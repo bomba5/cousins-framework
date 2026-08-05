@@ -180,6 +180,34 @@ def _position_at(spans, row, col0):
     return "code"
 
 
+def _language_for(filename, text):
+    if filename.endswith(".py"):
+        return "python"
+    if filename.endswith((".sh", ".bash")):
+        return "bash"
+    if filename.endswith((".md", ".markdown")):
+        return "markdown"
+    first = text.split("\n", 1)[0] if text else ""
+    if first.startswith("#!"):
+        if "python" in first:
+            return "python"
+        if re.search(r"\b(?:ba|z|da)?sh\b", first):
+            return "bash"
+    return "unknown"
+
+
+def _bash_position(lineno, line):
+    # Full-line comments are the only mechanical position in bash. The
+    # shebang is code: an interpreter path is behaviour. Trailing comments
+    # are left as code on purpose - quote-aware parsing is not worth the
+    # risk of calling a behaviour change mechanical.
+    if lineno == 1 and line.startswith("#!"):
+        return "code"
+    if line.lstrip().startswith("#"):
+        return "comment"
+    return "code"
+
+
 class Scanner:
     def __init__(self, name_terms=None):
         self.name_terms = list(name_terms or [])
@@ -189,7 +217,8 @@ class Scanner:
         ]
 
     def scan_text(self, text, filename):
-        spans = _python_spans(text) if filename.endswith(".py") else None
+        lang = _language_for(filename, text)
+        spans = _python_spans(text) if lang == "python" else None
         hits = []
         for lineno, line in enumerate(text.splitlines(), start=1):
             matches = []
@@ -203,10 +232,14 @@ class Scanner:
             for m in _JWT_RE.finditer(line):
                 matches.append((m.group(0), m, "secret"))
             for term, m, kind in matches:
-                if spans is None:
+                if lang == "python":
+                    position = _position_at(spans, lineno, m.start())
+                elif lang == "bash":
+                    position = _bash_position(lineno, line)
+                elif lang == "markdown":
                     position = "prose"
                 else:
-                    position = _position_at(spans, lineno, m.start())
+                    position = "unclassified"
                 hits.append(
                     Hit(
                         term=term,

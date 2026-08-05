@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cousin-framework"
+version = "0.0.1"
+description = "Persistent, co-located AI agents: identity, memory, lifecycle, inter-agent chat"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Jhonata Poma-Hansen" }]
+
+[project.scripts]
+cousin-gate = "cousin_lib.gate.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cousin_lib*"]

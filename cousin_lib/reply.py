@@ -1,10 +1,10 @@
 """Post a reply to this cousin's own chat surface.
 
 The reply path is cousin -> own chat-server; it never reaches another
-cousin's surface. Two rules carried over from the source framework's
-hard-won lessons: no cousin context means refuse (posting onto the wrong
-surface is a leak, not a fallback), and the message body travels as JSON
-so newlines survive.
+cousin's surface. Two contract rules: a process without cousin context is
+refused rather than guessed, because a reply on the wrong surface is a
+disclosure; and the body travels as JSON so newlines survive shell
+quoting.
 """
 import json
 import urllib.request

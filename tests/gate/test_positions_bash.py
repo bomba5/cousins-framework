@@ -1,9 +1,8 @@
 """Bash position classification.
 
-The CLIs ship, and in the source tree they are where interpreter paths and
-framework roots hide. A bash hit that looks like a rename job and is
-actually a behaviour change is the expensive mistake; full-line comments
-are the only mechanical position, everything else is code.
+Full-line comments are the only mechanical position in bash; everything
+else, including the shebang, is behaviour. Calling a behaviour change
+mechanical is the expensive mistake, so ambiguity resolves toward code.
 """
 import unittest
 

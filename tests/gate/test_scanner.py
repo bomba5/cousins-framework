@@ -26,8 +26,8 @@ class TestNameMatching(unittest.TestCase):
         self.assertEqual(hits[0].term, "zorblatt")
 
     def test_substring_inside_a_word_is_not_a_hit(self):
-        # The failure that invalidated the original triage: a short term
-        # matching inside longer words ("rea" inside React/textarea/create).
+        # A short term must never match inside longer words ("rea" inside
+        # React/textarea/create): boundaries are mandatory.
         s = Scanner(name_terms=["rea"])
         hits = s.scan_text(
             "const el = React.createElement('textarea')\n", filename="a.jsx"
@@ -53,9 +53,8 @@ class TestHitAuditability(unittest.TestCase):
 
 
 class TestPythonPositionClassification(unittest.TestCase):
-    """Position decides disposition: a hit in a comment is mechanical, a hit
-    in executable code is structural. This is what replaced the hit-count
-    triage."""
+    """Position decides disposition: a hit in a comment is mechanical, a
+    hit in executable code is structural."""
 
     def _scan(self, source):
         s = Scanner(name_terms=["zorblatt"])

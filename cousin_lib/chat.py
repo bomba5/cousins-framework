@@ -9,10 +9,14 @@ looking is not isolation. Operator surfaces do not use this gate.
 Outbound text passes the per-surface filter before anything touches the
 wire; a blocked message is never partially sent.
 """
+import argparse
 import json
+import sys
+import urllib.error
 import urllib.request
 
-from cousin_lib.config import CousinConfig
+from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
+from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
 
 
 class NoContextError(Exception):
@@ -61,3 +65,48 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None):
     )
     with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read() or b"{}")
+
+
+def chat_main(argv=None):
+    parser = argparse.ArgumentParser(prog="cousin-chat")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("send", help="post a message to another cousin")
+    s.add_argument("slug")
+    s.add_argument("text")
+    s.add_argument("--from", dest="display_name", help="sender display name")
+    sub.add_parser("list", help="list addressable cousins")
+    args = parser.parse_args(argv)
+
+    try:
+        fw = FrameworkConfig.from_env()
+        sender = CousinConfig.from_env()
+    except MissingConfigError as e:
+        print("cousin-chat: %s" % e, file=sys.stderr)
+        return 2
+
+    if args.cmd == "list":
+        for c in list_peers(fw, sender.slug):
+            marker = " (self)" if c.slug == sender.slug else ""
+            print("%-12s port=%-6s%s" % (c.slug, c.chat_port or "?", marker))
+        return 0
+
+    try:
+        result = send_message(
+            fw,
+            sender,
+            args.slug,
+            args.text,
+            policy=OutboundPolicy.load(fw.root),
+            display_name=args.display_name,
+        )
+    except FilterBlocked as e:
+        print("cousin-chat: %s" % e, file=sys.stderr)
+        return 3
+    except (MissingConfigError, NoContextError, ValueError) as e:
+        print("cousin-chat: %s" % e, file=sys.stderr)
+        return 2
+    except urllib.error.URLError as e:
+        print("cousin-chat: %s" % e, file=sys.stderr)
+        return 1
+    print(json.dumps({"ok": True, "to": args.slug, "id": result.get("id")}, sort_keys=True))
+    return 0

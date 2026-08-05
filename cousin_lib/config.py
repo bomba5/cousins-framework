@@ -23,6 +23,8 @@ class CousinConfig:
     name: str
     chat_port: int | None
     operator_name: str | None
+    chat_host: str | None = None
+    peer_visible: bool = True
 
     @classmethod
     def load(cls, home):
@@ -41,6 +43,8 @@ class CousinConfig:
             name=cousin.get("name", slug.capitalize()),
             chat_port=data.get("chat", {}).get("port"),
             operator_name=data.get("operator", {}).get("name"),
+            chat_host=data.get("chat", {}).get("host"),
+            peer_visible=bool(cousin.get("peer_visible", True)),
         )
 
     @classmethod
@@ -59,3 +63,32 @@ class CousinConfig:
                 "chat.port missing in %s" % (self.home / "cousin.toml")
             )
         return self.chat_port
+
+
+class FrameworkConfig:
+    """An install's shared layout. The filesystem is the registry: a cousin
+    exists iff cousins/<slug>/cousin.toml exists under the root. No service
+    has to be running for the fleet to be enumerable."""
+
+    def __init__(self, root):
+        self.root = Path(root)
+
+    @classmethod
+    def from_env(cls):
+        root = os.environ.get("FRAMEWORK_ROOT")
+        if not root:
+            raise MissingConfigError(
+                "FRAMEWORK_ROOT is not set; the framework root locates the "
+                "cousin registry and shared configuration"
+            )
+        return cls(root)
+
+    def list_cousins(self):
+        base = self.root / "cousins"
+        rows = []
+        if not base.is_dir():
+            return rows
+        for entry in sorted(base.iterdir()):
+            if (entry / "cousin.toml").is_file():
+                rows.append(CousinConfig.load(entry))
+        return rows

@@ -1,0 +1,15 @@
+# Provenance
+
+Every file in this repository answers three questions: where did it come
+from, what changed, and why does it belong in a public framework. Entries
+are added as files land. "The source framework" means the private codebase
+this project is extracted from; nothing here names it further.
+
+| file | origin | what changed / why it ships |
+|---|---|---|
+| `cousin_lib/gate/scanner.py` | written fresh | The contamination gate; exists before anything it guards. |
+| `cousin_lib/gate/cli.py` | written fresh | CLI for gate and triage modes. |
+| `cousin_lib/config.py` | written fresh | The configuration seam. Every hardcoded root, port, and personal default in the source framework becomes a lookup here; operator is optional by design. |
+| `cousin_lib/reply.py` | inspected rewrite of the source framework's reply module | Kept: the refuse-without-context rule and JSON body transport (both hard-won). Changed: cousins-directory default and defaulted operator name replaced by configuration (a missing operator is an error, not a fallback human); slug/port sniffing replaced by `COUSIN_HOME`; media attachment flags deferred with the media subsystem. |
+| `tests/*` | written fresh, from behavior | Tests are written from the spec of each module, never ported: ported tests carry ported assumptions. |
+| `templates/`, `server/`, `ui/` | (pending) | |

@@ -43,6 +43,14 @@ Two properties are enforced by the loader, not by convention:
 Both raise `DenylistLocationError`. Create the file by hand, somewhere that
 is neither version-controlled nor declaratively managed.
 
+## What a green gate does not prove
+
+The gate proves the tree is sterile of the terms and shapes it knows. It
+does not prove a file is finished. Comment quality, naming, and whether a
+docstring states the mechanism rather than someone's history are editorial
+judgements no scanner makes; their receipt is review. Read a green gate as
+"nothing known-private is here" - never as "this file is done".
+
 ## Matching discipline
 
 Name terms match case-insensitively on word boundaries, never as

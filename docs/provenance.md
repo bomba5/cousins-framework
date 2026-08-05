@@ -2,8 +2,18 @@
 
 Every file in this repository answers three questions: where did it come
 from, what changed, and why does it belong in a public framework. Entries
-are added as files land. "The source framework" means the private codebase
-this project is extracted from; nothing here names it further.
+are added as files land.
+
+This ledger is the one place where the project's history legitimately
+lives, and it ships publicly, so it carries its own content rule:
+
+- Origin references stay abstract. "The source framework" means the
+  private codebase this project is extracted from; nothing here names it
+  further - not its people, its machines, or its incidents.
+- Entries describe the mechanism of change: what was kept, what was
+  replaced, and why the file ships. Not anecdote.
+- If explaining an entry seems to require household detail, the
+  explanation is wrong, not the rule.
 
 | file | origin | what changed / why it ships |
 |---|---|---|

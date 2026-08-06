@@ -340,37 +340,37 @@ def _fire_worker_loops(config, state, now, report):
 def _consume_requests(state, deliver, errors):
     con = _db()
     try:
-        # kind='flip' rows belong to the timed-flip walker, which
-        # holds them pending until T-0; consuming them here would
-        # mark them failed-unknown before their time.
+        # POSITIVE filter: this consumer claims only the kinds it
+        # actually handles - "mine only if proven", never "mine unless
+        # proven otherwise". A negative filter (the first fix here)
+        # merely narrowed the kind-eating bug to every kind not yet
+        # invented; with the positive form, an unknown kind is
+        # invisible to every consumer until one is taught about it,
+        # and its TTL expires it loudly.
         rows = con.execute(
             "SELECT * FROM requests WHERE status='pending'"
-            " AND kind != 'flip' ORDER BY id").fetchall()
+            " AND kind IN ('fire') ORDER BY id").fetchall()
         for row in rows:
             payload = json.loads(row["payload"] or "{}")
-            if row["kind"] == "fire":
-                slug = row["cousin"]
-                home = FrameworkConfig.from_env().root / "cousins" / slug
-                loops, errs = load_cousin_loops(home)
-                errors.extend(errs)
-                target = next(
-                    (l for l in loops
-                     if l["name"] == payload.get("loop")), None)
-                if target is None:
-                    _finish_request(con, row["id"], "failed",
-                                    "no such loop %r"
-                                    % payload.get("loop"))
-                    continue
-                ok = deliver(slug,
-                             "[Framework scheduler: manual fire]\n\n"
-                             "### %s\n%s"
-                             % (target["name"], target["prompt"]))
-                _finish_request(con, row["id"],
-                                "done" if ok else "failed",
-                                "" if ok else "delivery failed")
-            else:
+            slug = row["cousin"]
+            home = FrameworkConfig.from_env().root / "cousins" / slug
+            loops, errs = load_cousin_loops(home)
+            errors.extend(errs)
+            target = next(
+                (l for l in loops
+                 if l["name"] == payload.get("loop")), None)
+            if target is None:
                 _finish_request(con, row["id"], "failed",
-                                "unknown request kind %r" % row["kind"])
+                                "no such loop %r"
+                                % payload.get("loop"))
+                continue
+            ok = deliver(slug,
+                         "[Framework scheduler: manual fire]\n\n"
+                         "### %s\n%s"
+                         % (target["name"], target["prompt"]))
+            _finish_request(con, row["id"],
+                            "done" if ok else "failed",
+                            "" if ok else "delivery failed")
     finally:
         con.close()
 

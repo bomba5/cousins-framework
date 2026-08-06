@@ -95,6 +95,20 @@ class TestCrossProcessRequests(LoopsCase):
         self._tick()
         self.assertEqual(len(self.delivered), delivered_before)
 
+    def test_unknown_kind_is_touched_by_no_consumer(self):
+        # The general form of the kind-eating bug: the consumer's rule
+        # must be "mine only if proven", not "mine unless proven
+        # otherwise". A kind nobody has taught a consumer about stays
+        # pending - the acceptable, silent kind of absence - until its
+        # TTL expires it loudly.
+        self._cousin("wren")
+        submit_request("teleport", cousin="wren",
+                       payload={}, ttl_seconds=3600)
+        self._tick()
+        row = list_requests()[0]
+        self.assertEqual(row["status"], "pending")
+        self.assertIsNone(row["consumed_at"])
+
     def test_unconsumed_request_expires_loudly_never_drops(self):
         self._cousin("wren")
         rid = submit_request("fire", cousin="wren",

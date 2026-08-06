@@ -1,0 +1,28 @@
+# CI: the test suite on every push and pull request, across supported
+# Python versions. The contamination gate's generic self-check runs
+# inside the suite (tests/gate/test_self.py scans this whole tree for
+# address literals, home paths, secret shapes, and opaque binaries),
+# so "the gate runs on every commit" is enforced here, not just
+# asserted. Name-denylisting is the operator's local additions, read
+# from outside the tree by design, and is not part of public CI.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (no third-party dependencies)
+        run: pip install -e .
+      - name: Run the suite (includes the gate self-check)
+        run: python -m unittest discover -s tests

@@ -115,6 +115,24 @@ _ADDRESS_RE = re.compile(
     r")\b"
 )
 
+# The full-range definitions, base plus canonical mask, are IETF text -
+# identical in every deployment, incapable of identifying anybody. They
+# are the ONLY exempt spellings: a host literal in these ranges, a
+# narrower subnet, or a canonical base without its mask is topology and
+# still hits. (A netguard cannot be written without these constants.)
+_PROTOCOL_CONSTANT_CIDRS = {
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+}
+
+
+def _is_protocol_constant(line, match):
+    tail = line[match.end():match.end() + 3]
+    if not tail.startswith("/"):
+        return False
+    mask = tail[1:3] if tail[1:3].isdigit() else tail[1:2]
+    return "%s/%s" % (match.group(0), mask) in _PROTOCOL_CONSTANT_CIDRS
+
+
 # An absolute /home/<user> path names an account on a real machine. Generic
 # code resolves homes at runtime; only personalised code spells one out.
 _HOME_PATH_RE = re.compile(r"/home/[A-Za-z0-9._-]+")
@@ -226,6 +244,8 @@ class Scanner:
                 for m in rx.finditer(line):
                     matches.append((term, m, "name"))
             for m in _ADDRESS_RE.finditer(line):
+                if _is_protocol_constant(line, m):
+                    continue
                 matches.append((m.group(0), m, "address"))
             for m in _HOME_PATH_RE.finditer(line):
                 matches.append((m.group(0), m, "home-path"))

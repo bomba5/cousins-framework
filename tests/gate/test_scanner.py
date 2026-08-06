@@ -99,6 +99,32 @@ class TestGenericClasses(unittest.TestCase):
         hits = s.scan_text("dns = '%s'\n" % addr, filename="c.py")
         self.assertEqual(hits, [])
 
+    def test_canonical_range_constants_are_protocol_text_not_hits(self):
+        # The full-range definitions (base plus canonical mask) are IETF
+        # text, identical in every deployment; a netguard cannot be
+        # written without them. Only these exact four are exempt.
+        s = Scanner()
+        for base, mask in ((("10", "0", "0", "0"), 8),
+                           (("172", "16", "0", "0"), 12),
+                           (("192", "168", "0", "0"), 16),
+                           (("100", "64", "0", "0"), 10)):
+            cidr = "%s/%d" % (".".join(base), mask)
+            hits = s.scan_text("NET = '%s'\n" % cidr, filename="c.py")
+            self.assertEqual(hits, [], cidr)
+
+    def test_narrower_subnet_is_still_topology_and_hits(self):
+        # 192.168.x.0/24 is somebody's actual LAN, not protocol text.
+        s = Scanner()
+        cidr = ".".join(["192", "168", "5", "0"]) + "/24"
+        (hit,) = s.scan_text("NET = '%s'\n" % cidr, filename="c.py")
+        self.assertEqual(hit.kind, "address")
+
+    def test_canonical_base_without_its_mask_still_hits(self):
+        s = Scanner()
+        addr = ".".join(["10", "0", "0", "0"])
+        (hit,) = s.scan_text("host = '%s'\n" % addr, filename="c.py")
+        self.assertEqual(hit.kind, "address")
+
     def test_absolute_home_path_is_a_hit(self):
         s = Scanner()
         path = "/".join(["", "home", "zuser", "f.txt"])

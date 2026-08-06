@@ -231,6 +231,20 @@ def _cmd_reindex(args):
     return 0
 
 
+def _cmd_compact(args):
+    from cousin_lib import compact
+
+    home = _home(args)
+    kwargs = {"dry_run": args.dry_run}
+    if args.budget is not None:
+        kwargs["budget"] = args.budget
+    if args.hot_days is not None:
+        kwargs["hot_days"] = args.hot_days
+    report = compact.compact_index(home, **kwargs)
+    print(json.dumps(report, sort_keys=True))
+    return 0 if report.get("ok") else 1
+
+
 def _cmd_propose_shared(args):
     from cousin_lib.config import CousinConfig
     from cousin_lib.shared_tier import commit_bulk_propose, plan_bulk_propose
@@ -270,6 +284,14 @@ def memory_main(argv=None):
     p.set_defaults(func=_cmd_search)
     p = sub.add_parser("reindex")
     p.set_defaults(func=_cmd_reindex)
+    p = sub.add_parser(
+        "compact",
+        help="retire old reachable pointers from MEMORY.md until it"
+             " fits the byte budget; hygiene, never deletion")
+    p.add_argument("--budget", type=int, default=None)
+    p.add_argument("--hot-days", type=int, default=None)
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(func=_cmd_compact)
     p = sub.add_parser(
         "propose-shared",
         help="nominate marked shareable memories into the shared"

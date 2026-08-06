@@ -46,7 +46,9 @@ class TestRetireRules(CompactCase):
             + self._index_line("project_new.md", "New thing",
                                date=time.strftime("%Y-%m-%d")))
         build_index(self.home)
-        report = compact_index(self.home, budget=120, hot_days=7)
+        # Budget below the current size, satisfiable by retiring the
+        # one old pointer.
+        report = compact_index(self.home, budget=80, hot_days=7)
         self.assertTrue(report["ok"])
         index = (self.home / "MEMORY.md").read_text()
         self.assertNotIn("project_old.md", index)

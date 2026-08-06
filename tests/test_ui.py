@@ -202,6 +202,35 @@ class TestCli(UICase):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(ui_main(["--port", "0"]), 2)
 
+    def test_root_accepts_the_same_flag_as_spawn(self):
+        # cousin-spawn takes --root; cousin-ui must too, or the two
+        # entry points disagree about how to be told the same fact and
+        # the disagreement is discovered by failing, not by --help.
+        self._cousin("wren")
+        from cousin_lib.ui import build_ui_from_cli
+        server = build_ui_from_cli(["--root", str(self.root),
+                                    "--port", "0"])
+        self.addCleanup(server.stop)
+        server.start()
+        status, body = self._json(server, "/api/cousins")
+        self.assertEqual([c["slug"] for c in body["cousins"]], ["wren"])
+
+    def test_flag_and_env_agree_flag_wins(self):
+        # Both channels work, and an explicit flag beats the
+        # environment - the same precedence spawn documents.
+        self._cousin("wren")
+        other = self.root / "decoy-root"
+        (other / "cousins").mkdir(parents=True)
+        from cousin_lib.ui import build_ui_from_cli
+        with mock.patch.dict(os.environ,
+                             {"FRAMEWORK_ROOT": str(other)}):
+            server = build_ui_from_cli(["--root", str(self.root),
+                                        "--port", "0"])
+        self.addCleanup(server.stop)
+        server.start()
+        _, body = self._json(server, "/api/cousins")
+        self.assertEqual([c["slug"] for c in body["cousins"]], ["wren"])
+
 
 if __name__ == "__main__":
     unittest.main()

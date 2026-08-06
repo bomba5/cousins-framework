@@ -10,6 +10,13 @@ list stays complete, so a new seam cannot ship undocumented.
 The `config/` directory does not exist in a fresh checkout - create it
 and add only the files you need.
 
+**The framework root** (which contains `cousins/`, `config/`, and
+`templates/`) is named the same way by every entry point that needs
+it: an explicit `--root` flag wins, else the `FRAMEWORK_ROOT`
+environment variable, else a loud error naming both. `cousin-spawn`
+and `cousin-ui` take it identically; a flag is discoverable from
+`--help`, the env var suits a service unit.
+
 | file | read by | absent means |
 |---|---|---|
 | `config/agent-cmd` | `cousin-spawn --start`, `cousin-flip` | no agent starts; spawn/flip that need it error with this path named |

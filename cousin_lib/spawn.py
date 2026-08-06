@@ -16,7 +16,11 @@ import sys
 import tempfile
 import tomllib
 
-from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.config import (
+    CousinConfig,
+    FrameworkConfig,
+    MissingConfigError,
+)
 from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
@@ -225,10 +229,10 @@ def spawn_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-spawn")
     parser.add_argument("slug")
     parser.add_argument(
-        "--root", required=True,
+        "--root",
         help="the framework root: a directory containing templates/"
              " and cousins/ (typically the checkout itself), not an"
-             " install prefix")
+             " install prefix. Falls back to FRAMEWORK_ROOT.")
     parser.add_argument("--name")
     parser.add_argument("--role", required=True)
     parser.add_argument("--role-paragraph")
@@ -238,7 +242,11 @@ def spawn_main(argv=None):
     parser.add_argument("--port", type=int)
     parser.add_argument("--start", action="store_true")
     args = parser.parse_args(argv)
-    root = FrameworkConfig(args.root).root
+    try:
+        root = FrameworkConfig.resolve(args.root).root
+    except MissingConfigError as err:
+        print("cousin-spawn: %s" % err, file=sys.stderr)
+        return 2
     try:
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,

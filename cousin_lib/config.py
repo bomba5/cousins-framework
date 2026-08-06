@@ -95,6 +95,22 @@ class FrameworkConfig:
             )
         return cls(root)
 
+    @classmethod
+    def resolve(cls, flag_value=None):
+        """The one root-discovery rule every entry point uses: an
+        explicit --root flag wins, else FRAMEWORK_ROOT, else a loud
+        error naming both channels. Sharing it is what keeps two
+        commands from disagreeing about how to be told the same fact -
+        a disagreement an adopter finds by failing, not by --help."""
+        root = flag_value or os.environ.get("FRAMEWORK_ROOT")
+        if not root:
+            raise MissingConfigError(
+                "no framework root; pass --root <checkout> or set "
+                "FRAMEWORK_ROOT. The root locates the cousin registry "
+                "and config/ (typically the checkout itself)."
+            )
+        return cls(root)
+
     def list_cousins(self):
         base = self.root / "cousins"
         rows = []

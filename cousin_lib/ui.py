@@ -26,7 +26,7 @@ _STATIC_TYPES = {
 
 class UIServer:
     def __init__(self, root, *, guard=None, host="127.0.0.1", port=0):
-        self.root = Path(root)
+        self.root = Path(root)  # read by ui_main for its startup line
         self.guard = guard
         server = self
 
@@ -56,28 +56,47 @@ def build_ui(root, *, guard=None, host="127.0.0.1", port=0):
     return UIServer(root, guard=guard, host=host, port=port)
 
 
-def ui_main(argv=None):
-    """Console entry point: cousin-ui [--port N] [--host H]. The guard
-    is the network allowlist, exactly as for the chat server - the
-    only boundary, stated as address trust, not user identity."""
+def _ui_parser():
     import argparse
-    import sys
-
-    from cousin_lib.server.netguard import NetGuard
 
     parser = argparse.ArgumentParser(prog="cousin-ui")
+    parser.add_argument(
+        "--root",
+        help="the framework root: a directory containing cousins/ and"
+             " config/ (typically the checkout). Falls back to"
+             " FRAMEWORK_ROOT.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8600)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def build_ui_from_cli(argv=None):
+    """Parse argv and build the server. The root comes from the shared
+    resolver, so cousin-ui and cousin-spawn agree on --root vs
+    FRAMEWORK_ROOT rather than each having its own rule."""
+    from cousin_lib.server.netguard import NetGuard
+
+    args = _ui_parser().parse_args(argv)
+    root = FrameworkConfig.resolve(args.root).root
+    guard = NetGuard.from_config(root)
+    return build_ui(root, guard=guard, host=args.host, port=args.port)
+
+
+def ui_main(argv=None):
+    """Console entry point: cousin-ui [--root R] [--port N] [--host H].
+    The guard is the network allowlist, exactly as for the chat
+    server - the only boundary, stated as address trust."""
+    import sys
+
+    from cousin_lib.config import MissingConfigError
+
     try:
-        root = FrameworkConfig.from_env().root
-    except Exception as err:
+        server = build_ui_from_cli(argv)
+    except MissingConfigError as err:
         print("cousin-ui: %s" % err, file=sys.stderr)
         return 2
-    guard = NetGuard.from_config(root)
-    server = build_ui(root, guard=guard, host=args.host, port=args.port)
     print("cousin-ui: serving %s on %s:%d"
-          % (root, args.host, server.port))
+          % (server.root, server.httpd.server_address[0], server.port))
     try:
         server.httpd.serve_forever()
     except KeyboardInterrupt:

@@ -29,6 +29,7 @@ cousin-ui = "cousin_lib.ui:ui_main"
 cousin-image = "cousin_lib.media:image_main"
 cousin-voice = "cousin_lib.media:voice_main"
 cousin-video = "cousin_lib.media:video_main"
+cousin-telegram = "cousin_lib.telegram:telegram_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

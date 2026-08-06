@@ -150,5 +150,23 @@ class TestOutbound(_BridgeFixture):
         self.assertEqual(media[0]["path"], str(asset))
 
 
+class TestCli(TelegramCase):
+    def test_unconfigured_main_refuses_with_exit_2(self):
+        self._toml("")  # no [telegram]
+        from cousin_lib.telegram import telegram_main
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = telegram_main(["--home", str(self.home)])
+        self.assertEqual(rc, 2)
+        self.assertIn("off for this cousin", err.getvalue())
+
+    def test_no_home_refuses(self):
+        from cousin_lib.telegram import telegram_main
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(telegram_main([]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

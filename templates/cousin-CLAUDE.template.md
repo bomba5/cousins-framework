@@ -99,6 +99,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-cycle` | your session-cadence counters and breadcrumbs | `cousin-cycle inc --action "shipped X"` · `cousin-cycle state` |
 | `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |
 | `cousin-telegram` | bridge your chat to Telegram, if configured | per-cousin `[telegram]` in cousin.toml; off until a token and operator are set |
+| `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |
 | `cousin-ui` | the web console over the framework (operator-run) | `cousin-ui --port 8600`; a view, never a source of truth |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 

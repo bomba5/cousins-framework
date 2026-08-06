@@ -141,5 +141,29 @@ class TestClientFailsLocal(HiveCase):
                         query="anything")
 
 
+class TestCli(HiveCase):
+    def _main(self, argv):
+        import contextlib
+        import io
+
+        from cousin_lib.hive import hive_main
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = hive_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_mint_prints_a_token(self):
+        rc, out, _ = self._main(["mint", "alice"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.strip().startswith("hive_"))
+
+    def test_send_with_no_queen_exits_one_local_fallback(self):
+        rc, _, err = self._main(
+            ["send", "--queen", "http://127.0.0.1:9",
+             "--token", "x", "--to", "bob", "--id", "m1", "hi"])
+        self.assertEqual(rc, 1)
+        self.assertIn("local", err)
+
+
 if __name__ == "__main__":
     unittest.main()

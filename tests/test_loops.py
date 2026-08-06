@@ -84,6 +84,12 @@ class TestCrossProcessRequests(LoopsCase):
         row = list_requests()[0]
         self.assertEqual(row["status"], "done")
         self.assertIsNotNone(row["consumed_at"])
+        # Exactly once: at-least-once with no upper bound is a
+        # different promise from at-least-once with idempotent
+        # consumption. A second tick must not re-deliver a done row.
+        delivered_before = len(self.delivered)
+        self._tick()
+        self.assertEqual(len(self.delivered), delivered_before)
 
     def test_unconsumed_request_expires_loudly_never_drops(self):
         self._cousin("wren")
@@ -149,6 +155,81 @@ class TestLoopConfig(LoopsCase):
         self.assertEqual(loops, [])
         self.assertTrue(errors)
         self.assertIn(str(home), errors[0])
+
+
+class TestScheduleEvaluation(LoopsCase):
+    def test_daily_fires_late_once_never_twice_a_day(self):
+        # Late is better than skipped - and once means once.
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "daily"\ndaily_at = "06:00"\n'
+            'prompt = "morning report"\n'))
+        from datetime import datetime
+        late_evening = datetime.now().replace(
+            hour=23, minute=0, second=0).timestamp()
+        self._tick(now=late_evening)
+        self.assertEqual(len(self.delivered), 1)
+        self._tick(now=late_evening + 60)
+        self.assertEqual(len(self.delivered), 1)
+
+    def test_interval_downtime_yields_one_catch_up_not_n(self):
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "often"\ninterval_seconds = 60\n'
+            'prompt = "check"\n'))
+        base = time.time()
+        self._tick(now=base)                 # first fire
+        self._tick(now=base + 600)           # 10 intervals later
+        self.assertEqual(len(self.delivered), 2)
+        self._tick(now=base + 601)           # immediately after
+        self.assertEqual(len(self.delivered), 2)
+
+    def test_two_due_loops_coalesce_into_one_delivery(self):
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "one"\ninterval_seconds = 30\n'
+            'prompt = "first thing"\n'
+            '[[loops]]\nname = "two"\ninterval_seconds = 30\n'
+            'prompt = "second thing"\n'))
+        self._tick()
+        self.assertEqual(len(self.delivered), 1)
+        _, text = self.delivered[0]
+        self.assertIn("2 loops due this tick", text)
+        self.assertIn("### one", text)
+        self.assertIn("### two", text)
+
+    def test_failed_delivery_leaves_loops_due(self):
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "x"\ninterval_seconds = 30\n'
+            'prompt = "p"\n'))
+        report = self._tick(deliver=lambda slug, text: False)
+        self.assertEqual(report["fired"], [])
+        self.assertTrue(any("stay due" in e for e in report["errors"]))
+        self._tick()  # delivery works now
+        self.assertEqual(len(self.delivered), 1)
+
+    def test_cron_dom_dow_or_when_both_restricted(self):
+        from datetime import datetime
+
+        from cousin_lib.loops import cron_matches
+        # 15th of the month OR Mondays. 2026-08-15 is a Saturday:
+        # dom matches, dow does not - real cron fires, AND would not.
+        when = datetime(2026, 8, 15, 6, 0)
+        self.assertTrue(cron_matches("0 6 15 * 1", when))
+        # A Monday that is not the 15th also fires.
+        when = datetime(2026, 8, 17, 6, 0)
+        self.assertTrue(cron_matches("0 6 15 * 1", when))
+        # A Tuesday the 16th does not.
+        when = datetime(2026, 8, 18, 6, 0)
+        self.assertFalse(cron_matches("0 6 15 * 1", when))
+
+    def test_cron_minute_dedupe_two_ticks_one_fire(self):
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "cronny"\ncron = "* * * * *"\n'
+            'prompt = "tick"\n'))
+        # Pin to a minute start so base+15 is provably the same
+        # minute whatever the wall clock says.
+        base = (int(time.time()) // 60) * 60 + 1
+        self._tick(now=base)
+        self._tick(now=base + 15)  # same minute, second shot
+        self.assertEqual(len(self.delivered), 1)
 
 
 if __name__ == "__main__":

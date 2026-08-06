@@ -87,7 +87,12 @@ def _write_cousin_toml(home, *, slug, name, role, port):
 
 def _write_identity_files(home, *, claude_md, name, role):
     (home / "CLAUDE.md").write_text(claude_md)
-    (home / "STATUS.md").write_text("# %s - STATUS\n" % name)
+    # The Open-loops section is the seam the session-end baseline
+    # derivation reads (cousin_lib.audits); spawn it empty so the
+    # convention exists from birth.
+    (home / "STATUS.md").write_text(
+        "# %s - STATUS\n\n## Open loops\n" % name
+    )
     (home / "MEMORY.md").write_text("# %s - memory index\n" % name)
 
 

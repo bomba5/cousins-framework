@@ -117,7 +117,11 @@ class TestCreateCousin(CreateCase):
         self.assertIn("# Wren", claude_md)
         self.assertIn("## Voice", claude_md)
         self.assertNotIn("{{", claude_md)
-        self.assertTrue((home / "STATUS.md").is_file())
+        status = (home / "STATUS.md").read_text()
+        # The Open-loops section is the seam the session-end baseline
+        # derivation reads; spawning it empty makes the convention real
+        # from birth instead of hoping cousins invent it.
+        self.assertIn("## Open loops", status)
         self.assertTrue((home / "MEMORY.md").is_file())
 
     def test_bad_slug_is_rejected_before_anything_is_written(self):

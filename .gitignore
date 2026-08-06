@@ -8,8 +8,10 @@ build/
 # Perimeter: never stage a live install's credentials or private homes.
 # config/ holds provider keys, bot tokens, hive tokens, allowlists;
 # cousins/ holds the fleet's private homes. The gate is the backstop;
-# this keeps them from ever reaching staging. Safe example configs are
-# tracked with a .example suffix, which this does not ignore.
-config/
-cousins/
+# this keeps them from ever reaching staging. The ignore excludes the
+# CONTENTS of config/ (not the directory) so the .example re-include
+# can fire - git does not descend into an excluded directory to reach
+# a carve-out. Safe example configs ship as config/*.example.
+config/*
 !config/*.example
+cousins/

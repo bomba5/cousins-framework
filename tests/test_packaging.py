@@ -76,21 +76,50 @@ class TestDocsCoherence(unittest.TestCase):
 
 
 class TestPerimeterHygiene(unittest.TestCase):
-    def test_config_and_cousins_are_gitignored(self):
-        # config/ holds credentials (bot tokens, hive tokens, provider
-        # keys) and cousins/ holds a live fleet's private homes; a
-        # stray `git add -A` must not be able to stage either. The gate
-        # is the backstop, this is defense in depth - a credential must
-        # never reach staging in the first place.
-        gitignore = (_REPO_ROOT / ".gitignore").read_text()
-        entries = {line.strip().rstrip("/")
-                   for line in gitignore.splitlines()
-                   if line.strip() and not line.startswith("#")}
-        for path in ("config", "cousins"):
-            self.assertIn(path, entries,
-                          "%s/ is not gitignored; a stray add could"
-                          " commit a credential or a private home"
-                          % path)
+    """Behavioural, not textual: ask git what the real .gitignore DOES
+    to real files, never what it looks like. A text-match test passes
+    against a carve-out that git never evaluates and would fail on the
+    correct form - it defends the appearance, not the behaviour."""
+
+    def _ignored(self, gitignore_text, relpath, content="secret\n"):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            (root / ".gitignore").write_text(gitignore_text)
+            target = root / relpath
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            result = subprocess.run(
+                ["git", "check-ignore", relpath],
+                cwd=root, capture_output=True, text=True)
+            return result.returncode == 0  # 0 = the path is ignored
+
+    def setUp(self):
+        self.gitignore = (_REPO_ROOT / ".gitignore").read_text()
+
+    def test_a_secret_under_config_is_ignored(self):
+        self.assertTrue(
+            self._ignored(self.gitignore, "config/embedding.toml"),
+            "a credential-bearing config file would stage")
+
+    def test_a_private_home_under_cousins_is_ignored(self):
+        self.assertTrue(
+            self._ignored(self.gitignore,
+                          "cousins/wren/cousin.toml"),
+            "a live fleet's private home would stage")
+
+    def test_an_example_config_is_NOT_ignored(self):
+        # The carve-out that lets safe examples ship: it can only fire
+        # if the ignore excludes config's CONTENTS, not the directory -
+        # git does not descend into an excluded directory to reach a
+        # re-include.
+        self.assertFalse(
+            self._ignored(self.gitignore,
+                          "config/embedding.toml.example"),
+            "example configs cannot be committed; the carve-out is"
+            " shadowed by a directory-level ignore")
 
 
 class TestConfigSeamsDocumented(unittest.TestCase):

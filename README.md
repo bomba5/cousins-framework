@@ -27,6 +27,7 @@ contract under `docs/`. Nothing here needs a third-party dependency.
 | job + sub-agent tracking | `cousin-job` | - |
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
+| hive: cross-machine cousins over an authed bus | `cousin-hive` | `docs/hive-spec.md` |
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 

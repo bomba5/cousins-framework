@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 
 from cousin_lib.config import CousinConfig, MissingConfigError
+from cousin_lib.trace import traced_cli
 
 
 def send_reply(cfg, body, user=None, reply_to=None):
@@ -39,6 +40,7 @@ def send_reply(cfg, body, user=None, reply_to=None):
         return json.loads(r.read() or b"{}")
 
 
+@traced_cli("cousin-reply")
 def reply_main(argv=None):
     parser = argparse.ArgumentParser(
         prog="cousin-reply",

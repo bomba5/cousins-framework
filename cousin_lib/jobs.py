@@ -16,6 +16,7 @@ import time
 from datetime import datetime, timezone
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
+from cousin_lib.trace import traced_cli
 
 _ACTIVE = ("running",)
 
@@ -361,6 +362,7 @@ def _reparse_start_remainder(args):
     args.cmdline = cl
 
 
+@traced_cli("cousin-job")
 def jobs_main(argv=None):
     parser = argparse.ArgumentParser(
         prog="cousin-job",

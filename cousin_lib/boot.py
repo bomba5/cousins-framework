@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import self_portrait
+from cousin_lib import self_portrait, trace
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -225,8 +225,8 @@ def _is_degraded(name, content, sections):
     is never a substring scan."""
     if name in ("law", "trace_summary", "memories"):
         # A missing law file is an install problem, not a per-cousin
-        # gap; the trace layer is reserved-empty by design; empty
-        # memories is a new cousin's starting condition.
+        # gap; the trace idle marker and empty memories are a new
+        # cousin's legitimate starting condition.
         return False
     if name == "self_portrait":
         return not content or content.startswith(
@@ -272,7 +272,7 @@ def assemble(slug, home, *, generation=None):
         "calibration": _calibration(home),
         "active_state": _active_state(home),
         "task_packet": _task_packet(home),
-        "trace_summary": "",  # reserved: absence is a no-op by rule
+        "trace_summary": trace.summary_for_boot(slug),
         "memories": _memories(home, LAYER_BUDGETS["memories"][1]),
     }
     degraded = [k for k, v in sections.items()

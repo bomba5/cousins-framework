@@ -17,6 +17,7 @@ import urllib.request
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
+from cousin_lib.trace import traced_cli
 
 
 class NoContextError(Exception):
@@ -67,6 +68,7 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None):
         return json.loads(r.read() or b"{}")
 
 
+@traced_cli("cousin-chat")
 def chat_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-chat")
     sub = parser.add_subparsers(dest="cmd", required=True)

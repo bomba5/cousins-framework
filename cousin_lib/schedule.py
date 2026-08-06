@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
+from cousin_lib.trace import traced_cli
 
 
 def _db_path():
@@ -229,6 +230,7 @@ def _cmd_tick(args):
     return 0
 
 
+@traced_cli("cousin-schedule")
 def schedule_main(argv=None):
     parser = argparse.ArgumentParser(
         prog="cousin-schedule", description="one-shot prompt scheduler"

@@ -16,6 +16,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from cousin_lib.trace import traced_cli
 
 # decisions.jsonl grows monotonically; past the threshold the older
 # entries move to a dated sibling archive and the newest tail stays
@@ -258,6 +259,7 @@ def _cmd_propose_shared(args):
     return 0
 
 
+@traced_cli("cousin-memory")
 def memory_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-memory")
     parser.add_argument("--home")

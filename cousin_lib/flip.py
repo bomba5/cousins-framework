@@ -27,6 +27,7 @@ from cousin_lib import audits, boot
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.server.injection import TmuxInjector
 from cousin_lib.spawn import SpawnError, start_cousin
+from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
 HANDOFF_HALFWAY_SECONDS = 150
@@ -338,6 +339,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     return result
 
 
+@traced_cli("cousin-flip")
 def flip_main(argv=None):
     """Console entry point: cousin-flip <slug> [--confirm] [--dry-run].
     Operator-driven; a cousin must never flip itself."""

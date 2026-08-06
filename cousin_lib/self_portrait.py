@@ -9,6 +9,7 @@ identity nobody reviewed does not boot.
 import json
 import re
 from pathlib import Path
+from cousin_lib.trace import traced_cli
 
 SECTIONS = [
     "Role", "Temperament", "Operator Calibration", "Working Style",
@@ -163,6 +164,7 @@ def commit_candidate(home):
     return committed
 
 
+@traced_cli("cousin-self-portrait")
 def portrait_main(argv=None):
     """Console entry point: synthesize / commit / show / diff. The
     review gate in CLI form - synthesize and commit are separate on

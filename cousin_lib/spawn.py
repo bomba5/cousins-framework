@@ -18,6 +18,7 @@ import tomllib
 
 from cousin_lib.config import CousinConfig, FrameworkConfig
 from cousin_lib.template import TemplateError, render_template
+from cousin_lib.trace import traced_cli
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 
@@ -215,6 +216,7 @@ def _read_agent_cmd(root):
     return cmd
 
 
+@traced_cli("cousin-spawn")
 def spawn_main(argv=None):
     """Console entry point. Exit codes are the interface: 0 created
     (and started, if asked), 1 create succeeded but --start failed

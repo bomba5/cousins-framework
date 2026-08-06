@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.trace import traced_cli
 
 SHAREABLE_PREFIXES = ("project_", "project-", "reference_", "reference-")
 
@@ -226,6 +227,7 @@ def plan_bulk_propose(home, slug):
     return plan
 
 
+@traced_cli("cousin-shared")
 def shared_main(argv=None):
     """Console entry point: cousin-shared list/read/diff/propose/
     promote/reject. Exit codes: 0 ok, 1 not found, 2 usage,

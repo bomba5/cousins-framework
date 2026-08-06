@@ -87,7 +87,15 @@ def tick(*, now_ts=None, deliver):
     and the mark refires the job. A duplicate reminder is the accepted
     cost; losing one silently is not. Do not "fix" a duplicate by
     marking before delivering - that flips the contract to
-    at-most-once, which loses reminders instead of repeating them."""
+    at-most-once, which loses reminders instead of repeating them.
+
+    Delivered lines carry a provenance prefix and that is also
+    contract, not cosmetics: a scheduled prompt is machine-authored
+    text arriving on the same channel as human instruction, and
+    unlabelled it is indistinguishable from the operator having said
+    it. The scheduled text is preserved verbatim AFTER the prefix;
+    callers must never assume the delivered line equals the scheduled
+    string byte-for-byte."""
     now_ts = now_ts or int(datetime.now().timestamp())
     conn = _db()
     try:

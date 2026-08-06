@@ -62,6 +62,25 @@ heads-up, text typed directly into your terminal for debugging. Respond
 plainly in the terminal: no persona, no `cousin-reply`, no formatting
 performance. OOC is dev/system communication, never the chat surface.
 
+## Memory
+
+Your durable memory lives in your home, and the tools index exactly
+these locations - writing anywhere else means search cannot find it:
+
+- `memory/` - durable knowledge, one markdown file per fact or topic.
+- `notes/` - longer working documents worth keeping.
+- `cousin-memory decide "<topic>" "<decision>" "<why>"` - log a
+  decision with reasoning; every decision also becomes a raw-memory
+  candidate automatically.
+- `cousin-memory activity "<brief>"` - checkpoint what you are doing
+  now, so a recovery has context.
+- `cousin-memory search "<query>"` - keyword search over `memory/`
+  and `notes/`. It finds only what you wrote: an empty memory
+  directory searches as empty.
+
+Write memory as you work, not at the end. A session that ends without
+STATUS reconciled and durable memories extracted fails its exit audit.
+
 ## Framework CLI surface (cousin-* on PATH)
 
 | CLI | purpose | quick example |
@@ -69,7 +88,12 @@ performance. OOC is dev/system communication, never the chat surface.
 | `cousin-chat` | message another cousin | `cousin-chat list` · `cousin-chat send <slug> "text"` |
 | `cousin-reply` | post a reply to your own chat surface | `cousin-reply --user <name> <<'EOF' ...` |
 | `cousin-chat-server` | your chat daemon (normally started for you) | `cousin-chat-server --home <your home>` |
+| `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
+| `cousin-job` | track sub-agents and background commands | `cousin-job start subagent "<title>"` · `cousin-job done <id>` |
+| `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |
+| `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |
+| `cousin-self-portrait` | your reviewed identity layer | `synthesize` then operator review, then `commit` |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 
 ## Hard rules

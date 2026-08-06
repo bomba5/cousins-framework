@@ -97,9 +97,15 @@ identity. Stages, in order, each reported in a structured result:
    codebase's single tmux-creation site. Session identity is minted as
    a fresh UUID and rendered into the agent command via an optional
    `{session_id}` placeholder in the host's agent-cmd config; an agent
-   with no session concept omits the placeholder. The new session id
-   is written back into `cousin.toml` with the same atomic re-parsed
-   write the rest of the framework uses.
+   with no session concept omits the placeholder. The id is minted and
+   written back into `cousin.toml` EVEN WHEN the placeholder is
+   absent - the generation record is more useful with it, and an
+   undefined dead state is how a later reader concludes the field is
+   unused and deletes it. The id's character set is constrained to
+   `[a-z0-9-]` at the mint site: a generated value substituted into a
+   command string stays safe by construction, not by the reason it
+   happened to be safe today. The write-back uses the same atomic
+   re-parsed write the rest of the framework uses.
 8. **Inject** the packet after the session settles, prefaced with the
    do-not-announce rule: the seam should be invisible unless the
    operator explicitly asked for a confirmation, in which case the

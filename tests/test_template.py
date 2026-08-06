@@ -64,9 +64,32 @@ class TestShippedTemplate(unittest.TestCase):
     def test_carries_the_day_one_doctrine(self):
         out = self._render()
         for anchor in ("## Voice", "IN-CHARACTER", "OUT-OF-CHARACTER",
-                       "## Hard rules",
+                       "## Hard rules", "## Memory",
                        "## Append your cousin-specific sections"):
             self.assertIn(anchor, out)
+
+    def test_cli_table_covers_every_shipped_cousin_cli(self):
+        # v1 shipped a memory subsystem the first template never
+        # mentioned - producer tooling with nothing telling the cousin
+        # to produce, the same species as an audited surface nothing
+        # writes. The table must track pyproject's console scripts.
+        out = self._render()
+        for cli in ("cousin-chat", "cousin-reply", "cousin-chat-server",
+                    "cousin-spawn", "cousin-gate", "cousin-memory",
+                    "cousin-job", "cousin-schedule", "cousin-flip",
+                    "cousin-self-portrait"):
+            self.assertIn("`%s`" % cli, out)
+
+    def test_memory_doctrine_names_the_layout_and_the_producer_loop(self):
+        out = self._render()
+        self.assertIn("memory/", out)
+        self.assertIn("notes/", out)
+        self.assertIn("cousin-memory decide", out)
+        self.assertIn("cousin-memory search", out)
+
+    def test_flip_carries_the_do_not_self_flip_caveat(self):
+        out = self._render()
+        self.assertIn("DO NOT run", out)
 
     def test_voice_section_carries_the_authored_never_improvised_rule(self):
         out = self._render()

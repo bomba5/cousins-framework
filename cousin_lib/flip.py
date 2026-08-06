@@ -278,7 +278,12 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     # persist the identity - ok hangs on that persist.
     if alive:
         _tmux(["kill-session", "-t", session], tmux_bin, tmux_socket)
+    # Minted and persisted even when the agent-cmd carries no
+    # {session_id} placeholder: the generation record is more useful
+    # with it. Charset pinned by spec - a generated value substituted
+    # into a command string stays safe by construction.
     session_id = str(uuid.uuid4())
+    assert re.fullmatch(r"[a-z0-9-]+", session_id), session_id
     agent_cmd = agent_cmd_template.replace("{session_id}", session_id)
     try:
         start_cousin(home, agent_cmd=agent_cmd, tmux_bin=tmux_bin,

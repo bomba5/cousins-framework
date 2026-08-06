@@ -106,7 +106,7 @@ class TestInboundGate(_BridgeFixture):
         self.assertEqual(sent[0]["message"], "hello cousin")
         self.assertEqual(sent[0]["user"], "Sam")
 
-    def test_unauthorized_sender_is_dropped_silently(self):
+    def test_unauthorized_sender_is_dropped_silently_on_the_wire(self):
         cfg = self._bridge()
         sent, replied = [], []
         relay_inbound(
@@ -118,6 +118,21 @@ class TestInboundGate(_BridgeFixture):
         # Nothing forwarded, and no acknowledgement to the stranger.
         self.assertEqual(sent, [])
         self.assertEqual(replied, [])
+
+    def test_a_rejected_sender_is_logged_loudly_with_the_id(self):
+        # Silent on the wire, loud in the log: an operator who typoed
+        # their own chat id must be able to tell "not on the list" from
+        # "bridge down". The attacker still learns nothing.
+        cfg = self._bridge()
+        logged = []
+        relay_inbound(
+            cfg,
+            update={"message": {"from": {"id": 999, "first_name": "X"},
+                                "text": "let me in"}},
+            chat_send=lambda **kw: None,
+            log=logged.append)
+        self.assertTrue(any("999" in line for line in logged),
+                        "the rejected id must reach the log")
 
 
 class TestOutbound(_BridgeFixture):

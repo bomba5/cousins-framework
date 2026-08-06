@@ -86,15 +86,27 @@ def _default_chat_send(cfg, *, user, message, attachment=None):
     urllib.request.urlopen(request, timeout=10)
 
 
-def relay_inbound(cfg, *, update, chat_send=None, tg_send=None):
+def _default_log(line):
+    import sys
+    print("cousin-telegram: %s" % line, file=sys.stderr)
+
+
+def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
+                  log=None):
     """One Telegram update -> the cousin's chat server, if the sender
-    is authorized. An unauthorized sender is dropped: nothing is
-    forwarded and nothing is sent back, so the bot never confirms its
-    existence to a stranger."""
+    is authorized. An unauthorized sender is dropped SILENTLY ON THE
+    WIRE - nothing forwarded, nothing sent back, so the bot never
+    confirms its existence to a stranger - but LOUDLY IN THE LOG with
+    the rejected id, so an operator who typoed their own chat id can
+    tell "not on the list" from "bridge down" instead of facing the
+    same silence pointed at them that the attacker faces."""
+    log = log or _default_log
     message = update.get("message") or {}
     sender = message.get("from") or {}
     if sender.get("id") not in cfg.operator_ids:
-        return  # dropped silently; not acknowledged
+        log("rejected message from unauthorized Telegram id %r"
+            " (not in operators)" % sender.get("id"))
+        return  # silent on the wire, logged above
     chat_send = chat_send or (lambda **kw: _default_chat_send(cfg, **kw))
     name = cfg.operator_name.get(sender["id"]) \
         or sender.get("first_name") or "operator"

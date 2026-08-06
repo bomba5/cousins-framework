@@ -1,0 +1,324 @@
+"""Boot packet assembly.
+
+Deterministic composition of the cold-start packet a fresh session
+boots from, within a hard total budget. Three rules shape this module,
+each earned against a real incident in the source framework:
+
+- The TOTAL ceiling governs. Per-layer maxima exist, but their sum is
+  allowed to exceed the ceiling and the composed packet still may not:
+  enforcing only per-layer caps let a multi-bloated home blow well
+  past the documented budget.
+- A truncation marker counts INSIDE the budget it truncates to. A
+  marker appended beyond the slice leaves the section longer than its
+  budget, and the overflow loop then picks the same victim again,
+  forever.
+- Degraded detection is per-layer explicit logic, never a substring
+  scan over section text: the scan flagged healthy cousins every
+  morning on legitimate fallback strings.
+"""
+import hashlib
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+from cousin_lib import self_portrait
+from cousin_lib.config import FrameworkConfig
+
+CHARS_PER_TOKEN = 4
+TOTAL_MAX_CHARS = 8000 * CHARS_PER_TOKEN
+
+LAYER_BUDGETS = {
+    "law": (500 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
+    "self_portrait": (800 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
+    "calibration": (300 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
+    "active_state": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
+    "task_packet": (500 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
+    "trace_summary": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
+    "memories": (1000 * CHARS_PER_TOKEN, 4000 * CHARS_PER_TOKEN),
+}
+
+# Overflow victims first to last; law is never truncated.
+TRUNCATE_ORDER = [
+    "memories", "trace_summary", "calibration", "task_packet",
+    "active_state", "self_portrait",
+]
+
+REQUIRED_BOOT_ACTIONS = """## 8. Required Boot Actions
+
+You must now (INTERNALLY, do not announce):
+1. Reconstruct the current objective in one mental paragraph.
+2. Identify the next action from active-threads.
+3. Verify boot completeness; declare degraded internally if a layer
+   is missing.
+4. Continue silently. Do NOT post a respawn announcement unless the
+   operator explicitly asked for a confirmation.
+5. Before exit write the three pre-exit artifacts: STATUS.md
+   (reconciled), data/handoff.md, and data/active-threads.md (one
+   bullet per in-flight thread). The framework falls back to a
+   STATUS-derived baseline if you skip the last one, but your richer
+   per-thread view is better boot fuel.
+6. Memory writes default to the cousin-conclusion truth level; cite a
+   source for anything you record as operator-stated.
+"""
+
+
+def _read(path):
+    try:
+        return Path(path).read_text()
+    except (FileNotFoundError, OSError):
+        return ""
+
+
+def _truncate(text, max_chars, label):
+    """Truncate to max_chars INCLUDING the overflow marker."""
+    if len(text) <= max_chars:
+        return text
+    marker = "\n\n... (truncated, %s, budget hit)" % label
+    if max_chars <= len(marker):
+        return marker[:max_chars]
+    return text[:max_chars - len(marker)] + marker
+
+
+def read_generation(home):
+    try:
+        return int((Path(home) / "data" / "generation.txt")
+                   .read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return 0
+
+
+def bump_generation(home):
+    path = Path(home) / "data" / "generation.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    generation = read_generation(home) + 1
+    path.write_text(str(generation))
+    return generation
+
+
+def _law_path():
+    return FrameworkConfig.from_env().root / "config" / "law.md"
+
+
+def _calibration(home):
+    """Distilled calibration file when present, else the committed
+    portrait's calibration section. Absent means degraded: a
+    persona-anchored cousin booting without calibration should know."""
+    distilled = _read(
+        Path(home) / "memory" / "distilled" / "operator-calibration.md"
+    ).strip()
+    if distilled and "_(empty" not in distilled:
+        return "## operator-calibration.md\n\n" + distilled
+    section = self_portrait.md_section(
+        _read(self_portrait.committed_path(home)), "Operator Calibration"
+    )
+    if section and "TODO" not in section:
+        return "## Operator Calibration (from self-portrait)\n" + section
+    return "(no operator calibration distilled yet - degraded)"
+
+
+def _staleness_header(home):
+    """Warn when decisions were logged after STATUS's last edit. The
+    next session anchors on STATUS as authoritative; silent drift
+    there poisons the whole orientation."""
+    home = Path(home)
+    try:
+        status_mtime = (home / "STATUS.md").stat().st_mtime
+    except OSError:
+        return ""
+    newer = 0
+    try:
+        with open(home / "data" / "decisions.jsonl") as fh:
+            for line in fh:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                ts = entry.get("timestamp") or entry.get("ts") or ""
+                try:
+                    when = datetime.fromisoformat(
+                        ts.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    continue
+                if when > status_mtime:
+                    newer += 1
+    except OSError:
+        pass
+    if not newer:
+        return ""
+    age_h = (datetime.now().timestamp() - status_mtime) / 3600.0
+    return (
+        "> STALE WARNING: STATUS.md mtime is %.1fh old; %d decision(s)"
+        " logged after. Verify against data/decisions.jsonl before"
+        " acting on it.\n\n" % (age_h, newer)
+    )
+
+
+def _active_state(home):
+    parts = []
+    stale = _staleness_header(home)
+    if stale:
+        parts.append(stale.rstrip())
+    status = _read(Path(home) / "STATUS.md")
+    if status:
+        m = re.search(r"## Open loops.*?(?=\n## |\Z)", status, re.DOTALL)
+        if m and m.group(0).strip() != "## Open loops":
+            parts.append("### STATUS.md (open loops)")
+            parts.append(m.group(0).strip())
+        else:
+            parts.append("### STATUS.md")
+            parts.append(status[:1500])
+    handoff = _read(Path(home) / "data" / "handoff.md")
+    if handoff:
+        parts.append("### handoff.md (most recent snapshot)")
+        parts.append(handoff[:1500])
+    return "\n\n".join(parts) if parts else "(no active state - degraded boot)"
+
+
+def _task_packet(home):
+    parts = []
+    threads = _read(Path(home) / "data" / "active-threads.md")
+    if threads:
+        parts.append("### active-threads.md")
+        parts.append(threads[:1500])
+    capsules = _read(
+        Path(home) / "memory" / "distilled" / "reasoning-capsules.md")
+    if capsules:
+        chunks = [c for c in capsules.split("\n---\n") if c.strip()]
+        if chunks:
+            parts.append("### last reasoning capsules")
+            parts.append("\n---\n".join(chunks[-3:]))
+    return "\n\n".join(parts) if parts \
+        else "(no in-flight tasks - check STATUS.md)"
+
+
+def _memories(home, max_chars):
+    """Recent raw-memory entries (the decide bridge is their producer)
+    plus the memory index head. Empty is the legitimate starting
+    condition of a new cousin."""
+    parts = []
+    raw_dir = Path(home) / "memory" / "raw"
+    if raw_dir.is_dir():
+        lines = []
+        for path in sorted(raw_dir.glob("*.jsonl"))[-14:]:
+            for line in _read(path).splitlines():
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                lines.append("- [%s] %s"
+                             % (entry.get("topic", "?"),
+                                entry.get("content", "")[:200]))
+        if lines:
+            parts.append("### recent raw memory (newest last)")
+            parts.append("\n".join(lines[-60:]))
+    index = _read(Path(home) / "MEMORY.md").strip()
+    if index:
+        parts.append("### memory index (head)")
+        parts.append(index[:1000])
+    out = "\n\n".join(parts)
+    return _truncate(out, max_chars, "memories")
+
+
+def _is_degraded(name, content, sections):
+    """Per-layer explicit rules; see the module docstring for why this
+    is never a substring scan."""
+    if name in ("law", "trace_summary", "memories"):
+        # A missing law file is an install problem, not a per-cousin
+        # gap; the trace layer is reserved-empty by design; empty
+        # memories is a new cousin's starting condition.
+        return False
+    if name == "self_portrait":
+        return not content or content.startswith(
+            "(no committed self-portrait yet")
+    if name == "calibration":
+        return not content or content.startswith(
+            "(no operator calibration distilled yet")
+    if name == "active_state":
+        return not content or content.startswith(
+            "(no active state - degraded boot)")
+    if name == "task_packet":
+        if not content:
+            return True
+        if content.startswith("(no in-flight tasks"):
+            active = sections.get("active_state", "")
+            return not active or active.startswith(
+                "(no active state - degraded boot)")
+        return False
+    return not content
+
+
+def assemble(slug, home, *, generation=None):
+    """Compose the boot packet. Returns text, sizes, identity hashes,
+    generation, and the named degraded layers."""
+    home = Path(home)
+    if generation is None:
+        generation = read_generation(home)
+    portrait = _read(self_portrait.committed_path(home))
+    law = _read(_law_path())
+    status = _read(home / "STATUS.md")
+    handoff = _read(home / "data" / "handoff.md")
+    hashes = {
+        "identity_hash": hashlib.sha256(
+            (portrait + law).encode()).hexdigest()[:12],
+        "state_hash": hashlib.sha256(
+            (status + handoff).encode()).hexdigest()[:12],
+        "memory_snapshot": datetime.now(timezone.utc)
+        .isoformat(timespec="seconds"),
+    }
+    sections = {
+        "law": law.strip(),
+        "self_portrait": self_portrait.for_boot_packet(home).strip(),
+        "calibration": _calibration(home),
+        "active_state": _active_state(home),
+        "task_packet": _task_packet(home),
+        "trace_summary": "",  # reserved: absence is a no-op by rule
+        "memories": _memories(home, LAYER_BUDGETS["memories"][1]),
+    }
+    degraded = [k for k, v in sections.items()
+                if _is_degraded(k, v, sections)]
+    for name, (_min, max_chars) in LAYER_BUDGETS.items():
+        if len(sections[name]) > max_chars:
+            sections[name] = _truncate(sections[name], max_chars, name)
+    total_max = TOTAL_MAX_CHARS - len(REQUIRED_BOOT_ACTIONS) - 600
+    while sum(len(v) for v in sections.values()) > total_max:
+        for victim in TRUNCATE_ORDER:
+            min_chars = LAYER_BUDGETS[victim][0]
+            if len(sections[victim]) > min_chars:
+                sections[victim] = _truncate(
+                    sections[victim], min_chars, victim + " (overflow)")
+                break
+        else:
+            break  # everything at minimum; cannot shrink further
+    body = [
+        "BOOT PACKET FOR COUSIN: %s" % slug,
+        "Generation: %d" % generation,
+        "identity_hash: %s" % hashes["identity_hash"],
+        "state_hash: %s" % hashes["state_hash"],
+        "memory_snapshot: %s" % hashes["memory_snapshot"],
+    ]
+    if degraded:
+        body.append("DEGRADED layers: %s" % ", ".join(sorted(degraded)))
+    for number, title, key in (
+        (1, "Framework Law", "law"),
+        (2, "Cousin Self-Portrait", "self_portrait"),
+        (3, "Operator Calibration", "calibration"),
+        (4, "Active State", "active_state"),
+        (5, "Current Task Packet", "task_packet"),
+        (6, "Recent Tool Trace Summary", "trace_summary"),
+        (7, "Retrieved Memories", "memories"),
+    ):
+        body.append("")
+        body.append("## %d. %s" % (number, title))
+        body.append(sections[key])
+    body.append("")
+    body.append(REQUIRED_BOOT_ACTIONS)
+    text = "\n".join(body)
+    return {
+        "text": text,
+        "chars": len(text),
+        "approx_tokens": len(text) // CHARS_PER_TOKEN,
+        "hashes": hashes,
+        "generation": generation,
+        "degraded_sections": sorted(degraded),
+    }

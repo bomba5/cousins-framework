@@ -32,7 +32,8 @@ Two cross-cutting contracts shape the rest: `docs/operator-interface.md`
 (the operator is a subsystem, and every surface works without one) and
 the rule the whole design serves - the same one the web console states
 in one line: a component that dies loses nothing that was not already
-in a store some other component owns.
+in a store some other component owns. Every optional install seam is
+listed in `docs/configuration.md`.
 
 ## Quickstart: a cousin with memory, from a cold clone
 

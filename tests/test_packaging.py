@@ -75,5 +75,27 @@ class TestDocsCoherence(unittest.TestCase):
                             "%s is unreferenced" % spec.name)
 
 
+class TestConfigSeamsDocumented(unittest.TestCase):
+    def test_every_config_file_the_code_reads_is_documented(self):
+        # The mechanism form of "no config seam undocumented": scan the
+        # source for config/<file> references and require each in
+        # docs/configuration.md. A new seam cannot ship unlisted.
+        import re
+        lib = _REPO_ROOT / "cousin_lib"
+        found = set()
+        pat = re.compile(
+            r'"config",\s*"([a-z0-9.-]+)"'
+            r'|"config"\s*/\s*"([a-z0-9.-]+)"')
+        for py in lib.rglob("*.py"):
+            for a, b in pat.findall(py.read_text()):
+                found.add(a or b)
+        self.assertTrue(found, "no config seams detected - check the scan")
+        doc = (_REPO_ROOT / "docs" / "configuration.md").read_text()
+        for name in found:
+            self.assertIn(name, doc,
+                          "config/%s is read by code but absent from"
+                          " docs/configuration.md" % name)
+
+
 if __name__ == "__main__":
     unittest.main()

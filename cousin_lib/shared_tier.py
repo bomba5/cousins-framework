@@ -128,6 +128,17 @@ def _check_reviewer(proposer, by):
     matters: the self-approval refusal fires even for a configured
     reviewer, because the allowlist must not be able to express
     proposer==approver."""
+    # Resolution requires the registry. Without it every name would
+    # resolve to its own folded form and this check would silently
+    # revert to the raw-string comparison it replaced - a security
+    # check degrading to its weaker predecessor when its data source
+    # is absent. Absence is not a no-op here; it changes who can
+    # approve what. Refuse.
+    if not (FrameworkConfig.from_env().root / "cousins").is_dir():
+        raise PromoteRefused(
+            "cousin registry not found under the framework root;"
+            " cannot resolve principals, refusing to promote"
+        )
     by_principal = _principal(by)
     if by_principal == _principal(proposer):
         raise PromoteRefused(

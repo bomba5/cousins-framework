@@ -37,6 +37,13 @@ class TierCase(unittest.TestCase):
         (self.root / "config" / "shared-reviewers.json").write_text(
             json.dumps({"reviewers": names}))
 
+    def _register_cousin(self, slug, name):
+        home = self.root / "cousins" / slug
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "%s"\nname = "%s"\n[chat]\nport = 8100\n'
+            % (slug, name))
+
     def _audit_entries(self):
         path = self.root / "shared" / "audit.jsonl"
         if not path.exists():
@@ -61,6 +68,7 @@ class TestProposeAndPromote(TierCase):
         self.assertEqual(kinds, ["propose", "propose-overwrite"])
 
     def test_promotion_moves_to_canonical_and_audits_the_reviewer(self):
+        self._register_cousin("wren", "Wren")
         self._reviewers(["Sam"])
         propose("norms.md", "be kind\n", slug="wren")
         promote("norms.md", proposer="wren", by="Sam")
@@ -74,6 +82,7 @@ class TestProposeAndPromote(TierCase):
                          ("promote", "Sam"))
 
     def test_reject_removes_the_proposal_with_a_reason_on_record(self):
+        self._register_cousin("wren", "Wren")
         self._reviewers(["Sam"])
         propose("norms.md", "questionable\n", slug="wren")
         reject("norms.md", proposer="wren", by="Sam", reason="too vague")
@@ -86,13 +95,6 @@ class TestProposeAndPromote(TierCase):
 
 
 class TestTheBoundary(TierCase):
-    def _register_cousin(self, slug, name):
-        home = self.root / "cousins" / slug
-        home.mkdir(parents=True, exist_ok=True)
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "%s"\nname = "%s"\n[chat]\nport = 8100\n'
-            % (slug, name))
-
     def test_display_name_cannot_launder_self_approval(self):
         # The hole: proposer is a slug, by is free text, and a cousin
         # whose display name differs from its slug is the NORMAL case.
@@ -118,6 +120,7 @@ class TestTheBoundary(TierCase):
     def test_self_approval_is_refused_even_when_config_allows_it(self):
         # The allowlist must not be able to express proposer==approver:
         # a boundary that config can switch off is not a boundary.
+        self._register_cousin("wren", "Wren")
         self._reviewers(["Wren", "Sam"])
         propose("norms.md", "mine\n", slug="wren")
         with self.assertRaises(PromoteRefused) as ctx:
@@ -126,14 +129,30 @@ class TestTheBoundary(TierCase):
         self.assertFalse((self.root / "shared" / "norms.md").exists())
 
     def test_unlisted_reviewer_is_refused(self):
+        self._register_cousin("wren", "Wren")
         self._reviewers(["Sam"])
         propose("norms.md", "x\n", slug="wren")
         with self.assertRaises(PromoteRefused):
             promote("norms.md", proposer="wren", by="Mallory")
 
+    def test_absent_registry_refuses_rather_than_degrading(self):
+        # With no cousins/ directory, name resolution is impossible and
+        # _principal would silently fall back to the raw-string
+        # comparison the resolution exists to replace - a security
+        # check degrading to its weaker predecessor when its data
+        # source is absent. Absence here is not a no-op: it changes
+        # who can approve what. Refuse.
+        self._reviewers(["Sam"])
+        propose("norms.md", "x\n", slug="wren")
+        # TierCase never created cousins/ - the registry is absent.
+        with self.assertRaises(PromoteRefused) as ctx:
+            promote("norms.md", proposer="wren", by="Sam")
+        self.assertIn("registry", str(ctx.exception))
+
     def test_no_reviewer_config_refuses_with_remediation(self):
         # Not "anyone but the proposer": an implicit reviewer set is
         # the self-approval hole one step removed.
+        self._register_cousin("wren", "Wren")
         propose("norms.md", "x\n", slug="wren")
         with self.assertRaises(PromoteRefused) as ctx:
             promote("norms.md", proposer="wren", by="Sam")
@@ -187,6 +206,7 @@ class TestCli(TierCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_propose_promote_read_roundtrip(self):
+        self._register_cousin("wren", "Wren")
         self._reviewers(["Sam"])
         rc, _, _ = self._main(
             ["propose", "norms.md", "--slug", "wren"],
@@ -201,6 +221,7 @@ class TestCli(TierCase):
         self.assertEqual(out, "be kind\n")
 
     def test_self_approval_refusal_reaches_the_exit_code(self):
+        self._register_cousin("wren", "Wren")
         self._reviewers(["Wren"])
         self._main(["propose", "norms.md", "--slug", "wren"],
                    stdin_text="x\n")

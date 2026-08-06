@@ -67,3 +67,17 @@ literals in executable code, and code itself, are structural positions (the
 term participates in behavior). Unknown is unsafe: anything the classifier
 cannot place is structural. Triage aggregates per file - one structural hit
 outweighs any number of mechanical ones.
+
+## Fixtures are publishable content
+
+The gate's scope includes test files and fixture data, and this is not
+theoretical: during this repository's own construction the gate caught
+a real personal name inside a freshly written test fixture, before it
+could enter history. A reader's instinct is that tests are not
+"publishable content"; the instinct is wrong - tests ship with the
+tree.
+
+Consequence: example people and cousins in tests come from a small
+fixed cast (Wren, Testa, Sam, Priya, Toki, Mallory), all invented for
+this repository. Use the cast; never invent a name mid-edit, because
+inventing one under pressure is exactly when a real one surfaces.

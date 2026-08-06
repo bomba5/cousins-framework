@@ -222,7 +222,11 @@ def spawn_main(argv=None):
     (nothing written)."""
     parser = argparse.ArgumentParser(prog="cousin-spawn")
     parser.add_argument("slug")
-    parser.add_argument("--root", required=True)
+    parser.add_argument(
+        "--root", required=True,
+        help="the framework root: a directory containing templates/"
+             " and cousins/ (typically the checkout itself), not an"
+             " install prefix")
     parser.add_argument("--name")
     parser.add_argument("--role", required=True)
     parser.add_argument("--role-paragraph")

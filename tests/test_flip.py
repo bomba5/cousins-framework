@@ -157,6 +157,23 @@ class TestGuards(FlipCase):
         self.assertNotIn("kill-session", calls)
 
 
+class TestMintSessionId(unittest.TestCase):
+    def test_minted_ids_stay_inside_the_charset(self):
+        from cousin_lib.flip import _mint_session_id
+        for _ in range(20):
+            self.assertRegex(_mint_session_id(), r"^[a-z0-9-]+$")
+
+    def test_a_drifted_mint_raises_instead_of_rendering(self):
+        # The constraint must travel with the mint and survive -O: if
+        # the generation line ever changes to something that can emit
+        # shell-relevant characters, the constructor itself refuses.
+        from cousin_lib import flip as flip_mod
+        with mock.patch.object(flip_mod.uuid, "uuid4",
+                               return_value="Bad_ID!;rm"):
+            with self.assertRaises(ValueError):
+                flip_mod._mint_session_id()
+
+
 class TestCli(FlipCase):
     def test_dry_run_via_the_cli_exits_zero(self):
         import contextlib

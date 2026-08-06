@@ -45,6 +45,25 @@ _HANDOFF_PROMPT = (
 )
 
 
+def _mint_session_id():
+    """Mint the new generation's session identity.
+
+    The id renders into a command string, so its charset ([a-z0-9-],
+    per the lifecycle spec) is a safety property - and the check lives
+    HERE, in the constructor, so it travels with the mint: a future
+    edit to the generation line faces the ValueError in the same
+    function rather than an assertion elsewhere that quietly stopped
+    matching (or vanished under -O). The format stays a real UUID
+    because agent harnesses that accept a session id typically
+    validate RFC4122; a bespoke constrained alphabet would satisfy the
+    charset and break the consumer."""
+    session_id = str(uuid.uuid4())
+    if not re.fullmatch(r"[a-z0-9-]+", session_id):
+        raise ValueError(
+            "minted session id violates its charset: %r" % session_id)
+    return session_id
+
+
 def _marker_path(home):
     return Path(home) / "data" / ".flip-in-progress.json"
 
@@ -280,10 +299,8 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
         _tmux(["kill-session", "-t", session], tmux_bin, tmux_socket)
     # Minted and persisted even when the agent-cmd carries no
     # {session_id} placeholder: the generation record is more useful
-    # with it. Charset pinned by spec - a generated value substituted
-    # into a command string stays safe by construction.
-    session_id = str(uuid.uuid4())
-    assert re.fullmatch(r"[a-z0-9-]+", session_id), session_id
+    # with it.
+    session_id = _mint_session_id()
     agent_cmd = agent_cmd_template.replace("{session_id}", session_id)
     try:
         start_cousin(home, agent_cmd=agent_cmd, tmux_bin=tmux_bin,

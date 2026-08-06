@@ -18,7 +18,10 @@ permanent. Everything below follows from refusing that state.
 - `templates/cousin-CLAUDE.template.md` is the ONLY definition of a new
   cousin's CLAUDE.md. No other code path may emit one.
 - The renderer substitutes `{{NAME}}`, `{{SLUG}}`, `{{PORT}}`,
-  `{{ROLE_ONE_LINE}}`, `{{ROLE_PARAGRAPH}}`, `{{VOICE_GUIDE}}`.
+  `{{ROLE_ONE_LINE}}`, `{{ROLE_PARAGRAPH}}`, `{{VOICE_GUIDE}}`, and
+  strips HTML comments: template comments are guidance for template
+  editors, and persisting "replace this before saving" into a cousin's
+  bedrock is drift-bait.
 - **Any `{{` remaining in rendered output is a spawn failure**, not a
   TODO. An unsubstituted `{{VOICE_GUIDE}}` means the cousin has no
   authored register on bedrock and will improvise one the first time its
@@ -56,11 +59,17 @@ operator is a configuration state, never a defaulted name.
    without one is reported as an orphan with its path, not treated as a
    cousin); the template must render completely with the provided
    values, checked BEFORE anything is written.
-2. **Allocate a port** if not given: scan every `cousin.toml` under the
-   root plus a live bind test, take the first free port in the
-   configured range. **Exhaustion is an error.** There is no sentinel
-   value; a cousin without a working chat port is a spawn failure, not a
-   degraded success.
+2. **Allocate a port** if not given: take the first port in the
+   configured range that is neither claimed nor live. The scan range
+   decides where to LOOK; the claimed set decides what to SKIP, and the
+   claimed set is every port in any `cousin.toml` under the root
+   **whether or not it falls inside the range** - a hand-configured
+   port outside the range must never become allocatable by someone
+   widening the range later, because a port collision between two
+   running cousins is silent misdelivery, not a startup error. A live
+   bind test backs the scan. **Exhaustion is an error.** There is no
+   sentinel value; a cousin without a working chat port is a spawn
+   failure, not a degraded success.
 3. **Create the home** under `cousins/<slug>/files/`: `memory/`,
    `data/`, `notes/`, `scripts/` - exactly the directories the shipped
    tools read, nothing speculative.

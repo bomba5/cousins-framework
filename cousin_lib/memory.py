@@ -211,8 +211,13 @@ def _cmd_search(args):
     from cousin_lib import memory_search
 
     home = _home(args)
-    hits = memory_search.search(args.query, top=args.top, home=home)
+    hits, notice = memory_search.search(args.query, top=args.top,
+                                        home=home)
     memory_search.print_results(hits)
+    if notice:
+        # The degrade contract: a promised-but-dead semantic leg is
+        # never silent.
+        print("notice: %s" % notice, file=sys.stderr)
     return 0
 
 

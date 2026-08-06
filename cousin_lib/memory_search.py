@@ -1,21 +1,38 @@
-"""Keyword search over a cousin's memory and notes.
+"""Search over a cousin's memory and notes: keyword always, semantic
+when an embedding service is configured.
 
-The v1 tier: SQLite FTS5 with BM25 ranking over <home>/memory/*.md and
-<home>/notes/*.md. Semantic search is the declared M2 seam - it adds
-an optional external model service, and keyword search is the path
-that keeps day-one true. Nothing here pretends to be semantic.
+The keyword leg is SQLite FTS5 with BM25; the semantic leg embeds
+files and queries through an HTTP embedding service declared in
+<root>/config/embedding.toml (url, model, timeout_s - the endpoint
+accepts {"model", "prompt"} and returns {"embedding": [...]}; front
+any service with that contract). Results merge by reciprocal-rank
+fusion.
+
+The degrade contract: soft-degrade is silent ONLY when nothing was
+promised. No embedding config -> keyword, silently - the install
+never claimed semantic search. Configured but unreachable or broken
+-> keyword PLUS a notice on the result, never silently: a quietly
+dead semantic leg leaves someone believing they have semantic recall
+until the belief costs them a lookup.
 
 Context comes from COUSIN_HOME and fails loud: a search that silently
 reads nothing teaches its caller that memory is empty, which is worse
 than an error.
 """
+import json
+import math
 import os
 import re
 import sqlite3
 import time
+import tomllib
+import urllib.request
 from pathlib import Path
 
-from cousin_lib.config import MissingConfigError
+from cousin_lib.config import FrameworkConfig, MissingConfigError
+
+_EMBED_CAP_CHARS = 6000
+_RRF_K = 60
 
 
 def _home():
@@ -119,11 +136,7 @@ def _sanitize(query, max_tokens=32):
     return " OR ".join('"%s"' % t for t in tokens)
 
 
-def search(query, *, top=5, home=None):
-    """Ranked keyword hits: [{path, collection, score, snippet}]. The
-    index self-heals on staleness so a fresh file is findable without
-    an explicit reindex."""
-    home = Path(home) if home else _home()
+def _keyword_search(query, home, top):
     if _index_stale(home):
         build_index(home)
     match = _sanitize(query)
@@ -146,6 +159,134 @@ def search(query, *, top=5, home=None):
         {"collection": c, "path": p, "score": s, "snippet": snip}
         for c, p, s, snip in rows
     ]
+
+
+def _embedding_config():
+    """The semantic leg's declaration: <root>/config/embedding.toml
+    with url, model, timeout_s. None when absent (nothing promised);
+    the string 'broken' when present but unparsable (promised and not
+    delivered - the caller must notice, not shrug)."""
+    try:
+        path = FrameworkConfig.from_env().root / "config" \
+            / "embedding.toml"
+    except MissingConfigError:
+        return None
+    if not path.exists():
+        return None
+    try:
+        config = tomllib.loads(path.read_text())
+        if not config.get("url"):
+            return "broken"
+        return config
+    except (OSError, tomllib.TOMLDecodeError):
+        return "broken"
+
+
+def _embed(text, config):
+    payload = json.dumps({
+        "model": config.get("model", ""),
+        "prompt": text[:_EMBED_CAP_CHARS],
+    }).encode()
+    request = urllib.request.Request(
+        config["url"], data=payload,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(
+            request, timeout=config.get("timeout_s", 10)) as response:
+        return json.loads(response.read())["embedding"]
+
+
+def _cosine(a, b):
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(
+        sum(x * x for x in b))
+    return dot / norm if norm else 0.0
+
+
+def _semantic_search(query, home, top, config):
+    """Embed stale files, cosine-rank against the query. Any failure
+    raises to the caller, which degrades WITH a notice - the contract
+    forbids this leg dying quietly."""
+    index_path = home / "memory" / "embeddings.json"
+    try:
+        index = json.loads(index_path.read_text())
+    except (OSError, ValueError):
+        index = {}
+    changed = False
+    current = {}
+    for collection, path in _sources(home):
+        key = str(path)
+        mtime = path.stat().st_mtime
+        entry = index.get(key)
+        if not entry or entry["mtime"] < mtime:
+            entry = {
+                "mtime": mtime,
+                "collection": collection,
+                "vector": _embed(path.read_text(errors="replace"),
+                                 config),
+            }
+            changed = True
+        current[key] = entry
+    if changed or set(current) != set(index):
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        index_path.write_text(json.dumps(current))
+    query_vector = _embed(query, config)
+    scored = sorted(
+        ((_cosine(query_vector, e["vector"]), key, e)
+         for key, e in current.items()),
+        reverse=True,
+    )
+    hits = []
+    for score, key, entry in scored[:top]:
+        first_line = Path(key).read_text(errors="replace") \
+            .strip().splitlines()
+        hits.append({
+            "collection": entry["collection"], "path": key,
+            "score": score,
+            "snippet": first_line[0] if first_line else "",
+        })
+    return hits
+
+
+def _fuse(keyword_hits, semantic_hits, top):
+    """Reciprocal-rank fusion by path: order-based, so the two legs'
+    incomparable score scales never fight each other."""
+    scores = {}
+    byname = {}
+    for hits in (keyword_hits, semantic_hits):
+        for rank, hit in enumerate(hits):
+            scores[hit["path"]] = scores.get(hit["path"], 0.0) \
+                + 1.0 / (_RRF_K + rank)
+            byname.setdefault(hit["path"], hit)
+    ranked = sorted(scores, key=scores.get, reverse=True)[:top]
+    out = []
+    for path in ranked:
+        hit = dict(byname[path])
+        hit["score"] = scores[path]
+        out.append(hit)
+    return out
+
+
+def search(query, *, top=5, home=None):
+    """Ranked hits plus the degrade notice: (hits, notice). notice is
+    None whenever the result honors everything the install's
+    configuration promised, and a human-readable explanation whenever
+    the semantic leg was promised and could not serve."""
+    home = Path(home) if home else _home()
+    keyword_hits = _keyword_search(query, home, top)
+    config = _embedding_config()
+    if config is None:
+        return keyword_hits, None
+    if config == "broken":
+        return keyword_hits, (
+            "embedding config exists but is unusable; keyword-only"
+            " results (fix or remove config/embedding.toml)")
+    try:
+        semantic_hits = _semantic_search(query, home, top, config)
+    except Exception as err:
+        return keyword_hits, (
+            "embedding service unreachable (%s); keyword-only results"
+            % err)
+    return _fuse(keyword_hits, semantic_hits, top), None
 
 
 def print_results(hits):

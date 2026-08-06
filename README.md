@@ -30,7 +30,16 @@ cousin-memory search "espresso descale"
 
 That is the core loop: spawn from the template (the single identity
 source - an unfilled voice is a spawn failure, not a TODO), write
-memory where the tools index it, search finds what you wrote. To run
+memory where the tools index it, search finds what you wrote.
+
+Search is keyword-first and needs nothing installed. To add the
+optional semantic leg, point `config/embedding.toml` at any HTTP
+embedding service (`url`, `model`, `timeout_s`; the endpoint takes
+`{"model", "prompt"}` and returns `{"embedding": [...]}`). As one
+non-normative example, a local Ollama exposes that contract at
+`http://localhost:11434/api/embeddings` with a model such as
+`nomic-embed-text`. If the configured service is unreachable, search
+degrades to keyword and SAYS SO - it never quietly pretends. To run
 the cousin as a live agent, put the command line that starts your
 agent in `config/agent-cmd` and pass `--start`; its chat server then
 serves the ports in `cousins/*/cousin.toml`. The docs directory

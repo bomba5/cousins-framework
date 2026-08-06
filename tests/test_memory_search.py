@@ -44,14 +44,14 @@ class TestContext(SearchCase):
 class TestSearch(SearchCase):
     def test_finds_the_right_file_by_keyword(self):
         build_index()
-        hits = search("claimed set port")
+        hits, _ = search("claimed set port")
         self.assertTrue(hits)
         self.assertIn("ports.md", hits[0]["path"])
         self.assertEqual(hits[0]["collection"], "memory")
 
     def test_notes_are_a_tagged_collection(self):
         build_index()
-        hits = search("verified identity write")
+        hits, _ = search("verified identity write")
         self.assertIn("flip-plan.md", hits[0]["path"])
         self.assertEqual(hits[0]["collection"], "notes")
 
@@ -59,7 +59,7 @@ class TestSearch(SearchCase):
         # FTS5 treats -, /, ', ( as query syntax; a raw natural-language
         # query used to error and the keyword leg swallowed it silently.
         build_index()
-        hits = search("what's the claimed-set (port) rule?")
+        hits, _ = search("what's the claimed-set (port) rule?")
         self.assertTrue(hits)
         self.assertIn("ports.md", hits[0]["path"])
 
@@ -68,7 +68,7 @@ class TestSearch(SearchCase):
         time.sleep(0.05)
         (self.home / "memory" / "fresh.md").write_text(
             "# Fresh\n\nzanzibar considerations\n")
-        hits = search("zanzibar")
+        hits, _ = search("zanzibar")
         self.assertTrue(hits)
         self.assertIn("fresh.md", hits[0]["path"])
 

@@ -29,3 +29,8 @@ cousin-ui = "cousin_lib.ui:ui_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]
+
+[tool.setuptools.package-data]
+# The web console is served from beside the module; without this a
+# wheel ships the code but not the pages it serves.
+cousin_lib = ["ui_static/*"]

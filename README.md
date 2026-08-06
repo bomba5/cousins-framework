@@ -25,6 +25,7 @@ contract under `docs/`. Nothing here needs a third-party dependency.
 | the reviewed identity layer | `cousin-self-portrait` | `docs/lifecycle-spec.md` |
 | recurring work: heartbeats, loops, timed flips | `cousin-loops`, `cousin-schedule`, `cousin-cycle` | `docs/loops-spec.md` |
 | job + sub-agent tracking | `cousin-job` | - |
+| media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 

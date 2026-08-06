@@ -94,14 +94,22 @@ class TmuxInjector:
     def _submitted(self, text):
         """Did the Enter actually submit? The probe is the normalized tail
         of the message; if it still shows in the pane's bottom lines, the
-        text is sitting in the input box. Only the bottom lines are
-        inspected, so the copy echoed into scrollback above the box
-        cannot cause a false 'unsubmitted'."""
+        text is sitting in the input box.
+
+        The window is 3 lines: an empty bottom-pinned input box renders
+        as roughly border, prompt, border, and the submitted message
+        often echoes DIRECTLY above it - a wider window reads that echo
+        as "still in the box" and fires the retry exactly when nothing
+        was stranded. A stranded paste always reaches the box's bottom
+        lines, however long it wrapped, because the probe is the tail of
+        the text. Assumes a bottom-pinned input box (an agent CLI); a
+        bare shell prompt echoes on the last line and cannot be told
+        apart, which costs at most one harmless Enter."""
         probe = _normalize_for_verify(text)[-24:]
         if not probe:
             return True
         r = self._tmux("capture-pane", "-p", "-t", self.session)
-        tail = "\n".join((r.stdout or "").splitlines()[-6:])
+        tail = "\n".join((r.stdout or "").splitlines()[-3:])
         return probe not in _normalize_for_verify(tail)
 
     def inject(self, text):
@@ -114,6 +122,8 @@ class TmuxInjector:
                 if r.returncode != 0:
                     # The only trace that the cousin never received the
                     # message (dead or renamed session, tmux down).
+                    # Nothing was pasted, so there is nothing to submit:
+                    # stop here rather than pressing Enter into the void.
                     print(
                         "[chat-server] tmux delivery FAILED (rc=%d)"
                         " target=%r: %s"
@@ -121,6 +131,7 @@ class TmuxInjector:
                            (r.stderr or "")[:200]),
                         file=self.log, flush=True,
                     )
+                    return
                 time.sleep(self.settle(len(text)))
                 self._tmux("send-keys", "-t", self.session, "Enter")
                 time.sleep(self.verify_delay)

@@ -15,6 +15,7 @@ authors = [{ name = "Jhonata Poma-Hansen" }]
 cousin-gate = "cousin_lib.gate.cli:main"
 cousin-reply = "cousin_lib.reply:reply_main"
 cousin-chat = "cousin_lib.chat:chat_main"
+cousin-chat-server = "cousin_lib.server.app:serve_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

@@ -9,19 +9,33 @@ the tmux injector in production) and `guard` (the network allowlist).
 `None` for either means the behavior is absent - a server with no guard
 allows everything, which only test harnesses should do.
 """
+import argparse
 import base64
 import binascii
 import json
+import os
 import re
+import shutil
+import sys
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
+from cousin_lib.config import CousinConfig, MissingConfigError
+from cousin_lib.server.injection import TmuxInjector, make_deliver
+from cousin_lib.server.netguard import NetGuard
 from cousin_lib.server.storage import ChatStore, normalize_chat_user
 
 
 class _BadRequest(Exception):
     """Client error carrying the message that becomes the 400 body."""
+
+
+class StartupError(Exception):
+    """The server refuses to start. Missing configuration, an unbindable
+    port, or an absent tmux binary are startup errors, not per-message
+    log lines."""
 
 
 # Extensions the inbox writes as-is; anything else is normalized to .bin
@@ -103,6 +117,60 @@ class ChatServer:
         self.httpd.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+
+
+def build_server(home, *, framework_root=None, tmux_bin=None,
+                 terminal_delivery=True):
+    """Assemble a ChatServer with its real seams: the netguard from the
+    install's allowlist config, and tmux delivery unless disabled. All
+    startup problems surface here, before the socket accepts anything."""
+    try:
+        config = CousinConfig.load(home)
+        config.require_chat_port()
+    except MissingConfigError as err:
+        raise StartupError(str(err))
+    root = framework_root or os.environ.get("FRAMEWORK_ROOT")
+    guard = NetGuard.from_config(Path(root)) if root else NetGuard()
+    deliver = notify = None
+    if terminal_delivery:
+        tmux_bin = tmux_bin or shutil.which("tmux")
+        if not tmux_bin or not os.access(tmux_bin, os.X_OK):
+            raise StartupError(
+                "tmux binary not found; terminal delivery is enabled and "
+                "cannot work without it"
+            )
+        injector = TmuxInjector(config.tmux_session, tmux_bin=tmux_bin,
+                                socket=os.environ.get("COUSIN_TMUX_SOCKET"))
+        deliver = make_deliver(config.home, injector)
+        notify = injector.inject_async
+    try:
+        return ChatServer(config, deliver=deliver, guard=guard,
+                          notify=notify)
+    except OSError as err:
+        raise StartupError("cannot bind chat port: %s" % err)
+
+
+def serve_main(argv=None):
+    """Console entry point: cousin-chat-server --home <cousin home>."""
+    parser = argparse.ArgumentParser(prog="cousin-chat-server")
+    parser.add_argument("--home", required=True)
+    parser.add_argument("--no-terminal-delivery", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        server = build_server(
+            args.home,
+            terminal_delivery=not args.no_terminal_delivery,
+        )
+    except StartupError as err:
+        print("cousin-chat-server: %s" % err, file=sys.stderr)
+        return 2
+    print("cousin-chat-server: %s on port %d"
+          % (server.config.slug, server.port))
+    try:
+        server.httpd.serve_forever()
+    except KeyboardInterrupt:
+        server.stop()
+    return 0
 
 
 class _ChatHandler(BaseHTTPRequestHandler):

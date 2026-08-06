@@ -120,6 +120,8 @@ class InjectorCase(unittest.TestCase):
     def _calls(self):
         return self.log.read_text().splitlines() if self.log.exists() else []
 
+
+class TestInjector(InjectorCase):
     def test_wire_sequence_is_paste_then_enter_then_verify(self):
         self.pane.write_text("> _\n")  # empty input box: submitted
         self._injector().inject("hello there")
@@ -138,6 +140,29 @@ class InjectorCase(unittest.TestCase):
         self._injector().inject("hello there")
         enters = [c for c in self._calls() if c.endswith("Enter")]
         self.assertEqual(len(enters), 2)
+
+    def test_echo_above_an_empty_input_box_reads_as_submitted(self):
+        # The submitted message often re-renders directly above the input
+        # box. That echo must not read as "still in the box": the retry
+        # exists to rescue a stranded message, and firing it here fires
+        # it exactly when nothing was stranded.
+        self.pane.write_text(
+            "> hello there\n"
+            "+----------+\n"
+            "| >        |\n"
+            "+----------+\n"
+        )
+        self._injector().inject("hello there")
+        enters = [c for c in self._calls() if c.endswith("Enter")]
+        self.assertEqual(len(enters), 1)
+
+    def test_failed_paste_stops_the_sequence(self):
+        # A dead or renamed session fails the paste; pressing Enter into
+        # it anyway is two pointless tmux calls and a misleading second
+        # failure line.
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):
+            self._injector().inject("hello")
+        self.assertEqual(len(self._calls()), 1)
 
     def test_failed_paste_is_logged_loudly_not_raised(self):
         with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):

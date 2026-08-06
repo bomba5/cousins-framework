@@ -101,12 +101,35 @@ def _reviewers():
         return None
 
 
+def _principal(name_or_slug):
+    """Resolve an identity string to its canonical principal id.
+
+    Identity here must be a resolved thing, not text: the framework
+    deliberately separates slugs from display names, so a cousin with
+    slug 'wren' and name 'Sam' is ONE principal wearing two strings -
+    and comparing the strings lets it approve its own proposal by
+    wearing the other one. A string that names a registered cousin (by
+    slug or display name, case-insensitive) resolves to that cousin's
+    slug; anything else - a human reviewer - resolves to its own
+    folded form. A human whose name collides with a cousin's display
+    name resolves to the cousin and may be refused: on ambiguity the
+    boundary denies, consistent with the tier's posture everywhere
+    else."""
+    folded = name_or_slug.strip().lower()
+    for config in FrameworkConfig.from_env().list_cousins():
+        if folded in (config.slug.lower(), config.name.lower()):
+            return config.slug.lower()
+    return folded
+
+
 def _check_reviewer(proposer, by):
-    """The boundary, enforced at the promote site. Order matters: the
-    self-approval refusal fires even for a configured reviewer,
-    because the allowlist must not be able to express
+    """The boundary, enforced at the promote site over RESOLVED
+    principals - one normalisation, used by every check. Order
+    matters: the self-approval refusal fires even for a configured
+    reviewer, because the allowlist must not be able to express
     proposer==approver."""
-    if by.lower() == proposer.lower():
+    by_principal = _principal(by)
+    if by_principal == _principal(proposer):
         raise PromoteRefused(
             "%s cannot promote their own proposal: the proposing side"
             " and the promoting side are never the same principal"
@@ -118,7 +141,7 @@ def _check_reviewer(proposer, by):
             "shared-reviewers.json ({\"reviewers\": [name, ...]})"
             " before promoting - an implicit reviewer set is the"
             " self-approval hole one step removed")
-    if by not in reviewers:
+    if by_principal not in {_principal(r) for r in reviewers}:
         raise PromoteRefused(
             "%r is not in the configured reviewer list" % by)
 

@@ -86,6 +86,35 @@ class TestProposeAndPromote(TierCase):
 
 
 class TestTheBoundary(TierCase):
+    def _register_cousin(self, slug, name):
+        home = self.root / "cousins" / slug
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "%s"\nname = "%s"\n[chat]\nport = 8100\n'
+            % (slug, name))
+
+    def test_display_name_cannot_launder_self_approval(self):
+        # The hole: proposer is a slug, by is free text, and a cousin
+        # whose display name differs from its slug is the NORMAL case.
+        # Both sides must resolve to the same principal - the slug -
+        # before either check runs.
+        self._register_cousin("wren", "Sam")
+        self._reviewers(["Sam"])
+        propose("norms.md", "mine\n", slug="wren")
+        with self.assertRaises(PromoteRefused) as ctx:
+            promote("norms.md", proposer="wren", by="Sam")
+        self.assertIn("own proposal", str(ctx.exception))
+
+    def test_reviewer_matching_is_by_principal_not_raw_string(self):
+        # One normalisation for one identity field: 'priya' in config
+        # must accept by='Priya' - the allowlist and the self-check
+        # read from the same resolved value.
+        self._register_cousin("wren", "Wren")
+        self._reviewers(["priya"])
+        propose("norms.md", "x\n", slug="wren")
+        promote("norms.md", proposer="wren", by="Priya")
+        self.assertTrue((self.root / "shared" / "norms.md").exists())
+
     def test_self_approval_is_refused_even_when_config_allows_it(self):
         # The allowlist must not be able to express proposer==approver:
         # a boundary that config can switch off is not a boundary.

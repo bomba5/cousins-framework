@@ -69,6 +69,19 @@ class TestCousinConfig(unittest.TestCase):
         cfg = CousinConfig.load(home)
         self.assertEqual(cfg.tmux_session, "wren-main")
 
+    def test_memory_scope_defaults_to_private(self):
+        # The privacy gate's deny-on-uncertainty starts here: unset
+        # means private, never shared.
+        home = self._home('[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        self.assertEqual(CousinConfig.load(home).memory_scope, "private")
+
+    def test_memory_scope_from_config(self):
+        home = self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[memory]\nscope = "both"\n'
+        )
+        self.assertEqual(CousinConfig.load(home).memory_scope, "both")
+
     def test_missing_chat_port_fails_loud(self):
         home = self._home('[cousin]\nslug = "wren"\n')
         cfg = CousinConfig.load(home)

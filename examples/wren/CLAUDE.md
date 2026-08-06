@@ -86,6 +86,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |
 | `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |
 | `cousin-self-portrait` | your reviewed identity layer | `synthesize` then operator review, then `commit` |
+| `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 
 ## Hard rules

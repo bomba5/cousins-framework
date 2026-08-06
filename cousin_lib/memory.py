@@ -225,6 +225,34 @@ def _cmd_reindex(args):
     return 0
 
 
+def _cmd_propose_shared(args):
+    from cousin_lib.config import CousinConfig
+    from cousin_lib.shared_tier import commit_bulk_propose, plan_bulk_propose
+
+    home = _home(args)
+    slug = CousinConfig.load(home).slug
+    plan = plan_bulk_propose(home, slug)
+    if not plan["eligible"]:
+        print("not eligible: [memory] scope is %r (need 'shared' or"
+              " 'both'; private and unset are excluded by design)"
+              % plan["scope"])
+        return 0
+    for item in plan["propose"]:
+        print("  PROPOSE  %s -> proposed/%s"
+              % (item["fname"], item["proposed_name"]))
+    for fname, reason in plan["skipped"]:
+        print("  skip     %s  (%s)" % (fname, reason))
+    if not args.commit:
+        print("[dry-run] %d would be proposed, %d skipped;"
+              " re-run with --commit to write"
+              % (len(plan["propose"]), len(plan["skipped"])))
+        return 0
+    count = commit_bulk_propose(plan, slug)
+    print("proposed %d file(s) into the review queue; nothing landed"
+          " in canonical" % count)
+    return 0
+
+
 def memory_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-memory")
     parser.add_argument("--home")
@@ -235,6 +263,13 @@ def memory_main(argv=None):
     p.set_defaults(func=_cmd_search)
     p = sub.add_parser("reindex")
     p.set_defaults(func=_cmd_reindex)
+    p = sub.add_parser(
+        "propose-shared",
+        help="nominate marked shareable memories into the shared"
+             " review queue (dry-run unless --commit; nothing ever"
+             " lands in canonical from here)")
+    p.add_argument("--commit", action="store_true")
+    p.set_defaults(func=_cmd_propose_shared)
     p = sub.add_parser("decide")
     p.add_argument("topic")
     p.add_argument("decision")

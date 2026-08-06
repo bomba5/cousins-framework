@@ -26,6 +26,7 @@ class CousinConfig:
     chat_host: str | None = None
     peer_visible: bool = True
     tmux_session: str = ""
+    memory_scope: str = "private"
 
     @classmethod
     def load(cls, home):
@@ -47,6 +48,7 @@ class CousinConfig:
             chat_host=data.get("chat", {}).get("host"),
             peer_visible=bool(cousin.get("peer_visible", True)),
             tmux_session=data.get("chat", {}).get("tmux_session", slug),
+            memory_scope=data.get("memory", {}).get("scope", "private"),
         )
 
     @classmethod

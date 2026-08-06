@@ -143,5 +143,71 @@ class TestBulkPropose(TierCase):
         self.assertIn("project_beta.md", skipped)
 
 
+class TestCli(TierCase):
+    def _main(self, argv, stdin_text=None):
+        import contextlib
+        import io
+
+        from cousin_lib.shared_tier import shared_main
+        out, err = io.StringIO(), io.StringIO()
+        stdin = io.StringIO(stdin_text or "")
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), \
+                mock.patch("sys.stdin", stdin):
+            rc = shared_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_propose_promote_read_roundtrip(self):
+        self._reviewers(["Sam"])
+        rc, _, _ = self._main(
+            ["propose", "norms.md", "--slug", "wren"],
+            stdin_text="be kind\n")
+        self.assertEqual(rc, 0)
+        rc, out, _ = self._main(["list"])
+        self.assertIn("wren__norms.md", out)
+        rc, _, _ = self._main(
+            ["promote", "norms.md", "--proposer", "wren", "--by", "Sam"])
+        self.assertEqual(rc, 0)
+        rc, out, _ = self._main(["read", "norms.md"])
+        self.assertEqual(out, "be kind\n")
+
+    def test_self_approval_refusal_reaches_the_exit_code(self):
+        self._reviewers(["Wren"])
+        self._main(["propose", "norms.md", "--slug", "wren"],
+                   stdin_text="x\n")
+        rc, _, err = self._main(
+            ["promote", "norms.md", "--proposer", "wren", "--by", "Wren"])
+        self.assertEqual(rc, 3)
+        self.assertIn("own proposal", err)
+
+
+class TestMemoryCliWiring(TierCase):
+    def test_propose_shared_is_dry_run_by_default(self):
+        import contextlib
+        import io
+
+        from cousin_lib.memory import memory_main
+        home = self.root / "cousins" / "wren"
+        (home / "memory").mkdir(parents=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[memory]\nscope = "shared"\n')
+        (home / "memory" / "project_alpha.md").write_text(
+            "shareable: true\n\nalpha\n")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COUSIN_HOME": str(home)}), \
+                contextlib.redirect_stdout(out):
+            rc = memory_main(["propose-shared"])
+        self.assertEqual(rc, 0)
+        self.assertIn("dry-run", out.getvalue())
+        self.assertFalse((self.root / "shared" / "proposed").exists())
+        with mock.patch.dict(os.environ, {"COUSIN_HOME": str(home)}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            memory_main(["propose-shared", "--commit"])
+        self.assertTrue(
+            (self.root / "shared" / "proposed"
+             / "wren__project_alpha.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

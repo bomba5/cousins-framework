@@ -103,6 +103,14 @@ class TestCousinConfig(unittest.TestCase):
             '[cousin]\nslug = "g"\ntype = "worker"\n[chat]\nport = 8100\n')
         self.assertEqual(CousinConfig.load(home).type, "worker")
 
+    def test_flip_at_defaults_to_none_and_parses(self):
+        home = self._home('[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        self.assertIsNone(CousinConfig.load(home).flip_at)
+        home = self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[lifecycle]\nflip_at = "04:00"\n')
+        self.assertEqual(CousinConfig.load(home).flip_at, "04:00")
+
     def test_missing_chat_port_fails_loud(self):
         home = self._home('[cousin]\nslug = "wren"\n')
         cfg = CousinConfig.load(home)

@@ -347,6 +347,105 @@ class TestWorkers(LoopsCase):
         (self.root / "config" / "worker-cmd").write_text("sh -c true\n")
         report = self._tick()
         self.assertIn("grinder|churn", report["fired"])
+        # Wait for the detached runner before teardown: tempdir
+        # cleanup racing a runner still writing its log and rc is a
+        # flaky ERROR, and the other worker tests already wait.
+        self._wait_job(("done", "failed"))
+
+
+class TestFlipDrivers(LoopsCase):
+    def setUp(self):
+        super().setUp()
+        self.flips = []
+
+    def _tick_f(self, **kw):
+        kw.setdefault("do_flip", lambda slug: self.flips.append(slug)
+                      or {"ok": True})
+        return self._tick(**kw)
+
+    def _flip_cousin(self, slug, at="04:00"):
+        self._cousin(slug, extra=(
+            "[heartbeat]\ncontext_beat_seconds = 0\n"
+            '[lifecycle]\nflip_at = "%s"\n' % at))
+
+    def test_daily_flip_fires_late_once(self):
+        self._flip_cousin("wren")
+        from datetime import datetime
+        evening = datetime.now().replace(hour=23, minute=0,
+                                         second=0).timestamp()
+        self._tick_f(now=evening)
+        self.assertEqual(self.flips, ["wren"])
+        self._tick_f(now=evening + 60)
+        self.assertEqual(self.flips, ["wren"])
+
+    def test_at_most_one_daily_flip_per_tick_stagger(self):
+        # Boot packets must never assemble simultaneously; the tick
+        # cadence is the stagger.
+        self._flip_cousin("wren")
+        self._flip_cousin("toki")
+        from datetime import datetime
+        evening = datetime.now().replace(hour=23, minute=0,
+                                         second=0).timestamp()
+        self._tick_f(now=evening)
+        self.assertEqual(len(self.flips), 1)
+        self._tick_f(now=evening + 30)
+        self.assertEqual(len(self.flips), 2)
+
+    def test_timed_flip_warns_then_fires_through_the_request_store(self):
+        self._cousin("wren")
+        base = time.time()
+        submit_request("flip", cousin="wren",
+                       payload={"fire_at": base + 300},
+                       ttl_seconds=600)
+        self._tick_f(now=base + 10)     # inside T-5m: warning
+        self.assertTrue(any("wrap up" in t for _, t in self.delivered))
+        self.assertEqual(self.flips, [])
+        self._tick_f(now=base + 301)    # T-0
+        self.assertEqual(self.flips, ["wren"])
+        row = list_requests()[0]
+        self.assertEqual(row["status"], "done")
+
+    def test_failed_flip_marks_the_request_failed_with_reason(self):
+        self._cousin("wren")
+        base = time.time()
+        submit_request("flip", cousin="wren",
+                       payload={"fire_at": base - 1}, ttl_seconds=600)
+        self._tick_f(do_flip=lambda slug: {"ok": False,
+                                           "error": "preflight failed"})
+        row = list_requests()[0]
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("preflight", row["reason"])
+
+
+class TestCliAndRun(LoopsCase):
+    def _main(self, argv):
+        import contextlib
+        import io
+
+        from cousin_lib.loops import loops_main
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = loops_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_status_reports_never_run_then_ok(self):
+        rc, out, _ = self._main(["status"])
+        self.assertEqual(rc, 1)
+        self.assertIn("never run", out)
+        self._cousin("wren")
+        rc, out, _ = self._main(["run", "--ticks", "2",
+                                 "--interval", "0"])
+        self.assertEqual(rc, 0)
+        rc, out, _ = self._main(["status"])
+        self.assertEqual(rc, 0)
+
+    def test_fire_subcommand_writes_a_visible_request(self):
+        self._cousin("wren")
+        rc, out, _ = self._main(["fire", "wren", "report"])
+        self.assertEqual(rc, 0)
+        rc, out, _ = self._main(["requests"])
+        self.assertIn("pending", out)
+        self.assertIn("report", out)
 
 
 if __name__ == "__main__":

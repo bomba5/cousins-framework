@@ -340,9 +340,12 @@ def _fire_worker_loops(config, state, now, report):
 def _consume_requests(state, deliver, errors):
     con = _db()
     try:
+        # kind='flip' rows belong to the timed-flip walker, which
+        # holds them pending until T-0; consuming them here would
+        # mark them failed-unknown before their time.
         rows = con.execute(
             "SELECT * FROM requests WHERE status='pending'"
-            " ORDER BY id").fetchall()
+            " AND kind != 'flip' ORDER BY id").fetchall()
         for row in rows:
             payload = json.loads(row["payload"] or "{}")
             if row["kind"] == "fire":
@@ -372,14 +375,94 @@ def _consume_requests(state, deliver, errors):
         con.close()
 
 
-def tick(*, deliver, is_alive, now=None):
+_WARN_LADDER = (
+    (300, "wrap up tool calls - flip in 5 minutes"),
+    (60, "finalize your handoff now - flip in 1 minute"),
+    (30, "write data/handoff.md - flip in 30 seconds"),
+)
+
+
+def _walk_timed_flips(state, deliver, do_flip, now, report):
+    """Timed flips live in the request store - which is what makes
+    them actually fire: the source scheduled them in one process and
+    walked an always-empty dict in the other. Warnings at T-5m/1m/30s,
+    fire at T-0, done/failed on the row."""
+    con = _db()
+    try:
+        rows = con.execute(
+            "SELECT * FROM requests WHERE status='pending'"
+            " AND kind='flip' ORDER BY id").fetchall()
+        for row in rows:
+            payload = json.loads(row["payload"] or "{}")
+            fire_at = float(payload.get("fire_at", 0))
+            slug = row["cousin"]
+            if now < fire_at:
+                warns = state.setdefault("timed_warns", {}) \
+                    .setdefault(str(row["id"]), [])
+                for threshold, text in _WARN_LADDER:
+                    key = str(threshold)
+                    if key not in warns and fire_at - now <= threshold:
+                        deliver(slug, "[cousin-flip] %s" % text)
+                        warns.append(key)
+                continue
+            result = do_flip(slug)
+            if result.get("ok"):
+                _finish_request(con, row["id"], "done")
+            else:
+                _finish_request(con, row["id"], "failed",
+                                result.get("error", "flip failed"))
+            state.get("timed_warns", {}).pop(str(row["id"]), None)
+            report["flips"].append(slug)
+    finally:
+        con.close()
+
+
+def _fire_daily_flips(state, do_flip, now, report):
+    """flip_at drivers: late-once per day, and AT MOST ONE flip per
+    tick - the tick cadence is the stagger that keeps boot packets
+    from assembling simultaneously."""
+    if report["flips"]:
+        return  # a timed flip already used this tick's slot
+    when = datetime.fromtimestamp(now)
+    for config in FrameworkConfig.from_env().list_cousins():
+        if not config.flip_at or config.type == "worker":
+            continue
+        try:
+            hour, minute = map(int, config.flip_at.split(":"))
+        except ValueError:
+            report["errors"].append(
+                "unparsable flip_at %r for %s"
+                % (config.flip_at, config.slug))
+            continue
+        target = when.replace(hour=hour, minute=minute, second=0,
+                              microsecond=0).timestamp()
+        last = state.setdefault("last_flips", {}).get(config.slug)
+        if now >= target and last != str(when.date()):
+            result = do_flip(config.slug)
+            state["last_flips"][config.slug] = str(when.date())
+            report["flips"].append(config.slug)
+            if not result.get("ok"):
+                report["errors"].append(
+                    "daily flip failed for %s: %s"
+                    % (config.slug, result.get("error", "?")))
+            return  # one per tick
+
+
+def _default_do_flip(slug):
+    from cousin_lib.flip import flip
+    return flip(slug)
+
+
+def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     """One scheduler tick, per docs/loops-spec.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
     commit-after-delivery, request consumption, one-shot firing,
     persist. Returns a report."""
     now = now or time.time()
     state = _load_state()
-    report = {"fired": [], "errors": [], "requests": 0}
+    report = {"fired": [], "errors": [], "requests": 0, "flips": []}
+    _walk_timed_flips(state, deliver, do_flip, now, report)
+    _fire_daily_flips(state, do_flip, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
         try:
             slug = config.slug
@@ -438,3 +521,80 @@ def tick(*, deliver, is_alive, now=None):
     state["last_tick"] = now
     _save_state(state)
     return report
+
+
+def _default_is_alive(slug):
+    """Liveness = the cousin's chat server answers on its port; a
+    lingering pane with a dead server must not receive fires."""
+    import socket
+
+    try:
+        config = CousinConfig.load(
+            FrameworkConfig.from_env().root / "cousins" / slug)
+        with socket.create_connection(
+                ("127.0.0.1", config.require_chat_port()),
+                timeout=1.5):
+            return True
+    except Exception:
+        return False
+
+
+def _default_deliver(slug, text):
+    from cousin_lib.server.injection import TmuxInjector
+
+    config = CousinConfig.load(
+        FrameworkConfig.from_env().root / "cousins" / slug)
+    injector = TmuxInjector(config.tmux_session)
+    injector.inject(text)
+    return True
+
+
+def loops_main(argv=None):
+    """cousin-loops: run the daemon, or inspect its state. Exit codes:
+    status returns 0 healthy / 1 down-or-never-run, everything else
+    0 ok / 2 usage."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="cousin-loops")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("run")
+    p.add_argument("--interval", type=float, default=30.0)
+    p.add_argument("--ticks", type=int, default=0,
+                   help="run N ticks then exit (0 = forever)")
+    sub.add_parser("status")
+    sub.add_parser("requests")
+    p = sub.add_parser("fire")
+    p.add_argument("slug")
+    p.add_argument("loop")
+    args = parser.parse_args(argv)
+    if args.cmd == "status":
+        status = daemon_status()
+        print(status["message"])
+        return 0 if status["ok"] else 1
+    if args.cmd == "requests":
+        rows = list_requests()
+        if not rows:
+            print("(no requests)")
+        for row in rows:
+            print("#%d %-8s %-6s %s %s"
+                  % (row["id"], row["status"], row["kind"],
+                     row["cousin"], row["payload"]))
+        return 0
+    if args.cmd == "fire":
+        request_id = submit_request(
+            "fire", cousin=args.slug, payload={"loop": args.loop})
+        print("request #%d pending; the daemon consumes it on its"
+              " next tick" % request_id)
+        return 0
+    # run
+    count = 0
+    while True:
+        report = tick(deliver=_default_deliver,
+                      is_alive=_default_is_alive)
+        for error in report["errors"]:
+            print("cousin-loops: %s" % error, file=sys.stderr)
+        count += 1
+        if args.ticks and count >= args.ticks:
+            return 0
+        time.sleep(args.interval)

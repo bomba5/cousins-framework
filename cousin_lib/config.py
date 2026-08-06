@@ -29,6 +29,7 @@ class CousinConfig:
     memory_scope: str = "private"
     heartbeat_seconds: int = 3600
     type: str = "cousin"
+    flip_at: str | None = None
 
     @classmethod
     def load(cls, home):
@@ -55,6 +56,7 @@ class CousinConfig:
                 data.get("heartbeat", {})
                 .get("context_beat_seconds", 3600)),
             type=cousin.get("type", "cousin"),
+            flip_at=data.get("lifecycle", {}).get("flip_at"),
         )
 
     @classmethod

@@ -6,9 +6,8 @@ operation. A defaulted home silently reads and writes somebody else's
 memory, so a missing COUSIN_HOME is a refusal with a message, never a
 fallback.
 
-Search and reindex join this CLI when the search module lands; shipping
-a subcommand whose backend does not exist would be a stub, and stubs
-teach callers wrong things.
+Search and reindex dispatch to the keyword search module
+(cousin_lib.memory_search); the semantic tier is the declared M2 seam.
 """
 import argparse
 import json
@@ -208,10 +207,34 @@ def _cmd_consolidate(args):
     return 0
 
 
+def _cmd_search(args):
+    from cousin_lib import memory_search
+
+    home = _home(args)
+    hits = memory_search.search(args.query, top=args.top, home=home)
+    memory_search.print_results(hits)
+    return 0
+
+
+def _cmd_reindex(args):
+    from cousin_lib import memory_search
+
+    home = _home(args)
+    count = memory_search.build_index(home)
+    print("indexed %d file(s)" % count)
+    return 0
+
+
 def memory_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-memory")
     parser.add_argument("--home")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("search")
+    p.add_argument("query")
+    p.add_argument("--top", type=int, default=5)
+    p.set_defaults(func=_cmd_search)
+    p = sub.add_parser("reindex")
+    p.set_defaults(func=_cmd_reindex)
     p = sub.add_parser("decide")
     p.add_argument("topic")
     p.add_argument("decision")

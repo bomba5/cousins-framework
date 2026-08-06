@@ -56,6 +56,19 @@ class TestCousinConfig(unittest.TestCase):
         cfg = CousinConfig.load(home)
         self.assertEqual(cfg.operator_name, "Sam")
 
+    def test_tmux_session_defaults_to_slug(self):
+        home = self._home('[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        cfg = CousinConfig.load(home)
+        self.assertEqual(cfg.tmux_session, "wren")
+
+    def test_tmux_session_from_config_when_present(self):
+        home = self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            'tmux_session = "wren-main"\n'
+        )
+        cfg = CousinConfig.load(home)
+        self.assertEqual(cfg.tmux_session, "wren-main")
+
     def test_missing_chat_port_fails_loud(self):
         home = self._home('[cousin]\nslug = "wren"\n')
         cfg = CousinConfig.load(home)

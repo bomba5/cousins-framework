@@ -25,6 +25,7 @@ class CousinConfig:
     operator_name: str | None
     chat_host: str | None = None
     peer_visible: bool = True
+    tmux_session: str = ""
 
     @classmethod
     def load(cls, home):
@@ -45,6 +46,7 @@ class CousinConfig:
             operator_name=data.get("operator", {}).get("name"),
             chat_host=data.get("chat", {}).get("host"),
             peer_visible=bool(cousin.get("peer_visible", True)),
+            tmux_session=data.get("chat", {}).get("tmux_session", slug),
         )
 
     @classmethod

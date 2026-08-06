@@ -82,6 +82,18 @@ class TestCousinConfig(unittest.TestCase):
         )
         self.assertEqual(CousinConfig.load(home).memory_scope, "both")
 
+    def test_heartbeat_default_is_one_value_everywhere(self):
+        # The source shipped three different beat defaults across
+        # code, template, and docs. One value, stated in the spec.
+        home = self._home('[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        self.assertEqual(CousinConfig.load(home).heartbeat_seconds, 3600)
+
+    def test_heartbeat_from_config(self):
+        home = self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[heartbeat]\ncontext_beat_seconds = 600\n')
+        self.assertEqual(CousinConfig.load(home).heartbeat_seconds, 600)
+
     def test_missing_chat_port_fails_loud(self):
         home = self._home('[cousin]\nslug = "wren"\n')
         cfg = CousinConfig.load(home)

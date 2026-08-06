@@ -27,6 +27,7 @@ class CousinConfig:
     peer_visible: bool = True
     tmux_session: str = ""
     memory_scope: str = "private"
+    heartbeat_seconds: int = 3600
 
     @classmethod
     def load(cls, home):
@@ -49,6 +50,9 @@ class CousinConfig:
             peer_visible=bool(cousin.get("peer_visible", True)),
             tmux_session=data.get("chat", {}).get("tmux_session", slug),
             memory_scope=data.get("memory", {}).get("scope", "private"),
+            heartbeat_seconds=int(
+                data.get("heartbeat", {})
+                .get("context_beat_seconds", 3600)),
         )
 
     @classmethod

@@ -38,7 +38,11 @@ class LoopsCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.delivered = []
 
-    def _cousin(self, slug="wren", loops_toml="", extra=""):
+    def _cousin(self, slug="wren", loops_toml="", extra=None):
+        # Beats are disabled in the plain fixture (interval 0) so loop
+        # tests count only their own deliveries; beat tests opt in.
+        if extra is None:
+            extra = "[heartbeat]\ncontext_beat_seconds = 0\n"
         home = self.root / "cousins" / slug
         (home / "data").mkdir(parents=True, exist_ok=True)
         (home / "cousin.toml").write_text(
@@ -230,6 +234,58 @@ class TestScheduleEvaluation(LoopsCase):
         self._tick(now=base)
         self._tick(now=base + 15)  # same minute, second shot
         self.assertEqual(len(self.delivered), 1)
+
+
+class TestHeartbeat(LoopsCase):
+    def _beat_cousin(self, seconds=1):
+        home = self._cousin("wren", extra=(
+            "[heartbeat]\ncontext_beat_seconds = %d\n" % seconds))
+        (home / "CLAUDE.md").write_text("# Wren\nidentity\n")
+        (home / "STATUS.md").write_text("# Wren - STATUS\n")
+        return home
+
+    def test_beat_fires_with_changed_files_inlined(self):
+        home = self._beat_cousin()
+        self._tick()
+        self.assertEqual(len(self.delivered), 1)
+        _, text = self.delivered[0]
+        self.assertIn("Context heartbeat", text)
+        self.assertIn("STATUS.md CHANGED", text)
+        self.assertIn("# Wren - STATUS", text)
+
+    def test_unchanged_files_yield_the_no_changes_note(self):
+        home = self._beat_cousin()
+        base = time.time()
+        self._tick(now=base)
+        self._tick(now=base + 10)
+        _, text = self.delivered[1]
+        self.assertNotIn("CHANGED", text)
+        self.assertIn("No identity files changed", text)
+
+    def test_delta_state_commits_after_delivery_not_before(self):
+        # The source wrote the mtime state BEFORE injecting; a failed
+        # inject lost the delta and the next beat lied "no changes".
+        # The fix its own ready-watcher had and its backend never got.
+        home = self._beat_cousin()
+        base = time.time()
+        self._tick(now=base, deliver=lambda s, t: False)
+        self.assertEqual(self.delivered, [])
+        self._tick(now=base + 10)  # delivery works now
+        _, text = self.delivered[0]
+        self.assertIn("STATUS.md CHANGED", text)
+
+    def test_beat_coalesces_with_due_loops(self):
+        self._beat_cousin()
+        home = self.root / "cousins" / "wren"
+        toml = (home / "cousin.toml").read_text()
+        (home / "cousin.toml").write_text(toml + (
+            '[[loops]]\nname = "extra"\ninterval_seconds = 30\n'
+            'prompt = "also this"\n'))
+        self._tick()
+        self.assertEqual(len(self.delivered), 1)
+        _, text = self.delivered[0]
+        self.assertIn("Context heartbeat", text)
+        self.assertIn("### extra", text)
 
 
 if __name__ == "__main__":

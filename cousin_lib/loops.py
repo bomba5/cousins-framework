@@ -217,6 +217,56 @@ def cron_matches(expr, when):
     return dom_ok and dow_ok
 
 
+_BEAT_FILES = ("CLAUDE.md", "STATUS.md", "MEMORY.md")
+_BEAT_INLINE_CAP = 6000
+
+
+def _compose_beat(home, now):
+    """(prompt, commit) for the context beat, or (None, None) when
+    composition fails. The mtime state is captured here but WRITTEN
+    only by commit() - which the tick calls after delivery succeeded.
+    The source wrote state before injecting; a failed inject lost the
+    delta and the next beat reported 'no changes' over real ones."""
+    home = Path(home)
+    state_path = home / "data" / "heartbeat-mtimes.json"
+    try:
+        seen = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        seen = {}
+    changed, current = [], {}
+    for name in _BEAT_FILES:
+        path = home / name
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        current[name] = mtime
+        if seen.get(name) != mtime:
+            body = path.read_text(errors="replace")[:_BEAT_INLINE_CAP]
+            changed.append(
+                "--- %s CHANGED since last heartbeat (%s) ---\n%s\n"
+                "--- end %s ---" % (name, path, body, name))
+    if changed:
+        delta = ("These are the AUTHORITATIVE current contents:\n\n"
+                 + "\n\n".join(changed))
+    else:
+        delta = ("No identity files changed since the last heartbeat;"
+                 " use cousin-memory search for anything older.")
+    prompt = (
+        "Context heartbeat. %s\n\nThen run cousin-memory activity"
+        " \"<brief current state>\" to checkpoint; cousin-memory"
+        " decide only if something non-trivial changed. Finally emit"
+        " one line 'Heartbeat at HH:MM'." % delta)
+
+    def commit():
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = state_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(current))
+        tmp.replace(state_path)
+
+    return prompt, commit
+
+
 def _loop_due(loop, last_fire, now):
     when = datetime.fromtimestamp(now)
     if "cron" in loop:
@@ -293,25 +343,37 @@ def tick(*, deliver, is_alive, now=None):
             home = FrameworkConfig.from_env().root / "cousins" / slug
             loops, errors = load_cousin_loops(home)
             report["errors"].extend(errors)
+            # The beat first, then loops - one coalesced delivery.
+            sections = []
+            beat_commit = None
+            interval = config.heartbeat_seconds
+            last_beat = state["last_beat"].get(slug, 0)
+            if interval > 0 and (now - last_beat) >= interval:
+                beat_prompt, beat_commit = _compose_beat(home, now)
+                if beat_prompt:
+                    sections.append(("context-heartbeat", beat_prompt))
             due = []
             for loop in loops:
                 key = "%s|%s" % (slug, loop["name"])
                 if _loop_due(loop, state["last_fires"].get(key, 0),
                              now):
                     due.append(loop)
-            if not due:
+                    sections.append((loop["name"], loop["prompt"]))
+            if not sections:
                 continue
-            if len(due) == 1:
-                text = due[0]["prompt"]
+            if len(sections) == 1:
+                text = sections[0][1]
             else:
                 text = ("[Framework scheduler: %d loops due this tick"
-                        " - handle in order]\n\n" % len(due)
-                        + "\n\n".join("### %s\n%s"
-                                      % (l["name"], l["prompt"])
-                                      for l in due))
-            # Commit-after-delivery: a failed injection leaves every
-            # due loop still due.
+                        " - handle in order]\n\n" % len(sections)
+                        + "\n\n".join("### %s\n%s" % (name, prompt)
+                                      for name, prompt in sections))
+            # Commit-after-delivery: a failed injection leaves the
+            # beat's delta unconsumed and every due loop still due.
             if deliver(slug, text):
+                if beat_commit is not None:
+                    beat_commit()
+                    state["last_beat"][slug] = now
                 for loop in due:
                     key = "%s|%s" % (slug, loop["name"])
                     state["last_fires"][key] = now

@@ -122,5 +122,43 @@ class TestNoSilentFallback(MediaCase):
             generate("voice", "hello")
 
 
+class TestCli(MediaCase):
+    def _main(self, argv):
+        import contextlib
+        import io
+
+        from cousin_lib.media import image_main
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = image_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_gen_writes_a_file_and_does_not_post(self):
+        self._configure(self._serve())
+        posted = []
+        with mock.patch("cousin_lib.media._post_reply",
+                        side_effect=lambda **kw: posted.append(kw)):
+            rc, out, _ = self._main(["gen", "a cat"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(posted, [])
+        self.assertIn("chat/images", out)
+
+    def test_chat_generates_and_posts_with_the_attachment(self):
+        self._configure(self._serve())
+        posted = []
+        with mock.patch("cousin_lib.media._post_reply",
+                        side_effect=lambda **kw: posted.append(kw)):
+            rc, _, _ = self._main(["chat", "a cat", "--user", "Sam"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(posted[0]["attachment"]["kind"], "image")
+        self.assertIn("chat/images", posted[0]["attachment"]["path"])
+
+    def test_unconfigured_cli_refuses_with_exit_2(self):
+        rc, _, err = self._main(["gen", "a cat"])
+        self.assertEqual(rc, 2)
+        self.assertIn("config/media.toml", err)
+
+
 if __name__ == "__main__":
     unittest.main()

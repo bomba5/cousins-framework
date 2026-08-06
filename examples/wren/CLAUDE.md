@@ -89,6 +89,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |
 | `cousin-cycle` | your session-cadence counters and breadcrumbs | `cousin-cycle inc --action "shipped X"` · `cousin-cycle state` |
+| `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |
 | `cousin-ui` | the web console over the framework (operator-run) | `cousin-ui --port 8600`; a view, never a source of truth |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 

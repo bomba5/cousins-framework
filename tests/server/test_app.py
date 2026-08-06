@@ -390,5 +390,38 @@ class TestStaticFiles(ServerCase):
         self.assertEqual(status, 404)
 
 
+class TestReplyAttachment(ServerCase):
+    def test_reply_stores_an_attachment_and_history_returns_it(self):
+        server = self._boot()
+        status, _, _ = self._request(server, "/api/wren_reply", {
+            "message": "here it is",
+            "reply_to_user": "Sam",
+            "attachment": {"kind": "image",
+                           "path": "/somewhere/wren_1_ab.png"},
+        })
+        self.assertEqual(status, 200)
+        _, _, hist = self._request(server, "/api/history?user=Sam")
+        msg = hist["messages"][0]
+        self.assertEqual(msg["attachment_kind"], "image")
+        self.assertEqual(msg["attachment_path"],
+                         "/somewhere/wren_1_ab.png")
+
+    def test_attachment_only_reply_needs_no_message(self):
+        # An image with no caption is a valid reply: message OR
+        # attachment, not message required.
+        server = self._boot()
+        status, _, _ = self._request(server, "/api/wren_reply", {
+            "reply_to_user": "Sam",
+            "attachment": {"kind": "image", "path": "/x/y.png"},
+        })
+        self.assertEqual(status, 200)
+
+    def test_empty_reply_with_neither_is_still_a_400(self):
+        server = self._boot()
+        status, _, _ = self._request(
+            server, "/api/wren_reply", {"reply_to_user": "Sam"})
+        self.assertEqual(status, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

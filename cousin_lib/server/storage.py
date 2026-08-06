@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS messages (
     type          TEXT NOT NULL,
     archived      INTEGER NOT NULL DEFAULT 0,
     reply_to      TEXT,
-    reply_to_user TEXT
+    reply_to_user TEXT,
+    attachment_kind TEXT,   -- 'image' | 'voice' | 'video', or NULL
+    attachment_path TEXT    -- absolute path to the asset file, or NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat_user ON messages(chat_user);
 CREATE INDEX IF NOT EXISTS idx_messages_archived  ON messages(archived);
@@ -58,7 +60,21 @@ class ChatStore:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA wal_autocheckpoint=200")
         self.conn.executescript(_SCHEMA)
+        self._add_reserved_columns()
         self.conn.commit()
+
+    def _add_reserved_columns(self):
+        """The attachment columns were reserved by the v1 chat spec and
+        land with the media subsystem. A database created before media
+        shipped lacks them; add them additively so its first
+        attachment insert does not fail. Additive columns are the one
+        anticipated migration - no id-space change, no data rewrite."""
+        existing = {r[1] for r in self.conn.execute(
+            "PRAGMA table_info(messages)")}
+        for column in ("attachment_kind", "attachment_path"):
+            if column not in existing:
+                self.conn.execute(
+                    "ALTER TABLE messages ADD COLUMN %s TEXT" % column)
 
     def close(self):
         self.conn.close()
@@ -72,17 +88,21 @@ class ChatStore:
         msg_type,
         reply_to=None,
         reply_to_user=None,
+        attachment_kind=None,
+        attachment_path=None,
     ):
         """Insert one message row and return {"id", "timestamp"}. reply_to
-        is opaque client JSON, stored verbatim."""
+        is opaque client JSON, stored verbatim. An attachment is a
+        local asset path plus its kind; the bytes live on disk, the row
+        holds only the path."""
         timestamp = datetime.now(timezone.utc).isoformat()
         cur = self.conn.execute(
             "INSERT INTO messages"
             " (chat_user, user, message, timestamp, type, reply_to,"
-            "  reply_to_user)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "  reply_to_user, attachment_kind, attachment_path)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (chat_user, user, message, timestamp, msg_type, reply_to,
-             reply_to_user),
+             reply_to_user, attachment_kind, attachment_path),
         )
         self.conn.commit()
         return {"id": cur.lastrowid, "timestamp": timestamp}

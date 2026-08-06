@@ -271,5 +271,49 @@ class TestArchive(StoreCase):
         self.assertEqual(store.archive("Sam", keep=1), 0)
 
 
+class TestAttachments(StoreCase):
+    def test_message_carries_an_attachment_path_through_history(self):
+        store = self._store()
+        store.add_message(
+            chat_user="sam", user="Sam", message="look",
+            msg_type="user", attachment_kind="image",
+            attachment_path="/srv/chat/images/wren_1_ab.png")
+        msg = store.history("Sam")["messages"][0]
+        self.assertEqual(msg["attachment_kind"], "image")
+        self.assertEqual(msg["attachment_path"],
+                         "/srv/chat/images/wren_1_ab.png")
+
+    def test_a_message_without_an_attachment_reports_none(self):
+        store = self._store()
+        store.add_message(chat_user="sam", user="Sam", message="hi",
+                          msg_type="user")
+        msg = store.history("Sam")["messages"][0]
+        self.assertIsNone(msg["attachment_kind"])
+        self.assertIsNone(msg["attachment_path"])
+
+    def test_a_pre_media_database_gains_the_columns(self):
+        # A chat.db created before media shipped has no attachment
+        # columns; opening it must add them additively rather than
+        # fail the first attachment insert. The reserved columns
+        # becoming real is the one anticipated schema change.
+        import sqlite3
+        path = self._db_path()
+        path.parent.mkdir(parents=True)
+        con = sqlite3.connect(path)
+        con.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY,"
+            " chat_user TEXT, user TEXT, message TEXT, timestamp TEXT,"
+            " type TEXT, archived INTEGER DEFAULT 0, reply_to TEXT,"
+            " reply_to_user TEXT)")
+        con.commit()
+        con.close()
+        store = ChatStore(path)
+        self.addCleanup(store.close)
+        cols = {r[1] for r in store.conn.execute(
+            "PRAGMA table_info(messages)")}
+        self.assertIn("attachment_kind", cols)
+        self.assertIn("attachment_path", cols)
+
+
 if __name__ == "__main__":
     unittest.main()

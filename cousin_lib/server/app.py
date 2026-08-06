@@ -297,10 +297,16 @@ class _ChatHandler(BaseHTTPRequestHandler):
         # never delivered back into its own pane. The slug-bound path that
         # routed here already rejected misroutes with a 404.
         body = self._read_json()
-        message = body.get("message")
+        message = body.get("message") or ""
         reply_to_user = body.get("reply_to_user")
-        if not message:
-            raise _BadRequest("a non-empty message is required")
+        attachment = body.get("attachment") or {}
+        kind = attachment.get("kind")
+        path = attachment.get("path")
+        # A caption-less attachment is a valid reply: message OR
+        # attachment, not message required.
+        if not message and not (kind and path):
+            raise _BadRequest(
+                "a reply needs a non-empty message or an attachment")
         if not reply_to_user:
             raise _BadRequest(
                 "reply_to_user is required: there is no default recipient"
@@ -314,6 +320,8 @@ class _ChatHandler(BaseHTTPRequestHandler):
             msg_type=config.slug,
             reply_to=json.dumps(reply_to) if reply_to is not None else None,
             reply_to_user=reply_to_user,
+            attachment_kind=kind,
+            attachment_path=path,
         ))
         self._send_json(200, {
             "ok": True, "id": row["id"], "timestamp": row["timestamp"],

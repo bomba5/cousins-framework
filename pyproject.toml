@@ -26,6 +26,9 @@ cousin-shared = "cousin_lib.shared_tier:shared_main"
 cousin-loops = "cousin_lib.loops:loops_main"
 cousin-cycle = "cousin_lib.cycle:cycle_main"
 cousin-ui = "cousin_lib.ui:ui_main"
+cousin-image = "cousin_lib.media:image_main"
+cousin-voice = "cousin_lib.media:voice_main"
+cousin-video = "cousin_lib.media:video_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

@@ -26,6 +26,7 @@ and `cousin-ui` take it identically; a flag is discoverable from
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search` | keyword search only, silently - nothing was promised |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
+| `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
 ## Formats
 
@@ -45,6 +46,10 @@ and `cousin-ui` take it identically; a flag is discoverable from
 - `shared-reviewers.json`: `{"reviewers": ["name-or-slug", ...]}`. A
   reviewer may never be the proposer; that boundary is enforced at the
   promote site regardless of what this file says.
+- `media.toml`: per-kind sections `[image]` / `[voice]` / `[video]`,
+  each `url`, `model`, optional `key_file`, `timeout_s`. See
+  `docs/media-spec.md`. A configured provider or an inert refusal -
+  never a silent reroute to a vendor you did not choose.
 
 ## The rule these share
 

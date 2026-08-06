@@ -38,6 +38,9 @@ in one line: a component that dies loses nothing that was not already
 in a store some other component owns. Every optional install seam is
 listed in `docs/configuration.md`.
 
+For a narrated walk through every feature with worked examples, see
+`docs/guide.md`.
+
 ## Quickstart: a cousin with memory, from a cold clone
 
 ```

@@ -1,0 +1,129 @@
+# Spawn and template specification
+
+How a cousin comes to exist: the `cousin-spawn` CLI, the cousin
+template, and the contract between them. This document is written from a
+full behavioral inventory of the source framework's spawn path and is
+the contract the implementation is written against and tested from.
+
+The source framework taught one lesson above all the mechanics: **two
+definitions of a cousin's identity will drift, and the drift lands in
+bedrock.** Its template was wired to nothing while an inline generated
+document diverged from it for a month - losing the voice section whose
+absence had already caused a documented incident, contradicting the
+peer-reply doctrine, and baking mutable facts into files meant to be
+permanent. Everything below follows from refusing that state.
+
+## The single-source rule
+
+- `templates/cousin-CLAUDE.template.md` is the ONLY definition of a new
+  cousin's CLAUDE.md. No other code path may emit one.
+- The renderer substitutes `{{NAME}}`, `{{SLUG}}`, `{{PORT}}`,
+  `{{ROLE_ONE_LINE}}`, `{{ROLE_PARAGRAPH}}`, `{{VOICE_GUIDE}}`.
+- **Any `{{` remaining in rendered output is a spawn failure**, not a
+  TODO. An unsubstituted `{{VOICE_GUIDE}}` means the cousin has no
+  authored register on bedrock and will improvise one the first time its
+  higher identity layers are absent. The renderer enforces this; the
+  test suite enforces it again on every example cousin in the tree.
+- The template carries doctrine every cousin needs from day one:
+  identity framing, in-character vs out-of-character chat handling with
+  the peer-reply pitfall stated, the CLI surface that actually ships,
+  memory and decision logging, hard rules, and the `## Voice` anchor
+  with its authored-never-improvised invariant. Cousin-specific material
+  is APPENDED below a marked seam, never edited into the doctrine.
+- Bedrock carries no mutable facts: no spawn timestamps, no model
+  catalogues, no tool inventories that rot. Those live in configuration
+  or docs that are allowed to change.
+
+## Operator references in the template
+
+The template must render correctly in a null-operator install. It names
+no person: operator authority is phrased against `cousin.toml
+[operator]` ("the operator configured there, if any, is the ultimate
+authority"), and examples use the `<operator name>` placeholder form in
+prose rather than interpolating a human being into bedrock. A missing
+operator is a configuration state, never a defaulted name.
+
+## `cousin-spawn`
+
+`cousin-spawn <slug> --root <framework root> --name <display name>
+--role <one line> [--role-paragraph <text>] [--voice <text>]
+[--port N] [--start]`
+
+### Effects, in order
+
+1. **Validate**: slug against `^[a-z][a-z0-9_-]{1,31}$`; a cousin
+   exists iff `cousins/<slug>/cousin.toml` exists (a bare directory
+   without one is reported as an orphan with its path, not treated as a
+   cousin); the template must render completely with the provided
+   values, checked BEFORE anything is written.
+2. **Allocate a port** if not given: scan every `cousin.toml` under the
+   root plus a live bind test, take the first free port in the
+   configured range. **Exhaustion is an error.** There is no sentinel
+   value; a cousin without a working chat port is a spawn failure, not a
+   degraded success.
+3. **Create the home** under `cousins/<slug>/files/`: `memory/`,
+   `data/`, `notes/`, `scripts/` - exactly the directories the shipped
+   tools read, nothing speculative.
+4. **Write `cousin.toml`** to a temporary file, re-parse it with a TOML
+   reader, and rename into place. A config that cannot be read back is
+   never persisted. Fields: `[cousin] slug/name/role`,
+   `[chat] port/tmux_session`, `[operator]` only if configured.
+5. **Render and write** `CLAUDE.md`, plus minimal `STATUS.md` and
+   `MEMORY.md` skeletons. Never overwrite an existing file.
+6. On any failure after step 3: **remove everything this run created**.
+   A failed spawn leaves no orphan tree and does not block the slug.
+
+### `--start`
+
+Optional and separate: creating a cousin and running one are different
+operations. `--start` creates the tmux session (named by
+`[chat] tmux_session`) and launches the configured agent command in it,
+then starts the chat server. The agent command - binary, flags, trust
+model - is **host configuration** (`config/agent-cmd`), not framework
+code: what it means to "run an agent" differs per install and per trust
+posture, and hardcoding any vendor's binary path or permission flags
+into the framework was one of the source's portability failures.
+
+There is exactly ONE tmux-session-creation site in the codebase, and
+`cousin-spawn --start` calls it. The source framework had two (spawn
+and respawn), with duplicated environment dicts and constants that
+drifted; any future respawn/flip machinery must call the same function.
+
+### Failure reporting
+
+Exit codes are the interface: 0 created (and started, if asked),
+1 partial-start (home created and kept, start failed - stated loudly),
+2 validation or configuration error (nothing written). A failure is
+never reported as success with the error folded into a status string;
+that pattern cost the source framework silent half-spawns that its own
+UI could not distinguish from health.
+
+## The example cousin
+
+`examples/wren/` is a complete rendered output of the template - a
+fictional cousin invented for this repository, not a scrubbed copy of a
+real one. It exists so the template's contract is exercised by a real
+artifact in the tree: the suite asserts Wren's CLAUDE.md contains a
+filled `## Voice` section and no unsubstituted placeholder, which is
+the executable form of the incident this design descends from.
+
+## Stated limits
+
+- **Spawn does not compose a boot packet.** In the source framework a
+  cousin's first full identity load happens at its first respawn, not
+  at spawn; v1 keeps that asymmetry honest by stating it: a fresh
+  cousin boots from its rendered CLAUDE.md alone. The boot-packet
+  layer arrives with the lifecycle module.
+- **Spawn does not start services beyond the chat server.** Heartbeats,
+  schedulers, and watchdogs are install-level concerns.
+- **Concurrent spawns are not serialized.** Port allocation re-checks
+  liveness at bind time, but two simultaneous spawns racing for the
+  same slug resolve by filesystem semantics, not by a lock. Single
+  operator, single host is the v1 posture.
+
+## Consciously excluded
+
+Respawn/flip, reincarnation, transplant, remote-node spawning, and
+UI-driven creation ship with their own modules later; each will consume
+this CLI (or its library form) rather than reimplementing any part of
+the sequence above.

@@ -24,6 +24,7 @@ cousin-flip = "cousin_lib.flip:flip_main"
 cousin-self-portrait = "cousin_lib.self_portrait:portrait_main"
 cousin-shared = "cousin_lib.shared_tier:shared_main"
 cousin-loops = "cousin_lib.loops:loops_main"
+cousin-cycle = "cousin_lib.cycle:cycle_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

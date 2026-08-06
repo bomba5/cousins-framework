@@ -288,5 +288,66 @@ class TestHeartbeat(LoopsCase):
         self.assertIn("### extra", text)
 
 
+class TestWorkers(LoopsCase):
+    def _worker(self, cmd, loops_toml=None):
+        (self.root / "config" / "worker-cmd").write_text(cmd + "\n")
+        home = self._cousin("grinder", loops_toml=loops_toml or (
+            '[[loops]]\nname = "churn"\ninterval_seconds = 30\n'
+            'prompt = "process the queue"\n'),
+            extra='type = "worker"\n'
+                  '[heartbeat]\ncontext_beat_seconds = 0\n')
+        # type belongs to [cousin]; rewrite with it in place.
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "grinder"\nname = "Grinder"\n'
+            'type = "worker"\n[chat]\nport = 8101\n'
+            '[heartbeat]\ncontext_beat_seconds = 0\n'
+            + (loops_toml or (
+                '[[loops]]\nname = "churn"\ninterval_seconds = 30\n'
+                'prompt = "process the queue"\n')))
+        os.environ["COUSIN_HOME"] = str(home)
+        self.addCleanup(os.environ.pop, "COUSIN_HOME", None)
+        return home
+
+    def _wait_job(self, wanted, timeout=10):
+        from cousin_lib.jobs import list_jobs
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            jobs = list_jobs(spawned_by="grinder")
+            if jobs and jobs[0]["status"] in wanted:
+                return jobs[0]
+            time.sleep(0.05)
+        self.fail("no job reached %s (have: %r)"
+                  % (wanted, list_jobs(spawned_by="grinder")))
+
+    def test_worker_firing_is_a_tracked_job_with_inspected_rc(self):
+        marker = self.root / "ran.txt"
+        self._worker("sh -c 'echo {prompt} > %s'" % marker)
+        self._tick()
+        job = self._wait_job(("done",))
+        self.assertEqual(job["exit_code"], 0)
+        self.assertIn("process the queue", marker.read_text())
+        # No tmux delivery for workers.
+        self.assertEqual(self.delivered, [])
+
+    def test_failing_worker_looks_failed(self):
+        # The source marked worker fires successful before the
+        # subprocess ran; a worker failing every firing looked
+        # perfectly healthy.
+        self._worker("sh -c 'exit 3'")
+        self._tick()
+        job = self._wait_job(("failed",))
+        self.assertEqual(job["exit_code"], 3)
+
+    def test_no_worker_cmd_is_an_error_and_the_loop_stays_due(self):
+        self._worker("x")
+        (self.root / "config" / "worker-cmd").unlink()
+        report = self._tick()
+        self.assertTrue(any("worker-cmd" in e for e in report["errors"]))
+        # Configured later: the loop fires.
+        (self.root / "config" / "worker-cmd").write_text("sh -c true\n")
+        report = self._tick()
+        self.assertIn("grinder|churn", report["fired"])
+
+
 if __name__ == "__main__":
     unittest.main()

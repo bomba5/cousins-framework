@@ -292,6 +292,51 @@ def _loop_due(loop, last_fire, now):
     return interval > 0 and (now - last_fire) >= interval
 
 
+def _fire_worker_loops(config, state, now, report):
+    """A worker cousin has no session and no beats; a due loop runs
+    the worker command template from host configuration as a tracked
+    background job. The EXIT CODE lands in the job row (the jobs
+    module's detached runner writes it back), so a worker failing
+    every firing looks failed everywhere loop state is shown - the
+    source marked fires successful before the subprocess ran. With no
+    worker-cmd configured the loop STAYS DUE and the error names the
+    remediation."""
+    import shlex
+
+    from cousin_lib import jobs
+
+    root = FrameworkConfig.from_env().root
+    home = root / "cousins" / config.slug
+    loops, errors = load_cousin_loops(home)
+    report["errors"].extend(errors)
+    try:
+        template = (root / "config" / "worker-cmd").read_text().strip()
+    except OSError:
+        template = ""
+    for loop in loops:
+        key = "%s|%s" % (config.slug, loop["name"])
+        if not _loop_due(loop, state["last_fires"].get(key, 0), now):
+            continue
+        if not template:
+            report["errors"].append(
+                "worker loop %s due but no worker command configured;"
+                " write config/worker-cmd (loop stays due)" % key)
+            continue
+        cmd = [part.replace("{prompt}", loop["prompt"])
+                   .replace("{home}", str(home))
+               for part in shlex.split(template)]
+        job_id = jobs.register_job(
+            kind="other", title="worker %s" % key,
+            spawned_by=config.slug, command=" ".join(cmd))
+        log_path = jobs._default_log_path(job_id)
+        jobs.set_log_path(job_id, str(log_path))
+        jobs._spawn_tracked(cmd, log_path, job_id)
+        # The RUN is the firing; the rc arrives in the job row when
+        # the detached runner finishes.
+        state["last_fires"][key] = now
+        report["fired"].append(key)
+
+
 def _consume_requests(state, deliver, errors):
     con = _db()
     try:
@@ -338,6 +383,9 @@ def tick(*, deliver, is_alive, now=None):
     for config in FrameworkConfig.from_env().list_cousins():
         try:
             slug = config.slug
+            if config.type == "worker":
+                _fire_worker_loops(config, state, now, report)
+                continue
             if not is_alive(slug):
                 continue
             home = FrameworkConfig.from_env().root / "cousins" / slug

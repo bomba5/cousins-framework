@@ -28,6 +28,7 @@ class CousinConfig:
     tmux_session: str = ""
     memory_scope: str = "private"
     heartbeat_seconds: int = 3600
+    type: str = "cousin"
 
     @classmethod
     def load(cls, home):
@@ -53,6 +54,7 @@ class CousinConfig:
             heartbeat_seconds=int(
                 data.get("heartbeat", {})
                 .get("context_beat_seconds", 3600)),
+            type=cousin.get("type", "cousin"),
         )
 
     @classmethod

@@ -87,5 +87,36 @@ class TestCommitAndBoot(PortraitCase):
         self.assertIn("Plain and warm.", backup.read_text())
 
 
+class TestCli(PortraitCase):
+    def _main(self, argv):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+
+        from cousin_lib.self_portrait import portrait_main
+        out, err = io.StringIO(), io.StringIO()
+        env = {"COUSIN_HOME": str(self.home), "COUSIN_SLUG": "wren"}
+        with mock.patch.dict(os.environ, env), \
+                contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err):
+            rc = portrait_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_synthesize_then_commit_then_show(self):
+        rc, out, _ = self._main(["synthesize"])
+        self.assertEqual(rc, 0)
+        rc, _, _ = self._main(["commit"])
+        self.assertEqual(rc, 0)
+        rc, out, _ = self._main(["show"])
+        self.assertEqual(rc, 0)
+        self.assertIn("Plain and warm.", out)
+
+    def test_commit_without_candidate_exits_one(self):
+        rc, _, err = self._main(["commit"])
+        self.assertEqual(rc, 1)
+        self.assertIn("synthesize", err)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -163,6 +163,53 @@ def commit_candidate(home):
     return committed
 
 
+def portrait_main(argv=None):
+    """Console entry point: synthesize / commit / show / diff. The
+    review gate in CLI form - synthesize and commit are separate on
+    purpose; nothing promotes an unreviewed candidate."""
+    import argparse
+    import difflib
+    import os
+    import sys
+
+    parser = argparse.ArgumentParser(prog="cousin-self-portrait")
+    parser.add_argument("cmd",
+                        choices=["synthesize", "commit", "show", "diff"])
+    parser.add_argument("--home",
+                        default=os.environ.get("COUSIN_HOME"))
+    args = parser.parse_args(argv)
+    if not args.home:
+        print("cousin-self-portrait: set COUSIN_HOME or pass --home",
+              file=sys.stderr)
+        return 2
+    home = args.home
+    slug = os.environ.get("COUSIN_SLUG") or Path(home).name
+    if args.cmd == "synthesize":
+        path = synthesize_candidate(home, slug)
+        print("candidate written: %s (review, then commit)" % path)
+        return 0
+    if args.cmd == "commit":
+        try:
+            path = commit_candidate(home)
+        except FileNotFoundError as err:
+            print("cousin-self-portrait: %s" % err, file=sys.stderr)
+            return 1
+        print("committed: %s" % path)
+        return 0
+    if args.cmd == "show":
+        text = _read(committed_path(home))
+        if not text:
+            print("(no committed self-portrait)", file=sys.stderr)
+            return 1
+        print(text, end="")
+        return 0
+    committed = _read(committed_path(home)).splitlines(keepends=True)
+    candidate = _read(candidate_path(home)).splitlines(keepends=True)
+    sys.stdout.writelines(difflib.unified_diff(
+        committed, candidate, fromfile="committed", tofile="candidate"))
+    return 0
+
+
 def for_boot_packet(home):
     """The committed portrait for the boot packet - never the
     candidate. The degraded marker is explicit so the boot assembler's

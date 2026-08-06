@@ -100,9 +100,12 @@ class TestFullFlip(FlipCase):
         cfg = tomllib.loads((self.home / "cousin.toml").read_text())
         sid = cfg["runtime"]["session_id"]
         self.assertIn(sid, spawn)
-        # Packet injected after respawn.
-        pastes = [c for c in calls if " -l " in c]
-        self.assertTrue(any("BOOT PACKET" in c for c in pastes))
+        # Packet injected after respawn. The packet is multi-line, so
+        # the fake's one-line-per-call log spreads it across lines;
+        # assert against the whole log text rather than per-line.
+        log_text = self.log.read_text()
+        self.assertIn("BOOT PACKET FOR COUSIN: wren", log_text)
+        self.assertIn("Do not announce", log_text)
         # Marker cleared.
         self.assertFalse(
             (self.home / "data" / ".flip-in-progress.json").exists())
@@ -152,6 +155,22 @@ class TestGuards(FlipCase):
         self.assertIn("preflight", out["error"])
         calls = " ".join(self._calls())
         self.assertNotIn("kill-session", calls)
+
+
+class TestCli(FlipCase):
+    def test_dry_run_via_the_cli_exits_zero(self):
+        import contextlib
+        import io
+        from cousin_lib.flip import flip_main
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = flip_main(["wren", "--dry-run"])
+        # Dry-run assembles and stops before anything destructive; on
+        # this fixture it must succeed. (It reaches the real tmux for
+        # one read-only has-session query; no session named wren
+        # exists, which is exactly the not-alive path.)
+        self.assertEqual(rc, 0)
+        self.assertIn('"ok": true', out.getvalue())
 
 
 if __name__ == "__main__":

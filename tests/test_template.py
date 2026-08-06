@@ -71,14 +71,18 @@ class TestShippedTemplate(unittest.TestCase):
     def test_cli_table_covers_every_shipped_cousin_cli(self):
         # v1 shipped a memory subsystem the first template never
         # mentioned - producer tooling with nothing telling the cousin
-        # to produce, the same species as an audited surface nothing
-        # writes. The table must track pyproject's console scripts.
+        # to produce. The mechanism version of the fix: the list of
+        # required rows is DERIVED from pyproject's console scripts, so
+        # a new CLI cannot ship without its template row.
+        import tomllib
+        pyproject = tomllib.loads(
+            (_REPO_ROOT / "pyproject.toml").read_text())
+        clis = pyproject["project"]["scripts"].keys()
+        self.assertGreaterEqual(len(clis), 10)
         out = self._render()
-        for cli in ("cousin-chat", "cousin-reply", "cousin-chat-server",
-                    "cousin-spawn", "cousin-gate", "cousin-memory",
-                    "cousin-job", "cousin-schedule", "cousin-flip",
-                    "cousin-self-portrait"):
-            self.assertIn("`%s`" % cli, out)
+        for cli in clis:
+            self.assertIn("`%s`" % cli, out,
+                          "%s shipped without a template row" % cli)
 
     def test_memory_doctrine_names_the_layout_and_the_producer_loop(self):
         out = self._render()

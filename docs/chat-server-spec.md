@@ -170,6 +170,14 @@ terminal line cannot carry megabytes of base64; the file is the handoff.
 Nothing else reads the directory and there is no retention policy - it is
 the cousin's inbox to manage.
 
+**A failed decode never fails the send.** The message is stored and
+delivered normally, with a decode-failure marker in the delivery line in
+place of the file path. A bad attachment is not a send error; treating it
+as one is the reimplementation mistake this sentence exists to prevent.
+Attachments are not persisted in the database in v1 - the reserved
+columns ship with the media subsystem - so an undecodable payload is
+gone; the marker is the honest record that it existed.
+
 ## Network guard
 
 Every request is checked against an address allowlist before anything else

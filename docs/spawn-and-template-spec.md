@@ -72,6 +72,13 @@ operator is a configuration state, never a defaulted name.
    `MEMORY.md` skeletons. Never overwrite an existing file.
 6. On any failure after step 3: **remove everything this run created**.
    A failed spawn leaves no orphan tree and does not block the slug.
+   This includes the partial state where `cousin.toml` was already
+   written - the state that squats a slug in practice, since existence
+   of that file is what makes a cousin real to the registry. The
+   boundary is creation, not startup: once every create step has
+   succeeded, the cousin exists, and a subsequent `--start` failure
+   KEEPS the home (exit 1) - a valid cousin that failed to launch is
+   restartable, not an orphan.
 
 ### `--start`
 

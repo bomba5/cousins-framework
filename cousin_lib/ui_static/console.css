@@ -1,0 +1,26 @@
+/* Minimal console styling. The frontend ships as committed files -
+   no runtime CDN, no in-browser transpile - so the whole bundle is
+   plain HTML/CSS/JS a stranger can read and serve. */
+body {
+    font: 14px/1.5 system-ui, sans-serif;
+    max-width: 60rem;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    color: #1a1a1a;
+    background: #fafafa;
+}
+h1 { font-size: 1.4rem; }
+.cousin {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.6rem 0.9rem;
+    margin: 0.5rem 0;
+    background: #fff;
+}
+.cousin .slug { font-weight: 600; }
+.cousin .meta { color: #666; font-size: 0.85rem; }
+@media (prefers-color-scheme: dark) {
+    body { color: #e8e8e8; background: #161616; }
+    .cousin { border-color: #333; background: #1f1f1f; }
+    .cousin .meta { color: #999; }
+}

@@ -56,6 +56,16 @@ class UICase(unittest.TestCase):
         status, _, body = self._get(server, path)
         return status, json.loads(body)
 
+    def _post(self, server, path, payload):
+        url = "http://127.0.0.1:%d%s" % (server.port, path)
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(), method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read())
+
 
 class TestKill9Property(UICase):
     def test_a_fresh_daemon_serves_the_fleet_from_the_filesystem(self):
@@ -103,6 +113,94 @@ class TestGuardFirst(UICase):
         for path in ("/api/health", "/api/cousins", "/"):
             status, _, _ = self._get(server, path)
             self.assertEqual(status, 403, path)
+
+
+class TestStoreProjections(UICase):
+    def test_jobs_view_reads_the_jobs_store(self):
+        # The daemon reads jobs.db - the module's own store - so the
+        # view survives a UI restart because the UI never held it.
+        from cousin_lib.jobs import register_job
+        self._cousin("wren")
+        with mock.patch.dict(os.environ,
+                             {"COUSIN_HOME": str(self.root / "cousins"
+                                                 / "wren")}):
+            register_job(kind="subagent", title="map the tree",
+                         spawned_by="wren")
+        server = self._serve()
+        status, body = self._json(server, "/api/jobs")
+        self.assertEqual(status, 200)
+        self.assertEqual([j["title"] for j in body["jobs"]],
+                         ["map the tree"])
+
+    def test_loops_view_reports_the_daemon_status(self):
+        # The UI reads the loops daemon's state; a never-run daemon is
+        # named, not hidden - the loud-absence contract carried through
+        # to the display layer.
+        self._cousin("wren")
+        server = self._serve()
+        status, body = self._json(server, "/api/loops")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["daemon"]["ok"])
+        self.assertIn("never run", body["daemon"]["message"])
+
+    def test_requests_view_reads_the_loop_request_store(self):
+        from cousin_lib.loops import submit_request
+        self._cousin("wren")
+        submit_request("fire", cousin="wren", payload={"loop": "x"})
+        server = self._serve()
+        _, body = self._json(server, "/api/loops/requests")
+        self.assertEqual([r["status"] for r in body["requests"]],
+                         ["pending"])
+
+
+class TestCommandsThroughStores(UICase):
+    def test_fire_command_writes_a_request_row_not_ui_state(self):
+        # A command is a request the loops daemon consumes - the UI
+        # writes through the same store a CLI would, holding nothing.
+        from cousin_lib.loops import list_requests
+        self._cousin("wren")
+        server = self._serve()
+        status, body = self._post(
+            server, "/api/loops/fire",
+            {"cousin": "wren", "loop": "report"})
+        self.assertEqual(status, 200)
+        rows = list_requests()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["kind"], "fire")
+        self.assertEqual(rows[0]["status"], "pending")
+
+    def test_delete_is_guarded_like_every_other_route(self):
+        # The source left cousin destruction ungated; here DELETE
+        # passes the same guard as everything else.
+        self._cousin("wren")
+        server = self._serve(guard=lambda addr: False)
+        url = "http://127.0.0.1:%d/api/cousins/wren" % server.port
+        req = urllib.request.Request(url, method="DELETE")
+        try:
+            status = urllib.request.urlopen(req, timeout=5).status
+        except urllib.error.HTTPError as err:
+            status = err.code
+        self.assertEqual(status, 403)
+
+    def test_no_side_effecting_get(self):
+        # A GET never mutates: the fire path must not be a GET route at
+        # all. Asserting 404 (unrouted) distinguishes that from a fire
+        # handler that happens to 400 on a GET's empty body - the
+        # latter would leave a routed side-effecting GET undetected.
+        self._cousin("wren")
+        server = self._serve()
+        from cousin_lib.loops import list_requests
+        status, _, _ = self._get(
+            server, "/api/loops/fire?cousin=wren&loop=report")
+        self.assertEqual(status, 404)
+        self.assertEqual(list_requests(), [])
+
+
+class TestCli(UICase):
+    def test_main_needs_a_framework_root(self):
+        from cousin_lib.ui import ui_main
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ui_main(["--port", "0"]), 2)
 
 
 if __name__ == "__main__":

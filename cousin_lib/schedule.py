@@ -79,9 +79,15 @@ def parse_when(when, *, now=None):
 
 def tick(*, now_ts=None, deliver):
     """Fire every pending job whose time has come and return how many
-    fired. A job is marked fired only AFTER its delivery succeeded: a
-    failed delivery keeps it pending for the next tick, because losing
-    a scheduled prompt silently is the one unforgivable failure here."""
+    fired.
+
+    Delivery is AT-LEAST-ONCE by contract, not by accident: a job is
+    marked fired only AFTER its delivery returned, so a failed delivery
+    stays pending and retries next tick, and a crash between delivery
+    and the mark refires the job. A duplicate reminder is the accepted
+    cost; losing one silently is not. Do not "fix" a duplicate by
+    marking before delivering - that flips the contract to
+    at-most-once, which loses reminders instead of repeating them."""
     now_ts = now_ts or int(datetime.now().timestamp())
     conn = _db()
     try:

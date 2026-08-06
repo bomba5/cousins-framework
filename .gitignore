@@ -4,3 +4,12 @@ __pycache__/
 dist/
 build/
 .venv/
+
+# Perimeter: never stage a live install's credentials or private homes.
+# config/ holds provider keys, bot tokens, hive tokens, allowlists;
+# cousins/ holds the fleet's private homes. The gate is the backstop;
+# this keeps them from ever reaching staging. Safe example configs are
+# tracked with a .example suffix, which this does not ignore.
+config/
+cousins/
+!config/*.example

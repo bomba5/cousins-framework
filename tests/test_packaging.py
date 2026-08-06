@@ -75,6 +75,24 @@ class TestDocsCoherence(unittest.TestCase):
                             "%s is unreferenced" % spec.name)
 
 
+class TestPerimeterHygiene(unittest.TestCase):
+    def test_config_and_cousins_are_gitignored(self):
+        # config/ holds credentials (bot tokens, hive tokens, provider
+        # keys) and cousins/ holds a live fleet's private homes; a
+        # stray `git add -A` must not be able to stage either. The gate
+        # is the backstop, this is defense in depth - a credential must
+        # never reach staging in the first place.
+        gitignore = (_REPO_ROOT / ".gitignore").read_text()
+        entries = {line.strip().rstrip("/")
+                   for line in gitignore.splitlines()
+                   if line.strip() and not line.startswith("#")}
+        for path in ("config", "cousins"):
+            self.assertIn(path, entries,
+                          "%s/ is not gitignored; a stray add could"
+                          " commit a credential or a private home"
+                          % path)
+
+
 class TestConfigSeamsDocumented(unittest.TestCase):
     def test_every_config_file_the_code_reads_is_documented(self):
         # The mechanism form of "no config seam undocumented": scan the

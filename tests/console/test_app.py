@@ -202,3 +202,52 @@ class TestEntryPoint(ConsoleCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCliServePath(ConsoleCase):
+    """The CLI serves through ConsoleServer.serve_forever(), which wires
+    the event sources first. Found live on the first real install: the
+    CLI called the raw httpd loop, the snapshot carried bare registry
+    rows with no status, and the sidebar drew every cousin as stopped
+    while the Cousins view (the GET route) said running."""
+
+    def test_cli_serve_path_wires_the_events_stream(self):
+        import socket
+        import subprocess
+        import sys
+        import time
+        self.cousin("wren")
+        self.tmux_running(True)
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "cousin_lib.console.app", "serve",
+             "--root", str(self.root), "--port", str(port),
+             "--tmux-bin", str(self.tmux)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            env=dict(os.environ))
+        self.addCleanup(lambda: (proc.kill(), proc.wait()))
+        deadline = time.monotonic() + 15
+        raw = b""
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", port), 1) as c:
+                    c.sendall(b"GET /api/events HTTP/1.0\r\n"
+                              b"Host: x\r\n\r\n")
+                    c.settimeout(3)
+                    while b"\n\n" not in raw.split(b"\r\n\r\n", 1)[-1]:
+                        chunk = c.recv(65536)
+                        if not chunk:
+                            break
+                        raw += chunk
+                break
+            except OSError:
+                time.sleep(0.2)
+        self.assertIn(b'"kind": "snapshot"', raw, raw[:400])
+        body = raw.split(b"\r\n\r\n", 1)[1].decode()
+        line = [l for l in body.splitlines() if l.startswith("data: ")][0]
+        snap = json.loads(line[len("data: "):])["data"]
+        self.assertEqual(snap["cousins"][0]["slug"], "wren")
+        self.assertEqual(snap["cousins"][0]["status"], "running",
+                         snap["cousins"][0])

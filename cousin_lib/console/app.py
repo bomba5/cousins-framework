@@ -216,6 +216,15 @@ class ConsoleServer:
         sse.stop_poller()
         sse.start_poller(root=self.root)
 
+    def serve_forever(self):
+        """The foreground entry the CLI uses: wire the event sources,
+        then serve. The threaded start() below wires too; the two must
+        never drift, because the events stream served without the
+        wiring carries bare registry rows (no status), which the
+        sidebar renders as every cousin stopped."""
+        self._wire_events()
+        self.httpd.serve_forever()
+
     def start(self):
         self._wire_events()
         self._thread = threading.Thread(
@@ -440,7 +449,11 @@ def console_main(argv=None):
              "" if server.users.configured()
              else " (auth not configured: cousin-console adduser <name>)"))
     try:
-        server.httpd.serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
         server.stop()
     return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - the -m launcher
+    raise SystemExit(console_main())

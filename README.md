@@ -41,6 +41,10 @@ listed in `docs/configuration.md`.
 For a narrated walk through every feature with worked examples, see
 `docs/guide.md`.
 
+The framework is being brought to parity with the private one it was
+extracted from, phase by phase; the plan and its results log are in
+`docs/port-plan.md`.
+
 ## Quickstart: a cousin with memory, from a cold clone
 
 ```

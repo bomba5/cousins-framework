@@ -91,7 +91,7 @@ Behaviours to port (source module in parentheses, names generic):
 
 Config seams added: `config/embedding.toml` gains `chunk_chars`,
 `chunk_overlap`, `recall.min_chars`, `recall.min_score`, `recall.top`;
-`config/transcripts.toml` names where the harness writes session transcripts
+`config/harness.toml` names where the harness writes session transcripts and keeps its auto-memory directory
 (absent: transcript mining is off, said once at flip).
 
 Checklist: the source's memory tests re-expressed here (about 120 functions),

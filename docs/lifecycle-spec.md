@@ -86,8 +86,20 @@ identity. Stages, in order, each reported in a structured result:
    degraded - a real signal loss, never the normal flow.
 3. **Session-end audit** (cousin_lib.audits) with the prior packet's
    mtime as session start, then the active-threads baseline
-   remediation. Transcript mining into raw memory is a reserved seam
-   here - best-effort when it lands, never able to fail the flip.
+   remediation.
+3b. **Transcript mining** (`cousin_lib.transcript_mine`). With
+   `config/harness.toml` present, the dying session's transcript
+   (`<transcripts_dir>/<session_id>.jsonl`, the OLD id, read before
+   the new one is minted) is mined for the cousin's own
+   conclusion-like and dead-end sentences, each written as a raw
+   candidate (`topic: episode:<id prefix>`, `source:
+   flip-transcript`, `L3_COUSIN_CONCLUSION`), capped, deduplicated,
+   for the raw -> distill pipeline to judge. Recorded as a stage
+   `{"stage": "transcript_mine", "mined": n}` or
+   `{"stage": "transcript_mine", "skipped": "<reason>"}`
+   (`dry-run`, `config/harness.toml absent`, no persisted session
+   id, or the error text). Best-effort by construction: it can
+   never fail the flip.
 4. **Archive** the ending generation (packet, handoff, pane tail)
    under `data/generations/`.
 5. **Generation bump** - a counter file, initialized at spawn.
@@ -131,6 +143,7 @@ rather than an accident.
 
 ## Consciously excluded from v1
 
-Reincarnation, transplant, timed/daily flip drivers, transcript
-mining, the trace ledger, and correction-capture calibration ship with
-their own modules; each has a named seam above.
+Reincarnation, transplant, timed/daily flip drivers, the trace
+ledger, and correction-capture calibration ship with their own
+modules; each has a named seam above. Transcript mining landed
+as stage 3b.

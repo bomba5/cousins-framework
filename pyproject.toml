@@ -34,6 +34,7 @@ cousin-reason = "cousin_lib.capsule:reason_main"
 cousin-backup = "cousin_lib.backup:backup_main"
 cousin-sync-state = "cousin_lib.sync_state:sync_state_main"
 cousin-ui = "cousin_lib.ui:ui_main"
+cousin-console = "cousin_lib.console.app:console_main"
 cousin-image = "cousin_lib.media:image_main"
 cousin-voice = "cousin_lib.media:voice_main"
 cousin-video = "cousin_lib.media:video_main"
@@ -57,4 +58,4 @@ include = ["cousin_lib*"]
 [tool.setuptools.package-data]
 # The web console is served from beside the module; without this a
 # wheel ships the code but not the pages it serves.
-cousin_lib = ["ui_static/*"]
+cousin_lib = ["ui_static/*", "console_static/*"]

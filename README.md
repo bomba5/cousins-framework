@@ -31,8 +31,8 @@ serving the tool surface over MCP is the one optional extra.
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
 | hive: cross-machine cousins over an authed bus, and the copy-over node archive | `cousin-hive`, `cousin-spawn-node` | `docs/hive-spec.md`, `docs/deploying-a-node.md` |
-| the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
-| the console's API contract: routes, live streams, auth, what was dropped | `cousin-ui` (the ported console lands as `cousin-console`) | `docs/console-spec.md` |
+| the web console (a view, never a source of truth) | `cousin-console` (`cousin-ui` is its retired alias) | `docs/ui-spec.md` |
+| the console's API contract: routes, live streams, auth, what was dropped | `cousin-console` | `docs/console-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 | unattended operation: units, the fleet sweep, the tool-surface manifest | `cousin-sweep`, `cousin-tool-surface`, `systemd/` | `docs/operations.md` |
 | the same CLIs as tools over MCP stdio, provisioned at spawn | `cousin-mcp` | `docs/mcp-spec.md` |
@@ -87,7 +87,7 @@ degrades to keyword and SAYS SO - it never quietly pretends. To run
 the cousin as a live agent, put the command line that starts your
 agent in `config/agent-cmd` and pass `--start`; its chat server then
 serves the ports in `cousins/*/cousin.toml`. To watch the fleet in a
-browser, run `cousin-ui --port 8600` - it renders what the framework
+browser, run `cousin-console --port 8600` - it renders what the framework
 persists and never becomes a source of truth of its own.
 
 ## The gate

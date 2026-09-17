@@ -110,7 +110,8 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-telegram` | bridge your chat to Telegram, if configured | per-cousin `[telegram]` in cousin.toml; off until a token and operator are set |
 | `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |
 | `cousin-spawn-node` | build the copy-over archive for a cousin on another machine (a hive node) | operator-run; the archive carries a bearer token and is moved by hand, never pushed |
-| `cousin-ui` | the web console over the framework (operator-run) | `cousin-ui --port 8600`; a view, never a source of truth |
+| `cousin-console` | the web console over the framework (operator-run) | `cousin-console --port 8600`; a view, never a source of truth; `cousin-console adduser <name>` adds a login |
+| `cousin-ui` | retired alias of `cousin-console`, kept for one release | prints a pointer and runs the console with the same flags |
 | `cousin-cache-audit` | prompt-cache hit rate and the files that likely invalidated it, read from the harness transcripts (operator-run) | `cousin-cache-audit --days 7` · `cousin-cache-audit --diagnose`; off until config/harness.toml names transcripts_dir |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 | `cousin-sweep` | fleet-wide memory compaction, every cousin in turn (operator-run, normally from its weekly timer) | `cousin-sweep compact --target both` |

@@ -10,16 +10,22 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
+import time
 import tomllib
+from pathlib import Path
 
 from cousin_lib.config import (
     CousinConfig,
     FrameworkConfig,
     MissingConfigError,
+    expand_harness_path,
+    harness_config,
 )
 from cousin_lib.mcp_server import provision_mcp
 from cousin_lib.template import TemplateError, render_template
@@ -30,6 +36,11 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 
 class SpawnError(Exception):
     """Creation cannot proceed; the message says why."""
+
+
+class DismissRefused(SpawnError):
+    """The home is kept: the archive that would hold its only copy could
+    not be written, or would land inside the tree being removed."""
 
 
 def _claimed_ports(root):
@@ -170,12 +181,17 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
     return {"slug": slug, "home": home, "port": port}
 
 
+def _pid_file(home):
+    return Path(home) / "data" / "chat-server.pid"
+
+
 def _default_chat_server(home):
     """Launch the cousin's chat server detached, logging to its data
-    dir. The daemon owns its own lifetime; spawn only starts it."""
+    dir, and record its pid so stop_cousin can find it. The daemon owns
+    its own lifetime; spawn only starts it."""
     log = open(home / "data" / "chat-server.log", "ab")
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [sys.executable, "-m", "cousin_lib.server.app",
              "--home", str(home)],
             stdout=log, stderr=log, stdin=subprocess.DEVNULL,
@@ -183,6 +199,179 @@ def _default_chat_server(home):
         )
     finally:
         log.close()
+    try:
+        _pid_file(home).write_text("%d\n" % proc.pid)
+    except OSError:
+        pass
+
+
+_CHAT_SERVER_MARKERS = ("cousin_lib.server.app", "cousin-chat-server")
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _pid_is_chat_server(pid):
+    """A pid file can outlive its process and point at whatever reused
+    the number; only a process whose command line carries a chat-server
+    marker is ours to signal. Without /proc there is nothing to check
+    and the pid file is trusted."""
+    try:
+        cmdline = Path("/proc/%d/cmdline" % pid).read_bytes()
+    except OSError:
+        return os.path.isdir("/proc") is False
+    text = cmdline.replace(b"\0", b" ").decode(errors="replace")
+    return any(marker in text for marker in _CHAT_SERVER_MARKERS)
+
+
+def _pid_bound_to_port(port):
+    """The pid listening on a local TCP port, from /proc; None when
+    nothing is, or on a platform without /proc."""
+    inodes = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            cols = line.split()
+            if len(cols) < 10 or cols[3] != "0A":  # 0A = LISTEN
+                continue
+            try:
+                if int(cols[1].rsplit(":", 1)[1], 16) == port:
+                    inodes.add(cols[9])
+            except (ValueError, IndexError):
+                continue
+    if not inodes:
+        return None
+    try:
+        entries = list(Path("/proc").iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            fds = list((entry / "fd").iterdir())
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink(fd)
+            except OSError:
+                continue
+            if target.startswith("socket:[") and target[8:-1] in inodes:
+                return int(entry.name)
+    return None
+
+
+def _tmux_base(tmux_bin, tmux_socket):
+    cmd = [tmux_bin]
+    if tmux_socket:
+        cmd += ["-S", tmux_socket]
+    return cmd
+
+
+def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
+                port_pid=_pid_bound_to_port, term_wait=5.0):
+    """Kill the tmux session and stop the chat server: the pid spawn
+    wrote, else the process bound to the cousin's port on this host.
+    Idempotent; the result names what each half was found doing."""
+    home = Path(home)
+    config = CousinConfig.load(home)
+    base = _tmux_base(tmux_bin, tmux_socket)
+    has = subprocess.run(base + ["has-session", "-t", config.tmux_session],
+                         capture_output=True, text=True, timeout=10,
+                         check=False)
+    if has.returncode == 0:
+        subprocess.run(base + ["kill-session", "-t", config.tmux_session],
+                       capture_output=True, text=True, timeout=10,
+                       check=False)
+        tmux_state = "stopped"
+    else:
+        tmux_state = "already stopped"
+    pid_file = _pid_file(home)
+    pid = None
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        pid = None
+    if pid is not None and not (_pid_alive(pid) and _pid_is_chat_server(pid)):
+        pid = None
+    if pid is None and config.chat_port:
+        candidate = port_pid(config.chat_port)
+        if candidate and _pid_alive(candidate) \
+                and _pid_is_chat_server(candidate):
+            pid = candidate
+    chat_state = "not running"
+    if pid is not None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            chat_state = "stopped"
+        except (ProcessLookupError, PermissionError):
+            pass
+        deadline = time.time() + term_wait
+        while chat_state == "stopped" and time.time() < deadline:
+            if not _pid_alive(pid):
+                break
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            time.sleep(0.05)
+    pid_file.unlink(missing_ok=True)
+    return {"tmux": tmux_state, "chat_server": chat_state}
+
+
+def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
+                   stop=None):
+    """Stop, archive the whole home to <root>/data/dismissed/
+    <slug>-<YYYYmmdd-HHMMSS>.tar.gz, then remove the tree. A failed
+    archive REFUSES the delete: untracked notes exist only on disk and
+    the archive is their one copy. Harness-side directories named by
+    config/harness.toml are left in place and reported."""
+    root = FrameworkConfig(root).root
+    home = root / "cousins" / slug
+    if not (home / "cousin.toml").is_file():
+        raise SpawnError("no cousin %r under %s" % (slug, root / "cousins"))
+    archive_dir = root / "data" / "dismissed"
+    if archive_dir.resolve().is_relative_to(home.resolve()):
+        raise DismissRefused(
+            "refusing to delete: archive dir %s is inside the tree being"
+            " deleted; home kept" % archive_dir)
+    stop_fn = stop or stop_cousin
+    stop_fn(home, tmux_bin=tmux_bin, tmux_socket=tmux_socket)
+    archive = archive_dir / ("%s-%s.tar.gz"
+                             % (slug, time.strftime("%Y%m%d-%H%M%S")))
+    try:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive, "w:gz") as tf:
+            tf.add(home, arcname=slug)
+    except (OSError, tarfile.TarError) as err:
+        try:
+            archive.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise DismissRefused(
+            "refusing to delete: archive failed (%s); home kept" % err)
+    shutil.rmtree(home)
+    left = []
+    try:
+        cfg = harness_config(root)
+    except MissingConfigError:
+        cfg = None
+    for key in ("transcripts_dir", "auto_memory_dir"):
+        if cfg and cfg.get(key):
+            left.append(str(expand_harness_path(cfg[key], home)))
+    return {"slug": slug, "status": "deleted", "archive": str(archive),
+            "left_in_place": left}
 
 
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,

@@ -107,8 +107,59 @@ def expire_stale_requests(*, now=None):
         con.close()
 
 
+def cancel_request(request_id):
+    """Mark a PENDING request cancelled; True when a row changed. A
+    cancelled row is consumed by nobody and reported like any other
+    terminal status - the console's flip/cancel and any CLI use this."""
+    con = _db()
+    try:
+        cur = con.execute(
+            "UPDATE requests SET status='cancelled', consumed_at=?,"
+            " reason='cancelled by request' WHERE id=? AND status='pending'",
+            (time.time(), request_id))
+        con.commit()
+        return cur.rowcount > 0
+    finally:
+        con.close()
+
+
 def _state_path():
     return FrameworkConfig.from_env().root / "data" / "loops-state.json"
+
+
+def _fires_path():
+    return FrameworkConfig.from_env().root / "data" / "loops-fires.jsonl"
+
+
+def _log_fire(slug, name, now):
+    """One line per delivered fire, appended at the same point the tick
+    commits last_fires. The console's drift view reads this series; a
+    failed append is reported by the caller, never fatal to the tick."""
+    path = _fires_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as fh:
+        fh.write(json.dumps({"ts": now, "cousin": slug, "loop": name})
+                 + "\n")
+
+
+def read_fires(*, limit=None):
+    """The fire log as dicts, oldest first; unparsable lines skipped.
+    limit keeps the newest N."""
+    try:
+        lines = _fires_path().read_text().splitlines()
+    except OSError:
+        return []
+    rows = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and "ts" in row:
+            rows.append(row)
+    if limit:
+        rows = rows[-limit:]
+    return rows
 
 
 def _load_state():
@@ -143,11 +194,12 @@ def daemon_status(*, tick_interval=30, now=None):
     return {"ok": True, "last_tick": last_tick, "message": "ok"}
 
 
-def load_cousin_loops(home):
+def load_cousin_loops(home, *, include_disabled=False):
     """([loops], [errors]). A malformed cousin.toml or invalid loop is
     a reported error NAMING its source - the source framework returned
     an empty list on any parse error, which silently disabled every
-    loop the cousin had."""
+    loop the cousin had. The daemon wants only enabled loops; a viewer
+    (the console's loops editor) asks for the disabled ones too."""
     import tomllib
     try:
         data = tomllib.loads((Path(home) / "cousin.toml").read_text())
@@ -173,10 +225,139 @@ def load_cousin_loops(home):
             errors.append("loop %r in %s has an empty prompt"
                           % (name, home))
             continue
-        if not entry.get("enabled", True):  # truthiness, by spec
-            continue
+        if not entry.get("enabled", True) and not include_disabled:
+            continue  # truthiness, by spec
         loops.append(entry)
     return loops, errors
+
+
+_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def validate_loops(entries):
+    """Every reason a [[loops]] array would be refused, each naming its
+    index: the name pattern and uniqueness, exactly one schedule form,
+    a non-empty prompt, days a list of three-letter weekdays. Empty
+    list means valid."""
+    if not isinstance(entries, list):
+        return ["loops must be a list"]
+    errors, seen = [], set()
+    for idx, entry in enumerate(entries):
+        tag = "loops[%d]" % idx
+        if not isinstance(entry, dict):
+            errors.append("%s: not a table" % tag)
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not _NAME_RE.match(name):
+            errors.append("%s: invalid name %r" % (tag, name))
+        elif name in seen:
+            errors.append("%s: duplicate name %r" % (tag, name))
+        seen.add(name)
+        forms = [f for f in _SCHEDULE_FORMS if f in entry]
+        if len(forms) != 1:
+            errors.append("%s: exactly one schedule form required, has %r"
+                          % (tag, forms))
+        elif forms[0] == "interval_seconds":
+            iv = entry["interval_seconds"]
+            if isinstance(iv, bool) or not isinstance(iv, int) or iv <= 0:
+                errors.append("%s: interval_seconds must be a positive"
+                              " integer" % tag)
+        elif not isinstance(entry[forms[0]], str) or not entry[forms[0]]:
+            errors.append("%s: %s must be a non-empty string"
+                          % (tag, forms[0]))
+        prompt = entry.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            errors.append("%s: empty prompt" % tag)
+        days = entry.get("days")
+        if days is not None:
+            if (not isinstance(days, list)
+                    or any(not isinstance(d, str)
+                           or d.lower()[:3] not in _WEEKDAYS
+                           or len(d) != 3 for d in days)):
+                errors.append("%s: days must be a list of three-letter"
+                              " weekdays" % tag)
+    return errors
+
+
+def _toml_string(value):
+    # A JSON string literal is a valid TOML basic string for every
+    # character json.dumps emits with ensure_ascii off.
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _render_loop(entry):
+    lines = ["[[loops]]", "name = %s" % _toml_string(entry["name"])]
+    for form in _SCHEDULE_FORMS:
+        if form in entry:
+            value = entry[form]
+            lines.append("%s = %s" % (form, value if form == "interval_seconds"
+                                      else _toml_string(value)))
+    if entry.get("days") is not None:
+        lines.append("days = [%s]" % ", ".join(
+            _toml_string(d.lower()) for d in entry["days"]))
+    lines.append("prompt = %s" % _toml_string(entry["prompt"]))
+    lines.append("enabled = %s"
+                 % ("true" if entry.get("enabled", True) else "false"))
+    if entry.get("hidden"):
+        lines.append("hidden = true")
+    return "\n".join(lines) + "\n"
+
+
+def _strip_loops_tables(text):
+    """Remove every [[loops]] table from a cousin.toml text; the other
+    tables keep their lines and order."""
+    out, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("[[loops]]"):
+            skipping = True
+            continue
+        if skipping and stripped.startswith("["):
+            skipping = False
+        if not skipping:
+            out.append(line)
+    return "".join(out)
+
+
+def _normalized(entries):
+    norm = []
+    for e in entries:
+        item = {"name": e["name"], "prompt": e["prompt"],
+                "enabled": bool(e.get("enabled", True))}
+        for form in _SCHEDULE_FORMS:
+            if form in e:
+                item[form] = e[form]
+        if e.get("days") is not None:
+            item["days"] = [d.lower() for d in e["days"]]
+        if e.get("hidden"):
+            item["hidden"] = True
+        norm.append(item)
+    return norm
+
+
+def save_cousin_loops(home, entries):
+    """Replace the whole [[loops]] array of <home>/cousin.toml: validate
+    (ValueError naming the index), render, re-parse the new text and
+    check it round-trips, then rename into place. Returns the
+    normalized entries as the file now holds them."""
+    import os
+    import tomllib
+    errors = validate_loops(entries)
+    if errors:
+        raise ValueError("; ".join(errors))
+    path = Path(home) / "cousin.toml"
+    text = path.read_text()
+    kept = _strip_loops_tables(text).rstrip("\n")
+    wanted = _normalized(entries)
+    rendered = "\n\n".join(_render_loop(e) for e in wanted)
+    new_text = kept + "\n" + ("\n" + rendered if rendered else "")
+    parsed = tomllib.loads(new_text)
+    if _normalized(parsed.get("loops", [])) != wanted:
+        raise ValueError("loops did not round-trip through TOML")
+    tmp = path.with_suffix(".toml.tmp")
+    tmp.write_text(new_text)
+    os.replace(tmp, path)
+    return wanted
 
 
 def _parse_cron_field(field, minimum, maximum):
@@ -296,6 +477,38 @@ def _loop_due(loop, last_fire, now):
     return interval > 0 and (now - last_fire) >= interval
 
 
+def next_due(loop, last_fire, *, now=None, horizon_days=8):
+    """The next time the daemon's own due logic would fire this loop:
+    interval loops from the last fire (now, when never fired); daily_at
+    and cron by scanning forward minute by minute. 0 when nothing within
+    the horizon."""
+    now = now or time.time()
+    if "interval_seconds" in loop:
+        interval = int(loop.get("interval_seconds") or 0)
+        if interval <= 0:
+            return 0
+        if not last_fire:
+            return int(now)
+        return int(max(now, last_fire + interval))
+    when = datetime.fromtimestamp(now).replace(second=0, microsecond=0)
+    step = 60
+    for minute in range(0, horizon_days * 24 * 60):
+        candidate = when.timestamp() + minute * step
+        if candidate < now - step:
+            continue
+        if "cron" in loop:
+            try:
+                if cron_matches(loop["cron"],
+                                datetime.fromtimestamp(candidate)):
+                    return int(candidate)
+            except (ValueError, IndexError):
+                return 0
+        elif "daily_at" in loop:
+            if _loop_due(loop, last_fire, candidate):
+                return int(candidate)
+    return 0
+
+
 def _fire_worker_loops(config, state, now, report):
     """A worker cousin has no session and no beats; a due loop runs
     the worker command template from host configuration as a tracked
@@ -339,6 +552,10 @@ def _fire_worker_loops(config, state, now, report):
         # the detached runner finishes.
         state["last_fires"][key] = now
         report["fired"].append(key)
+        try:
+            _log_fire(config.slug, loop["name"], now)
+        except OSError as err:
+            report["errors"].append("fire log: %s" % err)
 
 
 def _consume_requests(state, deliver, errors):
@@ -360,18 +577,32 @@ def _consume_requests(state, deliver, errors):
             home = FrameworkConfig.from_env().root / "cousins" / slug
             loops, errs = load_cousin_loops(home)
             errors.extend(errs)
-            target = next(
-                (l for l in loops
-                 if l["name"] == payload.get("loop")), None)
-            if target is None:
-                _finish_request(con, row["id"], "failed",
-                                "no such loop %r"
-                                % payload.get("loop"))
-                continue
-            ok = deliver(slug,
-                         "[Framework scheduler: manual fire]\n\n"
-                         "### %s\n%s"
-                         % (target["name"], target["prompt"]))
+            commit = None
+            if payload.get("loop") == "context-heartbeat":
+                # The canonical beat by name: the daemon's own
+                # composition, its delta committed after delivery like
+                # the scheduled beat (the console's fire button and the
+                # ready-file trigger both ask for it this way).
+                text, commit = _compose_beat(home, time.time())
+                if not text:
+                    _finish_request(con, row["id"], "failed",
+                                    "heartbeat composition failed")
+                    continue
+            else:
+                target = next(
+                    (l for l in loops
+                     if l["name"] == payload.get("loop")), None)
+                if target is None:
+                    _finish_request(con, row["id"], "failed",
+                                    "no such loop %r"
+                                    % payload.get("loop"))
+                    continue
+                text = ("[Framework scheduler: manual fire]\n\n"
+                        "### %s\n%s" % (target["name"], target["prompt"]))
+            ok = deliver(slug, text)
+            if ok and commit is not None:
+                commit()
+                state["last_beat"][slug] = time.time()
             _finish_request(con, row["id"],
                             "done" if ok else "failed",
                             "" if ok else "delivery failed")
@@ -663,6 +894,10 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
                     key = "%s|%s" % (slug, loop["name"])
                     state["last_fires"][key] = now
                     report["fired"].append(key)
+                    try:
+                        _log_fire(slug, loop["name"], now)
+                    except OSError as err:
+                        report["errors"].append("fire log: %s" % err)
             else:
                 report["errors"].append(
                     "delivery failed for %s; loops stay due" % slug)

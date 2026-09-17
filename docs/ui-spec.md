@@ -42,6 +42,11 @@ UI being up. That inversion does not recur.)
 
 ## Architecture
 
+The route-by-route wire contract of the ported console (every retained
+view's routes, the two SSE streams, the auth model, and the list of
+what was dropped) is `docs/console-spec.md`; this page states the
+constraints it was written under.
+
 A thin HTTP daemon, stdlib only, serving two things:
 
 1. **JSON read views** over the stores the framework already

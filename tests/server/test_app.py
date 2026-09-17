@@ -425,3 +425,15 @@ class TestReplyAttachment(ServerCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModuleEntryPoint(unittest.TestCase):
+    def test_python_dash_m_runs_the_server_cli(self):
+        # spawn and the watchdog launch the server as `python -m
+        # cousin_lib.server.app`; without a __main__ guard that command
+        # exits 0 having done nothing, and every launcher lies.
+        import subprocess, sys
+        out = subprocess.run([sys.executable, "-m", "cousin_lib.server.app", "--help"],
+                             capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("--home", out.stdout)

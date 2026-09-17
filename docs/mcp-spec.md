@@ -172,7 +172,8 @@ next session. No hot registration is promised.
 ## Protocol
 
 The adapter speaks MCP through the reference Python SDK, installed as
-the extra `cousin-framework[mcp]`. The default install pulls nothing;
+the extra `cousin-framework[mcp]` (the 1.x SDK; the 2.x SDK changed the
+server API and the extra excludes it). The default install pulls nothing;
 that is what the zero-dependency policy is for. The SDK is imported
 inside `serve()` only: registry parsing, schema building, argv
 assembly, provisioning and approval import nothing but the standard

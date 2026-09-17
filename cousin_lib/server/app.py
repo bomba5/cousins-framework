@@ -589,3 +589,7 @@ class _ChatHandler(BaseHTTPRequestHandler):
             archived=(query.get("archived") or ["0"])[0],
         ))
         self._send_json(200, {"messages": hits})
+
+
+if __name__ == "__main__":
+    sys.exit(serve_main())

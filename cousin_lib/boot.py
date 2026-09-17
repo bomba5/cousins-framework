@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import self_portrait, trace
+from cousin_lib import corrections, self_portrait, trace
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -100,7 +100,7 @@ def _law_path():
     return FrameworkConfig.from_env().root / "config" / "law.md"
 
 
-def _calibration(home):
+def _calibration_base(home):
     """Distilled calibration file when present, else the committed
     portrait's calibration section. Absent means degraded: a
     persona-anchored cousin booting without calibration should know."""
@@ -115,6 +115,18 @@ def _calibration(home):
     if section and "TODO" not in section:
         return "## Operator Calibration (from self-portrait)\n" + section
     return "(no operator calibration distilled yet - degraded)"
+
+
+def _calibration(home):
+    """The calibration base plus the recent-corrections summary when any
+    are recorded. Appended, never prepended: the degraded rule keys on
+    the section's first line, and corrections without a distilled
+    calibration are still a degraded boot."""
+    base = _calibration_base(home)
+    summary = corrections.summary_for_boot(home, n=15)
+    if summary == corrections.EMPTY_MARKER:
+        return base
+    return base + "\n\n" + summary
 
 
 def _staleness_header(home):

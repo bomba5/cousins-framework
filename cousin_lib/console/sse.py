@@ -120,7 +120,13 @@ def emit(kind, data):
 
 def _registry_rows(root):
     """The bare fleet projection: enough for a snapshot before the fleet
-    routes plug in their enriched rows."""
+    routes plug in their enriched rows. Model and effort are the same
+    effective values the fleet rows carry (the cousin's [runtime], else
+    the install's [agent] defaults), read through the fleet module's
+    helpers so the two projections cannot disagree."""
+    from cousin_lib.console.routes_fleet import (agent_defaults,
+                                                 effective_runtime)
+    defaults = agent_defaults(root)
     rows = []
     for c in FrameworkConfig(root).list_cousins():
         rows.append({
@@ -128,7 +134,7 @@ def _registry_rows(root):
             "port": c.chat_port, "host": c.chat_host, "home": str(c.home),
             "tmuxSession": c.tmux_session, "operator": c.operator_name,
             "memoryScope": c.memory_scope, "heartbeat": c.heartbeat_seconds,
-            "flipAt": c.flip_at,
+            "flipAt": c.flip_at, **effective_runtime(c, defaults),
         })
     return rows
 

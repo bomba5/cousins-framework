@@ -184,6 +184,8 @@ from the tokens seam below.
 | `memoryScope` | str | `[memory] scope` |
 | `heartbeat` | int | `[heartbeat] context_beat_seconds` (3600 default) |
 | `flipAt` | str or null | `[lifecycle] flip_at` |
+| `model` | str or null | what the next start renders into the agent command's `{model}`: `[runtime] model`, else `config/harness.toml [agent] default_model`, else null (a start with the placeholder would then fail naming both files; the row shows nothing rather than a guess) |
+| `effort` | str or null | likewise for `{effort}`: `[runtime] effort`, else `[agent] default_effort`, else null; one of `low`, `medium`, `high`, `max` |
 | `hidden` | bool | `[cousin] hidden` (default false; the console is this key's consumer) |
 | `status` | `"running"` or `"stopped"` | tmux session exists (workers: always `"running"`, meaning enrolled) |
 | `chat` | `"ok"`, `"down"` or `"none"` | `/health` reachable, not reachable, no port |
@@ -193,25 +195,47 @@ from the tokens seam below.
 | `tokensSpent` | int | today's total from the tokens seam, 0 when unavailable |
 
 Rows the source carried and this one does not: `main_tenant`,
-`framework_managed`, `model`, `effort`, `livenessTick`,
-`tokenBudget`, `auto_start`, `pid`, `uptime`, `cpu`, `mem`,
-`chatCount`, `lastTick`. The first six are install- or vendor-specific
-or dead keys; the rest were zeros or platform probes the views only
-rendered as decoration.
+`framework_managed`, `livenessTick`, `tokenBudget`, `auto_start`,
+`pid`, `uptime`, `cpu`, `mem`, `chatCount`, `lastTick`. The first
+four are install-specific or dead keys; the rest were zeros or
+platform probes the views only rendered as decoration. `model` and
+`effort` were dropped with them at first and came back once the agent
+command grew its `{model}` / `{effort}` placeholders: they are now
+`cousin.toml` facts with an install-wide fallback, not vendor keys.
 
 ### `POST /api/cousins` (spawn)
 Body: `{"slug": str, "name": str, "role": str, "voice": str,
-"role_paragraph": str?, "port": int?, "operator": str?}`. Calls
-`spawn.create_cousin`; `voice` is required because the template
+"role_paragraph": str?, "port": int?, "operator": str?, "model":
+str?, "effort": str?, "heartbeat": int?, "memory_scope": str?}`.
+Calls `spawn.create_cousin`; `voice` is required because the template
 refuses to render without it (`docs/spawn-and-template-spec.md`: an
-unfilled voice is a spawn failure). `201 {"ok": true, "slug": str,
-"home": str, "port": int}`. `400` on validation (`SpawnError` text in
-`error`), `409` when the slug exists or an orphan directory squats it.
-Creating and starting stay separate: the spawn modal follows a 201
-with `POST /api/cousins/<slug>/start`, as the source did. There is no
-`model`, `memory_scope`, `heartbeat` or `token_budget` field: the
-agent binary is host configuration (`config/agent-cmd`), and the
-others are edited in `cousin.toml` by hand or through the editors.
+unfilled voice is a spawn failure). The four optional runtime fields
+are the ones `cousin-spawn --model / --effort / --heartbeat /
+--memory-scope` take and land in `cousin.toml` as `[runtime] model`
+and `effort`, `[heartbeat] context_beat_seconds` and `[memory] scope`;
+an empty or absent field writes no key (the documented default
+applies). `201 {"ok": true, "slug": str, "home": str, "port": int}`.
+`400` on validation (`SpawnError` text in `error`: a bad effort or
+scope, a non-positive heartbeat, a model name shlex would split),
+`409` when the slug exists or an orphan directory squats it. Creating
+and starting stay separate: the spawn modal follows a 201 with `POST
+/api/cousins/<slug>/start`, as the source did. There is no
+`token_budget` field (a dead key), and the agent binary itself stays
+host configuration (`config/agent-cmd`): the model and effort only
+fill that command's placeholders.
+
+### `GET /api/spawn/options`
+What the spawn dialog offers and preselects: `{"models": [str],
+"default_model": str or null, "efforts": ["low", "medium", "high",
+"max"], "default_effort": str, "memory_scopes": ["private", "shared",
+"both"], "default_memory_scope": "private", "default_heartbeat":
+3600}`. `models` and the two defaults read `config/harness.toml
+[agent]` (`models`, `default_model`, `default_effort`); with no
+`models` the built-in catalogue of three names is offered, with no
+`default_model` the first catalogue entry is preselected, with no
+`default_effort` `high` is. The heartbeat and scope defaults are the
+`cousin.toml` defaults (`docs/configuration.md`). `500` with the
+reason when `harness.toml` exists and cannot be read.
 
 ### `DELETE /api/cousins/<slug>` (dismiss)
 Stops the cousin, archives the whole `cousins/<slug>/` tree to
@@ -264,6 +288,24 @@ timestamped backup of the previous file to
 the file. `200 {"ok": true, "slug": str, "bytes": int}`. The console
 edits an existing CLAUDE.md; it never generates one (the template is
 the single identity source).
+
+### `POST /api/cousins/<slug>/effort`
+Body `{"effort": "low" | "medium" | "high" | "max"}`. Persists
+`[runtime] effort` in `cousin.toml` through `spawn.persist_runtime`
+(the same targeted, re-parsed, atomically renamed write the session
+id uses). `200 {"ok": true, "slug": str, "effort": str,
+"restart_required": true}`: the value renders into the agent command
+at the next start, and the running agent keeps the one it started
+with, so the client shows a restart hint rather than pretending the
+change is live. `400` for any other value or a non-string, `404`
+unknown cousin. The source injected an in-session command into the
+pane as well; that was vendor-specific and is not ported.
+
+### `POST /api/cousins/<slug>/model`
+Body `{"model": str}`, one word of letters, digits and `._:/+-` (it is
+rendered into an argv). Persists `[runtime] model` the same way. `200
+{"ok": true, "slug": str, "model": str, "restart_required": true}`.
+`400` empty, non-string or splittable, `404` unknown cousin.
 
 ### `POST /api/cousins/<slug>/hidden`
 Body `{"hidden": bool}`. Sets or removes `[cousin] hidden` in
@@ -690,7 +732,7 @@ snapshot, never data, and the client backs off from 1 s to 15 s.
 
 | kind | data | produced when |
 |---|---|---|
-| `snapshot` | `{"cousins": [row], "loops": [row], "jobs": [row], "daemon": {...}}` | on connect (the same rows the GET views return; the source also sent `agents`, dropped) |
+| `snapshot` | `{"cousins": [row], "loops": [row], "jobs": [row], "daemon": {...}}` | on connect (the same rows the GET views return, `model` and `effort` included even in the bare registry rows served before the fleet routes are wired; the source also sent `agents`, dropped) |
 | `cousins-refresh` | `[row]` | the fleet poll finished (drives the unread dot via `lastMsgTs`) |
 | `loops-refresh` | `[row]` | the loops poll finished |
 | `cousin-status` | `{"slug": str, "status": "starting" | "stopping"}` | a start/stop/restart handler begins; the next refresh confirms |
@@ -822,7 +864,7 @@ For the record, so the list is checked rather than rediscovered:
 `/api/backlog/<id>`, `/api/chat/presence`, `/api/chat/presence/<slug>`,
 `/api/chat/engagement`, `/api/chat/engagement/<slug>`,
 `/api/chat/audio/...`, `/api/chat/image/...`, `/api/chat/video/...`,
-`/api/cousins/<slug>/budget`, `/api/cousins/<slug>/effort`,
+`/api/cousins/<slug>/budget`,
 `/api/peer-messages`, `/api/sidebar`, `/api/liveness` (no view called
 it), `/api/network-devices`, the three GPU-box routes,
 `/api/admin/restart/cousin/<slug>` (the views use

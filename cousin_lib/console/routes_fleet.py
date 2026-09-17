@@ -13,7 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import loops, spawn
-from cousin_lib.config import FrameworkConfig
+from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
+                               CousinConfig, FrameworkConfig,
+                               MissingConfigError, agent_config)
 from cousin_lib.console import router, tokens
 from cousin_lib.console._common import (chat_call, chat_health, check_slug,
                                         cousin_home, load_cousin, read_toml,
@@ -87,10 +89,33 @@ def _activity(home):
         return ""
 
 
-def fleet_row(server, config):
+def agent_defaults(root):
+    """config/harness.toml [agent] for the fleet projection. A file
+    that cannot be read must not take the fleet listing down with it:
+    the rows then carry no install default (null), and the spawn
+    options route, which can afford to, reports the reason."""
+    try:
+        return agent_config(root)
+    except MissingConfigError:
+        return {"default_model": None, "default_effort": None,
+                "models": list(DEFAULT_MODELS)}
+
+
+def effective_runtime(config, defaults):
+    """The model and effort the NEXT start of this cousin renders: its
+    own [runtime] value, else the install default, else null (a
+    placeholder would then fail the start, and the row says so by
+    showing nothing rather than a guess)."""
+    return {"model": config.model or defaults["default_model"],
+            "effort": config.effort or defaults["default_effort"]}
+
+
+def fleet_row(server, config, defaults=None):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
     chat = chat_health(config)
+    if defaults is None:
+        defaults = agent_defaults(server.root)
     if config.type == "worker":
         status = "running"
         active = False
@@ -113,6 +138,7 @@ def fleet_row(server, config):
         "memoryScope": config.memory_scope,
         "heartbeat": config.heartbeat_seconds,
         "flipAt": config.flip_at,
+        **effective_runtime(config, defaults),
         "hidden": bool(cousin.get("hidden", False)),
         "status": status,
         "chat": chat,
@@ -124,7 +150,8 @@ def fleet_row(server, config):
 
 
 def fleet_rows(server):
-    return [fleet_row(server, config)
+    defaults = agent_defaults(server.root)
+    return [fleet_row(server, config, defaults)
             for config in FrameworkConfig(server.root).list_cousins()]
 
 
@@ -148,7 +175,7 @@ def _start(server, slug):
     try:
         spawn.start_cousin(
             config.home, agent_cmd=agent_cmd, tmux_bin=server.tmux_bin,
-            tmux_socket=server.tmux_socket,
+            tmux_socket=server.tmux_socket, root=server.root,
             start_chat_server=((lambda home: None) if chat_ok
                                else spawn._default_chat_server))
     except spawn.SpawnError as err:
@@ -203,12 +230,20 @@ def register():
         if port is not None and (isinstance(port, bool)
                                  or not isinstance(port, int)):
             raise HttpError(400, "port must be an integer")
+        # The four runtime fields the dialog sends; each is validated
+        # by create_cousin before anything is written (400 below).
+        runtime = {}
+        for key in ("model", "effort", "heartbeat", "memory_scope"):
+            value = body.get(key)
+            if value is not None and value != "":
+                runtime[key] = value
         try:
             out = spawn.create_cousin(
                 req.server.root, slug=slug, role=role,
                 name=body.get("name") or None,
                 role_paragraph=body.get("role_paragraph") or None,
-                voice=voice, port=port, operator=body.get("operator") or None)
+                voice=voice, port=port, operator=body.get("operator") or None,
+                **runtime)
         except spawn.SpawnError as err:
             text = str(err)
             status = 409 if ("already exists" in text or "squats" in text) \
@@ -293,6 +328,46 @@ def register():
         tmp.write_text(content)
         tmp.replace(path)
         return 200, {"ok": True, "slug": slug, "bytes": len(content.encode())}
+
+    def _set_runtime(req, slug, key):
+        home = cousin_home(req.server, slug)
+        value = req.body.get(key)
+        if not isinstance(value, str):
+            raise HttpError(400, "%s must be a string" % key)
+        try:
+            spawn.persist_runtime(home, key, value)
+        except spawn.SpawnError as err:
+            raise HttpError(400, str(err))
+        # The running agent keeps the value it started with; the row
+        # already shows the new one, so the client is told which.
+        return 200, {"ok": True, "slug": slug, key: value,
+                     "restart_required": True}
+
+    @router.route("POST", "/api/cousins/{slug}/effort")
+    def set_effort(req, slug):
+        return _set_runtime(req, slug, "effort")
+
+    @router.route("POST", "/api/cousins/{slug}/model")
+    def set_model(req, slug):
+        return _set_runtime(req, slug, "model")
+
+    @router.route("GET", "/api/spawn/options")
+    def spawn_options(req):
+        try:
+            defaults = agent_config(req.server.root)
+        except MissingConfigError as err:
+            raise HttpError(500, str(err))
+        models = defaults["models"]
+        return 200, {
+            "models": models,
+            "default_model": defaults["default_model"] or (
+                models[0] if models else None),
+            "efforts": list(EFFORT_LEVELS),
+            "default_effort": defaults["default_effort"] or "high",
+            "memory_scopes": list(MEMORY_SCOPES),
+            "default_memory_scope": CousinConfig.memory_scope,
+            "default_heartbeat": CousinConfig.heartbeat_seconds,
+        }
 
     @router.route("POST", "/api/cousins/{slug}/hidden")
     def set_hidden(req, slug):

@@ -269,3 +269,23 @@ class TestStream(EventsCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRegistryRows(EventsCase):
+    """The bare registry rows the snapshot carries before the fleet
+    routes plug in must name the same model and effort the fleet rows
+    do, or a tab that connects before the wiring shows a blank."""
+
+    def test_rows_carry_model_and_effort_with_the_install_fallback(self):
+        rows = {r["slug"]: r for r in sse._registry_rows(self.root)}
+        self.assertIsNone(rows["testa"]["model"])
+        self.assertIsNone(rows["testa"]["effort"])
+        (self.root / "config").mkdir()
+        (self.root / "config" / "harness.toml").write_text(
+            '[agent]\ndefault_model = "dm"\ndefault_effort = "high"\n')
+        (self.root / "cousins" / "testa" / "cousin.toml").write_text(
+            '[cousin]\nslug = "testa"\nname = "Testa"\n[chat]\nport = 1\n'
+            '[runtime]\neffort = "low"\n')
+        rows = {r["slug"]: r for r in sse._registry_rows(self.root)}
+        self.assertEqual((rows["testa"]["model"], rows["testa"]["effort"]),
+                         ("dm", "low"))

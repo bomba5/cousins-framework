@@ -97,7 +97,7 @@ and `cousin-console` take it identically; a flag is discoverable from
   render to for a cousin whose `cousin.toml [runtime]` sets neither
   (`effort` is one of `low`, `medium`, `high`, `max`; another value
   is loud); `models` is the catalogue the console's spawn dialog
-  offers, a list of strings. Absent table:
+  offers (`GET /api/spawn/options`), a list of strings. Absent table:
   no default model, no default effort (a placeholder then needs the
   cousin's own value or the spawn fails naming this file), and a
   built-in catalogue of three names that never reaches an agent on

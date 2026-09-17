@@ -52,7 +52,12 @@ class TestListCousins(ConsoleCase):
         self.assertEqual(toki["chat"], "none")
         self.assertIsNone(toki["operator"])
         self.assertIsNone(toki["port"])
-        for dropped in ("model", "effort", "tokenBudget", "pid", "uptime"):
+        # No [runtime] value and no harness file: the model and effort
+        # the next start would render are unknown, and null says so.
+        self.assertIsNone(wren["model"])
+        self.assertIsNone(wren["effort"])
+        for dropped in ("tokenBudget", "livenessTick", "cpu", "mem",
+                        "chatCount", "lastTick"):
             self.assertNotIn(dropped, wren)
 
     def test_liveness_chat_and_last_message_are_live_projections(self):
@@ -418,3 +423,115 @@ class TestTokens(ConsoleCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestModelAndEffort(ConsoleCase):
+    """The fleet row's model and effort are the values the next start
+    renders (cousin [runtime], else harness [agent] defaults, else
+    null); the two POST routes persist through spawn.persist_runtime
+    and say a restart is what applies them; the spawn options route
+    hands the dialog its catalogue and defaults."""
+
+    def _harness(self, text):
+        (self.root / "config" / "harness.toml").write_text(text)
+
+    def test_rows_carry_the_effective_model_and_effort(self):
+        self.cousin("wren", extra='\n[runtime]\neffort = "low"\n')
+        self.cousin("toki")
+        self._harness('[agent]\ndefault_model = "dm"\n'
+                      'default_effort = "high"\n')
+        self.serve()
+        rows = {r["slug"]: r for r in self.get("/api/cousins")[1]["cousins"]}
+        self.assertEqual((rows["wren"]["model"], rows["wren"]["effort"]),
+                         ("dm", "low"))
+        self.assertEqual((rows["toki"]["model"], rows["toki"]["effort"]),
+                         ("dm", "high"))
+
+    def test_effort_persists_and_asks_for_a_restart(self):
+        home = self.cousin("wren", extra='\n[runtime]\nsession_id = "abc"\n')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/effort",
+                                 {"effort": "max"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body, {"ok": True, "slug": "wren", "effort": "max",
+                                "restart_required": True})
+        data = tomllib.loads((home / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"], {"session_id": "abc",
+                                           "effort": "max"})
+        self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["effort"],
+                         "max")
+        for bad in ({"effort": "xhigh"}, {"effort": 3}, {}):
+            status, body = self.post("/api/cousins/wren/effort", bad)
+            self.assertEqual(status, 400, bad)
+            self.assertIn("effort", body["error"])
+        self.assertEqual(self.post("/api/cousins/nobody/effort",
+                                   {"effort": "low"})[0], 404)
+
+    def test_model_persists_and_asks_for_a_restart(self):
+        home = self.cousin("wren")
+        self.serve()
+        status, body = self.post("/api/cousins/wren/model",
+                                 {"model": "m-two"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body, {"ok": True, "slug": "wren", "model": "m-two",
+                                "restart_required": True})
+        data = tomllib.loads((home / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"]["model"], "m-two")
+        self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["model"],
+                         "m-two")
+        for bad in ({"model": "two words"}, {"model": ""}, {"model": 1}, {}):
+            status, body = self.post("/api/cousins/wren/model", bad)
+            self.assertEqual(status, 400, bad)
+            self.assertIn("model", body["error"])
+        self.assertEqual(self.post("/api/cousins/nobody/model",
+                                   {"model": "m"})[0], 404)
+
+    def test_spawn_options_without_a_harness_file(self):
+        from cousin_lib.config import DEFAULT_MODELS, EFFORT_LEVELS
+        self.serve()
+        status, body = self.get("/api/spawn/options")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["models"], list(DEFAULT_MODELS))
+        self.assertEqual(body["default_model"], DEFAULT_MODELS[0])
+        self.assertEqual(body["efforts"], list(EFFORT_LEVELS))
+        self.assertEqual(body["default_effort"], "high")
+        self.assertEqual(body["memory_scopes"], ["private", "shared", "both"])
+        self.assertEqual(body["default_memory_scope"], "private")
+        self.assertEqual(body["default_heartbeat"], 3600)
+
+    def test_spawn_options_from_the_harness_file(self):
+        self._harness('[agent]\ndefault_model = "m-two"\n'
+                      'default_effort = "low"\nmodels = ["m-one", "m-two"]\n')
+        self.serve()
+        status, body = self.get("/api/spawn/options")
+        self.assertEqual(body["models"], ["m-one", "m-two"])
+        self.assertEqual(body["default_model"], "m-two")
+        self.assertEqual(body["default_effort"], "low")
+
+    def test_spawn_body_carries_the_four_runtime_fields(self):
+        (self.root / "templates").mkdir()
+        (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
+            "# {{NAME}}\n{{ROLE_ONE_LINE}}\n{{VOICE_GUIDE}}\n")
+        self.serve()
+        status, body = self.post("/api/cousins", {
+            "slug": "toki", "role": "tester", "voice": "plain",
+            "port": 8123, "model": "m-one", "effort": "medium",
+            "heartbeat": 600, "memory_scope": "both"})
+        self.assertEqual(status, 201, body)
+        data = tomllib.loads(
+            (self.root / "cousins" / "toki" / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"], {"model": "m-one",
+                                           "effort": "medium"})
+        self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
+        self.assertEqual(data["memory"]["scope"], "both")
+        row = self.get("/api/cousins")[1]["cousins"][0]
+        self.assertEqual((row["model"], row["effort"], row["heartbeat"],
+                          row["memoryScope"]),
+                         ("m-one", "medium", 600, "both"))
+        for bad in ({"effort": "xhigh"}, {"memory_scope": "all"},
+                    {"heartbeat": 0}, {"heartbeat": "x"},
+                    {"model": "two words"}):
+            status, body = self.post("/api/cousins", {
+                "slug": "kiwi", "role": "r", "voice": "v", **bad})
+            self.assertEqual(status, 400, bad)
+            self.assertFalse((self.root / "cousins" / "kiwi").exists())

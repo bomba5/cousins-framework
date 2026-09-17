@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Console favicon: a plain terminal mark (a rounded tile with a prompt
+chevron and a cursor bar). No brand, no product name; recolour by editing
+the two fills. Pure SVG, rendered by modern browsers as the tab icon and
+by the manifest as the installed-app icon.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect x="2" y="2" width="28" height="28" rx="6" fill="#1b1d24" stroke="#c95a82" stroke-width="2" />
+  <path d="M9 10 L15 16 L9 22" fill="none" stroke="#f0e0e8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <rect x="17" y="20" width="7" height="3" rx="1" fill="#c95a82" />
+</svg>

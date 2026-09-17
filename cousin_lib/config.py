@@ -132,8 +132,10 @@ def harness_config(root):
     """config/harness.toml: where the agent harness keeps this install's
     session transcripts and its own auto-memory directory, and the
     transcript size (flip_when_transcript_mb) past which the loops
-    daemon requests a flip. Absent: None (transcript mining, the
-    harness memory collection and the size guard are all off).
+    daemon requests a flip, and settings_file, the harness's own
+    settings JSON that `cousin-mcp approve` edits. Absent: None
+    (transcript mining, the harness memory collection, the size guard
+    and scripted MCP approval are all off).
     Unparsable, or a threshold that is not a positive number: loud,
     because it was promised. Path values are templates; expand them
     per cousin with expand_harness_path."""
@@ -154,7 +156,8 @@ def harness_config(root):
             " positive number of megabytes, got %r" % (threshold,))
     return {"transcripts_dir": data.get("transcripts_dir"),
             "auto_memory_dir": data.get("auto_memory_dir"),
-            "flip_when_transcript_mb": threshold}
+            "flip_when_transcript_mb": threshold,
+            "settings_file": data.get("settings_file")}
 
 
 def expand_harness_path(template, home):

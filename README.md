@@ -13,7 +13,8 @@ remains before a tagged release is broader real-world exercise.
 ## What is in it
 
 Each subsystem is a `cousin_lib` module with its own CLI and a
-contract under `docs/`. Nothing here needs a third-party dependency.
+contract under `docs/`. Nothing here needs a third-party dependency;
+serving the tool surface over MCP is the one optional extra.
 
 | subsystem | CLI | contract |
 |---|---|---|
@@ -32,6 +33,7 @@ contract under `docs/`. Nothing here needs a third-party dependency.
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 | unattended operation: units, the fleet sweep, the tool-surface manifest | `cousin-sweep`, `cousin-tool-surface`, `systemd/` | `docs/operations.md` |
+| the same CLIs as tools over MCP stdio, provisioned at spawn | `cousin-mcp` | `docs/mcp-spec.md` |
 
 Two cross-cutting contracts shape the rest: `docs/operator-interface.md`
 (the operator is a subsystem, and every surface works without one) and
@@ -98,7 +100,8 @@ python3 -m unittest discover -s tests   # the suite includes the self-gate
 cousin-gate --root . --denylist /path/outside/any/tree
 ```
 
-Zero third-party dependencies; Python 3.11+.
+Zero third-party dependencies; Python 3.11+. The one optional extra,
+`pip install "cousin-framework[mcp]"`, is needed only to serve MCP.
 
 ## License
 

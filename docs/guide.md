@@ -207,6 +207,34 @@ ls cousins/testa/memory/raw/
 #   -> 2026-07-digest.jsonl  2026-08-digest.jsonl  2026-09-16.jsonl  archive/
 ```
 
+**Auditing the prompt cache:** the provider's prompt cache is
+prefix-matched, so a file that changes between turns and sits in the
+prefix silently invalidates everything after it. `cousin-cache-audit`
+reads the cousin's session transcripts through `config/harness.toml`
+(absent: exit 2 naming the seam), takes the per-turn usage fields from
+the assistant messages, and names the files under the home (and the
+harness auto-memory directory, when configured) whose mtime falls
+between two successive turns where the hit rate dropped. `--days`
+bounds the window (default 7, 0 for all), `--json` prints the report as
+one object, `--diagnose` adds the turn pair behind each suspect.
+
+```
+cousin-cache-audit --days 7
+#   -> testa: 412 turn(s) over 7 day(s)
+#      hit rate: 71.3%  [marginal]
+#      per turn: min 0.0%  median 96.2%  max 99.8%
+#      tokens: cache_read 9,812,004  input 210,331  cache_creation 3,740,116
+#      drops: 6 (hit rate fell by more than 10 points between successive turns)
+#      suspects (touched inside a drop window):
+#        cousins/testa/STATUS.md  (fell 97.1% -> 2.4%)
+#        cousins/testa/memory/MEMORY.md  (fell 95.8% -> 31.0%)
+#      recommendation: move volatile content after the cache breakpoint; ...
+
+cousin-cache-audit --diagnose
+#        cousins/testa/STATUS.md  (fell 97.1% -> 2.4%)
+#            between 2026-09-15T08:02:11.000Z and 2026-09-15T08:03:40.000Z, mtime ...
+```
+
 ## 3. Talk to a cousin
 
 To run a cousin as a live agent, tell the framework what command

@@ -181,3 +181,12 @@ daemon this repository already has, not a second copy of the backend.
   chat server delivered the recall line into the terminal while the stored message stayed bare, a halt was
   captured as a correction, the dry-run flip showed the transcript-mining stage, and the boot packet carried
   the distilled decision.
+- **2026-09-17, phase 1 landed** (c8ade59..HEAD on main): ready-file triggers and a transcript-size guard as
+  tick steps of the loops daemon (one owner; the daily flip stays the daemon's `flip_at` driver); session
+  bookends (`cousin-session`) and the three harness hooks; reincarnate and transplant with snapshots and an
+  audit log; the prompt-cache audit; the compaction sweep; the tool-surface manifest read into the boot
+  packet; systemd unit templates with placeholders; the operations guide. Suite 756 tests green, gate clean.
+  Acceptance on the scratch cousin: bookend hooks ran and were recorded; the hooks wrote their checkpoints;
+  the tool surface listed 29 scripts and reached the packet; the sweep ran; the cache audit read a real
+  6 MB transcript (98.6 percent hit rate); three daemon ticks consumed a heartbeat and a message ready file,
+  delivered the message into the pane, and the size guard queued one flip request with its 5-minute warning.

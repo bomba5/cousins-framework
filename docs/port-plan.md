@@ -212,3 +212,15 @@ The procedure is .
   tests green, gate clean. Live: the console served on the scratch install, the operator logged in from a
   browser, listed the fleet, sent a chat message that reached the cousin's pane; one bug found and fixed on
   the way (the unread dot compared two differently spelled keys).
+- **2026-09-17, phase 5 by hand** (f063aa3 on main): a real install (its own venv, config/, user units for
+  loops, console, watchdog and tool surface). One cousin transferred from the old instance: memory tree,
+  decisions, state files and CLAUDE.md voice copied, index rebuilt from scratch, MCP approved, started
+  through the console. Verified live: a meaning query ranks the right memory file at 0.62 cosine, flip
+  dry-run assembles a 5.7k-token packet with no degraded section, a console chat message reached the pane
+  and the reply came back through the new chat server in 15 s, the loops daemon injected the first
+  heartbeat. One defect found before the start: a plain start (console, `cousin-spawn --start`) passed
+  the agent command verbatim, so a `{session_id}` placeholder reached the agent unrendered; only flip
+  substituted. Fixed at the single spawn site with canary tests (1190 tests, gate clean). A second cousin
+  spawned fresh on the same install booted and answered its first heartbeat. The old instance keeps the
+  transferred cousin's home on disk with `auto_start = false`; a cross-instance gap remains: peers on the
+  old instance cannot reach a cousin that moved.

@@ -190,3 +190,14 @@ daemon this repository already has, not a second copy of the backend.
   the tool surface listed 29 scripts and reached the packet; the sweep ran; the cache audit read a real
   6 MB transcript (98.6 percent hit rate); three daemon ticks consumed a heartbeat and a message ready file,
   delivered the message into the pane, and the size guard queued one flip request with its 5-minute warning.
+- **2026-09-17, phase 2 landed** (ac49703..HEAD on main): chat-pattern hooks evaluated by the chat server
+  (shell handlers detached and reaped, inject handlers as their own `fw-hook` line, outside paths refused);
+  the chat-server watchdog with its unit template; the MCP adapter (stdlib core, registry by console-script
+  name, `--selftest`, `approve` through the harness settings seam, the 1.x SDK as an optional extra) and
+  per-cousin provisioning at spawn (`--operator`). Presence and engagement were dropped by the operator.
+  Suite 909 tests green, gate clean. Live run on the scratch install: a message matching two hooks produced
+  the injected line in the pane and the shell hook's marker file; the watchdog respawned a killed chat
+  server and got a healthy answer; a real MCP stdio client listed four tools and logged a decision through
+  the adapter. Two defects the live run caught: the chat server had no `__main__` guard, so every `-m`
+  launcher (spawn, watchdog) reported success having started nothing; and the 2.x MCP SDK changed the
+  server API, so the extra pins 1.x.

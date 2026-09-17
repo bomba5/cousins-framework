@@ -25,9 +25,78 @@ from cousin_lib.trace import traced_cli
 DECISIONS_ROTATE_BYTES = 1_000_000
 DECISIONS_KEEP_TAIL = 200
 
+# The durable layer: six files the distiller regenerates from raw. A
+# file with nothing to say holds STUB_TEXT, and every reader treats the
+# stub as empty.
+DISTILLED_FILES = (
+    "preferences.md", "project-facts.md", "decisions.md",
+    "known-failures.md", "operator-calibration.md", "glossary.md",
+)
+STUB_TEXT = "_(empty - awaiting distillation)_"
+DEFAULT_TRUTH_LEVEL = "cousin-conclusion"
+
 
 class _NoContext(Exception):
     pass
+
+
+def raw_dir(home):
+    return Path(home) / "memory" / "raw"
+
+
+def distilled_dir(home):
+    return Path(home) / "memory" / "distilled"
+
+
+def ensure_layout(home):
+    """memory/raw and memory/distilled with the six stubs. Never touches
+    a file that exists."""
+    raw_dir(home).mkdir(parents=True, exist_ok=True)
+    ddir = distilled_dir(home)
+    ddir.mkdir(parents=True, exist_ok=True)
+    for fname in DISTILLED_FILES:
+        path = ddir / fname
+        if not path.exists():
+            title = fname.replace(".md", "").replace("-", " ").title()
+            path.write_text("# %s\n\n%s\n" % (title, STUB_TEXT))
+
+
+def entry_timestamp(entry):
+    """Epoch seconds of a raw entry, or None when it has no parsable
+    stamp. _append_raw writes `timestamp`; `created_at` is accepted for
+    entries other producers bring in."""
+    stamp = entry.get("timestamp") or entry.get("created_at") or ""
+    try:
+        return datetime.fromisoformat(str(stamp)).timestamp()
+    except ValueError:
+        return None
+
+
+def list_raw(home, since_days=30):
+    """Raw entries from the last N days across every memory/raw/*.jsonl
+    (daily files and monthly digests). Uncertainty keeps: an entry with
+    no parsable stamp is never treated as old."""
+    home = Path(home)
+    ensure_layout(home)
+    cutoff = datetime.now(timezone.utc).timestamp() - since_days * 86400
+    out = []
+    for path in sorted(raw_dir(home).glob("*.jsonl")):
+        try:
+            lines = path.read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            when = entry_timestamp(entry)
+            if when is not None and when < cutoff:
+                continue
+            out.append(entry)
+    return out
 
 
 def _home(args):
@@ -83,8 +152,53 @@ def _rotate_decisions_if_needed(path):
     return archive
 
 
+def parse_decide_stdin(text):
+    """Split a decide body into (topic, decision, reasoning).
+
+    Chunks are separated by a line that is exactly `---`. Nothing inside
+    a chunk is interpreted: a quoted heredoc into stdin cannot be
+    expanded by any shell, which is the point - backticks and $() in
+    decision prose get executed by the CALLER's shell on the argv path.
+    """
+    chunks, current = [], []
+    for line in text.split("\n"):
+        if line.strip() == "---":
+            chunks.append("\n".join(current).strip())
+            current = []
+        else:
+            current.append(line)
+    chunks.append("\n".join(current).strip())
+    if len(chunks) != 3:
+        raise ValueError(
+            "decide --stdin needs 3 chunks separated by a line of exactly"
+            " '---' (topic, decision, reasoning); got %d" % len(chunks))
+    if not all(chunks):
+        raise ValueError("decide --stdin: no chunk may be empty")
+    return chunks[0], chunks[1], chunks[2]
+
+
+_DECIDE_USAGE = (
+    "Usage: cousin-memory decide TOPIC DECISION REASONING\n"
+    "   or: cousin-memory decide --stdin <<'EOF'\n"
+    "       topic\n       ---\n       decision\n       ---\n"
+    "       reasoning\n       EOF")
+
+
 def _cmd_decide(args):
     home = _home(args)
+    topic, decision, reasoning = args.topic, args.decision, args.reasoning
+    if getattr(args, "stdin", False):
+        try:
+            topic, decision, reasoning = parse_decide_stdin(sys.stdin.read())
+        except ValueError as err:
+            print("error: %s" % err, file=sys.stderr)
+            return 2
+    if not (topic and decision and reasoning):
+        print(_DECIDE_USAGE, file=sys.stderr)
+        return 2
+    # The resolved values replace the originals so the rest of decide
+    # (the raw bridge included) never reads an unresolved argument.
+    args.topic, args.decision, args.reasoning = topic, decision, reasoning
     entry = {
         # Aware local time: raw-memory entries are UTC-aware and boot
         # staleness math compares the two.
@@ -106,7 +220,7 @@ def _cmd_decide(args):
         _append_raw(home, {
             "topic": args.topic,
             "content": "%s - why: %s" % (args.decision, args.reasoning),
-            "truth_level": "cousin-conclusion",
+            "truth_level": DEFAULT_TRUTH_LEVEL,
             "source": "decision",
         })
     except OSError as err:
@@ -157,12 +271,36 @@ def _cmd_activity(args):
     return 0
 
 
+def _run_distill(home, max_lines=None):
+    from cousin_lib import distill
+
+    kwargs = {}
+    if max_lines:
+        kwargs["max_lines"] = max_lines
+    report = distill.distill(home, **kwargs)
+    print("distilled %d topics from %d raw entries:"
+          % (report["topics"], report["entries"]))
+    for fname, count in report["files"].items():
+        print("  %s: %d" % (fname, count))
+    return 0
+
+
+def _cmd_distill(args):
+    """Regenerate memory/distilled/*.md from memory/raw. Deterministic
+    and idempotent; the boot assembler runs it too, so a manual run is
+    for inspection or after bulk raw edits."""
+    home = _home(args)
+    return _run_distill(home, max_lines=args.max_lines)
+
+
 def _cmd_consolidate(args):
     """Topics with 3+ entries across the real memory sources - the
-    decisions log and memory/raw - are promotion candidates. Read-only.
-    (Counting sources nothing writes reports 'no candidates' forever;
-    that was a real bug, and why the sources here are exactly the two
-    the producers feed.)"""
+    decisions log and memory/raw - are promotion candidates. (Counting
+    sources nothing writes reports 'no candidates' forever; that was a
+    real bug, and why the sources here are exactly the two the
+    producers feed.) Consolidation is a mechanism, not a reminder: the
+    distiller then rebuilds memory/distilled/ from raw right here, so
+    consolidate promotes instead of only suggesting."""
     home = _home(args)
     counts = Counter()
     latest = defaultdict(str)
@@ -199,13 +337,13 @@ def _cmd_consolidate(args):
     if not candidates:
         print("no promotion candidates (topics with 3+ entries across"
               " decisions.jsonl + memory/raw/)")
-        return 0
-    print("promotion candidates (3+ entries; consider promoting to the"
-          " memory index):")
-    for topic, count in candidates[:15]:
-        print("  %3dx  %s" % (count, topic))
-        print("        latest: %s" % latest[topic])
-    return 0
+    else:
+        print("promotion candidates (3+ entries; consider promoting to"
+              " the memory index):")
+        for topic, count in candidates[:15]:
+            print("  %3dx  %s" % (count, topic))
+            print("        latest: %s" % latest[topic])
+    return _run_distill(home)
 
 
 def _cmd_search(args):
@@ -235,6 +373,19 @@ def _cmd_compact(args):
     from cousin_lib import compact
 
     home = _home(args)
+    if args.target == "raw":
+        from cousin_lib import raw_fold
+
+        if args.dry_run:
+            print("raw: dry-run not supported; the fold is lossless"
+                  " (archive/<month>.jsonl.gz keeps every byte)")
+            return 0
+        kwargs = {}
+        if args.hot_days is not None:
+            kwargs["keep_days"] = args.hot_days
+        print("raw: %s" % json.dumps(raw_fold.fold_raw(home, **kwargs),
+                                     sort_keys=True))
+        return 0
     kwargs = {"dry_run": args.dry_run}
     if args.budget is not None:
         kwargs["budget"] = args.budget
@@ -286,12 +437,25 @@ def memory_main(argv=None):
     p.set_defaults(func=_cmd_reindex)
     p = sub.add_parser(
         "compact",
-        help="retire old reachable pointers from MEMORY.md until it"
-             " fits the byte budget; hygiene, never deletion")
+        help="index: retire old reachable pointers from MEMORY.md until"
+             " it fits the byte budget (hygiene, never deletion);"
+             " raw: fold daily raw files older than the hot window into"
+             " monthly gzip archives plus a per-topic digest (lossless)")
+    p.add_argument("--target", choices=["index", "raw"], default="index")
     p.add_argument("--budget", type=int, default=None)
-    p.add_argument("--hot-days", type=int, default=None)
+    p.add_argument("--hot-days", type=int, default=None,
+                   help="index: pointers newer than this never move;"
+                        " raw: days of daily files kept unfolded")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=_cmd_compact)
+    p = sub.add_parser(
+        "distill",
+        help="rebuild memory/distilled/*.md from memory/raw (newest"
+             " entry per topic, bounded, curated text above the marker"
+             " kept); the boot assembler runs this too")
+    p.add_argument("--max-lines", type=int, default=None,
+                   help="lines per distilled file (default 40)")
+    p.set_defaults(func=_cmd_distill)
     p = sub.add_parser(
         "propose-shared",
         help="nominate marked shareable memories into the shared"
@@ -300,9 +464,13 @@ def memory_main(argv=None):
     p.add_argument("--commit", action="store_true")
     p.set_defaults(func=_cmd_propose_shared)
     p = sub.add_parser("decide")
-    p.add_argument("topic")
-    p.add_argument("decision")
-    p.add_argument("reasoning")
+    p.add_argument("topic", nargs="?")
+    p.add_argument("decision", nargs="?")
+    p.add_argument("reasoning", nargs="?")
+    p.add_argument("--stdin", action="store_true",
+                   help="read topic, decision and reasoning from stdin,"
+                        " separated by a line that is exactly '---'"
+                        " (a quoted heredoc cannot be shell-expanded)")
     p.set_defaults(func=_cmd_decide)
     p = sub.add_parser("recall")
     p.add_argument("keyword", nargs="?", default="")
@@ -311,7 +479,10 @@ def memory_main(argv=None):
     p = sub.add_parser("activity")
     p.add_argument("text", nargs="*")
     p.set_defaults(func=_cmd_activity)
-    p = sub.add_parser("consolidate")
+    p = sub.add_parser(
+        "consolidate",
+        help="list recurring topics, then rebuild memory/distilled/"
+             " from raw (runs distill)")
     p.set_defaults(func=_cmd_consolidate)
     args = parser.parse_args(argv)
     try:

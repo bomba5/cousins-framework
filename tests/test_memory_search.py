@@ -1,9 +1,11 @@
-"""Keyword memory search: FTS index, sanitize, staleness.
+"""Keyword memory search: FTS index, sanitize, staleness, collections
+and the CLI surface.
 
-The v1 tier is keyword-only (SQLite FTS5, BM25); semantic search is
-the declared M2 seam and nothing here pretends otherwise. Real
-databases over real files.
+The keyword leg (SQLite FTS5, BM25) is what every install has; the
+semantic leg is tested in test_semantic_search. Real databases over
+real files.
 """
+import json
 import os
 import pathlib
 import tempfile
@@ -13,6 +15,7 @@ from unittest import mock
 
 from cousin_lib.config import MissingConfigError
 from cousin_lib.memory_search import build_index, search
+from tests._fakes import fake_embedder
 
 
 class SearchCase(unittest.TestCase):
@@ -93,6 +96,94 @@ class TestCliWiring(SearchCase):
         rc, out, _ = self._main(["reindex"])
         self.assertEqual(rc, 0)
         self.assertIn("indexed", out.lower())
+
+    def test_search_json_prints_a_list_of_hits(self):
+        rc, out, _ = self._main(["search", "claimed set port", "--json"])
+        self.assertEqual(rc, 0)
+        hits = json.loads(out)
+        self.assertIsInstance(hits, list)
+        self.assertIn("ports.md", hits[0]["path"])
+        self.assertEqual(set(hits[0]),
+                         {"path", "collection", "score", "snippet", "chunk"})
+
+    def test_search_json_with_no_hits_is_an_empty_list(self):
+        rc, out, _ = self._main(["search", "zzz-nothing-here", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out), [])
+
+    def test_search_collection_filters(self):
+        rc, out, _ = self._main(["search", "verified identity write",
+                                 "--collection", "notes", "--json"])
+        self.assertEqual(rc, 0)
+        hits = json.loads(out)
+        self.assertTrue(hits)
+        self.assertTrue(all(h["collection"] == "notes" for h in hits))
+        rc, out, _ = self._main(["search", "verified identity write",
+                                 "--collection", "memory", "--json"])
+        self.assertEqual(json.loads(out), [])
+
+    def test_reindex_reports_embedding_work_when_configured(self):
+        root = self.home.parent.parent
+        (root / "config").mkdir()
+        with fake_embedder() as url, \
+                mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+            (root / "config" / "embedding.toml").write_text(
+                'url = "%s"\nmodel = "m"\ntimeout_s = 2\n' % url)
+            rc, out, err = self._main(["reindex"])
+        self.assertEqual(rc, 0)
+        self.assertIn("indexed 2 file(s)", out)
+        self.assertIn("embedded 2 chunk(s)", out)
+        self.assertEqual(err, "")
+
+
+class TestCollections(SearchCase):
+    def test_collection_filter_on_the_keyword_leg(self):
+        hits, _ = search("verified identity write", collection="memory")
+        self.assertEqual(hits, [])
+        hits, _ = search("verified identity write", collection="notes")
+        self.assertTrue(hits)
+        self.assertTrue(all(h["collection"] == "notes" for h in hits))
+
+    def _root_with_harness(self, template):
+        root = self.home.parent.parent
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "harness.toml").write_text(
+            'auto_memory_dir = "%s"\n' % template)
+        return root
+
+    def test_harness_collection_when_configured_and_present(self):
+        root = self._root_with_harness(
+            str(self.home.parent.parent / "harness") + "/{home_encoded}/memory")
+        encoded = str(self.home).replace("/", "-")
+        harness = root / "harness" / encoded / "memory"
+        harness.mkdir(parents=True)
+        (harness / "feedback_terse.md").write_text(
+            "# Terse replies\n\nquokka preference: short statuses.\n")
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+            hits, _ = search("quokka")
+            self.assertTrue(hits)
+            self.assertEqual(hits[0]["collection"], "harness")
+            self.assertIn("feedback_terse.md", hits[0]["path"])
+            only, _ = search("quokka", collection="harness")
+            self.assertEqual([h["path"] for h in only],
+                             [hits[0]["path"]])
+
+    def test_harness_collection_absent_when_directory_missing(self):
+        root = self._root_with_harness(
+            str(self.home.parent.parent / "nowhere") + "/{home_encoded}")
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+            hits, notice = search("claimed set port")
+        self.assertIsNone(notice)
+        self.assertTrue(all(h["collection"] != "harness" for h in hits))
+
+    def test_no_root_means_own_files_only(self):
+        # Without FRAMEWORK_ROOT there is no config/ to consult: the
+        # searchable surface is memory/ and notes/, nothing else.
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ["COUSIN_HOME"] = str(self.home)
+            hits, notice = search("claimed set port")
+        self.assertIsNone(notice)
+        self.assertEqual({h["collection"] for h in hits}, {"memory"})
 
 
 if __name__ == "__main__":

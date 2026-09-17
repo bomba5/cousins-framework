@@ -7,7 +7,7 @@ memory, so a missing COUSIN_HOME is a refusal with a message, never a
 fallback.
 
 Search and reindex dispatch to the keyword search module
-(cousin_lib.memory_search); the semantic tier is the declared M2 seam.
+(cousin_lib.memory_search): keyword always, semantic when configured.
 """
 import argparse
 import json
@@ -351,11 +351,15 @@ def _cmd_search(args):
 
     home = _home(args)
     hits, notice = memory_search.search(args.query, top=args.top,
-                                        home=home)
-    memory_search.print_results(hits)
+                                        home=home,
+                                        collection=args.collection)
+    if args.json:
+        print(json.dumps(hits))
+    else:
+        memory_search.print_results(hits)
     if notice:
         # The degrade contract: a promised-but-dead semantic leg is
-        # never silent.
+        # never silent. stderr, so --json output stays parseable.
         print("notice: %s" % notice, file=sys.stderr)
     return 0
 
@@ -366,6 +370,20 @@ def _cmd_reindex(args):
     home = _home(args)
     count = memory_search.build_index(home)
     print("indexed %d file(s)" % count)
+    config = memory_search._embedding_config()
+    if config is None:
+        return 0
+    if config == "broken":
+        print("notice: embedding config exists but is unusable; vector"
+              " index not rebuilt", file=sys.stderr)
+        return 0
+    report = memory_search.ensure_index(home, config, force=True)
+    print("embedded %d chunk(s), %d failed" % (report["embedded"],
+                                                report["failed"]))
+    if report["failed"]:
+        print("notice: embedding service failed for %d chunk(s); prior"
+              " vectors kept where available" % report["failed"],
+              file=sys.stderr)
     return 0
 
 
@@ -432,6 +450,10 @@ def memory_main(argv=None):
     p = sub.add_parser("search")
     p.add_argument("query")
     p.add_argument("--top", type=int, default=5)
+    p.add_argument("--collection", default=None,
+                   help="limit to one of memory, notes, harness")
+    p.add_argument("--json", action="store_true",
+                   help="print the hits as a JSON list")
     p.set_defaults(func=_cmd_search)
     p = sub.add_parser("reindex")
     p.set_defaults(func=_cmd_reindex)

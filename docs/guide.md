@@ -46,10 +46,22 @@ echo "The espresso machine needs descaling every 200 shots." \
 
 cousin-memory search "descaling"
 #   -> 1. [memory] .../upkeep.md  "...needs [descaling] every 200 shots."
+
+cousin-memory search "descaling" --json
+#   -> [{"path": ".../upkeep.md", "collection": "memory",
+#        "score": 0.0167, "snippet": "...", "chunk": 0}]
+
+cousin-memory search "descaling" --collection notes
+#   -> no matches        (upkeep.md lives in memory/, not notes/)
 ```
 
 `memory/` and `notes/` are the searched surface; writing elsewhere
-means search cannot find it. `decide` also drops a raw-memory
+means search cannot find it. Each is a collection (`memory`, `notes`),
+and `--collection` limits a search to one. A third collection,
+`harness`, appears when `config/harness.toml` names the agent
+harness's own auto-memory directory and that directory exists. `--json`
+prints the hits as a list for scripts; a degrade notice, if any, goes
+to stderr so the JSON stays parseable. `decide` also drops a raw-memory
 candidate so the session-end audit and the boot packet have a
 producer. Search is keyword-first and needs nothing installed.
 
@@ -64,9 +76,16 @@ timeout_s = 30
 ```
 
 With it, `cousin-memory search "coffee upkeep"` finds `upkeep.md` by
-meaning even though "coffee" is nowhere in it. If the service is
-configured but unreachable, search degrades to keyword **and says
-so** - it never quietly pretends you have semantic recall you do not.
+meaning even though "coffee" is nowhere in it. Long files are embedded
+in overlapping chunks, so a fact deep in a note is findable and the hit
+names the chunk. The vector index (`memory/embeddings.json`) heals
+itself on every search: only new or changed text is embedded, the rest
+is reused, deleted files drop out. If the service is configured but
+unreachable, search degrades to keyword **and says so** - it never
+quietly pretends you have semantic recall you do not; if it fails on
+some files mid-pass, their previous vectors are kept and the notice
+says how many. `cousin-memory reindex` rebuilds the keyword index and,
+when the service is configured, re-embeds everything.
 
 Three small memory tools round out the surface. A cousin keeps its own
 library of moments worth calling back to; the file lives under

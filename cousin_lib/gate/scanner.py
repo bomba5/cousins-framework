@@ -279,6 +279,10 @@ class Scanner:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
             for name in sorted(filenames):
+                if name == ".git":
+                    # a worktree's pointer file: git plumbing carrying the
+                    # main checkout's absolute path, never tree content
+                    continue
                 path = Path(dirpath) / name
                 rel = path.relative_to(root).as_posix()
                 raw = path.read_bytes()

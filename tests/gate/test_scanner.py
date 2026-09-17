@@ -190,3 +190,18 @@ class TestTreeScanning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorktreePointer(unittest.TestCase):
+    def test_a_dot_git_file_is_skipped_like_the_directory(self):
+        # a git worktree has a .git FILE ("gitdir: /abs/path/...") that
+        # carries the main checkout's absolute path; it is git plumbing,
+        # not tree content, and must not fail the gate.
+        import tempfile
+        from pathlib import Path
+        from cousin_lib.gate.scanner import Scanner
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / ".git").write_text("gitdir: /home/someone/checkout/.git/worktrees/x\n")
+            (Path(root) / "ok.py").write_text("x = 1\n")
+            hits = Scanner().scan_tree(Path(root))
+            self.assertEqual(hits, [])

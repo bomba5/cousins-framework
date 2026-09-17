@@ -108,6 +108,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |
 | `cousin-telegram` | bridge your chat to Telegram, if configured | per-cousin `[telegram]` in cousin.toml; off until a token and operator are set |
 | `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |
+| `cousin-spawn-node` | build the copy-over archive for a cousin on another machine (a hive node) | operator-run; the archive carries a bearer token and is moved by hand, never pushed |
 | `cousin-ui` | the web console over the framework (operator-run) | `cousin-ui --port 8600`; a view, never a source of truth |
 | `cousin-cache-audit` | prompt-cache hit rate and the files that likely invalidated it, read from the harness transcripts (operator-run) | `cousin-cache-audit --days 7` · `cousin-cache-audit --diagnose`; off until config/harness.toml names transcripts_dir |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |

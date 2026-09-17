@@ -29,7 +29,7 @@ serving the tool surface over MCP is the one optional extra.
 | job + sub-agent tracking | `cousin-job` | - |
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
-| hive: cross-machine cousins over an authed bus | `cousin-hive` | `docs/hive-spec.md` |
+| hive: cross-machine cousins over an authed bus, and the copy-over node archive | `cousin-hive`, `cousin-spawn-node` | `docs/hive-spec.md`, `docs/deploying-a-node.md` |
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 | unattended operation: units, the fleet sweep, the tool-surface manifest | `cousin-sweep`, `cousin-tool-surface`, `systemd/` | `docs/operations.md` |

@@ -72,6 +72,12 @@ machine and moves the token. There is no remote-push spawn in v1 - a
 framework that could install itself on another machine on the
 operator's behalf is a larger trust surface than the hive needs, and
 it ships as a documented manual step or not at all.
+`cousin-spawn-node` is that manual step made repeatable: it mints the
+token in the queen's store, renders the node's identity, and writes
+one archive the operator moves and installs by hand
+(`docs/deploying-a-node.md`). The node runtime it ships is stdlib
+only, speaks the routes above with its bearer token, and keeps its own
+chat surface in this framework's shapes.
 
 ## Unconfigured / failure behavior
 

@@ -20,6 +20,7 @@ REQUIRED_UNITS = {
     "cousin-sweep.service", "cousin-sweep.timer",
     "cousin-tool-surface.service", "cousin-tool-surface.timer",
     "cousin-chat-server@.service",
+    "cousin-chat-watchdog.service", "cousin-chat-watchdog.timer",
 }
 PLACEHOLDERS = {"ROOT", "USER_BIN", "SYSTEM_PATH"}
 _ABS_PATH = re.compile(r'(?:^|[=:\s"\'])/[A-Za-z0-9_]')
@@ -128,6 +129,14 @@ class TestEachUnit(unittest.TestCase):
         self.assertTrue(sweep.startswith(("weekly", "Sun", "Mon", "Sat")),
                         sweep)
         self.assertTrue(daily.startswith(("daily", "*-*-*")), daily)
+
+    def test_chat_watchdog_runs_every_ten_minutes(self):
+        timer = _parse(_UNITS / "cousin-chat-watchdog.timer")["Timer"]
+        self.assertEqual(timer["OnCalendar"], "*:0/10")
+        service = _parse(_UNITS / "cousin-chat-watchdog.service")["Service"]
+        self.assertEqual(service["Type"], "oneshot")
+        self.assertEqual(service["ExecStart"],
+                         "{{USER_BIN}}/cousin-chat-watchdog")
 
     def test_chat_server_template_takes_the_slug_as_instance(self):
         text = (_UNITS / "cousin-chat-server@.service").read_text()

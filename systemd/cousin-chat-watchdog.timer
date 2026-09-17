@@ -1,0 +1,10 @@
+[Unit]
+Description=cousin-framework chat-server watchdog, every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

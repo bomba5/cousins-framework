@@ -41,6 +41,7 @@ cousin-hive = "cousin_lib.hive:hive_main"
 cousin-cache-audit = "cousin_lib.cache_audit:cache_audit_main"
 cousin-sweep = "cousin_lib.sweep:sweep_main"
 cousin-tool-surface = "cousin_lib.tool_surface:tool_surface_main"
+cousin-chat-watchdog = "cousin_lib.chat_watchdog:watchdog_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

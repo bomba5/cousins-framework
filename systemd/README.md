@@ -20,6 +20,7 @@ any absolute path in this directory.
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both` over every cousin home | weekly, Sunday 05:30 |
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily, 06:00 |
 | `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the instance name after `@` | always on, one instance per cousin |
+| `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: one ensure pass over every cousin; spawns a missing chat server, alerts on a sick one, never kills | every 10 minutes |
 
 Every service carries the two environment facts the framework needs
 (`FRAMEWORK_ROOT`, and a `PATH` that finds the wrappers first) and runs
@@ -43,6 +44,7 @@ grep -l '{{' ~/.config/systemd/user/cousin-* && echo "unsubstituted placeholder"
 systemctl --user daemon-reload
 systemctl --user enable --now cousin-loops.service
 systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer
+systemctl --user enable --now cousin-chat-watchdog.timer          # spawn/flip-owned servers
 systemctl --user enable --now cousin-chat-server@testa.service   # per cousin
 ```
 
@@ -63,3 +65,12 @@ themselves, detached. Use `cousin-chat-server@<slug>.service` only when
 you want systemd to own that lifetime instead; never both, since two
 servers on one port make the second one fail and the first one look
 like the survivor. See `docs/operations.md`.
+
+`cousin-chat-watchdog.timer` is the supervisor for the spawn/flip-owned
+case: every ten minutes it spawns a server for any running cousin whose
+port is free and logs an alert (never a kill) when the port is occupied
+but `/health` does not answer with the cousin's slug. With the
+`cousin-chat-server@` units, systemd already restarts the server, so
+leave the watchdog timer disabled. If your agent sessions live on a
+non-default tmux socket, add `Environment=COUSIN_TMUX_SOCKET=<path>` to
+the watchdog service, the same seam the chat server reads.

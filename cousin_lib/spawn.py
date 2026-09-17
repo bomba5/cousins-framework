@@ -21,6 +21,7 @@ from cousin_lib.config import (
     FrameworkConfig,
     MissingConfigError,
 )
+from cousin_lib.mcp_server import provision_mcp
 from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
@@ -69,9 +70,10 @@ def _toml_quote(value):
     return '"%s"' % value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _write_cousin_toml(home, *, slug, name, role, port):
+def _write_cousin_toml(home, *, slug, name, role, port, operator=None):
     """Write via a temporary file, re-parse, then rename into place: a
-    config that cannot be read back is never persisted."""
+    config that cannot be read back is never persisted. The [operator]
+    table exists only when one was configured."""
     text = (
         "[cousin]\n"
         "slug = %s\n"
@@ -83,6 +85,8 @@ def _write_cousin_toml(home, *, slug, name, role, port):
         % (_toml_quote(slug), _toml_quote(name), _toml_quote(role),
            port, _toml_quote(slug))
     )
+    if operator:
+        text += "\n[operator]\nname = %s\n" % _toml_quote(operator)
     tomllib.loads(text)
     fd, tmp = tempfile.mkstemp(dir=home, suffix=".toml.tmp")
     with os.fdopen(fd, "w") as fh:
@@ -102,11 +106,12 @@ def _write_identity_files(home, *, claude_md, name, role):
 
 
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
-                  voice=None, port=None, template_path=None,
+                  voice=None, port=None, template_path=None, operator=None,
                   _is_live=_is_live):
     """The creation sequence from the spec: validate, allocate, create,
-    write atomically, render - and on any failure after the home exists,
-    remove everything this run created. Returns {slug, home, port}."""
+    write atomically, render, provision the MCP adapter - and on any
+    failure after the home exists, remove everything this run created.
+    Returns {slug, home, port}."""
     root = FrameworkConfig(root).root
     if not slug or not _SLUG_RE.match(slug):
         raise SpawnError(
@@ -149,9 +154,14 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         for sub in ("memory", "data", "notes", "scripts"):
             (home / sub).mkdir(parents=True)
         _write_cousin_toml(home, slug=slug, name=name, role=role,
-                           port=port)
+                           port=port, operator=operator)
         _write_identity_files(home, claude_md=claude_md, name=name,
                               role=role)
+        # The harness-side registration of the cousin's tool surface:
+        # the registry (default, operator filled) and the .mcp.json
+        # that points the harness at it. Approval is a separate,
+        # operator-run step (cousin-mcp approve).
+        provision_mcp(home, root=root, slug=slug, operator=operator)
     except Exception as err:
         # The partial state is the one that squats a slug; a failed
         # create leaves nothing.
@@ -240,6 +250,10 @@ def spawn_main(argv=None):
                         help="the authored voice guide; a cousin is "
                              "never shipped without one")
     parser.add_argument("--port", type=int)
+    parser.add_argument("--operator",
+                        help="the operator's name: written to cousin.toml"
+                             " [operator] and named in the cousin's MCP"
+                             " registry so `send` can reach them")
     parser.add_argument("--start", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -251,7 +265,7 @@ def spawn_main(argv=None):
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,
             role_paragraph=args.role_paragraph, voice=args.voice,
-            port=args.port,
+            port=args.port, operator=args.operator,
         )
     except SpawnError as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)

@@ -1,0 +1,134 @@
+# config/mcp-registry.toml.example - the framework's default MCP tool
+# registry. Spec: docs/mcp-spec.md.
+#
+# This file is the default: cousin-spawn copies it into every new
+# cousin's home as <home>/mcp-registry.toml (with the operator filled
+# in when spawn was given one), and cousin-mcp reads it when no
+# --registry is passed and the cousin home carries none. To change the
+# default for one install, copy it to config/mcp-registry.toml and
+# edit that; the example is never edited in place.
+#
+# Every command is a console-script NAME. cousin-mcp resolves a bare
+# name beside the interpreter it runs under first, then on PATH, so on
+# a machine carrying two installs of these CLIs the one this
+# interpreter belongs to wins. A registry may still name an absolute
+# path where that is the clearer rule.
+#
+# The adapter has no built-in tool list: what is here is what a cousin
+# gets. Operator-class verbs (spawn, flip, lifecycle surgery, loop
+# control, shared-tier review) are absent on purpose and stay absent.
+# Never register a CLI that runs a shell on its input.
+
+ceiling = 12          # more enabled tools than this is a registry error
+timeout = 120         # seconds per call
+max_output = 16000    # characters of stdout returned per call; the rest is cut and said
+
+[tools.memory]
+command = "cousin-memory"
+description = "Durable memory: search what you wrote, log a decision with its reasoning, recall past decisions, checkpoint your current activity."
+
+[tools.memory.properties]
+query = { type = "string", description = "search text (search)" }
+top = { type = "integer", description = "max results (search)" }
+collection = { type = "string", enum = ["memory", "notes", "harness"], description = "limit to one collection (search)" }
+json = { type = "boolean", description = "hits as a JSON list (search)" }
+topic = { type = "string", description = "decision topic (decide)" }
+decision = { type = "string", description = "the decision (decide)" }
+reasoning = { type = "string", description = "why (decide)" }
+keyword = { type = "string", optional = true, description = "filter (recall)" }
+last = { type = "integer", description = "how many entries (recall)" }
+text = { type = "string", description = "what you are doing now (activity)" }
+
+[tools.memory.commands.search]
+argv = ["search", "{query}"]
+options = { top = "--top", collection = "--collection", json = "--json" }
+
+[tools.memory.commands.decide]
+argv = ["decide", "--stdin"]
+stdin = ["topic", "decision", "reasoning"]
+stdin_sep = "---"
+
+[tools.memory.commands.recall]
+argv = ["recall", "{keyword}"]
+options = { last = "--last" }
+
+[tools.memory.commands.activity]
+argv = ["activity", "{text}"]
+
+[tools.send]
+kind = "send"
+description = "Send a message to a peer cousin (by slug) or to a configured operator (by name). The destination decides the delivery path; an unknown destination is an error, never a default. A cousin absent from the peer list is not reachable here."
+operators = []
+peers_from = ["cousin-chat", "list"]
+# false makes an unknown-destination error give a COUNT of known peers
+# instead of their names, for an install whose peer list carries a
+# name a caller must not learn.
+errors_name_peers = true
+
+[tools.send.properties]
+to = { type = "string", description = "peer slug or configured operator name" }
+text = { type = "string", description = "message body, verbatim" }
+
+[tools.send.commands.peer]
+command = "cousin-chat"
+argv = ["send", "{to}", "{text}"]
+
+[tools.send.commands.operator]
+command = "cousin-reply"
+options = { to = "--user" }
+stdin = ["text"]
+
+[tools.job]
+command = "cousin-job"
+description = "Track sub-agents and background work: start, done, fail, list, show."
+
+[tools.job.properties]
+kind = { type = "string", enum = ["subagent", "shell", "build", "other"], description = "(start)" }
+title = { type = "string", description = "(start)" }
+desc = { type = "string", description = "context for the job (start)" }
+id = { type = "integer", description = "job id (done, fail, show)" }
+summary = { type = "string", optional = true, description = "(done, fail)" }
+exit = { type = "integer", description = "exit code (fail)" }
+status = { type = "string", description = "filter (list)" }
+mine = { type = "boolean", description = "only this cousin's jobs (list)" }
+active = { type = "boolean", description = "(list)" }
+json = { type = "boolean", description = "machine output (start, list, show)" }
+
+[tools.job.commands.start]
+argv = ["start", "{kind}", "{title}"]
+options = { desc = "--desc", json = "--json" }
+
+[tools.job.commands.done]
+argv = ["done", "{id}", "{summary}"]
+
+[tools.job.commands.fail]
+argv = ["fail", "{id}", "{summary}"]
+options = { exit = "--exit" }
+
+[tools.job.commands.list]
+argv = ["list"]
+options = { status = "--status", mine = "--mine", active = "--active", json = "--json" }
+
+[tools.job.commands.show]
+argv = ["show", "{id}"]
+options = { json = "--json" }
+
+[tools.schedule]
+command = "cousin-schedule"
+description = "One-shot future prompts to yourself: add, list, cancel."
+
+[tools.schedule.properties]
+when = { type = "string", description = "e.g. 'in 30m' or 'tomorrow 09:00' (add)" }
+prompt = { type = "string", description = "(add)" }
+id = { type = "integer", description = "(cancel)" }
+all = { type = "boolean", description = "include fired entries (list)" }
+
+[tools.schedule.commands.add]
+argv = ["add", "{when}", "{prompt}"]
+
+[tools.schedule.commands.list]
+argv = ["list"]
+options = { all = "--all" }
+
+[tools.schedule.commands.cancel]
+argv = ["cancel", "{id}"]

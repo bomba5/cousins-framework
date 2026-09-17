@@ -27,3 +27,10 @@
 # warning ladder. At most one cousin per tick; never a second request
 # while one is pending. Absent: no guard. Must be a positive number.
 #flip_when_transcript_mb = 100
+#
+# The harness's own settings JSON: the file that records, per project
+# path, which .mcp.json servers are approved ("enabledMcpjsonServers")
+# and whether the folder is trusted. `cousin-mcp approve <slug>` edits
+# exactly this file. Absent: approve refuses and prints the manual
+# edit instead of guessing where the harness keeps its settings.
+#settings_file = "~/.harness-settings.json"

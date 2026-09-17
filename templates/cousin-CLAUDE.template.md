@@ -121,6 +121,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 | `cousin-sweep` | fleet-wide memory compaction, every cousin in turn (operator-run, normally from its weekly timer) | `cousin-sweep compact --target both` |
 | `cousin-tool-surface` | rewrite `data/tool-surface.md`, the CLI list your boot packet quotes (operator-run, normally from its daily timer) | `cousin-tool-surface`; read the manifest instead of re-discovering your tools |
+| `cousin-mcp` | the same CLIs as tools over MCP, started by your harness from `.mcp.json` in your home; arguments travel as JSON, never through a shell | `cousin-mcp --selftest` lists your tools and where each command resolves; your registry is `mcp-registry.toml` in your home; `cousin-mcp approve` is operator-run |
 
 ## Session bookends
 

@@ -25,7 +25,8 @@ and `cousin-ui` take it identically; a flag is discoverable from
 | `config/net-allowlist.json` | the network guard (chat server, UI) | loopback + RFC1918 only; the file only ever ADDS CIDRs |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
-| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard | all off; mining says so once at flip, the guard is silent |
+| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out |
+| `config/mcp-registry.toml` (edited copy of the shipped `config/mcp-registry.toml.example`) | `cousin-spawn` (copied into every new home as `mcp-registry.toml`), `cousin-mcp` when no `--registry` is given and the cousin home carries none | the shipped example is the default; the adapter itself is off until a home carries a `.mcp.json` the harness has approved |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
@@ -70,9 +71,19 @@ and `cousin-ui` take it identically; a flag is discoverable from
   store (see `docs/loops-spec.md`). It needs `transcripts_dir`; set
   without it, the daemon reports a dead key on every tick. Absent:
   no guard. Zero, negative, or not a number: loud, like unparsable.
+  `settings_file` (optional): the harness's own settings JSON, the
+  file that records per-project MCP approval; `cousin-mcp approve
+  <slug>` edits exactly this file and nothing else. Absent: `approve`
+  refuses and prints the edit to make by hand. `~` is expanded.
 - `shared-reviewers.json`: `{"reviewers": ["name-or-slug", ...]}`. A
   reviewer may never be the proposer; that boundary is enforced at the
   promote site regardless of what this file says.
+- `mcp-registry.toml`: the MCP tool registry (`ceiling`, `timeout`,
+  `max_output`, `[tools.<name>]` with `command`, `properties`,
+  `commands`); the full shape is in `docs/mcp-spec.md`. Commands are
+  console-script names resolved beside the interpreter first, then
+  on PATH. The example ships with `operators = []`; spawn fills that
+  one line per cousin.
 - `media.toml`: per-kind sections `[image]` / `[voice]` / `[video]`,
   each `url`, `model`, optional `key_file`, `timeout_s`. See
   `docs/media-spec.md`. A configured provider or an inert refusal -

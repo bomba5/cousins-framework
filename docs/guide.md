@@ -548,13 +548,70 @@ cousin-tool-surface --root .
 a per-cousin chat server; `docs/operations.md` walks the install from
 a cold clone and lists what to check when a cousin goes quiet.
 
+## 13. The same CLIs as tools: MCP
+
+A cousin's harness can be handed the CLI surface as tools over the
+Model Context Protocol, so arguments travel as JSON and reach each CLI
+as an argv list - no shell between the model and `cousin-memory
+decide`, so backticks and `$(...)` in a decision body arrive
+byte-identical. Every tool is a CLI that already exists; the adapter
+adds no capability and no inbound path. Spawn provisions it: every new
+home carries `mcp-registry.toml` (the default registry, four coarse
+tools, with the operator from `--operator` filled in) and a
+`.mcp.json` pointing the harness at `cousin-mcp`. Nothing runs until
+the harness accepts that registration.
+
+```
+cousin-mcp --registry config/mcp-registry.toml.example --selftest
+#   -> registry: config/mcp-registry.toml.example (4 tools, ceiling 12, timeout 120s, output cap 16000 chars)
+#        memory    cousin-memory                activity, decide, recall, search
+#        send      cousin-chat, cousin-reply    operator, peer (operators: none configured)
+#        job       cousin-job                   done, fail, list, show, start
+#        schedule  cousin-schedule              add, cancel, list
+#        cousin-memory -> beside the interpreter
+#        cousin-chat -> beside the interpreter
+#        cousin-reply -> beside the interpreter
+#        cousin-job -> beside the interpreter
+#        cousin-schedule -> beside the interpreter
+#      mcp sdk: absent; the MCP SDK is not importable; serving needs the extra: pip install "cousin-framework[mcp]"
+#      selftest ok: 4 schema(s) built
+```
+
+The selftest needs no SDK: it loads the registry, builds every schema,
+and says where each command resolves - beside the interpreter this
+`cousin-mcp` runs under first, then on PATH - and exits 1 if one
+resolves nowhere. Serving does need the SDK, as the optional extra:
+
+```
+pip install "cousin-framework[mcp]"
+cousin-mcp approve testa --root .
+#   -> approved ./cousins/testa in ~/.harness-settings.json: trusted, "cousin" enabled; ...
+```
+
+`approve` records the harness's acceptance in the settings file
+`config/harness.toml settings_file` names and edits nothing else; with
+no seam it refuses and prints the edit to make by hand. `send` is the
+one tool with a resolution rule: a known peer slug goes to `cousin-chat
+send`, a configured operator name to `cousin-reply`, anything else is
+an error naming what the cousin knows - never a default. One call from
+a shell, to see what the model would see:
+
+```
+export COUSIN_HOME=$PWD/cousins/testa FRAMEWORK_ROOT=$PWD
+cousin-mcp --call memory '{"command": "search", "query": "descaling"}'
+#   -> 1. [memory] .../upkeep.md  "...needs [descaling] every 200 shots."
+```
+
+The contract, the registry shape and the stated limits are in
+`docs/mcp-spec.md`.
+
 ## Where to go deeper
 
 Every subsystem above has a contract under `docs/`:
 `spawn-and-template-spec.md`, `chat-server-spec.md`,
 `lifecycle-spec.md`, `session-hooks.md`, `loops-spec.md`, `memory-tiers.md`,
 `lifecycle-spec.md`, `lifecycle-surgery.md`, `loops-spec.md`, `memory-tiers.md`,
-`media-spec.md`, `telegram-spec.md`, `hive-spec.md`,
+`media-spec.md`, `telegram-spec.md`, `hive-spec.md`, `mcp-spec.md`,
 `ui-spec.md`, `operator-interface.md`, `configuration.md`,
 `operations.md`, and `gate.md`. The specs say exactly what each feature does, including in
 its unconfigured state; this guide is the way in.

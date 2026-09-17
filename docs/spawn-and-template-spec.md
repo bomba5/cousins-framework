@@ -50,7 +50,7 @@ operator is a configuration state, never a defaulted name.
 
 `cousin-spawn <slug> --root <framework root> --name <display name>
 --role <one line> [--role-paragraph <text>] [--voice <text>]
-[--port N] [--start]`
+[--port N] [--operator <name>] [--start]`
 
 ### Effects, in order
 
@@ -76,10 +76,22 @@ operator is a configuration state, never a defaulted name.
 4. **Write `cousin.toml`** to a temporary file, re-parse it with a TOML
    reader, and rename into place. A config that cannot be read back is
    never persisted. Fields: `[cousin] slug/name/role`,
-   `[chat] port/tmux_session`, `[operator]` only if configured.
+   `[chat] port/tmux_session`, `[operator]` only if `--operator` was
+   given.
 5. **Render and write** `CLAUDE.md`, plus minimal `STATUS.md` and
    `MEMORY.md` skeletons. Never overwrite an existing file.
-6. On any failure after step 3: **remove everything this run created**.
+6. **Provision the MCP adapter** (`docs/mcp-spec.md`): write
+   `mcp-registry.toml` (the install's default registry - the edited
+   `config/mcp-registry.toml` if one exists, else the shipped example -
+   with its `operators` line filled from `--operator`) and `.mcp.json`
+   (the harness registration: `cousin-mcp --registry <that file>` over
+   stdio with `COUSIN_HOME`, `COUSIN_SLUG`, `FRAMEWORK_ROOT` in its
+   env), each only if absent. The same function is safe to run on a
+   cousin that predates it. Spawn does NOT approve the registration:
+   approval lives in the harness's own settings and is an operator's
+   act (`cousin-mcp approve <slug>`), so a spawned cousin boots with the
+   adapter registered and, until approved, ignored by the harness.
+7. On any failure after step 3: **remove everything this run created**.
    A failed spawn leaves no orphan tree and does not block the slug.
    This includes the partial state where `cousin.toml` was already
    written - the state that squats a slug in practice, since existence

@@ -41,6 +41,12 @@ cousin-hive = "cousin_lib.hive:hive_main"
 cousin-cache-audit = "cousin_lib.cache_audit:cache_audit_main"
 cousin-sweep = "cousin_lib.sweep:sweep_main"
 cousin-tool-surface = "cousin_lib.tool_surface:tool_surface_main"
+cousin-mcp = "cousin_lib.mcp_server:mcp_main"
+
+[project.optional-dependencies]
+# Serving MCP needs the reference SDK; everything else in the adapter
+# (registry, schemas, argv assembly, provisioning, approval) is stdlib.
+mcp = ["mcp>=1.0"]
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

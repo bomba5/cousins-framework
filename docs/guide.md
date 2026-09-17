@@ -100,6 +100,58 @@ directory. The destination is always yours to name:
 ```
 cousin-backup --dest /var/backups/cousins
 #   -> snapshot written to /var/backups/cousins/testa/2026-09-17
+
+**Decision prose with shell characters:** the argv form runs through
+the caller's shell first, so backticks and `$(...)` in a double-quoted
+decision get executed before `decide` ever sees them. The stdin form
+takes three chunks separated by a line that is exactly `---`, and a
+quoted heredoc cannot be expanded by any shell:
+
+```
+cousin-memory decide --stdin <<'EOF'
+wrapper scripts
+---
+the wrapper is `exec python3 $lib "$@"`
+---
+$(uname -a) is data here, not a command
+EOF
+#   -> Decision logged: [wrapper scripts] the wrapper is `exec python3 $lib "$@"`
+```
+
+**The durable layer:** `memory/distilled/` holds six files
+(`preferences.md`, `project-facts.md`, `decisions.md`,
+`known-failures.md`, `operator-calibration.md`, `glossary.md`) that
+the boot packet reads as the cousin's floor. They are regenerated
+from `memory/raw` deterministically: newest entry per topic wins,
+each file is bounded, and anything you write above the
+`<!-- distilled:auto ... -->` marker survives every run. The boot
+assembler runs it before each generation; `consolidate` runs it too,
+so consolidation promotes instead of only suggesting.
+
+```
+cousin-memory decide "retention window" "keep 7 days" "disk"
+cousin-memory decide "retention window" "keep 30 days" "audits need a month"
+cousin-memory distill
+#   -> distilled 1 topics from 2 raw entries:
+#        preferences.md: 0
+#        project-facts.md: 0
+#        decisions.md: 1
+#        ...
+cat cousins/testa/memory/distilled/decisions.md
+#   -> - [cousin-conclusion] keep 30 days - why: audits need a month (2 entries, superseded 1 earlier, 2026-09-17; topic: retention window)
+```
+
+**Bounding raw without losing anything:** daily raw files older than
+the hot window fold into monthly gzip archives byte for byte, and a
+per-topic digest stays in place so `distill` and search still see the
+topic. `--hot-days` sets the window (default 30); there is no dry-run
+because nothing is deleted.
+
+```
+cousin-memory compact --target raw --hot-days 30
+#   -> raw: {"folded_days": 12, "folded_entries": 57, "months": ["2026-07", "2026-08"]}
+ls cousins/testa/memory/raw/
+#   -> 2026-07-digest.jsonl  2026-08-digest.jsonl  2026-09-16.jsonl  archive/
 ```
 
 ## 3. Talk to a cousin

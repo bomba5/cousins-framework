@@ -63,7 +63,16 @@ these locations - writing anywhere else means search cannot find it:
 - `notes/` - longer working documents worth keeping.
 - `cousin-memory decide "<topic>" "<decision>" "<why>"` - log a
   decision with reasoning; every decision also becomes a raw-memory
-  candidate automatically.
+  candidate automatically. When the prose holds backticks or `$(...)`,
+  use `cousin-memory decide --stdin <<'EOF'` with the three parts
+  separated by a line that is exactly `---`: a quoted heredoc is never
+  shell-expanded.
+- `cousin-memory distill` - rebuild `memory/distilled/` from raw (the
+  boot packet's floor; runs at every boot and on `consolidate`). Text
+  above the `distilled:auto` marker line is yours and survives.
+- `cousin-memory compact --target raw` - fold raw files older than the
+  hot window into monthly gzip archives plus a per-topic digest;
+  lossless.
 - `cousin-memory activity "<brief>"` - checkpoint what you are doing
   now, so a recovery has context.
 - `cousin-memory search "<query>"` - keyword search over `memory/`

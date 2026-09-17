@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import corrections, self_portrait, trace
+from cousin_lib import corrections, distill, memory, self_portrait, trace
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -104,10 +104,9 @@ def _calibration_base(home):
     """Distilled calibration file when present, else the committed
     portrait's calibration section. Absent means degraded: a
     persona-anchored cousin booting without calibration should know."""
-    distilled = _read(
-        Path(home) / "memory" / "distilled" / "operator-calibration.md"
-    ).strip()
-    if distilled and "_(empty" not in distilled:
+    distilled = _distilled_body(
+        Path(home) / "memory" / "distilled" / "operator-calibration.md")
+    if distilled:
         return "## operator-calibration.md\n\n" + distilled
     section = self_portrait.md_section(
         _read(self_portrait.committed_path(home)), "Operator Calibration"
@@ -204,11 +203,28 @@ def _task_packet(home):
         else "(no in-flight tasks - check STATUS.md)"
 
 
+def _distilled_body(path):
+    """A distilled file as the packet should quote it: the auto marker
+    and generated header stripped; the stub reads as empty."""
+    text = _read(path)
+    if not text or memory.STUB_TEXT in text:
+        return ""
+    return distill.strip_auto_marker(text)
+
+
 def _memories(home, max_chars):
-    """Recent raw-memory entries (the decide bridge is their producer)
-    plus the memory index head. Empty is the legitimate starting
-    condition of a new cousin."""
+    """The durable floor (memory/distilled, regenerated from raw by
+    assemble), recent raw-memory entries (the decide bridge is their
+    producer) and the memory index head. Empty is the legitimate
+    starting condition of a new cousin."""
     parts = []
+    for fname in memory.DISTILLED_FILES:
+        if fname == "operator-calibration.md":
+            continue  # the calibration layer carries it
+        body = _distilled_body(Path(home) / "memory" / "distilled" / fname)
+        if body:
+            parts.append("## %s" % fname)
+            parts.append(body)
     raw_dir = Path(home) / "memory" / "raw"
     if raw_dir.is_dir():
         lines = []
@@ -278,6 +294,15 @@ def assemble(slug, home, *, generation=None):
         "memory_snapshot": datetime.now(timezone.utc)
         .isoformat(timespec="seconds"),
     }
+    # The durable layer is a derived view of raw: regenerate it here so
+    # every packet reads a fresh floor without any cousin habit or
+    # timer (the consumer triggers the producer, like search
+    # self-heal). Best-effort: a failed distill boots a staler floor,
+    # never no boot.
+    try:
+        distill.distill(home)
+    except Exception:
+        pass
     sections = {
         "law": law.strip(),
         "self_portrait": self_portrait.for_boot_packet(home).strip(),

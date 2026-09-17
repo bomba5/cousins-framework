@@ -1,8 +1,8 @@
 # Memory tiers: private by default, shared by review
 
-**Status: doctrine only. The shared tier is NOT IMPLEMENTED in v1.**
-This page exists so an install built on v1 does not design itself into
-a corner that the M2 implementation cannot fix without a migration.
+**Status: implemented.** The shared tier ships as `cousin_lib/shared_tier.py`
+(`cousin-shared list/read/diff/propose/promote/reject`) against this page;
+the page remains the contract the module is tested against.
 
 ## The model
 
@@ -53,5 +53,5 @@ path, even while that path is manual.
 - The self-portrait review gate - the same propose/review/commit shape
   applied to identity, which is the promotion rule in miniature.
 
-The shared tier's CLI and storage land at M2 as their own module,
-implementing exactly this page.
+- The shared tier itself: `cousin-shared` with reviewer-checked
+  promotion (`config/shared-reviewers.json`) and an audit log.

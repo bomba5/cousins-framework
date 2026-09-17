@@ -146,4 +146,6 @@ rather than an accident.
 Reincarnation, transplant, timed/daily flip drivers, the trace
 ledger, and correction-capture calibration ship with their own
 modules; each has a named seam above. Transcript mining landed
-as stage 3b.
+as stage 3b. The bookends a cousin runs inside one generation
+(`cousin-session`) and the harness-side checkpoint hooks are a
+separate, smaller contract: `docs/session-hooks.md`.

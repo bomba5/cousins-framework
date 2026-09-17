@@ -98,6 +98,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |
 | `cousin-cycle` | your session-cadence counters and breadcrumbs | `cousin-cycle inc --action "shipped X"` · `cousin-cycle state` |
+| `cousin-session` | your bookend hooks from cousin.toml `[session]`, run at session start and end | `cousin-session start` · `cousin-session end` · `cousin-session status` |
 | `cousin-callback` | moments worth calling back to, kept under `memory/` | `cousin-callback tag "<moment>" --category <name>` · `cousin-callback search "<query>"` |
 | `cousin-reason` | reasoning capsules: a conclusion with its evidence and rejected alternatives, kept under `memory/` | `cousin-reason capsule --conclusion "<text>" --evidence "<bullet>" [--rejected "<alt>"] [--confidence low\|medium\|high] [--topic <t>]` · `cousin-reason list --n 5` |
 | `cousin-backup` | snapshot your databases and memory into a directory | `cousin-backup --dest <dir>` (operator-run; the destination is always explicit) |
@@ -107,6 +108,17 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |
 | `cousin-ui` | the web console over the framework (operator-run) | `cousin-ui --port 8600`; a view, never a source of truth |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
+
+## Session bookends
+
+Run `cousin-session start` when a session begins and `cousin-session
+end` before it closes. Each runs the hooks listed in your `cousin.toml`
+`[session]` table (`start_hooks`, `end_hooks`) in order, with
+`COUSIN_HOME`, `COUSIN_SLUG` and `SESSION_PHASE` set; a hook that fails
+is reported and the rest still run. The framework's `hooks/` directory
+holds the harness-side counterparts (a pre-compaction checkpoint, a
+stop checkpoint, a start banner) that write under `data/`; when one of
+those checkpoints exists at boot, read it first.
 
 ## Hard rules
 

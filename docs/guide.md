@@ -300,6 +300,42 @@ cousin-self-portrait synthesize   # drafts a candidate from real sources
 cousin-self-portrait commit       # promotes it; only this version boots
 ```
 
+Inside one generation a session still has a start and an end, and a
+cousin can list what to run at each in its own `cousin.toml`:
+
+```toml
+[session]
+start_hooks = ["cousin-cycle inc --start"]
+end_hooks = [
+  {name = "sync-state", cmd = "cousin-sync-state"},
+  "cousin-cycle inc --end",
+]
+```
+
+```
+cousin-session start
+#   -> running session start (1 hook(s))
+#        [ok]   step-1
+#      session start done: 1 ok, 0 failed, 0 skipped
+cousin-session end
+#   -> running session end (2 hook(s))
+#        [ok]   sync-state
+#        [ok]   step-2
+#      session end done: 2 ok, 0 failed, 0 skipped
+cousin-session status             # the last run and both hook lists, as JSON
+#   -> {"last_end": "2026-09-17T19:31:33", "last_run": {"phase": "end",
+#       "results": [{"name": "sync-state", "rc": 0,
+#                    "output": "state synced: 1 open, 0 parked, 0 closed", ...
+```
+
+Every hook sees `COUSIN_HOME`, `COUSIN_SLUG` and `SESSION_PHASE`. A hook
+that fails is reported (`[FAIL] step-2 (rc=3)`) and the rest still run;
+the command exits 1 so a wrapper can notice. `--skip NAME` leaves one
+out. Beside these, `hooks/` ships three scripts for the agent harness
+itself - a pre-compaction checkpoint, a stop checkpoint and a start
+banner - that read only `COUSIN_HOME` and write only under `data/`;
+`docs/session-hooks.md` has the wiring and what each one writes.
+
 ## 7. Shared memory: private by default, shared by review
 
 A cousin's memory is private. To share a fact with the fleet, propose
@@ -426,7 +462,7 @@ framework's own test suite on every commit, over its own tree, so
 
 Every subsystem above has a contract under `docs/`:
 `spawn-and-template-spec.md`, `chat-server-spec.md`,
-`lifecycle-spec.md`, `loops-spec.md`, `memory-tiers.md`,
+`lifecycle-spec.md`, `session-hooks.md`, `loops-spec.md`, `memory-tiers.md`,
 `media-spec.md`, `telegram-spec.md`, `hive-spec.md`,
 `ui-spec.md`, `operator-interface.md`, `configuration.md`, and
 `gate.md`. The specs say exactly what each feature does, including in

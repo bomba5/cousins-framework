@@ -21,6 +21,7 @@ REQUIRED_UNITS = {
     "cousin-tool-surface.service", "cousin-tool-surface.timer",
     "cousin-chat-server@.service",
     "cousin-chat-watchdog.service", "cousin-chat-watchdog.timer",
+    "cousin-console.service",
 }
 PLACEHOLDERS = {"ROOT", "USER_BIN", "SYSTEM_PATH"}
 _ABS_PATH = re.compile(r'(?:^|[=:\s"\'])/[A-Za-z0-9_]')
@@ -137,6 +138,19 @@ class TestEachUnit(unittest.TestCase):
         self.assertEqual(service["Type"], "oneshot")
         self.assertEqual(service["ExecStart"],
                          "{{USER_BIN}}/cousin-chat-watchdog")
+
+    def test_console_unit_is_a_restarting_service_on_a_stated_port(self):
+        # The console owns nothing durable but sessions and the users
+        # file, so a restart costs a login and nothing else: systemd may
+        # restart it freely. The port is stated so the README's "open
+        # http://<host>:8600" line and the unit agree.
+        service = _parse(_UNITS / "cousin-console.service")["Service"]
+        self.assertEqual(service["Type"], "simple")
+        self.assertEqual(service["ExecStart"],
+                         "{{USER_BIN}}/cousin-console --port 8600")
+        self.assertEqual(service["Restart"], "on-failure")
+        unit = _parse(_UNITS / "cousin-console.service")
+        self.assertEqual(unit["Install"]["WantedBy"], "default.target")
 
     def test_chat_server_template_takes_the_slug_as_instance(self):
         text = (_UNITS / "cousin-chat-server@.service").read_text()

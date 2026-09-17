@@ -1,0 +1,15 @@
+[Unit]
+Description=cousin-framework web console (a view over the stores, owns only sessions and the users file)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ROOT}}
+Environment=FRAMEWORK_ROOT={{ROOT}}
+Environment=PATH={{USER_BIN}}:{{SYSTEM_PATH}}
+ExecStart={{USER_BIN}}/cousin-console --port 8600
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

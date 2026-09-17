@@ -2,7 +2,8 @@
 
 How to run the framework unattended: install from a cold clone, the
 service units, the daily flip, backups, the fleet sweep, the
-tool-surface manifest, and what to check when a cousin goes quiet.
+tool-surface manifest, what to check when a cousin goes quiet, and
+the web console with its first user and first login.
 `docs/guide.md` narrates the features; this page is for the machine
 that runs them overnight.
 
@@ -44,6 +45,7 @@ no placeholder survived. What each one owns:
 | `cousin-tool-surface.timer` | the daily manifest refresh (06:00) |
 | `cousin-chat-server@<slug>.service` | one cousin's chat server, when systemd rather than spawn/flip should own it |
 | `cousin-chat-watchdog.timer` | the chat-server watchdog (every 10 minutes) for spawn/flip-owned servers |
+| `cousin-console.service` | the web console on loopback port 8600: a view over every store above, owning only browser sessions and the users file (section 8) |
 
 Every service sets `FRAMEWORK_ROOT` and a `PATH` that finds the
 wrappers first; a unit that carries neither fails in ways that read
@@ -176,3 +178,75 @@ Work from the outside in; stop at the first thing that is wrong.
 What the framework promises across all of this: a component that dies
 loses nothing that was not already in a store some other component
 owns. A silent cousin is a process to restart, not memory to recover.
+
+## 8. The console: unit, first user, first login
+
+`cousin-console.service` runs `cousin-console --port 8600` from the
+root, on loopback. It is the same unit shape as the others (root,
+`FRAMEWORK_ROOT`, the wrappers first on `PATH`, `Restart=on-failure`)
+and it may be restarted at any time: the console owns nothing but
+in-memory browser sessions and `config/console-users.json`, so a
+restart costs every open tab a login and nothing else
+(`docs/ui-spec.md`). Enable it with the rest:
+
+```
+systemctl --user enable --now cousin-console.service
+journalctl --user -u cousin-console.service -n 20
+#   -> cousin-console: serving <root> on 127.0.0.1:8600 (auth not configured: cousin-console adduser <name>)
+```
+
+That parenthesis is the first thing to act on. Out of the box the
+console is open to every address the network guard admits
+(`config/net-allowlist.json`; loopback only when the file is absent),
+and it says so on its account panel. Before the console is reachable
+from anything but the machine it runs on, create the first user; the
+password is read from a prompt, never from argv, so it lands in no
+shell history or process listing:
+
+```
+cousin-console --root "$FRAMEWORK_ROOT" adduser ana
+#   password for ana: ********
+#   again: ********
+#   -> cousin-console: user ana set in <root>/config/console-users.json
+```
+
+The file is written atomically with mode 0600 (PBKDF2-HMAC-SHA256, a
+random salt per user); the same command with an existing name resets
+that user's password. No restart is needed: the console reads the
+file on every request, and from the moment it holds one user every
+`/api/*` route but login and `me` answers 401 without a session. There
+is no loopback or trusted-LAN bypass to fall back on, by design.
+
+First login: open `http://127.0.0.1:8600/` (or the host the unit
+binds when you pass `--host`, behind TLS with `--secure-cookie` so the
+cookie is marked Secure). The page loads without a session; the login
+form is part of it. Sign in with the user just created; the account
+panel then lists the configured users and offers a password change and
+logout. A cousin created later by `cousin-spawn` appears on the next
+request, and a cousin whose chat server is down shows `chat: down` on
+its card rather than vanishing: the console asks each store every
+time and caches nothing anything else trusts.
+
+What to check when the console misbehaves, outside in:
+
+1. **403 on every route** is the network guard: the client's address
+   is not loopback and not in `config/net-allowlist.json`.
+2. **401 on every route but the page** is the users file: it exists
+   and holds a user, and this browser has no session (a console
+   restart drops every session; log in again).
+3. **A card says `stopped` for a cousin whose tmux session is up**
+   means the console and the session use different tmux sockets; pass
+   `--tmux-socket` in the unit's `ExecStart`, the same seam the chat
+   server reads as `COUSIN_TMUX_SOCKET`.
+4. **The page loads but stays blank** is the one runtime network fetch
+   the browser makes (React, Babel, marked, mermaid and xterm from a
+   CDN, named in `index.html`): vendor those files under the static
+   directory and edit the tags if the browser cannot reach them; the
+   backend fetches nothing.
+
+The end-to-end walk of exactly this session - one cousin spawned in a
+temp root, its real chat server, a fake tmux, one user, login, fleet,
+chat through the proxy, the pane and its stream, jobs, loops, memory,
+the tracker, the static bundle - is `tests/console/test_console_e2e.py`,
+in process and on loopback, so the flow above is run on every test run
+rather than remembered.

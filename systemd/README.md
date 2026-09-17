@@ -21,6 +21,7 @@ any absolute path in this directory.
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily, 06:00 |
 | `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the instance name after `@` | always on, one instance per cousin |
 | `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: one ensure pass over every cousin; spawns a missing chat server, alerts on a sick one, never kills | every 10 minutes |
+| `cousin-console.service` | `cousin-console --port 8600`: the web console on loopback, a projection of the stores the other units own; a restart costs every browser its login and nothing else | always on |
 
 Every service carries the two environment facts the framework needs
 (`FRAMEWORK_ROOT`, and a `PATH` that finds the wrappers first) and runs
@@ -46,6 +47,7 @@ systemctl --user enable --now cousin-loops.service
 systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer
 systemctl --user enable --now cousin-chat-watchdog.timer          # spawn/flip-owned servers
 systemctl --user enable --now cousin-chat-server@testa.service   # per cousin
+systemctl --user enable --now cousin-console.service             # the web console
 ```
 
 The `grep` line is the check that every placeholder was replaced; a

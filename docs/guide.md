@@ -306,6 +306,20 @@ the auth model are `docs/console-spec.md`). `cousin-ui` is the
 retired name: it prints a pointer and runs the console for one
 release.
 
+A first session, end to end: open the page, sign in, and the fleet
+card for `testa` shows `running` when its tmux session is up and
+`chat: ok` when its chat server answers `/health` with its slug. Type
+in the chat view and the message goes through the console to testa's
+own chat server, which delivers it to the session; the history you
+read back is that server's, not a copy. Open the pane and the browser
+shows testa's terminal from `capture-pane`, keystrokes going back
+through the same injection lock the chat server uses. Jobs, loops,
+memory and the tracker each render the store their CLI writes. Stop
+the console and start it again: every tab logs in once more and finds
+everything where it was. The same walk runs in process on every test
+run (`tests/console/test_console_e2e.py`), and running the console as
+a unit with its first user is `docs/operations.md` section 8.
+
 ## 5. Recurring work: heartbeats and loops
 
 Loops live in a cousin's `cousin.toml` and fire from one daemon:

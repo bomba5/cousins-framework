@@ -1,0 +1,10 @@
+[Unit]
+Description=cousin-framework daily tool-surface manifest refresh
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

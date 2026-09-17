@@ -1,0 +1,15 @@
+[Unit]
+Description=cousin-framework loops daemon (heartbeats, loops, timed flips)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ROOT}}
+Environment=FRAMEWORK_ROOT={{ROOT}}
+Environment=PATH={{USER_BIN}}:{{SYSTEM_PATH}}
+ExecStart={{USER_BIN}}/cousin-loops run --interval 30
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

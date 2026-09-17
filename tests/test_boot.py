@@ -51,6 +51,10 @@ class BootCase(unittest.TestCase):
         (self.root / "config" / "law.md").write_text(
             "1. Persona is authored, never improvised.\n"
         )
+        (self.root / "data").mkdir(exist_ok=True)
+        (self.root / "data" / "tool-surface.md").write_text(
+            "# Tool Surface\n\n- `cousin-memory` - usage: cousin-memory\n"
+        )
 
 
 class TestGeneration(BootCase):

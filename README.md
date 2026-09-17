@@ -31,6 +31,7 @@ contract under `docs/`. Nothing here needs a third-party dependency.
 | hive: cross-machine cousins over an authed bus | `cousin-hive` | `docs/hive-spec.md` |
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
+| unattended operation: units, the fleet sweep, the tool-surface manifest | `cousin-sweep`, `cousin-tool-surface`, `systemd/` | `docs/operations.md` |
 
 Two cross-cutting contracts shape the rest: `docs/operator-interface.md`
 (the operator is a subsystem, and every surface works without one) and
@@ -40,7 +41,9 @@ in a store some other component owns. Every optional install seam is
 listed in `docs/configuration.md`.
 
 For a narrated walk through every feature with worked examples, see
-`docs/guide.md`.
+`docs/guide.md`. To run it unattended (systemd unit templates, the
+daily flip, backups, the weekly sweep, what to check when a cousin goes
+quiet), see `docs/operations.md`.
 
 The framework is being brought to parity with the private one it was
 extracted from, phase by phase; the plan and its results log are in

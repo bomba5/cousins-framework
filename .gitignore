@@ -20,3 +20,8 @@ cousins/
 # request store and state, job logs, the tool-surface manifest. All of
 # it is regenerated; none of it is source.
 /data/
+
+# A built hive node archive holds a bearer token and is a binary the
+# gate refuses; cousin-spawn-node writes it where --out says, and it
+# must never stage from a checkout.
+*-node.tar.gz

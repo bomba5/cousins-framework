@@ -518,6 +518,31 @@ single-machine cousin. Transport is plain HTTP; front it with TLS if
 the network is not trusted (the framework does not pretend to encrypt
 what it does not).
 
+To put a whole cousin on the other machine rather than a token, build
+a node archive. It is copy-over, never push: the builder mints the
+token in the queen's store, renders the node's identity, and writes
+one tarball you move by hand and install there.
+
+```
+# on the queen machine:
+cousin-spawn-node kestrel --root . \
+    --queen-url http://queen.example.invalid:8101 \
+    --name Kestrel --role "watches the greenhouse" --out /tmp/build
+#   -> built /tmp/build/kestrel-node.tar.gz   (it holds the token: private)
+
+# on the node machine (python3 and outbound reach to the queen, nothing else):
+tar xzf kestrel-node.tar.gz && cd kestrel-node && ./install.sh
+```
+
+The node runs its own small chat server in the same shapes as every
+cousin's (`/health`, `/api/send`, `/api/history`), recalls from and
+remembers to the queen every turn, and answers messages other cousins
+send it over the bus. Its brain is the command in `node.env
+AGENT_CMD`; until you set one it is a placeholder that greets, echoes
+and still remembers, so a fresh node is never dead on arrival. The
+whole procedure, the archive's contents and the failure behaviour are
+in `docs/deploying-a-node.md`.
+
 ## 11. The gate: nothing private ships
 
 If you extract or publish from a tree, `cousin-gate` scans a

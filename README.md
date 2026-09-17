@@ -30,7 +30,7 @@ serving the tool surface over MCP is the one optional extra.
 | in-flight work tracker, framework-wide (domain, state, tags, owner) | `cousin-tracker` | `docs/tracker-spec.md` |
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
-| hive: cross-machine cousins over an authed bus | `cousin-hive` | `docs/hive-spec.md` |
+| hive: cross-machine cousins over an authed bus, and the copy-over node archive | `cousin-hive`, `cousin-spawn-node` | `docs/hive-spec.md`, `docs/deploying-a-node.md` |
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
 | the console's API contract: routes, live streams, auth, what was dropped | `cousin-ui` (the ported console lands as `cousin-console`) | `docs/console-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |

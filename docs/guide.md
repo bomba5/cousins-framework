@@ -141,6 +141,29 @@ cat cousins/testa/memory/distilled/decisions.md
 #   -> - [cousin-conclusion] keep 30 days - why: audits need a month (2 entries, superseded 1 earlier, 2026-09-17; topic: retention window)
 ```
 
+**Reasoning capsules:** a decision records what you chose; a capsule
+records why, compressed - the conclusion, the evidence it rests on,
+the alternatives you rejected on the way, and how sure you are. The
+record is `memory/capsules.jsonl`; a readable mirror lives beside the
+six distilled files at `memory/distilled/reasoning-capsules.md` (the
+distiller never touches it), and the boot packet carries the newest
+five conclusions as one line each.
+
+```
+cousin-reason capsule --conclusion "cap the port range at 8200" \
+    --evidence "leaves room for hive" \
+    --evidence "no collision with the console" \
+    --rejected "unbounded range" --confidence high --topic "port range"
+#   -> capsule-1789661854-94b5
+cousin-reason list --n 5
+#   -> capsule-1789661854-94b5  [high] 2026-09-17T16:17:34
+#        topic: port range
+#        cap the port range at 8200
+#        + leaves room for hive
+#        + no collision with the console
+#        - unbounded range
+```
+
 **Bounding raw without losing anything:** daily raw files older than
 the hot window fold into monthly gzip archives byte for byte, and a
 per-topic digest stays in place so `distill` and search still see the

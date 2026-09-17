@@ -22,7 +22,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import corrections, distill, memory, self_portrait, trace
+from cousin_lib import (capsule, corrections, distill, memory,
+                        self_portrait, trace)
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -192,13 +193,10 @@ def _task_packet(home):
     if threads:
         parts.append("### active-threads.md")
         parts.append(threads[:1500])
-    capsules = _read(
-        Path(home) / "memory" / "distilled" / "reasoning-capsules.md")
-    if capsules:
-        chunks = [c for c in capsules.split("\n---\n") if c.strip()]
-        if chunks:
-            parts.append("### last reasoning capsules")
-            parts.append("\n---\n".join(chunks[-3:]))
+    chunks = capsule.recent_blocks(home, n=3)
+    if chunks:
+        parts.append("### last reasoning capsules")
+        parts.append("\n---\n".join(chunks))
     return "\n\n".join(parts) if parts \
         else "(no in-flight tasks - check STATUS.md)"
 
@@ -214,8 +212,9 @@ def _distilled_body(path):
 
 def _memories(home, max_chars):
     """The durable floor (memory/distilled, regenerated from raw by
-    assemble), recent raw-memory entries (the decide bridge is their
-    producer) and the memory index head. Empty is the legitimate
+    assemble), the newest reasoning capsules, recent raw-memory
+    entries (the decide bridge is their producer) and the memory index
+    head. Empty is the legitimate
     starting condition of a new cousin."""
     parts = []
     for fname in memory.DISTILLED_FILES:
@@ -225,6 +224,11 @@ def _memories(home, max_chars):
         if body:
             parts.append("## %s" % fname)
             parts.append(body)
+    # Newest conclusions as one line each, read from the jsonl record
+    # (never the markdown mirror, so no marker can reach the packet).
+    capsules = capsule.summary_for_boot(home, n=5)
+    if capsules:
+        parts.append(capsules)
     raw_dir = Path(home) / "memory" / "raw"
     if raw_dir.is_dir():
         lines = []

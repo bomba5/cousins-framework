@@ -99,6 +99,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |
 | `cousin-cycle` | your session-cadence counters and breadcrumbs | `cousin-cycle inc --action "shipped X"` · `cousin-cycle state` |
 | `cousin-callback` | moments worth calling back to, kept under `memory/` | `cousin-callback tag "<moment>" --category <name>` · `cousin-callback search "<query>"` |
+| `cousin-reason` | reasoning capsules: a conclusion with its evidence and rejected alternatives, kept under `memory/` | `cousin-reason capsule --conclusion "<text>" --evidence "<bullet>" [--rejected "<alt>"] [--confidence low\|medium\|high] [--topic <t>]` · `cousin-reason list --n 5` |
 | `cousin-backup` | snapshot your databases and memory into a directory | `cousin-backup --dest <dir>` (operator-run; the destination is always explicit) |
 | `cousin-sync-state` | render your STATUS.md into `data/state.json` | `cousin-sync-state` after reconciling STATUS; the boot packet reads the JSON |
 | `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |

@@ -104,7 +104,8 @@ class TestCliWiring(SearchCase):
         self.assertIsInstance(hits, list)
         self.assertIn("ports.md", hits[0]["path"])
         self.assertEqual(set(hits[0]),
-                         {"path", "collection", "score", "snippet", "chunk"})
+                         {"path", "collection", "score", "snippet", "chunk",
+                          "similarity"})
 
     def test_search_json_with_no_hits_is_an_empty_list(self):
         rc, out, _ = self._main(["search", "zzz-nothing-here", "--json"])

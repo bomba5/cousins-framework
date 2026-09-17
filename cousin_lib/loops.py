@@ -14,9 +14,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.config import (CousinConfig, FrameworkConfig,
+                               MissingConfigError, harness_config)
 
 REQUEST_TTL_SECONDS = 600
+READY_SUFFIX = ".ready"
+GUARD_FLIP_DELAY_SECONDS = 300
+_MB = 1024 * 1024
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _SCHEDULE_FORMS = ("interval_seconds", "daily_at", "cron")
 
@@ -448,6 +452,151 @@ def _fire_daily_flips(state, do_flip, now, report):
             return  # one per tick
 
 
+def _remove_ready(path, report, why):
+    try:
+        path.unlink()
+    except OSError as err:
+        report["errors"].append("cannot remove %s: %s" % (path, err))
+        return
+    report["errors"].append("%s removed: %s" % (path, why))
+
+
+def _fire_ready_files(slug, home, loops, state, deliver, now, report):
+    """Trigger files: every <home>/<name>.ready is a request to fire
+    now. A name matching a [[loops]] entry delivers that loop's prompt
+    (an extra fire that leaves the schedule alone, like a manual
+    fire); "context-heartbeat" delivers the daemon's own beat
+    composition and commits its delta; a name ending in "-message"
+    delivers the file's contents as a literal line. Anything else is
+    removed with a report line and never delivered.
+
+    The file is the dedup state, and it commits after delivery like
+    everything else: a failed delivery leaves the file where it is,
+    reported once (not once per tick), and the next tick tries again.
+    The source framework ran this as a separate watcher process with
+    its own tmux path and its own seen-set; here it is a tick step, so
+    there is exactly one owner of delivery and one liveness gate."""
+    home = Path(home)
+    try:
+        entries = sorted(p for p in home.iterdir()
+                         if p.is_file() and p.name.endswith(READY_SUFFIX))
+    except OSError as err:
+        report["errors"].append(
+            "%s: cannot list ready files: %s" % (slug, err))
+        return
+    reported = state.setdefault("ready_reported", {})
+    by_name = {loop["name"]: loop for loop in loops}
+    for path in entries:
+        name = path.name[:-len(READY_SUFFIX)]
+        key = "%s|%s" % (slug, name)
+        commit = None
+        if name in by_name:
+            text = ("[Framework scheduler: ready-file trigger]\n\n"
+                    "### %s\n%s" % (name, by_name[name]["prompt"]))
+        elif name == "context-heartbeat":
+            text, commit = _compose_beat(home, now)
+            if not text:
+                report["errors"].append(
+                    "%s: heartbeat composition failed; file stays"
+                    % path)
+                continue
+        elif name.endswith("-message"):
+            try:
+                text = path.read_text(errors="replace").strip()
+            except OSError as err:
+                report["errors"].append(
+                    "%s: unreadable, file stays: %s" % (path, err))
+                continue
+            if not text:
+                _remove_ready(path, report, "empty message")
+                continue
+        else:
+            _remove_ready(path, report,
+                          "unknown trigger name %r for %s" % (name, slug))
+            continue
+        if deliver(slug, text):
+            if commit is not None:
+                commit()
+                state["last_beat"][slug] = now
+            try:
+                path.unlink()
+            except OSError as err:
+                report["errors"].append(
+                    "%s delivered but cannot remove the file: %s"
+                    % (path, err))
+            reported.pop(key, None)
+            report["ready"].append(key)
+        elif key not in reported:
+            reported[key] = now
+            report["errors"].append(
+                "delivery failed for %s; the file stays" % path)
+
+
+def _pending_flip_cousins():
+    con = _db()
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT cousin FROM requests"
+            " WHERE status='pending' AND kind='flip'").fetchall()
+        return {row["cousin"] for row in rows}
+    finally:
+        con.close()
+
+
+def _guard_transcript_size(is_alive, now, report):
+    """The transcript-size guard: when config/harness.toml sets
+    flip_when_transcript_mb and a live cousin's session transcript
+    (<transcripts_dir>/<runtime.session_id>.jsonl) has grown past it,
+    submit ONE timed-flip request through the request store - the
+    same row an operator's timed flip is, with the same warning
+    ladder - for the largest offender only, at most one cousin per
+    tick, and never a second while one is pending for that cousin.
+    Workers, dead cousins, cousins without a persisted session id and
+    absent transcripts are skipped without comment; a threshold with
+    no transcripts_dir to measure against is a dead key and is said."""
+    root = FrameworkConfig.from_env().root
+    try:
+        cfg = harness_config(root)
+    except MissingConfigError as err:
+        report["errors"].append("size guard off: %s" % err)
+        return
+    if not cfg or cfg.get("flip_when_transcript_mb") is None:
+        return
+    threshold_mb = cfg["flip_when_transcript_mb"]
+    if not cfg.get("transcripts_dir"):
+        report["errors"].append(
+            "config/harness.toml sets flip_when_transcript_mb but not"
+            " transcripts_dir; the size guard has nothing to measure")
+        return
+    from cousin_lib.flip import _read_session_id
+    from cousin_lib.transcript_mine import transcript_path
+
+    over = []
+    for config in FrameworkConfig.from_env().list_cousins():
+        if config.type == "worker" or not is_alive(config.slug):
+            continue
+        session_id = _read_session_id(config.home)
+        if not session_id:
+            continue
+        path = transcript_path(config.home, root, session_id)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if size > threshold_mb * _MB:
+            over.append((size, config.slug))
+    pending = _pending_flip_cousins() if over else set()
+    for size, slug in sorted(over, reverse=True):
+        if slug in pending:
+            continue
+        submit_request("flip", cousin=slug, payload={
+            "fire_at": now + GUARD_FLIP_DELAY_SECONDS,
+            "reason": "transcript over %s MB (%.1f MB)"
+                      % (threshold_mb, size / _MB)})
+        report["guarded"].append(slug)
+        return  # one cousin per tick
+
+
 def _default_do_flip(slug):
     from cousin_lib.flip import flip
     return flip(slug)
@@ -460,7 +609,8 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     persist. Returns a report."""
     now = now or time.time()
     state = _load_state()
-    report = {"fired": [], "errors": [], "requests": 0, "flips": []}
+    report = {"fired": [], "errors": [], "requests": 0, "flips": [],
+              "ready": [], "guarded": []}
     _walk_timed_flips(state, deliver, do_flip, now, report)
     _fire_daily_flips(state, do_flip, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
@@ -474,6 +624,10 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
             home = FrameworkConfig.from_env().root / "cousins" / slug
             loops, errors = load_cousin_loops(home)
             report["errors"].extend(errors)
+            # Trigger files first: each is its own delivery, so its
+            # removal maps one-to-one onto a delivery that succeeded.
+            _fire_ready_files(slug, home, loops, state, deliver, now,
+                              report)
             # The beat first, then loops - one coalesced delivery.
             sections = []
             beat_commit = None
@@ -517,6 +671,11 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
             # the rest of the walk.
             report["errors"].append("%s: %s" % (config.slug, err))
     _consume_requests(state, deliver, report["errors"])
+    try:
+        _guard_transcript_size(is_alive, now, report)
+    except Exception as err:
+        # The guard is advisory; it never costs the tick.
+        report["errors"].append("size guard: %s" % err)
     expire_stale_requests(now=now)
     state["last_tick"] = now
     _save_state(state)

@@ -41,7 +41,8 @@ class HarnessSeam(unittest.TestCase):
             (Path(root) / "config" / "harness.toml").write_text(
                 'transcripts_dir = "/tmp/h/projects/{home_encoded}"\n')
             cfg = config.harness_config(Path(root))
-            self.assertEqual(set(cfg), {"transcripts_dir", "auto_memory_dir"})
+            self.assertEqual(set(cfg), {"transcripts_dir", "auto_memory_dir",
+                                        "flip_when_transcript_mb"})
             self.assertIsNone(cfg["auto_memory_dir"])
 
     def test_home_placeholder_expands_verbatim(self):

@@ -130,10 +130,13 @@ class FrameworkConfig:
 
 def harness_config(root):
     """config/harness.toml: where the agent harness keeps this install's
-    session transcripts and its own auto-memory directory. Absent: None
-    (transcript mining and the harness memory collection are off).
-    Unparsable: loud, because it was promised. Values are templates;
-    expand them per cousin with expand_harness_path."""
+    session transcripts and its own auto-memory directory, and the
+    transcript size (flip_when_transcript_mb) past which the loops
+    daemon requests a flip. Absent: None (transcript mining, the
+    harness memory collection and the size guard are all off).
+    Unparsable, or a threshold that is not a positive number: loud,
+    because it was promised. Path values are templates; expand them
+    per cousin with expand_harness_path."""
     path = Path(root) / "config" / "harness.toml"
     if not path.exists():
         return None
@@ -141,8 +144,17 @@ def harness_config(root):
         data = tomllib.loads(path.read_text())
     except (OSError, tomllib.TOMLDecodeError) as err:
         raise MissingConfigError("config/harness.toml is unusable: %s" % err)
+    threshold = data.get("flip_when_transcript_mb")
+    if threshold is not None and (
+            isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or threshold <= 0):
+        raise MissingConfigError(
+            "config/harness.toml flip_when_transcript_mb must be a"
+            " positive number of megabytes, got %r" % (threshold,))
     return {"transcripts_dir": data.get("transcripts_dir"),
-            "auto_memory_dir": data.get("auto_memory_dir")}
+            "auto_memory_dir": data.get("auto_memory_dir"),
+            "flip_when_transcript_mb": threshold}
 
 
 def expand_harness_path(template, home):

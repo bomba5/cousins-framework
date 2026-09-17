@@ -1,11 +1,12 @@
 # config/harness.toml - where the agent harness keeps its per-project
 # state for this install. Copy to config/harness.toml and fill in.
 #
-# Absent file: transcript mining at flip and the harness auto-memory
-# search collection are both off, said once at flip. Present but
-# unparsable: a loud error, because the file promised something.
+# Absent file: transcript mining at flip, the harness auto-memory
+# search collection and the loops daemon's transcript-size guard are
+# all off (mining says so once at flip). Present but unparsable: a
+# loud error, because the file promised something.
 #
-# Both values are templates expanded per cousin:
+# The two path values are templates expanded per cousin:
 #   {home}          the cousin home, verbatim
 #   {home_encoded}  the harness's project-dir encoding of the home:
 #                   every "/" becomes "-", so /srv/fw/cousins/testa/files
@@ -18,3 +19,11 @@
 # The harness's own auto-memory directory for this cousin. When set it
 # becomes a search collection for cousin-memory search.
 #auto_memory_dir = "/var/lib/harness/projects/{home_encoded}/memory"
+#
+# Transcript-size guard (needs transcripts_dir). When a live cousin's
+# <transcripts_dir>/<session_id>.jsonl grows past this many megabytes
+# the loops daemon submits one timed-flip request for it, five
+# minutes out, visible in `cousin-loops requests` with the usual
+# warning ladder. At most one cousin per tick; never a second request
+# while one is pending. Absent: no guard. Must be a positive number.
+#flip_when_transcript_mb = 100

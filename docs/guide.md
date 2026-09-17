@@ -271,7 +271,14 @@ The context heartbeat is built in: at the cadence in `[heartbeat]
 context_beat_seconds` the daemon delivers changed identity files so a
 long-running cousin re-reads what moved. Delivery is at-least-once and
 firing state commits only after delivery, so a failed inject leaves
-the loop due rather than lying that it fired. A one-shot future prompt:
+the loop due rather than lying that it fired. Anything that can write
+a file can also trigger a loop: drop `<name>.ready` in the cousin
+home (`morning-standup.ready`, `context-heartbeat.ready`, or
+`testa-message.ready` carrying one literal line) and the next tick
+delivers it and removes the file. With `flip_when_transcript_mb` in
+`config/harness.toml` the daemon also requests a flip for a cousin
+whose session transcript outgrows it; see `docs/loops-spec.md`. A
+one-shot future prompt:
 
 ```
 cousin-schedule add "in 30m" "Remember to restart the indexer."

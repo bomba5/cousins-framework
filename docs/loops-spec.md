@@ -102,14 +102,17 @@ failing cousin skips that cousin, never the rest of the walk:
    fire at T-0 via `flip()` under its concurrency marker).
 2. For each registered, framework-managed cousin: liveness-gate
    (a lingering pane with a dead chat server must not receive
-   fires), collect due work - the context beat first, then loops in
-   file order - and deliver it COALESCED: one injection carrying all
-   due sections, each under its `### name` header.
+   fires), fire its trigger files (below, one delivery each), then
+   collect due work - the context beat first, then loops in file
+   order - and deliver it COALESCED: one injection carrying all due
+   sections, each under its `### name` header.
 3. Consume manual-fire and edit requests.
 4. Fire due one-shots from the scheduler store (the daemon is the
    framework-native driver the one-shot tick was waiting for; the
    orphan semantics are unchanged).
-5. Persist state - outside any lock that a reader also takes.
+5. Run the transcript-size guard (below): at most one flip request
+   submitted per tick.
+6. Persist state - outside any lock that a reader also takes.
 
 Ticks are inline, never per-tick threads (the source's zombie-tick
 wedge taught that); a watchdog exits the process on a wedged tick and
@@ -177,19 +180,74 @@ breadcrumbs at `data/cycle.json`; the boot staleness check is its
 consumer. The source's overlay and milestone fields had zero readers
 and do not ship - the dead-code rule.
 
-## The trigger-file seam (not implemented)
+## Trigger files
 
-The source framework contained a watcher protocol - drop
-`<loop>.ready` in a cousin's home to trigger that loop - that turned
-out to have no live producer anywhere in its tree. It does not ship.
-The seam stays named because an adopter will plausibly want it: if a
-trigger-file mechanism is added, it belongs INSIDE the daemon (one
-owner), fires through the same delivery path, and commits its
-dedup state after delivery like everything else.
+The source framework had a watcher protocol - drop `<name>.ready` in
+a cousin's home to trigger that loop - running as a SEPARATE process
+with its own tmux path and its own seen-set: a second owner of
+delivery. Here it is a tick step, so there is one owner, one
+liveness gate, and one delivery path.
+
+On every tick, for each live cousin, every `<home>/<name>.ready`
+file is a trigger, taken in name order:
+
+- `name` matching a `[[loops]]` entry fires that loop's prompt
+  behind a `[Framework scheduler: ready-file trigger]` provenance
+  line. It is an EXTRA fire, like a manual fire: the loop's own
+  schedule is untouched (a `daily_at` loop still fires at its time
+  that day).
+- `name == "context-heartbeat"` delivers the daemon's own beat
+  composition (the file-delta prompt) and commits the mtime state
+  after delivery, exactly as a scheduled beat does.
+- `name` ending in `-message` delivers the file's contents,
+  stripped, as one literal line. An empty file is removed with a
+  report line and delivers nothing.
+- Any other name is removed with a report line naming it, and is
+  never delivered. A trigger for a disabled loop is an unknown name.
+
+The file is the dedup state and it commits after delivery, like
+everything else in the daemon: the file is removed only once
+delivery reported success. A failed delivery leaves the file where
+it is and reports once - once, not once per tick - and every later
+tick tries again; a dead cousin (liveness gate) keeps its files
+untouched until it is back. Workers have no session and take no
+trigger files. The tick report lists what fired under `ready` as
+`slug|name`.
+
+A producer is anything that can write a file into the home: a shell
+hook, a cron line, another cousin's job. The daemon needs no
+notification; the next tick sees the file.
+
+## The transcript-size guard
+
+A harness session transcript grows without bound, and a long enough
+session degrades every turn before anyone notices. When
+`config/harness.toml` sets `flip_when_transcript_mb` (absent: the
+guard is off; see `docs/configuration.md`), every tick measures each
+live, non-worker cousin's transcript at
+`<transcripts_dir>/<runtime.session_id>.jsonl` - the same file the
+flip's transcript mining reads - and for the largest cousin over the
+threshold submits ONE timed-flip request through the request store:
+`kind = "flip"`, `fire_at = now + 300`, `reason = "transcript over N
+MB"`. That row is indistinguishable from an operator's timed flip: it
+is visible in `cousin-loops requests`, it gets the T-5m/T-1m/T-30s
+warning ladder, it fires through `flip()` under its concurrency
+marker, and it expires loudly if the daemon stops ticking.
+
+Bounds, all pinned by tests: at most one cousin per tick (the tick
+cadence is the stagger, as with daily flips); never a second request
+while any flip request is pending for that cousin, whoever submitted
+it; cousins without a persisted session id, without a transcript
+file, dead, or of type worker are skipped without comment. A
+threshold set without a `transcripts_dir` to measure against is a
+dead key and is reported on every tick. The tick report lists the
+cousin under `guarded`.
 
 ## Consciously excluded
 
 Remote-host cousins (the fleet module's problem), engagement pushes,
-chat watchdogs, and byte-guard flip policies stay outside this spec;
-none of them may fire loops except through the daemon's request
-store.
+and chat watchdogs stay outside this spec; none of them may fire
+loops or flips except through the daemon's request store. The one
+flip policy that ships - the transcript-size guard above - obeys the
+same rule from inside the daemon: it writes a request row, it never
+calls `flip()` itself.

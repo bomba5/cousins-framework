@@ -25,7 +25,7 @@ and `cousin-ui` take it identically; a flag is discoverable from
 | `config/net-allowlist.json` | the network guard (chat server, UI) | loopback + RFC1918 only; the file only ever ADDS CIDRs |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
-| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection | both off, said once at flip |
+| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard | all off; mining says so once at flip, the guard is silent |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
@@ -63,6 +63,13 @@ and `cousin-ui` take it identically; a flag is discoverable from
   session's transcript; `auto_memory_dir` is the harness's own memory
   directory for that cousin. A key left out is None, never a guessed
   location. Unparsable is loud: the file promised something.
+  `flip_when_transcript_mb` (optional, a positive number of
+  megabytes) arms the loops daemon's transcript-size guard: a live
+  cousin whose `<transcripts_dir>/<session_id>.jsonl` exceeds it gets
+  ONE timed-flip request, five minutes out, through the request
+  store (see `docs/loops-spec.md`). It needs `transcripts_dir`; set
+  without it, the daemon reports a dead key on every tick. Absent:
+  no guard. Zero, negative, or not a number: loud, like unparsable.
 - `shared-reviewers.json`: `{"reviewers": ["name-or-slug", ...]}`. A
   reviewer may never be the proposer; that boundary is enforced at the
   promote site regardless of what this file says.

@@ -6,7 +6,15 @@ files, in overlapping chunks, through an HTTP embedding service
 declared in <root>/config/embedding.toml (url, model, timeout_s - the
 endpoint accepts {"model", "prompt"} and returns {"embedding": [...]};
 front any service with that contract). Results merge by
-reciprocal-rank fusion.
+reciprocal-rank fusion, and every hit carries the semantic leg's
+cosine as "similarity" (None when only the keyword leg found it): the
+fused score is rank-based and cannot be compared against a cosine
+threshold, so a caller that wants "relevant enough" reads similarity.
+
+Recall is usage-weighted (cousin_lib.reinforce): every search records
+the files it surfaced, and a file's fused score is multiplied by
+(1 + bonus), a bounded, decaying nudge for what keeps being recalled.
+Reinforcement is fail-open; it can never take a search down with it.
 
 Collections: `memory` (<home>/memory), `notes` (<home>/notes) and
 `harness`, the agent harness's own auto-memory directory for this
@@ -42,6 +50,7 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
+from cousin_lib import reinforce
 from cousin_lib.config import (FrameworkConfig, MissingConfigError,
                                expand_harness_path, harness_config)
 
@@ -221,7 +230,7 @@ def _keyword_search(query, home, top, collection=None):
         conn.close()
     return [
         {"collection": c, "path": p, "score": s, "snippet": snip,
-         "chunk": 0}
+         "chunk": 0, "similarity": None}
         for c, p, s, snip in rows
     ]
 
@@ -432,6 +441,7 @@ def _semantic_search(query, home, top, config, collection=None):
             best[str(path)] = {
                 "path": str(path), "collection": coll, "score": score,
                 "snippet": _first_line(text), "chunk": chunk,
+                "similarity": score,
             }
     hits = sorted(best.values(), key=lambda h: h["score"], reverse=True)
     return hits[:top], report["failed"]
@@ -439,14 +449,21 @@ def _semantic_search(query, home, top, config, collection=None):
 
 # ----------------------------------------------------------------- fusion
 
-def _fuse(keyword_hits, semantic_hits, top):
+def _fuse(keyword_hits, semantic_hits, top, bonuses=None):
     """Reciprocal-rank fusion by path: order-based, so the two legs'
     incomparable score scales never fight each other. The keyword
     snippet (with its match markers) wins when both legs found the
-    file; the chunk comes from the semantic leg, which knows it."""
+    file; the chunk and the similarity come from the semantic leg,
+    which knows them. bonuses is {path: usage bonus}; each fused
+    score is multiplied by (1 + bonus) before ranking, so a file that
+    keeps being recalled is nudged up, never carried past a better
+    match (the cap is reinforce.MAX_BONUS). A keyword-only search is
+    a fusion with an empty semantic leg: one score scale everywhere,
+    higher is better."""
     scores = {}
     byname = {}
     chunk_of = {}
+    similarity_of = {}
     for hits in (keyword_hits, semantic_hits):
         for rank, hit in enumerate(hits):
             scores[hit["path"]] = scores.get(hit["path"], 0.0) \
@@ -454,45 +471,79 @@ def _fuse(keyword_hits, semantic_hits, top):
             byname.setdefault(hit["path"], hit)
     for hit in semantic_hits:
         chunk_of[hit["path"]] = hit["chunk"]
+        similarity_of[hit["path"]] = hit.get("similarity")
+    for path, bonus in (bonuses or {}).items():
+        if path in scores:
+            scores[path] *= 1.0 + bonus
     ranked = sorted(scores, key=scores.get, reverse=True)[:top]
     out = []
     for path in ranked:
         hit = dict(byname[path])
         hit["score"] = scores[path]
         hit["chunk"] = chunk_of.get(path, hit.get("chunk", 0))
+        hit["similarity"] = similarity_of.get(path, hit.get("similarity"))
         out.append(hit)
     return out
 
 
+def _bonuses(home, *legs):
+    """{path: usage bonus} for every path any leg surfaced. Fail-open:
+    a broken reinforcement store means no bonus, never no search."""
+    out = {}
+    for hits in legs:
+        for hit in hits:
+            if hit["path"] in out:
+                continue
+            try:
+                out[hit["path"]] = reinforce.bonus(home, hit["path"])
+            except Exception:
+                out[hit["path"]] = 0.0
+    return out
+
+
+def _record(home, query, hits):
+    """Record what this search surfaced. Fail-open, same reason."""
+    if not hits:
+        return
+    try:
+        reinforce.record(home, [hit["path"] for hit in hits], query=query)
+    except Exception:
+        pass
+
+
 def search(query, *, top=5, home=None, collection=None):
     """Ranked hits plus the degrade notice: (hits, notice). Each hit is
-    {"path", "collection", "score", "snippet", "chunk"}. collection
-    limits both legs to one of memory, notes, harness. notice is None
-    whenever the result honors everything the install's configuration
-    promised, and a human-readable explanation whenever the semantic
-    leg was promised and could not fully serve."""
+    {"path", "collection", "score", "snippet", "chunk", "similarity"}.
+    collection limits both legs to one of memory, notes, harness.
+    notice is None whenever the result honors everything the install's
+    configuration promised, and a human-readable explanation whenever
+    the semantic leg was promised and could not fully serve. Every
+    return that carries hits applies the usage bonus and records the
+    surfaced paths, the keyword-only ones included."""
     home = Path(home) if home else _home()
     keyword_hits = _keyword_search(query, home, top, collection)
     config = _embedding_config()
-    if config is None:
-        return keyword_hits, None
-    if config == "broken":
-        return keyword_hits, (
-            "embedding config exists but is unusable; keyword-only"
-            " results (fix or remove config/embedding.toml)")
-    try:
-        semantic_hits, failed = _semantic_search(
-            query, home, top, config, collection)
-    except Exception as err:
-        return keyword_hits, (
-            "embedding service unreachable (%s); keyword-only results"
-            % err)
+    semantic_hits = []
     notice = None
-    if failed:
-        notice = ("embedding service failed for %d chunk(s); prior"
-                  " vectors kept where available, new text unranked"
-                  " by meaning" % failed)
-    return _fuse(keyword_hits, semantic_hits, top), notice
+    if config == "broken":
+        notice = ("embedding config exists but is unusable; keyword-only"
+                  " results (fix or remove config/embedding.toml)")
+    elif config is not None:
+        try:
+            semantic_hits, failed = _semantic_search(
+                query, home, top, config, collection)
+        except Exception as err:
+            notice = ("embedding service unreachable (%s); keyword-only"
+                      " results" % err)
+        else:
+            if failed:
+                notice = ("embedding service failed for %d chunk(s);"
+                          " prior vectors kept where available, new"
+                          " text unranked by meaning" % failed)
+    hits = _fuse(keyword_hits, semantic_hits, top,
+                 _bonuses(home, keyword_hits, semantic_hits))
+    _record(home, query, hits)
+    return hits, notice
 
 
 def print_results(hits):

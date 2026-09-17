@@ -119,8 +119,30 @@ class TestSemanticLeg(SemanticCase):
         self._configure_embedding(self._serve_fake())
         hits, _ = search("sunrise")
         self.assertEqual(set(hits[0]),
-                         {"path", "collection", "score", "snippet", "chunk"})
+                         {"path", "collection", "score", "snippet", "chunk",
+                          "similarity"})
         self.assertIsInstance(hits[0]["chunk"], int)
+
+    def test_similarity_is_the_cosine_or_none(self):
+        # The fused score is reciprocal-rank (about 1/60 at best), so a
+        # cosine threshold can never be compared against it; every hit
+        # carries the semantic leg's cosine as "similarity" (None when
+        # only the keyword leg found it), and a path both legs found
+        # keeps the cosine whichever leg was seen first.
+        self._configure_embedding(self._serve_fake())
+        hits, _ = search("sunrise")
+        by_name = {pathlib.Path(h["path"]).name: h for h in hits}
+        # sky.md: keyword hit AND semantic winner -> cosine 1.0 kept.
+        self.assertAlmostEqual(by_name["sky.md"]["similarity"], 1.0,
+                               places=6)
+        # ports.md: semantic leg only, orthogonal vector -> cosine 0.0.
+        self.assertAlmostEqual(by_name["ports.md"]["similarity"], 0.0,
+                               places=6)
+        # Keyword-only install: no semantic leg, similarity is None.
+        (self.root / "config" / "embedding.toml").unlink()
+        hits, _ = search("claimed set port")
+        self.assertIn("ports.md", hits[0]["path"])
+        self.assertIsNone(hits[0]["similarity"])
 
     def test_fusion_ranks_a_file_both_legs_agree_on_first(self):
         # "sunrise" is a keyword hit AND the semantic winner for sky.md;

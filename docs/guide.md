@@ -87,6 +87,17 @@ some files mid-pass, their previous vectors are kept and the notice
 says how many. `cousin-memory reindex` rebuilds the keyword index and,
 when the service is configured, re-embeds everything.
 
+**Recall is usage-weighted.** Every search records which files it
+surfaced, in `memory/.recall-log.jsonl` (one line per search) and
+`memory/.recall-counts.json` (per-file counts and last recall), and a
+file that keeps being recalled gets a small lift on later searches:
+at most 15% of its score, halving every 14 days it goes unrecalled.
+It nudges ties and near-ties, it never carries a stale file past a
+better match. Each hit also carries `similarity`, the semantic leg's
+cosine (`null` when only the keyword leg found it); the ranking
+`score` is rank-based, so anything that wants "relevant enough" reads
+`similarity`. Delete the two dot-files to forget the usage history.
+
 Three small memory tools round out the surface. A cousin keeps its own
 library of moments worth calling back to; the file lives under
 `memory/`, so search finds it:

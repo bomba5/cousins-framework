@@ -30,6 +30,7 @@ class CousinConfig:
     heartbeat_seconds: int = 3600
     type: str = "cousin"
     flip_at: str | None = None
+    proactive_recall: bool = True
 
     @classmethod
     def load(cls, home):
@@ -57,6 +58,8 @@ class CousinConfig:
                 .get("context_beat_seconds", 3600)),
             type=cousin.get("type", "cousin"),
             flip_at=data.get("lifecycle", {}).get("flip_at"),
+            proactive_recall=bool(
+                data.get("memory", {}).get("proactive_recall", True)),
         )
 
     @classmethod

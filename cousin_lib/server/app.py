@@ -22,8 +22,10 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cousin_lib import corrections
-from cousin_lib.config import CousinConfig, MissingConfigError
+from cousin_lib import corrections, memory_search
+from cousin_lib.config import (CousinConfig, FrameworkConfig,
+                               MissingConfigError, expand_harness_path,
+                               harness_config)
 from cousin_lib.server.injection import TmuxInjector, make_deliver
 from cousin_lib.server.netguard import NetGuard
 from cousin_lib.server.storage import ChatStore, normalize_chat_user
@@ -85,21 +87,130 @@ def persist_inbound_file(home, message_id, data_uri):
     return "[image attached -> Read %s]" % path
 
 
+def _is_operator(config, user):
+    """Is this sender the configured operator? No operator configured
+    means nobody is: the null profile is "no operator", never a
+    defaulted human being."""
+    operator = config.operator_name
+    if not operator:
+        return False
+    return normalize_chat_user(user) == normalize_chat_user(operator)
+
+
 def _record_correction(config, user, message):
     """Capture an operator correction from an inbound message. Only the
     configured operator's messages count (no operator configured means
     nothing is recorded: a peer's "no" is not calibration). Best-effort
     by construction: the message is already stored and about to be
     delivered, and a full disk under data/ must not turn into a 500."""
-    operator = config.operator_name
-    if not operator:
-        return
-    if normalize_chat_user(user) != normalize_chat_user(operator):
+    if not _is_operator(config, user):
         return
     try:
         corrections.detect_and_record(config.home, user=user, text=message)
     except Exception as err:  # noqa: BLE001 - never fails the send
         print("corrections: not recorded: %s" % err, file=sys.stderr)
+
+
+# Proactive recall: a colleague remembers without being asked. An
+# operator message long enough to carry meaning is searched against the
+# cousin's own memory and the best hits ride along on the DELIVERED line
+# as one suffix. Names and paths only, never file contents; the stored
+# message is untouched (the history is what the operator said, not what
+# the cousin was reminded of); any failure means the line delivers bare.
+_RECALL_PREFIX = "[fw-recall] possibly relevant from your memory: "
+_RECALL_SUFFIX = " - cousin-memory search for details; ignore if not."
+
+
+def _recall_thresholds():
+    """The [recall] table of config/embedding.toml, defaults when the
+    seam is absent or unusable. Returns (thresholds, configured):
+    configured says whether a semantic leg was promised, which decides
+    how a hit qualifies."""
+    config = memory_search._embedding_config()
+    if isinstance(config, dict):
+        return config["recall"], True
+    return dict(memory_search._RECALL_DEFAULTS), config is not None
+
+
+def _hit_title(path):
+    """The file's first markdown heading, else its stem."""
+    try:
+        for line in path.read_text(errors="replace").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                title = stripped.lstrip("#").strip()
+                if title:
+                    return title
+    except OSError:
+        pass
+    return path.stem
+
+
+def _hit_relpath(home, hit):
+    """<relpath> inside the hit's collection: memory/ and notes/ live
+    under the home; the harness collection is wherever config/harness.toml
+    put it. A path outside every known base falls back to its name."""
+    path = Path(hit["path"])
+    collection = hit.get("collection") or ""
+    bases = [home / collection] if collection in ("memory", "notes") else []
+    if collection == "harness":
+        try:
+            template = (harness_config(FrameworkConfig.resolve().root)
+                        or {}).get("auto_memory_dir")
+            if template:
+                bases.append(expand_harness_path(template, home))
+        except MissingConfigError:
+            pass
+    for base in bases:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
+def _recall_line(config, message):
+    """The '[fw-recall] ...' suffix for an operator message, or None.
+    Single-line by construction (the delivery paste cannot carry a
+    newline). With the embedding seam configured a hit qualifies by its
+    semantic similarity; without it every keyword hit qualifies, since
+    an FTS match already means a term matched. Raises nothing: the
+    caller treats any exception as "no line"."""
+    if not config.proactive_recall:
+        return None
+    thresholds, configured = _recall_thresholds()
+    if len(message.strip()) < int(thresholds["min_chars"]):
+        return None
+    hits, _notice = memory_search.search(
+        message, top=int(thresholds["top"]), home=config.home)
+    kept = []
+    for hit in hits:
+        if configured:
+            similarity = hit.get("similarity")
+            if similarity is None or similarity < float(
+                    thresholds["min_score"]):
+                continue
+        path = Path(hit["path"])
+        kept.append("%s (%s:%s)" % (_hit_title(path), hit.get("collection"),
+                                    _hit_relpath(config.home, hit)))
+    if not kept:
+        return None
+    line = _RECALL_PREFIX + "; ".join(kept) + _RECALL_SUFFIX
+    return " ".join(line.split())
+
+
+def _with_recall(config, user, message):
+    """The text to deliver: the message, plus the recall suffix when one
+    applies. Best-effort by contract - a failing search never costs the
+    delivery, and never reaches the stored message."""
+    if not _is_operator(config, user):
+        return message
+    try:
+        line = _recall_line(config, message)
+    except Exception as err:  # noqa: BLE001 - never fails the send
+        print("recall: skipped: %s" % err, file=sys.stderr)
+        return message
+    return message + " " + line if line else message
 
 
 class ChatServer:
@@ -300,7 +411,10 @@ class _ChatHandler(BaseHTTPRequestHandler):
                 server.config.home, row["id"], image
             ))
         if server.deliver is not None:
-            server.deliver(user=user, message=message,
+            # The recall suffix rides the DELIVERED text only: the row
+            # above already holds the message as the operator wrote it.
+            server.deliver(user=user,
+                           message=_with_recall(server.config, user, message),
                            message_id=row["id"], attachments=attachments)
         # Touched after delivery composed its text: the marker's mtime is
         # the gap baseline for the NEXT message, not this one.

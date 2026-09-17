@@ -50,7 +50,15 @@ operator is a configuration state, never a defaulted name.
 
 `cousin-spawn <slug> --root <framework root> --name <display name>
 --role <one line> [--role-paragraph <text>] [--voice <text>]
-[--port N] [--operator <name>] [--start]`
+[--port N] [--operator <name>] [--model <name>]
+[--effort low|medium|high|max] [--heartbeat SECONDS]
+[--memory-scope private|shared|both] [--start]`
+
+The four optional runtime flags land in `cousin.toml` as `[runtime]
+model` and `effort`, `[heartbeat] context_beat_seconds` and `[memory]
+scope`; each is validated before anything is written, and a flag left
+out writes no key (the documented default applies, never a copied-out
+value). The console's spawn dialog sends the same four fields.
 
 ### Effects, in order
 
@@ -110,7 +118,13 @@ then starts the chat server. The agent command - binary, flags, trust
 model - is **host configuration** (`config/agent-cmd`), not framework
 code: what it means to "run an agent" differs per install and per trust
 posture, and hardcoding any vendor's binary path or permission flags
-into the framework was one of the source's portability failures.
+into the framework was one of the source's portability failures. The
+command may carry `{session_id}`, `{model}` and `{effort}`
+placeholders; all three render at this one site (`docs/configuration.md`
+says where each value comes from), so a per-cousin model or effort is
+a `cousin.toml [runtime]` fact and the install-wide fallback is a
+`config/harness.toml [agent]` fact - the command line itself stays one
+line for the whole install.
 
 There is exactly ONE tmux-session-creation site in the codebase, and
 `cousin-spawn --start` calls it. The source framework had two (spawn

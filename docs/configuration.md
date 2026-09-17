@@ -26,17 +26,24 @@ and `cousin-console` take it identically; a flag is discoverable from
 | `config/console-users.json` | `cousin-console` (the web console's login) | auth is not configured: the console is open to every address the guard admits, and `GET /api/auth/me` says so |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
-| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out |
+| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`), the `agent-cmd` `{model}`/`{effort}` defaults and the console's spawn catalogue (`[agent]`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out, a `{model}`/`{effort}` placeholder needs the cousin's own `[runtime]` value or the start fails naming this file |
 | `config/mcp-registry.toml` (edited copy of the shipped `config/mcp-registry.toml.example`) | `cousin-spawn` (copied into every new home as `mcp-registry.toml`), `cousin-mcp` when no `--registry` is given and the cousin home carries none | the shipped example is the default; the adapter itself is off until a home carries a `.mcp.json` the harness has approved |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
 ## Formats
 
-- `agent-cmd`, `worker-cmd`: one command line. `agent-cmd` may carry a
-  `{session_id}` placeholder (flip mints and substitutes it);
-  `worker-cmd` carries `{prompt}` and `{home}`. The binary and its
-  trust posture are yours - the framework hardcodes neither.
+- `agent-cmd`, `worker-cmd`: one command line. `agent-cmd` may carry
+  three placeholders, each rendered at the single spawn site
+  (`spawn.start_cousin`, so a plain start and a flip render alike):
+  `{session_id}` (minted fresh per start and written back to
+  `cousin.toml [runtime] session_id`), `{model}` and `{effort}`
+  (`cousin.toml [runtime] model` / `effort` for that cousin, else
+  `harness.toml [agent] default_model` / `default_effort` below). A
+  placeholder with no value in either file is a spawn error naming
+  both files; nothing guesses a vendor default. `worker-cmd` carries
+  `{prompt}` and `{home}`. The binary and its trust posture are
+  yours - the framework hardcodes neither.
 - `law.md`: markdown; the framework law every cousin boots with.
 - `net-allowlist.json`: `{"allow": ["203.0.113.0/24", ...]}`. Extends
   the defaults; can never remove loopback.
@@ -85,6 +92,16 @@ and `cousin-console` take it identically; a flag is discoverable from
   file that records per-project MCP approval; `cousin-mcp approve
   <slug>` edits exactly this file and nothing else. Absent: `approve`
   refuses and prints the edit to make by hand. `~` is expanded.
+  `[agent]` (optional table): `default_model` and `default_effort`
+  are what the `agent-cmd` placeholders `{model}` and `{effort}`
+  render to for a cousin whose `cousin.toml [runtime]` sets neither
+  (`effort` is one of `low`, `medium`, `high`, `max`; another value
+  is loud); `models` is the catalogue the console's spawn dialog
+  offers, a list of strings. Absent table:
+  no default model, no default effort (a placeholder then needs the
+  cousin's own value or the spawn fails naming this file), and a
+  built-in catalogue of three names that never reaches an agent on
+  its own.
 - `shared-reviewers.json`: `{"reviewers": ["name-or-slug", ...]}`. A
   reviewer may never be the proposer; that boundary is enforced at the
   promote site regardless of what this file says.

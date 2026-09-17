@@ -16,6 +16,26 @@ class MissingConfigError(Exception):
     becomes somebody's home directory or somebody's name in a log."""
 
 
+# The effort levels an agent command's {effort} placeholder may render;
+# the memory scopes a cousin may declare; the model catalogue the
+# console's spawn dialog offers when config/harness.toml [agent] names
+# none. The catalogue is a convenience list for a dialog, not a
+# default that ever reaches an agent: a {model} placeholder with no
+# value configured anywhere is a spawn error (cousin_lib.spawn).
+EFFORT_LEVELS = ("low", "medium", "high", "max")
+MEMORY_SCOPES = ("private", "shared", "both")
+DEFAULT_MODELS = ("claude-opus-5", "claude-sonnet-5",
+                  "claude-haiku-4-5-20251001")
+
+
+def _check_effort(value, where):
+    if value is not None and value not in EFFORT_LEVELS:
+        raise MissingConfigError(
+            "%s must be one of %s, got %r"
+            % (where, ", ".join(EFFORT_LEVELS), value))
+    return value
+
+
 @dataclass
 class CousinConfig:
     home: Path
@@ -32,6 +52,8 @@ class CousinConfig:
     flip_at: str | None = None
     proactive_recall: bool = True
     recall_keyword_only: bool = False
+    model: str | None = None
+    effort: str | None = None
 
     @classmethod
     def load(cls, home):
@@ -44,6 +66,10 @@ class CousinConfig:
         slug = cousin.get("slug")
         if not slug:
             raise MissingConfigError("cousin.slug missing in %s" % toml_path)
+        runtime = data.get("runtime", {})
+        model = runtime.get("model")
+        effort = _check_effort(runtime.get("effort"),
+                               "runtime.effort in %s" % toml_path)
         return cls(
             home=home,
             slug=slug,
@@ -63,6 +89,8 @@ class CousinConfig:
                 data.get("memory", {}).get("proactive_recall", True)),
             recall_keyword_only=bool(
                 data.get("memory", {}).get("recall_keyword_only", False)),
+            model=str(model) if model is not None else None,
+            effort=effort,
         )
 
     @classmethod
@@ -127,6 +155,51 @@ class FrameworkConfig:
                 rows.append(CousinConfig.load(entry))
         return rows
 
+    def agent_defaults(self):
+        """config/harness.toml [agent]; see agent_config."""
+        return agent_config(self.root)
+
+
+def _read_harness_toml(root):
+    path = Path(root) / "config" / "harness.toml"
+    if not path.exists():
+        return None
+    try:
+        return tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        raise MissingConfigError("config/harness.toml is unusable: %s" % err)
+
+
+def agent_config(root):
+    """config/harness.toml [agent]: the install-wide `default_model` and
+    `default_effort` an agent command's {model} and {effort}
+    placeholders fall back to when the cousin's [runtime] sets none,
+    and `models`, the catalogue the console's spawn dialog offers.
+    Absent file or table: both defaults None, the built-in catalogue.
+    A default_effort outside the levels or a models value that is not
+    a list of strings is loud, like the rest of the file."""
+    data = _read_harness_toml(root) or {}
+    agent = data.get("agent") or {}
+    if not isinstance(agent, dict):
+        raise MissingConfigError(
+            "config/harness.toml [agent] must be a table")
+    models = agent.get("models")
+    if models is None:
+        models = list(DEFAULT_MODELS)
+    elif (not isinstance(models, list)
+          or not all(isinstance(m, str) and m for m in models)):
+        raise MissingConfigError(
+            "config/harness.toml [agent] models must be a list of"
+            " model names, got %r" % (models,))
+    model = agent.get("default_model")
+    return {
+        "default_model": str(model) if model is not None else None,
+        "default_effort": _check_effort(
+            agent.get("default_effort"),
+            "config/harness.toml [agent] default_effort"),
+        "models": list(models),
+    }
+
 
 def harness_config(root):
     """config/harness.toml: where the agent harness keeps this install's
@@ -139,13 +212,9 @@ def harness_config(root):
     Unparsable, or a threshold that is not a positive number: loud,
     because it was promised. Path values are templates; expand them
     per cousin with expand_harness_path."""
-    path = Path(root) / "config" / "harness.toml"
-    if not path.exists():
+    data = _read_harness_toml(root)
+    if data is None:
         return None
-    try:
-        data = tomllib.loads(path.read_text())
-    except (OSError, tomllib.TOMLDecodeError) as err:
-        raise MissingConfigError("config/harness.toml is unusable: %s" % err)
     threshold = data.get("flip_when_transcript_mb")
     if threshold is not None and (
             isinstance(threshold, bool)

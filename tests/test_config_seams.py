@@ -68,3 +68,58 @@ class HarnessSeam(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentDefaultsSeam(unittest.TestCase):
+    """config/harness.toml [agent]: the install-wide model and effort
+    the agent-cmd placeholders fall back to when a cousin sets none,
+    and the model catalogue the console's spawn dialog offers. Absent
+    file or table: no default model, no default effort, the built-in
+    catalogue. A default_effort outside the levels is loud."""
+
+    def _root(self, text=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        if text is not None:
+            (root / "config").mkdir()
+            (root / "config" / "harness.toml").write_text(text)
+        return root
+
+    def test_absent_file_means_no_defaults_and_the_builtin_catalogue(self):
+        cfg = config.agent_config(self._root())
+        self.assertEqual(set(cfg), {"default_model", "default_effort",
+                                    "models"})
+        self.assertIsNone(cfg["default_model"])
+        self.assertIsNone(cfg["default_effort"])
+        self.assertEqual(cfg["models"], list(config.DEFAULT_MODELS))
+        self.assertTrue(cfg["models"])
+
+    def test_absent_table_reads_the_same_as_absent_file(self):
+        cfg = config.agent_config(self._root(
+            'transcripts_dir = "/tmp/h/{home_encoded}"\n'))
+        self.assertIsNone(cfg["default_model"])
+        self.assertEqual(cfg["models"], list(config.DEFAULT_MODELS))
+
+    def test_reads_the_agent_table(self):
+        cfg = config.agent_config(self._root(
+            '[agent]\ndefault_model = "m-one"\ndefault_effort = "medium"\n'
+            'models = ["m-one", "m-two"]\n'))
+        self.assertEqual(cfg, {"default_model": "m-one",
+                               "default_effort": "medium",
+                               "models": ["m-one", "m-two"]})
+
+    def test_framework_config_exposes_it(self):
+        root = self._root('[agent]\ndefault_model = "m-one"\n')
+        self.assertEqual(
+            config.FrameworkConfig(root).agent_defaults()["default_model"],
+            "m-one")
+
+    def test_bad_default_effort_or_models_is_loud(self):
+        with self.assertRaises(config.MissingConfigError):
+            config.agent_config(self._root(
+                '[agent]\ndefault_effort = "extreme"\n'))
+        with self.assertRaises(config.MissingConfigError):
+            config.agent_config(self._root('[agent]\nmodels = "m-one"\n'))
+        with self.assertRaises(config.MissingConfigError):
+            config.agent_config(self._root('[agent]\nmodels = [1, 2]\n'))

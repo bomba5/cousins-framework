@@ -22,9 +22,12 @@ import uuid
 from pathlib import Path
 
 from cousin_lib.config import (
+    EFFORT_LEVELS,
+    MEMORY_SCOPES,
     CousinConfig,
     FrameworkConfig,
     MissingConfigError,
+    agent_config,
     expand_harness_path,
     harness_config,
 )
@@ -33,10 +36,50 @@ from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+# A [runtime] value renders into the agent command and is then split
+# by shlex: anything a shell would treat as more than one word, or as
+# quoting, is refused before it is persisted.
+_RUNTIME_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
+# The [runtime] keys the placeholders read; session_id has its own
+# mint-and-persist path and is never set by hand through these.
+_RUNTIME_KEYS = ("model", "effort")
 
 
 class SpawnError(Exception):
     """Creation cannot proceed; the message says why."""
+
+
+def check_runtime_value(key, value):
+    """The value `persist_runtime` and `create_cousin` accept for a
+    [runtime] key, or a SpawnError naming what was wrong."""
+    if key not in _RUNTIME_KEYS:
+        raise SpawnError("runtime.%s is not a key set this way; the"
+                         " settable keys are %s"
+                         % (key, ", ".join(_RUNTIME_KEYS)))
+    if not isinstance(value, str) or not _RUNTIME_VALUE_RE.match(value):
+        raise SpawnError(
+            "runtime.%s must be one word of letters, digits and ._:/+-"
+            " (it is rendered into the agent command), got %r"
+            % (key, value))
+    if key == "effort" and value not in EFFORT_LEVELS:
+        raise SpawnError("runtime.effort must be one of %s, got %r"
+                         % (", ".join(EFFORT_LEVELS), value))
+    return value
+
+
+def _check_spawn_options(*, model, effort, heartbeat, memory_scope):
+    if model is not None:
+        check_runtime_value("model", model)
+    if effort is not None:
+        check_runtime_value("effort", effort)
+    if heartbeat is not None and (
+            isinstance(heartbeat, bool) or not isinstance(heartbeat, int)
+            or heartbeat <= 0):
+        raise SpawnError("heartbeat must be a positive number of seconds,"
+                         " got %r" % (heartbeat,))
+    if memory_scope is not None and memory_scope not in MEMORY_SCOPES:
+        raise SpawnError("memory scope must be one of %s, got %r"
+                         % (", ".join(MEMORY_SCOPES), memory_scope))
 
 
 class DismissRefused(SpawnError):
@@ -82,10 +125,14 @@ def _toml_quote(value):
     return '"%s"' % value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _write_cousin_toml(home, *, slug, name, role, port, operator=None):
+def _write_cousin_toml(home, *, slug, name, role, port, operator=None,
+                       model=None, effort=None, heartbeat=None,
+                       memory_scope=None):
     """Write via a temporary file, re-parse, then rename into place: a
-    config that cannot be read back is never persisted. The [operator]
-    table exists only when one was configured."""
+    config that cannot be read back is never persisted. The [operator],
+    [runtime], [heartbeat] and [memory] tables exist only when a value
+    was given for them: an absent key is the documented default, never
+    a copied-out one."""
     text = (
         "[cousin]\n"
         "slug = %s\n"
@@ -99,6 +146,16 @@ def _write_cousin_toml(home, *, slug, name, role, port, operator=None):
     )
     if operator:
         text += "\n[operator]\nname = %s\n" % _toml_quote(operator)
+    if model is not None or effort is not None:
+        text += "\n[runtime]\n"
+        if model is not None:
+            text += "model = %s\n" % _toml_quote(model)
+        if effort is not None:
+            text += "effort = %s\n" % _toml_quote(effort)
+    if heartbeat is not None:
+        text += "\n[heartbeat]\ncontext_beat_seconds = %d\n" % heartbeat
+    if memory_scope is not None:
+        text += "\n[memory]\nscope = %s\n" % _toml_quote(memory_scope)
     tomllib.loads(text)
     fd, tmp = tempfile.mkstemp(dir=home, suffix=".toml.tmp")
     with os.fdopen(fd, "w") as fh:
@@ -119,16 +176,22 @@ def _write_identity_files(home, *, claude_md, name, role):
 
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
                   voice=None, port=None, template_path=None, operator=None,
+                  model=None, effort=None, heartbeat=None, memory_scope=None,
                   _is_live=_is_live):
     """The creation sequence from the spec: validate, allocate, create,
     write atomically, render, provision the MCP adapter - and on any
     failure after the home exists, remove everything this run created.
+    model, effort, heartbeat and memory_scope are optional and land in
+    cousin.toml ([runtime], [heartbeat] context_beat_seconds, [memory]
+    scope); each is validated before anything is written.
     Returns {slug, home, port}."""
     root = FrameworkConfig(root).root
     if not slug or not _SLUG_RE.match(slug):
         raise SpawnError(
             "invalid slug %r: use ^[a-z][a-z0-9_-]{1,31}$" % (slug,)
         )
+    _check_spawn_options(model=model, effort=effort, heartbeat=heartbeat,
+                         memory_scope=memory_scope)
     home = root / "cousins" / slug
     if (home / "cousin.toml").is_file():
         raise SpawnError("cousin %r already exists" % slug)
@@ -166,7 +229,9 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         for sub in ("memory", "data", "notes", "scripts"):
             (home / sub).mkdir(parents=True)
         _write_cousin_toml(home, slug=slug, name=name, role=role,
-                           port=port, operator=operator)
+                           port=port, operator=operator, model=model,
+                           effort=effort, heartbeat=heartbeat,
+                           memory_scope=memory_scope)
         _write_identity_files(home, claude_md=claude_md, name=name,
                               role=role)
         # The harness-side registration of the cousin's tool surface:
@@ -394,37 +459,109 @@ def _mint_session_id():
     return session_id
 
 
-def _persist_session_id(home, session_id):
-    """Write runtime.session_id into cousin.toml without disturbing
-    anything else in the file: targeted line replace (function repl, so
-    no group-reference surprises), else an appended [runtime] table.
-    Re-parse before persisting; atomic rename into place."""
+def _persist_runtime_line(home, key, value):
+    """Write runtime.<key> into cousin.toml without disturbing anything
+    else in the file: targeted line replace (function repl, so no
+    group-reference surprises), else a line under an existing
+    [runtime] header, else an appended [runtime] table. Re-parse
+    before persisting; atomic rename into place."""
     path = Path(home) / "cousin.toml"
     text = path.read_text()
-    line = 'session_id = "%s"' % session_id
-    if re.search(r'(?m)^session_id\s*=', text):
-        new_text = re.sub(r'(?m)^session_id\s*=.*$',
-                          lambda m: line, text, count=1)
-    elif re.search(r"(?m)^\[runtime\]", text):
-        new_text = re.sub(r"(?m)^\[runtime\]\s*$",
-                          lambda m: "[runtime]\n" + line, text, count=1)
-    else:
+    line = '%s = "%s"' % (key, value)
+    header = re.search(r"(?m)^\[runtime\]\s*$", text)
+    if header is None:
         new_text = text.rstrip() + "\n\n[runtime]\n" + line + "\n"
-    tomllib.loads(new_text)
+    else:
+        # The table body: from the header to the next header or EOF,
+        # so a same-named key in another table is never the one hit.
+        body_start = header.end()
+        nxt = re.search(r"(?m)^\s*\[", text[body_start:])
+        body_end = body_start + nxt.start() if nxt else len(text)
+        body = text[body_start:body_end]
+        key_re = re.compile(r"(?m)^%s\s*=.*$" % re.escape(key))
+        if key_re.search(body):
+            body = key_re.sub(lambda m: line, body, count=1)
+        else:
+            body = "\n" + line + body
+        new_text = text[:body_start] + body + text[body_end:]
+    parsed = tomllib.loads(new_text)
+    if parsed.get("runtime", {}).get(key) != value:
+        raise SpawnError("runtime.%s did not round-trip through %s"
+                         % (key, path))
     tmp = path.with_suffix(".toml.tmp")
     tmp.write_text(new_text)
     os.replace(tmp, path)
 
 
+def _persist_session_id(home, session_id):
+    """The minted identity's write-back (see _mint_session_id)."""
+    _persist_runtime_line(home, "session_id", session_id)
+
+
+def persist_runtime(home, key, value):
+    """Set cousin.toml [runtime] model or effort the way the session id
+    is persisted, after check_runtime_value. The console's effort and
+    model routes and any CLI that edits these go through here; the
+    running agent keeps its old value until the next start."""
+    check_runtime_value(key, value)
+    _persist_runtime_line(home, key, value)
+
+
+def _resolve_root(home, root):
+    """The framework root a start needs for config/harness.toml: the
+    caller's, else FRAMEWORK_ROOT, else the home's grandparent (homes
+    live at <root>/cousins/<slug>)."""
+    if root is not None:
+        return Path(root)
+    env = os.environ.get("FRAMEWORK_ROOT")
+    if env:
+        return Path(env)
+    return Path(home).parent.parent
+
+
+def render_agent_cmd(agent_cmd, home, *, root=None):
+    """Render the {model} and {effort} placeholders of an agent command
+    for one cousin: cousin.toml [runtime], else config/harness.toml
+    [agent] default_model / default_effort. A placeholder with no value
+    in either file is a SpawnError naming both, never a guessed vendor
+    default. {session_id} is left for the spawn site (or flip) to mint.
+    Exposed so a flip can preflight the render before killing anything."""
+    root = _resolve_root(home, root)
+    config = CousinConfig.load(home)
+    try:
+        defaults = agent_config(root)
+    except MissingConfigError as err:
+        raise SpawnError(str(err))
+    values = {"model": config.model or defaults["default_model"],
+              "effort": config.effort or defaults["default_effort"]}
+    for key in _RUNTIME_KEYS:
+        placeholder = "{%s}" % key
+        if placeholder not in agent_cmd:
+            continue
+        if not values[key]:
+            raise SpawnError(
+                "the agent command carries %s but neither %s [runtime]"
+                " %s nor %s [agent] default_%s defines it; set one"
+                % (placeholder, Path(home) / "cousin.toml", key,
+                   root / "config" / "harness.toml", key))
+        agent_cmd = agent_cmd.replace(placeholder, values[key])
+    return agent_cmd
+
+
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
-                 start_chat_server=_default_chat_server):
+                 start_chat_server=_default_chat_server, root=None):
     """THE tmux-session-creation site - the only one in this codebase,
     by spec. Any future respawn machinery calls this function.
 
     agent_cmd is host configuration: what it means to 'run an agent'
     (binary, flags, trust model) differs per install and is never
-    hardcoded here."""
+    hardcoded here. Its {model} and {effort} placeholders render from
+    the cousin's [runtime], else the install's [agent] defaults
+    (render_agent_cmd); root locates config/harness.toml for those
+    defaults and falls back to FRAMEWORK_ROOT, then the home's
+    grandparent."""
     config = CousinConfig.load(home)
+    agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
     # A {session_id} placeholder is rendered HERE, at the single
     # spawn site, so a plain start (console, cousin-spawn --start) and
     # a flip mint identity the same way. flip.py renders its own copy
@@ -496,6 +633,20 @@ def spawn_main(argv=None):
                         help="the operator's name: written to cousin.toml"
                              " [operator] and named in the cousin's MCP"
                              " registry so `send` can reach them")
+    parser.add_argument("--model",
+                        help="cousin.toml [runtime] model: what the agent"
+                             " command's {model} placeholder renders to;"
+                             " absent, config/harness.toml [agent]"
+                             " default_model applies")
+    parser.add_argument("--effort", choices=EFFORT_LEVELS,
+                        help="cousin.toml [runtime] effort, rendered into"
+                             " the {effort} placeholder; absent, [agent]"
+                             " default_effort applies")
+    parser.add_argument("--heartbeat", type=int, metavar="SECONDS",
+                        help="cousin.toml [heartbeat] context_beat_seconds"
+                             " (absent: the documented default)")
+    parser.add_argument("--memory-scope", choices=MEMORY_SCOPES,
+                        help="cousin.toml [memory] scope (absent: private)")
     parser.add_argument("--start", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -507,7 +658,9 @@ def spawn_main(argv=None):
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,
             role_paragraph=args.role_paragraph, voice=args.voice,
-            port=args.port, operator=args.operator,
+            port=args.port, operator=args.operator, model=args.model,
+            effort=args.effort, heartbeat=args.heartbeat,
+            memory_scope=args.memory_scope,
         )
     except SpawnError as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)
@@ -516,7 +669,8 @@ def spawn_main(argv=None):
           % (out["slug"], out["home"], out["port"]))
     if args.start:
         try:
-            start_cousin(out["home"], agent_cmd=_read_agent_cmd(root))
+            start_cousin(out["home"], agent_cmd=_read_agent_cmd(root),
+                         root=root)
         except SpawnError as err:
             print("cousin-spawn: created but start failed: %s\n"
                   "the home is kept; fix the cause and start it again"

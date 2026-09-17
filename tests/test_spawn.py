@@ -294,3 +294,193 @@ class TestStartSubstitutesSessionId(TestStartCousin):
         )
         conf = _tomllib.loads((out["home"] / "cousin.toml").read_text())
         self.assertNotIn("session_id", conf.get("runtime", {}))
+
+
+class TestModelAndEffortPlaceholders(TestStartCousin):
+    """{model} and {effort} in the agent-cmd render at the single spawn
+    site from cousin.toml [runtime], else config/harness.toml [agent]
+    defaults; a placeholder with no value anywhere is a SpawnError that
+    names both files, never a guessed vendor default."""
+
+    def _harness(self, root, text):
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "harness.toml").write_text(text)
+
+    def test_cousin_values_win_over_harness_defaults(self):
+        root = self._framework_root()
+        out = self._create(root, model="own-model", effort="low")
+        self._harness(root, '[agent]\ndefault_model = "dm"\n'
+                            'default_effort = "high"\n')
+        tmux, log = self._fake_tmux(root)
+        start_cousin(out["home"], agent_cmd="my-agent --model {model}"
+                     " --effort {effort}", tmux_bin=str(tmux), root=root,
+                     start_chat_server=lambda home: None)
+        text = log.read_text()
+        self.assertIn("--model own-model --effort low", text)
+        self.assertNotIn("{model}", text)
+        self.assertNotIn("{effort}", text)
+
+    def test_harness_defaults_fill_what_the_cousin_leaves_unset(self):
+        root = self._framework_root()
+        out = self._create(root)
+        self._harness(root, '[agent]\ndefault_model = "dm"\n'
+                            'default_effort = "medium"\n')
+        tmux, log = self._fake_tmux(root)
+        start_cousin(out["home"], agent_cmd="my-agent --model {model}"
+                     " --effort {effort}", tmux_bin=str(tmux), root=root,
+                     start_chat_server=lambda home: None)
+        self.assertIn("--model dm --effort medium", log.read_text())
+
+    def test_root_falls_back_to_the_environment(self):
+        root = self._framework_root()
+        out = self._create(root)
+        self._harness(root, '[agent]\ndefault_model = "dm"\n')
+        tmux, log = self._fake_tmux(root)
+        with mock.patch.dict("os.environ", {"FRAMEWORK_ROOT": str(root)}):
+            start_cousin(out["home"], agent_cmd="my-agent --model {model}",
+                         tmux_bin=str(tmux),
+                         start_chat_server=lambda home: None)
+        self.assertIn("--model dm", log.read_text())
+
+    def test_missing_value_is_a_spawn_error_naming_both_files(self):
+        root = self._framework_root()
+        out = self._create(root)
+        tmux, log = self._fake_tmux(root)
+        with self.assertRaises(SpawnError) as ctx:
+            start_cousin(out["home"], agent_cmd="my-agent --effort {effort}",
+                         tmux_bin=str(tmux), root=root,
+                         start_chat_server=lambda home: None)
+        msg = str(ctx.exception)
+        self.assertIn("{effort}", msg)
+        self.assertIn(str(out["home"] / "cousin.toml"), msg)
+        self.assertIn(str(root / "config" / "harness.toml"), msg)
+        self.assertIn("default_effort", msg)
+        # Nothing was started: the error came before tmux.
+        self.assertFalse(log.exists())
+
+    def test_without_placeholders_no_value_is_needed(self):
+        root = self._framework_root()
+        out = self._create(root)
+        tmux, log = self._fake_tmux(root)
+        start_cousin(out["home"], agent_cmd="my-agent", tmux_bin=str(tmux),
+                     root=root, start_chat_server=lambda home: None)
+        self.assertIn("my-agent", log.read_text())
+
+    def test_render_is_exposed_for_preflight_and_keeps_session_id(self):
+        from cousin_lib.spawn import render_agent_cmd
+        root = self._framework_root()
+        out = self._create(root, model="own-model", effort="max")
+        cmd = render_agent_cmd(
+            "a --m {model} --e {effort} --s {session_id}", out["home"],
+            root=root)
+        self.assertEqual(cmd, "a --m own-model --e max --s {session_id}")
+
+
+class TestPersistRuntimeValues(CreateCase):
+    """persist_runtime mirrors the session-id write: a targeted line
+    replace inside [runtime], re-parsed, renamed into place, every other
+    line untouched. The values are validated before the write because
+    they render into an argv through shlex: a space or a quote in a
+    model name would become a second argument."""
+
+    def test_sets_and_replaces_inside_runtime_keeping_the_rest(self):
+        from cousin_lib.spawn import persist_runtime
+        root = self._framework_root()
+        out = self._create(root)
+        path = out["home"] / "cousin.toml"
+        path.write_text(path.read_text() + '\n[runtime]\nsession_id = "abc"\n'
+                        '\n[memory]\nscope = "shared"\n')
+        persist_runtime(out["home"], "model", "m-one")
+        persist_runtime(out["home"], "effort", "low")
+        persist_runtime(out["home"], "model", "m-two")
+        data = tomllib.loads(path.read_text())
+        self.assertEqual(data["runtime"], {"session_id": "abc",
+                                           "model": "m-two", "effort": "low"})
+        self.assertEqual(data["memory"]["scope"], "shared")
+        self.assertEqual(data["cousin"]["name"], "Wren")
+        self.assertEqual(path.read_text().count("[runtime]"), 1)
+
+    def test_creates_the_table_when_absent(self):
+        from cousin_lib.spawn import persist_runtime
+        root = self._framework_root()
+        out = self._create(root)
+        persist_runtime(out["home"], "effort", "high")
+        data = tomllib.loads((out["home"] / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"]["effort"], "high")
+
+    def test_rejects_unsafe_values_and_unknown_levels(self):
+        from cousin_lib.spawn import persist_runtime
+        root = self._framework_root()
+        out = self._create(root)
+        for bad in ("two words", 'q"uote', "", "a;b", "$(x)"):
+            with self.assertRaises(SpawnError, msg=bad):
+                persist_runtime(out["home"], "model", bad)
+        with self.assertRaises(SpawnError):
+            persist_runtime(out["home"], "effort", "xhigh")
+        with self.assertRaises(SpawnError):
+            persist_runtime(out["home"], "session_id", "not-through-here")
+        self.assertNotIn("runtime", tomllib.loads(
+            (out["home"] / "cousin.toml").read_text()))
+
+
+class TestCreateWithRuntimeOptions(CreateCase):
+    def test_create_writes_runtime_heartbeat_and_scope(self):
+        root = self._framework_root()
+        out = self._create(root, model="m-one", effort="medium",
+                           heartbeat=600, memory_scope="both")
+        data = tomllib.loads((out["home"] / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"], {"model": "m-one",
+                                           "effort": "medium"})
+        self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
+        self.assertEqual(data["memory"]["scope"], "both")
+        from cousin_lib.config import CousinConfig
+        cfg = CousinConfig.load(out["home"])
+        self.assertEqual((cfg.model, cfg.effort, cfg.heartbeat_seconds,
+                          cfg.memory_scope), ("m-one", "medium", 600, "both"))
+
+    def test_options_left_out_write_no_table(self):
+        root = self._framework_root()
+        out = self._create(root)
+        data = tomllib.loads((out["home"] / "cousin.toml").read_text())
+        for table in ("runtime", "heartbeat", "memory"):
+            self.assertNotIn(table, data)
+
+    def test_bad_options_fail_before_anything_is_written(self):
+        root = self._framework_root()
+        for kw in (dict(effort="xhigh"), dict(memory_scope="everyone"),
+                   dict(heartbeat=0), dict(heartbeat="soon"),
+                   dict(model="two words")):
+            with self.assertRaises(SpawnError, msg=kw):
+                self._create(root, **kw)
+            self.assertFalse((root / "cousins").exists(), kw)
+
+
+class TestSpawnMainRuntimeFlags(CreateCase):
+    def _main(self, argv):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = spawn_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_flags_reach_cousin_toml(self):
+        root = self._framework_root()
+        rc, _, err = self._main([
+            "wren", "--root", str(root), "--role", "x", "--voice", "v",
+            "--port", "8100", "--model", "m-one", "--effort", "max",
+            "--heartbeat", "900", "--memory-scope", "shared",
+        ])
+        self.assertEqual(rc, 0, err)
+        data = tomllib.loads(
+            (root / "cousins" / "wren" / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"], {"model": "m-one", "effort": "max"})
+        self.assertEqual(data["heartbeat"]["context_beat_seconds"], 900)
+        self.assertEqual(data["memory"]["scope"], "shared")
+
+    def test_bad_effort_is_refused_by_argparse(self):
+        root = self._framework_root()
+        with self.assertRaises(SystemExit):
+            self._main(["wren", "--root", str(root), "--role", "x",
+                        "--voice", "v", "--effort", "xhigh"])
+        self.assertFalse((root / "cousins").exists())

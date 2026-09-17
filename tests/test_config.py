@@ -145,3 +145,41 @@ class RecallKeywordOnlyKey(unittest.TestCase):
             (home / "cousin.toml").write_text(
                 '[cousin]\nslug = "wren"\nname = "Wren"\n[memory]\nrecall_keyword_only = true\n')
             self.assertTrue(CousinConfig.load(home).recall_keyword_only)
+
+
+class TestRuntimeModelAndEffort(unittest.TestCase):
+    """cousin.toml [runtime] model and effort: per-cousin values the
+    agent-cmd placeholders {model} and {effort} render from. Absent is
+    None (the install default applies); an effort outside the four
+    levels is loud, because a misspelt level would otherwise reach the
+    agent binary as a flag it rejects at the far end of a spawn."""
+
+    def _home(self, toml_text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = pathlib.Path(tmp.name)
+        (home / "cousin.toml").write_text(toml_text)
+        return home
+
+    def test_absent_means_none_never_a_vendor_default(self):
+        cfg = CousinConfig.load(
+            self._home('[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'))
+        self.assertIsNone(cfg.model)
+        self.assertIsNone(cfg.effort)
+
+    def test_reads_both_from_runtime(self):
+        cfg = CousinConfig.load(self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[runtime]\nmodel = "some-model"\neffort = "low"\n'))
+        self.assertEqual(cfg.model, "some-model")
+        self.assertEqual(cfg.effort, "low")
+
+    def test_effort_outside_the_levels_is_loud(self):
+        from cousin_lib.config import EFFORT_LEVELS
+        self.assertEqual(EFFORT_LEVELS, ("low", "medium", "high", "max"))
+        with self.assertRaises(MissingConfigError) as ctx:
+            CousinConfig.load(self._home(
+                '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+                '[runtime]\neffort = "xhigh"\n'))
+        self.assertIn("effort", str(ctx.exception))
+        self.assertIn("xhigh", str(ctx.exception))

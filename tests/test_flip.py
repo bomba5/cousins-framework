@@ -256,3 +256,33 @@ class TestTranscriptMineStage(FlipCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFlipRendersModelAndEffort(FlipCase):
+    """The agent-cmd's {model} and {effort} placeholders reach the
+    respawn rendered, and a placeholder with no value anywhere fails
+    preflight before the old session is killed."""
+
+    def test_unrenderable_placeholder_fails_preflight_before_any_damage(self):
+        (self.root / "config" / "agent-cmd").write_text(
+            "my-agent --effort {effort} --sid {session_id}\n")
+        out = self._flip()
+        self.assertFalse(out["ok"])
+        self.assertIn("preflight", out["error"])
+        self.assertIn("{effort}", out["error"])
+        self.assertIn("harness.toml", out["error"])
+        self.assertNotIn("kill-session", " ".join(self._calls()))
+
+    def test_values_render_from_the_cousin_and_the_install(self):
+        (self.root / "config" / "agent-cmd").write_text(
+            "my-agent --model {model} --effort {effort} --sid {session_id}\n")
+        (self.root / "config" / "harness.toml").write_text(
+            '[agent]\ndefault_model = "dm"\n')
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text()
+            + '\n[runtime]\neffort = "low"\n')
+        out = self._flip()
+        self.assertTrue(out["ok"], out)
+        spawn = [c for c in self._calls() if "new-session" in c][-1]
+        self.assertIn("--model dm --effort low", spawn)
+        self.assertNotIn("{", spawn)

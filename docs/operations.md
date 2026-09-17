@@ -18,7 +18,7 @@ git clone <this repo> cousin-framework && cd cousin-framework
 pip install -e .                     # or a wheel; no third-party deps
 export FRAMEWORK_ROOT="$PWD"         # the checkout is the root
 mkdir -p config
-printf '%s\n' '<your agent command line, {session_id} allowed>' > config/agent-cmd
+printf '%s\n' '<your agent command line; {session_id}, {model}, {effort} allowed>' > config/agent-cmd
 cousin-spawn testa --root . --name Testa --role "test cousin" \
     --voice "Plain and helpful." --start
 cousin-tool-surface --root .         # so the first boot is not degraded

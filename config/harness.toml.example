@@ -34,3 +34,15 @@
 # exactly this file. Absent: approve refuses and prints the manual
 # edit instead of guessing where the harness keeps its settings.
 #settings_file = "~/.harness-settings.json"
+#
+# Install-wide agent defaults. config/agent-cmd may carry {model} and
+# {effort} placeholders; each renders from the cousin's own
+# cousin.toml [runtime] model / effort, else from these. A placeholder
+# with no value in either place is a spawn error that names both
+# files. `models` is the catalogue the console's spawn dialog offers;
+# absent, a built-in list of three names is offered. `default_effort`
+# is one of low, medium, high, max.
+#[agent]
+#default_model = "some-model"
+#default_effort = "high"
+#models = ["some-model", "another-model"]

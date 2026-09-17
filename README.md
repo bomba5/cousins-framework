@@ -85,8 +85,11 @@ non-normative example, a local Ollama exposes that contract at
 `nomic-embed-text`. If the configured service is unreachable, search
 degrades to keyword and SAYS SO - it never quietly pretends. To run
 the cousin as a live agent, put the command line that starts your
-agent in `config/agent-cmd` and pass `--start`; its chat server then
-serves the ports in `cousins/*/cousin.toml`. To watch the fleet in a
+agent in `config/agent-cmd` (with `{session_id}`, `{model}` and
+`{effort}` placeholders if your agent takes them; the values come
+from each cousin's `cousin.toml [runtime]` or the install's
+`config/harness.toml [agent]` defaults) and pass `--start`; its chat
+server then serves the ports in `cousins/*/cousin.toml`. To watch the fleet in a
 browser, run `cousin-console --port 8600` - it renders what the framework
 persists and never becomes a source of truth of its own.
 

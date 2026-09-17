@@ -25,7 +25,8 @@ from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, harness_config)
 from cousin_lib.server.injection import TmuxInjector
 from cousin_lib.spawn import (SpawnError, _mint_session_id,
-                              _persist_session_id, start_cousin)
+                              _persist_session_id, render_agent_cmd,
+                              start_cousin)
 from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
@@ -184,6 +185,14 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     if not agent_cmd_template:
         failures.append("no agent command at %s"
                         % (root / "config" / "agent-cmd"))
+    else:
+        # The {model}/{effort} render is checked here, before the
+        # kill: a placeholder nothing defines would otherwise fail the
+        # respawn with the old session already gone.
+        try:
+            render_agent_cmd(agent_cmd_template, home, root=root)
+        except SpawnError as err:
+            failures.append(str(err))
     if failures:
         result["stages"].append({"stage": "preflight", "ok": False,
                                  "failures": failures})
@@ -298,7 +307,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     agent_cmd = agent_cmd_template.replace("{session_id}", session_id)
     try:
         start_cousin(home, agent_cmd=agent_cmd, tmux_bin=tmux_bin,
-                     tmux_socket=tmux_socket)
+                     tmux_socket=tmux_socket, root=root)
     except SpawnError as err:
         result["stages"].append({"stage": "respawn", "ok": False,
                                  "error": str(err)})

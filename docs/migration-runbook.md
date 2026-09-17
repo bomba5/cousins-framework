@@ -10,7 +10,8 @@ instance keeps serving the cousin until you stop it there.
 1. Install this framework on the target host: `pip install -e .` in the
    checkout (add `[mcp]` if cousins use the MCP adapter), set
    `FRAMEWORK_ROOT` to the root that will hold `cousins/`, `config/`, `data/`.
-2. `config/`: `agent-cmd` (the real agent binary line with `{session_id}`),
+2. `config/`: `agent-cmd` (the real agent binary line with `{session_id}`,
+   and `{model}` / `{effort}` if the model and effort vary per cousin),
    `harness.toml` (transcripts and auto-memory directories, the size guard),
    `embedding.toml` (the embedding provider; keyword-only without it),
    `console-users.json` via `cousin-console adduser <name>`,
@@ -31,10 +32,12 @@ instance keeps serving the cousin until you stop it there.
    --root <root> --name <Name> --role "<role>" --voice "<voice>" --operator
    <operator name>`. This writes `cousin.toml` in this framework's shape,
    `CLAUDE.md` from the template, the MCP registry and `.mcp.json`. Do NOT
-   copy the source `cousin.toml`: it carries tables this framework does not
-   read (`[runtime]`, `[heartbeat]`, `[budget]`, `[modules]`, `[engagement]`).
-   Port its `[[loops]]` entries by hand into the new file; port `[telegram]`
-   and `[session]` if used.
+   copy the source `cousin.toml`: it carries tables and keys this framework
+   does not read (`[budget]`, `[modules]`, `[engagement]`, most of
+   `[runtime]`). Port its `[[loops]]` entries by hand into the new file;
+   port `[telegram]` and `[session]` if used; pass the cousin's model and
+   effort as `--model` / `--effort` (they become `[runtime] model` and
+   `effort` here) and its beat as `--heartbeat`.
 3. **Copy memory**, same shapes on both sides: `memory/raw/`,
    `memory/distilled/` (regenerated at first boot anyway), `notes/`,
    `MEMORY.md`, `STATUS.md`, `data/decisions.jsonl`, `data/capsules.jsonl`

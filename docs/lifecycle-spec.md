@@ -109,7 +109,11 @@ identity. Stages, in order, each reported in a structured result:
    codebase's single tmux-creation site. Session identity is minted as
    a fresh UUID and rendered into the agent command via an optional
    `{session_id}` placeholder in the host's agent-cmd config; an agent
-   with no session concept omits the placeholder. The id is minted and
+   with no session concept omits the placeholder. The command's
+   `{model}` and `{effort}` placeholders render at the same site from
+   the cousin's `[runtime]` (else the install's `[agent]` defaults),
+   and preflight checks that render BEFORE the kill: a placeholder
+   nothing defines fails the flip with nothing destroyed. The id is minted and
    written back into `cousin.toml` EVEN WHEN the placeholder is
    absent - the generation record is more useful with it, and an
    undefined dead state is how a later reader concludes the field is

@@ -1,0 +1,25 @@
+# config/embedding.toml - the semantic leg of cousin-memory search.
+# Copy to config/embedding.toml and fill in. Absent: keyword search
+# only, silently (nothing was promised). Present but unreachable or
+# unparsable: keyword results plus a notice, never a quiet pretence.
+#
+# The endpoint takes {"model": ..., "prompt": ...} as JSON and returns
+# {"embedding": [...]}. Front any service with that contract.
+#url = "http://embeddings.example.invalid:11434/api/embeddings"
+#model = "nomic-embed-text"
+#timeout_s = 10
+#
+# Long files are embedded in chunks of chunk_chars characters, each
+# overlapping the previous by chunk_overlap characters, so a fact near
+# a chunk boundary is still findable by meaning.
+#chunk_chars = 2000
+#chunk_overlap = 200
+#
+# Proactive recall: the chat server searches memory for operator
+# messages of at least min_chars characters and appends up to top
+# hits scoring at least min_score as a "possibly relevant" line.
+# Per-cousin opt-out lives in cousin.toml [memory].
+#[recall]
+#min_chars = 24
+#min_score = 0.45
+#top = 3

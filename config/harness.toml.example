@@ -1,0 +1,20 @@
+# config/harness.toml - where the agent harness keeps its per-project
+# state for this install. Copy to config/harness.toml and fill in.
+#
+# Absent file: transcript mining at flip and the harness auto-memory
+# search collection are both off, said once at flip. Present but
+# unparsable: a loud error, because the file promised something.
+#
+# Both values are templates expanded per cousin:
+#   {home}          the cousin home, verbatim
+#   {home_encoded}  the harness's project-dir encoding of the home:
+#                   every "/" becomes "-", so /srv/fw/cousins/testa/files
+#                   becomes -srv-fw-cousins-testa-files
+#
+# Where the harness writes session transcripts (one directory per
+# project, JSONL files inside).
+#transcripts_dir = "/var/lib/harness/projects/{home_encoded}"
+#
+# The harness's own auto-memory directory for this cousin. When set it
+# becomes a search collection for cousin-memory search.
+#auto_memory_dir = "/var/lib/harness/projects/{home_encoded}/memory"

@@ -24,7 +24,8 @@ and `cousin-ui` take it identically; a flag is discoverable from
 | `config/law.md` | boot packet assembly | no framework-law layer; a missing law file is an install matter, never a per-cousin degradation |
 | `config/net-allowlist.json` | the network guard (chat server, UI) | loopback + RFC1918 only; the file only ever ADDS CIDRs |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
-| `config/embedding.toml` | `cousin-memory search` | keyword search only, silently - nothing was promised |
+| `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; no proactive recall line |
+| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection | both off, said once at flip |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
@@ -43,6 +44,21 @@ and `cousin-ui` take it identically; a flag is discoverable from
   `{"model", "prompt"}` and returns `{"embedding": [...]}`; front any
   service with that contract. A configured-but-unreachable service
   degrades to keyword AND says so - it never quietly pretends.
+  Optional search keys: `chunk_chars` (default 2000) and
+  `chunk_overlap` (default 200) split long files into overlapping
+  chunks before embedding. Optional `[recall]` table for proactive
+  recall in the chat server: `min_chars` (default 24, shorter
+  operator messages are not searched), `min_score` (default 0.45,
+  the fused score a hit needs to be mentioned), `top` (default 3,
+  the most hits one message may surface). Thresholds live here, not
+  in code; a per-cousin opt-out lives in `cousin.toml [memory]`.
+- `harness.toml`: `transcripts_dir`, `auto_memory_dir`, each a path
+  template with `{home}` (the cousin home) and `{home_encoded}` (the
+  harness's project-dir encoding of it: every `/` becomes `-`, so
+  `/a/b` is `-a-b`). `transcripts_dir` is where the harness writes a
+  session's transcript; `auto_memory_dir` is the harness's own memory
+  directory for that cousin. A key left out is None, never a guessed
+  location. Unparsable is loud: the file promised something.
 - `shared-reviewers.json`: `{"reviewers": ["name-or-slug", ...]}`. A
   reviewer may never be the proposer; that boundary is enforced at the
   promote site regardless of what this file says.

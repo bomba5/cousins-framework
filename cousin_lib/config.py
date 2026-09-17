@@ -120,3 +120,30 @@ class FrameworkConfig:
             if (entry / "cousin.toml").is_file():
                 rows.append(CousinConfig.load(entry))
         return rows
+
+
+def harness_config(root):
+    """config/harness.toml: where the agent harness keeps this install's
+    session transcripts and its own auto-memory directory. Absent: None
+    (transcript mining and the harness memory collection are off).
+    Unparsable: loud, because it was promised. Values are templates;
+    expand them per cousin with expand_harness_path."""
+    path = Path(root) / "config" / "harness.toml"
+    if not path.exists():
+        return None
+    try:
+        data = tomllib.loads(path.read_text())
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        raise MissingConfigError("config/harness.toml is unusable: %s" % err)
+    return {"transcripts_dir": data.get("transcripts_dir"),
+            "auto_memory_dir": data.get("auto_memory_dir")}
+
+
+def expand_harness_path(template, home):
+    """Expand a harness.toml path template for one cousin home. {home}
+    is the home verbatim; {home_encoded} is the harness's project-dir
+    encoding of it: every '/' becomes '-', so /a/b -> -a-b."""
+    home = Path(home)
+    encoded = str(home).replace("/", "-")
+    return Path(template.replace("{home_encoded}", encoded)
+                        .replace("{home}", str(home)))

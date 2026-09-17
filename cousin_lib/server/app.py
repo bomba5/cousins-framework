@@ -22,6 +22,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from cousin_lib import corrections
 from cousin_lib.config import CousinConfig, MissingConfigError
 from cousin_lib.server.injection import TmuxInjector, make_deliver
 from cousin_lib.server.netguard import NetGuard
@@ -82,6 +83,23 @@ def persist_inbound_file(home, message_id, data_uri):
     path = inbox / ("%d.%s" % (message_id, ext))
     path.write_bytes(payload)
     return "[image attached -> Read %s]" % path
+
+
+def _record_correction(config, user, message):
+    """Capture an operator correction from an inbound message. Only the
+    configured operator's messages count (no operator configured means
+    nothing is recorded: a peer's "no" is not calibration). Best-effort
+    by construction: the message is already stored and about to be
+    delivered, and a full disk under data/ must not turn into a 500."""
+    operator = config.operator_name
+    if not operator:
+        return
+    if normalize_chat_user(user) != normalize_chat_user(operator):
+        return
+    try:
+        corrections.detect_and_record(config.home, user=user, text=message)
+    except Exception as err:  # noqa: BLE001 - never fails the send
+        print("corrections: not recorded: %s" % err, file=sys.stderr)
 
 
 class ChatServer:
@@ -274,6 +292,7 @@ class _ChatHandler(BaseHTTPRequestHandler):
             reply_to=json.dumps(reply_to) if reply_to is not None else None,
         ))
         server = self.chat_server
+        _record_correction(server.config, user, message)
         attachments = []
         image = body.get("image")
         if image:

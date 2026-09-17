@@ -80,8 +80,10 @@ Request: `{"user": <display name>, "message": <text>, "reply_to": {...}?}`.
 
 Effects, in order:
 1. Insert into `messages` (`type='user'`).
-2. Deliver into the cousin's terminal (see Injection).
-3. Touch `<home>/data/.last-user-msg` - its mtime feeds the time prefix of
+2. Compose the delivery text: the message, plus the proactive recall
+   suffix when one applies (see Proactive recall).
+3. Deliver into the cousin's terminal (see Injection).
+4. Touch `<home>/data/.last-user-msg` - its mtime feeds the time prefix of
    the NEXT delivery, so each delivery reports the gap since the previous
    message. The touch happens after the delivery text is composed.
 
@@ -160,6 +162,39 @@ Inbound messages reach the cousin as a line typed into its tmux session:
 - The tmux binary and socket are resolved from configuration/PATH, never
   hardcoded paths.
 
+## Proactive recall
+
+A colleague remembers without being asked. When the sender is the
+configured operator (`cousin.toml [operator] name`; no operator means
+nobody qualifies) and the message is at least `min_chars` long, the
+server searches the cousin's own memory (`cousin_lib.memory_search`,
+the same hybrid search behind `cousin-memory search`) and appends
+exactly one suffix to the DELIVERED text:
+
+```
+[fw-recall] possibly relevant from your memory: <title> (<collection>:<relpath>); ... - cousin-memory search for details; ignore if not.
+```
+
+`<title>` is the file's first markdown heading, else its stem. Names
+and paths only, never file contents. The suffix is single-line by
+construction and rides the same paste as the message: one inject, one
+submit. The stored row is never touched - the history is what the
+operator said, not what the cousin was reminded of.
+
+Which hits qualify: with `config/embedding.toml` present a hit needs
+its semantic similarity at or above `[recall] min_score`; without it
+(keyword only) every FTS hit the search returns qualifies, because a
+match there already means a term matched. `min_chars`, `min_score`
+and `top` live in `config/embedding.toml [recall]` (defaults 24, 0.45,
+3; see `docs/configuration.md`), never in code. The per-cousin switch
+is `cousin.toml [memory] proactive_recall` (default true; `false`
+turns the search off for that cousin).
+
+Best-effort by contract: a search that raises, times out, or finds
+nothing above the threshold delivers the message bare. The search
+runs in the request thread before delivery, so a slow embedding
+service delays the `200` by at most `embedding.toml timeout_s`.
+
 ## Inbound files
 
 An inbound `data:` image is decoded and written to
@@ -207,8 +242,7 @@ do:
 ## Consciously excluded
 
 Engagement tracking, media routes and attachments, reaction-driven
-queues, response-cadence lints, operator-correction capture, and
-proactive memory recall belong to subsystems that ship separately. The
-recall hook has a reserved seam: delivery composition accepts an optional
-suffix provider; the memory subsystem plugs in there without touching the
-send path.
+queues, and response-cadence lints belong to subsystems that ship
+separately. Operator-correction capture and proactive recall are
+implemented above; delivery composition still accepts an optional
+suffix provider as a general seam for further best-effort riders.

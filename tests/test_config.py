@@ -82,6 +82,18 @@ class TestCousinConfig(unittest.TestCase):
         )
         self.assertEqual(CousinConfig.load(home).memory_scope, "both")
 
+    def test_proactive_recall_defaults_on(self):
+        # A colleague remembers without being asked unless told not to.
+        home = self._home('[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        self.assertIs(CousinConfig.load(home).proactive_recall, True)
+
+    def test_proactive_recall_explicit_off(self):
+        home = self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[memory]\nproactive_recall = false\n'
+        )
+        self.assertIs(CousinConfig.load(home).proactive_recall, False)
+
     def test_heartbeat_default_is_one_value_everywhere(self):
         # The source shipped three different beat defaults across
         # code, template, and docs. One value, stated in the spec.

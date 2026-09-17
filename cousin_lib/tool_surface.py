@@ -49,12 +49,15 @@ def scripts_from_entry_points():
 
 
 def console_scripts():
-    """Installed entry points first, else the checkout's pyproject."""
-    rows = scripts_from_entry_points()
-    if rows is not None:
-        return rows
-    return scripts_from_pyproject(
-        Path(__file__).resolve().parents[1] / "pyproject.toml")
+    """The checkout's pyproject first (an editable install's recorded
+    entry points go stale the moment a script is added; the file beside
+    the module is the source of truth), else the installed entry points."""
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if pyproject.is_file():
+        rows = scripts_from_pyproject(pyproject)
+        if rows:
+            return rows
+    return scripts_from_entry_points()
 
 
 def _first_usage(text):

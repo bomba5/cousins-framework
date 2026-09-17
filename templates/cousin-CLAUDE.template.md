@@ -115,6 +115,8 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |
 | `cousin-ui` | the web console over the framework (operator-run) | `cousin-ui --port 8600`; a view, never a source of truth |
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
+| `cousin-sweep` | fleet-wide memory compaction, every cousin in turn (operator-run, normally from its weekly timer) | `cousin-sweep compact --target both` |
+| `cousin-tool-surface` | rewrite `data/tool-surface.md`, the CLI list your boot packet quotes (operator-run, normally from its daily timer) | `cousin-tool-surface`; read the manifest instead of re-discovering your tools |
 
 ## Hard rules
 

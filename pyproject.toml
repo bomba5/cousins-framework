@@ -35,6 +35,8 @@ cousin-voice = "cousin_lib.media:voice_main"
 cousin-video = "cousin_lib.media:video_main"
 cousin-telegram = "cousin_lib.telegram:telegram_main"
 cousin-hive = "cousin_lib.hive:hive_main"
+cousin-sweep = "cousin_lib.sweep:sweep_main"
+cousin-tool-surface = "cousin_lib.tool_surface:tool_surface_main"
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

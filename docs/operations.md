@@ -1,0 +1,158 @@
+# Operations
+
+How to run the framework unattended: install from a cold clone, the
+service units, the daily flip, backups, the fleet sweep, the
+tool-surface manifest, and what to check when a cousin goes quiet.
+`docs/guide.md` narrates the features; this page is for the machine
+that runs them overnight.
+
+Every value that belongs to one install (the checkout, the user, the
+wrapper directory) is a placeholder here and in `systemd/`. Nothing on
+this page names a real host.
+
+## 1. Install from a cold clone
+
+```
+git clone <this repo> cousin-framework && cd cousin-framework
+pip install -e .                     # or a wheel; no third-party deps
+export FRAMEWORK_ROOT="$PWD"         # the checkout is the root
+mkdir -p config
+printf '%s\n' '<your agent command line, {session_id} allowed>' > config/agent-cmd
+cousin-spawn testa --root . --name Testa --role "test cousin" \
+    --voice "Plain and helpful." --start
+cousin-tool-surface --root .         # so the first boot is not degraded
+python3 -m unittest discover -s tests
+```
+
+`config/` holds every install seam and is gitignored except for
+`*.example` files; `docs/configuration.md` lists each file and what its
+absence means. The root's `data/` directory (loop state, the request
+store, job logs, the tool-surface manifest) is runtime state and is
+gitignored too.
+
+## 2. The units
+
+`systemd/` ships templates with three placeholders (`{{ROOT}}`,
+`{{USER_BIN}}`, `{{SYSTEM_PATH}}`); `systemd/README.md` gives the
+`sed` loop that turns them into user units and the one-line check that
+no placeholder survived. What each one owns:
+
+| unit | owns |
+|---|---|
+| `cousin-loops.service` | the scheduler: heartbeats, `[[loops]]`, timed-flip requests, and the per-cousin daily `flip_at` |
+| `cousin-sweep.timer` | the weekly compaction sweep (Sunday 05:30) |
+| `cousin-tool-surface.timer` | the daily manifest refresh (06:00) |
+| `cousin-chat-server@<slug>.service` | one cousin's chat server, when systemd rather than spawn/flip should own it |
+
+Every service sets `FRAMEWORK_ROOT` and a `PATH` that finds the
+wrappers first; a unit that carries neither fails in ways that read
+like a broken install (a command "not found" from inside a working
+checkout). Enable lingering (`loginctl enable-linger`) or the user
+units stop when you log out.
+
+The loops daemon is the one owner of recurring work. Do not add a cron
+entry that also fires a loop or a flip: two owners means the "fired"
+state each one commits is a lie to the other.
+
+## 3. The daily flip
+
+There is no daily-flip unit. The daemon carries the driver: set
+`flip_at = "HH:MM"` under `[lifecycle]` in a cousin's `cousin.toml` and
+the daemon flips that cousin once per day at or after that time, at
+most one cousin per tick, so boot packets never assemble at the same
+moment. Stagger the times across cousins yourself (a few minutes apart
+is enough). A missed time (the daemon was down) fires on the next tick
+after it comes back, once, not once per missed day. Worker-type
+cousins are skipped.
+
+`cousin-loops requests` lists pending timed flips; `cousin-loops status`
+says whether the daemon has ticked recently. A manual flip is
+`cousin-flip --confirm <slug>`, never from inside the cousin itself.
+
+## 4. Backups
+
+`cousin-backup --home <home> --dest <dir>` snapshots one cousin: every
+database under its `data/` through `VACUUM INTO` (a file copy of a
+database another process holds open can be torn), plus `memory/`,
+`MEMORY.md`, `STATUS.md`, `CLAUDE.md`, `cousin.toml`, staged then
+renamed so a failed run leaves no half-written snapshot. Rebuildable
+search indexes are skipped. It lands at `<dest>/<slug>/<date>/`.
+
+There is no fleet backup unit because what to do with a directory of
+snapshots is yours to decide (rsync, restic, a git remote). A loop over
+the registry is one line:
+
+```
+for home in "$FRAMEWORK_ROOT"/cousins/*/; do
+  cousin-backup --home "$home" --dest /path/to/snapshots
+done
+```
+
+Restore is a copy back into the home while the cousin is stopped; the
+chat server and the loops daemon open their databases lazily and pick
+the restored files up on their next access.
+
+## 5. The sweep
+
+`cousin-sweep compact --target both` runs `cousin-memory compact` for
+every cousin in registry order: `index` retires old reachable pointers
+from `MEMORY.md` until it fits its byte budget (hygiene, never
+deletion), `raw` folds daily raw files older than the hot window into
+monthly gzip archives plus a digest (lossless). One cousin's failure
+never stops the rest; the exit code is 1 if any failed, which marks the
+unit failed so the journal carries it:
+
+```
+journalctl --user -u cousin-sweep.service -n 50
+```
+
+Run it by hand with `--target index` first on a new fleet and read the
+per-cousin lines before enabling the timer.
+
+## 6. The tool surface
+
+`cousin-tool-surface` writes `<root>/data/tool-surface.md`: one line
+per console script with the first line of its `--help`, the script
+list taken from the installed package's entry points (from
+`pyproject.toml` when running from an uninstalled checkout). The boot
+packet quotes it as section "Tool Surface", bounded to 1500
+characters, and marks the boot degraded when the file is absent, so run
+it once at install and let the daily timer keep it current after every
+upgrade. The unit passes `--bin {{USER_BIN}}` so the manifest describes
+the wrappers actually on PATH.
+
+## 7. When a cousin is silent
+
+Work from the outside in; stop at the first thing that is wrong.
+
+1. **Is the daemon ticking?** `cousin-loops status`. "never run" or
+   "down" means nothing recurring fires for anyone; `systemctl --user
+   status cousin-loops.service` and its journal say why.
+2. **Is the chat server up, and is it THIS cousin's?** A port answers
+   `GET /health` with its slug. A port that answers with a
+   different slug (or an unrelated service) reads as "running" to a
+   port check while the cousin is dead; kill the squatter, then start
+   the right server. Its log is `<home>/data/chat-server.log`.
+3. **Is the agent session alive?** `tmux ls` (or your agent's own
+   listing) for the cousin's session. No session: `cousin-flip
+   --confirm <slug>` starts a fresh generation with a boot packet;
+   `config/agent-cmd` must exist or the flip names it and stops.
+4. **Did delivery fail rather than the loop?** Firing state commits
+   only after delivery, so a loop that "never fired" is usually a
+   delivery that keeps failing; the daemon prints each error to its
+   stderr (the unit's journal). Fix the target, and the loop fires on
+   the next tick, once.
+5. **Did it boot degraded?** The boot packet header lists `DEGRADED
+   layers`. A missing self-portrait, calibration, active state or
+   tool surface each has a one-command fix named in its section.
+6. **Is STATUS stale?** The packet warns when decisions were logged
+   after STATUS.md's last edit; the cousin anchors on STATUS, so
+   reconcile it (`cousin-sync-state` afterwards) before blaming
+   memory.
+7. **Did the outbound filter block the reply?** Exit 3 from
+   `cousin-reply` or `cousin-chat` is a protected term in the text;
+   the message was not sent and the CLI said which rule.
+
+What the framework promises across all of this: a component that dies
+loses nothing that was not already in a store some other component
+owns. A silent cousin is a process to restart, not memory to recover.

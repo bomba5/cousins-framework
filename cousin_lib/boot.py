@@ -37,15 +37,18 @@ LAYER_BUDGETS = {
     "task_packet": (500 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "trace_summary": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "memories": (1000 * CHARS_PER_TOKEN, 4000 * CHARS_PER_TOKEN),
+    # The tool-surface manifest is a list, not prose: bounded in
+    # characters, and the first overflow victim.
+    "tool_surface": (300, 1500),
 }
 
 # Overflow victims first to last; law is never truncated.
 TRUNCATE_ORDER = [
-    "memories", "trace_summary", "calibration", "task_packet",
-    "active_state", "self_portrait",
+    "tool_surface", "memories", "trace_summary", "calibration",
+    "task_packet", "active_state", "self_portrait",
 ]
 
-REQUIRED_BOOT_ACTIONS = """## 8. Required Boot Actions
+REQUIRED_BOOT_ACTIONS = """## 9. Required Boot Actions
 
 You must now (INTERNALLY, do not announce):
 1. Reconstruct the current objective in one mental paragraph.
@@ -99,6 +102,25 @@ def bump_generation(home):
 
 def _law_path():
     return FrameworkConfig.from_env().root / "config" / "law.md"
+
+
+TOOL_SURFACE_ABSENT = (
+    "(no tool-surface manifest at data/tool-surface.md - degraded;"
+    " run cousin-tool-surface, or enable its timer)")
+
+
+def _tool_surface():
+    """The manifest cousin-tool-surface writes under the framework
+    root, its own title line dropped (this section already has one).
+    Absent or empty means degraded: the cousin boots without knowing
+    its CLIs, and the fix is one command away."""
+    from cousin_lib.tool_surface import MANIFEST_RELPATH
+    text = _read(FrameworkConfig.from_env().root / MANIFEST_RELPATH)
+    lines = text.strip().splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+    body = "\n".join(lines).strip()
+    return body or TOOL_SURFACE_ABSENT
 
 
 def _calibration_base(home):
@@ -269,6 +291,9 @@ def _is_degraded(name, content, sections):
     if name == "active_state":
         return not content or content.startswith(
             "(no active state - degraded boot)")
+    if name == "tool_surface":
+        return not content or content.startswith(
+            "(no tool-surface manifest")
     if name == "task_packet":
         if not content:
             return True
@@ -315,6 +340,7 @@ def assemble(slug, home, *, generation=None):
         "task_packet": _task_packet(home),
         "trace_summary": trace.summary_for_boot(slug),
         "memories": _memories(home, LAYER_BUDGETS["memories"][1]),
+        "tool_surface": _tool_surface(),
     }
     degraded = [k for k, v in sections.items()
                 if _is_degraded(k, v, sections)]
@@ -348,6 +374,7 @@ def assemble(slug, home, *, generation=None):
         (5, "Current Task Packet", "task_packet"),
         (6, "Recent Tool Trace Summary", "trace_summary"),
         (7, "Retrieved Memories", "memories"),
+        (8, "Tool Surface", "tool_surface"),
     ):
         body.append("")
         body.append("## %d. %s" % (number, title))

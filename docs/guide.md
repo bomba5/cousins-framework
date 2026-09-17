@@ -422,12 +422,41 @@ published tree in the first place. The gate also runs inside this
 framework's own test suite on every commit, over its own tree, so
 "the gate runs on every commit" is enforced, not just asserted.
 
+## 12. Running it unattended
+
+Two fleet-wide maintenance commands exist for a timer to run. The
+compaction sweep drives `cousin-memory compact` over every cousin home
+in turn, never stopping at one failure, and exits non-zero if any
+failed so a unit's journal shows it:
+
+```
+cousin-sweep compact --target both --root .
+#   -> [sweep] testa index: rc=0 {"ok": true, "retired": [], ...}
+#      [sweep] testa raw: rc=0 raw: {"folded_days": 0, ...}
+#      [sweep] 2 run(s), 0 failed
+```
+
+The tool-surface manifest is the list of `cousin-*` commands with the
+first line of each one's `--help`, derived from the package's own entry
+points (nothing typed by hand); the boot packet quotes it as its Tool
+Surface layer, so a fresh generation knows its tools without
+re-discovering them, and boots degraded until the file exists:
+
+```
+cousin-tool-surface --root .
+#   -> wrote ./data/tool-surface.md (25 tools)
+```
+
+`systemd/` holds unit templates for the loops daemon, both timers and
+a per-cousin chat server; `docs/operations.md` walks the install from
+a cold clone and lists what to check when a cousin goes quiet.
+
 ## Where to go deeper
 
 Every subsystem above has a contract under `docs/`:
 `spawn-and-template-spec.md`, `chat-server-spec.md`,
 `lifecycle-spec.md`, `loops-spec.md`, `memory-tiers.md`,
 `media-spec.md`, `telegram-spec.md`, `hive-spec.md`,
-`ui-spec.md`, `operator-interface.md`, `configuration.md`, and
-`gate.md`. The specs say exactly what each feature does, including in
+`ui-spec.md`, `operator-interface.md`, `configuration.md`,
+`operations.md`, and `gate.md`. The specs say exactly what each feature does, including in
 its unconfigured state; this guide is the way in.

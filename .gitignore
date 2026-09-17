@@ -15,3 +15,8 @@ build/
 config/*
 !config/*.example
 cousins/
+
+# Runtime state the framework writes under the root: the loops daemon's
+# request store and state, job logs, the tool-surface manifest. All of
+# it is regenerated; none of it is source.
+/data/

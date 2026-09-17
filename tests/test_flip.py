@@ -216,7 +216,10 @@ class TestTranscriptMineStage(FlipCase):
         out = self._flip(dry_run=True)
         self.assertEqual(self._stage(out, "transcript_mine"),
                          {"stage": "transcript_mine", "skipped": "dry-run"})
-        self.assertFalse((self.home / "memory" / "raw").exists())
+        # the boot assembler lays out memory/ (distill runs on assemble);
+        # what must not exist is a raw candidate file
+        self.assertEqual(list((self.home / "memory" / "raw").glob("*.jsonl"))
+                         if (self.home / "memory" / "raw").exists() else [], [])
 
     def test_absent_harness_config_records_the_skip(self):
         out = self._flip()

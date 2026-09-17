@@ -47,7 +47,7 @@ cousin-mcp = "cousin_lib.mcp_server:mcp_main"
 [project.optional-dependencies]
 # Serving MCP needs the reference SDK; everything else in the adapter
 # (registry, schemas, argv assembly, provisioning, approval) is stdlib.
-mcp = ["mcp>=1.0"]
+mcp = ["mcp>=1.2,<2"]
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

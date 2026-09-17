@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import time
 import tomllib
+import uuid
 from pathlib import Path
 
 from cousin_lib.config import (
@@ -374,6 +375,47 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
             "left_in_place": left}
 
 
+def _mint_session_id():
+    """Mint the new generation's session identity.
+
+    The id renders into a command string, so its charset ([a-z0-9-],
+    per the lifecycle spec) is a safety property - and the check lives
+    HERE, in the constructor, so it travels with the mint: a future
+    edit to the generation line faces the ValueError in the same
+    function rather than an assertion elsewhere that quietly stopped
+    matching (or vanished under -O). The format stays a real UUID
+    because agent harnesses that accept a session id typically
+    validate RFC4122; a bespoke constrained alphabet would satisfy the
+    charset and break the consumer."""
+    session_id = str(uuid.uuid4())
+    if not re.fullmatch(r"[a-z0-9-]+", session_id):
+        raise ValueError(
+            "minted session id violates its charset: %r" % session_id)
+    return session_id
+
+
+def _persist_session_id(home, session_id):
+    """Write runtime.session_id into cousin.toml without disturbing
+    anything else in the file: targeted line replace (function repl, so
+    no group-reference surprises), else an appended [runtime] table.
+    Re-parse before persisting; atomic rename into place."""
+    path = Path(home) / "cousin.toml"
+    text = path.read_text()
+    line = 'session_id = "%s"' % session_id
+    if re.search(r'(?m)^session_id\s*=', text):
+        new_text = re.sub(r'(?m)^session_id\s*=.*$',
+                          lambda m: line, text, count=1)
+    elif re.search(r"(?m)^\[runtime\]", text):
+        new_text = re.sub(r"(?m)^\[runtime\]\s*$",
+                          lambda m: "[runtime]\n" + line, text, count=1)
+    else:
+        new_text = text.rstrip() + "\n\n[runtime]\n" + line + "\n"
+    tomllib.loads(new_text)
+    tmp = path.with_suffix(".toml.tmp")
+    tmp.write_text(new_text)
+    os.replace(tmp, path)
+
+
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
                  start_chat_server=_default_chat_server):
     """THE tmux-session-creation site - the only one in this codebase,
@@ -383,6 +425,15 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
     (binary, flags, trust model) differs per install and is never
     hardcoded here."""
     config = CousinConfig.load(home)
+    # A {session_id} placeholder is rendered HERE, at the single
+    # spawn site, so a plain start (console, cousin-spawn --start) and
+    # a flip mint identity the same way. flip.py renders its own copy
+    # before calling in (it needs the id for the generation record),
+    # so by the time it arrives here the placeholder is already gone.
+    session_id = None
+    if "{session_id}" in agent_cmd:
+        session_id = _mint_session_id()
+        agent_cmd = agent_cmd.replace("{session_id}", session_id)
     cmd = [tmux_bin]
     if tmux_socket:
         cmd += ["-S", tmux_socket]
@@ -399,6 +450,8 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
             "tmux new-session failed (rc=%d): %s"
             % (r.returncode, (r.stderr or "").strip()[:200])
         )
+    if session_id is not None:
+        _persist_session_id(home, session_id)
     start_chat_server(home)
 
 

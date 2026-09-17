@@ -14,12 +14,9 @@ Crash recovery is the operator: a stale in-progress marker is reported
 and overwritten, never auto-recovered.
 """
 import json
-import os
-import re
 import subprocess
 import time
 import tomllib
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,7 +24,8 @@ from cousin_lib import audits, boot, transcript_mine
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, harness_config)
 from cousin_lib.server.injection import TmuxInjector
-from cousin_lib.spawn import SpawnError, start_cousin
+from cousin_lib.spawn import (SpawnError, _mint_session_id,
+                              _persist_session_id, start_cousin)
 from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
@@ -45,25 +43,6 @@ _HANDOFF_PROMPT = (
     " thread.\n"
     "Then stop working. The framework is rebuilding your boot packet."
 )
-
-
-def _mint_session_id():
-    """Mint the new generation's session identity.
-
-    The id renders into a command string, so its charset ([a-z0-9-],
-    per the lifecycle spec) is a safety property - and the check lives
-    HERE, in the constructor, so it travels with the mint: a future
-    edit to the generation line faces the ValueError in the same
-    function rather than an assertion elsewhere that quietly stopped
-    matching (or vanished under -O). The format stays a real UUID
-    because agent harnesses that accept a session id typically
-    validate RFC4122; a bespoke constrained alphabet would satisfy the
-    charset and break the consumer."""
-    session_id = str(uuid.uuid4())
-    if not re.fullmatch(r"[a-z0-9-]+", session_id):
-        raise ValueError(
-            "minted session id violates its charset: %r" % session_id)
-    return session_id
 
 
 def _marker_path(home):
@@ -118,28 +97,6 @@ def _archive_generation(home, generation, *, transcript_tail):
     if transcript_tail:
         (arch / "transcript-tail.txt").write_text(transcript_tail)
     return arch
-
-
-def _persist_session_id(home, session_id):
-    """Write runtime.session_id into cousin.toml without disturbing
-    anything else in the file: targeted line replace (function repl, so
-    no group-reference surprises), else an appended [runtime] table.
-    Re-parse before persisting; atomic rename into place."""
-    path = Path(home) / "cousin.toml"
-    text = path.read_text()
-    line = 'session_id = "%s"' % session_id
-    if re.search(r'(?m)^session_id\s*=', text):
-        new_text = re.sub(r'(?m)^session_id\s*=.*$',
-                          lambda m: line, text, count=1)
-    elif re.search(r"(?m)^\[runtime\]", text):
-        new_text = re.sub(r"(?m)^\[runtime\]\s*$",
-                          lambda m: "[runtime]\n" + line, text, count=1)
-    else:
-        new_text = text.rstrip() + "\n\n[runtime]\n" + line + "\n"
-    tomllib.loads(new_text)
-    tmp = path.with_suffix(".toml.tmp")
-    tmp.write_text(new_text)
-    os.replace(tmp, path)
 
 
 def _read_session_id(home):

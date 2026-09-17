@@ -168,7 +168,8 @@ class TestMintSessionId(unittest.TestCase):
         # the generation line ever changes to something that can emit
         # shell-relevant characters, the constructor itself refuses.
         from cousin_lib import flip as flip_mod
-        with mock.patch.object(flip_mod.uuid, "uuid4",
+        from cousin_lib import spawn as spawn_mod
+        with mock.patch.object(spawn_mod.uuid, "uuid4",
                                return_value="Bad_ID!;rm"):
             with self.assertRaises(ValueError):
                 flip_mod._mint_session_id()

@@ -257,3 +257,40 @@ class TestSpawnMain(CreateCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStartSubstitutesSessionId(TestStartCousin):
+    """A plain start (console, cousin-spawn --start) must render the
+    {session_id} placeholder exactly as a flip does: a fresh uuid in the
+    argv, persisted to cousin.toml [runtime]. Before this, only flip.py
+    substituted and a plain start handed the literal braces to the
+    agent."""
+
+    def test_placeholder_is_rendered_and_persisted(self):
+        import re as _re
+        import tomllib as _tomllib
+        root = self._framework_root()
+        out = self._create(root)
+        tmux, log = self._fake_tmux(root)
+        start_cousin(
+            out["home"], agent_cmd="my-agent --session-id {session_id}",
+            tmux_bin=str(tmux), start_chat_server=lambda home: None,
+        )
+        text = log.read_text()
+        self.assertNotIn("{session_id}", text)
+        m = _re.search(r"--session-id ([0-9a-f-]{36})", text)
+        self.assertIsNotNone(m, text)
+        conf = _tomllib.loads((out["home"] / "cousin.toml").read_text())
+        self.assertEqual(conf["runtime"]["session_id"], m.group(1))
+
+    def test_without_placeholder_nothing_is_persisted(self):
+        import tomllib as _tomllib
+        root = self._framework_root()
+        out = self._create(root)
+        tmux, log = self._fake_tmux(root)
+        start_cousin(
+            out["home"], agent_cmd="my-agent --flag",
+            tmux_bin=str(tmux), start_chat_server=lambda home: None,
+        )
+        conf = _tomllib.loads((out["home"] / "cousin.toml").read_text())
+        self.assertNotIn("session_id", conf.get("runtime", {}))

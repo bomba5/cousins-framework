@@ -172,4 +172,12 @@ daemon this repository already has, not a second copy of the backend.
 
 ## Results log
 
-_(one dated line per phase when it lands)_
+- **2026-09-17, phase 0 landed** (commits d56bfe6..HEAD on main): hybrid search with chunking, per-chunk
+  incremental vectors and RRF; usage-weighted recall; proactive recall in the chat server (cosine threshold,
+  keyword-only opt-in); the durable-layer distiller and lossless raw fold, run by the boot assembler;
+  reasoning capsules (`cousin-reason`); corrections capture; transcript mining at flip; callbacks, backup,
+  state sync; `decide --stdin`; `consolidate` promotes. Suite 608 tests green, gate clean. Acceptance on a
+  scratch cousin with a real embedding provider: a query with no shared words surfaced the right note, the
+  chat server delivered the recall line into the terminal while the stored message stayed bare, a halt was
+  captured as a correction, the dry-run flip showed the transcript-mining stage, and the boot packet carried
+  the distilled decision.

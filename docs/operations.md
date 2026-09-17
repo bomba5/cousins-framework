@@ -43,6 +43,7 @@ no placeholder survived. What each one owns:
 | `cousin-sweep.timer` | the weekly compaction sweep (Sunday 05:30) |
 | `cousin-tool-surface.timer` | the daily manifest refresh (06:00) |
 | `cousin-chat-server@<slug>.service` | one cousin's chat server, when systemd rather than spawn/flip should own it |
+| `cousin-chat-watchdog.timer` | the chat-server watchdog (every 10 minutes) for spawn/flip-owned servers |
 
 Every service sets `FRAMEWORK_ROOT` and a `PATH` that finds the
 wrappers first; a unit that carries neither fails in ways that read
@@ -53,6 +54,23 @@ units stop when you log out.
 The loops daemon is the one owner of recurring work. Do not add a cron
 entry that also fires a loop or a flip: two owners means the "fired"
 state each one commits is a lie to the other.
+
+The chat server started by `cousin-spawn --start` or `cousin-flip` has
+no supervisor of its own; `cousin-chat-watchdog` is that supervisor,
+one ensure pass per timer fire. For every cousin in the registry it
+decides one of four things: no tmux session or no `chat.port`, skip;
+`/health` answers with the cousin's slug, ok; the port is occupied but
+health does not answer for this slug, alert (a line in the journal,
+exit 1, and nothing touched, because the occupant may be a squatter or
+a wedged server and a watchdog must never kill blind); the port is
+free, spawn `cousin-chat-server --home <home>` detached with its output
+appended to `<home>/data/chat-server.log`, then wait up to 5 seconds
+for `/health`. `cousin-chat-watchdog --dry-run` prints the decision per
+cousin and spawns nothing. An flock on `<root>/data/chat-watchdog.lock`
+makes an overlapping fire exit 0 with "another pass is running". Do
+not enable the timer for cousins the `cousin-chat-server@` units own:
+systemd restarts those itself, and two owners of one port is the
+failure the README warns about.
 
 ## 3. The daily flip
 
@@ -133,6 +151,8 @@ Work from the outside in; stop at the first thing that is wrong.
    different slug (or an unrelated service) reads as "running" to a
    port check while the cousin is dead; kill the squatter, then start
    the right server. Its log is `<home>/data/chat-server.log`.
+   `cousin-chat-watchdog --dry-run` gives this answer for the whole
+   fleet in one line per cousin (ok, spawn, alert, skip).
 3. **Is the agent session alive?** `tmux ls` (or your agent's own
    listing) for the cousin's session. No session: `cousin-flip
    --confirm <slug>` starts a fresh generation with a boot packet;

@@ -544,9 +544,27 @@ cousin-tool-surface --root .
 #   -> wrote ./data/tool-surface.md (25 tools)
 ```
 
-`systemd/` holds unit templates for the loops daemon, both timers and
-a per-cousin chat server; `docs/operations.md` walks the install from
-a cold clone and lists what to check when a cousin goes quiet.
+The chat server that `cousin-spawn --start` and `cousin-flip` launch
+runs detached with no supervisor, so a third timer command watches it.
+`cousin-chat-watchdog` makes one pass over the fleet: a running cousin
+whose port is free gets its server spawned (log appended to
+`<home>/data/chat-server.log`), a port that is occupied but does not
+answer `/health` with the cousin's slug is an alert and nothing more
+(it never kills), and a stopped cousin is skipped. `--dry-run` shows
+the decisions:
+
+```
+cousin-chat-watchdog --dry-run --root .
+#   -> [chat-watchdog] testa: ok
+#      [chat-watchdog] testb: spawn (would spawn cousin-chat-server --home ./cousins/testb)
+#      [chat-watchdog] testc: skip
+cousin-chat-watchdog --root .
+#   -> [chat-watchdog] spawned testb on :8091 health=ok
+```
+
+`systemd/` holds unit templates for the loops daemon, the three timers
+and a per-cousin chat server; `docs/operations.md` walks the install
+from a cold clone and lists what to check when a cousin goes quiet.
 
 ## Where to go deeper
 

@@ -190,5 +190,65 @@ class TestCli(FlipCase):
         self.assertIn('"ok": true', out.getvalue())
 
 
+class TestTranscriptMineStage(FlipCase):
+    """The flip mines the dying session's transcript into raw memory
+    after capture and before archive: best-effort, recorded as a stage,
+    never able to fail the flip."""
+
+    def _configure_harness(self, session_id, text):
+        transcripts = self.root / "transcripts"
+        transcripts.mkdir()
+        (self.root / "config" / "harness.toml").write_text(
+            'transcripts_dir = "%s"\n' % transcripts)
+        (transcripts / (session_id + ".jsonl")).write_text(json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": text}]},
+        }) + "\n")
+        with open(self.home / "cousin.toml", "a") as fh:
+            fh.write('[runtime]\nsession_id = "%s"\n' % session_id)
+
+    def _stage(self, out, name):
+        return next(s for s in out["stages"] if s["stage"] == name)
+
+    def test_dry_run_records_the_skip_and_writes_nothing(self):
+        self._configure_harness(
+            "old-session-1234", "It failed because the socket was gone.")
+        out = self._flip(dry_run=True)
+        self.assertEqual(self._stage(out, "transcript_mine"),
+                         {"stage": "transcript_mine", "skipped": "dry-run"})
+        self.assertFalse((self.home / "memory" / "raw").exists())
+
+    def test_absent_harness_config_records_the_skip(self):
+        out = self._flip()
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(
+            self._stage(out, "transcript_mine"),
+            {"stage": "transcript_mine",
+             "skipped": "config/harness.toml absent"})
+
+    def test_mines_the_old_session_before_archive(self):
+        self._configure_harness(
+            "old-session-1234",
+            "Read the log first. It failed because the socket was gone.")
+        out = self._flip()
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(self._stage(out, "transcript_mine"),
+                         {"stage": "transcript_mine", "mined": 1})
+        names = [s["stage"] for s in out["stages"]]
+        self.assertLess(names.index("capture"),
+                        names.index("transcript_mine"))
+        self.assertLess(names.index("transcript_mine"),
+                        names.index("archive"))
+        raw = "".join(p.read_text() for p in
+                      (self.home / "memory" / "raw").glob("*.jsonl"))
+        self.assertIn("episode:old-sess", raw)
+        self.assertIn("socket was gone", raw)
+        # The new identity was minted after the mine: the old id is
+        # what the transcript belonged to.
+        cfg = tomllib.loads((self.home / "cousin.toml").read_text())
+        self.assertNotEqual(cfg["runtime"]["session_id"],
+                            "old-session-1234")
+
+
 if __name__ == "__main__":
     unittest.main()

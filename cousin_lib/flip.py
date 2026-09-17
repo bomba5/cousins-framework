@@ -23,8 +23,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import audits, boot
-from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
+from cousin_lib import audits, boot, transcript_mine
+from cousin_lib.config import (CousinConfig, FrameworkConfig,
+                               MissingConfigError, harness_config)
 from cousin_lib.server.injection import TmuxInjector
 from cousin_lib.spawn import SpawnError, start_cousin
 from cousin_lib.trace import traced_cli
@@ -141,6 +142,38 @@ def _persist_session_id(home, session_id):
     os.replace(tmp, path)
 
 
+def _read_session_id(home):
+    """The dying generation's runtime.session_id, or "" when none was
+    ever persisted (a hand-made cousin, or a first flip)."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    return str((data.get("runtime") or {}).get("session_id") or "")
+
+
+def _mine_transcript(home, root, *, dry_run):
+    """Stage record for mining the dying session's transcript into raw
+    memory. Best-effort by construction: every way this can go wrong
+    becomes a named skip, never an exception out of the flip."""
+    stage = {"stage": "transcript_mine"}
+    if dry_run:
+        stage["skipped"] = "dry-run"
+        return stage
+    try:
+        if harness_config(root) is None:
+            stage["skipped"] = "config/harness.toml absent"
+            return stage
+        session_id = _read_session_id(home)
+        if not session_id:
+            stage["skipped"] = "no runtime.session_id in cousin.toml"
+            return stage
+        stage["mined"] = transcript_mine.mine(home, root, session_id)
+    except Exception as err:  # noqa: BLE001 - best-effort stage
+        stage["skipped"] = "error: %s" % err
+    return stage
+
+
 def _read_agent_cmd_template(root):
     try:
         cmd = (root / "config" / "agent-cmd").read_text().strip()
@@ -250,9 +283,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
             result["stages"].append({"stage": "emergency_handoff",
                                      "written": True})
         # Session-end audit with the prior packet's mtime as session
-        # start, then the baseline remediation. Transcript mining is a
-        # reserved seam here (lifecycle spec): best-effort when it
-        # lands, never able to fail the flip.
+        # start, then the baseline remediation.
         prior_gen = boot.read_generation(home)
         prior_packet = (Path(home) / "data"
                         / ("boot-packet-gen-%04d.md" % prior_gen))
@@ -271,6 +302,11 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
         result["stages"].append({
             "stage": "prompt_handoff", "sent": False,
             "reason": "dry-run" if dry_run else "no live session"})
+
+    # Mine the dying session's transcript into raw candidates BEFORE
+    # the identity is re-minted (the transcript belongs to the old id)
+    # and before archive. Best-effort: a stage record, never a failure.
+    result["stages"].append(_mine_transcript(home, root, dry_run=dry_run))
 
     # Archive, bump, assemble.
     prior_gen = boot.read_generation(home)

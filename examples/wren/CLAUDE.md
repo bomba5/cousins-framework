@@ -94,6 +94,8 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |
 | `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |
+| `cousin-reincarnate` | change a cousin's role, keep its memory, flip it | operator-driven; when asked for a bequest, write `data/handoff.md` before the flip |
+| `cousin-transplant` | move memory or body between two cousins (soul-donation, body-swap, merge) | operator-driven; both cousins are flipped afterwards |
 | `cousin-self-portrait` | your reviewed identity layer | `synthesize` then operator review, then `commit` |
 | `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |

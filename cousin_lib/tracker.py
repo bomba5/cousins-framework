@@ -44,7 +44,7 @@ def db_path(root=None):
 def _db(root):
     path = db_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=10, isolation_level=None)
+    conn = sqlite3.connect(path, timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(

@@ -62,6 +62,8 @@ system unit directory; the placeholders are the same.
 
 ## Chat server: pick one owner
 
+Both `cousin-console.service` and `cousin-loops.service` carry `KillMode=process`: a chat server started through the console, or respawned by a flip, lives in that unit's cgroup, and without it a plain `systemctl --user restart` of the console silently killed every chat server it had started.
+
 `cousin-spawn --start` and `cousin-flip` start a cousin's chat server
 themselves, detached. Use `cousin-chat-server@<slug>.service` only when
 you want systemd to own that lifetime instead; never both, since two

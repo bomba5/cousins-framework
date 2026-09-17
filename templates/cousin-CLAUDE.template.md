@@ -97,6 +97,9 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |
 | `cousin-cycle` | your session-cadence counters and breadcrumbs | `cousin-cycle inc --action "shipped X"` · `cousin-cycle state` |
+| `cousin-callback` | moments worth calling back to, kept under `memory/` | `cousin-callback tag "<moment>" --category <name>` · `cousin-callback search "<query>"` |
+| `cousin-backup` | snapshot your databases and memory into a directory | `cousin-backup --dest <dir>` (operator-run; the destination is always explicit) |
+| `cousin-sync-state` | render your STATUS.md into `data/state.json` | `cousin-sync-state` after reconciling STATUS; the boot packet reads the JSON |
 | `cousin-image` / `cousin-voice` / `cousin-video` | media generation, if a provider is configured | `cousin-image chat "<prompt>" --user <name>`; off until config/media.toml declares a provider |
 | `cousin-telegram` | bridge your chat to Telegram, if configured | per-cousin `[telegram]` in cousin.toml; off until a token and operator are set |
 | `cousin-hive` | cross-machine cousins, if a queen is configured | `cousin-hive recall "<query>"`; off until a queen and token are set |

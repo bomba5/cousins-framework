@@ -68,6 +68,40 @@ meaning even though "coffee" is nowhere in it. If the service is
 configured but unreachable, search degrades to keyword **and says
 so** - it never quietly pretends you have semantic recall you do not.
 
+Three small memory tools round out the surface. A cousin keeps its own
+library of moments worth calling back to; the file lives under
+`memory/`, so search finds it:
+
+```
+cousin-callback tag "the operator named the espresso machine Gustav" \
+    --cycle 3 --category banter
+cousin-callback search "gustav"
+#   -> 2026-09-17T09:12:00 | cycle 3 | banter | the operator named ...
+```
+
+`cousin-sync-state` renders STATUS.md into `data/state.json` for a cold
+session that wants the open loops without parsing markdown. Only the
+newest `## Open loops` section counts (a STATUS accumulates one per
+generation), and plain bullets count as loops, not only checkboxes:
+
+```
+printf '## Open loops\n- **descale Gustav**\n- [x] order beans\n' \
+    > cousins/testa/STATUS.md
+cousin-sync-state
+#   -> state synced: 2 open, 0 parked, 0 closed
+#      data/state.json: {"open_loops": [{"text": "**descale Gustav**", ...
+```
+
+`cousin-backup` snapshots every database under `data/` (through
+`VACUUM INTO`, so a chat database the server holds open copies
+cleanly) plus `memory/` and the core markdown files into a dated
+directory. The destination is always yours to name:
+
+```
+cousin-backup --dest /var/backups/cousins
+#   -> snapshot written to /var/backups/cousins/testa/2026-09-17
+```
+
 ## 3. Talk to a cousin
 
 To run a cousin as a live agent, tell the framework what command

@@ -20,7 +20,7 @@ Identical to the phase 0 plan's Global Constraints, plus: no private literal sur
 
 **Files:** Create `docs/console-spec.md`; modify `docs/ui-spec.md` (point at it), README (link).
 
-**Source:** `SOURCE_UI=/home/user/framework/ui` (`backend.py` 5995 lines: every `"/api/..."` route, its method, query and body parameters, response JSON shape, SSE event names and payloads; `static/app.jsx`, `views.jsx`, `cousins.jsx`, `chat.jsx`, `ui.jsx`, `data.jsx`: every `fetch(`/`EventSource(` call). Read-only; no private literal in the output.)
+**Source:** `SOURCE_UI` (the source console directory, handed to you by the integrator) (`backend.py` 5995 lines: every `"/api/..."` route, its method, query and body parameters, response JSON shape, SSE event names and payloads; `static/app.jsx`, `views.jsx`, `cousins.jsx`, `chat.jsx`, `ui.jsx`, `data.jsx`: every `fetch(`/`EventSource(` call). Read-only; no private literal in the output.)
 
 **Deliverable:** for every route a retained view calls: method, path, parameters, response shape (keys and types), errors; SSE streams (`/api/events`, `/api/pane/stream`) with event names and payloads; the auth model (users file, session cookie, `/api/auth/me`, change-password); the list of views retained and dropped (dropped: backlog, media display of generated files, gpuhost/host GPU controls, games, presence/engagement, agents legacy tracker; retained: everything else); a section "private literals to genericize" listing each occurrence in the static files by file and what replaces it (a config value, a cousin field, or removal); a section "backend behaviours that move": scheduler role (loops daemon), MCP provisioning (spawn), dismissal archive (already in delete path spec). No code.
 

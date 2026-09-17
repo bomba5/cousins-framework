@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0a0a" />
+<title>console</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+<meta name="apple-mobile-web-app-title" content="console" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<!--
+  The one runtime network fetch a browser makes for this console
+  (docs/console-spec.md, "Static files"). Pins:
+    react 18.3.1, react-dom 18.3.1 (unpkg, UMD builds, SRI hashes)
+    @babel/standalone 7.29.0 (unpkg, SRI hash)
+    marked (latest, jsdelivr), mermaid 10 (jsdelivr)
+    xterm 5.3.0 and xterm-addon-fit 0.8.0 (jsdelivr)
+  An install that cannot allow the fetch vendors these files under the
+  static directory and edits the tags; nothing else changes.
+-->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- markdown + mermaid for the chat view -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<!-- xterm.js for the live pane (input and rendering) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });</script>
+
+<!-- Load order matters: each file publishes its exports on window for the next. -->
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="ui.jsx"></script>
+<script type="text/babel" src="chat.jsx"></script>
+<script type="text/babel" src="cousins.jsx"></script>
+<script type="text/babel" src="views.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

@@ -300,6 +300,33 @@ cousin-self-portrait synthesize   # drafts a candidate from real sources
 cousin-self-portrait commit       # promotes it; only this version boots
 ```
 
+### Changing who a cousin is: reincarnate and transplant
+
+Editing CLAUDE.md does nothing to a running session, and killing the
+session loses what it was holding. `cousin-reincarnate` does the
+change as a ceremony: snapshot the continuity files, ask the running
+cousin for a bequest (a prompt through its own chat server, then a
+bounded wait on `data/handoff.md`), rewrite the role in CLAUDE.md and
+cousin.toml, then flip. `cousin-transplant` does the two-cousin
+version in three modes. Both are operator-run, both write every step
+to `data/lifecycle/audit.jsonl`, and both snapshot under
+`data/lifecycle/<slug>/<timestamp>/` first.
+
+```
+cousin-reincarnate testa --new-role "keeper of the ledger" --root .
+#   -> {"op": "reincarnate", "slug": "testa", "ok": true, "steps": [...]}
+
+cousin-transplant --donor testa --recipient testb --mode merge --root .
+#   -> testb's MEMORY.md gains "## Memories inherited from Testa (date)";
+#      memory/raw is unioned; both cousins flip
+```
+
+The three transplant modes: `soul-donation` (the recipient carries the
+donor's memory in its own body), `body-swap` (the two bodies trade
+places, memory stays put), `merge` (the donor's memory is braided into
+the recipient's, the donor keeps its own). Details and the rollback
+path are in `docs/lifecycle-surgery.md`.
+
 ## 7. Shared memory: private by default, shared by review
 
 A cousin's memory is private. To share a fact with the fleet, propose
@@ -426,7 +453,7 @@ framework's own test suite on every commit, over its own tree, so
 
 Every subsystem above has a contract under `docs/`:
 `spawn-and-template-spec.md`, `chat-server-spec.md`,
-`lifecycle-spec.md`, `loops-spec.md`, `memory-tiers.md`,
+`lifecycle-spec.md`, `lifecycle-surgery.md`, `loops-spec.md`, `memory-tiers.md`,
 `media-spec.md`, `telegram-spec.md`, `hive-spec.md`,
 `ui-spec.md`, `operator-interface.md`, `configuration.md`, and
 `gate.md`. The specs say exactly what each feature does, including in

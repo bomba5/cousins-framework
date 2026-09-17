@@ -143,7 +143,8 @@ rather than an accident.
 
 ## Consciously excluded from v1
 
-Reincarnation, transplant, timed/daily flip drivers, the trace
-ledger, and correction-capture calibration ship with their own
-modules; each has a named seam above. Transcript mining landed
-as stage 3b.
+Timed/daily flip drivers, the trace ledger, and correction-capture
+calibration ship with their own modules; each has a named seam above.
+Transcript mining landed as stage 3b. Reincarnation and transplant
+landed as `cousin_lib.lifecycle`, built on the flip: see
+`docs/lifecycle-surgery.md`.

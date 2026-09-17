@@ -23,6 +23,7 @@ contract under `docs/`. Nothing here needs a third-party dependency.
 | reviewed shared-memory tier | `cousin-shared` | `docs/memory-tiers.md` |
 | session boundary: boot packets and flip | `cousin-flip` | `docs/lifecycle-spec.md` |
 | the reviewed identity layer | `cousin-self-portrait` | `docs/lifecycle-spec.md` |
+| identity surgery: reincarnate a role, transplant memory or body | `cousin-reincarnate`, `cousin-transplant` | `docs/lifecycle-surgery.md` |
 | recurring work: heartbeats, loops, timed flips | `cousin-loops`, `cousin-schedule`, `cousin-cycle` | `docs/loops-spec.md` |
 | job + sub-agent tracking | `cousin-job` | - |
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |

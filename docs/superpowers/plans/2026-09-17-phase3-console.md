@@ -22,7 +22,7 @@ Identical to the phase 0 plan's Global Constraints, plus: no private literal sur
 
 **Source:** `SOURCE_UI` (the source console directory, handed to you by the integrator) (`backend.py` 5995 lines: every `"/api/..."` route, its method, query and body parameters, response JSON shape, SSE event names and payloads; `static/app.jsx`, `views.jsx`, `cousins.jsx`, `chat.jsx`, `ui.jsx`, `data.jsx`: every `fetch(`/`EventSource(` call). Read-only; no private literal in the output.)
 
-**Deliverable:** for every route a retained view calls: method, path, parameters, response shape (keys and types), errors; SSE streams (`/api/events`, `/api/pane/stream`) with event names and payloads; the auth model (users file, session cookie, `/api/auth/me`, change-password); the list of views retained and dropped (dropped: backlog, media display of generated files, gpuhost/host GPU controls, games, presence/engagement, agents legacy tracker; retained: everything else); a section "private literals to genericize" listing each occurrence in the static files by file and what replaces it (a config value, a cousin field, or removal); a section "backend behaviours that move": scheduler role (loops daemon), MCP provisioning (spawn), dismissal archive (already in delete path spec). No code.
+**Deliverable:** for every route a retained view calls: method, path, parameters, response shape (keys and types), errors; SSE streams (`/api/events`, `/api/pane/stream`) with event names and payloads; the auth model (users file, session cookie, `/api/auth/me`, change-password); the list of views retained and dropped (dropped: backlog, media display of generated files, the GPU box controls on the host view, games, presence/engagement, agents legacy tracker; retained: everything else); a section "private literals to genericize" listing each occurrence in the static files by file and what replaces it (a config value, a cousin field, or removal); a section "backend behaviours that move": scheduler role (loops daemon), MCP provisioning (spawn), dismissal archive (already in delete path spec). No code.
 
 - [ ] Write the spec; run the docs coherence tests; commit `"docs: the console API contract"`.
 
@@ -50,7 +50,7 @@ Identical to the phase 0 plan's Global Constraints, plus: no private literal sur
 
 **Files:** Create `cousin_lib/console_static/{index.html,app.jsx,views.jsx,cousins.jsx,ui.jsx,data.jsx}`; tests `tests/console/test_static_files.py` (every file present, no private literal, no reference to a dropped view or route, every `fetch(` path exists in the spec).
 
-**Source:** `SOURCE_UI/static/*.jsx`. Port as-is minus: `BacklogView` and its nav entry, the GPU-host cards in `HostView`, the agents legacy view, anything calling a route the spec dropped. Replace every private literal per the spec's genericize list. Keep the keyboard shortcuts, SSE application, sidebar groups, spawn/flip/dismiss modals, role and CLAUDE.md editors, loops editor, token panel.
+**Source:** `SOURCE_UI/static/*.jsx`. Port as-is minus: `BacklogView` and its nav entry, the GPU box cards in `HostView`, the agents legacy view, anything calling a route the spec dropped. Replace every private literal per the spec's genericize list. Keep the keyboard shortcuts, SSE application, sidebar groups, spawn/flip/dismiss modals, role and CLAUDE.md editors, loops editor, token panel.
 
 - [ ] Write the static-file tests first (they fail on missing files), port, pass; commit `"console: frontend A (shell, cousins, jobs, memory, loops, tokens, settings)"`.
 

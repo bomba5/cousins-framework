@@ -201,7 +201,7 @@ class WorktreePointer(unittest.TestCase):
         from pathlib import Path
         from cousin_lib.gate.scanner import Scanner
         with tempfile.TemporaryDirectory() as root:
-            (Path(root) / ".git").write_text("gitdir: /home/someone/checkout/.git/worktrees/x\n")
+            (Path(root) / ".git").write_text("gitdir: /srv/checkout/.git/worktrees/x\n")
             (Path(root) / "ok.py").write_text("x = 1\n")
             hits = Scanner().scan_tree(Path(root))
             self.assertEqual(hits, [])

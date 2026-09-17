@@ -22,7 +22,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cousin_lib import corrections, memory_search
+from cousin_lib import chat_hooks, corrections, memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, expand_harness_path,
                                harness_config)
@@ -216,6 +216,29 @@ def _with_recall(config, user, message):
         print("recall: skipped: %s" % err, file=sys.stderr)
         return message
     return message + " " + line if line else message
+
+
+# Chat-pattern hooks: <home>/chat-hooks.json reacts to a message after
+# it is stored and delivered. An inject: handler rides the same deliver
+# seam as the message, as its own line under a fixed author, with the
+# triggering message's id. Best-effort by contract: nothing here may
+# turn into a failed send.
+def _fire_hooks(server, user, message, message_id):
+    try:
+        hooks = chat_hooks.load_hooks(server.config.home)
+        matched = chat_hooks.evaluate(hooks, user, message)
+        if not matched:
+            return
+        inject = None
+        if server.deliver is not None:
+            def inject(text):
+                server.deliver(user=chat_hooks.HOOK_SENDER, message=text,
+                               message_id=message_id, attachments=[])
+        chat_hooks.fire(matched, user=user, message=message,
+                        slug=server.config.slug, home=server.config.home,
+                        inject=inject)
+    except Exception as err:  # noqa: BLE001 - never fails the send
+        print("chat-hooks: skipped: %s" % err, file=sys.stderr)
 
 
 class ChatServer:
@@ -426,6 +449,9 @@ class _ChatHandler(BaseHTTPRequestHandler):
         marker = server.config.home / "data" / ".last-user-msg"
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.touch()
+        # Hooks last: the message is stored and its delivery composed,
+        # so a hook's inject line is unambiguously the second line.
+        _fire_hooks(server, user, message, row["id"])
         self._send_json(200, {
             "ok": True, "id": row["id"], "timestamp": row["timestamp"],
         })

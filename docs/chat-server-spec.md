@@ -214,6 +214,68 @@ Attachments are not persisted in the database in v1 - the reserved
 columns ship with the media subsystem - so an undecodable payload is
 gone; the marker is the honest record that it existed.
 
+## Chat-pattern hooks
+
+A cousin reacts to a recurring kind of message declaratively, instead
+of relying on judgment every time. The hook file is
+`<home>/chat-hooks.json`, a list of entries:
+
+```json
+[
+  {
+    "pattern": "(?i)\\bprice\\s+check\\b",
+    "user": "Sam",
+    "handler": "shell:scripts/quote-prices.sh",
+    "desc": "quote the tariff when Sam asks"
+  },
+  {
+    "pattern": "(?i)\\bdebug\\s+health\\b",
+    "user": "*",
+    "handler": "inject:[fw-hook] consider running the health check",
+    "desc": "nudge on a debug request"
+  }
+]
+```
+
+- `pattern`: a Python regular expression searched against the message
+  text (required).
+- `user`: the sender it applies to, compared case-insensitively; `*`
+  or an absent key matches anyone.
+- `handler`: `shell:<path>` or `inject:<text>` (required).
+- `desc`: free text for the person maintaining the file; ignored.
+
+Evaluation happens on `POST /api/send`, AFTER the message is stored,
+its delivery composed and the presence marker touched, so the cousin
+always sees the chat line before anything a hook adds. Every matching
+entry fires, in file order.
+
+`shell:<path>` runs the script detached (its own session, stdin
+closed, the child reaped off-thread) with `COUSIN_HOOK_USER`,
+`COUSIN_HOOK_MESSAGE`, `COUSIN_HOOK_PATTERN`, `COUSIN_SLUG` and
+`COUSIN_HOME` in its environment, working directory the home, stdout
+and stderr appended to `<home>/data/chat-hooks.log`. A relative path
+is taken from the home. The resolved path must sit inside the home or
+inside the framework root (`FRAMEWORK_ROOT`, when set); anything
+else is refused with one stderr line and no run. The hook file is data
+a cousin edits, and data must not be able to name an arbitrary
+executable.
+
+`inject:<text>` delivers the text through the same terminal delivery
+seam as the message, as its own line under the author `fw-hook` and
+with the triggering message's id:
+
+```
+[now: 2026-01-01 12:00 UTC | dt-since-msg: 0m] (Chat fw-hook): [fw-hook] consider running the health check
+```
+
+The stored history never carries the hook line; it holds what the
+sender said.
+
+Best-effort by contract: a missing file, malformed JSON, a malformed
+entry, a bad regex, a missing or refused script, and a handler that
+raises are all no-ops that never reach the send. A bad regex is
+reported to stderr once per process, not once per message.
+
 ## Network guard
 
 Every request is checked against an address allowlist before anything else
@@ -244,6 +306,7 @@ do:
 
 Engagement tracking, media routes and attachments, reaction-driven
 queues, and response-cadence lints belong to subsystems that ship
-separately. Operator-correction capture and proactive recall are
-implemented above; delivery composition still accepts an optional
-suffix provider as a general seam for further best-effort riders.
+separately. Operator-correction capture, proactive recall and chat-pattern
+hooks are implemented above; delivery composition still accepts an
+optional suffix provider as a general seam for further best-effort
+riders.

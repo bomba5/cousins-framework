@@ -260,8 +260,28 @@ cousin-job list --mine
 cousin-job done 1 "mapped; notes in data/"
 ```
 
-Jobs live in a database the module owns, so they survive anything. To
-watch the fleet in a browser:
+Jobs live in a database the module owns, so they survive anything.
+
+Jobs are what is running right now; the tracker is what is in flight
+across the whole framework, whoever holds it - the operator's list of
+open threads, blocked threads and what closed:
+
+```
+cousin-tracker add "migrate the chat archive" --domain infra --tag q4
+cousin-tracker state 1 active
+cousin-tracker update 1 --notes "waiting on the disk swap" --state blocked
+cousin-tracker list --state blocked
+cousin-tracker show 1 --json
+cousin-tracker state 1 done
+```
+
+Five states, `open|active|blocked|done|dropped`; the owner defaults to
+the cousin whose `COUSIN_HOME` is set, so each cousin's adds attribute
+themselves. `list` puts open work first and closed work last. Ids never
+recycle: a deleted #3 stays gone, so a note that says #3 keeps meaning
+the same thing. The store is `<root>/data/tracker.db` and the console
+serves it; the shapes are in `docs/tracker-spec.md`. To watch the
+fleet in a browser:
 
 ```
 cousin-ui --port 8600

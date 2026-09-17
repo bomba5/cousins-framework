@@ -27,6 +27,7 @@ serving the tool surface over MCP is the one optional extra.
 | identity surgery: reincarnate a role, transplant memory or body | `cousin-reincarnate`, `cousin-transplant` | `docs/lifecycle-surgery.md` |
 | recurring work: heartbeats, loops, timed flips | `cousin-loops`, `cousin-schedule`, `cousin-cycle` | `docs/loops-spec.md` |
 | job + sub-agent tracking | `cousin-job` | - |
+| in-flight work tracker, framework-wide (domain, state, tags, owner) | `cousin-tracker` | `docs/tracker-spec.md` |
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
 | hive: cross-machine cousins over an authed bus | `cousin-hive` | `docs/hive-spec.md` |

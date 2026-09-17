@@ -91,6 +91,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-chat-server` | your chat daemon (normally started for you) | `cousin-chat-server --home <your home>` |
 | `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
 | `cousin-job` | track sub-agents and background commands | `cousin-job start subagent "<title>"` · `cousin-job done <id>` |
+| `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker list --state blocked` |
 | `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |
 | `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |

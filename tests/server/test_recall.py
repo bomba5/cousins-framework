@@ -38,21 +38,6 @@ def _sunrise_vectors(text):
     return VECTOR_A if ("sunrise" in text or "dawn" in text) else VECTOR_B
 
 
-def _bridge_similarity(real_search):
-    """TEMPORARY, until the search module's hits carry "similarity"
-    (owned by the usage-weighted recall task): fill the key from the
-    scripted vector rule when the real search left it out. A no-op once
-    the real search supplies it, so the end-to-end test then runs
-    unbridged; delete this helper at that point."""
-    def search(query, **kw):
-        hits, notice = real_search(query, **kw)
-        for hit in hits:
-            if "similarity" not in hit:
-                body = pathlib.Path(hit["path"]).read_text()
-                hit["similarity"] = 1.0 if "sunrise" in body else 0.0
-        return hits, notice
-    return search
-
 
 class RecallCase(unittest.TestCase):
     def setUp(self):
@@ -68,14 +53,17 @@ class RecallCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         os.environ["PATH"] = "/usr/bin:/bin"
 
-    def _boot(self, *, operator="Sam", recall=None):
+    def _boot(self, *, operator="Sam", recall=None, keyword_only=False):
         toml = ('[cousin]\nslug = "wren"\nname = "Wren"\n'
                 "[chat]\nport = 0\n")
         if operator:
             toml += '[operator]\nname = "%s"\n' % operator
+        if recall is not None or keyword_only:
+            toml += "[memory]\n"
         if recall is not None:
-            toml += "[memory]\nproactive_recall = %s\n" % (
-                "true" if recall else "false")
+            toml += "proactive_recall = %s\n" % ("true" if recall else "false")
+        if keyword_only:
+            toml += "recall_keyword_only = true\n"
         (self.home / "cousin.toml").write_text(toml)
         self.calls = []
         server = ChatServer(CousinConfig.load(self.home),
@@ -132,9 +120,7 @@ class TestEndToEnd(RecallCase):
         self._configure_embedding(self._serve_fake())
         server = self._boot()
         message = "tell me again about the sunrise over the ridge"
-        with mock.patch.object(app.memory_search, "search",
-                               _bridge_similarity(memory_search.search)):
-            status, _ = self._send(server, message)
+        status, _ = self._send(server, message)
         self.assertEqual(status, 200)
         delivered = self._delivered()
         self.assertEqual(
@@ -147,14 +133,25 @@ class TestEndToEnd(RecallCase):
         self.assertEqual([m["message"] for m in self._history(server)],
                          [message])
 
-    def test_keyword_only_install_keeps_every_fts_hit(self):
-        # No embedding seam: an FTS match already means a term matched.
+    def test_keyword_only_install_is_silent_unless_opted_in(self):
+        # No embedding seam and no opt-in: an OR-joined keyword match is
+        # too loose to interrupt with, so nothing is appended.
+        (self.home / "memory" / "upkeep.md").write_text(
+            "# Grinder upkeep\n\nThe burr grinder needs descaling.\n")
+        server = self._boot()
+        message = "when did the burr grinder last get descaling done?"
+        self._send(server, message)
+        self.assertEqual(self._delivered(), message)
+
+    def test_keyword_only_install_keeps_every_fts_hit_when_opted_in(self):
+        # No embedding seam, [memory] recall_keyword_only = true: an FTS
+        # match already means a term matched.
         (self.home / "memory" / "upkeep.md").write_text(
             "# Grinder upkeep\n\nThe burr grinder needs descaling.\n")
         (self.home / "notes").mkdir()
         (self.home / "notes" / "2026-01-01-ports.md").write_text(
             "The claimed set excludes every port.\n")
-        server = self._boot()
+        server = self._boot(keyword_only=True)
         message = "when did the burr grinder last get descaling done?"
         self._send(server, message)
         delivered = self._delivered()
@@ -168,7 +165,7 @@ class TestEndToEnd(RecallCase):
         (self.home / "notes").mkdir()
         (self.home / "notes" / "2026-01-01-grinder.md").write_text(
             "The burr grinder needs descaling every 200 shots.\n")
-        server = self._boot()
+        server = self._boot(keyword_only=True)
         self._send(server, "when did the burr grinder last get descaling?")
         self.assertIn("2026-01-01-grinder (notes:2026-01-01-grinder.md)",
                       self._delivered())
@@ -246,7 +243,7 @@ class TestThresholds(RecallCase):
     def test_defaults_when_no_embedding_config(self):
         for name in ("a.md", "b.md", "c.md"):
             (self.home / "memory" / name).write_text("# %s\n" % name[0])
-        server = self._boot()
+        server = self._boot(keyword_only=True)
         seen, search = self._capture([self._hit("a.md"), self._hit("b.md")])
         with mock.patch.object(app.memory_search, "search", search):
             self._send(server, "x" * 23)

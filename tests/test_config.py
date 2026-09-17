@@ -132,3 +132,16 @@ class TestCousinConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecallKeywordOnlyKey(unittest.TestCase):
+    def test_default_false_and_explicit_true(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+            self.assertFalse(CousinConfig.load(home).recall_keyword_only)
+            (home / "cousin.toml").write_text(
+                '[cousin]\nslug = "wren"\nname = "Wren"\n[memory]\nrecall_keyword_only = true\n')
+            self.assertTrue(CousinConfig.load(home).recall_keyword_only)

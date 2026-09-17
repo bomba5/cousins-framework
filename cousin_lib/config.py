@@ -31,6 +31,7 @@ class CousinConfig:
     type: str = "cousin"
     flip_at: str | None = None
     proactive_recall: bool = True
+    recall_keyword_only: bool = False
 
     @classmethod
     def load(cls, home):
@@ -60,6 +61,8 @@ class CousinConfig:
             flip_at=data.get("lifecycle", {}).get("flip_at"),
             proactive_recall=bool(
                 data.get("memory", {}).get("proactive_recall", True)),
+            recall_keyword_only=bool(
+                data.get("memory", {}).get("recall_keyword_only", False)),
         )
 
     @classmethod

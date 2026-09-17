@@ -24,7 +24,7 @@ and `cousin-ui` take it identically; a flag is discoverable from
 | `config/law.md` | boot packet assembly | no framework-law layer; a missing law file is an install matter, never a per-cousin degradation |
 | `config/net-allowlist.json` | the network guard (chat server, UI) | loopback + RFC1918 only; the file only ever ADDS CIDRs |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
-| `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall keeps every keyword hit and uses the default `[recall]` thresholds |
+| `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
 | `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection | both off, said once at flip |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
@@ -51,7 +51,8 @@ and `cousin-ui` take it identically; a flag is discoverable from
   operator messages are not searched), `min_score` (default 0.45,
   the semantic similarity a hit needs to be mentioned; keyword-only
   hits under a configured seam are never mentioned, and without the
-  seam every keyword hit is), `top` (default 3, the most hits one
+  seam nothing is unless `cousin.toml [memory] recall_keyword_only =
+  true`), `top` (default 3, the most hits one
   message may surface). Thresholds live here, not in code; a
   per-cousin opt-out is `cousin.toml [memory] proactive_recall =
   false` (see `docs/chat-server-spec.md`).

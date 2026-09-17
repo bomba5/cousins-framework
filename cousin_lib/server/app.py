@@ -173,12 +173,17 @@ def _recall_line(config, message):
     """The '[fw-recall] ...' suffix for an operator message, or None.
     Single-line by construction (the delivery paste cannot carry a
     newline). With the embedding seam configured a hit qualifies by its
-    semantic similarity; without it every keyword hit qualifies, since
-    an FTS match already means a term matched. Raises nothing: the
-    caller treats any exception as "no line"."""
+    semantic similarity; without it nothing is said unless the cousin
+    opted in with [memory] recall_keyword_only = true, in which case
+    every keyword hit qualifies. Raises nothing: the caller treats any
+    exception as "no line"."""
     if not config.proactive_recall:
         return None
     thresholds, configured = _recall_thresholds()
+    if not configured and not config.recall_keyword_only:
+        # no semantic leg: a keyword match on an OR-joined query is too
+        # loose to interrupt with; the cousin opts in per install
+        return None
     if len(message.strip()) < int(thresholds["min_chars"]):
         return None
     hits, _notice = memory_search.search(

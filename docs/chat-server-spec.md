@@ -183,9 +183,10 @@ operator said, not what the cousin was reminded of.
 
 Which hits qualify: with `config/embedding.toml` present a hit needs
 its semantic similarity at or above `[recall] min_score`; without it
-(keyword only) every FTS hit the search returns qualifies, because a
-match there already means a term matched. `min_chars`, `min_score`
-and `top` live in `config/embedding.toml [recall]` (defaults 24, 0.45,
+(keyword only) nothing is appended unless the cousin opted in with
+`cousin.toml [memory] recall_keyword_only = true`, in which case every
+FTS hit the search returns qualifies, because a term matched. The
+thresholds `min_chars`, `min_score` and `top` live in `config/embedding.toml [recall]` (defaults 24, 0.45,
 3; see `docs/configuration.md`), never in code. The per-cousin switch
 is `cousin.toml [memory] proactive_recall` (default true; `false`
 turns the search off for that cousin).

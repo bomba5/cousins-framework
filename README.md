@@ -32,6 +32,7 @@ serving the tool surface over MCP is the one optional extra.
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
 | hive: cross-machine cousins over an authed bus | `cousin-hive` | `docs/hive-spec.md` |
 | the web console (a view, never a source of truth) | `cousin-ui` | `docs/ui-spec.md` |
+| the console's API contract: routes, live streams, auth, what was dropped | `cousin-ui` (the ported console lands as `cousin-console`) | `docs/console-spec.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 | unattended operation: units, the fleet sweep, the tool-surface manifest | `cousin-sweep`, `cousin-tool-surface`, `systemd/` | `docs/operations.md` |
 | the same CLIs as tools over MCP stdio, provisioned at spawn | `cousin-mcp` | `docs/mcp-spec.md` |

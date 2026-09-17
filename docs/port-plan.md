@@ -115,10 +115,10 @@ embedding provider, search returns the planted fact by meaning, not by word.
 
 ## Phase 2: chat and the harness adapter
 
-- Presence (is the operator watching this tab), engagement cursor, chat-pattern
-  hooks (regex to shell or inject handlers from a per-cousin JSON file), the
-  chat-server watchdog, inbound image attachments in chat (display only; no
-  generation).
+- Chat-pattern hooks (regex to shell or inject handlers from a per-cousin JSON
+  file) and the chat-server watchdog. Presence and engagement tracking were
+  dropped from scope by the operator on 2026-09-17; inbound image attachments
+  already ship here.
 - The MCP adapter: the cousin's CLI surface over stdio, registry-driven,
   argv lists only, per-cousin provisioning at spawn, harness pre-approval as a
   documented manual or scripted step. The MCP package is an optional extra.

@@ -149,6 +149,8 @@ daemon this repository already has, not a second copy of the backend.
 
 ## Phase 5: migration (by hand)
 
+The procedure is .
+
 - No converter is built. A runbook lists what to carry per cousin home:
   `cousin.toml` (rewritten by hand to this repository's shape), memory files
   (raw, distilled, decisions, notes: same shapes, copied), and what is left
@@ -201,3 +203,12 @@ daemon this repository already has, not a second copy of the backend.
   the adapter. Two defects the live run caught: the chat server had no `__main__` guard, so every `-m`
   launcher (spawn, watchdog) reported success having started nothing; and the 2.x MCP SDK changed the
   server API, so the extra pins 1.x.
+- **2026-09-17, phases 3 and 4 landed** (dbf079e..HEAD on main): the console API contract (61 routes),
+  a shared route registry, backend A (fleet, jobs, loops, memory, shared review, auth, admin, tracker) and
+  backend B (chat proxy, live pane, events stream, static), frontend A and B (the React console ported minus
+  media, backlog, GPU controls, presence and engagement, the game; a tracker view written fresh), an
+  end-to-end test through the HTTP surface, the console unit, the ui-spec rewrite; the tracker store and
+  CLI; the hive node builder and node template with the deploy guide; the migration runbook. Suite 1186
+  tests green, gate clean. Live: the console served on the scratch install, the operator logged in from a
+  browser, listed the fleet, sent a chat message that reached the cousin's pane; one bug found and fixed on
+  the way (the unread dot compared two differently spelled keys).

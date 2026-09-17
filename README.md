@@ -51,7 +51,7 @@ quiet), see `docs/operations.md`.
 
 The framework is being brought to parity with the private one it was
 extracted from, phase by phase; the plan and its results log are in
-`docs/port-plan.md`.
+`docs/port-plan.md`; moving a cousin over by hand is `docs/migration-runbook.md`.
 
 ## Quickstart: a cousin with memory, from a cold clone
 

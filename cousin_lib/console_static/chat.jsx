@@ -48,7 +48,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   // the sidebar's unread-dot logic compares against c.lastMsgTs.
   React.useEffect(() => {
     if (!activeCousin || !chatUser) return;
-    const key = `fw_chat_seen_${activeCousin}_${chatUser}`;
+    const key = chatSeenKey(activeCousin, chatUser);
     const stamp = () => {
       if (document.visibilityState === "visible") {
         try { localStorage.setItem(key, String(Math.floor(Date.now()/1000))); }

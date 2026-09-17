@@ -163,3 +163,14 @@ class TestConfigSeamsDocumented(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConsoleStaticPackaging(unittest.TestCase):
+    def test_console_static_is_declared_package_data(self):
+        import tomllib
+        data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+        patterns = (data.get("tool", {}).get("setuptools", {})
+                    .get("package-data", {}).get("cousin_lib", []))
+        self.assertTrue(any("console_static" in p for p in patterns),
+                        "cousin_lib/console_static/* is not declared as package-data;"
+                        " a wheel would omit the console")

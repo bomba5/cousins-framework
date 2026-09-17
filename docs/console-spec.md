@@ -623,24 +623,24 @@ series are removed with the budget key.
 
 ## Tracker
 
-The framework-wide in-flight work tracker (the phase 4 store,
-`cousin_lib/tracker.py`; the console codes against these functions and
-guards the import until it lands). Items live in
-`<root>/data/tracker.db`; an item is `{"id": int, "title": str,
-"owner": str, "domain": str, "state": str, "summary": str, "links":
-[str], "tags": [str], "last_action": str, "created": iso, "updated":
-iso}` with `state` in `new`, `in_progress`, `under_review`, `blocked`,
-`done`, `dropped`.
+The framework-wide in-flight work tracker (`cousin_lib/tracker.py`,
+contract in `docs/tracker-spec.md`; the console serves the library's
+shapes verbatim). Items live in `<root>/data/tracker.db`; an item is
+`{"id": int, "title": str, "domain": str, "state": str, "tags": [str],
+"owner": str, "notes": str, "created_at": iso, "updated_at": iso}` with
+`state` in `open`, `active`, `blocked`, `done`, `dropped`. Ids never
+recycle.
 
-- `GET /api/tracker?owner=&state=&domain=` returns `{"items": [item]}`,
-  open items first, then by `updated` descending.
-- `POST /api/tracker` with `{"title": str, ...}` (`title` required,
-  `state` default `new`, `links` and `tags` lists) returns
-  `200 {"ok": true, "item": item}`; `400` on a missing title or a
-  state outside the set.
-- `POST /api/tracker/<id>` with any subset of the fields returns
-  `{"ok": true, "item": item}`; `400` no fields, `404` unknown.
-- `DELETE /api/tracker/<id>` returns `{"ok": true}`.
+- `GET /api/tracker?owner=&state=&domain=&tag=` returns `{"items":
+  [item]}`, open items first, then by `updated_at` descending.
+- `POST /api/tracker` with `{"title": str, "domain"?, "state"?, "tags"?,
+  "owner"?, "notes"?}` (`title` required, `state` default `open`) returns
+  `200 {"item": item}`; `400` on a blank title or a state outside the set.
+- `POST /api/tracker/<id>` with any subset of the fields (state included,
+  validated) returns `{"item": item}`; `400` no fields or bad state,
+  `404` unknown id.
+- `DELETE /api/tracker/<id>` returns `{"ok": true, "deleted": id}`;
+  `404` unknown id.
 
 ## Host, logs, restart
 

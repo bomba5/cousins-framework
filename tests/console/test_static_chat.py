@@ -173,3 +173,13 @@ class StaticChatFiles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeenWatermarkLinkage(unittest.TestCase):
+    def test_chat_stamps_the_same_seen_key_the_sidebar_reads(self):
+        # app.jsx computes the unread dot from chatSeenKey(slug, user) in
+        # data.jsx; a chat view stamping a differently spelled key means
+        # the dot never clears.
+        chat = (_STATIC / "chat.jsx").read_text()
+        self.assertIn("chatSeenKey(", chat)
+        self.assertNotIn("fw_chat_seen_", chat)

@@ -83,25 +83,18 @@ def build_ui_from_cli(argv=None):
 
 
 def ui_main(argv=None):
-    """Console entry point: cousin-ui [--root R] [--port N] [--host H].
-    The guard is the network allowlist, exactly as for the chat
-    server - the only boundary, stated as address trust."""
+    """Retired alias, kept for one release: `cousin-ui` prints a pointer
+    and runs `cousin-console` with the same flags (--root, --host,
+    --port are shared; the console adds --tmux-bin and --tmux-socket).
+    The small daemon above stays importable for its tests until the
+    console's end-to-end suite replaces them."""
     import sys
 
-    from cousin_lib.config import MissingConfigError
+    from cousin_lib.console.app import console_main
 
-    try:
-        server = build_ui_from_cli(argv)
-    except MissingConfigError as err:
-        print("cousin-ui: %s" % err, file=sys.stderr)
-        return 2
-    print("cousin-ui: serving %s on %s:%d"
-          % (server.root, server.httpd.server_address[0], server.port))
-    try:
-        server.httpd.serve_forever()
-    except KeyboardInterrupt:
-        server.stop()
-    return 0
+    print("cousin-ui is retired: use cousin-console (same flags); running"
+          " it for you", file=sys.stderr)
+    return console_main(argv)
 
 
 class _UIHandler(BaseHTTPRequestHandler):

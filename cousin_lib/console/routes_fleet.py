@@ -1,0 +1,451 @@
+"""Fleet routes (docs/console-spec.md, "Fleet: cousins" and "Tokens"):
+the registry read on every call and enriched with liveness, chat
+health, activity, the newest reply and today's tokens; spawn, dismiss,
+start, stop, restart, the editors, peer delivery and the two flip
+paths, each through the library a CLI would use."""
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from cousin_lib import loops, spawn
+from cousin_lib.config import FrameworkConfig
+from cousin_lib.console import router, tokens
+from cousin_lib.console._common import (chat_call, chat_health, check_slug,
+                                        cousin_home, load_cousin, read_toml,
+                                        session_alive, tmux)
+from cousin_lib.console.app import HttpError
+from cousin_lib.console.toml_edit import write_key
+
+ACTIVE_WINDOW_SECONDS = 60
+ROLE_MAX_CHARS = 5000
+CLAUDE_MD_MAX_CHARS = 200000
+
+
+# ---- the fleet projection ----------------------------------------------
+
+def _pane_active(server, config):
+    """The pane's last 20 lines changed within the window, by hash kept
+    per server: a projection of the terminal, not a store."""
+    if config.chat_host or not config.tmux_session:
+        return False
+    try:
+        r = tmux(server, ["capture-pane", "-p", "-t", config.tmux_session,
+                          "-S", "-20"])
+    except Exception:
+        return False
+    digest = hashlib.sha1((r.stdout or "").encode()).hexdigest()
+    hashes = server.state.setdefault("pane_hashes", {})
+    now = time.time()
+    prev = hashes.get(config.slug)
+    if prev is None:
+        hashes[config.slug] = (digest, now)
+        return False
+    if prev[0] != digest:
+        hashes[config.slug] = (digest, now)
+        return True
+    return now - prev[1] < ACTIVE_WINDOW_SECONDS
+
+
+def _to_unix(ts):
+    try:
+        when = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return int(when.timestamp())
+
+
+def _last_msg_ts(config, chat):
+    if chat != "ok" or not config.operator_name:
+        return 0
+    try:
+        status, body = chat_call(
+            config, "/api/history?user=%s&limit=20"
+            % config.operator_name.replace(" ", "%20"), timeout=1.5)
+    except HttpError:
+        return 0
+    if status != 200 or not isinstance(body, dict):
+        return 0
+    newest = 0
+    for row in body.get("messages") or []:
+        if isinstance(row, dict) and row.get("type") == config.slug:
+            newest = max(newest, _to_unix(row.get("timestamp")))
+    return newest
+
+
+def _activity(home):
+    try:
+        return (Path(home) / "data" / "last-activity.txt") \
+            .read_text(errors="replace").strip()[:200]
+    except OSError:
+        return ""
+
+
+def fleet_row(server, config):
+    raw = read_toml(config.home)
+    cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
+    chat = chat_health(config)
+    if config.type == "worker":
+        status = "running"
+        active = False
+    elif config.chat_host:
+        status = "running" if chat == "ok" else "stopped"
+        active = False
+    else:
+        status = "running" if session_alive(server, config) else "stopped"
+        active = _pane_active(server, config) if status == "running" else False
+    return {
+        "slug": config.slug,
+        "name": config.name,
+        "role": str(cousin.get("role", "")),
+        "type": config.type,
+        "port": config.chat_port,
+        "host": config.chat_host,
+        "home": str(config.home),
+        "tmuxSession": config.tmux_session,
+        "operator": config.operator_name,
+        "memoryScope": config.memory_scope,
+        "heartbeat": config.heartbeat_seconds,
+        "flipAt": config.flip_at,
+        "hidden": bool(cousin.get("hidden", False)),
+        "status": status,
+        "chat": chat,
+        "active": active,
+        "activity": _activity(config.home),
+        "lastMsgTs": _last_msg_ts(config, chat),
+        "tokensSpent": tokens.today_total(server, config.home),
+    }
+
+
+def fleet_rows(server):
+    return [fleet_row(server, config)
+            for config in FrameworkConfig(server.root).list_cousins()]
+
+
+# ---- commands -----------------------------------------------------------
+
+def _start(server, slug):
+    config = load_cousin(server, slug)
+    chat_ok = chat_health(config) == "ok"
+    if session_alive(server, config):
+        if not chat_ok and not config.chat_host:
+            spawn._default_chat_server(config.home)
+            return {"ok": True, "slug": slug, "status": "already running",
+                    "chat_server": "started"}
+        return {"ok": True, "slug": slug, "status": "already running",
+                "chat_server": "reused" if chat_ok else "not running"}
+    try:
+        agent_cmd = spawn._read_agent_cmd(server.root)
+    except spawn.SpawnError as err:
+        raise HttpError(500, str(err))
+    server.emit("cousin-status", {"slug": slug, "status": "starting"})
+    try:
+        spawn.start_cousin(
+            config.home, agent_cmd=agent_cmd, tmux_bin=server.tmux_bin,
+            tmux_socket=server.tmux_socket,
+            start_chat_server=((lambda home: None) if chat_ok
+                               else spawn._default_chat_server))
+    except spawn.SpawnError as err:
+        raise HttpError(500, str(err))
+    return {"ok": True, "slug": slug, "status": "started",
+            "chat_server": "reused" if chat_ok else "started"}
+
+
+def _stop(server, slug):
+    home = cousin_home(server, slug)
+    server.emit("cousin-status", {"slug": slug, "status": "stopping"})
+    result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
+                               tmux_socket=server.tmux_socket)
+    return {"ok": True, "slug": slug, "status": "stopped", **result}
+
+
+def _pending_flip(slug):
+    for row in loops.list_requests(status="pending", limit=500):
+        if row["kind"] == "flip" and row["cousin"] == slug:
+            try:
+                payload = json.loads(row["payload"] or "{}")
+            except ValueError:
+                payload = {}
+            return {"request_id": row["id"],
+                    "fire_at": float(payload.get("fire_at") or 0)}
+    return None
+
+
+def _flip_state(server, slug):
+    return server.state.setdefault("flips", {}).get(slug)
+
+
+def register():
+    @router.route("GET", "/api/cousins")
+    def list_cousins(req):
+        return 200, {"cousins": fleet_rows(req.server)}
+
+    @router.route("POST", "/api/cousins")
+    def create(req):
+        body = req.body
+        slug = body.get("slug")
+        role = body.get("role")
+        voice = body.get("voice")
+        if not isinstance(slug, str) or not slug:
+            raise HttpError(400, "slug is required")
+        if not isinstance(role, str) or not role.strip():
+            raise HttpError(400, "role is required")
+        if not isinstance(voice, str) or not voice.strip():
+            raise HttpError(400, "voice is required: the template refuses"
+                                 " to render without one")
+        port = body.get("port")
+        if port is not None and (isinstance(port, bool)
+                                 or not isinstance(port, int)):
+            raise HttpError(400, "port must be an integer")
+        try:
+            out = spawn.create_cousin(
+                req.server.root, slug=slug, role=role,
+                name=body.get("name") or None,
+                role_paragraph=body.get("role_paragraph") or None,
+                voice=voice, port=port, operator=body.get("operator") or None)
+        except spawn.SpawnError as err:
+            text = str(err)
+            status = 409 if ("already exists" in text or "squats" in text) \
+                else 400
+            raise HttpError(status, text)
+        req.server.emit("cousins-refresh", fleet_rows(req.server))
+        return 201, {"ok": True, "slug": out["slug"], "home": str(out["home"]),
+                     "port": out["port"]}
+
+    @router.route("DELETE", "/api/cousins/{slug}")
+    def dismiss(req, slug):
+        cousin_home(req.server, slug)
+        req.server.emit("cousin-status", {"slug": slug, "status": "stopping"})
+        try:
+            out = spawn.dismiss_cousin(req.server.root, slug=slug,
+                                       tmux_bin=req.server.tmux_bin,
+                                       tmux_socket=req.server.tmux_socket)
+        except spawn.DismissRefused as err:
+            raise HttpError(500, str(err))
+        except spawn.SpawnError as err:
+            raise HttpError(404, str(err))
+        req.server.state.setdefault("flips", {}).pop(slug, None)
+        return 200, {"ok": True, **out}
+
+    @router.route("POST", "/api/cousins/{slug}/start")
+    def start(req, slug):
+        return 200, _start(req.server, slug)
+
+    @router.route("POST", "/api/cousins/{slug}/stop")
+    def stop(req, slug):
+        return 200, _stop(req.server, slug)
+
+    @router.route("POST", "/api/cousins/{slug}/restart")
+    def restart(req, slug):
+        stopped = _stop(req.server, slug)
+        time.sleep(req.server.settle_seconds)
+        try:
+            started = _start(req.server, slug)
+        except HttpError as err:
+            return err.status, {"ok": False, "target": "cousin/%s" % slug,
+                                "stop": stopped, "start": err.body}
+        return 200, {"ok": True, "target": "cousin/%s" % slug,
+                     "stop": stopped, "start": started}
+
+    @router.route("POST", "/api/cousins/{slug}/role")
+    def set_role(req, slug):
+        home = cousin_home(req.server, slug)
+        role = req.body.get("role")
+        if not isinstance(role, str) or len(role) > ROLE_MAX_CHARS:
+            raise HttpError(400, "role must be a string of at most %d"
+                                 " characters" % ROLE_MAX_CHARS)
+        write_key(home, "cousin", "role", role)
+        return 200, {"ok": True, "slug": slug, "role": role}
+
+    @router.route("GET", "/api/cousins/{slug}/claude-md")
+    def get_claude_md(req, slug):
+        home = cousin_home(req.server, slug)
+        path = home / "CLAUDE.md"
+        out = {"ok": True, "slug": slug, "path": str(path)}
+        try:
+            content = path.read_text(errors="replace")
+        except OSError:
+            out.update({"content": "", "bytes": 0, "missing": True})
+            return 200, out
+        out.update({"content": content, "bytes": len(content.encode())})
+        return 200, out
+
+    @router.route("POST", "/api/cousins/{slug}/claude-md")
+    def set_claude_md(req, slug):
+        home = cousin_home(req.server, slug)
+        content = req.body.get("content")
+        if not isinstance(content, str) or len(content) > CLAUDE_MD_MAX_CHARS:
+            raise HttpError(400, "content must be a string of at most %d"
+                                 " characters" % CLAUDE_MD_MAX_CHARS)
+        path = home / "CLAUDE.md"
+        if path.is_file():
+            backups = home / "data" / "claude-md-backups"
+            backups.mkdir(parents=True, exist_ok=True)
+            (backups / ("CLAUDE-%d.md" % int(time.time()))).write_bytes(
+                path.read_bytes())
+        tmp = path.with_suffix(".md.tmp")
+        tmp.write_text(content)
+        tmp.replace(path)
+        return 200, {"ok": True, "slug": slug, "bytes": len(content.encode())}
+
+    @router.route("POST", "/api/cousins/{slug}/hidden")
+    def set_hidden(req, slug):
+        home = cousin_home(req.server, slug)
+        hidden = req.body.get("hidden")
+        if not isinstance(hidden, bool):
+            raise HttpError(400, "hidden must be a boolean")
+        write_key(home, "cousin", "hidden", True if hidden else None)
+        return 200, {"ok": True, "slug": slug, "hidden": hidden}
+
+    @router.route("POST", "/api/cousins/{slug}/peer")
+    def peer(req, slug):
+        source = load_cousin(req.server, slug)
+        to = req.body.get("to")
+        text = req.body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HttpError(400, "text is required")
+        if not isinstance(to, str) or to == slug:
+            raise HttpError(400, "to must name another cousin")
+        dest = load_cousin(req.server, to)
+        status, body = chat_call(dest, "/api/send", method="POST",
+                                 payload={"user": source.name,
+                                          "message": text.strip()},
+                                 timeout=10.0)
+        if status != 200:
+            return status, body
+        return 200, {"ok": True, "to": to, "id": body.get("id")}
+
+    @router.route("GET", "/api/cousins/{slug}/flip")
+    def flip_status(req, slug):
+        home = cousin_home(req.server, slug)
+        entry = _flip_state(req.server, slug)
+        out = {"ok": True}
+        if entry is not None:
+            out["status"] = entry["status"]
+            out["started_at"] = entry["started_at"]
+            if entry["status"] != "running":
+                out["stages"] = entry.get("stages", [])
+                out["result"] = entry.get("result", {})
+        else:
+            marker = home / "data" / ".flip-in-progress.json"
+            if marker.exists():
+                try:
+                    data = json.loads(marker.read_text())
+                except (OSError, ValueError):
+                    data = {}
+                out["status"] = "stale_marker"
+                out["recovery"] = {
+                    "marker": str(marker),
+                    "started_at": data.get("started_at"),
+                    "hint": "a flip left its marker behind; the next"
+                            " cousin-flip reports and overwrites it"}
+            else:
+                out["status"] = "idle"
+        pending = _pending_flip(slug)
+        if pending:
+            pending["seconds_until_fire"] = max(
+                0, int(pending["fire_at"] - time.time()))
+            out["pending"] = pending
+        return 200, out
+
+    @router.route("POST", "/api/cousins/{slug}/flip")
+    def flip_start(req, slug):
+        cousin_home(req.server, slug)
+        server = req.server
+        body = req.body
+        confirm = bool(body.get("confirm", False))
+        delay = body.get("delay_seconds", 0)
+        if delay is None:
+            delay = 0
+        if isinstance(delay, bool) or not isinstance(delay, int) or delay < 0:
+            raise HttpError(400, "delay_seconds must be a non-negative"
+                                 " integer")
+        if delay > 0:
+            if _pending_flip(slug):
+                raise HttpError(409, "a timed flip is already pending")
+            fire_at = time.time() + delay
+            request_id = loops.submit_request(
+                "flip", cousin=slug,
+                payload={"fire_at": fire_at, "reason": "console"},
+                ttl_seconds=delay + loops.REQUEST_TTL_SECONDS)
+            server.emit("cousin-flip", {"slug": slug, "phase": "scheduled",
+                                        "fire_at": fire_at,
+                                        "delay_seconds": delay})
+            return 202, {"ok": True, "slug": slug, "request_id": request_id,
+                         "fire_at": fire_at, "delay_seconds": delay}
+        lock = server.state.setdefault("flip_lock", threading.Lock())
+        flips = server.state.setdefault("flips", {})
+        with lock:
+            current = flips.get(slug)
+            if current and current["status"] == "running":
+                raise HttpError(409, "a flip is already running")
+            entry = {"status": "running", "started_at": time.time()}
+            flips[slug] = entry
+        run_flip = server.flip_fn or _default_flip
+
+        def run():
+            try:
+                result = run_flip(slug, confirm=confirm,
+                                  tmux_bin=server.tmux_bin,
+                                  tmux_socket=server.tmux_socket)
+            except Exception as err:  # noqa: BLE001 - reported on the row
+                result = {"slug": slug, "ok": False, "error": str(err),
+                          "stages": []}
+            entry["result"] = result
+            entry["stages"] = result.get("stages", [])
+            entry["status"] = "done" if result.get("ok") else "failed"
+            event = {"slug": slug,
+                     "phase": "complete" if result.get("ok") else "failed",
+                     "ok": bool(result.get("ok"))}
+            for key in ("new_generation", "boot_packet_tokens",
+                        "degraded_sections", "error"):
+                if key in result:
+                    event[key] = result[key]
+            server.emit("cousin-flip", event)
+
+        server.emit("cousin-flip", {"slug": slug, "phase": "started"})
+        threading.Thread(target=run, daemon=True,
+                         name="console-flip-%s" % slug).start()
+        return 202, {"ok": True, "slug": slug, "status": "running",
+                     "started_at": entry["started_at"]}
+
+    @router.route("POST", "/api/cousins/{slug}/flip/cancel")
+    def flip_cancel(req, slug):
+        cousin_home(req.server, slug)
+        entry = _flip_state(req.server, slug)
+        if entry and entry["status"] == "running":
+            raise HttpError(409, "a running flip cannot be cancelled")
+        pending = _pending_flip(slug)
+        was_pending = False
+        if pending:
+            was_pending = loops.cancel_request(pending["request_id"])
+            if was_pending:
+                req.server.emit("cousin-flip", {"slug": slug,
+                                                "phase": "cancelled"})
+        return 200, {"ok": True, "slug": slug, "was_pending": was_pending}
+
+    @router.route("GET", "/api/tokens")
+    def token_series(req):
+        server = req.server
+        available, reason = tokens.availability(server.root)
+        if not available:
+            return 200, {"available": False, "reason": reason, "cousins": []}
+        rows = []
+        for config in FrameworkConfig(server.root).list_cousins():
+            rows.append({"slug": config.slug, "name": config.name,
+                         "series": tokens.series(server, config.home)})
+        return 200, {"available": True, "cousins": rows}
+
+
+def _default_flip(slug, **kw):
+    from cousin_lib import flip
+    return flip.flip(slug, **kw)
+
+
+register()

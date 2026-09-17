@@ -284,13 +284,27 @@ serves it; the shapes are in `docs/tracker-spec.md`. To watch the
 fleet in a browser:
 
 ```
-cousin-ui --port 8600
+cousin-console --port 8600
 ```
 
-The console renders what the framework persists - the fleet, jobs,
-loops, chat - and submits requests through the same stores a CLI
-uses. It is a view, never a source of truth: close it, restart it,
-never run it, and nothing is lost but the page.
+The console renders what the framework persists - the fleet with its
+cards and editors, chat with the live terminal pane, jobs, memory and
+the shared-tier review, loops with drift, tokens, the tracker - and
+submits every command through the same library a CLI uses. It is a
+view, never a source of truth: close it, restart it, never run it, and
+nothing is lost but the page. Out of the box it is open to every
+address the network guard admits and says so on its account panel; to
+put a login in front of it:
+
+```
+cousin-console adduser ana      # password from a prompt, never argv
+```
+
+That writes `config/console-users.json`, and from then on every API
+route needs a session, with no address-based bypass (the routes and
+the auth model are `docs/console-spec.md`). `cousin-ui` is the
+retired name: it prints a pointer and runs the console for one
+release.
 
 ## 5. Recurring work: heartbeats and loops
 

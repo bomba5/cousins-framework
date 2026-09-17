@@ -13,7 +13,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
@@ -111,7 +111,7 @@ def get_job(job_id):
 
 
 def list_jobs(*, status=None, spawned_by=None, active_only=False,
-              limit=100):
+              limit=100, kind=None, since_hours=None, running_first=False):
     conn = _db()
     try:
         where, args = ["1=1"], []
@@ -121,16 +121,141 @@ def list_jobs(*, status=None, spawned_by=None, active_only=False,
         if spawned_by:
             where.append("spawned_by=?")
             args.append(spawned_by)
+        if kind:
+            where.append("kind=?")
+            args.append(kind)
+        if since_hours:
+            cutoff = (datetime.now(timezone.utc)
+                      - timedelta(hours=float(since_hours)))
+            where.append("started_at >= ?")
+            args.append(cutoff.isoformat(timespec="seconds"))
         if active_only:
             where.append("status IN (%s)"
                          % ",".join("?" * len(_ACTIVE)))
             args.extend(_ACTIVE)
+        order = ("(status='running') DESC, id DESC" if running_first
+                 else "id DESC")
         rows = conn.execute(
-            "SELECT * FROM jobs WHERE %s ORDER BY id DESC LIMIT ?"
-            % " AND ".join(where),
+            "SELECT * FROM jobs WHERE %s ORDER BY %s LIMIT ?"
+            % (" AND ".join(where), order),
             args + [limit],
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+STATUSES = ("running", "done", "failed", "cancelled")
+_UPDATABLE = ("status", "result_summary", "exit_code", "title",
+              "description")
+
+
+def update_job(job_id, **fields):
+    """Set any of status, result_summary, exit_code, title, description.
+    A terminal status stamps finished_at. Returns the row, None for an
+    unknown id; ValueError for no fields or a status outside STATUSES."""
+    sets, args = [], []
+    for key in _UPDATABLE:
+        if key in fields and fields[key] is not None:
+            value = fields[key]
+            if key == "status" and value not in STATUSES:
+                raise ValueError("status must be one of %s"
+                                 % "|".join(STATUSES))
+            if key in ("title", "description"):
+                value = str(value)[:500]
+            sets.append("%s=?" % key)
+            args.append(value)
+    if not sets:
+        raise ValueError("no updatable field given")
+    if "status" in fields and fields["status"] != "running":
+        sets.append("finished_at=?")
+        args.append(_now())
+    conn = _db()
+    try:
+        cur = conn.execute("UPDATE jobs SET %s WHERE id=?"
+                           % ", ".join(sets), args + [job_id])
+        conn.commit()
+        if cur.rowcount == 0:
+            return None
+        row = conn.execute("SELECT * FROM jobs WHERE id=?",
+                           (job_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def delete_job(job_id):
+    """Remove a row; True when one went."""
+    conn = _db()
+    try:
+        cur = conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def reap_stale(*, max_age_hours=24):
+    """Rows 'running' for longer than max_age_hours are marked failed
+    with an auto-reap note; returns how many. Maintenance the store's
+    owner accepts from any reader."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+              ).isoformat(timespec="seconds")
+    conn = _db()
+    try:
+        cur = conn.execute(
+            "UPDATE jobs SET status='failed', finished_at=?,"
+            " result_summary=COALESCE(result_summary, '') || ?"
+            " WHERE status='running' AND started_at < ?",
+            (_now(), " [auto-reap: stale running > %dh]" % max_age_hours,
+             cutoff))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def _minted_log_dir():
+    return FrameworkConfig.from_env().root / "data" / "job-logs"
+
+
+def is_minted_log(path):
+    """True when a log path sits inside the store's own log directory -
+    the only logs a reader may remove along with a row."""
+    if not path:
+        return False
+    try:
+        return (os.path.realpath(path).startswith(
+            os.path.realpath(_minted_log_dir()) + os.sep))
+    except (OSError, TypeError):
+        return False
+
+
+def rotate(*, cap=1000):
+    """Cap the table: the oldest FINISHED rows beyond cap go, with their
+    minted log files; running rows are never rotated. Returns how many
+    rows were removed."""
+    conn = _db()
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+        excess = total - cap
+        if excess <= 0:
+            return 0
+        rows = conn.execute(
+            "SELECT id, log_path FROM jobs WHERE status != 'running'"
+            " ORDER BY id ASC LIMIT ?", (excess,)).fetchall()
+        for row in rows:
+            if is_minted_log(row["log_path"]):
+                try:
+                    os.unlink(row["log_path"])
+                except OSError:
+                    pass
+        ids = [row["id"] for row in rows]
+        if ids:
+            conn.execute("DELETE FROM jobs WHERE id IN (%s)"
+                         % ",".join("?" * len(ids)), ids)
+            conn.commit()
+        return len(ids)
     finally:
         conn.close()
 

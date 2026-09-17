@@ -14,7 +14,7 @@ and add only the files you need.
 `templates/`) is named the same way by every entry point that needs
 it: an explicit `--root` flag wins, else the `FRAMEWORK_ROOT`
 environment variable, else a loud error naming both. `cousin-spawn`
-and `cousin-ui` take it identically; a flag is discoverable from
+and `cousin-console` take it identically; a flag is discoverable from
 `--help`, the env var suits a service unit.
 
 | file | read by | absent means |
@@ -23,6 +23,7 @@ and `cousin-ui` take it identically; a flag is discoverable from
 | `config/worker-cmd` | `cousin-loops` (worker cousins) | a worker loop stays due and names this path; nothing fires |
 | `config/law.md` | boot packet assembly | no framework-law layer; a missing law file is an install matter, never a per-cousin degradation |
 | `config/net-allowlist.json` | the network guard (chat server, UI) | loopback + RFC1918 only; the file only ever ADDS CIDRs |
+| `config/console-users.json` | `cousin-console` (the web console's login) | auth is not configured: the console is open to every address the guard admits, and `GET /api/auth/me` says so |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
 | `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out |
@@ -39,6 +40,15 @@ and `cousin-ui` take it identically; a flag is discoverable from
 - `law.md`: markdown; the framework law every cousin boots with.
 - `net-allowlist.json`: `{"allow": ["203.0.113.0/24", ...]}`. Extends
   the defaults; can never remove loopback.
+- `console-users.json`: `{"<user>": {"salt": "<hex>", "hash": "<hex>",
+  "iterations": N}}`, PBKDF2-HMAC-SHA256 with a random 16-byte salt per
+  user and 200000 iterations. Never written by hand: `cousin-console
+  adduser <name>` prompts for the password and writes the file
+  atomically with mode 0600; the same command with an existing name
+  resets that user. Present with at least one user, every `/api/*`
+  route but login and `me` needs a session cookie and there is no
+  address-based bypass. There is no scope field: no per-user
+  authorization is enforced, so none is stored (`docs/console-spec.md`).
 - `outbound-filter.json`: the filter's per-surface additions;
   see the outbound filter module for the shape.
 - `embedding.toml`: `url`, `model`, `timeout_s`. The endpoint takes

@@ -103,10 +103,34 @@ started from another cousin's shell inherits that cousin's home.
 Wiring is per cousin: spawn writes `<home>/.claude/settings.json`
 (`docs/spawn-and-template-spec.md`, step 6) with SessionStart,
 PreCompact and Stop pointing at these scripts by absolute path, the
-home as the argument. `cousin-spawn <slug> --repair-settings` writes
+home as the argument, plus the job-tracking hook below. `cousin-spawn <slug> --repair-settings` writes
 the same into an existing home. An install on another harness wires
 them by hand; the scripts only assume a POSIX `sh`, `date`, `wc`,
 `grep`, `tail`.
+
+## The job-tracking hook
+
+`cousin_lib.job_hooks` is the fourth harness hook, a Python module run
+as `python -m cousin_lib.job_hooks --home <home> --root <root>` with
+the harness's JSON payload on stdin. It writes rows into the jobs
+store (`cousin-job`, the console's Jobs view):
+
+| event (matcher) | does |
+|---|---|
+| PreToolUse (`Agent\|Task`) | registers a `subagent` job titled by the call's description |
+| PreToolUse (`Bash`) | registers a `shell` job, only when `run_in_background` is set |
+| PostToolUse | closes it done with the start of the answer; an agent launched in the background (`async_launched`) and a backgrounded shell (`backgroundTaskId`) stay running with a note instead |
+| PostToolUseFailure | closes it failed, or cancelled on an interrupt |
+| SubagentStop | closes a background agent's row by its agent id |
+
+Pre and Post are matched by `tool_use_id` through small files under
+`<home>/data/job-hooks/` (pruned after a week). A backgrounded shell
+has no completion event, so its row stays running until someone
+closes it or the store's 24-hour reap does. The hook exits 0 on every
+path and prints nothing; an error is appended to
+`<home>/data/job-hooks.log`. Home and root come from the arguments,
+else `COUSIN_HOME` / `FRAMEWORK_ROOT`, else the payload's `cwd` (the
+nearest directory with a `cousin.toml`) and its grandparent.
 
 ## Where the pieces meet
 

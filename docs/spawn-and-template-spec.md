@@ -102,8 +102,9 @@ value). The console's spawn dialog sends the same four fields.
    writes the same bytes, a file that is not a JSON object is refused
    and left alone). It carries `"cousin"` in `enabledMcpjsonServers`
    (the approval of the adapter for this project) and this cousin's
-   hooks: the three bookend scripts under the checkout's `hooks/`, each
-   by absolute path with the home written into the command, so a hook
+   hooks: the three bookend scripts under the checkout's `hooks/` and
+   the job-tracking hook (`python -m cousin_lib.job_hooks` under the
+   interpreter that wrote the file), each by absolute path with the home written into the command, so a hook
    never depends on the agent's environment or working directory.
    Folder trust stays the operator's act (`cousin-mcp approve <slug>`
    edits the harness's user-wide file). An existing cousin is brought

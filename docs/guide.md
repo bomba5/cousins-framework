@@ -679,6 +679,16 @@ cousin-mcp approve testa --root .
 #   -> approved ./cousins/testa in ~/.harness-settings.json: trusted, "cousin" enabled; ...
 ```
 
+Spawn also writes the cousin's own harness project settings,
+`<home>/.claude/settings.json`: its session hooks, the job-tracking
+hook that records subagents and background shells in `cousin-job`,
+and `"cousin"` in `enabledMcpjsonServers`. For a cousin spawned
+before that:
+
+```
+cousin-spawn testa --root . --repair-settings
+```
+
 `approve` records the harness's acceptance in the settings file
 `config/harness.toml settings_file` names and edits nothing else; with
 no seam it refuses and prints the edit to make by hand. `send` is the

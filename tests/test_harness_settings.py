@@ -82,6 +82,45 @@ class TestFreshWrite(SettingsCase):
         self.assertIn("session_checkpoint.sh", " ".join(out["missing"]))
 
 
+class TestJobHooks(SettingsCase):
+    """The job-tracking hook is wired for subagent and Bash calls, their
+    failures, and subagent stops, under the interpreter that wrote the
+    settings, with home and root in the command."""
+
+    def test_tool_events_carry_both_matchers(self):
+        self._apply()
+        data = self._read()
+        for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
+            matchers = sorted(g.get("matcher")
+                              for g in data["hooks"][event])
+            self.assertEqual(matchers, ["Agent|Task", "Bash"], event)
+
+    def test_subagent_stop_is_wired(self):
+        self._apply()
+        self.assertEqual(len(self._commands(self._read(), "SubagentStop")),
+                         1)
+
+    def test_command_runs_the_module_with_home_and_root(self):
+        self._apply(python="/opt/venv/bin/python3")
+        cmd = self._commands(self._read(), "PreToolUse")[0]
+        self.assertEqual(shlex.split(cmd), [
+            "/opt/venv/bin/python3", "-m", "cousin_lib.job_hooks",
+            "--home", str(self.home), "--root", str(self.root)])
+
+    def test_default_interpreter_is_the_running_one(self):
+        import sys
+        self._apply()
+        cmd = self._commands(self._read(), "PreToolUse")[0]
+        self.assertEqual(shlex.split(cmd)[0], sys.executable)
+
+    def test_a_new_interpreter_replaces_the_old_entry(self):
+        self._apply(python="/old/python3")
+        self._apply(python="/new/python3")
+        cmds = self._commands(self._read(), "PreToolUse")
+        self.assertEqual(len(cmds), 2)  # one per matcher, not four
+        self.assertTrue(all(c.startswith("/new/python3") for c in cmds))
+
+
 class TestMerge(SettingsCase):
     def test_foreign_keys_and_foreign_hooks_are_kept(self):
         path = settings_path(self.home)

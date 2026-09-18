@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import shlex
+import sys
 import tempfile
 
 from cousin_lib.mcp_server import SERVER_NAME
@@ -26,6 +27,19 @@ PROJECT_SETTINGS = pathlib.Path(".claude") / "settings.json"
 SHELL_HOOKS = (("SessionStart", "session_init.sh"),
                ("PreCompact", "pre_compact.sh"),
                ("Stop", "session_checkpoint.sh"))
+
+# The job-tracking hook (cousin_lib.job_hooks): one module, several
+# events. A matcher of None means the event takes none (it is not about
+# one tool). PostToolUse fires only on success; a failed or interrupted
+# call arrives as PostToolUseFailure, and an agent launched in the
+# background finishes as a SubagentStop.
+JOB_HOOK_MODULE = "cousin_lib.job_hooks"
+JOB_HOOK_MATCHERS = ("Agent|Task", "Bash")
+JOB_HOOK_EVENTS = (("PreToolUse", JOB_HOOK_MATCHERS),
+                   ("PostToolUse", JOB_HOOK_MATCHERS),
+                   ("PostToolUseFailure", JOB_HOOK_MATCHERS),
+                   ("SubagentStop", (None,)))
+JOB_HOOK_TIMEOUT = 10
 
 
 class SettingsError(Exception):
@@ -57,14 +71,17 @@ def _owned(command):
     if head.parent.name == "hooks" and head.name in {
             s for _e, s in SHELL_HOOKS}:
         return True
-    return False
+    return "-m" in argv and JOB_HOOK_MODULE in argv
 
 
-def desired_hooks(home, *, root, hooks_root=None):
+def desired_hooks(home, *, root, python=None, hooks_root=None):
     """The hook groups this cousin's settings should carry, per event,
-    and the shell scripts that could not be found."""
+    and the shell scripts that could not be found. The job hook runs
+    under `python` (default: this interpreter, so the hook imports the
+    same install that wrote it)."""
     home = pathlib.Path(home)
     hooks_root = pathlib.Path(hooks_root) if hooks_root else hooks_dir()
+    python = python or sys.executable
     wanted, missing = {}, []
     for event, script in SHELL_HOOKS:
         path = hooks_root / script
@@ -74,6 +91,15 @@ def desired_hooks(home, *, root, hooks_root=None):
         wanted.setdefault(event, []).append({"hooks": [{
             "type": "command",
             "command": shlex.join([str(path), str(home)])}]})
+    job_cmd = shlex.join([str(python), "-m", JOB_HOOK_MODULE,
+                          "--home", str(home), "--root", str(root)])
+    for event, matchers in JOB_HOOK_EVENTS:
+        for matcher in matchers:
+            group = {"hooks": [{"type": "command", "command": job_cmd,
+                                "timeout": JOB_HOOK_TIMEOUT}]}
+            if matcher is not None:
+                group = {"matcher": matcher, **group}
+            wanted.setdefault(event, []).append(group)
     return wanted, missing
 
 
@@ -112,7 +138,7 @@ def _strip_owned(groups):
     return kept
 
 
-def apply_project_settings(home, *, root, hooks_root=None):
+def apply_project_settings(home, *, root, python=None, hooks_root=None):
     """Create or merge <home>/.claude/settings.json: this cousin's hooks
     and its `cousin` MCP server approved. Returns {path, events,
     missing}. Idempotent."""
@@ -130,7 +156,8 @@ def apply_project_settings(home, *, root, hooks_root=None):
     if not isinstance(hooks, dict):
         raise SettingsError("%s: hooks is not an object, left as it is"
                             % path)
-    wanted, missing = desired_hooks(home, root=root, hooks_root=hooks_root)
+    wanted, missing = desired_hooks(home, root=root, python=python,
+                                    hooks_root=hooks_root)
     for event in list(hooks):
         if isinstance(hooks[event], list):
             hooks[event] = _strip_owned(hooks[event])

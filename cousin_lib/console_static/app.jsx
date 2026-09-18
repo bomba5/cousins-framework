@@ -504,7 +504,7 @@ function App() {
           title={sidebarCollapsed ? "expand sidebar" : "collapse sidebar"}
           style={{ minHeight: 24, padding: "0 6px", fontSize: 12, marginRight: 4 }}
         >{sidebarCollapsed ? "›" : "‹"}</button>
-        <span className="brand">cousins-framework<span className="dim">//</span>console</span>
+        <span className="brand">cousins<span className="dim">//</span>framework</span>
         <span className="spacer" />
         <button
           className="btn ghost"

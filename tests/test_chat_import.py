@@ -167,6 +167,15 @@ class TestImport(ImportCase):
         backups = list((self.new_home / "data").glob("chat.db.pre-import-*"))
         self.assertEqual(len(backups), 1)
 
+    def test_a_missing_new_store_is_created_first(self):
+        # Canary (2026-09-18): a cousin whose chat server never wrote a
+        # row has no store yet; the import creates it instead of refusing.
+        (self.new_home / "data" / "chat.db").unlink()
+        report = self._run()
+        self.assertEqual(report["imported"], 4)
+        self.assertEqual(report["renumbered"], 0)
+        self.assertEqual(sorted(self._rows()), [1, 2, 4, 5])
+
     def test_a_missing_old_store_is_refused(self):
         (self.old_home / "data" / "chat.db").unlink()
         with self.assertRaises(chat_import.ImportRefused):

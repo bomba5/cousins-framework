@@ -96,8 +96,11 @@ def import_history(old_home, new_home, *, force=False):
     if not old_db.is_file():
         raise ImportRefused("no old chat store at %s" % old_db)
     if not new_db.is_file():
-        raise ImportRefused("no chat store at %s (start the chat server"
-                            " once so it creates it)" % new_db)
+        # A chat server that never stored a row has not created its
+        # store yet; create it with the server's own schema.
+        from cousin_lib.server.storage import ChatStore
+        new_db.parent.mkdir(parents=True, exist_ok=True)
+        ChatStore(new_db)
     if marker.exists() and not force:
         raise ImportRefused("history already imported (%s)" % marker)
 

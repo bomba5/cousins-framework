@@ -128,7 +128,11 @@ directory. The root is made absolute before it is written anywhere, so
   means the agent is waiting on a person rather than working, such as
   the harness's login menu; the console's fleet row carries the first
   one a running cousin's pane shows (`attention`) and the card says
-  "needs attention". Absent: nothing is flagged. Not a list of
+  "needs attention". Every injection into a cousin's pane (chat
+  delivery, loops, schedule, flip) reads the visible pane first and
+  skips, with a "tmux delivery SKIPPED" log line, while it shows one:
+  typed text in a login or trust menu selects options. Absent:
+  nothing is flagged and nothing is skipped. Not a list of
   non-empty strings: loud.
   `[agent]` (optional table): `default_model` and `default_effort`
   are what the `agent-cmd` placeholders `{model}` and `{effort}`

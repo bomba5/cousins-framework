@@ -88,8 +88,15 @@ curl -fsSL https://claude.ai/install.sh | bash     # installs ~/.local/bin/claud
 Log in interactively once (or run `claude auth login`) BEFORE any
 cousin starts. A cousin started before that sits at the login menu in
 its tmux session; the console shows it as running with a "needs
-attention" line (with the preset below), and anything sent to it is
-typed into the menu.
+attention" line (with the preset below). With the preset, the
+framework also types nothing into such a pane: chat messages, the
+loops daemon's heartbeat and scheduled prompts, and a flip's boot
+text are skipped with a "tmux delivery SKIPPED" line in the log
+(the chat message stays stored, but the cousin never sees it).
+Without `config/harness.toml` there is no pattern to recognise the
+menu by, and all of that, including the framework's own first
+heartbeat minutes after the start, is typed into the menu, where it
+can select options.
 
 The agent command, with an absolute path so it resolves under the
 units' PATH as well as yours:

@@ -199,4 +199,51 @@ def distill(home, *, max_lines=DEFAULT_MAX_LINES,
             tmp.replace(path)
         report["files"][fname] = len(lines)
     report["generated_at"] = datetime.now(timezone.utc).isoformat()
+    # A view is rewritten only when its text changes, so the files'
+    # mtimes say when the floor last CHANGED, not when it was last
+    # brought up to date. The stamp records the run itself: "is the
+    # floor behind raw?" compares against it.
+    try:
+        last_run_path(home).write_text(report["generated_at"] + "\n")
+    except OSError:
+        pass
     return report
+
+
+def last_run_path(home):
+    """memory/.last-distill, touched by every distill. Outside
+    memory/distilled/ on purpose: that directory holds exactly the
+    views (and the capsules mirror), nothing else."""
+    return Path(home) / "memory" / ".last-distill"
+
+
+def last_run(home):
+    """Epoch seconds of the last distill run, or None."""
+    try:
+        return last_run_path(home).stat().st_mtime
+    except OSError:
+        return None
+
+
+def raw_newest_mtime(home):
+    """Newest mtime among memory/raw/*.jsonl (daily files and digests),
+    or None. Cheap: a stat per file, nothing parsed."""
+    rdir = memory.raw_dir(Path(home))
+    try:
+        return max((p.stat().st_mtime for p in rdir.glob("*.jsonl")),
+                   default=None)
+    except OSError:
+        return None
+
+
+def distill_if_behind(home):
+    """Distill when raw was written after the last run (or there never
+    was one). Returns True when it ran."""
+    newest = raw_newest_mtime(home)
+    if newest is None:
+        return False
+    ran = last_run(home)
+    if ran is not None and ran >= newest:
+        return False
+    distill(home)
+    return True

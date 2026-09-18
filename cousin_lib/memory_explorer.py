@@ -590,7 +590,13 @@ def overview(home, *, root=None, now=None):
     cutoff = (now - timedelta(days=raw_fold.DEFAULT_KEEP_DAYS)) \
         .date().isoformat()
     newest_raw = max((r["when"] for r in live if r["when"]), default=None)
-    distilled_mtime = max((r["mtime"] for r in distilled), default=None)
+    # When the views were last brought up to date: the distill run
+    # stamp. The files' own mtimes only move when their text changes,
+    # so a raw entry that changes no top line would read as "behind"
+    # forever. Installs from before the stamp fall back to the mtimes.
+    from cousin_lib import distill as _distill
+    distilled_mtime = _distill.last_run(home) or max(
+        (r["mtime"] for r in distilled), default=None)
     months = Counter((r["timestamp"] or "")[:7] for r in daily_recs
                      if r["timestamp"])
     insights = {

@@ -210,8 +210,10 @@ cousin's long-term floor:
 - `glossary.md`
 
 They're rebuilt from raw every time a boot packet is assembled (a
-flip), every time the cousin is started or resumed, and by
-`cousin-memory distill` and `cousin-memory consolidate`. No model is
+flip), every time the cousin is started or resumed, by the loops
+daemon within a tick of any raw write (it compares the raw files
+against `memory/.last-distill`, which every distill touches),
+and by `cousin-memory distill` and `cousin-memory consolidate`. No model is
 involved and the result is the same every run. Entries are grouped by
 topic and the newest entry per topic becomes the line; older entries
 show up as a count:

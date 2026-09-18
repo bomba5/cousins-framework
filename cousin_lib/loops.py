@@ -863,6 +863,20 @@ def _default_do_flip(slug):
     return flip(slug)
 
 
+def _keep_distilled(slug, home, report):
+    """Keep the distilled floor level with raw: distill when raw was
+    written after the last run. A stat per raw file per tick; the
+    distill itself is well under a second. Without it the floor only
+    moved at a start or a flip, and the console's memory view said
+    "raw has entries newer than the distilled views" nearly always."""
+    try:
+        from cousin_lib import distill
+        if distill.distill_if_behind(home):
+            report["distilled"].append(slug)
+    except Exception as err:  # noqa: BLE001 - never costs the tick
+        report["errors"].append("distill failed for %s: %s" % (slug, err))
+
+
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     """One scheduler tick, per docs/reference/loops.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
@@ -871,7 +885,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
-              "ready": [], "guarded": [], "scheduled": 0}
+              "ready": [], "guarded": [], "scheduled": 0, "distilled": []}
     _walk_timed_flips(state, deliver, do_flip, now, report)
     _fire_daily_flips(state, do_flip, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
@@ -880,9 +894,10 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
             if config.type == "worker":
                 _fire_worker_loops(config, state, now, report)
                 continue
+            home = FrameworkConfig.from_env().root / "cousins" / slug
+            _keep_distilled(slug, home, report)
             if not is_alive(slug):
                 continue
-            home = FrameworkConfig.from_env().root / "cousins" / slug
             loops, errors = load_cousin_loops(home)
             report["errors"].extend(errors)
             # Trigger files first: each is its own delivery, so its

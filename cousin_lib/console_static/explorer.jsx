@@ -281,7 +281,7 @@ function MemoryInsights({ ov, only }) {
   if (ins.obsolete) flags.push(`${ins.obsolete} obsolete (L5) marks in raw: a topic whose newest entry is one stays out of the distilled views`);
   if (ins.hypotheses) flags.push(`${ins.hypotheses} hypotheses (L4) never confirmed or retired`);
   if (ins.pending_fold_files) flags.push(`${ins.pending_fold_files} daily raw files are past the fold window (cousin-memory compact --target raw folds them)`);
-  if (ins.distilled_behind_raw) flags.push("raw has entries newer than the distilled views (they regenerate at the next boot or cousin-memory distill)");
+  if (ins.distilled_behind_raw) flags.push("raw has entries newer than the last distill (the loops daemon catches up within a tick; cousin-memory distill does it now)");
   if (ins.unparsable_lines) flags.push(`${ins.unparsable_lines} raw lines are not JSON and are skipped by every reader`);
   if (ins.undated) flags.push(`${ins.undated} raw entries carry no timestamp`);
   if ((ins.dangling_index_links || []).length) flags.push(`MEMORY.md points at ${ins.dangling_index_links.length} missing file(s): ${ins.dangling_index_links.join(", ")}`);

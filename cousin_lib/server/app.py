@@ -204,17 +204,38 @@ def _recall_line(config, message):
     return " ".join(line.split())
 
 
+RECALL_BUDGET_SECONDS = 4.0
+
+
 def _with_recall(config, user, message):
     """The text to deliver: the message, plus the recall suffix when one
     applies. Best-effort by contract - a failing search never costs the
     delivery, and never reaches the stored message."""
     if not _is_operator(config, user):
         return message
-    try:
-        line = _recall_line(config, message)
-    except Exception as err:  # noqa: BLE001 - never fails the send
-        print("recall: skipped: %s" % err, file=sys.stderr)
+    # Bounded: the search refreshes its index first, and after a big
+    # change that can take longer than the console waits for a send.
+    # Past the budget the message goes out without the line; the search
+    # keeps running on its own thread and leaves the index warm.
+    box = {}
+
+    def _run():
+        try:
+            box["line"] = _recall_line(config, message)
+        except Exception as err:  # noqa: BLE001 - never fails the send
+            box["error"] = err
+
+    worker = threading.Thread(target=_run, name="recall", daemon=True)
+    worker.start()
+    worker.join(RECALL_BUDGET_SECONDS)
+    if worker.is_alive():
+        print("recall: skipped: over the %ss budget"
+              % RECALL_BUDGET_SECONDS, file=sys.stderr)
         return message
+    if "error" in box:
+        print("recall: skipped: %s" % box["error"], file=sys.stderr)
+        return message
+    line = box.get("line")
     return message + " " + line if line else message
 
 

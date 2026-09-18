@@ -208,6 +208,29 @@ class TestTriggers(RecallCase):
         self.assertEqual(status, 200)
         self.assertEqual(self._delivered(), LONG)
 
+    def test_a_slow_search_is_cut_off_and_delivery_proceeds(self):
+        # Canary (2026-09-18): the search re-embedded a big change inside
+        # the send, the console's 15 s wait ran out, and the operator saw
+        # a failed send for a message that was stored and delivered late.
+        import threading
+        import time
+        release = threading.Event()
+
+        def slow(*a, **k):
+            release.wait(5)
+            return [], None
+        server = self._boot()
+        self._configure_embedding("http://127.0.0.1:9/unused")
+        with mock.patch.object(app, "RECALL_BUDGET_SECONDS", 0.2), \
+                mock.patch.object(app.memory_search, "search", slow):
+            started = time.monotonic()
+            status, _ = self._send(server, LONG)
+            took = time.monotonic() - started
+        release.set()
+        self.assertEqual(status, 200)
+        self.assertLess(took, 3)
+        self.assertEqual(self._delivered(), LONG)
+
     def test_nothing_above_threshold_appends_nothing(self):
         self._configure_embedding("http://127.0.0.1:9/unused")
         (self.home / "memory" / "a.md").write_text("# A\n\nbody\n")

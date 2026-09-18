@@ -107,3 +107,17 @@ class ChatHeaderEffort(unittest.TestCase):
     def test_main_header_names_the_model_beside_the_slug(self):
         app = _read("app.jsx")
         self.assertRegex(app, r"\{c\.slug\}[^\n]*c\.model[^\n]*heartbeat")
+
+
+class CousinTagColour(unittest.TestCase):
+    """The fleet-wide cousin tag uses the accent colour; the hash hue
+    is kept for log lines only."""
+
+    def test_tag_uses_the_accent_and_log_lines_keep_the_hash_hue(self):
+        views = _read("views.jsx")
+        tag = _component(views, "CousinTag")
+        self.assertIn("var(--accent)", tag)
+        self.assertNotIn("cousinColor", tag)
+        rest = views.replace(tag, "")
+        self.assertEqual(rest.count("cousinColor("), 1)
+        self.assertIn("l.cousin", rest[rest.index("cousinColor("):][:80])

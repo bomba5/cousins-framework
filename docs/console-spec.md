@@ -810,7 +810,7 @@ replacement:
 | `styles.css:414` | an avatar rule keyed on one cousin's slug | a generic `.msg.cousin` rule (message `type` not `user`) |
 | `styles.css:529-531` | three log-colour rules keyed on cousin slugs | removed; colour comes from a hash of the slug |
 | `views.jsx:3-133` | the legacy agents view | removed |
-| `views.jsx:136` | tag colours keyed on three cousin slugs | a hue from a hash of the slug |
+| `views.jsx:136` | tag colours keyed on three cousin slugs | the accent colour for the fleet-wide tag; a hue from a hash of the slug for log lines only |
 | `views.jsx:934` | a comment naming two cousins | reworded |
 | `views.jsx:1118` | a fake token sparkline seeded per one slug | removed with the fake data |
 | `views.jsx:1158-1629` | the backlog view and its modal | removed |

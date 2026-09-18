@@ -1,8 +1,10 @@
 // Jobs, Memory, Loops, Tokens, Tracker, Settings, Host, Logs views
 
 function CousinTag({ slug }) {
-  // A hue from a hash of the slug: every cousin gets a colour, none by name.
-  return <span style={{ color: cousinColor(slug), fontWeight: 500 }}>@{slug}</span>;
+  // The fleet-wide tag reads in the accent colour, as the source console
+  // did; the per-slug hash hue is kept for log lines only, where telling
+  // cousins apart at a glance is the point.
+  return <span style={{ color: "var(--accent)", fontWeight: 500 }}>@{slug}</span>;
 }
 
 // ============ JOBS ============

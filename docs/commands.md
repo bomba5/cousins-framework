@@ -23,7 +23,9 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 
 `cousin-spawn` creates a cousin from the template (home, `cousin.toml`,
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
-alone on an existing cousin it starts it; `--repair-settings` rewrites an
+alone on an existing cousin it starts it, and `--start --resume` resumes its
+last session instead of opening a new one (what the start-at-boot unit
+uses); `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`. See [cousins](cousins.md).
 
 ```

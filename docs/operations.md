@@ -196,10 +196,18 @@ console's top bar shows the one the console process is running.
 
 ## After a reboot
 
-The units come back by themselves (with linger on). The cousins don't:
-nothing restarts an agent session on its own. Start each one from the
-console or with `cousin-spawn <slug> --start`. The watchdog then keeps its
-chat server up.
+The units come back by themselves (with linger on). A cousin comes back only
+if you enabled its start unit:
+
+```
+systemctl --user enable cousin-start@wren.service
+```
+
+That runs `cousin-spawn wren --start --resume` once at boot, which picks up
+the cousin's last session where it can and opens a new one where it can't.
+Cousins without the unit stay stopped until you start them from the console
+or with `cousin-spawn <slug> --start`. Either way the watchdog then keeps
+the chat server up. See [systemd/README.md](../systemd/README.md).
 
 ## Troubleshooting
 

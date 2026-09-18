@@ -833,20 +833,52 @@ def _chat_server_unless_live(home):
     _default_chat_server(home)
 
 
-def _start_existing(root, slug, agent_cmd):
+def resume_plan(home, root, agent_cmd):
+    """(agent command, note) that resumes the cousin's last session, or
+    (None, why not). Resuming needs [agent.resume] in harness.toml, a
+    runtime.session_id, and - when harness.toml names transcripts_dir -
+    that session's transcript on disk (a resume of a session the
+    harness no longer has would open an empty pane)."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None, "cousin.toml unreadable"
+    session_id = str((data.get("runtime") or {}).get("session_id") or "")
+    if not session_id:
+        return None, "no runtime.session_id yet"
+    try:
+        cmd = resume_agent_cmd(agent_cmd, root, session_id)
+    except SpawnError as err:
+        return None, str(err)
+    from cousin_lib import transcript_mine
+    path = transcript_mine.transcript_path(home, root, session_id)
+    if path is not None and not path.is_file():
+        return None, "no transcript for session %s" % session_id[:8]
+    return cmd, "resumed session %s" % session_id[:8]
+
+
+def _start_existing(root, slug, agent_cmd, resume=False):
     home = root / "cousins" / slug
     config = CousinConfig.load(home)
     if _session_alive(config.tmux_session):
         print("%s is already running (tmux session %s); nothing started"
               % (slug, config.tmux_session))
         return 0
+    cmd, note = agent_cmd, None
+    if resume:
+        resumed, why = resume_plan(home, root, agent_cmd)
+        if resumed is None:
+            print("%s: not resuming (%s); starting a new session"
+                  % (slug, why))
+        else:
+            cmd, note = resumed, why
     try:
-        start_cousin(home, agent_cmd=agent_cmd, root=root,
+        start_cousin(home, agent_cmd=cmd, root=root, note=note,
                      start_chat_server=_chat_server_unless_live)
     except SpawnError as err:
         print("cousin-spawn: start failed: %s" % err, file=sys.stderr)
         return 1
-    print("started %s" % slug)
+    print("started %s%s" % (slug, " (%s)" % note if note else ""))
     return 0
 
 
@@ -918,6 +950,12 @@ def spawn_main(argv=None):
                              " server) after creating it; on an EXISTING"
                              " cousin, given without --role/--voice, just"
                              " start it (a no-op when already running)")
+    parser.add_argument("--resume", action="store_true",
+                        help="with --start on an existing cousin: resume"
+                             " its last session (config/harness.toml"
+                             " [agent.resume]) instead of a new one; falls"
+                             " back to a new session when that is not"
+                             " possible. What the start-at-boot unit uses")
     parser.add_argument("--repair-settings", action="store_true",
                         help="create nothing: (re)write an EXISTING"
                              " cousin's harness project settings"
@@ -971,7 +1009,8 @@ def spawn_main(argv=None):
                   file=sys.stderr)
             return 2
     if start_existing:
-        return _start_existing(root, args.slug, agent_cmd)
+        return _start_existing(root, args.slug, agent_cmd,
+                               resume=args.resume)
     try:
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,

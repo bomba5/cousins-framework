@@ -1,0 +1,18 @@
+[Unit]
+Description=cousins-framework: start cousin %i at boot, resuming its last session
+After=cousin-console.service cousin-loops.service
+Wants=cousin-loops.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The tmux session and chat server it launches must outlive this unit.
+KillMode=process
+WorkingDirectory={{ROOT}}
+Environment=FRAMEWORK_ROOT={{ROOT}}
+Environment=PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}
+Environment=PYTHONUNBUFFERED=1
+ExecStart={{USER_BIN}}/cousin-spawn %i --start --resume
+
+[Install]
+WantedBy=default.target

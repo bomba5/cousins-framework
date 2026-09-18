@@ -26,6 +26,7 @@ here).
 | `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: starts a missing chat server for any running cousin, logs an alert for a sick one, never kills | every 10 minutes |
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
+| `cousin-start@.service` | `cousin-spawn <slug> --start --resume` for the slug after the `@`: brings the cousin back after a reboot, resuming its last session when it can | once at boot, one per cousin you enable it for |
 | `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the slug after the `@` | always, one per cousin, only if you want systemd to own chat servers (see below) |
 
 A `.timer` starts the `.service` with the same name. Enable the timer, not
@@ -66,6 +67,20 @@ systemctl --user enable --now cousin-loops.service cousin-console.service
 systemctl --user enable --now cousin-chat-watchdog.timer cousin-tool-surface.timer cousin-sweep.timer
 loginctl enable-linger "$USER"
 ```
+
+Nothing starts a cousin's session after a reboot unless you ask for it. For
+each cousin you want back, enable its start unit (a stopped cousin you leave
+alone stays stopped):
+
+```
+systemctl --user enable cousin-start@wren.service
+```
+
+It runs once at boot, after the console and the loops daemon. It resumes the
+cousin's last session if `config/harness.toml` has `[agent.resume]` and the
+session's transcript is still there, and starts a new session otherwise. If
+the cousin is already running it does nothing. `systemctl --user disable
+cousin-start@wren.service` stops it coming back.
 
 The `grep` line prints nothing when every placeholder was replaced. If it
 prints a file name, that unit still has a `{{...}}` in it and will fail at

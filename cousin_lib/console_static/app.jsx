@@ -619,7 +619,7 @@ function MainHeader({ view, cousins, activeCousin }) {
       {view === "chat" && c && (
         <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-2)" }}>
           <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
-          {" "}{c.slug} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
+          {" "}{c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
         </span>
       )}
     </div>

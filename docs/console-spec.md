@@ -787,7 +787,8 @@ replacement:
 | `app.jsx:528`, `532` | the agents and backlog view mounts | removed |
 | `chat.jsx:35` | the default chat user is an operator's first name | `?user=`, else the cousin's `operator`, else the session user; with none the composer is disabled with a one-line reason |
 | `chat.jsx:120` | presence heartbeat posts | removed |
-| `chat.jsx:248` | the effort selector | removed |
+| `chat.jsx:248` | the effort selector (levels hard-coded, an in-session vendor command injected into the pane) | kept as a select whose levels come from `GET /api/spawn/options`; it persists through `POST /api/cousins/<slug>/effort` and shows "restart to apply" |
+| `chat.jsx:325` | the media-kind filter dropdown (`all` / images / videos / audio) beside it | removed with the media views |
 | `chat.jsx:407` | engagement posts | removed |
 | `chat.jsx:470` | the `has=` media filter on search | removed |
 | `chat.jsx:489` | a comment naming a region and its VPN | reworded |

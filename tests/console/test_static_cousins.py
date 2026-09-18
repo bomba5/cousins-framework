@@ -79,3 +79,31 @@ class CousinCardRows(unittest.TestCase):
         self.assertRegex(self.src, r"pid · <b>\{c\.pid \?\? \"-\"\}")
         self.assertRegex(self.src, r"uptime · <b>\{[^}]*uptime_seconds")
         self.assertRegex(self.src, r"model · <b>\{c\.model")
+
+
+class ChatHeaderEffort(unittest.TestCase):
+    """The chat header carries an effort select that persists through
+    POST /api/cousins/<slug>/effort and says a restart applies it; the
+    main header shows the model beside the slug."""
+
+    def setUp(self):
+        self.chat = _read("chat.jsx")
+        self.header = _component(self.chat, "ChatHeader")
+
+    def test_effort_select_persists_and_hints_a_restart(self):
+        self.assertIn("/api/spawn/options", self.header)
+        self.assertIn("/api/cousins/${cousin.slug}/effort", self.header)
+        self.assertRegex(self.header, r"<select[^>]*value=\{effort\}")
+        self.assertIn("restart to apply", self.header)
+        self.assertRegex(self.header, r"\.efforts\s*\|\|")
+        self.assertNotRegex(self.header, r'\[\s*"low"\s*,')
+
+    def test_no_media_filter_returned_with_it(self):
+        # The source's "all" dropdown beside the effort select was the
+        # media-kind filter; media is out of scope and it stays out.
+        self.assertNotIn("chat-media-filter", self.chat)
+        self.assertNotIn("any media", self.chat)
+
+    def test_main_header_names_the_model_beside_the_slug(self):
+        app = _read("app.jsx")
+        self.assertRegex(app, r"\{c\.slug\}[^\n]*c\.model[^\n]*heartbeat")

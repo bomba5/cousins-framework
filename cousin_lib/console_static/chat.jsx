@@ -169,6 +169,37 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
 function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived }) {
   const btnH = 24;  // shared height for input + buttons
 
+  // Effort: the levels come from the server (GET /api/spawn/options),
+  // the current value from the cousin row, and a change persists to
+  // cousin.toml [runtime] through the effort route. The running agent
+  // keeps the level it started with, so a saved change shows "restart
+  // to apply" rather than pretending it is live.
+  const [efforts, setEfforts] = React.useState([]);
+  const [effort, setEffort] = React.useState(cousin.effort || "");
+  const [effortHint, setEffortHint] = React.useState(null);
+  React.useEffect(() => { setEffort(cousin.effort || ""); setEffortHint(null); }, [cousin.effort, cousin.slug]);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const d = await apiGet("/api/spawn/options");
+      if (cancelled || !d) return;
+      setEfforts(d.efforts || []);
+      setEffort(e => e || d.default_effort || "");
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const applyEffort = async (level) => {
+    const before = effort;
+    setEffort(level);
+    const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/effort`, { effort: level });
+    if (r.ok && d.ok) {
+      setEffortHint(d.restart_required ? "restart to apply" : null);
+    } else {
+      setEffort(before);
+      setEffortHint("failed: " + (d.error || `HTTP ${r.status}`));
+    }
+  };
+
   return (
     <div className="chat-header" style={{
       display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
@@ -179,6 +210,31 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
     }}>
       <span>chat &middot; @{cousin.slug}{chatUser ? ` as ${chatUser}` : ""}</span>
       <span style={{ flex: 1 }} />
+      {!embed && (
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <span>effort</span>
+          <select
+            value={effort}
+            onChange={e => applyEffort(e.target.value)}
+            disabled={!efforts.length}
+            title="cousin.toml [runtime] effort: rendered into the agent command at the next start"
+            style={{
+              fontFamily: "var(--mono)", fontSize: 11,
+              background: "var(--bg-0)", color: "var(--fg-0)",
+              border: "1px solid var(--line)", borderRadius: 3,
+              padding: "0 6px", height: btnH, boxSizing: "border-box", outline: "none",
+            }}
+          >
+            {!efforts.length && <option value={effort}>{effort || "..."}</option>}
+            {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          {effortHint && (
+            <span style={{ color: effortHint.startsWith("failed") ? "var(--red)" : "var(--fg-2)" }}>
+              {effortHint}
+            </span>
+          )}
+        </label>
+      )}
       <button
         className="btn ghost"
         onClick={onArchive}

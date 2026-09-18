@@ -28,7 +28,10 @@ _DROPPED_NAMES = (
     "lightbox", "InlineVideo", "engagement", "presence",
     "favorite", "favourite", "MediaRecorder", "getUserMedia",
     "/api/chat/audio", "/api/chat/image", "/api/chat/video",
-    "/effort", "has=", "agents-table", "kanban", "backlog",
+    # the source injected a vendor slash command ("/effort <level>")
+    # into the pane; the effort ROUTE (/api/cousins/<slug>/effort) is
+    # on the contract and persists to cousin.toml instead
+    "/effort ", "has=", "agents-table", "kanban", "backlog",
 )
 
 # Generic patterns the contract lists as install specifics: a private
@@ -67,10 +70,14 @@ def _called_routes(text):
     """The static prefix of every `/api/...` string literal in a JSX file.
 
     A path built into a variable and passed to fetch() later counts the
-    same as one written inline: the literal is what names the route.
+    same as one written inline: the literal is what names the route. A
+    `${...}` segment in a template literal is one path parameter, the
+    way the spec's `<slug>` is, so `/api/cousins/${slug}/effort` is
+    checked as a whole route rather than as its static prefix.
     """
-    rx = re.compile(r"[`\"'](/api/[^`\"'?$]*)")
-    return sorted(set(rx.findall(text)))
+    rx = re.compile(r"[`\"'](/api/(?:[^`\"'?$]|\$\{[^}]*\})*)")
+    return sorted(set(re.sub(r"\$\{[^}]*\}", "x", p)
+                      for p in rx.findall(text)))
 
 
 class StaticChatFiles(unittest.TestCase):

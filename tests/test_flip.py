@@ -361,7 +361,14 @@ class TestHandoffPromptAsksForMemory(FlipCase):
         from cousin_lib.flip import handoff_prompt
         text = handoff_prompt()
         self.assertIn("[cousin-flip in progress] Four pre-exit writes", text)
-        self.assertIn("4. Save what this session learned", text)
+        self.assertIn("3. Save what this session learned", text)
+        # The handoff is the done signal, so every other write comes
+        # before it.
+        self.assertIn("4. LAST, write your handoff", text)
+        for earlier in ("STATUS.md", "active-threads.md",
+                        "cousin-memory remember"):
+            self.assertLess(text.index(earlier),
+                            text.index("data/handoff.md"), earlier)
         self.assertIn("cousin-memory remember", text)
         self.assertIn("cousin-memory decide", text)
         self._flip()
@@ -371,7 +378,7 @@ class TestHandoffPromptAsksForMemory(FlipCase):
         from cousin_lib.flip import handoff_prompt
         text = handoff_prompt("cousin-stop", "The cousin is being stopped.")
         self.assertTrue(text.startswith("[cousin-stop in progress]"))
-        self.assertIn("4. Save what this session learned", text)
+        self.assertIn("3. Save what this session learned", text)
         self.assertTrue(text.endswith("The cousin is being stopped."))
 
 

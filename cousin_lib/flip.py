@@ -41,20 +41,22 @@ def handoff_prompt(event="cousin-flip", after="The framework is"
     by a flip or by a clean stop. Step 4 is the one the handoff files
     cannot carry: what the session learned goes into memory now, with
     its truth level, because the next session boots on a packet and
-    starts without this context."""
+    starts without this context. The handoff comes last because the
+    framework ends the session as soon as data/handoff.md changes."""
     return (
-        "[%s in progress] Four pre-exit writes required:\n"
+        "[%s in progress] Four pre-exit writes required, in this order:\n"
         "1. Reconcile STATUS.md: fold in-flight progress and open loops"
         " into the file - the next session anchors on STATUS.md as"
         " authoritative.\n"
-        "2. Write your handoff to data/handoff.md (position, next action,"
-        " open questions, degraded_state: false).\n"
-        "3. Write data/active-threads.md, one bullet per in-flight"
+        "2. Write data/active-threads.md, one bullet per in-flight"
         " thread.\n"
-        "4. Save what this session learned that is not in memory yet:"
+        "3. Save what this session learned that is not in memory yet:"
         " cousin-memory remember (operator statements at --level"
         " operator with --cite) and cousin-memory decide for decisions"
         " and their reasons.\n"
+        "4. LAST, write your handoff to data/handoff.md (position, next"
+        " action, open questions, degraded_state: false). Its write is"
+        " the signal that you are done: the session ends right after.\n"
         "Then stop working. %s" % (event, after))
 
 

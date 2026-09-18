@@ -89,12 +89,13 @@ Step by step:
 5. **Handoff.** Type this into the live session:
 
    ```
-   [cousin-flip in progress] Four pre-exit writes required:
+   [cousin-flip in progress] Four pre-exit writes required, in this order:
    1. Reconcile STATUS.md ...
-   2. Write your handoff to data/handoff.md ...
-   3. Write data/active-threads.md, one bullet per in-flight thread.
-   4. Save what this session learned that is not in memory yet:
+   2. Write data/active-threads.md, one bullet per in-flight thread.
+   3. Save what this session learned that is not in memory yet:
       cousin-memory remember (...) and cousin-memory decide (...).
+   4. LAST, write your handoff to data/handoff.md (...). Its write is
+      the signal that you are done: the session ends right after.
    Then stop working. The framework is rebuilding your boot packet.
    ```
 

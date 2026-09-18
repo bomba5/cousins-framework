@@ -105,18 +105,31 @@ class HiveStore:
                 (slug, text, scope, time.time()))
             self.conn.commit()
 
-    def recall(self, query, *, scopes):
-        """Substring recall over memories whose scope the caller's
-        token includes. 'shared' is only reachable with shared scope."""
+    def recall(self, query, *, scopes, slug):
+        """Substring recall over the memories the caller may read.
+
+        `slug` is the caller's identity (from its token) and is
+        required: 'own' means the caller's OWN memories only, never
+        every node's, and it still needs 'own' in the token's scope.
+        Any other scope ('shared') is readable by every token carrying
+        it. Filtered in SQL so no row outside the boundary is even
+        loaded."""
+        scopes = set(scopes)
+        other = sorted(s for s in scopes if s != "own")
+        clauses, params = [], []
+        if "own" in scopes:
+            clauses.append("(scope='own' AND slug=?)")
+            params.append(slug)
+        if other:
+            clauses.append("(scope IN (%s))" % ",".join("?" * len(other)))
+            params.extend(other)
+        if not clauses:
+            return []
         rows = self.conn.execute(
-            "SELECT text, scope FROM memory ORDER BY id DESC").fetchall()
-        out = []
-        for r in rows:
-            if r["scope"] not in scopes:
-                continue
-            if query.lower() in r["text"].lower():
-                out.append(r["text"])
-        return out
+            "SELECT text FROM memory WHERE %s ORDER BY id DESC"
+            % " OR ".join(clauses), params).fetchall()
+        needle = query.lower()
+        return [r["text"] for r in rows if needle in r["text"].lower()]
 
 
 def build_queen(store, *, host="127.0.0.1", port=0):
@@ -195,7 +208,7 @@ class _QueenHandler(BaseHTTPRequestHandler):
                                           if "?" in self.path else "")
             q = (query.get("q") or [""])[0]
             self._json(200, {"memories": self.queen_store.recall(
-                q, scopes=identity["scope"])})
+                q, scopes=identity["scope"], slug=identity["slug"])})
         else:
             self._json(404, {"error": "not found"})
 
@@ -214,9 +227,16 @@ class _QueenHandler(BaseHTTPRequestHandler):
                 msg_id=body.get("id"), body=body.get("body", ""))
             self._json(200, {"ok": True})
         elif path == "/hive/memory":
+            scope = body.get("scope", "own")
+            # Writes are scope-gated like reads: a token may only write
+            # into a tier it could read, so an own-only node cannot
+            # plant text in the shared corpus or invent a tier.
+            if scope not in identity["scope"]:
+                self._json(403, {"error": "scope %r not on this token"
+                                 % scope})
+                return
             self.queen_store.append_memory(
-                identity["slug"], body.get("text", ""),
-                scope=body.get("scope", "own"))
+                identity["slug"], body.get("text", ""), scope=scope)
             self._json(200, {"ok": True})
         else:
             self._json(404, {"error": "not found"})

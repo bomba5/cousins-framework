@@ -126,6 +126,67 @@ class TestScopeGate(HiveCase):
         self.assertEqual(body["memories"], [])
 
 
+class TestOwnMemoriesStayWithTheirNode(HiveCase):
+    """'own' scope means the caller's own slug, never every node's own
+    memories. Canary: recall filtered on scope only, so any token
+    holding 'own' read every node's private memories."""
+
+    def _recall(self, url, token, q):
+        status, body = self._call(url, "/hive/recall?q=" + q, token=token)
+        self.assertEqual(status, 200)
+        return body["memories"]
+
+    def test_a_node_cannot_read_another_nodes_own_memories(self):
+        store = self._store()
+        wren = self._mint(store, "wren")
+        testa = self._mint(store, "testa")
+        store.append_memory("testa", "testa secret: the lockbox code",
+                            scope="own")
+        url = self._queen(store)
+        self.assertEqual(self._recall(url, wren, "secret"), [])
+        self.assertEqual(self._recall(url, testa, "secret"),
+                         ["testa secret: the lockbox code"])
+
+    def test_own_and_shared_still_read_through_the_queen(self):
+        store = self._store()
+        wren = self._mint(store, "wren")
+        self._mint(store, "testa")
+        url = self._queen(store)
+        status, _ = self._call(url, "/hive/memory", token=wren,
+                               method="POST",
+                               body={"text": "wren note: kettle",
+                                     "scope": "own"})
+        self.assertEqual(status, 200)
+        store.append_memory("testa", "fleet note: kettle", scope="shared")
+        store.append_memory("testa", "testa note: kettle", scope="own")
+        self.assertEqual(sorted(self._recall(url, wren, "kettle")),
+                         ["fleet note: kettle", "wren note: kettle"])
+
+    def test_own_scope_is_still_required_for_own_memories(self):
+        store = self._store()
+        shared_only = self._mint(store, "wren", scope=("shared",))
+        store.append_memory("wren", "wren note", scope="own")
+        url = self._queen(store)
+        self.assertEqual(self._recall(url, shared_only, "note"), [])
+
+    def test_recall_requires_the_callers_slug(self):
+        store = self._store()
+        with self.assertRaises(TypeError):
+            store.recall("x", scopes={"own"})
+
+    def test_a_write_outside_the_tokens_scope_is_refused(self):
+        store = self._store()
+        own_only = self._mint(store, "wren", scope=("own",))
+        url = self._queen(store)
+        for scope in ("shared", "kestrel"):
+            status, _ = self._call(url, "/hive/memory", token=own_only,
+                                   method="POST",
+                                   body={"text": "planted", "scope": scope})
+            self.assertEqual(status, 403, scope)
+        rows = store.conn.execute("SELECT COUNT(*) FROM memory").fetchone()
+        self.assertEqual(rows[0], 0)
+
+
 class TestClientFailsLocal(HiveCase):
     def test_send_with_no_queen_raises_hive_error_for_local_fallback(self):
         # A cousin with no reachable queen behaves single-machine: the

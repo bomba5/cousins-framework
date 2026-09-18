@@ -41,6 +41,12 @@ unauthenticated path would be the hole this rewrite exists to close.
 - **Scope is on the token.** A token carries what its node may read -
   its own inbox always, the shared corpus only if its scope includes
   it. Scope gates reads at the queen; it is not advisory.
+- **`own` means this node's own.** A memory written in `own` scope is
+  recalled only by the token of the slug that wrote it (and only when
+  that token carries `own`); no other node's token reaches it, whatever
+  its scope. Writes are gated the same way: a token may only write
+  into a scope it carries, so an own-only node cannot plant text in
+  the shared corpus.
 - **Transport is plain HTTP unless the operator fronts it with TLS.**
   This is stated, not hidden: the queen speaks HTTP, and an operator
   who needs confidentiality across an untrusted network puts a TLS

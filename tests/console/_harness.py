@@ -21,11 +21,14 @@ printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
 sub=""
 for a in "$@"; do
   case "$a" in
-    has-session|kill-session|capture-pane|new-session|send-keys|resize-window)
+    has-session|kill-session|capture-pane|new-session|send-keys|resize-window|display-message)
       sub="$a";;
   esac
 done
 if [ "$sub" = capture-pane ]; then cat "$FAKE_TMUX_PANE" 2>/dev/null; fi
+# display-message answers the pane pid probe (#{pane_pid}) with
+# FAKE_TMUX_PANE_PID; empty means "tmux printed nothing usable".
+if [ "$sub" = display-message ]; then printf '%s\\n' "${FAKE_TMUX_PANE_PID:-}"; fi
 var="FAKE_TMUX_RC_$(printf '%s' "$sub" | tr 'a-z-' 'A-Z_')"
 rc="${!var:-${FAKE_TMUX_RC:-0}}"
 exit "$rc"

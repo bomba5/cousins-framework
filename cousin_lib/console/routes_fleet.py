@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -51,6 +53,53 @@ def _pane_active(server, config):
         hashes[config.slug] = (digest, now)
         return True
     return now - prev[1] < ACTIVE_WINDOW_SECONDS
+
+
+def _pane_pid(server, config):
+    """The agent process in the cousin's session: tmux's #{pane_pid}
+    for the exactly named session (the `=` prefix refuses prefix
+    matches), through the console's own binary and socket. None when
+    tmux fails or prints nothing usable."""
+    try:
+        r = tmux(server, ["display-message", "-p", "-t",
+                          "=" + config.tmux_session, "#{pane_pid}"],
+                 timeout=2)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        pid = int((r.stdout or "").strip())
+    except ValueError:
+        return None
+    return pid if pid > 0 else None
+
+
+def uptime_seconds(pid, proc="/proc"):
+    """Seconds since the process started: /proc/<pid>/stat's start
+    time (field 22, clock ticks since boot) against /proc/uptime,
+    else `ps -o etimes=`, else None. Unknown is None, never 0: a zero
+    reads as "just started"."""
+    if not pid:
+        return None
+    try:
+        stat = (Path(proc) / str(pid) / "stat").read_text()
+        up = float((Path(proc) / "uptime").read_text().split()[0])
+        # The command name sits in parentheses and may hold spaces;
+        # split after the closing one so the field numbers hold.
+        start_ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        return max(0, int(up - start_ticks / os.sysconf("SC_CLK_TCK")))
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        r = subprocess.run(["ps", "-o", "etimes=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=2,
+                           check=False)
+        if r.returncode == 0 and (r.stdout or "").strip():
+            return max(0, int(r.stdout.strip()))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return None
 
 
 def _to_unix(ts):
@@ -125,6 +174,12 @@ def fleet_row(server, config, defaults=None):
     else:
         status = "running" if session_alive(server, config) else "stopped"
         active = _pane_active(server, config) if status == "running" else False
+    # The agent process and its age: only a local, running session has
+    # one to ask tmux about; everything else is null, not zero.
+    pid = None
+    if status == "running" and config.type != "worker" \
+            and not config.chat_host:
+        pid = _pane_pid(server, config)
     return {
         "slug": config.slug,
         "name": config.name,
@@ -143,6 +198,8 @@ def fleet_row(server, config, defaults=None):
         "status": status,
         "chat": chat,
         "active": active,
+        "pid": pid,
+        "uptime_seconds": uptime_seconds(pid) if pid else None,
         "activity": _activity(config.home),
         "lastMsgTs": _last_msg_ts(config, chat),
         "tokensSpent": tokens.today_total(server, config.home),

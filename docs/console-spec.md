@@ -190,18 +190,23 @@ from the tokens seam below.
 | `status` | `"running"` or `"stopped"` | tmux session exists (workers: always `"running"`, meaning enrolled) |
 | `chat` | `"ok"`, `"down"` or `"none"` | `/health` reachable, not reachable, no port |
 | `active` | bool | the pane's last 20 lines changed within 60 s (capture-pane hash) |
+| `pid` | int or null | the agent process in the session: `tmux display-message -p -t =<session> '#{pane_pid}'` through the console's binary and socket, only for a local running cousin; null otherwise or when tmux prints nothing usable |
+| `uptime_seconds` | int or null | the age of `pid` from `/proc/<pid>/stat` against `/proc/uptime`, else `ps -o etimes=`; null when `pid` is null or the process cannot be aged (never 0, which would read as "just started") |
 | `activity` | str | first 200 chars of `data/last-activity.txt`, else `""` |
 | `lastMsgTs` | int | unix time of the newest message of type `<slug>` in the operator's thread (proxied history, newest 20 rows), 0 when no operator, no port, or the server is down |
 | `tokensSpent` | int | today's total from the tokens seam, 0 when unavailable |
 
 Rows the source carried and this one does not: `main_tenant`,
 `framework_managed`, `livenessTick`, `tokenBudget`, `auto_start`,
-`pid`, `uptime`, `cpu`, `mem`, `chatCount`, `lastTick`. The first
-four are install-specific or dead keys; the rest were zeros or
-platform probes the views only rendered as decoration. `model` and
-`effort` were dropped with them at first and came back once the agent
-command grew its `{model}` / `{effort}` placeholders: they are now
-`cousin.toml` facts with an install-wide fallback, not vendor keys.
+`cpu`, `mem`, `chatCount`, `lastTick`. The first four are
+install-specific or dead keys; the rest were zeros or platform probes
+the views only rendered as decoration. `model` and `effort` were
+dropped with them at first and came back once the agent command grew
+its `{model}` / `{effort}` placeholders: they are now `cousin.toml`
+facts with an install-wide fallback, not vendor keys. The source's
+`pid` (the chat server's, found by port) and `uptime` (0 when unknown)
+came back as `pid` (the agent's, asked of tmux) and `uptime_seconds`
+(null when unknown).
 
 ### `POST /api/cousins` (spawn)
 Body: `{"slug": str, "name": str, "role": str, "voice": str,

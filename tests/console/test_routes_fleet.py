@@ -535,3 +535,63 @@ class TestModelAndEffort(ConsoleCase):
                 "slug": "kiwi", "role": "r", "voice": "v", **bad})
             self.assertEqual(status, 400, bad)
             self.assertFalse((self.root / "cousins" / "kiwi").exists())
+
+
+class TestPidAndUptime(ConsoleCase):
+    """pid is the pane's process as tmux reports it (display-message
+    #{pane_pid} on the exact session), uptime_seconds its age from
+    /proc; both null whenever the cousin is not a local running
+    session or the probe answers nothing usable. Never a zero."""
+
+    def test_running_local_cousin_reports_pid_and_uptime(self):
+        self.cousin("wren")
+        self.tmux_running(True)
+        os.environ["FAKE_TMUX_PANE_PID"] = str(os.getpid())
+        self.serve()
+        row = self.get("/api/cousins")[1]["cousins"][0]
+        self.assertEqual(row["pid"], os.getpid())
+        self.assertIsInstance(row["uptime_seconds"], int)
+        self.assertGreaterEqual(row["uptime_seconds"], 0)
+        calls = [l for l in self.tmux_log.read_text().splitlines()
+                 if "display-message" in l]
+        self.assertTrue(calls)
+        self.assertIn("-t =wren", calls[0])
+        self.assertIn("#{pane_pid}", calls[0])
+
+    def test_stopped_remote_and_worker_rows_are_null(self):
+        self.cousin("wren")
+        self.cousin("far", extra='host = "elsewhere"\n')
+        self.cousin("toki", port=None, ctype="worker")
+        os.environ["FAKE_TMUX_PANE_PID"] = str(os.getpid())
+        self.serve()
+        rows = {r["slug"]: r for r in self.get("/api/cousins")[1]["cousins"]}
+        for slug in ("wren", "far", "toki"):
+            self.assertIsNone(rows[slug]["pid"], slug)
+            self.assertIsNone(rows[slug]["uptime_seconds"], slug)
+        self.assertNotIn("display-message", self.tmux_log.read_text())
+
+    def test_unusable_probe_or_vanished_process_is_null_not_zero(self):
+        self.cousin("wren")
+        self.tmux_running(True)
+        os.environ["FAKE_TMUX_PANE_PID"] = ""
+        self.serve()
+        row = self.get("/api/cousins")[1]["cousins"][0]
+        self.assertIsNone(row["pid"])
+        self.assertIsNone(row["uptime_seconds"])
+        # A pid tmux reports but no process answers to: the pid is
+        # what tmux said, the age is unknown.
+        os.environ["FAKE_TMUX_PANE_PID"] = "4194303"
+        row = self.get("/api/cousins")[1]["cousins"][0]
+        self.assertEqual(row["pid"], 4194303)
+        self.assertIsNone(row["uptime_seconds"])
+
+    def test_uptime_reads_proc_then_ps_then_gives_up(self):
+        from cousin_lib.console.routes_fleet import uptime_seconds
+        age = uptime_seconds(os.getpid())
+        self.assertIsInstance(age, int)
+        self.assertGreaterEqual(age, 0)
+        # Without /proc the ps fallback answers for a live process.
+        age = uptime_seconds(os.getpid(), proc=str(self.root / "no-proc"))
+        self.assertIsInstance(age, int)
+        self.assertIsNone(uptime_seconds(4194303))
+        self.assertIsNone(uptime_seconds(None))

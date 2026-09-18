@@ -16,8 +16,14 @@ from injectable callables so the stream is tested without tmux.
 
 Each frame carries the pane's state (alternate screen, mouse tracking,
 cursor) and ends with a control tail the browser terminal is left in
-after it resets and writes the frame: the cursor moved onto tmux's
-cursor cell, and shown or hidden as tmux has it.
+after it resets and writes the frame: the mouse mode when the program
+tracks the mouse, the cursor moved onto tmux's cursor cell, and the
+cursor shown or hidden as tmux has it. A full-screen program runs on
+tmux's alternate screen, which has no history to capture, so the only
+way to scroll it from the browser is the program's own mouse wheel
+handling: the browser terminal must itself be in mouse mode to turn a
+wheel into an SGR report, and a captured frame never contains the
+program's mode-setting escapes, so the frame sets it.
 
 Input goes through the injection module's process-wide lock, so a chat
 delivery and a keystroke never interleave.
@@ -52,6 +58,11 @@ _STATE_FORMATS = ("alternate_on", "mouse_any_flag", "mouse_sgr_flag",
                   "cursor_flag")
 _STATE_KEYS = ("alt", "mouse", "sgr", "cols", "rows", "cx", "cy", "cursor")
 
+# Normal tracking (press, release, wheel) with SGR encoding. Not the
+# program's own mode: any-motion tracking would turn every mouse move
+# over the browser pane into an input request, and the input path
+# forwards SGR reports only, whatever encoding the program asked for.
+_MOUSE_ON = "\x1b[?1000h\x1b[?1006h"
 _CURSOR_SHOW, _CURSOR_HIDE = "\x1b[?25h", "\x1b[?25l"
 
 
@@ -156,6 +167,8 @@ def compose_frame(raw, state):
         row = top + max(0, min(rows - 1, state.get("cy", 0)))
         keep = max(keep, row + 1)
     tail = ""
+    if state.get("mouse") and state.get("sgr"):
+        tail += _MOUSE_ON
     if row is not None:
         up = keep - 1 - row
         if up:
@@ -168,9 +181,9 @@ def compose_frame(raw, state):
 def input_tokens(data):
     """xterm bytes -> [(mode, payload)]: 'key' for a tmux key name,
     'literal' for text sent with `-l`. Any CSI or SS3 sequence not in the
-    table is consumed and dropped, never forwarded as Escape; SGR mouse
-    reports are forwarded literally so a full-screen program can
-    scroll."""
+    table is consumed and dropped, never forwarded as Escape; an SGR
+    mouse report is a 'mouse' token, sent literally only while the
+    program tracks the mouse (send_input)."""
     out = []
     i, n = 0, len(data)
     while i < n:
@@ -191,7 +204,7 @@ def input_tokens(data):
                     seq = data[i:end]
                     if len(seq) >= 4 and seq[2] == "<" \
                             and seq[-1] in ("M", "m"):
-                        out.append(("literal", seq))
+                        out.append(("mouse", seq))
                     i = end
                 elif nxt == "O":
                     i = min(i + 3, n)
@@ -224,9 +237,18 @@ def send_input(tmux, session, data):
     """Type the bytes into the session under the injection lock. Returns
     the token count; raises RouteError(500) with tmux's stderr."""
     tokens = input_tokens(data or "")
+    if any(mode == "mouse" for mode, _ in tokens):
+        # A report reaches the program as bytes (send-keys -l bypasses
+        # tmux's own mouse handling). A program tracking the mouse with
+        # SGR reads it as a mouse event; to any other program it is an
+        # Escape followed by text, which throws a modal editor out of
+        # insert mode and eats the next typed or injected line.
+        st = tmux.state(session)
+        tracked = bool(st and st.get("mouse") and st.get("sgr"))
+        tokens = [t for t in tokens if t[0] != "mouse" or tracked]
     with injection._INJECT_LOCK:
         for mode, payload in tokens:
-            if mode == "literal":
+            if mode in ("literal", "mouse"):
                 # -l and -- are load-bearing: a run starting with '-' is
                 # otherwise parsed as flags
                 batches = [["-l", "--", piece]

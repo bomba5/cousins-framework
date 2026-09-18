@@ -491,15 +491,22 @@ An SSE stream (`text/event-stream`, `Cache-Control: no-cache`,
 
 A `pane` frame is written into a freshly reset terminal. `text` is
 `capture-pane -p -e -S -<lines>` with trailing blank lines trimmed
-(never above the cursor's line), followed by a control tail: the
-cursor moved onto tmux's cursor cell relative to the frame's last line (`ESC [ n A` up, `ESC [ col G` to the column),
+(never above the cursor's line), followed by a control tail: `ESC [
+? 1000 h ESC [ ? 1006 h` when the program tracks the mouse with SGR
+reports, then the cursor moved onto tmux's cursor cell relative to
+the frame's last line (`ESC [ n A` up, `ESC [ col G` to the column),
 then `ESC [ ? 25 h` or `ESC [ ? 25 l` as tmux shows or hides the
 cursor. `state` is `{"alt", "mouse", "sgr", "cols", "rows", "cx",
 "cy", "cursor", "top"}` from one `display-message` (`alternate_on`,
 `mouse_any_flag`, `mouse_sgr_flag`, `pane_width`, `pane_height`,
 `cursor_x`, `cursor_y`, `cursor_flag`; `top` is the number of frame
 lines above the screen's first row), null when tmux prints nothing
-usable.
+usable. A full-screen program runs on the alternate screen, which has
+no history to capture: the browser scrolls it by sending the
+program's own wheel reports, which a terminal only produces while in
+mouse mode, and a capture never contains the program's mode-setting
+escapes, hence the tail. While the program does not track the mouse,
+a wheel scrolls the client's own scrollback and sends nothing.
 
 How the server obtains bytes is an implementation choice this contract
 does not fix: a `pipe-pane` tap (the source's local path) or
@@ -513,8 +520,10 @@ Body `{"cousin": str, "data": str}`: the raw bytes a terminal emulator
 produced. The server maps them to tmux `send-keys`: named keys for
 `Enter`, `Tab`, `BSpace`, `Escape`, `Up/Down/Left/Right`, `Home/End`,
 `PageUp/PageDown`, `DC/IC`, `F1..F4`, `C-a..C-z`; SGR mouse reports
-(`ESC [ < ... M|m`) forwarded literally so a full-screen program can
-scroll; every other CSI or SS3 sequence dropped, never forwarded as
+(`ESC [ < ... M|m`) forwarded literally, and only while the pane's
+program tracks the mouse with SGR reports (to any other program a
+report is an Escape and text, which a modal editor reads as leaving
+insert mode); every other CSI or SS3 sequence dropped, never forwarded as
 Escape; printable runs sent with `-l --` in chunks under tmux's
 message ceiling (the `-l` and `--` are load-bearing: a line starting
 with `-` is otherwise parsed as flags). All sends take the

@@ -140,11 +140,11 @@ class TestInputTokens(unittest.TestCase):
         self.assertEqual(pane.input_tokens("a\x1b[Ob"),
                          [("literal", "a"), ("literal", "b")])
 
-    def test_sgr_mouse_reports_are_forwarded_literally(self):
+    def test_sgr_mouse_reports_are_mouse_tokens(self):
         self.assertEqual(pane.input_tokens("\x1b[<64;10;5M"),
-                         [("literal", "\x1b[<64;10;5M")])
+                         [("mouse", "\x1b[<64;10;5M")])
         self.assertEqual(pane.input_tokens("\x1b[<0;1;1m"),
-                         [("literal", "\x1b[<0;1;1m")])
+                         [("mouse", "\x1b[<0;1;1m")])
 
     def test_literal_chunking_respects_the_limit(self):
         self.assertEqual(pane.chunk_literal("abcdef", 4), ["abcd", "ef"])
@@ -191,6 +191,33 @@ class TestInput(PaneCase):
         self.assertEqual(status, 500)
         self.assertFalse(body["ok"])
 
+    def test_mouse_reports_reach_a_program_tracking_the_mouse(self):
+        with mock.patch.dict("os.environ",
+                             {"FAKE_TMUX_STATE": "1 1 1 80 24 0 0 0"}):
+            status, body = self._post("/api/pane/input", cousin="testa",
+                                      data="\x1b[<64;3;4M\x1b[<65;3;4M")
+        self.assertEqual((status, body["tokens"]), (200, 2))
+        sends = [c for c in self._calls() if "send-keys" in c]
+        self.assertEqual(sends, ["send-keys -t testa -l -- \x1b[<64;3;4M",
+                                 "send-keys -t testa -l -- \x1b[<65;3;4M"])
+
+    def test_mouse_reports_are_dropped_when_the_program_does_not_track(self):
+        # an SGR report typed into a program not tracking the mouse is
+        # an Escape followed by text: a modal editor leaves insert mode
+        for st in ("0 0 0 80 24 0 0 1", "1 1 0 80 24 0 0 1", ""):
+            self.log.write_text("")
+            with mock.patch.dict("os.environ", {"FAKE_TMUX_STATE": st}):
+                status, body = self._post("/api/pane/input", cousin="testa",
+                                          data="a\x1b[<64;3;4Mb")
+            self.assertEqual((status, body["tokens"]), (200, 2), st)
+            sends = [c for c in self._calls() if "send-keys" in c]
+            self.assertEqual(sends, ["send-keys -t testa -l -- a",
+                                     "send-keys -t testa -l -- b"], st)
+
+    def test_no_state_query_without_a_mouse_report(self):
+        self._post("/api/pane/input", cousin="testa", data="ab")
+        self.assertFalse([c for c in self._calls() if "display-message" in c])
+
     def test_empty_data_is_a_noop_200(self):
         status, body = self._post("/api/pane/input", cousin="testa", data="")
         self.assertEqual((status, body["tokens"]), (200, 0))
@@ -220,8 +247,9 @@ def _state(**kw):
 
 
 class TestComposeFrame(unittest.TestCase):
-    """One frame = the capture, trimmed, then the control tail: cursor
-    placement relative to the frame's last line, cursor visibility. The tail is what the browser terminal is left in after
+    """One frame = the capture, trimmed, then the control tail: mouse
+    mode, cursor placement relative to the frame's last line, cursor
+    visibility. The tail is what the browser terminal is left in after
     it resets and writes the frame."""
 
     def test_no_state_trims_trailing_blank_lines_only(self):
@@ -247,7 +275,13 @@ class TestComposeFrame(unittest.TestCase):
         self.assertEqual(top, 0)
         self.assertEqual(
             text, "top\n> typed\nfooter\nstatus"
-                  "\x1b[2A\x1b[8G\x1b[?25l")
+                  "\x1b[?1000h\x1b[?1006h\x1b[2A\x1b[8G\x1b[?25l")
+
+    def test_mouse_mode_needs_the_sgr_encoding_the_input_path_forwards(self):
+        text, _ = pane.compose_frame("x\n\n\n\n",
+                                     _state(mouse=1, sgr=0))
+        self.assertNotIn("?1000h", text)
+        self.assertTrue(text.endswith("\x1b[1G\x1b[?25h"))
 
     def test_capture_shorter_than_the_screen_places_no_cursor(self):
         text, top = pane.compose_frame("x\n", _state(rows=4, cy=2))
@@ -280,7 +314,7 @@ class TestPaneState(PaneCase):
             body.close()
         self.assertEqual(first[1]["state"]["mouse"], 1)
         self.assertTrue(first[1]["text"].endswith(
-            "\x1b[2G\x1b[?25l"),
+            "\x1b[?1000h\x1b[?1006h\x1b[2G\x1b[?25l"),
             repr(first[1]["text"]))
 
 
@@ -338,7 +372,7 @@ class TestStream(PaneCase):
         self.assertTrue(first[1]["text"].startswith("one\ntwo\nthree"))
         # the cursor is one line above the frame's last line, column 6
         self.assertTrue(first[1]["text"].endswith(
-            "\x1b[1A\x1b[6G\x1b[?25h"),
+            "\x1b[?1000h\x1b[?1006h\x1b[1A\x1b[6G\x1b[?25h"),
             repr(first[1]["text"]))
         self.assertEqual(first[1]["state"]["alt"], 1)
         self.assertEqual(first[1]["state"]["mouse"], 1)

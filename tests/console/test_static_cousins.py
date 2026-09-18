@@ -151,3 +151,46 @@ class PanelEditorsUseTheAccent(unittest.TestCase):
         self.assertIsNotNone(rule)
         self.assertIn("border-color: var(--accent)", rule.group(1))
         self.assertIn("var(--accent)", rule.group(1).split("box-shadow")[1])
+
+
+class InspectorIdentityEditors(unittest.TestCase):
+    """Operator, memory scope and heartbeat are editable in the
+    inspector's identity block through their routes, with the restart
+    hint the chat header's effort select uses; the other identity rows
+    stay read-only."""
+
+    def setUp(self):
+        cousins = _read("cousins.jsx")
+        self.inspector = _component(cousins, "Inspector")
+        self.field = _component(cousins, "IdentityField")
+        self.cousins = cousins
+
+    def test_three_rows_use_the_editor_and_the_rest_do_not(self):
+        for field in ("operator", "memory_scope", "heartbeat"):
+            self.assertRegex(self.inspector,
+                             r'<IdentityField cousin=\{c\} field="%s"' % field)
+        self.assertEqual(self.inspector.count("<IdentityField"), 3)
+        for row in ("slug", "type", "home", "tmux", "chat", "pid",
+                    "uptime"):
+            dd = re.search(r"<dt>%s</dt><dd[^>]*>(.*?)</dd>" % row,
+                           self.inspector)
+            self.assertIsNotNone(dd, row)
+            self.assertNotIn("IdentityField", dd.group(1), row)
+
+    def test_routes_limits_and_restart_hint(self):
+        for route in ("operator", "memory-scope", "heartbeat"):
+            self.assertIn("`/api/cousins/${slug}/%s`" % route, self.cousins)
+        self.assertIn("spec.url(cousin.slug)", self.field)
+        self.assertIn("restart_required", self.field)
+        self.assertIn("restart to apply", self.field)
+        for key in ("memory_scopes", "heartbeat_bounds",
+                    "operator_max_chars"):
+            self.assertIn(key, self.field, key)
+        self.assertIn("/api/spawn/options", self.inspector)
+        self.assertIn("cancel", self.field)
+        self.assertIn("setErr(", self.field)
+
+    def test_heartbeat_reads_in_seconds_and_a_human_form(self):
+        beat = _component(self.cousins, "fmtBeat")
+        self.assertIn("fmtDuration(", beat)
+        self.assertRegex(beat, r"`\$\{n\}s \(")

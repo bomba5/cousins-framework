@@ -536,6 +536,8 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(body["memory_scopes"], ["private", "shared", "both"])
         self.assertEqual(body["default_memory_scope"], "private")
         self.assertEqual(body["default_heartbeat"], 3600)
+        self.assertEqual(body["heartbeat_bounds"], [60, 30 * 86400])
+        self.assertEqual(body["operator_max_chars"], 64)
 
     def test_spawn_options_from_the_harness_file(self):
         self._harness('[agent]\ndefault_model = "m-two"\n'
@@ -573,6 +575,94 @@ class TestModelAndEffort(ConsoleCase):
                 "slug": "kiwi", "role": "r", "voice": "v", **bad})
             self.assertEqual(status, 400, bad)
             self.assertFalse((self.root / "cousins" / "kiwi").exists())
+
+
+
+class TestIdentityEditors(ConsoleCase):
+    """The inspector edits three identity keys: operator ([operator]
+    name), memory scope ([memory] scope) and heartbeat ([heartbeat]
+    context_beat_seconds). Each route validates through
+    spawn.persist_identity, keeps the rest of cousin.toml, announces a
+    fleet refresh and says whether a restart is what applies it: the
+    chat server holds the operator from its start, while the scope and
+    the heartbeat are read from cousin.toml on every use (the loops
+    daemon loads every cousin.toml on each tick)."""
+
+    ROUTES = (("operator", "operator", "Kestrel", True),
+              ("memory-scope", "memory_scope", "both", False),
+              ("heartbeat", "heartbeat", 7200, False))
+
+    def test_each_write_persists_round_trips_and_refreshes_the_fleet(self):
+        from cousin_lib.config import CousinConfig
+        home = self.cousin("wren", operator="Testa",
+                           extra='# a hand note\n[runtime]\n'
+                                 'session_id = "abc"\n')
+        server = self.serve()
+        seen = []
+        server.listeners.append(lambda k, d: seen.append((k, d)))
+        for route, key, value, restart in self.ROUTES:
+            status, body = self.post("/api/cousins/wren/%s" % route,
+                                     {key: value})
+            self.assertEqual(status, 200, body)
+            self.assertEqual(body, {"ok": True, "slug": "wren", key: value,
+                                    "restart_required": restart})
+            refresh = [d for k, d in seen if k == "cousins-refresh"]
+            self.assertTrue(refresh, route)
+        cfg = CousinConfig.load(home)
+        self.assertEqual((cfg.operator_name, cfg.memory_scope,
+                          cfg.heartbeat_seconds), ("Kestrel", "both", 7200))
+        text = (home / "cousin.toml").read_text()
+        self.assertIn("# a hand note", text)
+        self.assertEqual(tomllib.loads(text)["runtime"],
+                         {"session_id": "abc"})
+        row = self.get("/api/cousins")[1]["cousins"][0]
+        self.assertEqual((row["operator"], row["memoryScope"],
+                          row["heartbeat"]), ("Kestrel", "both", 7200))
+        last = [d for k, d in seen if k == "cousins-refresh"][-1]
+        self.assertEqual(last[0]["heartbeat"], 7200)
+
+    def test_invalid_values_are_400_and_leave_the_file_untouched(self):
+        home = self.cousin("wren", operator="Testa")
+        before = (home / "cousin.toml").read_bytes()
+        self.serve()
+        bad = {"operator": [{"operator": ""}, {"operator": " "},
+                            {"operator": "a\u0007b"}, {"operator": "x" * 65},
+                            {"operator": 4}, {}],
+               "memory-scope": [{"memory_scope": "all"},
+                                {"memory_scope": 1}, {}],
+               "heartbeat": [{"heartbeat": 0}, {"heartbeat": 59},
+                             {"heartbeat": 30 * 86400 + 1},
+                             {"heartbeat": "600"}, {"heartbeat": True},
+                             {"heartbeat": 90.5}, {}]}
+        for route, bodies in bad.items():
+            for payload in bodies:
+                status, body = self.post("/api/cousins/wren/%s" % route,
+                                         payload)
+                self.assertEqual(status, 400, (route, payload, body))
+                self.assertFalse(body["ok"])
+        self.assertEqual((home / "cousin.toml").read_bytes(), before)
+
+    def test_unknown_cousin_is_404(self):
+        self.serve()
+        for route, key, value, _ in self.ROUTES:
+            self.assertEqual(self.post("/api/cousins/nobody/%s" % route,
+                                       {key: value})[0], 404, route)
+
+    def test_auth_is_required_like_every_other_route(self):
+        from cousin_lib.console import auth
+        auth.Users(self.root / "config" / "console-users.json") \
+            .set_password("ana", "correct horse")
+        home = self.cousin("wren")
+        before = (home / "cousin.toml").read_bytes()
+        self.serve()
+        for route, key, value, _ in self.ROUTES:
+            self.assertEqual(self.post("/api/cousins/wren/%s" % route,
+                                       {key: value})[0], 401, route)
+        self.assertEqual((home / "cousin.toml").read_bytes(), before)
+        self.post("/api/auth/login", {"user": "ana",
+                                      "password": "correct horse"})
+        self.assertEqual(self.post("/api/cousins/wren/heartbeat",
+                                   {"heartbeat": 600})[0], 200)
 
 
 class TestPidAndUptime(ConsoleCase):

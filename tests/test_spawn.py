@@ -517,6 +517,67 @@ class TestModelAndEffortPlaceholders(TestStartCousin):
         self.assertEqual(cmd, "a --m own-model --e max --s {session_id}")
 
 
+
+class TestPersistIdentityValues(CreateCase):
+    """persist_identity sets the three identity keys the console edits
+    ([operator] name, [memory] scope, [heartbeat] context_beat_seconds)
+    with a targeted edit that keeps comments and every other table, and
+    validates first: a refused value leaves the file byte-for-byte as
+    it was."""
+
+    def test_sets_each_key_keeping_comments_and_other_tables(self):
+        from cousin_lib.config import CousinConfig
+        from cousin_lib.spawn import persist_identity
+        root = self._framework_root()
+        out = self._create(root)
+        path = out["home"] / "cousin.toml"
+        path.write_text("# hand note\n" + path.read_text()
+                        + '\n[runtime]\nsession_id = "abc"  # kept\n')
+        persist_identity(out["home"], "operator", "Kestrel")
+        persist_identity(out["home"], "memory_scope", "both")
+        persist_identity(out["home"], "heartbeat", 7200)
+        persist_identity(out["home"], "heartbeat", 600)
+        text = path.read_text()
+        self.assertTrue(text.startswith("# hand note\n"))
+        self.assertIn('session_id = "abc"  # kept', text)
+        self.assertEqual(text.count("[heartbeat]"), 1)
+        cfg = CousinConfig.load(out["home"])
+        self.assertEqual((cfg.operator_name, cfg.memory_scope,
+                          cfg.heartbeat_seconds), ("Kestrel", "both", 600))
+
+    def test_refuses_bad_values_and_leaves_the_file_untouched(self):
+        from cousin_lib.spawn import persist_identity
+        root = self._framework_root()
+        out = self._create(root)
+        path = out["home"] / "cousin.toml"
+        before = path.read_bytes()
+        bad = [("operator", ""), ("operator", "   "), ("operator", "a\nb"),
+               ("operator", "x" * 65), ("operator", 3),
+               ("memory_scope", "all"), ("memory_scope", None),
+               ("heartbeat", 0), ("heartbeat", 59), ("heartbeat", -1),
+               ("heartbeat", 30 * 86400 + 1), ("heartbeat", True),
+               ("heartbeat", "600"), ("heartbeat", 60.5),
+               ("slug", "other")]
+        for key, value in bad:
+            with self.assertRaises(SpawnError, msg=(key, value)):
+                persist_identity(out["home"], key, value)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_bounds_are_inclusive(self):
+        from cousin_lib.spawn import (HEARTBEAT_MAX_SECONDS,
+                                      HEARTBEAT_MIN_SECONDS,
+                                      persist_identity)
+        self.assertEqual((HEARTBEAT_MIN_SECONDS, HEARTBEAT_MAX_SECONDS),
+                         (60, 30 * 86400))
+        root = self._framework_root()
+        out = self._create(root)
+        persist_identity(out["home"], "heartbeat", 60)
+        persist_identity(out["home"], "heartbeat", 30 * 86400)
+        self.assertEqual(tomllib.loads((out["home"] / "cousin.toml")
+                                       .read_text())["heartbeat"],
+                         {"context_beat_seconds": 30 * 86400})
+
+
 class TestPersistRuntimeValues(CreateCase):
     """persist_runtime mirrors the session-id write: a targeted line
     replace inside [runtime], re-parsed, renamed into place, every other

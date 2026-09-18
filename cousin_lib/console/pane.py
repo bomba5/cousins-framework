@@ -11,8 +11,19 @@ The stream polls `capture-pane` (the contract leaves the byte source
 open; polling needs no tap file to clean up and works identically for a
 remote cousin): a `pane` frame on connect and on every change, `geom`
 plus a fresh `pane` when the geometry changes, `heartbeat` after 3 s of
-silence, `: tick` between polls. Frames, geometry and cursor come from
-injectable callables so the stream is tested without tmux.
+silence, `: tick` between polls. Frames, geometry and pane state come
+from injectable callables so the stream is tested without tmux.
+
+Each frame carries the pane's state (alternate screen, mouse tracking,
+cursor) and ends with a control tail the browser terminal is left in
+after it resets and writes the frame: the mouse mode when the program
+tracks the mouse, the cursor moved onto tmux's cursor cell, and the
+cursor shown or hidden as tmux has it. A full-screen program runs on
+tmux's alternate screen, which has no history to capture, so the only
+way to scroll it from the browser is the program's own mouse wheel
+handling: the browser terminal must itself be in mouse mode to turn a
+wheel into an SGR report, and a captured frame never contains the
+program's mode-setting escapes, so the frame sets it.
 
 Input goes through the injection module's process-wide lock, so a chat
 delivery and a keystroke never interleave.
@@ -40,6 +51,19 @@ _NAMED = {
     "\x1bOP": "F1", "\x1bOQ": "F2", "\x1bOR": "F3", "\x1bOS": "F4",
 }
 _SINGLE = {"\r": "Enter", "\n": "Enter", "\x7f": "BSpace", "\t": "Tab"}
+
+# tmux formats for Tmux.state, in the order of their keys
+_STATE_FORMATS = ("alternate_on", "mouse_any_flag", "mouse_sgr_flag",
+                  "pane_width", "pane_height", "cursor_x", "cursor_y",
+                  "cursor_flag")
+_STATE_KEYS = ("alt", "mouse", "sgr", "cols", "rows", "cx", "cy", "cursor")
+
+# Normal tracking (press, release, wheel) with SGR encoding. Not the
+# program's own mode: any-motion tracking would turn every mouse move
+# over the browser pane into an input request, and the input path
+# forwards SGR reports only, whatever encoding the program asked for.
+_MOUSE_ON = "\x1b[?1000h\x1b[?1006h"
+_CURSOR_SHOW, _CURSOR_HIDE = "\x1b[?25h", "\x1b[?25l"
 
 
 class Tmux:
@@ -70,13 +94,14 @@ class Tmux:
         except (OSError, subprocess.TimeoutExpired):
             return False
 
-    def capture(self, session, lines):
+    def capture(self, session, lines, trim=True):
         r = self.run("capture-pane", "-p", "-e", "-t", session,
                      "-S", "-%d" % int(lines), timeout=6)
         if r.returncode != 0:
             raise RouteError(500, {"ok": False,
                                    "error": (r.stderr or "").strip()[:200]})
-        return trim_trailing_blank(r.stdout or "")
+        out = r.stdout or ""
+        return trim_trailing_blank(out) if trim else out
 
     def _display(self, session, fmt):
         try:
@@ -90,10 +115,17 @@ class Tmux:
         parts = self._display(session, "#{pane_width} #{pane_height}")
         return (parts[0], parts[1]) if len(parts) >= 2 else (0, 0)
 
-    def cursor(self, session):
-        parts = self._display(session,
-                              "#{cursor_y} #{cursor_x} #{pane_height}")
-        return (parts[0], parts[1], parts[2]) if len(parts) >= 3 else None
+    def state(self, session):
+        """The pane's screen state in one query, or None when tmux
+        prints nothing usable: `alt` alternate screen on, `mouse` the
+        program tracks the mouse (any mode), `sgr` it asked for SGR
+        reports, `cols`/`rows` the pane size, `cx`/`cy` tmux's cursor
+        cell (0-based), `cursor` the cursor is visible."""
+        parts = self._display(session, " ".join(
+            "#{%s}" % f for f in _STATE_FORMATS))
+        if len(parts) != len(_STATE_KEYS):
+            return None
+        return dict(zip(_STATE_KEYS, parts))
 
 
 def trim_trailing_blank(text):
@@ -105,12 +137,53 @@ def trim_trailing_blank(text):
     return "\n".join(lines)
 
 
+def _blank(line):
+    return not _ANSI_RE.sub("", line).strip()
+
+
+def compose_frame(raw, state):
+    """A raw capture (history lines, then the screen's rows) and the
+    pane state -> (text, top): the frame with trailing blank lines
+    trimmed, never above the cursor's line, followed by the control
+    tail; `top` is the number of frame lines above the screen's first
+    row.
+
+    The cursor is placed relative to the frame's last line (up, then to
+    the column) because the terminal writing the frame may be shorter
+    than the pane: where the last line lands is known to it, the
+    frame's absolute row is not."""
+    lines = raw.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()                     # capture-pane ends every line
+    keep = len(lines)
+    while keep and _blank(lines[keep - 1]):
+        keep -= 1
+    if not state:
+        return "\n".join(lines[:keep]), 0
+    rows = state.get("rows") or 0
+    top = max(0, len(lines) - rows)
+    row = None
+    if rows and len(lines) >= rows:
+        row = top + max(0, min(rows - 1, state.get("cy", 0)))
+        keep = max(keep, row + 1)
+    tail = ""
+    if state.get("mouse") and state.get("sgr"):
+        tail += _MOUSE_ON
+    if row is not None:
+        up = keep - 1 - row
+        if up:
+            tail += "\x1b[%dA" % up
+        tail += "\x1b[%dG" % (max(0, state.get("cx", 0)) + 1)
+    tail += _CURSOR_SHOW if state.get("cursor") else _CURSOR_HIDE
+    return "\n".join(lines[:keep]) + tail, top
+
+
 def input_tokens(data):
     """xterm bytes -> [(mode, payload)]: 'key' for a tmux key name,
     'literal' for text sent with `-l`. Any CSI or SS3 sequence not in the
-    table is consumed and dropped, never forwarded as Escape; SGR mouse
-    reports are forwarded literally so a full-screen program can
-    scroll."""
+    table is consumed and dropped, never forwarded as Escape; an SGR
+    mouse report is a 'mouse' token, sent literally only while the
+    program tracks the mouse (send_input)."""
     out = []
     i, n = 0, len(data)
     while i < n:
@@ -131,7 +204,7 @@ def input_tokens(data):
                     seq = data[i:end]
                     if len(seq) >= 4 and seq[2] == "<" \
                             and seq[-1] in ("M", "m"):
-                        out.append(("literal", seq))
+                        out.append(("mouse", seq))
                     i = end
                 elif nxt == "O":
                     i = min(i + 3, n)
@@ -164,9 +237,18 @@ def send_input(tmux, session, data):
     """Type the bytes into the session under the injection lock. Returns
     the token count; raises RouteError(500) with tmux's stderr."""
     tokens = input_tokens(data or "")
+    if any(mode == "mouse" for mode, _ in tokens):
+        # A report reaches the program as bytes (send-keys -l bypasses
+        # tmux's own mouse handling). A program tracking the mouse with
+        # SGR reads it as a mouse event; to any other program it is an
+        # Escape followed by text, which throws a modal editor out of
+        # insert mode and eats the next typed or injected line.
+        st = tmux.state(session)
+        tracked = bool(st and st.get("mouse") and st.get("sgr"))
+        tokens = [t for t in tokens if t[0] != "mouse" or tracked]
     with injection._INJECT_LOCK:
         for mode, payload in tokens:
-            if mode == "literal":
+            if mode in ("literal", "mouse"):
                 # -l and -- are load-bearing: a run starting with '-' is
                 # otherwise parsed as flags
                 batches = [["-l", "--", piece]
@@ -193,28 +275,29 @@ def _iso():
 
 
 def stream_pane(session, lines, *, tmux, capture=None, geometry=None,
-                cursor=None, clock=time.monotonic, sleep=time.sleep,
+                state=None, clock=time.monotonic, sleep=time.sleep,
                 poll=0.5, heartbeat_after=3.0, geom_every=2.0):
-    """Generator of SSE bytes for one pane. `capture(lines) -> str`,
-    `geometry() -> (cols, rows)` and `cursor() -> (cy, cx, pane_height)
-    | None` default to tmux; tests inject them."""
-    capture = capture or (lambda n: tmux.capture(session, n))
+    """Generator of SSE bytes for one pane. `capture(lines) -> str` (the
+    raw capture, untrimmed), `geometry() -> (cols, rows)` and `state()
+    -> dict | None` (Tmux.state) default to tmux; tests inject them."""
+    capture = capture or (lambda n: tmux.capture(session, n, trim=False))
     geometry = geometry or (lambda: tmux.geometry(session))
-    cursor = cursor or (lambda: tmux.cursor(session))
+    state = state or (lambda: tmux.state(session))
 
     def snapshot():
-        text = capture(lines)
-        pos = cursor()
-        if pos:
-            cy, cx, ph = pos
-            # the viewport's last row is line lines-1 of the snapshot
-            row = max(0, min(lines - 1, lines - ph + cy))
-            text += "\x1b[%d;%dH" % (row + 1, cx + 1)
-        return text
+        raw = capture(lines)
+        st = state()
+        text, top = compose_frame(raw, st)
+        if st:
+            st = dict(st, top=top)
+        return text, st
+
+    def frame(text, st):
+        return sse.event_frame("pane", {"text": text, "state": st,
+                                        "ts": _iso(), "changed": True})
 
     last_frame = snapshot()
-    yield sse.event_frame("pane", {"text": last_frame, "ts": _iso(),
-                                   "changed": True})
+    yield frame(*last_frame)
     last_output = clock()
     last_geom_check = clock()
     last_geom = geometry()
@@ -229,17 +312,14 @@ def stream_pane(session, lines, *, tmux, capture=None, geometry=None,
                 yield sse.event_frame("geom", {"cols": g[0], "rows": g[1],
                                                "ts": _iso()})
                 last_frame = snapshot()
-                yield sse.event_frame("pane", {"text": last_frame,
-                                               "ts": _iso(),
-                                               "changed": True})
+                yield frame(*last_frame)
                 last_output = now
                 continue
-        frame = snapshot()
-        if frame != last_frame:
-            last_frame = frame
+        current = snapshot()
+        if current != last_frame:
+            last_frame = current
             last_output = now
-            yield sse.event_frame("pane", {"text": frame, "ts": _iso(),
-                                           "changed": True})
+            yield frame(*current)
         elif now - last_output >= heartbeat_after:
             last_output = now
             yield sse.event_frame("heartbeat", {"ts": _iso()})

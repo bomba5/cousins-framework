@@ -756,15 +756,24 @@ function PaneView({ cousin, onClose }) {
   const followRef = React.useRef(true);
   const pendingRef = React.useRef(null);
   const applyingRef = React.useRef(false);
+  // The pane state that came with the frame on screen (and with the held
+  // one): whether the program tracks the mouse, the pane's rows, and how
+  // many frame lines sit above the screen's first row.
+  const paneStateRef = React.useRef(null);
+  const pendingStateRef = React.useRef(null);
   const [held, setHeld] = React.useState(false);
 
   // Rewrite the terminal with one full frame and land on its last line.
   // Only refs are read, so the closure a stale render captured still
-  // writes to the live terminal.
-  const applyFrame = (text) => {
+  // writes to the live terminal. reset() also clears the mouse mode and
+  // the cursor state; the frame's own control tail sets them again
+  // (mouse mode while the program tracks the mouse, the cursor on
+  // tmux's cell, shown or hidden as tmux has it).
+  const applyFrame = (text, state) => {
     const term = termRef.current;
     if (!term) return;
     applyingRef.current = true;
+    paneStateRef.current = state || null;
     term.reset();
     term.write(text, () => {
       try { term.scrollToBottom(); } catch (_e) {}
@@ -821,10 +830,25 @@ function PaneView({ cousin, onClose }) {
     requestAnimationFrame(() => debouncedResize());
     term.onResize(({ cols, rows }) => pushResize(cols, rows));
 
+    // A mouse report names a cell of this terminal's viewport; the pane
+    // wants its own screen row. Frame line k is buffer line k (a frame
+    // is written into a reset terminal), and the pane's first row is
+    // frame line `top`, so viewport row v is pane row viewportY + v - top.
+    const toPaneRows = (data) => {
+      const st = paneStateRef.current;
+      if (!st || data.indexOf("\x1b[<") < 0) return data;
+      const b = term.buffer.active;
+      const maxRow = Math.max(1, st.rows || term.rows || 1);
+      return data.replace(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/g, (_m, btn, col, row, fin) => {
+        const r = Math.max(1, Math.min(maxRow, b.viewportY + Number(row) - (st.top || 0)));
+        return "\x1b[<" + btn + ";" + col + ";" + r + fin;
+      });
+    };
+
     // Input: buffer keystrokes for 40ms then POST as one blob. Reduces
     // subprocess calls when the user types fast.
     const sendInput = async () => {
-      const buf = inputBufRef.current;
+      const buf = toPaneRows(inputBufRef.current);
       inputBufRef.current = "";
       flushTimerRef.current = null;
       if (!buf) return;
@@ -848,21 +872,27 @@ function PaneView({ cousin, onClose }) {
       }
     });
 
-    // Mobile touch-drag -> scroll. A cousin session usually runs a
-    // full-screen program (tmux alternate screen), so xterm has no client
-    // scrollback to flick through - the gesture must reach the app itself.
-    // Desktop wheels work because xterm emits SGR mouse reports when the
-    // app enables mouse tracking (the server forwards them literally), but
-    // xterm.js generates NO mouse reports from touch. Translate vertical
-    // drag into synthetic SGR wheel ticks (button 64 up / 65 down) at the
-    // touched cell. When the app has mouse tracking OFF (plain shell,
-    // normal buffer) do nothing: xterm's own viewport already touch-scrolls
-    // its scrollback natively, and double-handling would double-scroll.
+    // Scrolling. A cousin session usually runs a full-screen program on
+    // tmux's alternate screen: nothing to capture above it, so this
+    // terminal has no scrollback to flick through and the gesture must
+    // reach the program itself, as the program's own wheel reports. The
+    // frame's tail puts this terminal in SGR mouse mode exactly while the
+    // program tracks the mouse, so a desktop wheel becomes a report
+    // (xterm.js emits them natively; the server forwards them only while
+    // the program tracks the mouse). xterm.js generates no reports from
+    // touch: vertical drag is translated into SGR wheel ticks (button 64
+    // up / 65 down) at the touched cell. With tracking off (plain shell,
+    // normal buffer) nothing is sent: xterm's viewport scrolls its own
+    // scrollback, by wheel and by touch.
     const host = hostRef.current;
     let touchLastY = null;
     let touchAccPx = 0;
     const TOUCH_PX_PER_TICK = 24; // ~2 text rows per wheel tick
     const appTracksMouse = () => {
+      // the frame's state first: between a frame's reset() and the end
+      // of its write the terminal's own mode reads "none" for a moment
+      const st = paneStateRef.current;
+      if (st && st.mouse && st.sgr) return true;
       try {
         const m = term.modes && term.modes.mouseTrackingMode;
         return !!m && m !== "none";
@@ -899,6 +929,19 @@ function PaneView({ cousin, onClose }) {
       while (touchAccPx <= -TOUCH_PX_PER_TICK) { queueWheel(false, t); touchAccPx += TOUCH_PX_PER_TICK; }
     };
     const onTouchEnd = () => { touchLastY = null; touchAccPx = 0; };
+    // A wheel must never reach the program as keys: on its alternate
+    // buffer with mouse tracking off, xterm.js turns a wheel into arrow
+    // keys, and an Escape-led sequence throws a modal input box out of
+    // insert mode (the next injected line is then eaten as commands).
+    // Frames never switch this terminal to the alternate buffer; if
+    // anything does, the wheel is swallowed here before xterm sees it.
+    const onWheelCapture = (e) => {
+      if (appTracksMouse()) return;
+      let alt = false;
+      try { alt = term.buffer.active.type === "alternate"; } catch (_e) {}
+      if (alt) { e.preventDefault(); e.stopPropagation(); }
+    };
+    host.addEventListener("wheel", onWheelCapture, { capture: true, passive: false });
     host.addEventListener("touchstart", onTouchStart, { passive: true });
     host.addEventListener("touchmove", onTouchMove, { passive: false });
     host.addEventListener("touchend", onTouchEnd, { passive: true });
@@ -916,8 +959,10 @@ function PaneView({ cousin, onClose }) {
         followRef.current = true;
         setHeld(false);
         const next = pendingRef.current;
+        const nextState = pendingStateRef.current;
         pendingRef.current = null;
-        if (next !== null && next !== lastTextRef.current) applyFrame(next);
+        pendingStateRef.current = null;
+        if (next !== null && next !== lastTextRef.current) applyFrame(next, nextState);
       } else if (!atBottom && followRef.current) {
         followRef.current = false;
         setHeld(true);
@@ -951,6 +996,7 @@ function PaneView({ cousin, onClose }) {
       host.removeEventListener("touchmove", onTouchMove);
       host.removeEventListener("touchend", onTouchEnd);
       host.removeEventListener("touchcancel", onTouchEnd);
+      host.removeEventListener("wheel", onWheelCapture, { capture: true });
       if (resizeTimer) clearTimeout(resizeTimer);
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       term.dispose();
@@ -982,10 +1028,11 @@ function PaneView({ cousin, onClose }) {
           const payload = JSON.parse(ev.data);
           const text = payload.text || "";
           if (followRef.current) {
-            applyFrame(text);
+            applyFrame(text, payload.state);
           } else {
             // the reader is scrolled up: keep their place, hold the frame
             pendingRef.current = text;
+            pendingStateRef.current = payload.state || null;
           }
           setStatus("live");
           const ts = payload.ts ? new Date(payload.ts) : new Date();

@@ -282,3 +282,39 @@ class PaneScrollsBack(unittest.TestCase):
     def test_returning_to_the_bottom_resumes_following(self):
         self.assertIn("scrollToBottom", self.pane)
         self.assertRegex(self.pane, r"onScroll|addEventListener\(\"scroll\"")
+
+
+class PaneScrollsTheProgram(unittest.TestCase):
+    """A full-screen program has no captured history: the wheel must
+    reach it as its own mouse reports, and never as keys."""
+
+    def setUp(self):
+        self.pane = _function_body((_STATIC / "chat.jsx").read_text(),
+                                   "PaneView")
+
+    def test_a_frame_is_applied_with_the_state_it_came_with(self):
+        self.assertIn("applyFrame(text, payload.state)", self.pane)
+        self.assertIn("pendingStateRef.current = payload.state", self.pane)
+        self.assertIn("applyFrame(next, nextState)", self.pane)
+
+    def test_mouse_reports_are_mapped_to_pane_rows_before_sending(self):
+        self.assertRegex(self.pane, r"const buf = toPaneRows\(inputBufRef\.current\)")
+        self.assertIn("b.viewportY + Number(row) - (st.top || 0)", self.pane)
+
+    def test_an_untracked_wheel_on_an_alternate_buffer_is_swallowed(self):
+        start = self.pane.index("const onWheelCapture = ")
+        body = self.pane[start:self.pane.index("};", start)]
+        self.assertIn("appTracksMouse()", body)
+        self.assertIn('"alternate"', body)
+        self.assertIn("stopPropagation", body)
+        self.assertRegex(self.pane, r'addEventListener\("wheel", onWheelCapture, \{ capture: true')
+
+    def test_touch_drag_still_turns_into_wheel_reports(self):
+        self.assertIn('"\\x1b[<" + (up ? 64 : 65)', self.pane)
+        self.assertIn("mouseTrackingMode", self.pane)
+
+    def test_mouse_tracking_is_read_from_the_frame_state_first(self):
+        start = self.pane.index("const appTracksMouse = ")
+        body = self.pane[start:self.pane.index("};", start)]
+        self.assertLess(body.index("paneStateRef.current"),
+                        body.index("mouseTrackingMode"))

@@ -457,7 +457,14 @@ class TestMerge(LifecycleCase):
         self.assertLess(merged.index("Testb remembers"),
                         merged.index("Testa remembers"))
         raw = self.b / "memory" / "raw"
-        names = sorted(p.name for p in raw.iterdir())
+        # Besides the union, today's file holds the framework's own L1
+        # note of the transplant (tests/test_memory_level_writers.py).
+        today = time.strftime("%Y-%m-%d") + ".jsonl"
+        notes = [json.loads(l) for l in
+                 (raw / today).read_text().splitlines()]
+        self.assertEqual({n["topic"] for n in notes},
+                         {"framework:transplant"})
+        names = sorted(p.name for p in raw.iterdir() if p.name != today)
         self.assertEqual(names, ["2026-09-01.jsonl", "testa-only.jsonl",
                                  "testb-only.jsonl"])
         shared = (raw / "2026-09-01.jsonl").read_text().splitlines()

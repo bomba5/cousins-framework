@@ -26,8 +26,9 @@ from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, harness_config)
 from cousin_lib.server.injection import TmuxInjector
 from cousin_lib.spawn import (SpawnError, _mint_session_id,
-                              _persist_session_id, render_agent_cmd,
-                              start_cousin, start_preflight)
+                              _persist_session_id, framework_event,
+                              render_agent_cmd, start_cousin,
+                              start_preflight)
 from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
@@ -180,6 +181,13 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
                 "another flip started %ds ago - refusing concurrent"
                 " flip" % int(age))
             return result
+        # A stale marker is a flip that died mid-run: reported (here
+        # and in raw memory), then overwritten, never auto-recovered.
+        framework_event(home, "crash", "an earlier flip did not finish"
+                        " (stale in-progress marker%s); this flip"
+                        " overwrites it" % (
+                            ", %d min old" % (age // 60)
+                            if age is not None else ""))
 
     # Preflight: zero side effects, runs even under dry-run - a
     # dry-run that skips preflight lies about what a real flip would
@@ -326,7 +334,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     agent_cmd = agent_cmd_template.replace("{session_id}", session_id)
     try:
         start_cousin(home, agent_cmd=agent_cmd, tmux_bin=tmux_bin,
-                     tmux_socket=tmux_socket, root=root)
+                     tmux_socket=tmux_socket, root=root, record=False)
     except SpawnError as err:
         result["stages"].append({"stage": "respawn", "ok": False,
                                  "error": str(err)})
@@ -342,6 +350,15 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
         persisted = False
     if persisted:
         result["stages"].append({"stage": "persist_identity", "ok": True})
+        handoff = next((st for st in result["stages"]
+                        if st["stage"] == "wait_handoff"), None)
+        framework_event(home, "flip", "flipped to generation %d (from %d),"
+                        " session %s; handoff %s" % (
+                            new_gen, prior_gen, session_id[:8],
+                            "not asked (no live session)" if handoff is None
+                            else "clean" if handoff["wrote_clean"]
+                            else "emergency (timed out)"),
+                        generation=new_gen)
 
     # Inject the packet after the session settles. The seam should be
     # invisible: no announcement unless the operator asked.

@@ -201,6 +201,13 @@ def import_history(old_home, new_home, *, force=False):
         os.replace(parked, final)
     report["imported_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     marker.write_text(json.dumps(report, indent=2) + "\n")
+    from cousin_lib import memory
+    memory.record_event(
+        new_home, "L1_FRAMEWORK", "framework:chat-import",
+        "chat history imported from %s: %d messages (%d existing"
+        " renumbered, %d pictures, %d missing)" % (
+            old_home, report["imported"], report["renumbered"],
+            report["images"], report["images_missing"]), "framework")
     return report
 
 

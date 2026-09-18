@@ -260,6 +260,14 @@ def _set_cousin_keys(home, **values):
     os.replace(tmp, path)
 
 
+def _event(home, kind, content):
+    """An L1 raw-memory note of the surgery in the cousin's own home;
+    best-effort, never a reason for the ceremony to fail."""
+    from cousin_lib import memory
+    memory.record_event(home, "L1_FRAMEWORK", "framework:%s" % kind,
+                        content, "framework")
+
+
 # ---------- reincarnate ----------
 
 def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
@@ -295,6 +303,8 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
         claude.write_text(rewrite_role(claude.read_text(), name=config.name,
                                        new_role=new_role))
     _set_cousin_keys(home, role=new_role.strip())
+    _event(home, "role", "reincarnated: role rewritten to %r"
+           % new_role.strip())
     result["steps"].append({"step": "rewrite", "new_role": new_role.strip(),
                             "claude_md": claude.is_file()})
     _audit(root, dict(base, step="rewrite", new_role=new_role.strip()))
@@ -487,6 +497,15 @@ def transplant(*, donor, recipient, mode, root, do_flip=None):
         detail["raw_lines_added"] = _merge_memory(d, r)
     result["steps"].append(dict({"step": "apply"}, **detail))
     _audit(root, dict(base, step="apply", **detail))
+    # After the apply, so each note lands in the home it describes (a
+    # soul donation replaces the recipient's memory wholesale).
+    for cfg, other, side in ((d, r, "donor"), (r, d, "recipient")):
+        _event(cfg.home, "transplant", "memory transplant (%s) as %s with"
+               " %s%s" % (mode, side, other.slug,
+                          "; %d raw lines merged in"
+                          % detail["raw_lines_added"]
+                          if side == "recipient" and "raw_lines_added"
+                          in detail else ""))
 
     ok = True
     result["flips"] = {}

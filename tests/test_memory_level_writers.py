@@ -287,6 +287,205 @@ class TestJobResults(unittest.TestCase):
         self.assertIn("failed (exit 3): cli close - broke", row["content"])
 
 
+# ------------------------------------------------------------ L1 framework
+
+def framework_rows(home, topic=None):
+    return [r for r in level_rows(home, "L1_FRAMEWORK")
+            if topic is None or r["topic"] == topic]
+
+
+class TestRuntimeAndAuth(HomeCase):
+    def setUp(self):
+        super().setUp()
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n\n[runtime]\nmodel = "model-a"\n')
+
+    def test_a_model_change_is_recorded_a_same_value_save_is_not(self):
+        from cousin_lib import spawn
+        spawn.persist_runtime(self.home, "model", "model-b")
+        spawn.persist_runtime(self.home, "model", "model-b")
+        spawn.persist_runtime(self.home, "effort", "high")
+        [model] = framework_rows(self.home, "framework:model")
+        self.assertIn("model model-a -> model-b", model["content"])
+        [effort] = framework_rows(self.home, "framework:effort")
+        self.assertIn("effort (install default) -> high", effort["content"])
+
+    def test_an_auth_mode_change_is_recorded_a_same_mode_save_is_not(self):
+        from cousin_lib import agent_auth
+        agent_auth.persist_mode(self.home, agent_auth.MODE_LOGIN)
+        self.assertEqual(framework_rows(self.home), [])
+        agent_auth.persist_mode(self.home, agent_auth.MODE_API_KEY)
+        [row] = framework_rows(self.home, "framework:auth")
+        self.assertEqual(row["content"], "auth mode %s -> %s" % (
+            agent_auth.MODE_LOGIN, agent_auth.MODE_API_KEY))
+
+
+_FAKE_TMUX_SH = """#!/bin/sh
+echo "$@" >> "$FAKE_TMUX_LOG"
+case "$1" in has-session) exit "${FAKE_TMUX_RC_HAS_SESSION:-0}";; esac
+exit 0
+"""
+
+
+class TestStartAndStop(HomeCase):
+    def setUp(self):
+        super().setUp()
+        self.root = self.home.parent
+        (self.root / "config").mkdir()
+        self.home = self.root / "cousins" / "wren"
+        (self.home / "data").mkdir(parents=True)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        self.tmux = self.root / "tmux"
+        self.tmux.write_text(_FAKE_TMUX_SH)
+        self.tmux.chmod(self.tmux.stat().st_mode | stat.S_IEXEC)
+        patcher = mock.patch.dict(os.environ, {
+            "FRAMEWORK_ROOT": str(self.root),
+            "FAKE_TMUX_LOG": str(self.root / "tmux.log")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def start(self, **kw):
+        from cousin_lib import spawn
+        spawn.start_cousin(self.home, agent_cmd="my-agent --sid {session_id}",
+                           tmux_bin=str(self.tmux), root=self.root,
+                           start_chat_server=lambda home: None, **kw)
+
+    def test_a_start_is_recorded_with_its_session(self):
+        import tomllib
+        self.start()
+        [row] = framework_rows(self.home, "framework:session")
+        sid = tomllib.loads((self.home / "cousin.toml").read_text()
+                           )["runtime"]["session_id"]
+        self.assertEqual(row["content"],
+                         "agent started on new session %s" % sid[:8])
+
+    def test_a_caller_that_records_its_own_event_can_opt_out(self):
+        self.start(record=False)
+        self.assertEqual(framework_rows(self.home), [])
+
+    def test_a_stop_is_recorded_an_already_stopped_cousin_is_not(self):
+        from cousin_lib import spawn
+        spawn.stop_cousin(self.home, tmux_bin=str(self.tmux),
+                          port_pid=lambda port: None)
+        [row] = framework_rows(self.home, "framework:session")
+        self.assertEqual(row["content"], "agent stopped")
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC_HAS_SESSION": "1"}):
+            spawn.stop_cousin(self.home, tmux_bin=str(self.tmux),
+                              port_pid=lambda port: None)
+        self.assertEqual(len(framework_rows(self.home)), 1)
+
+
+class TestChatImportAndWatchdog(HomeCase):
+    def test_a_chat_import_is_recorded_in_the_new_home(self):
+        from tests.test_chat_import import ImportCase
+
+        class Case(ImportCase):
+            def runTest(self):
+                pass
+        case = Case()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        report = case._run()
+        [row] = framework_rows(case.new_home, "framework:chat-import")
+        self.assertIn("%d messages" % report["imported"], row["content"])
+        self.assertEqual(framework_rows(case.old_home), [])
+
+    def test_a_chat_server_respawn_is_recorded_a_healthy_pass_is_not(self):
+        from cousin_lib import chat_watchdog as W
+        from tests.test_chat_watchdog import _make_fleet
+        root = self.home.parent / "fleet"
+        _make_fleet(root, {"testa": 8090, "testb": 8091})
+        healthy = {8091}
+
+        def spawn(home):
+            healthy.add(8090)
+            return True
+        seams = dict(has_tmux=lambda s: True,
+                     health=lambda port, slug: port in healthy,
+                     port_in_use=lambda port: port in healthy,
+                     spawn=spawn, sleep=lambda s: None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            W.ensure_pass(root, **seams)
+            W.ensure_pass(root, **seams)
+        a, b = root / "cousins" / "testa", root / "cousins" / "testb"
+        [row] = framework_rows(a, "framework:respawn")
+        self.assertIn("respawned on :8090, health ok", row["content"])
+        self.assertEqual(framework_rows(b), [])
+
+
+class TestFlipEvents(unittest.TestCase):
+    """Runs the real flip through tests.test_flip's fixture."""
+
+    def _case(self):
+        from tests.test_flip import FlipCase
+
+        class Case(FlipCase):
+            def runTest(self):
+                pass
+        case = Case()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        return case
+
+    def test_a_flip_records_generation_and_session_once(self):
+        import tomllib
+        case = self._case()
+        out = case._flip()
+        self.assertTrue(out["ok"], out)
+        [row] = framework_rows(case.home, "framework:flip")
+        sid = tomllib.loads((case.home / "cousin.toml").read_text()
+                           )["runtime"]["session_id"]
+        self.assertIn("flipped to generation 1 (from 0), session %s"
+                      % sid[:8], row["content"])
+        self.assertIn("handoff emergency", row["content"])
+        self.assertEqual(row["generation"], 1)
+        # The flip's respawn does not add a second, plainer start entry.
+        self.assertEqual(framework_rows(case.home, "framework:session"), [])
+
+    def test_a_dry_run_records_nothing(self):
+        case = self._case()
+        case._flip(dry_run=True)
+        self.assertEqual(framework_rows(case.home), [])
+
+    def test_a_stale_marker_is_recorded_as_a_crashed_flip(self):
+        case = self._case()
+        (case.home / "data" / ".flip-in-progress.json").write_text(
+            json.dumps({"started_at": "2020-01-01T00:00:00+00:00"}))
+        case._flip()
+        [row] = framework_rows(case.home, "framework:crash")
+        self.assertIn("an earlier flip did not finish", row["content"])
+
+
+class TestLifecycleEvents(unittest.TestCase):
+    def _case(self):
+        from tests.test_lifecycle import LifecycleCase
+
+        class Case(LifecycleCase):
+            def runTest(self):
+                pass
+        case = Case()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        return case
+
+    def test_a_merge_transplant_is_noted_in_both_homes(self):
+        case = self._case()
+        out = case._transplant("merge")
+        self.assertTrue(out["ok"], out)
+        [donor] = framework_rows(case.a, "framework:transplant")
+        [recipient] = framework_rows(case.b, "framework:transplant")
+        self.assertIn("(merge) as donor with testb", donor["content"])
+        self.assertIn("(merge) as recipient with testa",
+                      recipient["content"])
+        self.assertIn("raw lines merged in", recipient["content"])
+
+    def test_a_reincarnation_notes_the_new_role(self):
+        case = self._case()
+        case._reincarnate()
+        [row] = framework_rows(case.a, "framework:role")
+        self.assertIn("mender of the fence", row["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

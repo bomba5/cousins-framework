@@ -21,7 +21,7 @@ import tomllib
 import uuid
 from pathlib import Path
 
-from cousin_lib import agent_auth
+from cousin_lib import agent_auth, memory
 from cousin_lib.config import (
     EFFORT_LEVELS,
     MEMORY_SCOPES,
@@ -401,6 +401,11 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
                 pass
             time.sleep(0.05)
     pid_file.unlink(missing_ok=True)
+    stopped = [what for what, state in (("agent", tmux_state),
+                                        ("chat server", chat_state))
+               if state == "stopped"]
+    if stopped:
+        framework_event(home, "session", "%s stopped" % " and ".join(stopped))
     return {"tmux": tmux_state, "chat_server": chat_state}
 
 
@@ -516,13 +521,39 @@ def _persist_session_id(home, session_id):
     _persist_runtime_line(home, "session_id", session_id)
 
 
+def read_runtime_value(home, key):
+    """cousin.toml [runtime] <key> as a string, or None when unset or
+    the file cannot be read."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    value = (data.get("runtime") or {}).get(key)
+    return None if value is None else str(value)
+
+
+def framework_event(home, topic, content, **extra):
+    """An L1_FRAMEWORK raw entry: a state change the framework itself
+    made or observed. Best-effort (memory.record_event never raises).
+    Topics are `framework:<kind>`, stable so the distiller folds
+    repeats into one line per kind."""
+    return memory.record_event(home, "L1_FRAMEWORK", "framework:%s" % topic,
+                               content, "framework", **extra)
+
+
 def persist_runtime(home, key, value):
     """Set cousin.toml [runtime] model or effort the way the session id
     is persisted, after check_runtime_value. The console's effort and
     model routes and any CLI that edits these go through here; the
-    running agent keeps its old value until the next start."""
+    running agent keeps its old value until the next start. A real
+    change (not a same-value save) is recorded as an L1 event."""
     check_runtime_value(key, value)
+    previous = read_runtime_value(home, key)
     _persist_runtime_line(home, key, value)
+    if previous != value:
+        framework_event(home, key, "%s %s -> %s (applies at the next"
+                        " start)" % (key, previous or "(install default)",
+                                     value))
 
 
 
@@ -670,7 +701,8 @@ def resume_agent_cmd(agent_cmd, root, session_id):
 
 
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
-                 start_chat_server=_default_chat_server, root=None):
+                 start_chat_server=_default_chat_server, root=None,
+                 record=True, note=None):
     """THE tmux-session-creation site - the only one in this codebase,
     by spec. Any future respawn machinery calls this function.
 
@@ -680,7 +712,11 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
     the cousin's [runtime], else the install's [agent] defaults
     (render_agent_cmd); root locates config/harness.toml for those
     defaults and falls back to FRAMEWORK_ROOT, then the home's
-    grandparent."""
+    grandparent.
+
+    A successful start is recorded in the cousin's raw memory as an L1
+    event (framework:session) unless record is False - the flip records
+    its own, richer entry. note, when given, is appended to it."""
     config = CousinConfig.load(home)
     agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
     # The auth mode's checks (key file, isolated harness config) run
@@ -718,6 +754,13 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
         )
     if session_id is not None:
         _persist_session_id(home, session_id)
+    if record:
+        text = "agent started"
+        if session_id is not None:
+            text += " on new session %s" % session_id[:8]
+        if note:
+            text += "; %s" % note
+        framework_event(home, "session", text)
     start_chat_server(home)
 
 

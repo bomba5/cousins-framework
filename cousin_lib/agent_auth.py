@@ -100,10 +100,19 @@ def read_mode(home):
 
 
 def persist_mode(home, mode):
+    """Write cousin.toml [runtime] auth. A real change (not a same-mode
+    save) is recorded in raw memory as an L1 event, framework:auth."""
     check_mode(mode)
     # Late import: spawn imports this module for the launcher.
-    from cousin_lib.spawn import _persist_runtime_line
+    from cousin_lib.spawn import _persist_runtime_line, framework_event
+    try:
+        previous = read_mode(home)
+    except AuthError:
+        previous = None
     _persist_runtime_line(home, "auth", mode)
+    if previous != mode:
+        framework_event(home, "auth", "auth mode %s -> %s"
+                        % (previous or "(unreadable)", mode))
 
 
 # ---- harness configuration --------------------------------------------
@@ -568,7 +577,9 @@ def switch(root, slug, mode, *, restart=True, force=False, tmux_bin="tmux",
         kwargs["start_chat_server"] = spawn._chat_server_unless_live
     try:
         spawn.start_cousin(home, agent_cmd=resume_cmd, tmux_bin=tmux_bin,
-                           tmux_socket=tmux_socket, root=root, **kwargs)
+                           tmux_socket=tmux_socket, root=root,
+                           note="resumed session %s after the auth switch"
+                           " to %s" % (session_id[:8], mode), **kwargs)
     except spawn.SpawnError as err:
         raise AuthError("mode set to %s but the restart failed: %s"
                         % (mode, err))

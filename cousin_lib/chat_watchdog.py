@@ -190,6 +190,15 @@ def _ensure_one(config, *, dry_run, has_tmux, health, port_in_use, spawn,
                  ("no answer within %.0fs" % SPAWN_WAIT_S if launched
                   else "launch failed")))
         result["ok"] = bool(answered)
+        # A spawn only happens on a transition (the agent runs, its chat
+        # server is gone), so this is a crash record, not a tick.
+        from cousin_lib import memory
+        memory.record_event(
+            home, "L1_FRAMEWORK", "framework:respawn",
+            "chat server found down while the agent ran; respawned on :%s,"
+            " health %s" % (port, "ok" if answered else
+                            ("no answer" if launched else "launch failed")),
+            "framework")
     return result
 
 

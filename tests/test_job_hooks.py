@@ -180,6 +180,7 @@ class TestBash(HookCase):
         job = self._jobs()[0]
         self.assertEqual(job["status"], "running")
         self.assertIn("bg-3", job["result_summary"])
+        self.assertIn("on exit", job["result_summary"])
 
     def test_a_finished_result_marks_done(self):
         self._pre(True)
@@ -199,6 +200,111 @@ class TestBash(HookCase):
         self._fire({"hook_event_name": "PreToolUse", "tool_name": "Read",
                     "tool_use_id": "toolu_r", "tool_input": {}})
         self.assertEqual(self._jobs(), [])
+
+
+class TestBackgroundShellClosesItself(HookCase):
+    """A background shell closes its own row when the command exits.
+
+    The harness sends hooks no event when a backgrounded command ends,
+    so PreToolUse rewrites the command (updatedInput) to carry an exit
+    trap that closes the row with the command's real exit code. Canary:
+    before this, the row stayed running until the 24h reap (operator
+    report 2026-09-18)."""
+
+    def _pre_out(self, command="sleep 100", home=None):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                   "tool_use_id": "toolu_w1",
+                   "tool_input": {"command": command,
+                                  "description": "wrapped",
+                                  "run_in_background": True}}
+        home = home or self.home
+        out = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+                mock.patch.object(sys, "stdout", out):
+            rc = job_hooks.main(["--home", str(home), "--root", str(self.root)])
+        self.assertEqual(rc, 0)
+        return out.getvalue()
+
+    def _run_wrapped(self, command, shell):
+        out = json.loads(self._pre_out(command))
+        wrapped = out["hookSpecificOutput"]["updatedInput"]["command"]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(_REPO_ROOT)
+        proc = subprocess.run([shell, "-c", wrapped], capture_output=True,
+                              text=True, env=env, timeout=60)
+        return proc, self._jobs()[0]
+
+    def test_pre_rewrites_the_command_and_keeps_the_other_fields(self):
+        out = json.loads(self._pre_out("echo hi"))
+        spec = out["hookSpecificOutput"]
+        self.assertEqual(spec["hookEventName"], "PreToolUse")
+        self.assertNotIn("permissionDecision", spec)
+        updated = spec["updatedInput"]
+        self.assertTrue(updated["run_in_background"])
+        self.assertEqual(updated["description"], "wrapped")
+        self.assertIn("echo hi", updated["command"])
+        self.assertIn("trap", updated["command"])
+        # the row keeps the command as the cousin wrote it
+        self.assertEqual(self._jobs()[0]["command"], "echo hi")
+
+    def test_a_foreground_call_prints_nothing(self):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                   "tool_use_id": "toolu_f", "tool_input": {"command": "ls"}}
+        out = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+                mock.patch.object(sys, "stdout", out):
+            job_hooks.main(["--home", str(self.home), "--root", str(self.root)])
+        self.assertEqual(out.getvalue(), "")
+
+    def _shells(self):
+        return [s for s in ("/run/current-system/sw/bin/bash", "/bin/bash",
+                            "/run/current-system/sw/bin/zsh", "/bin/zsh")
+                if os.path.exists(s)]
+
+    def test_success_closes_done_with_exit_zero(self):
+        for shell in self._shells():
+            with self.subTest(shell=shell):
+                self.setUp()
+                proc, job = self._run_wrapped("echo fine", shell)
+                self.assertIn("fine", proc.stdout)
+                self.assertEqual(job["status"], "done", job)
+                self.assertEqual(job["exit_code"], 0)
+
+    def test_failure_closes_failed_with_the_exit_code(self):
+        for shell in self._shells():
+            with self.subTest(shell=shell):
+                self.setUp()
+                proc, job = self._run_wrapped("false; exit 3", shell)
+                self.assertEqual(proc.returncode, 3)
+                self.assertEqual(job["status"], "failed", job)
+                self.assertEqual(job["exit_code"], 3)
+
+    def test_a_later_backgrounded_post_does_not_reopen_or_relabel(self):
+        proc, job = self._run_wrapped("true", self._shells()[0])
+        self.assertEqual(job["status"], "done")
+        self._post("Bash", "toolu_w1", {"stdout": "", "stderr": "",
+                                        "interrupted": False,
+                                        "backgroundTaskId": "bg-9"})
+        job = self._jobs()[0]
+        self.assertEqual(job["status"], "done")
+        self.assertNotIn("24h", job["result_summary"] or "")
+
+    def test_a_backgrounded_post_says_it_closes_on_exit(self):
+        self._pre_out("sleep 100")
+        self._post("Bash", "toolu_w1", {"stdout": "", "stderr": "",
+                                        "interrupted": False,
+                                        "backgroundTaskId": "bg-4"})
+        job = self._jobs()[0]
+        self.assertEqual(job["status"], "running")
+        self.assertIn("bg-4", job["result_summary"])
+        self.assertIn("on exit", job["result_summary"])
+
+    def test_an_unsafe_home_path_registers_but_does_not_rewrite(self):
+        odd = self.root / "cousins" / "it's"
+        (odd / "data").mkdir(parents=True)
+        (odd / "cousin.toml").write_text(
+            '[cousin]\nslug = "odd"\n[chat]\nport = 8101\n')
+        self.assertEqual(self._pre_out("sleep 1", home=odd), "")
 
 
 class TestNeverFails(HookCase):

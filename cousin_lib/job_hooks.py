@@ -13,10 +13,13 @@ console's Jobs view reads (cousin_lib.jobs):
   with status async_launched: the row stays running with a note and
   closes when that agent's SubagentStop arrives.
 - a Bash call with run_in_background: PreToolUse registers a `shell`
-  job with the command. When the result only says the command was
-  backgrounded, the row stays running with a note naming the task -
-  marking it done would be a lie about a process still running.
-  Foreground Bash calls are not recorded.
+  job with the command, and rewrites the command (the harness's
+  updatedInput) to carry an EXIT trap that closes the row with the
+  command's real exit code the moment it ends. The harness sends hooks
+  no event when a backgrounded command finishes, so the command closes
+  its own row. When the home or root path holds characters the trap
+  cannot quote safely, the command runs unchanged and the row falls back
+  to the store's 24h reap. Foreground Bash calls are not recorded.
 
 Pre and Post are correlated by tool_use_id, a background agent by its
 agent id, through small files under <home>/data/job-hooks/.
@@ -44,6 +47,8 @@ LOG_NAME = "job-hooks.log"
 STATE_MAX_AGE = 7 * 24 * 3600
 SUMMARY_CHARS = 200
 _SAFE_ID = re.compile(r"[^A-Za-z0-9_.-]")
+# Paths spliced into the trap text must need no quoting at all.
+_SAFE_PATH = re.compile(r"^[A-Za-z0-9_./+-]+$")
 
 
 # ------------------------------------------------------------ locations
@@ -160,6 +165,36 @@ def _is_error(response):
     return False
 
 
+# ----------------------------------------------------- self-closing shell
+
+def _wrap(command, home, root, job_id):
+    """The command with an EXIT trap that closes job `job_id` with the
+    exit code, or None when a path is unsafe to splice. TERM, INT and HUP
+    are turned into exits so the EXIT trap runs when the harness kills a
+    background task; only SIGKILL escapes it (the 24h reap covers that).
+    Plain POSIX trap syntax: the cousin's Bash tool may run bash or zsh."""
+    python = sys.executable
+    for part in (str(home), str(root), python):
+        if not _SAFE_PATH.match(part):
+            return None
+    closer = ("%s -m cousin_lib.job_hooks --close %d --rc $? --home %s"
+              " --root %s >/dev/null 2>&1" % (python, int(job_id), home, root))
+    return ("trap '%s' EXIT\n"
+            "trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP\n"
+            "%s\n" % (closer, command))
+
+
+def close_from_trap(job_id, rc):
+    """Called by the trap: done on 0, failed otherwise, with the code."""
+    from cousin_lib import jobs
+    row = jobs.get_job(job_id)
+    if row is None or row.get("status") != "running":
+        return
+    status = "done" if rc == 0 else "failed"
+    jobs.finish_job(job_id, status=status, exit_code=rc,
+                    summary="exit %d" % rc)
+
+
 # --------------------------------------------------------------- events
 
 def _pre(home, slug, payload):
@@ -183,10 +218,21 @@ def _pre(home, slug, payload):
         job_id = jobs.register_job(kind="shell", title=str(title),
                                    description="background shell",
                                    spawned_by=slug, command=command)
+        _remember(home, "tool", tid, job_id)
+        _prune(home)
+        root = os.environ.get("FRAMEWORK_ROOT") or ""
+        wrapped = _wrap(command, home, root, job_id) if command else None
+        if wrapped is None:
+            return None
+        updated = dict(tool_input)
+        updated["command"] = wrapped
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                       "updatedInput": updated}}
     else:
-        return
+        return None
     _remember(home, "tool", tid, job_id)
     _prune(home)
+    return None
 
 
 def _post(home, payload):
@@ -218,10 +264,12 @@ def _post(home, payload):
         task = (response.get("backgroundTaskId")
                 or response.get("background_task_id"))
         if task:
+            row = jobs.get_job(job_id)
+            if row is not None and row.get("status") != "running":
+                return  # the trap already closed it: nothing to add
             jobs.update_job(job_id, result_summary=(
-                "backgrounded as task %s; the harness reports no completion"
-                " to hooks, so this row stays running (the store reaps it"
-                " after 24h)" % task))
+                "backgrounded as task %s; closes itself on exit with the"
+                " command's exit code" % task))
             return
         if response.get("interrupted"):
             jobs.finish_job(job_id, status="failed", summary="interrupted")
@@ -281,7 +329,7 @@ def handle(payload, home, root):
             slug = CousinConfig.load(home).slug
         except Exception:
             slug = pathlib.Path(home).name
-        _pre(home, slug, payload)
+        return _pre(home, slug, payload)
     elif event == "PostToolUse":
         _post(home, payload)
     elif event == "PostToolUseFailure":
@@ -291,15 +339,25 @@ def handle(payload, home, root):
 
 
 def main(argv=None):
-    """Always 0. Nothing on stdout: the harness would read it back."""
+    """Always 0. Stdout carries only the harness's hook output (the
+    rewritten command for a background shell); the harness reads it."""
     home = None
     try:
         parser = argparse.ArgumentParser(prog="cousin_lib.job_hooks",
                                          add_help=False)
         parser.add_argument("--home")
         parser.add_argument("--root")
+        parser.add_argument("--close", type=int)
+        parser.add_argument("--rc", type=int, default=0)
         args, _rest = parser.parse_known_args(argv)
         home = args.home or os.environ.get("COUSIN_HOME")
+        if args.close is not None:
+            if args.home:
+                os.environ["COUSIN_HOME"] = args.home
+            if args.root:
+                os.environ["FRAMEWORK_ROOT"] = args.root
+            close_from_trap(args.close, args.rc)
+            return 0
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):
@@ -307,7 +365,10 @@ def main(argv=None):
         home, root = resolve_context(args, payload)
         if home is None:
             return 0
-        handle(payload, home, root)
+        output = handle(payload, home, root)
+        if output:
+            sys.stdout.write(json.dumps(output))
+            sys.stdout.flush()
     except BaseException as err:  # noqa: a hook never breaks the harness
         if isinstance(err, KeyboardInterrupt):
             return 0

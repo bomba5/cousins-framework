@@ -11,6 +11,7 @@ import time
 
 from cousin_lib.console import router
 
+RESTART_EXIT_CODE = 75  # EX_TEMPFAIL: systemd's Restart=on-failure brings it back
 RESTART_DELAY_SECONDS = 0.6
 _GB = 1024 ** 3
 
@@ -115,7 +116,9 @@ def register():
     def restart(req):
         server = req.server
         supervised = bool(os.environ.get("INVOCATION_ID"))
-        exit_fn = server.exit_fn or (lambda: os._exit(0))
+        # Non-zero on purpose: the shipped unit restarts on failure only,
+        # so a clean exit 0 would leave the console stopped.
+        exit_fn = server.exit_fn or (lambda: os._exit(RESTART_EXIT_CODE))
         timer = threading.Timer(RESTART_DELAY_SECONDS, exit_fn)
         timer.daemon = True
         timer.start()

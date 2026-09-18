@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.3.0 - 2026-09-18
+
+Memory fills in its own truth levels, and the docs are new.
+
+- The framework writes L1 entries when it changes a cousin: flips,
+  starts and stops, model, effort and auth changes, chat imports, role
+  changes, transplants, a flip that died, a chat server respawn.
+- A finished job (done or failed) lands in its cousin's memory at L2
+  with its title, exit code and summary.
+- Hedged sentences mined from a transcript at flip land at L4
+  (hypothesis) instead of L3.
+- `cousin-memory obsolete TOPIC --why ...` retires a topic (L5): it
+  leaves the distilled views, the history stays. Also a "mark obsolete"
+  button in the console explorer and an `obsolete` command on the MCP
+  memory tool.
+- The documentation is rewritten from scratch: a short README, one page
+  per area, and the API details under `docs/reference/`.
+
 ## 0.2.0 - 2026-09-18
 
 Remote cousins, with the console as the queen.

@@ -1,3 +1,4 @@
+import pathlib
 """Host stats, the chat-server log tail, and the console's own restart."""
 import os
 import socket
@@ -59,3 +60,14 @@ class TestNoLogsRoute(ConsoleCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRestartExitCode(unittest.TestCase):
+    def test_the_restart_exit_is_a_failure_so_systemd_restarts_it(self):
+        # Canary (2026-09-18): the button exited 0 and the unit only
+        # restarts on failure, so pressing restart stopped the console.
+        from cousin_lib.console import routes_admin
+        self.assertNotEqual(routes_admin.RESTART_EXIT_CODE, 0)
+        unit = (pathlib.Path(__file__).resolve().parents[2] / "systemd"
+                / "cousin-console.service").read_text()
+        self.assertIn("Restart=on-failure", unit)

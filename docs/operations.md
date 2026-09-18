@@ -282,11 +282,11 @@ recover.
   `cousin_lib/console_static/index.html` and point its script tags at them.
 
 **The console's restart button stops the console**
-- Check: the button exits the console process cleanly and relies on systemd
-  to start it again. The shipped unit has `Restart=on-failure`, which doesn't
-  restart after a clean exit.
-- Fix: `systemctl --user start cousin-console`, or add a drop-in with
-  `Restart=always` if you want the button to work.
+- Check: the button exits with code 75 and relies on systemd to start it
+  again. That works with the shipped unit (`Restart=on-failure`). If you run
+  the console by hand or under a unit without a restart policy, nothing
+  brings it back.
+- Fix: `systemctl --user start cousin-console`, and use the shipped unit.
 
 **A cousin keeps getting restarted**
 - Check: `cousin-loops requests` and the loops journal. A flip ends the

@@ -425,6 +425,10 @@ What you can delete: lines in `memory/raw/*.jsonl` and `data/decisions.jsonl`; f
 
 The batch lands in `<home>/memory/.trash/<id>/` with one audit line per item in `memory/.trash/audit.jsonl`, attributed to the logged-in user (`console` with no login). Removing a raw entry reruns the distiller. `200 {"ok": true, "trash": manifest, "effects": {...}}` and a `memory-change` event.
 
+### `POST /api/memory/<slug>/obsolete`
+
+Body `{"topic": "...", "why": "...", "force": false}`. Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
+
 ### `POST /api/memory/<slug>/restore`
 
 Body `{"id": "..."}`. Files go back to their path, lines back into their file at their old position. `200 {"ok": true, "restored": manifest, "effects": {...}}` and a `memory-change` event. `409` if something is already back in the way, `404` unknown id. The CLI does the same with `cousin-memory trash restore <id>`.
@@ -539,7 +543,7 @@ The events come from two places: route handlers announce what they just did, and
 | `cousin-flip` | `{"slug", "phase", ...}` | see below |
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
-| `memory-change` | `{"slug", "action": "trash" \| "restore", "id"}` | a memory delete or restore through the console |
+| `memory-change` | `{"slug", "action": "trash" \| "restore" \| "obsolete", ...}` | a memory delete, restore or obsolete mark through the console |
 
 `cousin-flip` phases: `scheduled` (with `fire_at`, and `delay_seconds` or `request_id`), `started`, `complete` (with `ok: true`, and `new_generation`, `boot_packet_tokens`, `degraded_sections` when the console ran it), `failed` (with `ok: false` and `error`), `cancelled`. Timed flips the daemon runs show up through the poller: a request that turns `done` is `complete`, `failed` or `expired` is `failed`.
 

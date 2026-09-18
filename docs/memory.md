@@ -165,12 +165,37 @@ Older entries may carry short forms: `operator-stated` reads as L0,
 packet's required actions remind every cousin to record what you told
 it at L0 with a citation and its guesses at `hypothesis`.
 
-Right now every level is written by hand with `--level`. Automatic
-writers are on their way: the framework will record its own events
-(L1) and job results (L2), hedged sentences in a cousin's transcript
-will land as L4, and an `obsolete` command will mark an entry L5.
+L0 and L3 are mostly written by the cousin itself. The other levels
+fill themselves in:
 
-<!-- TODO levels writers -->
+- **L1 framework.** The framework notes what it changes about a cousin,
+  under topics like `framework:flip`, `framework:session`,
+  `framework:model`, `framework:auth`: flips (new generation, session,
+  clean or emergency handoff), starts and stops, model, effort and auth
+  mode changes, chat history imports, role changes, memory transplants,
+  a flip that died halfway, and a dead chat server getting restarted.
+  Nothing is written when nothing changed, and there are no periodic
+  entries.
+- **L2 tool.** When a cousin's job finishes as done or failed, its
+  title, exit code and summary land in that cousin's memory under
+  `job:<title>`. Repeat runs of the same job fold into one line.
+  Cancelled jobs and jobs with no owning cousin are skipped.
+- **L4 hypothesis.** When a flip mines the old session's transcript, a
+  sentence that hedges ("probably", "might", "I suspect", "I think",
+  "likely", "maybe", "not sure", "seems") is kept as a hypothesis under
+  `episode:<id>:hypothesis` instead of as a conclusion.
+- **L5 obsolete.** When something stops being true, retire the topic:
+
+  ```
+  cousin-memory obsolete "backups" --why "moved the NAS snapshot to 03:00"
+  ```
+
+  The topic drops out of the distilled files the next session boots
+  from, but the history stays in raw. A reason is required. A topic
+  with no raw entries is refused unless you add `--force` (it suggests
+  close matches). Any later entry on the same topic brings it back. The
+  console explorer has the same thing as a "mark obsolete" button on
+  each raw entry, and the MCP memory tool has an `obsolete` command.
 
 ## The distilled views
 

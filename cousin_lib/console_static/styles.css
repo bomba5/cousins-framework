@@ -1077,8 +1077,29 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   .main { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); }
 }
 
-/* Inbound attachment inside a bubble */
-.chat-bubble .chat-attachment { max-width: 100%; height: auto; }
+/* Attachments inside a bubble (media.jsx): bounded thumbnails, a looping
+   muted video preview, a native audio player. */
+.chat-media-slot { max-width: 100%; }
+.chat-media {
+  display: block;
+  height: auto;
+  max-width: min(100%, 420px);
+  border-radius: 4px;
+}
+.chat-media-image,
+.chat-media-video {
+  max-height: 300px;
+  cursor: zoom-in;
+  background: var(--bg-0);
+  border: 1px solid var(--line-soft);
+}
+/* A fixed width: the bubble shrink-wraps its content, so a percentage
+   alone collapses the player to its minimum. */
+.chat-media-audio { width: 320px; max-width: 64vw; height: 40px; }
+
+@media (max-width: 540px) {
+  .chat-media-image, .chat-media-video { max-height: 220px; }
+}
 
 /* Search highlights inside chat bubbles */
 .chat-md mark.hl-match {

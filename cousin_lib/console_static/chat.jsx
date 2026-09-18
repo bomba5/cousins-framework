@@ -1186,15 +1186,10 @@ function groupReactions(rows) {
   return Array.from(by.values());
 }
 
-// An inbound attachment is a file the cousin's chat server wrote; the
-// console projects it as `attachment.url` on the message. A `data:` image
-// on a row (a client-side echo) is accepted too. Nothing else renders.
-function attachmentSrc(msg) {
-  if (msg.attachment && typeof msg.attachment.url === "string") return msg.attachment.url;
-  if (typeof msg.image === "string" && msg.image.startsWith("data:image/")) return msg.image;
-  return null;
-}
-
+// An attachment is a file the cousin's chat server wrote (the inbox) or a
+// generated asset; the console projects it as `attachment: {url, kind}`
+// on the message. attachmentMedia (media.jsx) resolves it, a `data:`
+// image echo included, and InlineMedia renders it by kind.
 function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser }) {
   const isUser = msg.type === "user";
   // Parse incoming reply_to. The server stores it as a JSON string when the
@@ -1388,7 +1383,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser }) {
     });
   }, [rendered, streaming]);
 
-  const imgSrc = attachmentSrc(msg);
+  const media = attachmentMedia(msg);
   const chips = groupReactions(reactions);
 
   return (
@@ -1428,14 +1423,10 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser }) {
             </div>
           </div>
         )}
-        {imgSrc && (
-          // The attachment opens in its own tab at full size; there is no
-          // in-page viewer.
-          <a href={imgSrc} target="_blank" rel="noopener noreferrer" title="open full size"
-             style={{ display: "block", marginBottom: visible ? 6 : 0 }}>
-            <img src={imgSrc} alt="attachment" className="chat-attachment"
-                 style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 3, display: "block" }} />
-          </a>
+        {media && (
+          <div className="chat-media-slot" style={{ marginBottom: visible ? 6 : 0 }}>
+            <InlineMedia media={media} />
+          </div>
         )}
         <div ref={divRef} className="chat-md" dangerouslySetInnerHTML={{ __html: rendered }} />
         <div className="chat-meta">{fmtShortTime(msg.timestamp)}</div>

@@ -210,6 +210,34 @@ class TestStartCousin(CreateCase):
         self.assertIn("my-agent --flag", text)
         self.assertEqual(self.calls, [out["home"]])
 
+    def test_start_distills_raw_memory_first(self):
+        # Only a flip assembled a boot packet, so a cousin that was only
+        # ever started or resumed never had its distilled views built.
+        from cousin_lib import memory
+        root = self._framework_root()
+        out = self._create(root)
+        tmux, _ = self._fake_tmux(root)
+        memory._append_raw(out["home"], {
+            "topic": "retention window",
+            "content": "keep thirty days of flows",
+            "truth_level": "cousin-conclusion", "source": "decision"})
+        start_cousin(out["home"], agent_cmd="my-agent",
+                     tmux_bin=str(tmux), start_chat_server=lambda h: None)
+        text = (out["home"] / "memory" / "distilled"
+                / "decisions.md").read_text()
+        self.assertIn("keep thirty days of flows", text)
+
+    def test_a_failing_distill_never_stops_a_start(self):
+        root = self._framework_root()
+        out = self._create(root)
+        tmux, log = self._fake_tmux(root)
+        with mock.patch("cousin_lib.distill.distill",
+                        side_effect=RuntimeError("boom")):
+            start_cousin(out["home"], agent_cmd="my-agent",
+                         tmux_bin=str(tmux),
+                         start_chat_server=lambda h: None)
+        self.assertIn("new-session", log.read_text())
+
     def test_tmux_failure_is_a_spawn_error(self):
         root = self._framework_root()
         out = self._create(root)

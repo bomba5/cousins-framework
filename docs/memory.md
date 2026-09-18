@@ -209,7 +209,8 @@ cousin's long-term floor:
 - `operator-calibration.md`
 - `glossary.md`
 
-They're rebuilt from raw every time a boot packet is assembled, and by
+They're rebuilt from raw every time a boot packet is assembled (a
+flip), every time the cousin is started or resumed, and by
 `cousin-memory distill` and `cousin-memory consolidate`. No model is
 involved and the result is the same every run. Entries are grouped by
 topic and the newest entry per topic becomes the line; older entries
@@ -368,6 +369,24 @@ new or changed chunks and drops deleted files, so the first search
 after a lot of writing is slow and the rest are quick. `reindex`
 rebuilds the keyword index and, with a service configured, re-embeds
 everything.
+
+Only one refresh runs per cousin at a time (a lock on
+`memory/.embeddings.lock`). A search that finds another refresh
+running doesn't start a second one: it ranks against the index as it
+stands and says so in its notice. `reindex` waits its turn instead. A
+long refresh saves what it has every 32 embedded chunks, so a pass
+that dies partway (a killed process, a proactive recall past its
+budget) leaves its work behind for the next one.
+
+On a CPU-only host an embedding service can take every core for each
+request. The `[options]` table in `config/embedding.toml` is passed to
+the service as is; for Ollama, `num_thread` caps the cores one
+embedding uses:
+
+```toml
+[options]
+num_thread = 8
+```
 
 Keyword and semantic results are merged by rank. Each hit's `score` is
 that merged rank score, and `similarity` is the semantic cosine (`null`

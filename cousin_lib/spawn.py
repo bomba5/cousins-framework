@@ -727,6 +727,17 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
         agent_auth.preflight(home, launch_root)
     except agent_auth.AuthError as err:
         raise SpawnError("auth: %s" % err)
+    # The durable floor is a derived view of raw memory; the boot
+    # packet regenerates it, but only a flip assembles one. A plain
+    # start or a --resume at boot never did, so a cousin that was only
+    # ever resumed had no distilled views at all (2026-09-18). Every
+    # start refreshes it. Best-effort: a failed distill never stops a
+    # start.
+    try:
+        from cousin_lib import distill
+        distill.distill(home)
+    except Exception:
+        pass
     # A {session_id} placeholder is rendered HERE, at the single
     # spawn site, so a plain start (console, cousin-spawn --start) and
     # a flip mint identity the same way. flip.py renders its own copy

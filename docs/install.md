@@ -275,8 +275,15 @@ Ollama (its installer creates a system service, a user and a group):
 sudo systemctl disable --now ollama
 sudo rm -f /etc/systemd/system/ollama.service && sudo systemctl daemon-reload
 sudo rm -rf /usr/local/bin/ollama /usr/local/lib/ollama /usr/share/ollama
+sudo gpasswd -d "$USER" ollama   # the installer adds you to its group
 sudo userdel ollama; sudo groupdel ollama
 ```
 
-The apt packages (`tmux`, `python3-venv`) are ordinary system
-packages; remove them with `apt-get remove` if nothing else uses them.
+The apt packages are ordinary system packages; if nothing else uses
+them, remove them together with the dependencies they pulled in (names
+for Ubuntu 24.04):
+
+```
+sudo apt-get remove -y tmux libevent-core-2.1-7t64 \
+    python3-venv python3.12-venv python3-pip-whl python3-setuptools-whl
+```

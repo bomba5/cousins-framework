@@ -478,6 +478,18 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     setAtBottom(true);
   };
 
+  // The media viewer: a snapshot of the thread's images and videos taken
+  // at the click, so a poll landing while it is open does not move it.
+  const [viewer, setViewer] = React.useState(null);  // {items, start}
+  const openMedia = React.useCallback((msg) => {
+    const items = threadMedia(messages);
+    const at = items.findIndex(x => x.id === msg.id);
+    if (at < 0) return;
+    setViewer({ items, start: at });
+  }, [messages]);
+  const closeViewer = React.useCallback(() => setViewer(null), []);
+  React.useEffect(() => { if (!mediaShown) setViewer(null); }, [mediaShown]);
+
   const [attachment, setAttachment] = React.useState(null); // {dataUrl, name}
   const [replyingTo, setReplyingTo] = React.useState(null);  // {id, user, snippet}
   const fileInputRef = React.useRef(null);
@@ -623,6 +635,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
             isLast={i === messages.length - 1}
             chatUser={chatUser}
             mediaShown={mediaShown !== false}
+            onOpenMedia={openMedia}
             onReply={() => setReplyingTo({
               id: m.id, user: m.user,
               snippet: (m.message || "").replace(/\s+/g, " ").slice(0, 120),
@@ -631,6 +644,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
         ))}
         <div ref={chatAnchorRef} style={{ height: 1 }} />
       </div>
+      {viewer && <MediaViewer items={viewer.items} start={viewer.start} onClose={closeViewer} />}
       {!atBottom && (
         <button
           onClick={jumpToBottom}
@@ -1207,7 +1221,7 @@ function groupReactions(rows) {
 // generated asset; the console projects it as `attachment: {url, kind}`
 // on the message. attachmentMedia (media.jsx) resolves it, a `data:`
 // image echo included, and InlineMedia renders it by kind.
-function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown }) {
+function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown, onOpenMedia }) {
   const isUser = msg.type === "user";
   // Parse incoming reply_to. The server stores it as a JSON string when the
   // sender provided a dict; older rows may already be objects.
@@ -1442,7 +1456,8 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
         )}
         {media && (
           <div className="chat-media-slot" style={{ marginBottom: visible ? 6 : 0 }}>
-            <InlineMedia media={media} shown={mediaShown !== false} />
+            <InlineMedia media={media} shown={mediaShown !== false}
+                         onOpen={onOpenMedia ? () => onOpenMedia(msg) : null} />
           </div>
         )}
         <div ref={divRef} className="chat-md" dangerouslySetInnerHTML={{ __html: rendered }} />

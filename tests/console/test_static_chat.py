@@ -322,7 +322,9 @@ class PaneScrollsTheProgram(unittest.TestCase):
 
 
 class ChatMediaViewer(unittest.TestCase):
-    """The media port (docs/console-spec.md, "The chat media viewer")."""
+    """The media port (docs/console-spec.md, "The chat media viewer"):
+    the on/off toggle and its browser key, kind detection, the inline
+    players and the viewer with its keys, counter and links."""
 
     def setUp(self):
         self.media = (_STATIC / "media.jsx").read_text()
@@ -417,6 +419,36 @@ process.stdout.write(JSON.stringify(cases));
         self.assertIn("<InlineMedia", bubble)
         self.assertIn("mediaShown", bubble)
 
+    def test_viewer_handles_keys_counter_and_links(self):
+        viewer = _function_body(self.media, "MediaViewer")
+        for key in ('"Escape"', '"ArrowLeft"', '"ArrowRight"'):
+            self.assertIn(key, viewer)
+        self.assertIn('addEventListener("keydown"', viewer)
+        self.assertIn('removeEventListener("keydown"', viewer)
+        self.assertIn("{index + 1} / {count}", viewer)
+        self.assertRegex(viewer, r"<video[^>]*controls[^>]*autoPlay")
+        self.assertIn("onClick={onClose}", viewer, "a click outside closes")
+        self.assertIn("media-viewer-prev", viewer)
+        self.assertIn("media-viewer-next", viewer)
+        self.assertRegex(viewer, r'href=\{current\.src\}[^>]*target="_blank"')
+        self.assertRegex(viewer, r"href=\{current\.src\} download")
+        # A ref callback re-runs on every poll render and would restart a
+        # video the reader paused; the start is an effect keyed on the item.
+        self.assertNotRegex(viewer, r"ref=\{\(el\)")
+        self.assertIn("[currentSrc]", viewer)
+
+    def test_chat_body_owns_the_viewer_and_snapshots_the_gallery(self):
+        body = _function_body(self.chat, "ChatBody")
+        self.assertIn("threadMedia(messages)", body)
+        self.assertIn("<MediaViewer", body)
+        self.assertIn("onOpenMedia={openMedia}", body)
+
+    def test_viewer_styles_exist_with_a_phone_layout(self):
+        for sel in (".media-viewer {", ".media-viewer-item {", ".media-viewer-bar {",
+                    ".chat-media-hidden {", ".chat-media-audio {"):
+            self.assertIn(sel, self.css)
+        phone = self.css[self.css.rindex("@media (max-width: 540px)"):]
+        self.assertIn(".media-viewer-item", phone)
 
 
 if __name__ == "__main__":

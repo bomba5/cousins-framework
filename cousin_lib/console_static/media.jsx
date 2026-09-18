@@ -1,5 +1,5 @@
-// Chat media: how an attachment renders inside a bubble and the media
-// on/off preference.
+// Chat media: how an attachment renders inside a bubble, the media on/off
+// preference, and the full-size viewer with prev/next across the thread.
 // docs/console-spec.md, "The chat media viewer". Loaded before chat.jsx,
 // which reads these names off window.
 
@@ -64,6 +64,19 @@ function attachmentMedia(msg) {
   return kind ? { src, kind } : null;
 }
 
+// The viewer's gallery: every image and video in the thread, in order.
+// Audio plays inline and is not part of it.
+function threadMedia(messages) {
+  const out = [];
+  for (const m of messages || []) {
+    const media = attachmentMedia(m);
+    if (media && (media.kind === "image" || media.kind === "video")) {
+      out.push({ id: m.id, src: media.src, kind: media.kind });
+    }
+  }
+  return out;
+}
+
 // Inline video preview: silent and looping, but it plays only while on
 // screen. Every clip in a long thread decoding at once is what leaves
 // mobile browsers showing black boxes, so an IntersectionObserver plays
@@ -114,8 +127,105 @@ function InlineMedia({ media, shown, onOpen }) {
   return <audio src={media.src} controls preload="metadata" className="chat-media chat-media-audio" />;
 }
 
+// The full-size viewer. `items` is the gallery snapshot taken when it
+// opened (polling does not reshuffle it under the reader), `start` the
+// index clicked. Escape or a click outside the media closes it; the
+// arrow keys and the side buttons move through the gallery.
+function MediaViewer({ items, start, onClose }) {
+  const list = items || [];
+  const [index, setIndex] = React.useState(start || 0);
+  React.useEffect(() => { setIndex(start || 0); }, [start, items]);
+  const count = list.length;
+  const go = React.useCallback((step) => {
+    if (count < 2) return;
+    setIndex(i => (i + step + count) % count);
+  }, [count]);
+
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [go, onClose]);
+
+  // Touch: a horizontal swipe moves through the gallery.
+  const touchRef = React.useRef(null);
+  const onTouchStart = (e) => {
+    const t = e.touches && e.touches[0];
+    touchRef.current = t ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onTouchEnd = (e) => {
+    const s = touchRef.current;
+    touchRef.current = null;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!s || !t) return;
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy)) go(dx < 0 ? 1 : -1);
+  };
+
+  const current = list[index];
+  // Start the full video with sound once per item. A ref callback would
+  // run again on every parent render (the chat polls) and restart a
+  // video the reader paused.
+  const videoRef = React.useRef(null);
+  const currentSrc = current ? current.src : null;
+  React.useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = false;
+    const p = el.play && el.play();
+    if (p && p.catch) p.catch(() => {});
+  }, [currentSrc]);
+  if (!current) return null;
+  const stop = (e) => e.stopPropagation();
+
+  const body = (
+    <div className="media-viewer" role="dialog" aria-modal="true" aria-label="media viewer"
+         onClick={onClose} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div className="media-viewer-stage">
+        {current.kind === "image" ? (
+          <img key={current.src} src={current.src} alt="" className="media-viewer-item" onClick={stop} />
+        ) : (
+          // Opened by a click, so sound is allowed on desktop; if the
+          // browser still refuses, the controls are there to press play.
+          <video key={current.src} ref={videoRef} src={current.src} className="media-viewer-item"
+                 controls autoPlay loop playsInline onClick={stop} />
+        )}
+      </div>
+      {count > 1 && (
+        <button type="button" className="media-viewer-nav media-viewer-prev" title="previous (left arrow)"
+                aria-label="previous" onClick={(e) => { stop(e); go(-1); }}>&lsaquo;</button>
+      )}
+      {count > 1 && (
+        <button type="button" className="media-viewer-nav media-viewer-next" title="next (right arrow)"
+                aria-label="next" onClick={(e) => { stop(e); go(1); }}>&rsaquo;</button>
+      )}
+      <button type="button" className="media-viewer-close" title="close (Esc)" aria-label="close"
+              onClick={(e) => { stop(e); onClose(); }}>&times;</button>
+      <div className="media-viewer-bar" onClick={stop}>
+        <span className="media-viewer-count">{index + 1} / {count}</span>
+        <a className="media-viewer-link" href={current.src} target="_blank" rel="noopener noreferrer">open original</a>
+        <a className="media-viewer-link" href={current.src} download>download</a>
+      </div>
+    </div>
+  );
+  // Portal to <body>: a fixed overlay inside the chat column would be
+  // clipped by any ancestor that grows a transform.
+  return (window.ReactDOM && ReactDOM.createPortal)
+    ? ReactDOM.createPortal(body, document.body)
+    : body;
+}
+
 Object.assign(window, {
   MEDIA_PREF_KEY, readMediaShown, writeMediaShown,
-  mediaKindFromUrl, normalizeMediaKind, attachmentMedia,
-  LoopingPreview, InlineMedia,
+  mediaKindFromUrl, normalizeMediaKind, attachmentMedia, threadMedia,
+  LoopingPreview, InlineMedia, MediaViewer,
 });

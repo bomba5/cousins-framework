@@ -224,3 +224,13 @@ The procedure is .
   spawned fresh on the same install booted and answered its first heartbeat. The old instance keeps the
   transferred cousin's home on disk with `auto_start = false`; a cross-instance gap remains: peers on the
   old instance cannot reach a cousin that moved.
+- **2026-09-18, live use on the first install** (ca3a1b6..847c931): the operator's side-by-side with the
+  old console found two defects and a parity gap. Defects: chat servers started through the console died
+  with a console restart (KillMode=process on the console and loops units); the CLI serve path never
+  wired the events stream, so every cousin drew as stopped while the GET route said running (the CLI now
+  serves through the wiring, the module has its `__main__` guard, and a canary runs the real command and
+  reads the snapshot bytes). Parity: per-cousin model and effort through `{model}`/`{effort}` in
+  agent-cmd with `[agent]` defaults; the spawn dialog takes model, effort, heartbeat and memory scope;
+  cards show role, model, pid and uptime (pid through `list-panes`, since `display-message` with a
+  session target prints nothing on tmux 3.6a); the chat header gets an effort select and the model
+  badge. The media-kind filter of the old chat header was left out by scope. Suite 1237, gate clean.

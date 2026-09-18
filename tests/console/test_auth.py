@@ -185,5 +185,135 @@ class TestAdduserCli(ConsoleCase):
                           / "console-users.json").exists())
 
 
+class TestBrokenUsersFileFailsClosed(ConsoleCase):
+    """A users file that is present but cannot be read as a user map
+    must close the console, never open it. Canary: Users.load read a
+    corrupt file as {}, configured() went False, and the login check
+    was skipped - a truncated file turned auth off."""
+
+    BROKEN = {
+        "garbage": b"{not json",
+        "truncated": b"",
+        "not a map": b"[]",
+        "no users": b"{}",
+        "bad entry": b'{"ana": "hunter2"}',
+    }
+
+    def _write(self, raw):
+        path = self.root / "config" / "console-users.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        return path
+
+    def _assert_closed(self):
+        self.assertIn(self.get("/api/cousins")[0], (503,))
+        self.assertEqual(self.get("/api/jobs")[0], 503)
+        self.assertEqual(self.post("/api/cousins/wren/start")[0], 503)
+        self.assertEqual(self.delete("/api/cousins/wren")[0], 503)
+        status, body = self.post("/api/auth/login",
+                                 {"user": "ana", "password": "correct horse"})
+        self.assertEqual(status, 503)
+        self.assertIn("console-users.json", body["error"])
+        status, body = self.get("/api/auth/me")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["configured"], True)
+        self.assertIsNone(body["user"])
+        self.assertIn("console-users.json", body["error"])
+
+    def test_every_broken_shape_refuses_every_api_route(self):
+        self.cousin("wren")
+        self.serve()
+        for label, raw in self.BROKEN.items():
+            with self.subTest(label):
+                self._write(raw)
+                self._assert_closed()
+
+    def test_the_refusal_names_the_file_and_the_fix(self):
+        self._write(b"{not json")
+        self.serve()
+        status, body = self.get("/api/cousins")
+        self.assertEqual(status, 503)
+        self.assertIn("console-users.json", body["error"])
+        self.assertIn("adduser", body["error"])
+
+    def test_an_unreadable_file_is_closed_not_open(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads mode 000 files")
+        path = self._write(b"{}")
+        auth.Users(path).path.unlink()
+        auth.Users(path).set_password("ana", "correct horse")
+        path.chmod(0)
+        self.addCleanup(path.chmod, 0o600)
+        self.serve()
+        self.assertEqual(self.get("/api/cousins")[0], 503)
+
+    def test_a_live_session_is_refused_once_the_file_breaks(self):
+        path = self.root / "config" / "console-users.json"
+        auth.Users(path).set_password("ana", "correct horse")
+        self.serve()
+        status, _ = self.post("/api/auth/login",
+                              {"user": "ana", "password": "correct horse"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.get("/api/cousins")[0], 200)
+        path.write_text("{oops")
+        self.assertEqual(self.get("/api/cousins")[0], 503)
+
+    def test_static_files_still_load_so_the_page_can_say_why(self):
+        self._write(b"{not json")
+        self.serve()
+        static = self.root / "static"
+        static.mkdir()
+        (static / "index.html").write_text("<!doctype html>")
+        self.server.static_dir = static
+        self.assertEqual(self.get("/", raw=True)[0], 200)
+
+    def test_users_state_and_load_are_strict(self):
+        path = self._write(b"{not json")
+        users = auth.Users(path)
+        state, error = users.state()
+        self.assertEqual(state, "broken")
+        self.assertIn("console-users.json", error)
+        with self.assertRaises(auth.UsersFileError):
+            users.load()
+        with self.assertRaises(auth.UsersFileError):
+            users.configured()
+        # adduser must not paper over a corrupt file with a fresh one.
+        with self.assertRaises(auth.UsersFileError):
+            users.set_password("ana", "correct horse")
+        self.assertEqual(path.read_bytes(), b"{not json")
+
+    def test_adduser_refuses_a_broken_file_before_prompting(self):
+        import contextlib
+        import io
+        from cousin_lib.console.app import console_main
+        path = self._write(b"{not json")
+        err = io.StringIO()
+        with mock.patch("getpass.getpass") as prompt, \
+                contextlib.redirect_stderr(err):
+            rc = console_main(["--root", str(self.root), "adduser", "ana"])
+        self.assertEqual(rc, 1)
+        prompt.assert_not_called()
+        self.assertIn("console-users.json", err.getvalue())
+        self.assertEqual(path.read_bytes(), b"{not json")
+
+    def test_missing_file_is_still_the_documented_open_first_run(self):
+        users = auth.Users(self.root / "config" / "console-users.json")
+        self.assertEqual(users.state(), ("missing", None))
+        self.serve()
+        self.assertEqual(self.get("/api/cousins")[0], 200)
+
+    def test_startup_banner_says_closed(self):
+        from cousin_lib.console.app import auth_banner
+        self._write(b"{not json")
+        users = auth.Users(self.root / "config" / "console-users.json")
+        line = auth_banner(users)
+        self.assertIn("CLOSED", line)
+        self.assertIn("console-users.json", line)
+        users.path.unlink()
+        self.assertIn("auth not configured", auth_banner(users))
+        users.set_password("ana", "correct horse")
+        self.assertEqual(auth_banner(users), "")
+
+
 if __name__ == "__main__":
     unittest.main()

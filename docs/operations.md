@@ -241,6 +241,13 @@ file on every request, and from the moment it holds one user every
 `/api/*` route but login and `me` answers 401 without a session. There
 is no loopback or trusted-LAN bypass to fall back on, by design.
 
+Once the file exists, only its absence reopens the console. A users
+file that is present but unusable (corrupt, truncated, unreadable, or
+holding no users) closes it instead: every `/api/*` route answers 503
+naming the file, the startup line says `CLOSED`, and the journal
+carries the reason. Restore the file from a backup, or remove it and
+run `adduser` again; `adduser` will not write over a broken file.
+
 First login: open `http://127.0.0.1:8600/` on the machine, or tunnel
 from another one (`ssh -L 8600:127.0.0.1:8600 <user>@<machine>`, then
 the same URL). For direct LAN access put `--host 0.0.0.0` in the

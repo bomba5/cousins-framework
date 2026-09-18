@@ -10,6 +10,11 @@ where the existing raw -> distill pipeline turns them into durable
 memory or lets them fold away.
 
 Deliberately mechanical: no model call, a keyword test per sentence.
+A kept sentence that hedges ("probably", "might", "I suspect", "I
+think", "likely", "maybe", "not sure", "seems") is a hypothesis: it is
+written at L4_COUSIN_HYPOTHESIS under episode:<id8>:hypothesis, the
+rest at L3_COUSIN_CONCLUSION under episode:<id8>. Hedging only
+reclassifies; it never makes a sentence worth keeping by itself.
 Operator lines already persist in the chat store; tool activity in the
 trace ledger; the cousin's own conclusions were the gap. Sidechain
 turns (sub-agents) are excluded: their results surface in the main
@@ -33,6 +38,7 @@ MIN_SENTENCE_CHARS = 24
 MAX_SENTENCE_CHARS = 400
 SOURCE = "flip-transcript"
 TRUTH_LEVEL = "L3_COUSIN_CONCLUSION"
+HYPOTHESIS_LEVEL = "L4_COUSIN_HYPOTHESIS"
 
 # A sentence is a conclusion when it carries a reason or a resolution,
 # a dead end when it names a failure. Word-bounded so "also" is not
@@ -40,6 +46,13 @@ TRUTH_LEVEL = "L3_COUSIN_CONCLUSION"
 _CONCLUSION = re.compile(
     r"\b(because|so|therefore|the cause|fixed|decided)\b", re.IGNORECASE)
 _DEAD_END = re.compile(r"\b(does not|failed|wrong)\b", re.IGNORECASE)
+# A kept sentence that hedges is a hypothesis, not a conclusion: it is
+# written at L4 under its own topic, so the distilled view shows the
+# session's newest conclusion and its newest open guess side by side.
+# Word-bounded: "likelihood" is not "likely", "mighty" is not "might".
+_HEDGE = re.compile(
+    r"\b(probably|might|i suspect|i think|likely|maybe|not sure|seems)\b",
+    re.IGNORECASE)
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
@@ -68,6 +81,15 @@ def _assistant_texts(path):
 
 def _keep(sentence):
     return bool(_CONCLUSION.search(sentence) or _DEAD_END.search(sentence))
+
+
+def is_hedged(sentence):
+    return bool(_HEDGE.search(sentence))
+
+
+def level_for(sentence):
+    """L4 for a hedged sentence, L3 for everything else kept."""
+    return HYPOTHESIS_LEVEL if is_hedged(sentence) else TRUTH_LEVEL
 
 
 def candidates(texts, *, max_entries=MAX_ENTRIES):
@@ -114,10 +136,12 @@ def mine(home, root, session_id, *, max_entries=MAX_ENTRIES):
         return 0
     topic = "episode:%s" % session_id[:8]
     for sentence in kept:
+        level = level_for(sentence)
         memory._append_raw(home, {
-            "topic": topic,
+            "topic": (topic if level == TRUTH_LEVEL
+                      else topic + ":hypothesis"),
             "content": sentence,
-            "truth_level": TRUTH_LEVEL,
+            "truth_level": level,
             "source": SOURCE,
         })
     return len(kept)

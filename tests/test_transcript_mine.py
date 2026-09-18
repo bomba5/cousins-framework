@@ -136,5 +136,50 @@ class TestMine(MineCase):
         self.assertEqual(transcript_mine.mine(self.home, self.root, ""), 0)
 
 
+class TestHypotheses(MineCase):
+    """Canary (2026-09-18): no writer produced L4. A kept sentence that
+    hedges is a hypothesis, written at L4 under its own topic; the rest
+    stays L3 exactly as before."""
+
+    def test_hedged_sentences_go_to_l4_the_rest_stay_l3(self):
+        self._configure()
+        self._write_transcript("sess-abcdef12-3456", [_line(
+            "assistant",
+            "The cause is probably the stale cache, so a clear should do."
+            " The build failed because the port was busy."
+            " I think it failed because the lock file was left behind."
+            " Not sure yet, but the retry failed on the same host.")])
+        transcript_mine.mine(self.home, self.root, "sess-abcdef12-3456")
+        by_level = {}
+        for e in self._raw_entries():
+            by_level.setdefault(e["truth_level"], []).append(e)
+        l3 = by_level["L3_COUSIN_CONCLUSION"]
+        l4 = by_level["L4_COUSIN_HYPOTHESIS"]
+        self.assertEqual([e["content"] for e in l3],
+                         ["The build failed because the port was busy."])
+        self.assertEqual(len(l4), 3, l4)
+        self.assertEqual({e["topic"] for e in l3}, {"episode:sess-abc"})
+        self.assertEqual({e["topic"] for e in l4},
+                         {"episode:sess-abc:hypothesis"})
+
+    def test_hedge_words_are_word_bounded(self):
+        for sentence in ("The likelihood of a retry failed us.",
+                         "A mighty fix: the cause is the lock.",
+                         "Maybelline failed because of the dye."):
+            self.assertEqual(transcript_mine.level_for(sentence),
+                             "L3_COUSIN_CONCLUSION", sentence)
+        for sentence in ("It might be the lock, so retry.",
+                         "It seems fixed.", "Likely the cache.",
+                         "I suspect the port.", "Maybe the disk."):
+            self.assertEqual(transcript_mine.level_for(sentence),
+                             "L4_COUSIN_HYPOTHESIS", sentence)
+
+    def test_hedging_alone_never_makes_a_sentence_worth_keeping(self):
+        self._configure()
+        self._write_transcript("s1", [_line(
+            "assistant", "I think I will read the configuration next.")])
+        self.assertEqual(transcript_mine.mine(self.home, self.root, "s1"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -538,7 +538,7 @@ class TestModelAndEffort(ConsoleCase):
 
 
 class TestPidAndUptime(ConsoleCase):
-    """pid is the pane's process as tmux reports it (display-message
+    """pid is the pane's process as tmux reports it (list-panes
     #{pane_pid} on the exact session), uptime_seconds its age from
     /proc; both null whenever the cousin is not a local running
     session or the probe answers nothing usable. Never a zero."""
@@ -553,7 +553,7 @@ class TestPidAndUptime(ConsoleCase):
         self.assertIsInstance(row["uptime_seconds"], int)
         self.assertGreaterEqual(row["uptime_seconds"], 0)
         calls = [l for l in self.tmux_log.read_text().splitlines()
-                 if "display-message" in l]
+                 if "list-panes" in l]
         self.assertTrue(calls)
         self.assertIn("-t =wren", calls[0])
         self.assertIn("#{pane_pid}", calls[0])
@@ -568,7 +568,7 @@ class TestPidAndUptime(ConsoleCase):
         for slug in ("wren", "far", "toki"):
             self.assertIsNone(rows[slug]["pid"], slug)
             self.assertIsNone(rows[slug]["uptime_seconds"], slug)
-        self.assertNotIn("display-message", self.tmux_log.read_text())
+        self.assertNotIn("list-panes", self.tmux_log.read_text())
 
     def test_unusable_probe_or_vanished_process_is_null_not_zero(self):
         self.cousin("wren")

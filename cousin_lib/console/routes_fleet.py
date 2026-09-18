@@ -57,19 +57,23 @@ def _pane_active(server, config):
 
 def _pane_pid(server, config):
     """The agent process in the cousin's session: tmux's #{pane_pid}
-    for the exactly named session (the `=` prefix refuses prefix
-    matches), through the console's own binary and socket. None when
-    tmux fails or prints nothing usable."""
+    of the session's first pane, for the exactly named session (the
+    `=` prefix refuses prefix matches), through the console's own
+    binary and socket. list-panes, not display-message: on a live
+    tmux 3.6a `display-message -p -t =name` printed an empty line for
+    a session target, which read as "no pid" on every running cousin.
+    None when tmux fails or prints nothing usable."""
     try:
-        r = tmux(server, ["display-message", "-p", "-t",
-                          "=" + config.tmux_session, "#{pane_pid}"],
+        r = tmux(server, ["list-panes", "-t", "=" + config.tmux_session,
+                          "-F", "#{pane_pid}"],
                  timeout=2)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
+    first = ((r.stdout or "").strip().splitlines() or [""])[0]
     try:
-        pid = int((r.stdout or "").strip())
+        pid = int(first)
     except ValueError:
         return None
     return pid if pid > 0 else None

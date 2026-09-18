@@ -19,6 +19,11 @@ What it is:
   else), [tell-home: text] (a post to the configured home chat server)
 - an inbox poller: messages other cousins send it through the queen
   become turns, answered back over the bus
+- a checkin: on start and every checkin_seconds (the queen's answer,
+  60 until it says otherwise) the node tells the queen its port, name,
+  role and runtime version, so the queen's console can show its card
+  and reach its chat; a failed checkin is logged and retried, never
+  fatal
 
 The backend is AGENT_CMD from the environment when set (the prompt on
 stdin, the reply on stdout), else the placeholder brain, so a fresh
@@ -26,13 +31,20 @@ node is never dead on arrival. With no reachable queen it keeps
 serving its own chat and simply remembers nothing until the queen is
 back: the absence is inert, never a crash.
 
+Off loopback (NODE_HOST other than 127.0.0.1) the chat routes answer
+only a caller presenting this node's own HIVE_TOKEN as a bearer: the
+queen's console holds it and proxies chat with it. Loopback callers
+and /health need nothing.
+
 Configuration is the environment (install.sh loads node.env):
-  COUSIN_SLUG, NODE_NAME, NODE_PORT, NODE_HOST (127.0.0.1)
+  COUSIN_SLUG, NODE_NAME, NODE_ROLE, NODE_PORT, NODE_HOST (127.0.0.1)
   QUEEN_URL, HIVE_TOKEN
   HOME_CHAT_URL (optional gateway), AGENT_CMD (optional backend)
   NODE_DIR (this directory), NODE_POLL_SECONDS (5; 0 disables)
   AGENT_TIMEOUT_SECONDS (120)
 """
+import hmac
+import ipaddress
 import json
 import os
 import re
@@ -49,6 +61,9 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+# The runtime's own version, reported at each checkin.
+NODE_VERSION = "0.2.0"
+DEFAULT_CHECKIN_SECONDS = 60
 
 # The three reply markers. A payload written as <placeholder> is the
 # syntax being quoted (the identity file and the doctrine both spell
@@ -107,6 +122,7 @@ class NodeConfig:
         if not self.slug:
             raise ConfigError("COUSIN_SLUG is missing from the environment")
         self.name = (get("NODE_NAME") or "").strip() or self.slug.capitalize()
+        self.role = (get("NODE_ROLE") or "").strip()
         self.host = (get("NODE_HOST") or "").strip() or "127.0.0.1"
         try:
             self.port = int(get("NODE_PORT") or 8210)
@@ -190,6 +206,83 @@ class Hive:
         if not out:
             return []
         return list(out.get("messages") or [])
+
+    def checkin(self, *, port, name, role, version):
+        """(answer, None) or (None, reason): unlike the other calls the
+        caller logs why a checkin failed."""
+        if not self.queen_url:
+            return None, "no QUEEN_URL"
+        request = urllib.request.Request(
+            self.queen_url + "/hive/checkin",
+            data=json.dumps({"port": port, "name": name, "role": role,
+                             "version": version}).encode(),
+            method="POST",
+            headers={"Authorization": "Bearer %s" % self.token,
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as r:
+                return json.loads(r.read()), None
+        except urllib.error.HTTPError as err:
+            return None, "HTTP %d" % err.code
+        except Exception as err:  # noqa: BLE001 - any failure is retried
+            return None, str(getattr(err, "reason", err))
+
+
+class Checkin:
+    """On start and every checkin_seconds: tell the queen where this
+    node's chat is. The period is the queen's (its answer carries it),
+    DEFAULT_CHECKIN_SECONDS until it has answered. Failures are logged
+    once per change of reason and retried at the same period."""
+
+    def __init__(self, config, hive, port_fn, *, log=None):
+        self.config = config
+        self.hive = hive
+        self.port_fn = port_fn
+        self.log = log or (lambda text: None)
+        self.period = DEFAULT_CHECKIN_SECONDS
+        self._last_error = None
+        self._stop = threading.Event()
+        self._thread = None
+
+    def once(self):
+        answer, error = self.hive.checkin(
+            port=self.port_fn(), name=self.config.name,
+            role=self.config.role, version=NODE_VERSION)
+        if answer is None:
+            if error != self._last_error:
+                self.log("checkin failed (%s); retrying every %ds"
+                         % (error, self.period))
+            self._last_error = error
+            return False
+        if self._last_error is not None:
+            self.log("checkin ok again")
+        self._last_error = None
+        try:
+            period = int(answer.get("checkin_seconds") or 0)
+        except (TypeError, ValueError):
+            period = 0
+        if period > 0:
+            self.period = period
+        return True
+
+    def _loop(self):
+        while not self._stop.is_set():
+            try:
+                self.once()
+            except Exception as err:  # noqa: BLE001 - never fatal
+                self.log("checkin: %s" % err)
+            self._stop.wait(self.period)
+
+    def start(self):
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)
 
 
 # ---- the chat store: one JSONL file, the framework's row shape ----------
@@ -444,11 +537,40 @@ class _BadRequest(Exception):
     pass
 
 
+def is_loopback(address):
+    """True for 127.0.0.0/8, ::1 and their IPv4-mapped forms."""
+    try:
+        addr = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return (mapped or addr).is_loopback
+
+
+def caller_allowed(address, authorization, token):
+    """The chat routes' gate: a loopback caller is the box itself; any
+    other caller must present this node's own hive token."""
+    if is_loopback(address):
+        return True
+    if not token or not authorization.startswith("Bearer "):
+        return False
+    return hmac.compare_digest(authorization[7:].strip().encode(),
+                               token.encode())
+
+
 class _Handler(BaseHTTPRequestHandler):
     node = None
 
     def log_message(self, fmt, *args):
         pass
+
+    def _allowed(self):
+        if caller_allowed(self.client_address[0],
+                          self.headers.get("Authorization") or "",
+                          self.node.config.token):
+            return True
+        self._send_json(401, {"error": "unauthorized"})
+        return False
 
     def _send_json(self, status, payload):
         body = json.dumps(payload).encode()
@@ -483,7 +605,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "port": self.node.port, "brain": self.node.config.brain,
                 })
             elif parsed.path == "/api/history":
-                self._history(urllib.parse.parse_qs(parsed.query))
+                if self._allowed():
+                    self._history(urllib.parse.parse_qs(parsed.query))
             else:
                 self._send_json(404, {"error": "not found"})
         except _BadRequest as err:
@@ -492,7 +615,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             if self.path == "/api/send":
-                self._send()
+                if self._allowed():
+                    self._send()
             else:
                 self._send_json(404, {"error": "not found"})
         except _BadRequest as err:
@@ -545,6 +669,8 @@ class Node:
         self.brain = Brain(config, self.hive, self.store, log=self.log)
         self.poller = InboxPoller(config, self.hive, self.store, self.brain,
                                   log=self.log)
+        self.checkin = Checkin(config, self.hive, lambda: self.port,
+                               log=self.log)
         node = self
 
         class Handler(_Handler):
@@ -563,8 +689,10 @@ class Node:
                                         daemon=True)
         self._thread.start()
         self.poller.start()
+        self.checkin.start()
 
     def stop(self):
+        self.checkin.stop()
         self.poller.stop()
         self.httpd.shutdown()
         self.httpd.server_close()
@@ -590,11 +718,13 @@ def main(argv=None):
     print("%s (%s) listening on %s:%d [brain=%s]" % (
         node.config.name, node.config.slug, node.config.host, node.port,
         node.config.brain), flush=True)
+    node.checkin.start()
     try:
         node.httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        node.checkin.stop()
         node.poller.stop()
         node.httpd.server_close()
     return 0

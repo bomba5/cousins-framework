@@ -14,6 +14,7 @@ Crash recovery is the operator: a stale in-progress marker is reported
 and overwritten, never auto-recovered.
 """
 import json
+import shutil
 import subprocess
 import time
 import tomllib
@@ -26,7 +27,7 @@ from cousin_lib.config import (CousinConfig, FrameworkConfig,
 from cousin_lib.server.injection import TmuxInjector
 from cousin_lib.spawn import (SpawnError, _mint_session_id,
                               _persist_session_id, render_agent_cmd,
-                              start_cousin)
+                              start_cousin, start_preflight)
 from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
@@ -59,8 +60,11 @@ def _tmux(args, tmux_bin, tmux_socket, *, timeout=5):
 
 
 def _session_alive(session, tmux_bin, tmux_socket):
-    return _tmux(["has-session", "-t", session],
-                 tmux_bin, tmux_socket).returncode == 0
+    try:
+        return _tmux(["has-session", "-t", session],
+                     tmux_bin, tmux_socket).returncode == 0
+    except OSError:
+        return False
 
 
 def _capture_tail(session, tmux_bin, tmux_socket, lines=100):
@@ -143,7 +147,7 @@ def _read_agent_cmd_template(root):
 def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
          tmux_socket=None, handoff_deadline=HANDOFF_DEADLINE_SECONDS,
          halfway=HANDOFF_HALFWAY_SECONDS,
-         settle=RESPAWN_SETTLE_SECONDS):
+         settle=RESPAWN_SETTLE_SECONDS, which=shutil.which):
     """Run the flip for one cousin. Returns a structured result whose
     ok reflects the verified identity write."""
     result = {"slug": slug, "ok": False, "stages": []}
@@ -190,9 +194,17 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
         # kill: a placeholder nothing defines would otherwise fail the
         # respawn with the old session already gone.
         try:
-            render_agent_cmd(agent_cmd_template, home, root=root)
+            rendered = render_agent_cmd(agent_cmd_template, home, root=root)
         except SpawnError as err:
             failures.append(str(err))
+        else:
+            # The host half: tmux and the agent's executable, checked
+            # before the kill for the same reason. PATH is this
+            # process's; a unit's PATH is often narrower than a login
+            # shell's, which is exactly the case this catches.
+            failures.extend(start_preflight(
+                rendered.replace("{session_id}", "x"), tmux_bin=tmux_bin,
+                which=which))
     if failures:
         result["stages"].append({"stage": "preflight", "ok": False,
                                  "failures": failures})
@@ -346,14 +358,24 @@ def flip_main(argv=None):
     """Console entry point: cousin-flip <slug> [--confirm] [--dry-run].
     Operator-driven; a cousin must never flip itself."""
     import argparse
+    import os
     import sys
 
     parser = argparse.ArgumentParser(prog="cousin-flip")
     parser.add_argument("slug")
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--root",
+        help="the framework root (the checkout); falls back to"
+             " FRAMEWORK_ROOT")
     args = parser.parse_args(argv)
     try:
+        root = FrameworkConfig.resolve(args.root).root
+        # The flip's stages (boot assembly, audits, the respawned
+        # session) read the root from the environment; the CLI owns its
+        # process environment, so --root is exported for all of them.
+        os.environ["FRAMEWORK_ROOT"] = str(root)
         result = flip(args.slug, confirm=args.confirm,
                       dry_run=args.dry_run)
     except MissingConfigError as err:

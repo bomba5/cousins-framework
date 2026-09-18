@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from cousin_lib.flip import flip
+from tests._fakes import agent_on_path
 from tests.server.test_injection import _FAKE_TMUX
 
 
@@ -49,6 +50,7 @@ class FlipCase(unittest.TestCase):
         })
         patcher.start()
         self.addCleanup(patcher.stop)
+        agent_on_path(self, self.root)
 
     def _flip(self, **kw):
         kw.setdefault("tmux_bin", str(self.tmux))
@@ -175,7 +177,57 @@ class TestMintSessionId(unittest.TestCase):
                 flip_mod._mint_session_id()
 
 
+class TestHostPreflight(FlipCase):
+    """A flip checks what the respawn needs from the host before it
+    touches the running session: tmux, and the agent command's
+    executable. Without them the old session would be killed and the
+    new one would never start."""
+
+    def test_missing_tmux_fails_preflight_cleanly(self):
+        out = self._flip(tmux_bin=str(self.root / "no-such-tmux"))
+        self.assertFalse(out["ok"])
+        self.assertIn("preflight", out["error"])
+        self.assertIn("tmux", out["error"])
+        self.assertFalse(self.log.exists())
+
+    def test_missing_tmux_fails_a_dry_run_too_without_a_traceback(self):
+        out = self._flip(tmux_bin=str(self.root / "no-such-tmux"),
+                         dry_run=True)
+        self.assertFalse(out["ok"])
+        self.assertIn("tmux", out["error"])
+
+    def test_unresolvable_agent_fails_preflight_before_any_damage(self):
+        (self.root / "config" / "agent-cmd").write_text(
+            "not-an-agent-anywhere --sid {session_id}\n")
+        out = self._flip()
+        self.assertFalse(out["ok"])
+        self.assertIn("not-an-agent-anywhere", out["error"])
+        self.assertNotIn("kill-session", " ".join(self._calls()))
+
+
 class TestCli(FlipCase):
+    def test_root_flag_is_accepted(self):
+        import contextlib
+        import io
+        from cousin_lib.flip import flip_main
+        seen = {}
+
+        def fake_flip(slug, **kw):
+            seen.update(kw, slug=slug,
+                        root=os.environ.get("FRAMEWORK_ROOT"))
+            return {"ok": True}
+        out = io.StringIO()
+        with mock.patch.dict(os.environ):
+            os.environ.pop("FRAMEWORK_ROOT", None)
+            with mock.patch("cousin_lib.flip.flip", fake_flip), \
+                    contextlib.redirect_stdout(out):
+                rc = flip_main(["wren", "--root", str(self.root),
+                                "--dry-run"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(pathlib.Path(seen["root"]), self.root)
+
+    @unittest.skipUnless(__import__("shutil").which("tmux"),
+                         "tmux is a documented prerequisite; not installed")
     def test_dry_run_via_the_cli_exits_zero(self):
         import contextlib
         import io

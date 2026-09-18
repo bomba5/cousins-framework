@@ -89,10 +89,12 @@ Step by step:
 5. **Handoff.** Type this into the live session:
 
    ```
-   [cousin-flip in progress] Three pre-exit writes required:
+   [cousin-flip in progress] Four pre-exit writes required:
    1. Reconcile STATUS.md ...
    2. Write your handoff to data/handoff.md ...
    3. Write data/active-threads.md, one bullet per in-flight thread.
+   4. Save what this session learned that is not in memory yet:
+      cousin-memory remember (...) and cousin-memory decide (...).
    Then stop working. The framework is rebuilding your boot packet.
    ```
 
@@ -128,6 +130,12 @@ The flip counts as ok only if the new session id was saved: a flip that lost it 
 On failure there's an `error` string and the stages up to the one that failed.
 
 `--dry-run` skips the concurrency guard and the marker, runs preflight, skips the handoff, mining, archive and respawn, and builds the packet without writing it, so you see `new_generation`, `boot_packet_tokens` and `degraded_sections` for what a real flip would produce. Building the packet does regenerate `memory/distilled/`, so that's the one thing a dry run writes.
+
+### A clean stop
+
+The console's stop button ends a running cousin the same way, minus the respawn: steps 3 to 10 above (marker, capture, the handoff prompt headed `[cousin-stop in progress]`, the audit, transcript mining, archive, generation, packet), then the agent and the chat server stop. The packet waits in `data/pending-boot.json`. The next start of any kind (the console, `cousin-spawn --start`, the `cousin-start@` unit with `--resume`) starts a fresh session instead of resuming the closed one, and types the packet in after 8 seconds, preceded by `[cousin-start] the last session closed cleanly; boot packet follows.` A flip in between supersedes the pending packet with its own.
+
+The console runs a clean stop in the background (HTTP 202, the row turns `stopped` when it is done; the handoff wait is up to 300 seconds). A cousin that isn't running stops at once. `{"clean": false}` on `POST /api/cousins/<slug>/stop` stops at once without the handoff, and restart stays immediate: it applies a setting and comes straight back. In code the clean stop is `cousin_lib.flip.close_session`.
 
 ### When a flip dies halfway
 

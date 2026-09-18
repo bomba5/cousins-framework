@@ -153,15 +153,18 @@ behind a small launcher that applies the auth mode, and starts the chat
 server if nothing answers on its port. The chat server's pid goes in
 `data/chat-server.pid` and its log in `data/chat-server.log`.
 
-Stop and restart are in the console (card and inspector buttons). There's no
-stop command yet; by hand it is:
+Stop and restart are in the console (card and inspector buttons). Stop is a
+clean stop: the cousin writes its handoff and saves what it learned, the
+transcript is mined, and the next start boots a fresh session on a packet
+built from all that ([lifecycle](reference/lifecycle.md#a-clean-stop)).
+There's no stop command yet; an immediate stop by hand is:
 
 ```
 tmux kill-session -t wren
 kill "$(cat cousins/wren/data/chat-server.pid)"
 ```
 
-Restart is stop, a short pause, start. Either way the conversation in the
+Restart is an immediate stop, a short pause, start. The conversation in the
 session is gone; the next session starts fresh from CLAUDE.md and whatever
 the cousin wrote to disk. To keep the thread across a restart, flip instead
 (below), or switch auth modes, which resumes the same session.

@@ -351,3 +351,94 @@ class TestFlipRendersModelAndEffort(FlipCase):
         spawn = [c for c in self._calls() if "new-session" in c][-1]
         self.assertIn("--model dm --effort low", spawn)
         self.assertNotIn("{", spawn)
+
+
+class TestHandoffPromptAsksForMemory(FlipCase):
+    """The pre-exit prompt carries a fourth write: what the session
+    learned goes into memory, with its truth level, before it ends."""
+
+    def test_flip_prompt_names_the_memory_step(self):
+        from cousin_lib.flip import handoff_prompt
+        text = handoff_prompt()
+        self.assertIn("[cousin-flip in progress] Four pre-exit writes", text)
+        self.assertIn("4. Save what this session learned", text)
+        self.assertIn("cousin-memory remember", text)
+        self.assertIn("cousin-memory decide", text)
+        self._flip()
+        self.assertIn("cousin-memory remember", self.log.read_text())
+
+    def test_stop_prompt_says_stop_not_flip(self):
+        from cousin_lib.flip import handoff_prompt
+        text = handoff_prompt("cousin-stop", "The cousin is being stopped.")
+        self.assertTrue(text.startswith("[cousin-stop in progress]"))
+        self.assertIn("4. Save what this session learned", text)
+        self.assertTrue(text.endswith("The cousin is being stopped."))
+
+
+class TestCloseSession(FlipCase):
+    """A clean stop is the first half of a flip, then the stop: the
+    next packet waits in data/pending-boot.json for the next start."""
+
+    def _close(self, **kw):
+        from cousin_lib.flip import close_session
+        kw.setdefault("tmux_bin", str(self.tmux))
+        kw.setdefault("handoff_deadline", 1)
+        kw.setdefault("halfway", 0.4)
+        with mock.patch("cousin_lib.spawn._pid_bound_to_port",
+                        lambda port: None):
+            return close_session("wren", **kw)
+
+    def test_a_live_cousin_hands_off_and_leaves_a_pending_packet(self):
+        def cousin_writes():
+            time.sleep(0.3)
+            (self.home / "data" / "handoff.md").write_text("# H\nok\n")
+        threading.Thread(target=cousin_writes, daemon=True).start()
+        out = self._close()
+        self.assertTrue(out["ok"], out)
+        stages = {s["stage"]: s for s in out["stages"]}
+        self.assertTrue(stages["wait_handoff"]["wrote_clean"])
+        self.assertIn("transcript_mine", stages)
+        self.assertEqual(out["new_generation"], 1)
+        log_text = self.log.read_text()
+        self.assertIn("[cousin-stop in progress]", log_text)
+        self.assertIn("cousin-memory remember", log_text)
+        calls = self._calls()
+        self.assertTrue(any("kill-session" in c for c in calls))
+        self.assertFalse(any("new-session" in c for c in calls))
+        pending = json.loads(
+            (self.home / "data" / "pending-boot.json").read_text())
+        self.assertEqual(pending["generation"], 1)
+        self.assertIn("BOOT PACKET FOR COUSIN: wren",
+                      pathlib.Path(pending["packet"]).read_text())
+        self.assertFalse(
+            (self.home / "data" / ".flip-in-progress.json").exists())
+
+    def test_a_stopped_cousin_is_just_stopped(self):
+        os.environ["FAKE_TMUX_RC"] = "1"
+        self.addCleanup(os.environ.pop, "FAKE_TMUX_RC", None)
+        out = self._close()
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["stop"]["tmux"], "already stopped")
+        self.assertFalse((self.home / "data" / "pending-boot.json").exists())
+        self.assertNotIn("cousin-stop in progress",
+                         self.log.read_text() if self.log.exists() else "")
+
+    def test_refuses_while_a_flip_is_running(self):
+        (self.home / "data" / ".flip-in-progress.json").write_text(
+            json.dumps({"started_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc).isoformat()}))
+        out = self._close()
+        self.assertFalse(out["ok"])
+        self.assertIn("refusing", out["error"])
+
+    def test_a_flip_supersedes_a_pending_packet(self):
+        pending = self.home / "data" / "pending-boot.json"
+        packet = self.home / "data" / "boot-packet-gen-0009.md"
+        packet.write_text("old packet\n")
+        pending.write_text(json.dumps({"generation": 9,
+                                       "packet": str(packet)}))
+        out = self._flip()
+        self.assertTrue(out["ok"], out)
+        self.assertFalse(pending.exists())
+        self.assertNotIn("the last session closed cleanly",
+                         self.log.read_text())

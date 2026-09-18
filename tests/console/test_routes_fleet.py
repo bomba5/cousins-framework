@@ -229,9 +229,40 @@ class TestStartStopRestart(ConsoleCase):
                                 "tmux": "already stopped",
                                 "chat_server": "not running"})
         self.tmux_running(True)
-        status, body = self.post("/api/cousins/wren/stop")
+        status, body = self.post("/api/cousins/wren/stop", {"clean": False})
         self.assertEqual(body["tmux"], "stopped")
         self.assertEqual(self.post("/api/cousins/nobody/stop")[0], 404)
+        self.assertEqual(self.post("/api/cousins/wren/stop",
+                                   {"clean": "yes"})[0], 400)
+
+    def test_a_running_cousin_stops_cleanly_in_the_background(self):
+        self.cousin("wren")
+        self.tmux_running(True)
+        server = self.serve()
+        seen, calls = [], []
+        server.listeners.append(lambda k, d: seen.append((k, d)))
+        done = __import__("threading").Event()
+
+        def fake_close(slug, **kw):
+            calls.append(slug)
+            done.set()
+            return {"slug": slug, "ok": True, "stages": [],
+                    "new_generation": 3}
+        server.close_fn = fake_close
+        status, body = self.post("/api/cousins/wren/stop")
+        self.assertEqual(status, 202, body)
+        self.assertEqual(body["status"], "closing")
+        self.assertTrue(done.wait(5))
+        deadline = time.time() + 5
+        while time.time() < deadline and not any(
+                d.get("status") == "stopped" for k, d in seen
+                if k == "cousin-status"):
+            time.sleep(0.02)
+        self.assertEqual(calls, ["wren"])
+        self.assertIn(("cousin-status", {"slug": "wren",
+                                         "status": "closing"}), seen)
+        self.assertIn(("cousin-status", {"slug": "wren",
+                                         "status": "stopped"}), seen)
 
     def test_restart_is_stop_then_start_with_the_starts_code(self):
         self.cousin("wren")

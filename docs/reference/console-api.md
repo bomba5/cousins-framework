@@ -130,11 +130,13 @@ Starts the tmux session with the agent from `config/agent-cmd`, and the chat ser
 
 ### `POST /api/cousins/<slug>/stop`
 
-Kills the tmux session and stops the chat server. Idempotent. `200 {"ok": true, "slug", "status": "stopped", "tmux": "stopped" | "already stopped", "chat_server": "stopped" | "not running"}`. Emits `cousin-status` `stopping`.
+Body (optional): `{"clean": true}` (the default). A running cousin stops cleanly in the background ([lifecycle](lifecycle.md#a-clean-stop)): `202 {"ok": true, "slug", "status": "closing", "started_at"}`, `cousin-status` `closing`, then `stopped` (or `stop failed`) and a `cousins-refresh` when it is done; `409` while a flip or another clean stop of that cousin is running. The run's stages show on `GET /api/cousins/<slug>/flip`.
+
+With `{"clean": false}`, or when the cousin isn't running: kills the tmux session and stops the chat server at once. Idempotent. `200 {"ok": true, "slug", "status": "stopped", "tmux": "stopped" | "already stopped", "chat_server": "stopped" | "not running"}`. Emits `cousin-status` `stopping`. `400` when `clean` is not a boolean.
 
 ### `POST /api/cousins/<slug>/restart`
 
-Stop, wait about a second, start. `200 {"ok": true, "target": "cousin/<slug>", "stop": {...}, "start": {...}}`. If the start fails you get the start's status code with `ok: false` and its error body under `start`.
+Immediate stop (as `{"clean": false}`), wait about a second, start. `200 {"ok": true, "target": "cousin/<slug>", "stop": {...}, "start": {...}}`. If the start fails you get the start's status code with `ok: false` and its error body under `start`.
 
 ### `GET /api/cousins/<slug>/auth`
 

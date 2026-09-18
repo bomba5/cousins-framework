@@ -406,10 +406,57 @@ def register():
 
     @router.route("POST", "/api/cousins/{slug}/stop")
     def stop(req, slug):
-        return 200, _stop(req.server, slug)
+        """A running cousin stops CLEANLY by default: it is asked for
+        its pre-exit writes and memory, the transcript is mined and the
+        next packet assembled (flip.close_session), in the background,
+        202. {"clean": false} stops at once, as kill does for the
+        session. A cousin that is not running stops at once either
+        way."""
+        server = req.server
+        config = load_cousin(server, slug)
+        clean = req.body.get("clean", True)
+        if not isinstance(clean, bool):
+            raise HttpError(400, "clean must be a boolean")
+        if not clean or not session_alive(server, config):
+            return 200, _stop(server, slug)
+        lock = server.state.setdefault("flip_lock", threading.Lock())
+        flips = server.state.setdefault("flips", {})
+        with lock:
+            current = flips.get(slug)
+            if current and current["status"] == "running":
+                raise HttpError(409, "a flip or clean stop is already"
+                                     " running")
+            entry = {"status": "running", "started_at": time.time(),
+                     "kind": "stop"}
+            flips[slug] = entry
+        run_close = server.close_fn or _default_close
+
+        def run():
+            try:
+                result = run_close(slug, tmux_bin=server.tmux_bin,
+                                   tmux_socket=server.tmux_socket)
+            except Exception as err:  # noqa: BLE001 - reported on the row
+                result = {"slug": slug, "ok": False, "error": str(err),
+                          "stages": []}
+            entry["result"] = result
+            entry["stages"] = result.get("stages", [])
+            entry["status"] = "done" if result.get("ok") else "failed"
+            server.emit("cousin-status", {
+                "slug": slug,
+                "status": "stopped" if result.get("ok") else "stop failed"})
+            server.emit("cousins-refresh", fleet_rows(server))
+
+        server.emit("cousin-status", {"slug": slug, "status": "closing"})
+        threading.Thread(target=run, daemon=True,
+                         name="console-close-%s" % slug).start()
+        return 202, {"ok": True, "slug": slug, "status": "closing",
+                     "started_at": entry["started_at"]}
 
     @router.route("POST", "/api/cousins/{slug}/restart")
     def restart(req, slug):
+        # A restart stays immediate: it applies a setting (a model, an
+        # auth mode) and comes straight back; a clean stop is the stop
+        # button's.
         stopped = _stop(req.server, slug)
         time.sleep(req.server.settle_seconds)
         try:
@@ -743,6 +790,11 @@ def register():
 def _default_flip(slug, **kw):
     from cousin_lib import flip
     return flip.flip(slug, **kw)
+
+
+def _default_close(slug, **kw):
+    from cousin_lib import flip
+    return flip.close_session(slug, **kw)
 
 
 register()

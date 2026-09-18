@@ -183,6 +183,7 @@ class ConsoleServer:
         self.static_handler = None
         self.settle_seconds = 1.0
         self.flip_fn = None
+        self.close_fn = None
         self.exit_fn = None
         # Every library the console calls reads FRAMEWORK_ROOT; the
         # entry point exports the flag, a direct construction inherits

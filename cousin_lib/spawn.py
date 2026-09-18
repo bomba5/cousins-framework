@@ -6,6 +6,7 @@ failed create removes everything it made, a completed create is a real
 cousin whatever happens afterwards.
 """
 import argparse
+import json
 import os
 import re
 import shlex
@@ -702,9 +703,58 @@ def resume_agent_cmd(agent_cmd, root, session_id):
         .replace("{session_id}", session_id)
 
 
+# A clean stop (flip.close_session) ends the generation the way a flip
+# does and leaves the next generation's boot packet here. The next
+# start, whatever starts it, consumes it: a fresh session (never a
+# resume of the closed one) with the packet typed in once the agent is
+# up. A flip supersedes a pending packet with its own.
+PENDING_BOOT = "pending-boot.json"
+BOOT_SETTLE_SECONDS = 8
+
+
+def pending_boot_path(home):
+    return Path(home) / "data" / PENDING_BOOT
+
+
+def pending_boot(home):
+    """The pending packet's record ({generation, packet, written_at}),
+    or None when there is none or its packet file is gone."""
+    try:
+        data = json.loads(pending_boot_path(home).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("packet"):
+        return None
+    if not Path(data["packet"]).is_file():
+        return None
+    return data
+
+
+def _inject_pending_boot(home, config, *, tmux_bin, tmux_socket, settle):
+    """Type a pending packet into the just-started session and clear
+    it. Best-effort: a failure leaves the record for the next start and
+    never fails this one."""
+    pending = pending_boot(home)
+    if pending is None:
+        pending_boot_path(home).unlink(missing_ok=True)
+        return False
+    try:
+        text = Path(pending["packet"]).read_text()
+        from cousin_lib.server.injection import TmuxInjector
+        time.sleep(settle)
+        TmuxInjector(config.tmux_session, tmux_bin=tmux_bin,
+                     socket=tmux_socket).inject(
+            "[cousin-start] the last session closed cleanly; boot packet"
+            " follows. Do not announce the restart.\n" + text)
+    except Exception:  # noqa: BLE001 - best-effort, see docstring
+        return False
+    pending_boot_path(home).unlink(missing_ok=True)
+    return True
+
+
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
                  start_chat_server=_default_chat_server, root=None,
-                 record=True, note=None):
+                 record=True, note=None, boot_settle=BOOT_SETTLE_SECONDS):
     """THE tmux-session-creation site - the only one in this codebase,
     by spec. Any future respawn machinery calls this function.
 
@@ -718,7 +768,11 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
 
     A successful start is recorded in the cousin's raw memory as an L1
     event (framework:session) unless record is False - the flip records
-    its own, richer entry. note, when given, is appended to it."""
+    its own, richer entry. note, when given, is appended to it.
+
+    A packet a clean stop left (pending_boot) is typed in after
+    boot_settle seconds; the caller is responsible for not resuming
+    the closed session (resume_plan declines while one is pending)."""
     config = CousinConfig.load(home)
     agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
     # The auth mode's checks (key file, isolated harness config) run
@@ -773,8 +827,13 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
             text += " on new session %s" % session_id[:8]
         if note:
             text += "; %s" % note
+        if pending_boot(home) is not None:
+            text += "; boot packet from the clean stop injected"
         framework_event(home, "session", text)
     start_chat_server(home)
+    if pending_boot_path(home).exists():
+        _inject_pending_boot(home, config, tmux_bin=tmux_bin,
+                             tmux_socket=tmux_socket, settle=boot_settle)
 
 
 def _read_agent_cmd(root):
@@ -856,6 +915,9 @@ def resume_plan(home, root, agent_cmd):
         data = tomllib.loads((Path(home) / "cousin.toml").read_text())
     except (OSError, tomllib.TOMLDecodeError):
         return None, "cousin.toml unreadable"
+    if pending_boot(home) is not None:
+        return None, ("the last session closed cleanly; starting fresh on"
+                      " its boot packet")
     session_id = str((data.get("runtime") or {}).get("session_id") or "")
     if not session_id:
         return None, "no runtime.session_id yet"

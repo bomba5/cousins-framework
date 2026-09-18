@@ -27,25 +27,38 @@ from cousin_lib.config import (CousinConfig, FrameworkConfig,
 from cousin_lib.server.injection import TmuxInjector
 from cousin_lib.spawn import (SpawnError, _mint_session_id,
                               _persist_session_id, framework_event,
-                              render_agent_cmd, start_cousin,
-                              start_preflight)
+                              pending_boot_path, render_agent_cmd,
+                              start_cousin, start_preflight, stop_cousin)
 from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
 HANDOFF_HALFWAY_SECONDS = 150
 RESPAWN_SETTLE_SECONDS = 8
 
-_HANDOFF_PROMPT = (
-    "[cousin-flip in progress] Three pre-exit writes required:\n"
-    "1. Reconcile STATUS.md: fold in-flight progress and open loops"
-    " into the file - the next session anchors on STATUS.md as"
-    " authoritative.\n"
-    "2. Write your handoff to data/handoff.md (position, next action,"
-    " open questions, degraded_state: false).\n"
-    "3. Write data/active-threads.md, one bullet per in-flight"
-    " thread.\n"
-    "Then stop working. The framework is rebuilding your boot packet."
-)
+def handoff_prompt(event="cousin-flip", after="The framework is"
+                   " rebuilding your boot packet."):
+    """The pre-exit prompt typed into a session that is about to end,
+    by a flip or by a clean stop. Step 4 is the one the handoff files
+    cannot carry: what the session learned goes into memory now, with
+    its truth level, because the next session boots on a packet and
+    starts without this context."""
+    return (
+        "[%s in progress] Four pre-exit writes required:\n"
+        "1. Reconcile STATUS.md: fold in-flight progress and open loops"
+        " into the file - the next session anchors on STATUS.md as"
+        " authoritative.\n"
+        "2. Write your handoff to data/handoff.md (position, next action,"
+        " open questions, degraded_state: false).\n"
+        "3. Write data/active-threads.md, one bullet per in-flight"
+        " thread.\n"
+        "4. Save what this session learned that is not in memory yet:"
+        " cousin-memory remember (operator statements at --level"
+        " operator with --cite) and cousin-memory decide for decisions"
+        " and their reasons.\n"
+        "Then stop working. %s" % (event, after))
+
+
+_HANDOFF_PROMPT = handoff_prompt()
 
 
 def _marker_path(home):
@@ -135,6 +148,63 @@ def _mine_transcript(home, root, *, dry_run):
     except Exception as err:  # noqa: BLE001 - best-effort stage
         stage["skipped"] = "error: %s" % err
     return stage
+
+
+def _hand_off(home, slug, session, *, alive, dry_run, injector, prompt,
+              event, tmux_bin, tmux_socket, deadline_seconds, halfway):
+    """The pre-exit half shared by a flip and a clean stop: prompt the
+    live session, wait (bounded, one nudge) for data/handoff.md to
+    change, else write an emergency handoff; then the session-end audit
+    and the active-threads baseline. Returns the stage records."""
+    stages = []
+    handoff_path = Path(home) / "data" / "handoff.md"
+    mtime_before = (handoff_path.stat().st_mtime
+                    if handoff_path.exists() else 0)
+    if not alive or dry_run:
+        stages.append({
+            "stage": "prompt_handoff", "sent": False,
+            "reason": "dry-run" if dry_run else "no live session"})
+        return stages
+    injector.inject(prompt)
+    stages.append({"stage": "prompt_handoff", "sent": True})
+    deadline = time.time() + deadline_seconds
+    halfway_at = time.time() + halfway
+    nudged = wrote = False
+    while time.time() < deadline:
+        time.sleep(0.1)
+        try:
+            current = handoff_path.stat().st_mtime
+        except FileNotFoundError:
+            current = 0
+        if current > mtime_before:
+            wrote = True
+            break
+        if not nudged and time.time() >= halfway_at:
+            injector.inject("[%s] still waiting for the handoff; wrap up"
+                            " now." % event)
+            nudged = True
+    stages.append({"stage": "wait_handoff", "wrote_clean": wrote,
+                   "nudged": nudged})
+    if not wrote:
+        _write_emergency_handoff(
+            home, slug,
+            transcript_tail=_capture_tail(session, tmux_bin, tmux_socket),
+            reason="handoff timeout (%ss)" % deadline_seconds)
+        stages.append({"stage": "emergency_handoff", "written": True})
+    # Session-end audit with the prior packet's mtime as session start,
+    # then the baseline remediation.
+    prior_gen = boot.read_generation(home)
+    prior_packet = (Path(home) / "data"
+                    / ("boot-packet-gen-%04d.md" % prior_gen))
+    since_ts = (prior_packet.stat().st_mtime
+                if prior_packet.exists() else 0.0)
+    violations = audits.audit_before_exit(slug, home, since_ts=since_ts)
+    stages.append({"stage": "audit_before_exit",
+                   "violations": len(violations)})
+    baseline = audits.write_active_threads_baseline(home, since_ts=since_ts)
+    stages.append({"stage": "active_threads_baseline",
+                   "wrote": baseline["wrote"], "reason": baseline["reason"]})
+    return stages
 
 
 def _read_agent_cmd_template(root):
@@ -240,61 +310,13 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     result["stages"].append({"stage": "capture", "alive": alive,
                              "transcript_chars": len(tail)})
 
-    # Bounded handoff window with one halfway nudge.
-    handoff_path = Path(home) / "data" / "handoff.md"
-    mtime_before = (handoff_path.stat().st_mtime
-                    if handoff_path.exists() else 0)
     injector = TmuxInjector(session, tmux_bin=tmux_bin,
                             socket=tmux_socket)
-    if alive and not dry_run:
-        injector.inject(_HANDOFF_PROMPT)
-        result["stages"].append({"stage": "prompt_handoff", "sent": True})
-        deadline = time.time() + handoff_deadline
-        halfway_at = time.time() + halfway
-        nudged = wrote = False
-        while time.time() < deadline:
-            time.sleep(0.1)
-            try:
-                current = handoff_path.stat().st_mtime
-            except FileNotFoundError:
-                current = 0
-            if current > mtime_before:
-                wrote = True
-                break
-            if not nudged and time.time() >= halfway_at:
-                injector.inject("[cousin-flip] still waiting for the"
-                                " handoff; wrap up now.")
-                nudged = True
-        result["stages"].append({"stage": "wait_handoff",
-                                 "wrote_clean": wrote, "nudged": nudged})
-        if not wrote:
-            _write_emergency_handoff(
-                home, slug,
-                transcript_tail=_capture_tail(session, tmux_bin,
-                                              tmux_socket),
-                reason="handoff timeout (%ss)" % handoff_deadline)
-            result["stages"].append({"stage": "emergency_handoff",
-                                     "written": True})
-        # Session-end audit with the prior packet's mtime as session
-        # start, then the baseline remediation.
-        prior_gen = boot.read_generation(home)
-        prior_packet = (Path(home) / "data"
-                        / ("boot-packet-gen-%04d.md" % prior_gen))
-        since_ts = (prior_packet.stat().st_mtime
-                    if prior_packet.exists() else 0.0)
-        violations = audits.audit_before_exit(slug, home,
-                                              since_ts=since_ts)
-        result["stages"].append({"stage": "audit_before_exit",
-                                 "violations": len(violations)})
-        baseline = audits.write_active_threads_baseline(
-            home, since_ts=since_ts)
-        result["stages"].append({"stage": "active_threads_baseline",
-                                 "wrote": baseline["wrote"],
-                                 "reason": baseline["reason"]})
-    else:
-        result["stages"].append({
-            "stage": "prompt_handoff", "sent": False,
-            "reason": "dry-run" if dry_run else "no live session"})
+    result["stages"].extend(_hand_off(
+        home, slug, session, alive=alive, dry_run=dry_run,
+        injector=injector, prompt=_HANDOFF_PROMPT, event="cousin-flip",
+        tmux_bin=tmux_bin, tmux_socket=tmux_socket,
+        deadline_seconds=handoff_deadline, halfway=halfway))
 
     # Mine the dying session's transcript into raw candidates BEFORE
     # the identity is re-minted (the transcript belongs to the old id)
@@ -327,6 +349,9 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     # persist the identity - ok hangs on that persist.
     if alive:
         _tmux(["kill-session", "-t", session], tmux_bin, tmux_socket)
+    # A packet an earlier clean stop left is superseded by this one,
+    # which the flip injects itself below.
+    pending_boot_path(home).unlink(missing_ok=True)
     # Minted and persisted even when the agent-cmd carries no
     # {session_id} placeholder: the generation record is more useful
     # with it.
@@ -382,6 +407,102 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
 
     marker.unlink(missing_ok=True)
     result["ok"] = persisted
+    return result
+
+
+_STOP_AFTER = ("The cousin is being stopped; the next start boots on a"
+               " packet built from these files.")
+
+
+def close_session(slug, *, tmux_bin="tmux", tmux_socket=None,
+                  handoff_deadline=HANDOFF_DEADLINE_SECONDS,
+                  halfway=HANDOFF_HALFWAY_SECONDS):
+    """A clean stop: the first half of a flip, then the stop. The live
+    session is asked for its pre-exit writes (handoff_prompt, with the
+    memory step), its transcript is mined, the generation is archived
+    and bumped and the next packet assembled; then the agent and chat
+    server stop. The packet waits in data/pending-boot.json, and the
+    next start of any kind boots a fresh session on it instead of
+    resuming this one (spawn.pending_boot).
+
+    A cousin that is not running is just stopped: there is no session
+    to hand off and nothing new to pack. Shares the flip's marker, so
+    a flip and a clean stop never run at once."""
+    result = {"slug": slug, "ok": False, "stages": []}
+    root = FrameworkConfig.from_env().root
+    home = root / "cousins" / slug
+    try:
+        config = CousinConfig.load(home)
+    except MissingConfigError as err:
+        result["error"] = str(err)
+        return result
+    session = config.tmux_session
+    alive = _session_alive(session, tmux_bin, tmux_socket)
+    if not alive:
+        result["stop"] = stop_cousin(home, tmux_bin=tmux_bin,
+                                     tmux_socket=tmux_socket)
+        result["stages"].append({"stage": "prompt_handoff", "sent": False,
+                                 "reason": "no live session"})
+        result["ok"] = True
+        return result
+    marker = _marker_path(home)
+    if marker.exists():
+        try:
+            started = datetime.fromisoformat(
+                json.loads(marker.read_text())["started_at"])
+            age = (datetime.now(timezone.utc) - started).total_seconds()
+        except (ValueError, KeyError, OSError):
+            age = None
+        if age is not None and age < handoff_deadline + 180:
+            result["error"] = ("a flip or clean stop started %ds ago -"
+                               " refusing a concurrent one" % int(age))
+            return result
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps({
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "slug": slug, "kind": "stop"}))
+    try:
+        tail = _capture_tail(session, tmux_bin, tmux_socket)
+        result["stages"].append({"stage": "capture", "alive": True,
+                                 "transcript_chars": len(tail)})
+        injector = TmuxInjector(session, tmux_bin=tmux_bin,
+                                socket=tmux_socket)
+        result["stages"].extend(_hand_off(
+            home, slug, session, alive=True, dry_run=False,
+            injector=injector,
+            prompt=handoff_prompt("cousin-stop", _STOP_AFTER),
+            event="cousin-stop", tmux_bin=tmux_bin,
+            tmux_socket=tmux_socket, deadline_seconds=handoff_deadline,
+            halfway=halfway))
+        result["stages"].append(_mine_transcript(home, root, dry_run=False))
+        prior_gen = boot.read_generation(home)
+        arch = _archive_generation(home, prior_gen, transcript_tail=tail)
+        result["stages"].append({"stage": "archive", "path": str(arch)})
+        new_gen = boot.bump_generation(home)
+        packet = boot.assemble(slug, home, generation=new_gen)
+        packet_path = (Path(home) / "data"
+                       / ("boot-packet-gen-%04d.md" % new_gen))
+        packet_path.write_text(packet["text"])
+        pending_boot_path(home).write_text(json.dumps({
+            "generation": new_gen, "packet": str(packet_path),
+            "written_at": datetime.now(timezone.utc).isoformat()}))
+        result["new_generation"] = new_gen
+        result["boot_packet_tokens"] = packet["approx_tokens"]
+        result["stages"].append({"stage": "assemble_packet",
+                                 "path": str(packet_path), "pending": True})
+        result["stop"] = stop_cousin(home, tmux_bin=tmux_bin,
+                                     tmux_socket=tmux_socket)
+        handoff = next((st for st in result["stages"]
+                        if st["stage"] == "wait_handoff"), {})
+        framework_event(home, "stop", "closed generation %d cleanly"
+                        " (handoff %s); the next start boots generation %d"
+                        " on its packet" % (
+                            prior_gen, "clean" if handoff.get("wrote_clean")
+                            else "emergency (timed out)", new_gen),
+                        generation=new_gen)
+        result["ok"] = True
+    finally:
+        marker.unlink(missing_ok=True)
     return result
 
 

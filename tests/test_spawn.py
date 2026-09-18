@@ -3,12 +3,14 @@
 Tested against real temporary framework roots; nothing is mocked below
 the CLI's own seams.
 """
+import json
 import pathlib
 import shutil
 import socket
 import tempfile
 import tomllib
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from cousin_lib.spawn import (
@@ -775,3 +777,59 @@ class TestResumePlan(unittest.TestCase):
                                          "agent --session-id {session_id}")
             self.assertIsNone(cmd)
             self.assertIn("transcript", why)
+
+
+class PendingBootPacket(unittest.TestCase):
+    """A packet a clean stop left is consumed by the next start: a
+    fresh session (resume_plan declines) with the packet typed in."""
+
+    def setUp(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name) / "cousins" / "wren"
+        (self.home / "data").mkdir(parents=True)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n'
+            '[chat]\nport = 8100\ntmux_session = "wren"\n'
+            '[runtime]\nsession_id = "abc-123"\n')
+        self.packet = self.home / "data" / "boot-packet-gen-0002.md"
+        self.packet.write_text("BOOT PACKET FOR COUSIN: wren\n")
+        self.pending = self.home / "data" / "pending-boot.json"
+        self.pending.write_text(json.dumps(
+            {"generation": 2, "packet": str(self.packet)}))
+
+    def test_resume_is_declined_while_a_packet_is_pending(self):
+        from cousin_lib.spawn import resume_plan
+        cmd, why = resume_plan(self.home, self.home.parent.parent,
+                               "agent --session-id {session_id}")
+        self.assertIsNone(cmd)
+        self.assertIn("closed cleanly", why)
+
+    def test_a_record_whose_packet_is_gone_is_not_pending(self):
+        from cousin_lib.spawn import pending_boot
+        self.assertIsNotNone(pending_boot(self.home))
+        self.packet.unlink()
+        self.assertIsNone(pending_boot(self.home))
+
+    def test_the_start_injects_the_packet_and_clears_it(self):
+        from cousin_lib import spawn
+        injected = []
+
+        class FakeInjector:
+            def __init__(self, session, **kw):
+                self.session = session
+
+            def inject(self, text):
+                injected.append((self.session, text))
+
+        config = spawn.CousinConfig.load(self.home)
+        with mock.patch("cousin_lib.server.injection.TmuxInjector",
+                        FakeInjector):
+            ok = spawn._inject_pending_boot(self.home, config, tmux_bin="t",
+                                            tmux_socket=None, settle=0)
+        self.assertTrue(ok)
+        self.assertFalse(self.pending.exists())
+        self.assertEqual(injected[0][0], "wren")
+        self.assertIn("closed cleanly", injected[0][1])
+        self.assertIn("BOOT PACKET FOR COUSIN: wren", injected[0][1])

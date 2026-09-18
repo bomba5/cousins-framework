@@ -21,6 +21,10 @@ cousins/
 # it is regenerated; none of it is source.
 /data/
 
+# The root's shared tier: reviewed shared memory and the hive database,
+# which holds bearer tokens. One install's state, never source.
+/shared/
+
 # A built hive node archive holds a bearer token and is a binary the
 # gate refuses; cousin-spawn-node writes it where --out says, and it
 # must never stage from a checkout.

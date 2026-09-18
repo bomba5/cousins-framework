@@ -116,17 +116,32 @@ class ChatHeaderEffort(unittest.TestCase):
 
 
 class CousinTagColour(unittest.TestCase):
-    """The fleet-wide cousin tag uses the accent colour; the hash hue
-    is kept for log lines only."""
+    """The fleet-wide cousin tag uses the accent colour. The per-slug
+    hash hue served only the log drawer and went with it."""
 
-    def test_tag_uses_the_accent_and_log_lines_keep_the_hash_hue(self):
+    def test_tag_uses_the_accent_and_no_hash_hue_is_left(self):
         views = _read("views.jsx")
         tag = _component(views, "CousinTag")
         self.assertIn("var(--accent)", tag)
-        self.assertNotIn("cousinColor", tag)
-        rest = views.replace(tag, "")
-        self.assertEqual(rest.count("cousinColor("), 1)
-        self.assertIn("l.cousin", rest[rest.index("cousinColor("):][:80])
+        for name in ("views.jsx", "data.jsx", "cousins.jsx", "app.jsx"):
+            self.assertNotIn("cousinColor", _read(name), name)
+
+
+class NoTailLogs(unittest.TestCase):
+    """The inspector's "tail logs" button opened a drawer polling
+    GET /api/logs; it was deprecated and did not work, so the button,
+    the drawer, its fetcher, its styles and the route are gone. The
+    canary fails if any of them comes back."""
+
+    def test_the_button_and_its_plumbing_are_gone(self):
+        inspector = _component(_read("cousins.jsx"), "Inspector")
+        self.assertNotIn("tail logs", inspector)
+        for name in ("cousins.jsx", "app.jsx", "views.jsx", "data.jsx"):
+            text = _read(name)
+            for word in ("openLogs", "LogDrawer", "fetchLogs", "/api/logs",
+                         "LOG_SEED"):
+                self.assertNotIn(word, text, (name, word))
+        self.assertNotIn(".logtail", _read("styles.css"))
 
 
 class PanelEditorsUseTheAccent(unittest.TestCase):

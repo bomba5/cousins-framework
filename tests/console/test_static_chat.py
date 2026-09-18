@@ -154,8 +154,6 @@ class StaticChatFiles(unittest.TestCase):
         self.assertNotRegex(css, r"url\(\s*['\"]?https?://")
         # message avatars are keyed on the row's type, never on a slug
         self.assertLessEqual(set(re.findall(r"\.msg\.(\w+)", css)), {"me", "op", "cousin"})
-        # log colours come from a hash of the slug, not from a rule per slug
-        self.assertIsNone(re.search(r"\.logtail \.c\.\w+", css))
         for cls in ("agents-table", "kanban"):
             self.assertNotIn(cls, css)
         self.assertIn(".chat-bubble", css)

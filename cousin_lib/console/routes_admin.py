@@ -1,25 +1,17 @@
-"""Host stats, the chat-server log tail and the console's own restart
-(docs/console-spec.md, "Host, logs, restart"). Each host block
+"""Host stats and the console's own restart (docs/console-spec.md,
+"Host, restart"). Each host block
 degrades to zeros on a platform without the /proc files; the restart
 never names a service manager."""
 from __future__ import annotations
 
 import os
-import re
 import socket
 import threading
 import time
-from datetime import datetime, timezone
 
-from cousin_lib.config import FrameworkConfig
 from cousin_lib.console import router
-from cousin_lib.console._common import cousin_home
-from cousin_lib.console.app import HttpError
 
 RESTART_DELAY_SECONDS = 0.6
-_TS_RE = re.compile(
-    r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?"
-    r"(?:Z|[+-]\d{2}:?\d{2})?)\s*")
 _GB = 1024 ** 3
 
 
@@ -103,46 +95,10 @@ def host_stats(server):
     return out
 
 
-def _log_lines(slug, home, n, now):
-    text = _read(str(home / "data" / "chat-server.log"))
-    rows = []
-    for line in text.splitlines()[-n:]:
-        t = 0
-        msg = line
-        m = _TS_RE.match(line)
-        if m:
-            raw = m.group(1).replace("Z", "+00:00")
-            try:
-                when = datetime.fromisoformat(raw)
-                if when.tzinfo is None:
-                    when = when.replace(tzinfo=timezone.utc)
-                t = int(max(0, now - when.timestamp()))
-                msg = line[m.end():]
-            except ValueError:
-                t = 0
-        rows.append({"cousin": slug, "unit": "chat-server", "level": "info",
-                     "msg": msg.rstrip(), "t": t})
-    return rows
-
-
 def register():
     @router.route("GET", "/api/host")
     def host(req):
         return 200, host_stats(req.server)
-
-    @router.route("GET", "/api/logs")
-    def logs(req):
-        n = max(1, req.int_query("n", 80))
-        now = time.time()
-        only = req.query.get("cousin")
-        rows = []
-        if only:
-            home = cousin_home(req.server, only)
-            rows = _log_lines(only, home, n, now)
-        else:
-            for config in FrameworkConfig(req.server.root).list_cousins():
-                rows.extend(_log_lines(config.slug, config.home, n, now))
-        return 200, {"lines": rows[-n:]}
 
     @router.route("POST", "/api/admin/restart/framework")
     def restart(req):

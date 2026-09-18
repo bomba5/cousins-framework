@@ -1,5 +1,5 @@
 // Cousins view: cards, inspector drawer, editors, spawn / dismiss / flip
-function CousinsView({ cousins, setCousins, openLogs, setActiveCousin }) {
+function CousinsView({ cousins, setCousins, setActiveCousin }) {
   const [selected, setSelected] = React.useState(null);
   const [spawning, setSpawning] = React.useState(false);
   const [toast, setToast] = React.useState(null);
@@ -99,7 +99,6 @@ function CousinsView({ cousins, setCousins, openLogs, setActiveCousin }) {
           cousin={cousins.find(c => c.slug === selected)}
           onClose={() => setSelected(null)}
           onAct={act}
-          openLogs={openLogs}
         />
       )}
       {spawning && (
@@ -187,7 +186,7 @@ function CousinCard({ c, onClick, onAct, onChat }) {
   );
 }
 
-function Inspector({ cousin: c, onClose, onAct, openLogs }) {
+function Inspector({ cousin: c, onClose, onAct }) {
   // The identity editors' catalogue and limits (scopes, heartbeat
   // bounds, operator length) come from the server, like the spawn
   // dialog's, so the two cannot drift from the routes' validation.
@@ -263,7 +262,6 @@ function Inspector({ cousin: c, onClose, onAct, openLogs }) {
               restart
             </button>
           )}
-          <button className="btn" onClick={() => openLogs(c.slug)}>tail logs →</button>
           <HideCousinButton cousin={c} />
         </div>
       </div>

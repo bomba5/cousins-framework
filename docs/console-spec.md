@@ -43,7 +43,7 @@ Retained, with the routes each one calls (all detailed below):
 | view | routes |
 |---|---|
 | overview (the host panel, cousin table, totals, recent fires) | `GET /api/host`, `GET /api/cousins`, `GET /api/loops`, `GET /api/loops/recent` |
-| cousins: cards, inspector, role editor, CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel`, `GET /api/logs` |
+| cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
 | chat with the live pane | `GET /api/messages`, `GET /api/search`, `POST /api/chat/send`, `/api/chat/archive`, `/api/chat/reactions`, `GET /api/chat/inbound/...`, `GET /api/pane`, `GET /api/pane/stream`, `POST /api/pane/input`, `/api/pane/resize` |
 | jobs | `GET /api/jobs`, `GET /api/jobs/<id>`, `GET /api/jobs/<id>/log`, `POST /api/jobs/<id>`, `DELETE /api/jobs/<id>` |
 | memory with the shared-tier review | `GET /api/memory`, `GET /api/shared/list`, `.../content`, `.../diff`, `.../audit`, `POST /api/shared/approve`, `/api/shared/reject` |
@@ -712,7 +712,7 @@ recycle.
 - `DELETE /api/tracker/<id>` returns `{"ok": true, "deleted": id}`;
   `404` unknown id.
 
-## Host, logs, restart
+## Host, restart
 
 ### `GET /api/host`
 `{"host": str, "kernel": str, "uptime": int, "cpu": {"pct": float,
@@ -724,14 +724,6 @@ running machine's hostname at request time (never a literal), memory
 in GB from `MemTotal` minus `MemAvailable`, disk for `/`, network as
 MB/s since the previous call. Each block degrades to zeros on a
 platform without the `/proc` files.
-
-### `GET /api/logs?cousin=<slug>&n=N`
-`{"lines": [{"cousin": str, "unit": "chat-server", "level": "info",
-"msg": str, "t": int}]}`: the last `n` (default 80) lines across every
-cousin's `<home>/data/chat-server.log` (the file spawn's chat-server
-launcher writes), optionally one cousin; `t` is seconds since the
-line's timestamp when the line carries one, else 0. The source also
-tailed the journal of install-specific units; not ported.
 
 ### `POST /api/admin/restart/framework`
 Restarts the console itself. The console answers `200 {"ok": true,
@@ -898,6 +890,10 @@ For the record, so the list is checked rather than rediscovered:
 it), `/api/network-devices`, the three GPU-box routes,
 `/api/admin/restart/cousin/<slug>` (the views use
 `/api/cousins/<slug>/restart`), and `POST /api/jobs` (creation).
+`/api/logs` was ported and later removed: its only caller was the
+inspector's "tail logs" drawer, which read `<home>/data/chat-server.log`
+and was retired; that file is still written and is read by the chat
+watchdog and by an operator on the host.
 
 ### What the plan expected and the source did not contain
 

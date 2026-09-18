@@ -334,8 +334,6 @@ function App() {
   const [view, setView] = useStateApp(initialView);
   const [cousins, setCousins] = useStateApp([]);
   const [loops, setLoops] = useStateApp([]);
-  const [logOpen, setLogOpen] = useStateApp(false);
-  const [logFilter, setLogFilter] = useStateApp(null);
   const [activeCousin, setActiveCousin] = useStateApp(initialCousin);
   const [clock, setClock] = useStateApp(() => new Date());
   // Reveal cousins/loops marked hidden=true in cousin.toml. Drives sidebar
@@ -460,8 +458,6 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const openLogs = (slug) => { setLogFilter(slug || null); setLogOpen(true); };
-
   // Restart-in-flight banner: fires when the Settings process-control
   // panel dispatches a 'fw-restart' CustomEvent. We poll /api/cousins every
   // 800ms until the console is up, then hide.
@@ -550,7 +546,7 @@ function App() {
         <MainHeader view={view} cousins={cousins} activeCousin={activeCousin} />
         <div className="main-body">
           {view === "chat"     && window.ChatView && <ChatView activeCousin={activeCousin} cousins={cousins} embedUser={embedUser} sessionUser={sessionUser} embed={embedMode} />}
-          {view === "cousins"  && <CousinsView cousins={cousins} setCousins={setCousins} openLogs={openLogs} setActiveCousin={(s) => { setActiveCousin(s); pickView("chat"); }} />}
+          {view === "cousins"  && <CousinsView cousins={cousins} setCousins={setCousins} setActiveCousin={(s) => { setActiveCousin(s); pickView("chat"); }} />}
           {view === "jobs"     && <JobsView />}
           {view === "memory"   && <MemoryView />}
           {view === "loops"    && <LoopsView loops={loops} />}
@@ -582,7 +578,6 @@ function App() {
         </div>
       )}
 
-      <LogDrawer open={logOpen} onClose={() => setLogOpen(false)} filter={logFilter} />
     </div>
   );
 }

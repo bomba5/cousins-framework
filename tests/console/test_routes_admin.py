@@ -23,28 +23,6 @@ class TestHost(ConsoleCase):
         self.assertGreaterEqual(body["console_uptime"], 0)
 
 
-class TestLogs(ConsoleCase):
-    def test_tail_across_cousins_with_ages(self):
-        a = self.cousin("wren")
-        b = self.cousin("toki")
-        (a / "data" / "chat-server.log").write_text(
-            "2020-01-01T00:00:00 first\nplain line\n")
-        (b / "data" / "chat-server.log").write_text("toki says\n")
-        self.serve()
-        _, body = self.get("/api/logs")
-        lines = body["lines"]
-        self.assertEqual([l["cousin"] for l in lines],
-                         ["toki", "wren", "wren"])
-        self.assertEqual(lines[1]["unit"], "chat-server")
-        self.assertEqual(lines[1]["level"], "info")
-        self.assertGreater(lines[1]["t"], 10 ** 8)
-        self.assertEqual(lines[2]["t"], 0)
-        self.assertEqual(lines[2]["msg"], "plain line")
-        _, body = self.get("/api/logs?cousin=wren&n=1")
-        self.assertEqual([l["msg"] for l in body["lines"]], ["plain line"])
-        self.assertEqual(self.get("/api/logs?cousin=nobody")[0], 404)
-
-
 class TestRestart(ConsoleCase):
     def test_answers_then_exits_through_the_seam(self):
         server = self.serve()
@@ -65,6 +43,18 @@ class TestRestart(ConsoleCase):
             server.exit_fn = lambda: None
             _, body = self.post("/api/admin/restart/framework")
         self.assertFalse(body["supervised"])
+
+
+class TestNoLogsRoute(ConsoleCase):
+    """GET /api/logs served only the retired "tail logs" drawer and was
+    removed with it; the canary fails if the route is registered
+    again."""
+
+    def test_the_route_is_gone(self):
+        self.cousin("wren")
+        self.serve()
+        self.assertEqual(self.get("/api/logs")[0], 404)
+        self.assertEqual(self.get("/api/logs?cousin=wren")[0], 404)
 
 
 if __name__ == "__main__":

@@ -248,6 +248,14 @@ and the network guard admits loopback and the private ranges
 put TLS in front (`--secure-cookie`) for anything beyond a trusted
 LAN.
 
+The console can also be the hive's queen, so cousins on other
+machines show up as cards and can be built from its spawn dialog.
+That is off until `config/hive.toml` turns it on (copy
+`config/hive.toml.example`; `public_url` is this machine's LAN address
+and the console's port, as the other machines reach it) and needs the
+LAN drop-in above, because nodes call the console. Restart the
+console after creating the file. See `docs/deploying-a-node.md`.
+
 Sign in, open `testa`, send a message in its chat. The card should
 say running with no "needs attention" line, and the reply arrives in
 the thread.

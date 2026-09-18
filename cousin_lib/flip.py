@@ -2,7 +2,7 @@
 identity.
 
 Stage order and its guarantees are specified in
-docs/lifecycle-spec.md. The properties that matter: nothing
+docs/reference/lifecycle.md. The properties that matter: nothing
 destructive happens before preflight passes; the dying session gets a
 bounded chance to hand off before the framework synthesizes an
 emergency handoff; the respawn goes through spawn.start_cousin - the

@@ -1,4 +1,4 @@
-"""The cousin file explorer (docs/console-spec.md, "Cousin files"):
+"""The cousin file explorer (docs/reference/console-api.md, "Cousin files"):
 a read-only view of one cousin home. Directory listings are one level
 at a time; reads page text by lines and never return a binary file as
 text; the download streams the bytes as an attachment (raster images

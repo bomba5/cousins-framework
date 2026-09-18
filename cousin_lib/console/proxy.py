@@ -1,9 +1,9 @@
 """Chat routes: a proxy over each cousin's chat server
-(docs/console-spec.md, "Chat: a proxy over each cousin's chat server").
+(docs/reference/console-api.md, "Chat: a proxy over each cousin's chat server").
 
 Every route names the cousin, resolves its `host`/`port` from the
 filesystem registry on that call, and forwards to the routes in
-docs/chat-server-spec.md. The console stores no message: the only files
+docs/reference/chat-api.md. The console stores no message: the only files
 it touches under a cousin home are the inbox and the generated-media
 folders (`chat/images`, `chat/audio`, `chat/video`), served read-only,
 and the attachment annotation on history rows is one directory listing
@@ -44,7 +44,7 @@ _INBOX_TYPES = {
     ".webp": "image/webp",
 }
 _INBOX_NAME_RE = re.compile(r"^(\d+)\.(png|jpg|jpeg|gif|webp)$")
-# Generated media lands under <home>/chat/<folder>/ (docs/media-spec.md,
+# Generated media lands under <home>/chat/<folder>/ (docs/media.md,
 # "Storage"); the row's attachment_path names the file. Each folder
 # holds one display kind, and only these suffixes are served from it.
 _MEDIA_FOLDERS = {"images": "image", "audio": "audio", "video": "video"}

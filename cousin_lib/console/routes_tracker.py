@@ -1,5 +1,5 @@
-"""Tracker routes over cousin_lib.tracker (docs/tracker-spec.md for the
-shapes, docs/console-spec.md for the routes): list open-first, create,
+"""Tracker routes over cousin_lib.tracker (docs/jobs-and-loops.md for the
+shapes, docs/reference/console-api.md for the routes): list open-first, create,
 update, delete, with ItemNotFound as 404 and any other TrackerError as
 400, and a tracker-change event per mutation."""
 from __future__ import annotations

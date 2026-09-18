@@ -1,6 +1,6 @@
 // explorer.jsx: the per-cousin memory explorer (layers, raw entries,
 // decisions, files, trash) and the cousin file explorer. Both read
-// through confined routes (docs/console-spec.md, "Memory explorer" and
+// through confined routes (docs/reference/console-api.md, "Memory explorer" and
 // "Cousin files"); nothing here decides what is safe to show.
 
 function fmtBytes(n) {

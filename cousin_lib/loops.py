@@ -1,6 +1,6 @@
 """The loops daemon: recurring work with one owner.
 
-docs/loops-spec.md is the contract. The structural rule everything
+docs/reference/loops.md is the contract. The structural rule everything
 here serves: ONE process owns scheduler state. Requests (manual
 fires, edits, timed flips) are rows in a shared store with visible
 status - pending, done, failed, expired - because the source's worst
@@ -196,7 +196,7 @@ def daemon_status(*, tick_interval=30, now=None):
 
 def load_cousin_loops(home, *, include_disabled=False):
     """([loops], [errors]). A malformed cousin.toml or invalid loop is
-    a reported error NAMING its source - the source framework returned
+    a reported error NAMING its source - an earlier version returned
     an empty list on any parse error, which silently disabled every
     loop the cousin had. The daemon wants only enabled loops; a viewer
     (the console's loops editor) asks for the disabled ones too."""
@@ -704,7 +704,7 @@ def _fire_ready_files(slug, home, loops, state, deliver, now, report):
     The file is the dedup state, and it commits after delivery like
     everything else: a failed delivery leaves the file where it is,
     reported once (not once per tick), and the next tick tries again.
-    The source framework ran this as a separate watcher process with
+    An earlier version ran this as a separate watcher process with
     its own tmux path and its own seen-set; here it is a tick step, so
     there is exactly one owner of delivery and one liveness gate."""
     home = Path(home)
@@ -864,7 +864,7 @@ def _default_do_flip(slug):
 
 
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
-    """One scheduler tick, per docs/loops-spec.md: per-cousin
+    """One scheduler tick, per docs/reference/loops.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
     commit-after-delivery, request consumption, one-shot firing
     (_fire_one_shots), persist. Returns a report."""

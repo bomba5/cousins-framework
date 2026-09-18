@@ -2,7 +2,7 @@
 summary, and the two integration points (chat server on an operator
 send; boot's calibration layer).
 
-The detection tests are re-expressed from the source framework's own
+The detection tests are re-expressed from an earlier version's own
 unit tests for this module; the patterns are generic English and carry
 nothing private. The store here is per-cousin (home/data), so the
 source's cousin-filter tests have no counterpart.

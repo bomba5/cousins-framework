@@ -1,6 +1,6 @@
 """Media generation: a provider seam that is off until configured.
 
-docs/media-spec.md is the contract. The rule that shapes the module:
+docs/media.md is the contract. The rule that shapes the module:
 media generates nothing and reaches no network until a provider is
 declared in config/media.toml, and a request goes to the declared
 provider or nowhere - never a silent reroute to a vendor the operator

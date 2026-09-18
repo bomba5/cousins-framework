@@ -1,4 +1,4 @@
-"""Fleet routes (docs/console-spec.md, "Fleet: cousins" and "Tokens"):
+"""Fleet routes (docs/reference/console-api.md, "Fleet: cousins" and "Tokens"):
 the registry read on every call and enriched with liveness, chat
 health, activity, the newest reply and today's tokens; spawn, dismiss,
 start, stop, restart, the editors, peer delivery and the two flip

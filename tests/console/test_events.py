@@ -1,6 +1,6 @@
 """`GET /api/events`: a poller that diffs the stores other components own
 and a broker that fans events out to every open stream
-(docs/console-spec.md, "`GET /api/events`: the live stream"). Framing,
+(docs/reference/console-api.md, "`GET /api/events`: the live stream"). Framing,
 the snapshot-first rule, the ping comment, clean close on disconnect."""
 import json
 import os

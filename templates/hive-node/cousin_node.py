@@ -4,7 +4,7 @@
 This file ships inside the archive cousin-spawn-node builds and runs on
 a machine that has python3 and outbound network to the queen, nothing
 else. It is deliberately self-contained: it does not import the
-framework, it speaks the queen's routes (docs/hive-spec.md) over
+framework, it speaks the queen's routes (docs/reference/hive-api.md) over
 urllib with the bearer token from node.env.
 
 What it is:

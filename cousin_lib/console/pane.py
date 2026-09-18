@@ -1,5 +1,5 @@
 """The pane: the cousin's tmux session rendered in the browser and typed
-into (docs/console-spec.md, "The pane").
+into (docs/reference/console-api.md, "The pane").
 
 Four routes over one session resolution: the session name from the
 registry (`[chat] tmux_session`, default the slug), the binary and

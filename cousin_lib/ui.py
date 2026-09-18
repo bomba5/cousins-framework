@@ -1,6 +1,6 @@
 """The web UI daemon: a projection over stores the framework owns.
 
-The governing rule, from docs/ui-spec.md: a UI process that dies loses
+The governing rule, from docs/reference/console-api.md: a UI process that dies loses
 nothing but its pixels. This daemon holds no state - every view is
 read from the store that owns it on each request, and every command
 writes through the same library a CLI uses. A restart costs a refresh,

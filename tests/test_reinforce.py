@@ -6,7 +6,7 @@ a BOUNDED, DECAYING bonus: asymptotic in the count so use can nudge but
 never drown relevance, halved every 14 days of disuse so a file that
 was hot last quarter stops riding on it.
 
-Ported from the source framework's reinforcement tests (bounded and
+Ported from an earlier version's reinforcement tests (bounded and
 monotonic boost, counts collapse duplicates, empty hits never log,
 failures never raise, search wiring is fail-open) and re-expressed
 over this repository's home-based API, keyed by absolute path; the

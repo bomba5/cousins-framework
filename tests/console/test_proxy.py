@@ -1,5 +1,5 @@
 """The chat proxy: every chat route forwards to the cousin's own chat
-server by its configured port and stores nothing (docs/console-spec.md,
+server by its configured port and stores nothing (docs/reference/console-api.md,
 "Chat: a proxy over each cousin's chat server"). The upstream here is a
 real ChatServer on an ephemeral loopback port; the console side is
 exercised through the router with a minimal request object."""

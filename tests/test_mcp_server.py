@@ -1,6 +1,6 @@
 """MCP adapter: registry, schemas, argv assembly, the guards, approval.
 
-Spec: docs/mcp-spec.md. The core is stdlib-only and tested here without
+Spec: docs/mcp.md. The core is stdlib-only and tested here without
 the SDK; the SDK is imported inside serve() only, and no test below
 needs the extra installed. The load-bearing test is the hostile one:
 content carrying backticks, $(...), a newline and an unbalanced quote

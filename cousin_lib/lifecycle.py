@@ -7,7 +7,7 @@ a ceremony, not an edit: snapshot first, ask the running session for
 a bequest, mutate the files, then flip so the next generation boots
 from the new identity. Every step lands in an audit log.
 
-Two operations, specified in docs/lifecycle-surgery.md:
+Two operations, specified in docs/reference/lifecycle.md:
 
   cousin-reincarnate <slug> --new-role TEXT
       One cousin. Snapshot, bequest, rewrite the role in CLAUDE.md

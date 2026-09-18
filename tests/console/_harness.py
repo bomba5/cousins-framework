@@ -37,7 +37,7 @@ exit "$rc"
 
 class FakeChatServer:
     """Answers /health, /api/history, /api/search, /api/send, /api/archive
-    and /api/reactions the way docs/chat-server-spec.md says, from
+    and /api/reactions the way docs/reference/chat-api.md says, from
     scripted rows. Records every send."""
 
     def __init__(self, slug, messages=None):

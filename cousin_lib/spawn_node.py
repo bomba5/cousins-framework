@@ -1,7 +1,7 @@
 """cousin-spawn-node: build the copy-over archive for a hive node.
 
 A node is a cousin on another machine that reaches the queen outbound
-only (docs/hive-spec.md). Deployment is therefore copy-over, not push:
+only (docs/reference/hive-api.md). Deployment is therefore copy-over, not push:
 this builder mints the node's token through the queen's own store,
 renders its identity from templates/hive-node/, and writes one
 self-contained tarball the operator carries to the other machine and
@@ -96,7 +96,7 @@ def _render_readme(*, slug, name, queen_url, port):
         "\n"
         "The brain is a placeholder until you set AGENT_CMD in node.env\n"
         "to the command that runs your agent (prompt on stdin, reply on\n"
-        "stdout). See docs/deploying-a-node.md in the framework.\n"
+        "stdout). See docs/remote-cousins.md in the framework.\n"
         % (name, slug, queen_url, port))
 
 

@@ -2,7 +2,7 @@
 
 Deterministic composition of the cold-start packet a fresh session
 boots from, within a hard total budget. Three rules shape this module,
-each earned against a real incident in the source framework:
+each earned against a real incident in an earlier version:
 
 - The TOTAL ceiling governs. Per-layer maxima exist, but their sum is
   allowed to exceed the ceiling and the composed packet still may not:

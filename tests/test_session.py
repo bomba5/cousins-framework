@@ -1,7 +1,7 @@
 """Session bookends: the hooks a cousin runs at session start and end.
 
 Hooks come from `cousin.toml [session]`, parsed by tomllib like every
-other key in that file (the source framework hand-parsed the list with
+other key in that file (an earlier version hand-parsed the list with
 a bracket counter; a real parser means a quoted bracket cannot break
 it). Every hook sees COUSIN_HOME, COUSIN_SLUG and SESSION_PHASE; a
 failing hook is reported and the rest still run; the last run lands

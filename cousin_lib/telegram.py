@@ -1,6 +1,6 @@
 """Telegram bridge: relay a cousin's chat to and from Telegram.
 
-docs/telegram-spec.md is the contract. This is the framework's first
+docs/chat.md is the contract. This is the framework's first
 send-to-a-third-party feature, so the module refuses to run unless
 fully configured: a missing token, a disabled flag, or an empty
 operator allowlist is an error naming the cause, never a silent

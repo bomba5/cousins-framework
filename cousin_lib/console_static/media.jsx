@@ -1,6 +1,6 @@
 // Chat media: how an attachment renders inside a bubble, the media on/off
 // preference, and the full-size viewer with prev/next across the thread.
-// docs/console-spec.md, "The chat media viewer". Loaded before chat.jsx,
+// docs/reference/console-api.md, "The chat media viewer". Loaded before chat.jsx,
 // which reads these names off window.
 
 // The media on/off choice is a browser preference, never server state.

@@ -1,4 +1,4 @@
-"""MCP adapter: the cousin's CLI surface over stdio. Spec: docs/mcp-spec.md.
+"""MCP adapter: the cousin's CLI surface over stdio. Spec: docs/mcp.md.
 
 Stdlib-only core - registry -> schemas, JSON arguments -> argv list ->
 subprocess.run(list) - and a serve() that imports the SDK lazily. There
@@ -869,7 +869,7 @@ def _approve(args):
         print("cousin-mcp: %s has no .mcp.json; provision it first (spawn"
               " writes it; for an older cousin copy config/%s.example to"
               " the home as %s and write the .mcp.json by hand, see"
-              " docs/mcp-spec.md)" % (home, REGISTRY_NAME, REGISTRY_NAME),
+              " docs/mcp.md)" % (home, REGISTRY_NAME, REGISTRY_NAME),
               file=sys.stderr)
         return 2
     try:

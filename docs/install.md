@@ -1,27 +1,43 @@
-# Install on a new machine
+# Install
 
-The one ordered procedure from a stock machine to a logged-in cousin
-answering chat, then its reverse. Written against Ubuntu 24.04; any
-Linux with Python 3.11 or newer, tmux, git and a systemd user manager
-works the same way with its own package names. Every step is a command
-you can paste; the example cousin is `testa`.
+This takes you from a plain Linux box to a logged-in console with a first
+cousin answering chat, and back again. I wrote it against Ubuntu 24.04; any
+Linux with the same pieces works with its own package names. The example
+cousin is `wren` and the console user is `ana`.
 
-What you end up with: the checkout (it is also the framework root),
-a venv inside it, one cousin under `cousins/testa`, the agent running
-in a tmux session named `testa`, its chat server on a local port, and
-the user units (loops daemon, console, three timers) running whether
-or not you are logged in.
+When you're done you have: the checkout (which is also the framework root),
+a venv inside it, one cousin under `cousins/wren`, its Claude Code session in
+a tmux session called `wren`, its chat server on a local port, and a handful
+of systemd user units that keep running whether or not you're logged in.
 
-## Prerequisites
+## What you need
 
-| need | why | Ubuntu 24.04 |
-|---|---|---|
-| Python >= 3.11 | the framework | ships 3.12 |
-| `python3-venv` | Ubuntu refuses `pip install` into the system Python (PEP 668); the framework lives in a venv | `apt-get install python3-venv` |
-| `tmux` | every cousin's agent runs in a tmux session; `--start`, flips, chat delivery and the console's pane view all use it | `apt-get install tmux` |
-| `git` | the clone, and the gate's self-test | `apt-get install git` |
-| `curl` | the agent and Ollama installers | usually present |
-| access to the repository | it may be private: the clone needs a GitHub deploy key or a token | - |
+- **Python 3.11 or newer.** The framework is Python and uses `tomllib`, which
+  arrived in 3.11. Ubuntu 24.04 ships 3.12.
+- **python3-venv.** Ubuntu won't let pip install into the system Python, so
+  the framework lives in a venv.
+- **tmux.** Every cousin's agent runs in a tmux session. Starting, flipping,
+  delivering chat messages and the console's terminal view all go through
+  it.
+- **git.** For the clone. The console also reads the commit it's running
+  from it.
+- **A systemd user manager.** The loops daemon, the console and the timers
+  run as user units. You can skip systemd and run the commands by hand, but
+  then nothing recurring happens while you're away.
+- **Claude Code.** The agent. The framework starts whatever command
+  `config/agent-cmd` holds, but it writes Claude Code's project files for
+  every cousin (`.claude/settings.json`, `.mcp.json`) and ships a Claude Code
+  preset, so that's what this page installs.
+- **curl.** For the Claude Code and Ollama installers. Usually already there.
+- **The `mcp` Python package** (optional extra, pulled in by
+  `pip install -e ".[mcp]"`). It's what lets a cousin use its tools over MCP.
+  Spawn wires MCP up for every cousin, so install it unless you know you
+  won't use it. Everything else in the framework is standard library.
+- **Ollama with `nomic-embed-text`** (optional). Gives memory search a
+  semantic leg. Without it, search is keyword only.
+- **A browser with internet access** for the console. The page loads React,
+  Babel, marked, mermaid and xterm from unpkg and jsdelivr. The backend
+  fetches nothing.
 
 ## 1. System packages
 
@@ -30,106 +46,83 @@ sudo apt-get update
 sudo apt-get install -y python3-venv tmux git curl
 ```
 
-`apt-get update` first: on a machine that has not refreshed its
-package lists, `python3.12-venv` can 404 on a stale `.deb`.
+Run `apt-get update` first. On a box that hasn't refreshed its package
+lists, `python3.12-venv` can 404 on a stale `.deb`.
 
-## 2. Clone and install into a venv
+## 2. Clone and install
 
 ```
-git clone <repo-url> ~/cousins-framework     # private repo: deploy key or token
+git clone https://github.com/bomba5/cousins-framework.git ~/cousins-framework
 cd ~/cousins-framework
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[mcp]"
 ```
 
-`[mcp]` is the one optional extra (the MCP SDK and a few dozen
-dependency packages); it
-is what lets the agent use the cousin's tools over MCP, which spawn
-wires up for every cousin, so install it unless you know you will not
-use it. The package is not on PyPI: always install from the checkout
-(`-e .` or `-e ".[mcp]"`).
+The package isn't on PyPI. Always install from the checkout.
 
-Every later shell starts in the checkout with the venv on PATH and the
-root named (the steps below use paths relative to the checkout):
+For every shell after this one:
 
 ```
 cd ~/cousins-framework && . .venv/bin/activate && export FRAMEWORK_ROOT=$PWD
 ```
 
-(or put the last two in your shell profile). To point the memory and job
-tools at one cousin from a shell, also `export COUSIN_HOME=$PWD/cousins/<slug>`;
-without it they stop with "no cousin context". The units below carry them
-themselves. Commands you type inside the checkout find the root on their
-own, and a cousin's tools find it from the cousin's home, but naming it
-keeps every command in agreement.
+Put the last two in your shell profile if you like. Commands you type inside
+the checkout find the root on their own, but exporting it keeps every command
+in agreement. For the memory and job tools from a plain shell, also
+`export COUSIN_HOME=$PWD/cousins/<slug>`, otherwise they stop with "no cousin
+context". The systemd units set all of this themselves.
 
-## 3. Run the suite
+## 3. Run the tests
 
 ```
 python3 -m unittest discover -s tests
 ```
 
-About 1390 tests in about six minutes on a small VM; the summary line
-must read `OK` (a few `skipped` are fine). Run it now, before any cousin
-exists, so a failure is the framework's and not your install's.
+It takes a few minutes. The last line has to say `OK` (a few skips are fine).
+Do it now, before any cousin exists, so a failure is the framework's and not
+your install's.
 
-## 4. The agent: Claude Code
-
-The framework starts whatever `config/agent-cmd` names; it writes
-Claude Code's project files for every cousin (`.claude/settings.json`,
-`.mcp.json`), so Claude Code is the agent this procedure installs.
+## 4. Claude Code
 
 ```
-curl -fsSL https://claude.ai/install.sh | bash     # installs ~/.local/bin/claude
+curl -fsSL https://claude.ai/install.sh | bash     # puts claude in ~/.local/bin
 ~/.local/bin/claude                                 # log in once, then /exit
 ```
 
-Log in interactively once (or run `claude auth login`) BEFORE any
-cousin starts. A cousin started before that sits at the login menu in
-its tmux session; the console shows it as running with a "needs
-attention" line (with the preset below). With the preset, the
-framework also types nothing into such a pane: chat messages, the
-loops daemon's heartbeat and scheduled prompts, and a flip's boot
-text are skipped with a "tmux delivery SKIPPED" line in the log
-(the chat message stays stored, but the cousin never sees it).
-Without `config/harness.toml` there is no pattern to recognise the
-menu by, and all of that, including the framework's own first
-heartbeat minutes after the start, is typed into the menu, where it
-can select options.
+Log in once (interactively, or with `claude auth login`) before any cousin
+starts. A cousin started before that sits on the login menu in its tmux
+session. With the preset below, the console marks it "needs attention" and
+the framework types nothing into that pane: chat messages, heartbeats,
+scheduled prompts and a flip's boot text are all skipped with a
+`tmux delivery SKIPPED` line in the log. The chat message is stored, but the
+cousin never sees it. Without the preset there's nothing to recognise the
+menu by, and all of that gets typed into it, where it can pick options.
 
-The agent command, with an absolute path so it resolves under the
-units' PATH as well as yours:
+Now tell the framework how to start the agent. Use the absolute path, so it
+resolves under systemd's PATH as well as yours:
 
 ```
 printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
-```
-
-`--dangerously-skip-permissions` lets the agent run every tool without
-asking, which is what an unattended cousin needs, and it means exactly
-what it says: the cousin can do anything your account can. Leave it
-out to answer permission prompts yourself (in the console's pane view
-or `tmux attach -t testa`); Claude Code may also ask you once to
-confirm the mode. `{model}`, `{effort}` and `{session_id}` are filled
-per start (see `docs/configuration.md`).
-
-The Claude Code preset for `config/harness.toml`:
-
-```
 cp config/harness.toml.claude-code.example config/harness.toml
 ```
 
-Without this file the console's token view says `config/harness.toml
-absent`, and these are all off: token counts, transcript mining at
-flip, the transcript-size guard that flips a cousin before its
-transcript grows unbounded, the harness auto-memory search collection,
-`cousin-mcp approve`, the `{model}`/`{effort}` defaults, and the
-"needs attention" flag for a pane parked on the login menu.
+`--dangerously-skip-permissions` lets the cousin run every tool without
+asking, which is what an unattended cousin needs. It means what it says: the
+cousin can do anything your account can. Leave it out if you'd rather answer
+permission prompts yourself in the console's terminal view or with
+`tmux attach -t wren`. `{model}`, `{effort}` and `{session_id}` are filled in
+on every start; see [configuration](configuration.md#agent-cmd).
+
+Without `config/harness.toml`, a lot quietly stays off: token counts in the
+console, transcript mining at flip, the transcript-size guard, the harness
+memory search collection, `cousin-mcp approve`, the `{model}`/`{effort}`
+defaults and the "needs attention" flag. Copy the preset.
 
 ## 5. Optional: semantic search with Ollama
 
-Search is keyword-only until `config/embedding.toml` exists. For
-meaning-based search with a local Ollama:
+Search is keyword only until `config/embedding.toml` exists. With a local
+Ollama:
 
 ```
 curl -fsSL https://ollama.com/install.sh | sh
@@ -142,39 +135,42 @@ timeout_s = 120
 EOF
 ```
 
-Disk: the installer takes about 2.4 GB even on a CPU-only machine (it
-ships its GPU runtimes regardless), plus about 260 MB for the model.
-`timeout_s = 120` is deliberate: on a CPU without AVX one 560-character
-chunk took 32 seconds to embed, and a timeout shorter than one chunk
-makes every search fall back to keyword (it says so) after waiting the
-full timeout. On a machine with a GPU or a modern CPU, 30 is plenty.
+The Ollama installer takes about 2.4 GB of disk even on a CPU-only box, plus
+about 260 MB for the model. The 120 second timeout is on purpose: on an old
+CPU without AVX one chunk took 32 seconds to embed, and a timeout shorter than
+one chunk makes every search wait it out and then fall back to keyword. With
+a GPU or a modern CPU, 30 is plenty.
 
-## 6. Create and start the cousin
+## 6. Make the first cousin
 
 ```
-export FRAMEWORK_ROOT="$PWD"
-cousin-spawn testa --root "$PWD" --name Testa --role "test cousin" \
-    --voice "Plain and helpful." --operator "$USER"
-cousin-mcp approve testa                  # trust the home, enable its MCP server
-cousin-tool-surface                       # so the first boot is not degraded
-cousin-spawn testa --start
+cousin-spawn wren --name Wren --role "helps me around the house" \
+    --voice "Short, plain and honest." --operator ana
+cousin-mcp approve wren
+cousin-tool-surface
+cousin-spawn wren --start
 ```
 
-`--operator` is the name the cousin's `send` tool may reach (use the
-name you will chat as); leave it out for a cousin with no operator.
-`cousin-mcp approve` records in `~/.claude.json` that the cousin's
-home is trusted and its `cousin` MCP server enabled (the Claude Code
-installer creates that file; no login is needed for this step). `cousin-spawn <slug>
---start` starts an existing cousin (tmux session plus chat server) and
-is a no-op when it is already running. Before creating or starting
-anything, spawn checks that tmux and the agent command's executable
-resolve, and stops with the reason if either does not.
+- `cousin-spawn` creates `cousins/wren/` with its `cousin.toml`, `CLAUDE.md`
+  from the template, `STATUS.md`, `MEMORY.md`, the MCP registry and
+  `.mcp.json`, and picks a free chat port from 8090 up. `--role` and
+  `--voice` are required. `--operator` is the name you'll chat as; the
+  cousin's `send` tool can reach that name. Leave it out for a cousin with no
+  operator.
+- `cousin-mcp approve` marks the home as trusted in `~/.claude.json` and
+  enables the cousin's `cousin` MCP server, so Claude Code doesn't stop on
+  its trust prompt. The file exists once Claude Code has run once.
+- `cousin-tool-surface` writes `data/tool-surface.md`, which the boot packet
+  quotes. Without it the first boot is marked degraded. The daily timer keeps
+  it fresh after this.
+- `cousin-spawn wren --start` starts the tmux session and the chat server.
+  On a cousin that's already running it does nothing. Before it touches
+  anything it checks that tmux and the agent command resolve, and stops with
+  the reason if either doesn't.
 
-Inside the checkout, the root defaults to the working directory for
-every command you type, so `--root "$PWD"` is optional there; the
-exported `FRAMEWORK_ROOT` covers other directories.
+More on all of this in [cousins](cousins.md).
 
-## 7. The user units
+## 7. The systemd units
 
 ```
 ROOT="$PWD"
@@ -187,50 +183,55 @@ for unit in systemd/*.service systemd/*.timer; do
       -e "s|{{SYSTEM_PATH}}|$SYSTEM_PATH|g" \
       "$unit" > ~/.config/systemd/user/"$(basename "$unit")"
 done
-! grep -l '{{' ~/.config/systemd/user/cousin-*   # success prints nothing; a file name means a placeholder was left
+! grep -l '{{' ~/.config/systemd/user/cousin-*   # prints nothing when every placeholder was replaced
 systemctl --user daemon-reload
 systemctl --user enable --now cousin-loops.service cousin-console.service
+cousin-console adduser ana
 systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
-loginctl enable-linger "$USER"            # units keep running after you log out
-cousin-console adduser "$USER"            # now, not later: prompts for a password
+loginctl enable-linger "$USER"
 ```
 
-The console has no authentication from its first start until the
-first `cousin-console adduser`: in that window anyone the network
-guard admits (loopback and the private ranges; the default bind is
-loopback, so in practice anyone on this machine) can use it without
-signing in. Its journal line says so with a suffix,
-`(auth not configured: cousin-console adduser <name>)`. That is why
-the adduser line above follows the `enable` line directly: run it
-immediately. Auth is enforced as soon as the users file exists, with
-no restart; the suffix stays in the journal line printed at start
-until the next restart.
+Run `cousin-console adduser` right after the console starts. Until the first
+user exists the console has no login at all: anyone the network guard lets
+in can use it. By default it listens on loopback only, so in practice that's
+anyone on this machine. The console asks for the password twice (at least 8
+characters) and never takes it from the command line. Login is enforced from
+the moment the users file exists, no restart needed.
 
-Do not enable `cousin-chat-server@testa.service` here: `--start`
-already started that chat server and the watchdog timer supervises it;
-a second server on the same port fails to bind and restarts every
-five seconds. The unit is the alternative for when you want systemd,
-not spawn, to own the server (`systemd/README.md`). The units' PATH
-includes `~/.local/bin` (as `%h/.local/bin`), where Claude Code lives.
-If `loginctl enable-linger` is refused, run it with `sudo`.
+`loginctl enable-linger` keeps your user units running after you log out. If
+it's refused, run it with `sudo`.
 
-## 8. Console and first chat
+Don't enable `cousin-chat-server@wren.service`. `--start` already started
+Wren's chat server and the watchdog timer looks after it. A second server on
+the same port fails to bind and restarts every five seconds. The template
+unit is for when you want systemd to own the chat server instead; see
+[the units](../systemd/README.md).
+
+## 8. Open the console
 
 ```
 journalctl --user -u cousin-console.service -n 5
-#   -> cousin-console: serving <root> on 127.0.0.1:8600
-#      (with the "auth not configured" suffix if it started before adduser)
+#   cousin-console: serving <root> on 127.0.0.1:8600
 ```
 
-The console binds loopback. Open `http://127.0.0.1:8600/` on the
-machine itself, or from another one through a tunnel:
+If the line ends with `(auth not configured: cousin-console adduser <name>)`,
+it started before you added the user. That's fine, the suffix only goes away
+on the next restart.
+
+Open `http://127.0.0.1:8600/` on the machine itself, or tunnel from another
+one:
 
 ```
-ssh -L 8600:127.0.0.1:8600 <user>@<machine>     # then open http://127.0.0.1:8600/
+ssh -L 8600:127.0.0.1:8600 ana@192.0.2.10     # then open http://127.0.0.1:8600/
 ```
 
-For direct LAN access, give the unit a drop-in (re-running step 7 does
-not overwrite a drop-in; it would overwrite an edited unit file):
+Log in, open Wren and send a message. The card should say running with no
+"needs attention" line, and the reply shows up in the thread.
+
+## Reaching the console from the LAN
+
+Give the unit a drop-in. Re-running step 7 overwrites the unit files but
+leaves drop-ins alone.
 
 ```
 mkdir -p ~/.config/systemd/user/cousin-console.service.d
@@ -241,81 +242,95 @@ ExecStart=%h/cousins-framework/.venv/bin/cousin-console --host 0.0.0.0 --port 86
 EOF
 systemctl --user daemon-reload && systemctl --user restart cousin-console
 ```
- Caution:
-that is plain HTTP, so passwords and chat cross the network in clear,
-and the network guard admits loopback and the private ranges
-(`config/net-allowlist.json` adds more); create the user first, and
-put TLS in front (`--secure-cookie`) for anything beyond a trusted
-LAN.
 
-The console can also be the hive's queen, so cousins on other
-machines show up as cards and can be built from its spawn dialog.
-That is off until `config/hive.toml` turns it on (copy
-`config/hive.toml.example`; `public_url` is this machine's LAN address
-and the console's port, as the other machines reach it) and needs the
-LAN drop-in above, because nodes call the console. Restart the
-console after creating the file. See `docs/deploying-a-node.md`.
+This is plain HTTP, so passwords and chat cross the network in the clear.
+Create the user first. The network guard only lets in loopback and the
+private ranges (10/8, 172.16/12, 192.168/16); `config/net-allowlist.json`
+adds more. For anything beyond a LAN you trust, put TLS in front and add
+`--secure-cookie` to that `ExecStart`.
 
-Sign in, open `testa`, send a message in its chat. The card should
-say running with no "needs attention" line, and the reply arrives in
-the thread.
+Cousins on other machines need the console reachable too, since their nodes
+call it. That's off until `config/hive.toml` turns it on; see
+[remote cousins](remote-cousins.md).
 
 ## After a reboot
 
-The units come back on their own (linger). The tmux sessions do not:
-nothing restarts an agent until its next flip. Start each cousin
-once, and the watchdog then brings its chat server back within ten
-minutes:
+The units come back on their own (that's what linger is for). The cousins'
+tmux sessions don't: nothing restarts an agent by itself. Start each one,
+from the console's start button or:
 
 ```
-cousin-spawn testa --start
+cousin-spawn wren --start
 ```
+
+## Update
+
+```
+cd ~/cousins-framework
+git pull
+. .venv/bin/activate
+pip install -e ".[mcp]"          # picks up new commands; harmless otherwise
+cousin-tool-surface               # the timer would do it by 06:00, this is now
+systemctl --user daemon-reload
+systemctl --user restart cousin-loops.service cousin-console.service
+```
+
+The `pip install` matters when the update adds a new `cousin-*` command:
+an editable install only creates wrappers for the commands it knew about.
+If `systemd/` changed in the pull, re-run the `sed` loop from step 7 before
+the `daemon-reload`.
+
+Restarting the console and the loops daemon doesn't touch the cousins or
+their chat servers (both units use `KillMode=process`). Running cousins keep
+the old code in their chat servers until they're restarted or flipped. A
+flip picks up everything new; see [cousins](cousins.md). The console's top
+bar shows the version and commit the console process is running, so a pull
+without a restart is visible there.
+
+If you move the checkout to another path, the cousins' Claude Code settings
+still point at the old one. Fix each with `cousin-spawn <slug>
+--repair-settings`, then `cousin-mcp approve <slug>` again.
 
 ## Uninstall
 
-In reverse. Stop the units and the cousin, remove the unit files and
-the checkout; the agent and Ollama are separate products with their
-own uninstall.
+The reverse, in order. Back up first if you might want the cousins again:
+`cousins/` holds all their memory and nothing else has a copy (see
+[operations](operations.md#backups)).
 
 ```
 systemctl --user disable --now cousin-loops.service cousin-console.service \
     cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
-rm -rf ~/.config/systemd/user/cousin-*   # -r: the LAN drop-in is a directory
+rm -rf ~/.config/systemd/user/cousin-*        # -r: the LAN drop-in is a directory
 rm -f ~/.local/share/systemd/timers/stamp-cousin-*   # the timers' last-run stamps
 systemctl --user daemon-reload
 systemctl --user reset-failed
-tmux kill-session -t testa                # one per cousin
-kill "$(cat ~/cousins-framework/cousins/testa/data/chat-server.pid)"
-rm -rf ~/cousins-framework                 # the checkout, venv, config, every cousin home
+
+# every cousin: the tmux session and the chat server
+for home in ~/cousins-framework/cousins/*/; do
+  slug=$(basename "$home")
+  tmux kill-session -t "$slug" 2>/dev/null
+  [ -f "$home/data/chat-server.pid" ] && kill "$(cat "$home/data/chat-server.pid")"
+done
+
+rm -rf ~/cousins-framework     # checkout, venv, config, every cousin home
 ```
 
-`cousins/` holds every cousin's memory and nothing else has a copy:
-archive it first if you may want it back (`cousin-backup`, or a tar of
-the directory). Turn linger off only if nothing else of yours needs
-it: `loginctl disable-linger "$USER"`.
+If a cousin's tmux session has a different name, it's `[chat] tmux_session`
+in its `cousin.toml`. Turn linger off only if nothing else of yours needs it:
+`loginctl disable-linger "$USER"`.
 
-Claude Code: `rm -rf ~/.local/bin/claude ~/.local/share/claude
-~/.cache/claude ~/.local/state/claude` (the binary, its versions, the
-installer's staging directory and its lock directory), and `~/.claude`
-plus `~/.claude.json` if you do not use it otherwise (they hold its
-login and every project's transcripts, the cousins' included).
-
-Ollama (its installer creates a system service, a user and a group):
+Claude Code and Ollama are separate products with their own uninstall.
+Keep in mind that `~/.claude` and `~/.claude.json` hold Claude Code's login
+and every project's transcripts, the cousins' included. The Ollama installer
+adds a system service, a user and a group:
 
 ```
 sudo systemctl disable --now ollama
 sudo rm -f /etc/systemd/system/ollama.service && sudo systemctl daemon-reload
 sudo rm -rf /usr/local/bin/ollama /usr/local/lib/ollama /usr/share/ollama
-sudo gpasswd -d "$USER" ollama   # the installer adds you to its group
 sudo userdel ollama
-getent group ollama >/dev/null && sudo groupdel ollama   # userdel usually removed it already
+getent group ollama >/dev/null && sudo groupdel ollama
 ```
 
-The apt packages are ordinary system packages; if nothing else uses
-them, remove them together with the dependencies they pulled in (names
-for Ubuntu 24.04):
-
-```
-sudo apt-get remove -y tmux libevent-core-2.1-7t64 \
-    python3-venv python3.12-venv python3-pip-whl python3-setuptools-whl
-```
+The apt packages are ordinary system packages; remove them if nothing else
+uses them.

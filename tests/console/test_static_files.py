@@ -4,7 +4,7 @@ Three things are pinned here. Every file the frontend tasks deliver
 exists. Nothing private survives in them: the gate's generic classes
 (an address, a home path, a secret shape, an opaque binary) plus the
 out-of-tree denylist when the environment names one. And the wire the
-views call is exactly the wire `docs/console-spec.md` states: every
+views call is exactly the wire `docs/reference/console-api.md` states: every
 `/api/...` literal in the files matches a route on that page, and none
 matches a route the page lists as not ported. A dropped view leaves no
 trace by name either.
@@ -18,7 +18,7 @@ from cousin_lib.gate.scanner import Scanner, load_denylist
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _STATIC = _REPO_ROOT / "cousin_lib" / "console_static"
-_SPEC = _REPO_ROOT / "docs" / "console-spec.md"
+_SPEC = _REPO_ROOT / "docs" / "reference" / "console-api.md"
 
 # Frontend A (this task). Frontend B extends the list with chat.jsx,
 # styles.css and the PWA assets.
@@ -44,7 +44,7 @@ def _static_files():
 
 def _split_spec():
     text = _SPEC.read_text(encoding="utf-8")
-    marker = "## Source routes not ported"
+    marker = "## Routes the older console had"
     head, _, tail = text.partition(marker)
     stop = tail.find("\n## ")
     dropped_section = tail if stop < 0 else tail[:stop]

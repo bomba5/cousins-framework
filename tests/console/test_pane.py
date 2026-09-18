@@ -1,5 +1,5 @@
 """The pane routes: capture, the SSE stream, input through the injection
-lock, resize (docs/console-spec.md, "The pane"). tmux is a fake binary
+lock, resize (docs/reference/console-api.md, "The pane"). tmux is a fake binary
 that logs its argv; the stream's frame source is injectable."""
 import json
 import os

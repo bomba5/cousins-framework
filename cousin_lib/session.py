@@ -15,7 +15,7 @@ that exits non-zero is reported and the rest still run; the phase's
 exit is 1 if any failed. The last run is recorded at data/session.json
 and `status` prints it.
 
-The source framework parsed the hook list by hand with a bracket
+An earlier version parsed the hook list by hand with a bracket
 counter and carried options tied to one install's media habits; here
 the list is read by tomllib like every other key in cousin.toml, and
 the media options do not ship.

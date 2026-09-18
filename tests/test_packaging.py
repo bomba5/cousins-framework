@@ -58,34 +58,26 @@ class TestDocsCoherence(unittest.TestCase):
             self.assertTrue((_REPO_ROOT / ref).is_file(),
                             "README points at missing %s" % ref)
 
-    def test_the_guide_narrates_every_shipped_cli(self):
-        # The operator asked that the docs narrate ALL the features
-        # with examples. The mechanism form: the guide must mention
-        # every console script, derived from pyproject, so a new
-        # feature cannot ship un-narrated.
+    def test_the_commands_page_covers_every_shipped_cli(self):
+        # Every console script, derived from pyproject, must appear in
+        # docs/commands.md, so a new command cannot ship undocumented.
         import tomllib
         pyproject = tomllib.loads(
             (_REPO_ROOT / "pyproject.toml").read_text())
-        guide = (_REPO_ROOT / "docs" / "guide.md").read_text()
+        guide = (_REPO_ROOT / "docs" / "commands.md").read_text()
         for cli in pyproject["project"]["scripts"]:
-            # chat-server is covered under the run-a-cousin narrative
-            # by its outcome, not by name; everything else appears.
-            if cli == "cousin-chat-server":
-                continue
             self.assertIn(cli, guide,
-                          "%s is not narrated in the guide" % cli)
+                          "%s is missing from docs/commands.md" % cli)
 
-    def test_every_spec_doc_is_referenced_somewhere(self):
-        # A spec nobody links is a spec nobody finds. The README or
-        # another doc must reach every contract under docs/.
+    def test_every_doc_is_linked_from_somewhere(self):
+        # A page nobody links is a page nobody finds. The README or
+        # another page must link every file under docs/.
         import re
         docs = _REPO_ROOT / "docs"
         corpus = "\n".join(
             p.read_text() for p in
-            [_REPO_ROOT / "README.md"] + list(docs.glob("*.md")))
-        for spec in docs.glob("*.md"):
-            if spec.name == "provenance.md":
-                continue  # the ledger references files, not vice versa
+            [_REPO_ROOT / "README.md"] + list(docs.rglob("*.md")))
+        for spec in docs.rglob("*.md"):
             referenced = re.search(
                 r"\b%s\b" % re.escape(spec.name), corpus)
             self.assertTrue(referenced,

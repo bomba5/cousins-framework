@@ -1,4 +1,4 @@
-"""The shared-tier review (docs/console-spec.md, "Memory and the
+"""The shared-tier review (docs/reference/console-api.md, "Memory and the
 shared-tier review"): listings with hashes, content strictly inside
 each scope, diffs, the audit tail, and promote/reject through
 cousin_lib.shared_tier with the reviewer taken from the session (or,

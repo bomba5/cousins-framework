@@ -247,7 +247,7 @@ function JobsView() {
 }
 
 // The open job's log: loads the tail, then follows with ?from=<next>
-// every 2 s and appends (docs/console-spec.md, jobs log). The box
+// every 2 s and appends (docs/reference/console-api.md, jobs log). The box
 // scrolls; it follows the end while the reader sits at the bottom,
 // holds still once they scroll up, and resumes when they return to the
 // bottom or press "follow". The browser keeps the last 2 MB.
@@ -839,7 +839,7 @@ function LoopsTable({ loops, allCousins }) {
   }, [fireToast]);
 
   // A fire is a request row the daemon consumes; the toast says
-  // "requested", never "fired" (docs/console-spec.md).
+  // "requested", never "fired" (docs/reference/console-api.md).
   const fireNow = async (cousin, name) => {
     setFiring(`${cousin}/${name}`);
     try {
@@ -1100,7 +1100,7 @@ function num(v) {
 }
 
 // ============ TRACKER ============
-// The framework-wide ledger of in-flight work (docs/tracker-spec.md). The
+// The framework-wide ledger of in-flight work (docs/jobs-and-loops.md). The
 // store is the library's; this view is one caller of the same routes the
 // CLI's --json output mirrors. Written fresh: the source had no view.
 const TRACKER_STATES = ["open", "active", "blocked", "done", "dropped"];

@@ -1,6 +1,6 @@
 """The shared memory tier: private by default, shared by review.
 
-docs/memory-tiers.md is this module's specification and the tests
+docs/memory.md is this module's specification and the tests
 hold it to the page's promises. The boundary that everything else
 serves: the proposing side and the promoting side are never the same
 principal, and no configuration can express otherwise - a boundary

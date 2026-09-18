@@ -1,6 +1,6 @@
 """Static serving for the console: an allowlisted directory, a traversal
 check, index fallback for `/`, and a cache-busting stamp on index.html's
-local script and stylesheet references (docs/console-spec.md, "Static
+local script and stylesheet references (docs/reference/console-api.md, "Static
 files")."""
 import os
 import pathlib

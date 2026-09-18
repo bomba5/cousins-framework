@@ -1,12 +1,12 @@
 """The hive: an authenticated cross-machine message bus.
 
-docs/hive-spec.md is the contract. Off by default: no queen runs and
+docs/reference/hive-api.md is the contract. Off by default: no queen runs and
 no token is minted until an operator starts one (a standalone
 `cousin-hive serve`, or the console with config/hive.toml enabled).
 The design's spine is one authenticated route set and no others -
 every request's identity comes from its bearer token, never from the
 body, so a node cannot claim to be another; and the two
-unauthenticated LAN-trust shortcuts the source framework used do not
+unauthenticated LAN-trust shortcuts an earlier version used do not
 exist here.
 
 The route logic lives once, in `handle_request`: the standalone queen

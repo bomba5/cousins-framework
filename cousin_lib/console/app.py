@@ -1,7 +1,7 @@
 """The console server: a threaded http.server behind the network guard
 that owns two things, browser sessions and the users file, and serves
 everything else as a projection of a store some other component owns
-(docs/console-spec.md, docs/ui-spec.md).
+(docs/reference/console-api.md, docs/reference/console-api.md).
 
 Extension points for the other console tasks:
 

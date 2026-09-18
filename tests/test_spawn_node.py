@@ -162,6 +162,40 @@ class TestNodeEnv(SpawnNodeCase):
         self.assertIn("COUSIN_SLUG=testa\n", text)
 
 
+class TestNodeEnvForTheConsole(SpawnNodeCase):
+    def _env(self, tarball):
+        text = self._read(tarball, "testa-node/node.env")
+        return dict(line.split("=", 1) for line in text.splitlines()
+                    if line and not line.startswith("#"))
+
+    def test_loopback_by_default_and_the_role_rides_along(self):
+        env = self._env(self._build(role="watcher")["tarball"])
+        self.assertEqual(env["NODE_HOST"], "127.0.0.1")
+        self.assertEqual(env["NODE_ROLE"], "watcher")
+
+    def test_node_host_for_a_console_proxied_node(self):
+        env = self._env(self._build(node_host="0.0.0.0")["tarball"])
+        self.assertEqual(env["NODE_HOST"], "0.0.0.0")
+
+    def test_cli_listen_all(self):
+        rc, _, _ = self._main(["testa", "--root", str(self.root),
+                               "--queen-url", QUEEN, "--name", "Testa",
+                               "--role", "r", "--out", str(self.out),
+                               "--listen-all"])
+        self.assertEqual(rc, 0)
+        env = self._env(self.out / "testa-node.tar.gz")
+        self.assertEqual(env["NODE_HOST"], "0.0.0.0")
+
+    def test_the_built_card_knows_its_name_and_role(self):
+        self._build(name="Testa", role="watcher")
+        store = HiveStore(self.root / "shared" / "hive")
+        self.addCleanup(store.close)
+        row = store.nodes()[0]
+        self.assertEqual((row["slug"], row["name"], row["role"],
+                          row["checked_in"]),
+                         ("testa", "Testa", "watcher", False))
+
+
 class TestMint(SpawnNodeCase):
     def test_token_is_minted_in_the_queen_store_with_both_scopes(self):
         token = self._build()["token"]

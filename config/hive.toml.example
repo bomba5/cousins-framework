@@ -1,0 +1,23 @@
+# config/hive.toml - the console as the hive's queen. Copy to
+# config/hive.toml and fill in. Absent (or enabled = false): there is
+# no hive at all - no /hive/ route, no remote cousin cards, no token.
+# See docs/hive-spec.md and docs/deploying-a-node.md.
+#
+# On: the console's own server answers the queen routes under /hive/,
+# shows remote cousins beside the local ones, and its spawn dialog can
+# build a node archive for another machine.
+enabled = false
+
+# The queen as the NODES reach it: this machine's address on the
+# network the nodes are on, and the console's port. Baked into every
+# archive the console builds and used for the one-time download link.
+public_url = "http://192.0.2.10:8600"
+
+# How often a node checks in (seconds, at least 5). A node is shown
+# online while its last checkin is within 2.5 periods.
+#checkin_seconds = 60
+
+# Optional: a chat server (this framework's /api/send) that a
+# console-built node's [tell-home: ...] marker posts to. The build
+# dialog's "home chat" switch needs it.
+#home_chat_url = "http://192.0.2.10:8090"

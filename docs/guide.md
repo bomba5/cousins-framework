@@ -685,14 +685,28 @@ from "bridge down."
 ## 10. Hive: cousins across machines (optional)
 
 The hive is the one feature that moves memory between machines, and it
-is off until an operator runs a queen. Every cross-machine message
-goes through one authenticated route; a node's identity is its bearer
-token.
+is off until an operator starts a queen. Every cross-machine message
+goes through one authenticated route set; a node's identity is its
+bearer token.
+
+The usual queen is the console itself: write `config/hive.toml`
+(`enabled = true`, `public_url = "http://<lan-ip>:8600"`, from
+`config/hive.toml.example`), restart the console, and its own port
+answers the queen routes under `/hive/`. Remote cousins then appear
+among the cards (host:port, last seen, online or offline, revoke),
+their chat opens in the chat view like any cousin's, and the spawn
+dialog gains "Remote (another machine)", which builds the node's
+archive and hands you a one-time download link plus the install
+command to run on the other machine.
+
+A standalone queen still works for an install that wants it separate:
 
 ```
 # on the queen machine:
 cousin-hive serve --port 8101
 cousin-hive mint kestrel --scope own,shared      # -> hive_<token>
+cousin-hive nodes                                # who checked in, when
+cousin-hive revoke kestrel                       # its token answers 401 from now
 
 # move that token and the queen URL onto the node machine, then:
 cousin-hive send --queen http://queen:8101 --token hive_<token> \
@@ -731,6 +745,12 @@ AGENT_CMD`; until you set one it is a placeholder that greets, echoes
 and still remembers, so a fresh node is never dead on arrival. The
 whole procedure, the archive's contents and the failure behaviour are
 in `docs/deploying-a-node.md`.
+
+Coming from the previous framework's queen? `cousin-hive import-legacy
+--tokens <its tokens.json> --memory-dir <its store dir>` imports its
+tokens with the same strings (a deployed node only changes its queen
+URL) and each node's memory with its original time and kind; running
+it twice imports nothing new.
 
 ## 11. The gate: nothing private ships
 

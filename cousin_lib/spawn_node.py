@@ -35,7 +35,8 @@ class SpawnNodeError(Exception):
 
 
 def render_node_env(*, slug, name, port, queen_url, token, home_chat,
-                    agent_cmd, poll_seconds=5, agent_timeout=120):
+                    agent_cmd, poll_seconds=5, agent_timeout=120,
+                    role="", node_host="127.0.0.1"):
     """The node's environment file: every key the runtime reads, shell
     quoted so install.sh can source it whatever the values hold. Keys
     that are optional are present and empty, so the operator edits a
@@ -43,8 +44,9 @@ def render_node_env(*, slug, name, port, queen_url, token, home_chat,
     rows = [
         ("COUSIN_SLUG", slug),
         ("NODE_NAME", name),
+        ("NODE_ROLE", role or ""),
         ("NODE_PORT", str(port)),
-        ("NODE_HOST", "127.0.0.1"),
+        ("NODE_HOST", node_host),
         ("QUEEN_URL", queen_url),
         ("HIVE_TOKEN", token),
         ("HOME_CHAT_URL", home_chat or ""),
@@ -100,10 +102,15 @@ def _render_readme(*, slug, name, queen_url, port):
 
 def build_node_archive(root, *, slug, queen_url, name, role, out,
                        token=None, home_chat=None, port=_DEFAULT_PORT,
-                       agent_cmd=""):
+                       agent_cmd="", node_host="127.0.0.1"):
     """Mint (or take) the token, render everything in memory, and only
     then write the tarball: a failed render leaves no archive behind.
-    Returns {tarball, token, slug}."""
+    Returns {tarball, token, slug}.
+
+    `node_host` is the address the node's chat server binds: loopback
+    by default; "0.0.0.0" when the console (its queen) should reach it
+    to proxy chat. Off loopback the node answers /api/* only to a
+    caller presenting its own hive token (the console does)."""
     root = FrameworkConfig(root).root
     if not slug or not _SLUG_RE.match(slug):
         raise SpawnNodeError(
@@ -129,15 +136,20 @@ def build_node_archive(root, *, slug, queen_url, name, role, out,
     if token is None:
         # The queen's own store: the same row cousin-hive mint writes,
         # idempotent per slug so a rebuild never orphans a deployed node.
-        token = HiveStore(root / "shared" / "hive").mint_token(
-            slug, scope=("own", "shared"))
+        store = HiveStore(root / "shared" / "hive")
+        try:
+            token = store.mint_token(slug, scope=("own", "shared"),
+                                     name=name, role=role)
+        finally:
+            store.close()
     files = [
         ("cousin_node.py", sources["cousin_node.py"], 0o644),
         ("install.sh", sources["install.sh"], 0o755),
         ("CLAUDE.md", claude_md, 0o644),
         ("node.env", render_node_env(
             slug=slug, name=name, port=port, queen_url=queen_url,
-            token=token, home_chat=home_chat, agent_cmd=agent_cmd), 0o600),
+            token=token, home_chat=home_chat, agent_cmd=agent_cmd,
+            role=role, node_host=node_host), 0o600),
         ("README", _render_readme(slug=slug, name=name,
                                   queen_url=queen_url, port=port), 0o644),
     ]
@@ -202,6 +214,11 @@ def spawn_node_main(argv=None):
     parser.add_argument("--port", type=int, default=_DEFAULT_PORT,
                         help="the node's own chat port (default %d)"
                              % _DEFAULT_PORT)
+    parser.add_argument("--listen-all", action="store_true",
+                        help="bind the node's chat on 0.0.0.0 so the"
+                             " console can proxy chat to it (it then"
+                             " requires its hive token off loopback);"
+                             " default loopback only")
     parser.add_argument("--out", default=".",
                         help="where <slug>-node.tar.gz is written")
     args = parser.parse_args(argv)
@@ -215,7 +232,8 @@ def spawn_node_main(argv=None):
             root, slug=args.slug, queen_url=args.queen_url,
             name=args.name, role=args.role, out=args.out,
             token=args.token, home_chat=args.home_chat, port=args.port,
-            agent_cmd=args.agent_cmd)
+            agent_cmd=args.agent_cmd,
+            node_host="0.0.0.0" if args.listen_all else "127.0.0.1")
     except SpawnNodeError as err:
         print("cousin-spawn-node: %s" % err, file=sys.stderr)
         return 2

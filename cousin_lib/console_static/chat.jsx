@@ -114,6 +114,10 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
     );
   }
 
+  // A remote cousin (a hive node on another machine) has no pane here:
+  // the console does not run it, it only proxies its chat.
+  const paneShown = paneOpen && !c.remote;
+
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0 }}>
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
@@ -121,7 +125,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
         <div
           className="chat-col"
           style={{
-            flex: paneOpen ? "0 0 0" : "1 1 auto",
+            flex: paneShown ? "0 0 0" : "1 1 auto",
             minWidth: 0,
             overflow: "hidden",
             position: "relative",              /* anchor for the jump-to-bottom button */
@@ -129,7 +133,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
             transition: "flex 240ms cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
-          <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneOpen} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} />
+          <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneShown} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} />
           {fullscreen && (
             <button className="chat-fullscreen-exit"
                     onClick={() => setFullscreen(false)}
@@ -152,9 +156,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
         </div>
         {/* RIGHT: terminal pane - slides in from the right, takes the whole chat window when open */}
         <div
-          className={`pane-col ${paneOpen ? "open" : ""}`}
+          className={`pane-col ${paneShown ? "open" : ""}`}
           style={{
-            flex: paneOpen ? "1 1 auto" : "0 0 0",
+            flex: paneShown ? "1 1 auto" : "0 0 0",
             minWidth: 0,
             overflow: "hidden",
             display: "flex", flexDirection: "column",
@@ -162,7 +166,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
             transition: "flex 240ms cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
-          {paneOpen && <PaneView cousin={c} onClose={() => setPaneOpen(false)} />}
+          {paneShown && <PaneView cousin={c} onClose={() => setPaneOpen(false)} />}
         </div>
       </div>
     </div>
@@ -171,6 +175,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
 
 function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown }) {
   const btnH = 24;  // shared height for input + buttons
+  // A remote cousin's node serves send and history only: no effort to
+  // set, no archive, no pane.
+  const remote = !!cousin.remote;
 
   // Effort: the levels come from the server (GET /api/spawn/options),
   // the current value from the cousin row, and a change persists to
@@ -212,8 +219,9 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
       fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)",
     }}>
       <span>chat &middot; @{cousin.slug}{chatUser ? ` as ${chatUser}` : ""}</span>
+      {remote && <span title={`a hive node at ${cousin.host}:${cousin.port}`}>&middot; remote</span>}
       <span style={{ flex: 1 }} />
-      {!embed && (
+      {!embed && !remote && (
         <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           <span>effort</span>
           <select
@@ -238,6 +246,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
           )}
         </label>
       )}
+      {!remote && (<>
       <button
         className="btn ghost"
         onClick={onArchive}
@@ -255,6 +264,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
           color: showArchived ? "var(--bg-0)" : undefined,
         }}
       >{showArchived ? "live" : "archived"}</button>
+      </>)}
       {setMediaShown && (
         <button
           className="btn ghost chat-media-toggle"
@@ -268,6 +278,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
           }}
         >{mediaShown ? "media on" : "media off"}</button>
       )}
+      {!remote && (
       <input
         className="chat-search"
         value={search}
@@ -281,7 +292,8 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
           boxSizing: "border-box", outline: "none",
         }}
       />
-      {!paneOpen && !embed && (
+      )}
+      {!paneOpen && !embed && !remote && (
         <button
           className="btn ghost"
           onClick={() => setPaneOpen(true)}

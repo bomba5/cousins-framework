@@ -276,10 +276,15 @@ def auth_status(server, slug):
 
 
 def fleet_rows(server):
+    """The local cousins, then (with the hive on) the remote nodes the
+    queen knows as `type: "remote"` rows (cousin_lib/console/hive.py)."""
+    from cousin_lib.console import hive as console_hive
     defaults = agent_defaults(server.root)
     patterns = attention_patterns(server.root)
-    return [fleet_row(server, config, defaults, patterns)
+    rows = [fleet_row(server, config, defaults, patterns)
             for config in FrameworkConfig(server.root).list_cousins()]
+    return rows + console_hive.remote_rows(
+        server, {row["slug"] for row in rows})
 
 
 # ---- commands -----------------------------------------------------------

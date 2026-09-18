@@ -69,12 +69,40 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
   const showHidden = (window.useSetting && window.useSetting("showHidden")) || false;
   const visibleCousins = cousins.filter(c => showHidden || !c.hidden);
   const hiddenCount = cousins.filter(c => c.hidden).length;
+  const remoteCount = visibleCousins.filter(c => c.remote).length;
+
+  // Remote cousins (hive nodes on other machines): revoke the token,
+  // then forget the row. There is no start/stop/pane: the console does
+  // not run them, it is only their queen.
+  const actRemote = async (c, action) => {
+    try {
+      if (action === "revoke") {
+        if (!window.confirm(`Revoke @${c.slug}? Its hive token stops working at once (every queen call answers 401). This cannot be undone; a rebuilt archive gets a new token.`)) return;
+        const { r, d } = await apiSend("POST", `/api/hive/nodes/${c.slug}/revoke`);
+        if (r.ok && d.ok) {
+          flash(`revoked @${c.slug}`);
+          setCousins(cs => cs.map(x => x.slug === c.slug ? { ...x, revoked: true, remoteState: "revoked", online: false, status: "stopped" } : x));
+        } else flash("revoke failed: " + (d.error || `HTTP ${r.status}`), 4000);
+        return;
+      }
+      if (action === "forget") {
+        const { r, d } = await apiSend("DELETE", `/api/hive/nodes/${c.slug}`);
+        if (r.ok && d.ok) {
+          flash(`forgot @${c.slug}`);
+          setCousins(cs => cs.filter(x => x.slug !== c.slug));
+        } else flash("forget failed: " + (d.error || `HTTP ${r.status}`), 4000);
+      }
+    } catch (e) {
+      flash("error: " + (e.message || e), 4000);
+    }
+  };
 
   return (
     <div className="wrap-pad">
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
           {visibleCousins.length} cousins · {visibleCousins.filter(c => c.status === "running").length} running
+          {remoteCount > 0 && <span style={{ marginLeft: 8 }}>· {remoteCount} remote</span>}
           {hiddenCount > 0 && !showHidden && <span style={{ marginLeft: 8, color: "var(--fg-3)" }}>· {hiddenCount} hidden</span>}
         </div>
         <div style={{ flex: 1 }} />
@@ -84,7 +112,13 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
-        {visibleCousins.map(c => (
+        {visibleCousins.map(c => c.remote ? (
+          <RemoteCousinCard
+            key={c.slug} c={c}
+            onAct={actRemote}
+            onChat={() => setActiveCousin(c.slug)}
+          />
+        ) : (
           <CousinCard
             key={c.slug} c={c}
             onClick={() => setSelected(c.slug)}
@@ -96,7 +130,7 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
 
       {selected && (
         <Inspector
-          cousin={cousins.find(c => c.slug === selected)}
+          cousin={cousins.find(c => c.slug === selected && !c.remote)}
           onClose={() => setSelected(null)}
           onAct={act}
         />
@@ -179,6 +213,50 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         <button className="btn danger" onClick={() => onAct(c, "delete")} title="dismiss cousin (stop, archive the home, remove it)">dismiss</button>
         <div style={{ flex: 1 }} />
         {!isWorker && (
+          <button className="btn" onClick={() => onChat(c.slug)}>open chat →</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A remote cousin: a hive node on another machine that checks in with
+// this console (its queen). The card shows where it is and when it was
+// last heard from; online means a checkin within 2.5 checkin periods.
+// No start/stop/restart/pane: the console does not run it.
+function RemoteCousinCard({ c, onAct, onChat }) {
+  const state = c.remoteState || (c.online ? "online" : "offline");
+  const tone = { online: "green", offline: "gray", pending: "amber", revoked: "red" }[state] || "gray";
+  const label = state === "pending" ? "built, not checked in" : state;
+  const seen = c.lastSeen ? fmtAgo(Date.now() / 1000 - c.lastSeen) : "never";
+  return (
+    <div className="cousin-card remote">
+      <div className="name-row">
+        <Led state={c.online ? "running" : "stopped"} pulse={c.online} />
+        <div className="name">{c.name}</div>
+        <div className="slug">@{c.slug}</div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          <Pill tone="cyan">remote</Pill>
+          <Pill tone={tone}>{label}</Pill>
+        </div>
+      </div>
+      <div className="role">{c.role}</div>
+      <div style={{ margin: "4px 0" }}>
+        <HeartbeatGraph state={c.online ? "idle" : "stopped"} width={240} height={22} />
+      </div>
+      <div className="stats">
+        <div>host · <b>{c.host && c.port ? `${c.host}:${c.port}` : "-"}</b></div>
+        <div>last seen · <b>{seen}</b></div>
+        <div>runtime · <b>{c.version || "-"}</b></div>
+      </div>
+      <div className="actions" onClick={e => e.stopPropagation()}>
+        {c.revoked ? (
+          <button className="btn" onClick={() => onAct(c, "forget")} title="remove this revoked node from the console">forget</button>
+        ) : (
+          <button className="btn danger" onClick={() => onAct(c, "revoke")} title="revoke the node's hive token">revoke</button>
+        )}
+        <div style={{ flex: 1 }} />
+        {c.online && !c.revoked && (
           <button className="btn" onClick={() => onChat(c.slug)}>open chat →</button>
         )}
       </div>
@@ -572,7 +650,7 @@ function PeerMessagePanel({ cousin }) {
 
   React.useEffect(() => {
     fetchCousins().then(all => {
-      const others = all.filter(c => c.slug !== cousin.slug && c.type !== "worker");
+      const others = all.filter(c => c.slug !== cousin.slug && c.type !== "worker" && !c.remote);
       setPeers(others);
       if (others.length && !to) setTo(others[0].slug);
     });
@@ -1056,6 +1134,16 @@ function SpawnModal({ onClose, onSpawn }) {
   const efforts = options?.efforts || [];
   const scopes = options?.memory_scopes || [];
 
+  // Where the cousin runs. "Remote" is offered only when the hive is on
+  // (config/hive.toml); it builds a node archive instead of a local home.
+  const [hive, setHive] = React.useState(null);
+  const [mode, setMode] = React.useState("local");
+  React.useEffect(() => {
+    let cancelled = false;
+    apiGet("/api/hive").then(d => { if (!cancelled && d) setHive(d); });
+    return () => { cancelled = true; };
+  }, []);
+
   React.useEffect(() => {
     if (!slug && name) setSlug(name.toLowerCase().replace(/[^a-z0-9]/g, ""));
   }, [name]);
@@ -1106,6 +1194,17 @@ function SpawnModal({ onClose, onSpawn }) {
           <span>spawn cousin</span>
           <span style={{ color: "var(--fg-3)", marginLeft: "auto" }}>console / cousins / new</span>
         </div>
+        {hive?.enabled && (
+          <div style={{ padding: "12px 18px 0" }}>
+            <div className="radio-row">
+              <button type="button" className={mode === "local" ? "sel" : ""} onClick={() => setMode("local")}>This machine</button>
+              <button type="button" className={mode === "remote" ? "sel" : ""} onClick={() => setMode("remote")}>Remote (another machine)</button>
+            </div>
+          </div>
+        )}
+        {mode === "remote" && hive?.enabled ? (
+          <RemoteSpawnForm hive={hive} onClose={onClose} />
+        ) : (<>
         <div className="body">
           <div className="grid2">
             <FormField label="name" hint="Display name (e.g. Wren)">
@@ -1176,8 +1275,172 @@ function SpawnModal({ onClose, onSpawn }) {
             {I.plus} {busy ? "creating..." : `create cousin ${slug || "-"}`}
           </button>
         </div>
+        </>)}
       </div>
     </div>
+  );
+}
+
+// Copy a command: the Clipboard API where the page is a secure context,
+// else a hidden textarea and execCommand (a console on plain http over
+// the LAN is not a secure context).
+function CopyButton({ text }) {
+  const [done, setDone] = React.useState(false);
+  const copy = async () => {
+    let ok = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch (_e) { ok = false; }
+    if (!ok) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
+      document.body.removeChild(ta);
+    }
+    setDone(ok ? "copied" : "select and copy by hand");
+    setTimeout(() => setDone(false), 1800);
+  };
+  return <button className="btn" onClick={copy} style={{ fontSize: 11 }}>{done || "copy"}</button>;
+}
+
+// Build a remote cousin: POST /api/hive/nodes mints the node's token in
+// this console's queen store and builds the archive; the answer is a
+// one-time download URL (15 minutes or first download) and the install
+// commands. Nothing is pushed anywhere: the operator runs the command on
+// the other machine. The card appears as "built, not checked in" and
+// goes online at the node's first checkin.
+function RemoteSpawnForm({ hive, onClose }) {
+  const [name, setName] = React.useState("");
+  const [slug, setSlug] = React.useState("");
+  const [role, setRole] = React.useState("");
+  const [port, setPort] = React.useState(String(hive.default_port || 8210));
+  const [brain, setBrain] = React.useState("placeholder");
+  const [agentCmd, setAgentCmd] = React.useState("");
+  const [homeChat, setHomeChat] = React.useState(false);
+  const [reachable, setReachable] = React.useState(true);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const [built, setBuilt] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!slug && name) setSlug(name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  }, [name]);
+
+  const valid = slug.trim() && name.trim() && role.trim()
+    && (brain === "placeholder" || agentCmd.trim());
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const body = { slug, name: name.trim(), role: role.trim(), brain,
+                     home_chat: homeChat, reachable };
+      if (String(port).trim()) body.port = Number(port);
+      if (brain === "agent") body.agent_cmd = agentCmd.trim();
+      const { r, d } = await apiSend("POST", "/api/hive/nodes", body);
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setBuilt(d);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (built) {
+    const expires = new Date(built.expires_at * 1000).toLocaleTimeString();
+    return (
+      <>
+        <div className="body">
+          <p style={{ color: "var(--fg-1)", fontSize: 12, lineHeight: 1.5, marginTop: 0 }}>
+            Built <b>@{built.slug}</b>. On the other machine (python3 and outbound
+            network to <code>{hive.public_url}</code> are all it needs), run one of:
+          </p>
+          <SectionLabel>download and install</SectionLabel>
+          <div className="copy-row"><code>{built.curl}</code><CopyButton text={built.curl} /></div>
+          <SectionLabel style={{ marginTop: 14 }}>install an archive you already copied over</SectionLabel>
+          <div className="copy-row"><code>{built.install}</code><CopyButton text={built.install} /></div>
+          <p style={{ color: "var(--amber)", fontSize: 12, marginTop: 14 }}>
+            The archive carries the node's bearer token. The link works once and
+            expires at {expires}; after that, build again (the slug keeps its token).
+          </p>
+          <p style={{ color: "var(--fg-3)", fontSize: 11 }}>
+            The card shows "built, not checked in" until the node's first checkin.
+          </p>
+        </div>
+        <div className="foot">
+          <button className="btn primary" onClick={onClose}>done</button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="body">
+        <div className="grid2">
+          <FormField label="name" hint="Display name (e.g. Kestrel)">
+            <input className="txt" value={name} onChange={e => setName(e.target.value)} placeholder="Kestrel" />
+          </FormField>
+          <FormField label="slug" hint="The node's identity on the queen; its token is minted for it">
+            <input className="txt" value={slug} onChange={e => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))} placeholder="kestrel" />
+          </FormField>
+        </div>
+        <div style={{ marginTop: 14 }} />
+        <FormField label="role" hint="One line: rendered into the node's CLAUDE.md and shown on its card.">
+          <textarea className="txt" value={role} onChange={e => setRole(e.target.value)} placeholder="watches the greenhouse" />
+        </FormField>
+        <div style={{ marginTop: 14 }} />
+        <div className="grid2">
+          <FormField label="node port" hint="The node's own chat port on its machine.">
+            <input className="txt" type="number" value={port} onChange={e => setPort(e.target.value)} placeholder="8210" />
+          </FormField>
+          <FormField label="brain" hint="Placeholder greets and echoes; an agent command reads the prompt on stdin.">
+            <div className="radio-row">
+              <button type="button" className={brain === "placeholder" ? "sel" : ""} onClick={() => setBrain("placeholder")}>placeholder</button>
+              <button type="button" className={brain === "agent" ? "sel" : ""} onClick={() => setBrain("agent")}>agent command</button>
+            </div>
+          </FormField>
+        </div>
+        {brain === "agent" && (
+          <>
+            <div style={{ marginTop: 14 }} />
+            <FormField label="agent command" hint="One command line as it runs ON THE NODE: prompt on stdin, reply on stdout (AGENT_CMD in node.env).">
+              <input className="txt" value={agentCmd} onChange={e => setAgentCmd(e.target.value)} placeholder="/usr/local/bin/my-agent --plain" />
+            </FormField>
+          </>
+        )}
+        <div style={{ marginTop: 14 }} />
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--fg-1)" }}>
+          <input type="checkbox" checked={homeChat} disabled={!hive.home_chat_url}
+                 onChange={e => setHomeChat(e.target.checked)} />
+          home chat{hive.home_chat_url ? ` (${hive.home_chat_url})` : " (set home_chat_url in config/hive.toml)"}
+        </label>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--fg-1)", marginTop: 8 }}>
+          <input type="checkbox" checked={reachable} onChange={e => setReachable(e.target.checked)} />
+          chat from this console (the node listens on its network and answers only its own token off loopback)
+        </label>
+      </div>
+      {error && (
+        <div style={{ padding: "8px 16px", color: "var(--red)", fontFamily: "var(--mono)", fontSize: 11, borderTop: "1px solid var(--line)" }}>
+          · {error}
+        </div>
+      )}
+      <div className="foot">
+        <button className="btn ghost" onClick={onClose}>cancel</button>
+        <button className="btn primary" disabled={!valid || busy} onClick={submit}>
+          {I.plus} {busy ? "building..." : `build node ${slug || "-"}`}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -1191,4 +1454,4 @@ function FormField({ label, hint, children }) {
   );
 }
 
-Object.assign(window, { CousinsView, CousinCard, Inspector, IdentityField, AuthField, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });
+Object.assign(window, { CousinsView, CousinCard, RemoteCousinCard, RemoteSpawnForm, CopyButton, Inspector, IdentityField, AuthField, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });

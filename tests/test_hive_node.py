@@ -75,6 +75,7 @@ class NodeCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.tmp = pathlib.Path(tmp.name)
         self.store = HiveStore(self.tmp / "hive")
+        self.addCleanup(self.store.close)
         self.token = self.store.mint_token("testa", scope=["own", "shared"])
         self.queen = build_queen(self.store)
         self.queen.start()
@@ -500,6 +501,62 @@ class TestSubprocess(NodeCase):
                               capture_output=True, text=True, timeout=10)
         self.assertEqual(proc.returncode, 2)
         self.assertIn("COUSIN_SLUG", proc.stderr)
+
+
+class TestCheckin(NodeCase):
+    def test_the_node_checks_in_on_start(self):
+        node = self._node(NODE_ROLE="greenhouse")
+        deadline = time.time() + 5
+        while time.time() < deadline and self.store.node("testa") is None:
+            time.sleep(0.05)
+        row = self.store.node("testa")
+        self.assertIsNotNone(row, "no checkin reached the queen")
+        self.assertEqual((row["port"], row["name"], row["role"],
+                          row["version"], row["host"]),
+                         (node.port, "Testa", "greenhouse",
+                          self.module.NODE_VERSION, "127.0.0.1"))
+
+    def test_the_period_is_the_queens_answer(self):
+        node = self.module.build_node(self._env(), log=lambda text: None)
+        self.addCleanup(node.httpd.server_close)
+        self.assertEqual(node.checkin.period, 60)
+        self.queen.context.checkin_seconds = 17
+        self.assertTrue(node.checkin.once())
+        self.assertEqual(node.checkin.period, 17)
+
+    def test_a_failed_checkin_is_logged_and_not_fatal(self):
+        logged = []
+        node = self.module.build_node(
+            self._env(QUEEN_URL="http://127.0.0.1:9"), log=logged.append)
+        self.addCleanup(node.httpd.server_close)
+        self.assertFalse(node.checkin.once())
+        self.assertFalse(node.checkin.once())
+        self.assertEqual(len(logged), 1, logged)  # once per reason
+        self.assertIn("checkin failed", logged[0])
+        self.store.revoke("testa")
+        node.hive.queen_url = self.queen_url
+        self.assertFalse(node.checkin.once())
+        self.assertIn("HTTP 401", logged[-1])
+
+
+class TestOffLoopbackGate(unittest.TestCase):
+    def setUp(self):
+        self.module = _load_node_module()
+
+    def test_loopback_forms(self):
+        for address in ("127.0.0.1", "127.8.9.1", "::1", "::ffff:127.0.0.1"):
+            self.assertTrue(self.module.is_loopback(address), address)
+        for address in ("198.51.100.7", "192.0.2.1", "::ffff:198.51.100.7", "junk"):
+            self.assertFalse(self.module.is_loopback(address), address)
+
+    def test_off_loopback_needs_the_nodes_own_token(self):
+        allowed = self.module.caller_allowed
+        self.assertTrue(allowed("127.0.0.1", "", "hive_t"))
+        self.assertTrue(allowed("198.51.100.7", "Bearer hive_t", "hive_t"))
+        self.assertFalse(allowed("198.51.100.7", "", "hive_t"))
+        self.assertFalse(allowed("198.51.100.7", "Bearer hive_other", "hive_t"))
+        self.assertFalse(allowed("198.51.100.7", "hive_t", "hive_t"))
+        self.assertFalse(allowed("198.51.100.7", "Bearer ", ""))
 
 
 class TestInstallScript(unittest.TestCase):

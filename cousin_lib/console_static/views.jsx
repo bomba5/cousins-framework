@@ -427,7 +427,7 @@ function MemoryView() {
 
   const scopes = [
     { id: "shared", label: "shared", count: shared.canonical.length + shared.pending.length },
-    ...cousins.map(c => ({ id: c.slug, label: `@${c.slug}` })),
+    ...cousins.filter(c => !c.remote).map(c => ({ id: c.slug, label: `@${c.slug}` })),
   ];
   const scopeBar = (
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }} data-memory-scopes>
@@ -644,7 +644,7 @@ function LoopsView({ loops }) {
         <div className="panel" style={{ marginBottom: 10, padding: 10 }}>
           <div style={{ display: "grid", gridTemplateColumns: "120px 140px 90px 1fr 60px 80px 80px", gap: 6, alignItems: "center" }}>
             <select className="sel" value={slug} onChange={e => setSlug(e.target.value)}>
-              {cousins.map(c => <option key={c.slug} value={c.slug}>@{c.slug}</option>)}
+              {cousins.filter(c => !c.remote).map(c => <option key={c.slug} value={c.slug}>@{c.slug}</option>)}
               {cousins.length === 0 && <option value="">(no cousin)</option>}
             </select>
             <input className="txt" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="loop name" />
@@ -1779,7 +1779,7 @@ function HostView() {
                     <td><StatePill state={c.status} /></td>
                     <td className="muted">{c.chat}</td>
                     <td className="muted">{c.operator || "-"}</td>
-                    <td className="muted">{c.heartbeat}s</td>
+                    <td className="muted">{c.heartbeat != null ? `${c.heartbeat}s` : "-"}</td>
                     <td className="num">{fmtTokens(c.tokensSpent || 0)}</td>
                   </tr>
                 ))}

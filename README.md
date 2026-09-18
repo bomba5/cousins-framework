@@ -30,7 +30,7 @@ serving the tool surface over MCP is the one optional extra.
 | in-flight work tracker, framework-wide (domain, state, tags, owner) | `cousin-tracker` | `docs/tracker-spec.md` |
 | media generation (image/voice/video), configurable provider | `cousin-image`, `cousin-voice`, `cousin-video` | `docs/media-spec.md` |
 | Telegram bridge, per-cousin configurable | `cousin-telegram` | `docs/telegram-spec.md` |
-| hive: cross-machine cousins over an authed bus, and the copy-over node archive | `cousin-hive`, `cousin-spawn-node` | `docs/hive-spec.md`, `docs/deploying-a-node.md` |
+| hive: cross-machine cousins over an authed bus (the console can be its queen), and the copy-over node archive | `cousin-hive`, `cousin-spawn-node` | `docs/hive-spec.md`, `docs/deploying-a-node.md` |
 | the web console (a view, never a source of truth) | `cousin-console` (`cousin-ui` is its retired alias) | `docs/ui-spec.md` |
 | the console's API contract: routes, live streams, auth, what was dropped | `cousin-console` | `docs/console-spec.md` |
 | per-cousin auth mode: the harness login or an API key | `cousin-auth` | `docs/guide.md`, `docs/configuration.md` |
@@ -138,6 +138,11 @@ The short version of each piece:
   LAN access run it with `--host 0.0.0.0` (plain HTTP: only on a
   trusted LAN, TLS in front otherwise); or keep loopback and tunnel:
   `ssh -L 8600:127.0.0.1:8600 <user>@<machine>`.
+- **Hive (off by default).** `config/hive.toml` (from the `.example`)
+  makes the console the hive's queen on its own port: cousins on
+  other machines show up as remote cards, and the spawn dialog builds
+  a node archive behind a one-time download link
+  (`docs/deploying-a-node.md`).
 - **Unattended.** `systemd/` ships user-unit templates (loops daemon,
   console, sweep, tool surface, chat watchdog); `docs/install.md`
   step 7 installs them, with `loginctl enable-linger "$USER"`.

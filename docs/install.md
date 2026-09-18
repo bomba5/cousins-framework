@@ -43,7 +43,8 @@ python3 -m venv .venv
 pip install -e ".[mcp]"
 ```
 
-`[mcp]` is the one optional extra (the MCP SDK, about 27 wheels); it
+`[mcp]` is the one optional extra (the MCP SDK and a few dozen
+dependency packages); it
 is what lets the agent use the cousin's tools over MCP, which spawn
 wires up for every cousin, so install it unless you know you will not
 use it. The package is not on PyPI: always install from the checkout
@@ -69,7 +70,7 @@ keeps every command in agreement.
 python3 -m unittest discover -s tests
 ```
 
-About 1380 tests in about five minutes on a small VM; the summary line
+About 1390 tests in about six minutes on a small VM; the summary line
 must read `OK` (a few `skipped` are fine). Run it now, before any cousin
 exists, so a failure is the framework's and not your install's.
 
@@ -179,12 +180,24 @@ for unit in systemd/*.service systemd/*.timer; do
       -e "s|{{SYSTEM_PATH}}|$SYSTEM_PATH|g" \
       "$unit" > ~/.config/systemd/user/"$(basename "$unit")"
 done
-grep -l '{{' ~/.config/systemd/user/cousin-* && echo "unsubstituted placeholder"
+! grep -l '{{' ~/.config/systemd/user/cousin-*   # success prints nothing; a file name means a placeholder was left
 systemctl --user daemon-reload
 systemctl --user enable --now cousin-loops.service cousin-console.service
 systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
 loginctl enable-linger "$USER"            # units keep running after you log out
+cousin-console adduser "$USER"            # now, not later: prompts for a password
 ```
+
+The console has no authentication from its first start until the
+first `cousin-console adduser`: in that window anyone the network
+guard admits (loopback and the private ranges; the default bind is
+loopback, so in practice anyone on this machine) can use it without
+signing in. Its journal line says so with a suffix,
+`(auth not configured: cousin-console adduser <name>)`. That is why
+the adduser line above follows the `enable` line directly: run it
+immediately. Auth is enforced as soon as the users file exists, with
+no restart; the suffix stays in the journal line printed at start
+until the next restart.
 
 Do not enable `cousin-chat-server@testa.service` here: `--start`
 already started that chat server and the watchdog timer supervises it;
@@ -197,9 +210,9 @@ If `loginctl enable-linger` is refused, run it with `sudo`.
 ## 8. Console and first chat
 
 ```
-cousin-console adduser "$USER"            # prompts for a password
 journalctl --user -u cousin-console.service -n 5
 #   -> cousin-console: serving <root> on 127.0.0.1:8600
+#      (with the "auth not configured" suffix if it started before adduser)
 ```
 
 The console binds loopback. Open `http://127.0.0.1:8600/` on the

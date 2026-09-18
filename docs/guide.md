@@ -442,6 +442,16 @@ cousin-transplant --donor testa --recipient testb --mode merge --root .
 #      memory/raw is unioned; both cousins flip
 ```
 
+A cousin moving over from the previous framework brings its chat history
+with `cousin-chat-import` (chat server stopped): old messages keep their
+ids and pictures, rows already in the new store move after them, and a
+second run is refused.
+
+```
+cousin-chat-import testa --old-home /old/instance/cousins/testa/files --root .
+#   -> {"imported": 566, "renumbered": 4, "images": 157, ...}
+```
+
 The three transplant modes: `soul-donation` (the recipient carries the
 donor's memory in its own body), `body-swap` (the two bodies trade
 places, memory stays put), `merge` (the donor's memory is braided into

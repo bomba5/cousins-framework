@@ -135,6 +135,7 @@ you is `cousin-job start shell "<title>" -- <cmd>` from a shell.
 | `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |
 | `cousin-reincarnate` | change a cousin's role, keep its memory, flip it | operator-driven; when asked for a bequest, write `data/handoff.md` before the flip |
 | `cousin-transplant` | move memory or body between two cousins (soul-donation, body-swap, merge) | operator-driven; both cousins are flipped afterwards |
+| `cousin-chat-import` | bring a cousin's chat history over from the previous framework | operator-driven, at migration, with the cousin's chat server stopped |
 | `cousin-self-portrait` | your reviewed identity layer | `synthesize` then operator review, then `commit` |
 | `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |

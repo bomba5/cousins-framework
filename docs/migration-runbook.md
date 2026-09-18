@@ -42,9 +42,21 @@ instance keeps serving the cousin until you stop it there.
    `memory/distilled/` (regenerated at first boot anyway), `notes/`,
    `MEMORY.md`, `STATUS.md`, `data/decisions.jsonl`, `data/capsules.jsonl`
    if present, `data/corrections.jsonl`, `data/active-threads.md`,
-   `data/handoff.md`. Skip `memory/embeddings.json` and `memory/fts_index.db`
-   (rebuilt by the first search) and the source `data/chat.db` (the chat
-   schema differs; history stays readable on the source instance).
+   `data/handoff.md`, plus the cousin's working folders (`scripts/`,
+   `scratch/`, `chat/` media, `inbox/`, `self-portrait.md`). Skip
+   `memory/embeddings.json` and `memory/fts_index.db` (rebuilt by the first
+   search).
+3a. **Archive the whole source** into `<home>/legacy/` (mode 700, files
+   600) before anything else can delete it: `tar -czf
+   legacy/old-home-<date>.tar.gz` of the source cousin directory, and the
+   same for the harness's per-project transcript directory. After this the
+   source home can be deleted without loss; tell the cousin in its
+   CLAUDE.md where the archive is.
+3b. **Import the chat history** with the new chat server stopped:
+   `cousin-chat-import <slug> --old-home <source home>` (an unpacked
+   `legacy/old-home-*.tar.gz` works too). Old messages keep their ids and
+   pictures; rows already in the new store move after them. It keeps a
+   backup of the new store and refuses a second run.
 4. **Rewrite CLAUDE.md**: keep the template's doctrine sections that spawn
    produced and append the cousin's own sections (voice, identity invariants,
    loops it runs, household hard rules) from the source file. The source's

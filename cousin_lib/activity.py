@@ -35,13 +35,26 @@ def _one_line(text, limit=LINE_CHARS):
 
 # ------------------------------------------------------------ activity
 
+_WRAPPER_PREFIXES = ("trap ", "exec > >(tee -a ")
+
+
+def unwrap_command(command):
+    """A background shell's command as the cousin wrote it: the job
+    hook prepends its own trap and tee lines (job_hooks._wrap), and the
+    post-call payload carries the rewritten command."""
+    lines = command.split("\n")
+    while lines and lines[0].startswith(_WRAPPER_PREFIXES):
+        lines.pop(0)
+    return "\n".join(lines).strip()
+
+
 def describe_call(tool, tool_input):
     """What a tool call did, in a few words: the command, the file, the
     pattern. Unknown tools show their input compactly."""
     tool_input = tool_input if isinstance(tool_input, dict) else {}
     get = tool_input.get
     if tool == "Bash":
-        what = get("command") or ""
+        what = unwrap_command(get("command") or "")
         if get("description"):
             what = "%s  # %s" % (_one_line(what, 160), get("description"))
         if get("run_in_background"):

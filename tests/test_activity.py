@@ -163,3 +163,13 @@ class SubagentJobLog(HookCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrappedCommandReadsAsWritten(unittest.TestCase):
+    def test_the_hook_wrapper_is_not_in_the_line(self):
+        wrapped = job_hooks._wrap("make -j8", "/h", "/r", 7,
+                                  log_path="/r/data/job-logs/job-7.log")
+        self.assertIn("trap", wrapped)
+        line = activity.describe_call("Bash", {"command": wrapped,
+                                               "run_in_background": True})
+        self.assertEqual(line, "[bg] make -j8")

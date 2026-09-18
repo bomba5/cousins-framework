@@ -481,11 +481,25 @@ An SSE stream (`text/event-stream`, `Cache-Control: no-cache`,
 
 | event | payload | when |
 |---|---|---|
-| `pane` | `{"text": str, "ts": iso, "changed": true}` | once on connect (a full frame, ending with an absolute cursor-position escape so the client caret lands where tmux's is), and again whenever the frame must be resent (after a geometry change; every change when the server is polling) |
+| `pane` | `{"text": str, "state": object or null, "ts": iso, "changed": true}` | once on connect (a full frame), and again whenever the frame must be resent (after a geometry change; every change when the server is polling). See "Frames" below |
 | `delta` | `{"text": str, "ts": iso}` | new bytes since the last event, decoded with a boundary-safe UTF-8 decoder (an incomplete multi-byte character waits for its rest) |
 | `geom` | `{"cols": int, "rows": int, "ts": iso}` | the pane's geometry changed (checked at least every 2 s, during bursts too); a fresh `pane` frame follows |
 | `heartbeat` | `{"ts": iso}` | after 3 s without output |
 | `: tick` | comment frame | keep-alive between polls |
+
+#### Frames
+
+A `pane` frame is written into a freshly reset terminal. `text` is
+`capture-pane -p -e -S -<lines>` with trailing blank lines trimmed
+(never above the cursor's line), followed by a control tail: the
+cursor moved onto tmux's cursor cell relative to the frame's last line (`ESC [ n A` up, `ESC [ col G` to the column),
+then `ESC [ ? 25 h` or `ESC [ ? 25 l` as tmux shows or hides the
+cursor. `state` is `{"alt", "mouse", "sgr", "cols", "rows", "cx",
+"cy", "cursor", "top"}` from one `display-message` (`alternate_on`,
+`mouse_any_flag`, `mouse_sgr_flag`, `pane_width`, `pane_height`,
+`cursor_x`, `cursor_y`, `cursor_flag`; `top` is the number of frame
+lines above the screen's first row), null when tmux prints nothing
+usable.
 
 How the server obtains bytes is an implementation choice this contract
 does not fix: a `pipe-pane` tap (the source's local path) or

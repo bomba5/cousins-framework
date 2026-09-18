@@ -68,6 +68,12 @@ class CousinCardRows(unittest.TestCase):
     def setUp(self):
         self.src = _component(_read("cousins.jsx"), "CousinCard")
 
+    def test_a_row_needing_attention_says_so(self):
+        # "running" with the agent parked on a login menu read as
+        # healthy; the row's attention field is shown on the card.
+        self.assertIn("c.attention", self.src)
+        self.assertIn("needs attention", self.src)
+
     def test_role_sits_under_the_name(self):
         self.assertRegex(self.src, r'className="role"[^\n]*\{c\.role\}')
 

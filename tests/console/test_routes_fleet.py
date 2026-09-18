@@ -14,6 +14,44 @@ from cousin_lib import loops
 from tests.console._harness import ConsoleCase
 
 
+class TestAttention(ConsoleCase):
+    """A running session whose pane shows one of the harness's
+    attention_patterns (a login menu, say) is flagged on its row:
+    "running" alone read as healthy while the agent waited on a human."""
+
+    def test_a_matching_pane_is_flagged(self):
+        (self.root / "config" / "harness.toml").write_text(
+            'attention_patterns = ["Select login method"]\n')
+        self.cousin("wren")
+        self.pane.write_text("Welcome\nSelect login method:\n 1. account\n")
+        self.tmux_running()
+        self.serve()
+        row = self.get("/api/cousins")[1]["cousins"][0]
+        self.assertEqual(row["status"], "running")
+        self.assertEqual(row["attention"], "Select login method")
+
+    def test_no_match_or_no_patterns_is_null(self):
+        self.cousin("wren")
+        self.pane.write_text("Select login method:\n")
+        self.tmux_running()
+        self.serve()
+        self.assertIsNone(self.get("/api/cousins")[1]["cousins"][0]
+                          ["attention"])
+        (self.root / "config" / "harness.toml").write_text(
+            'attention_patterns = ["Paste code here"]\n')
+        self.assertIsNone(self.get("/api/cousins")[1]["cousins"][0]
+                          ["attention"])
+
+    def test_a_stopped_cousin_is_never_flagged(self):
+        (self.root / "config" / "harness.toml").write_text(
+            'attention_patterns = ["Select login method"]\n')
+        self.cousin("wren")
+        self.pane.write_text("Select login method:\n")
+        self.serve()
+        self.assertIsNone(self.get("/api/cousins")[1]["cousins"][0]
+                          ["attention"])
+
+
 class TestListCousins(ConsoleCase):
     def test_rows_carry_the_contract_keys_from_the_registry(self):
         self.cousin("wren", operator="Sam",

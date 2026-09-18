@@ -227,6 +227,66 @@ class TestObsoleteCli(HomeCase):
         self.assertEqual(raw_rows(self.home)[-1]["topic"], "deploy")
 
 
+# ------------------------------------------------------------ L2 jobs
+
+class TestJobResults(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.home = self.root / "cousins" / "wren"
+        self.home.mkdir(parents=True)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n')
+        patcher = mock.patch.dict(os.environ, {
+            "FRAMEWORK_ROOT": str(self.root),
+            "COUSIN_HOME": str(self.home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_done_and_failed_land_as_l2_in_the_owner_home(self):
+        from cousin_lib import jobs
+        a = jobs.register_job(kind="build", title="Build the Docs!")
+        jobs.finish_job(a, status="done", summary="42 pages", exit_code=0)
+        b = jobs.register_job(kind="shell", title="fleet sync")
+        jobs.finish_job(b, status="failed", summary="host 3 refused " * 80,
+                        exit_code=7)
+        rows = level_rows(self.home, "L2_TOOL")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["topic"], "job:build-the-docs")
+        self.assertIn("job #%d done (exit 0): Build the Docs! - 42 pages"
+                      % a, rows[0]["content"])
+        self.assertEqual(rows[0]["source"], "job")
+        self.assertEqual(rows[1]["exit_code"], 7)
+        self.assertIn("failed (exit 7)", rows[1]["content"])
+        self.assertLessEqual(len(rows[1]["content"]),
+                             memory.EVENT_CONTENT_CHARS)
+
+    def test_a_repeat_close_or_a_cancel_writes_nothing_more(self):
+        from cousin_lib import jobs
+        a = jobs.register_job(kind="build", title="t")
+        jobs.finish_job(a, status="done")
+        jobs.finish_job(a, status="done", summary="again")
+        c = jobs.register_job(kind="build", title="c")
+        jobs.finish_job(c, status="cancelled")
+        self.assertEqual(len(level_rows(self.home, "L2_TOOL")), 1)
+
+    def test_a_job_with_no_cousin_home_is_skipped(self):
+        from cousin_lib import jobs
+        a = jobs.register_job(kind="other", title="t", spawned_by="ghost")
+        jobs.finish_job(a, status="done")
+        self.assertFalse((self.root / "cousins" / "ghost").exists())
+        self.assertEqual(level_rows(self.home, "L2_TOOL"), [])
+
+    def test_the_cli_close_path_writes_too(self):
+        from cousin_lib import jobs
+        a = jobs.register_job(kind="build", title="cli close")
+        with contextlib.redirect_stdout(io.StringIO()):
+            jobs.jobs_main(["fail", str(a), "broke", "--exit", "3"])
+        [row] = level_rows(self.home, "L2_TOOL")
+        self.assertIn("failed (exit 3): cli close - broke", row["content"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

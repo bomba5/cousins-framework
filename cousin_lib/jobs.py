@@ -8,6 +8,7 @@ one. Identity and root come from the environment and fail loud.
 import argparse
 import json
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -74,9 +75,13 @@ def register_job(*, kind, title, description="", spawned_by=None,
 
 def finish_job(job_id, *, status="done", summary="", exit_code=None):
     """Close a job row. Idempotent by last-write-wins; the terminal
-    status is whatever the closer says it is."""
+    status is whatever the closer says it is. The first close of a
+    running row to done or failed also lands in the owning cousin's
+    raw memory as an L2 (tool) entry - see record_job_result."""
     conn = _db()
     try:
+        before = conn.execute("SELECT status FROM jobs WHERE id=?",
+                              (job_id,)).fetchone()
         conn.execute(
             "UPDATE jobs SET status=?, finished_at=?,"
             " result_summary=COALESCE(NULLIF(?, ''), result_summary),"
@@ -85,8 +90,55 @@ def finish_job(job_id, *, status="done", summary="", exit_code=None):
             (status, _now(), summary[:500], exit_code, job_id),
         )
         conn.commit()
+        row = conn.execute("SELECT * FROM jobs WHERE id=?",
+                           (job_id,)).fetchone()
     finally:
         conn.close()
+    if before is not None and before["status"] == "running" and row:
+        record_job_result(dict(row))
+
+
+# What a finished job leaves in its cousin's raw memory. The topic
+# folds repeat runs of the same work: job:<title slug>.
+JOB_SUMMARY_CHARS = 400
+_TOPIC_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def job_topic(title):
+    slug = _TOPIC_SLUG.sub("-", str(title or "").lower()).strip("-")
+    return "job:%s" % (slug[:60].rstrip("-") or "untitled")
+
+
+def record_job_result(job):
+    """An L2_TOOL raw entry in the owning cousin's home for a job that
+    ended done or failed: what ran, how it ended (exit code when
+    known), what it said. A job whose spawned_by names no cousin home
+    under the root is skipped. Never raises: the job is closed either
+    way."""
+    try:
+        if job.get("status") not in ("done", "failed"):
+            return False
+        owner = str(job.get("spawned_by") or "")
+        if not owner or "/" in owner or owner.startswith("."):
+            return False
+        home = FrameworkConfig.from_env().root / "cousins" / owner
+        if not (home / "cousin.toml").is_file():
+            return False
+        from cousin_lib import memory
+        title = " ".join(str(job.get("title") or "").split())
+        head = "job #%s %s" % (job.get("id"), job["status"])
+        if job.get("exit_code") is not None:
+            head += " (exit %s)" % job["exit_code"]
+        summary = " ".join(str(job.get("result_summary") or "").split())
+        content = "%s: %s" % (head, title or "(untitled)")
+        if summary:
+            content += " - %s" % summary[:JOB_SUMMARY_CHARS]
+        return memory.record_event(
+            home, "L2_TOOL", job_topic(title), content, "job",
+            job_id=job.get("id"), status=job["status"],
+            exit_code=job.get("exit_code"), kind=job.get("kind"))
+    except Exception:  # noqa: BLE001 - the close already happened
+        return False
 
 
 def set_log_path(job_id, log_path):

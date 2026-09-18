@@ -112,6 +112,19 @@ class TestFullFlip(FlipCase):
         self.assertFalse(
             (self.home / "data" / ".flip-in-progress.json").exists())
 
+    def test_distilled_floor_includes_the_flip_record(self):
+        # The flip records itself after the packet is assembled; the
+        # floor used to lag by that one entry until the next start.
+        self._flip()
+        before = {p.name: p.read_text() for p in
+                  (self.home / "memory" / "distilled").glob("*.md")}
+        from cousin_lib import distill
+        distill.distill(self.home)
+        after = {p.name: p.read_text() for p in
+                 (self.home / "memory" / "distilled").glob("*.md")}
+        self.assertEqual(before, after)
+        self.assertIn("flipped to generation 1", "".join(after.values()))
+
     def test_silent_cousin_gets_an_emergency_handoff(self):
         out = self._flip()
         stages = {s["stage"]: s for s in out["stages"]}

@@ -359,6 +359,14 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
                             else "clean" if handoff["wrote_clean"]
                             else "emergency (timed out)"),
                         generation=new_gen)
+        # The packet's floor was distilled before this record existed;
+        # fold it in so the floor doesn't lag the flip itself by one
+        # entry until the next start. Best-effort.
+        try:
+            from cousin_lib import distill
+            distill.distill(home)
+        except Exception:
+            pass
 
     # Inject the packet after the session settles. The seam should be
     # invisible: no announcement unless the operator asked.

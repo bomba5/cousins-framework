@@ -247,7 +247,10 @@ cousin-spawn kestrel --root . --name Kestrel --role "..." \
 ```
 
 The agent runs in a tmux session; its chat server serves the port in
-`cousin.toml`. A person on that chat page replies with `cousin-reply`;
+`cousin.toml`. A person on that chat page replies with `cousin-reply`
+(`--image <file>` shows a picture on the reply: the file lands as
+`<home>/chat/inbound/<reply id>.<ext>`, which the console attaches to that
+message);
 another cousin messages it with `cousin-chat send kestrel "..."`. The
 distinction is load-bearing and the template spells it out - the wrong
 path silently fails to deliver.

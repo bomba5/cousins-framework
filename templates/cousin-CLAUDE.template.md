@@ -39,6 +39,11 @@ multi-line preserved cleanly
 REPLY
 ```
 
+To show a picture on the reply (a render, a chart, a photo), add
+`--image <path>` (PNG, JPEG, GIF or WebP): `cousin-reply --user <their name>
+--image preview.png -m "caption"`. Through MCP, pass `image` to the send
+tool. Pictures go to people watching your page only, not to other cousins.
+
 Your chat-server runs on port {{PORT}} and binds `/api/{{SLUG}}_reply`.
 
 **(b) Another cousin** - they do NOT watch your chat page; they have

@@ -68,6 +68,7 @@ errors_name_peers = true
 [tools.send.properties]
 to = { type = "string", description = "peer slug or configured operator name" }
 text = { type = "string", description = "message body, verbatim" }
+image = { type = "string", optional = true, description = "path to a PNG, JPEG, GIF or WebP file to show on the reply; operator replies only (cousin-reply --image)" }
 
 [tools.send.commands.peer]
 command = "cousin-chat"
@@ -75,7 +76,7 @@ argv = ["send", "{to}", "{text}"]
 
 [tools.send.commands.operator]
 command = "cousin-reply"
-options = { to = "--user" }
+options = { to = "--user", image = "--image" }
 stdin = ["text"]
 
 [tools.job]

@@ -183,6 +183,18 @@ class SchemaCase(unittest.TestCase):
         self.assertIn("search", schema["properties"]["query"]["description"])
         self.assertFalse(schema["additionalProperties"])
 
+    def test_shipped_send_tool_can_attach_an_image_to_an_operator_reply(self):
+        # Canary: cousin-reply grew --image (2026-09-18); the MCP send
+        # tool must expose it, optional, and only on the operator path.
+        send = self.reg["tools"]["send"]
+        self.assertTrue(send["properties"]["image"].get("optional"))
+        self.assertEqual(send["commands"]["operator"]["options"].get("image"),
+                         "--image")
+        self.assertNotIn("{image}", send["commands"]["peer"]["argv"])
+        schema = mcp_server.build_schema("send", send)
+        self.assertIn("image", schema["properties"])
+        self.assertNotIn("image", schema["required"])
+
     def test_send_tool_schema_requires_to_and_text_and_has_no_command(self):
         schema = mcp_server.build_schema("send", self.reg["tools"]["send"])
         self.assertEqual(sorted(schema["required"]), ["text", "to"])
@@ -530,6 +542,19 @@ class SendCase(unittest.TestCase):
         log = json.loads((self.tmp / "op.py.log").read_text())
         self.assertEqual(log["argv"], ["--user", "Operator"])
         self.assertEqual(log["stdin"], HOSTILE)
+
+    def test_operator_reply_with_an_image_passes_the_flag(self):
+        self.tool["properties"]["image"] = {"type": "string", "optional": True}
+        self.tool["commands"]["operator"]["options"]["image"] = "--image"
+        mcp_server._validate_tool("send", self.tool)
+        text, is_error = mcp_server.call_tool(
+            self.reg, "send", {"to": "Operator", "text": "look",
+                               "image": "/tmp/render.png"}, os.environ,
+            {"kestrel"})
+        self.assertFalse(is_error, text)
+        log = json.loads((self.tmp / "op.py.log").read_text())
+        self.assertEqual(log["argv"], ["--user", "Operator",
+                                       "--image", "/tmp/render.png"])
 
     def test_unknown_destination_is_an_error_naming_what_is_known(self):
         text, is_error = mcp_server.call_tool(

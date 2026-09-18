@@ -20,7 +20,6 @@ discovery (test_hermetic imports it), before any test runs.
 """
 import os
 import unittest
-from unittest import mock
 
 # Every variable the framework reads to find an install, a cousin, a
 # tmux server, a filter override or a supervisor.
@@ -31,20 +30,32 @@ HERMETIC_VARS = ("FRAMEWORK_ROOT", "COUSIN_HOME", "COUSIN_SLUG",
 _MARK = "_cousin_hermetic"
 
 
+def _restore(snapshot):
+    """Put os.environ back to `snapshot` by touching only the keys that
+    differ. Never clear-and-refill (what mock.patch.dict does on exit):
+    a daemon thread a test left running, or one it is joining, would
+    see an empty environment for that moment, and a subprocess it
+    starts would get no PATH."""
+    for name in [k for k in os.environ if k not in snapshot]:
+        os.environ.pop(name, None)
+    for name, value in snapshot.items():
+        if os.environ.get(name) != value:
+            os.environ[name] = value
+
+
 def hermetic_env():
     """A context manager: os.environ without HERMETIC_VARS, restored
-    in full on exit."""
-    patcher = mock.patch.dict(os.environ)
+    on exit to exactly what it was on entry."""
 
     class _Ctx:
         def __enter__(self):
-            patcher.start()
+            self.snapshot = dict(os.environ)
             for name in HERMETIC_VARS:
                 os.environ.pop(name, None)
             return os.environ
 
         def __exit__(self, *exc):
-            patcher.stop()
+            _restore(self.snapshot)
             return False
 
     return _Ctx()

@@ -63,6 +63,35 @@ class TestHermeticWrapper(unittest.TestCase):
         self.assertIn("Ran 2 tests", proc.stderr)
 
 
+class TestRestoreNeverEmptiesTheEnvironment(unittest.TestCase):
+    """Threads a test leaves running (a node's poll loop, a server)
+    read os.environ while the wrapper restores it. A clear-and-refill
+    restore showed them an empty environment for a moment, which made
+    hive node tests flaky; the restore touches only changed keys."""
+
+    def test_a_concurrent_reader_always_sees_path(self):
+        import threading
+        stop = threading.Event()
+        missing = []
+
+        def reader():
+            while not stop.is_set():
+                if "PATH" not in os.environ:
+                    missing.append(1)
+
+        thread = threading.Thread(target=reader, daemon=True)
+        thread.start()
+        try:
+            for i in range(300):
+                with _hermetic.hermetic_env():
+                    os.environ["COUSIN_HERMETIC_PROBE"] = str(i)
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+        self.assertEqual(missing, [])
+        self.assertNotIn("COUSIN_HERMETIC_PROBE", os.environ)
+
+
 class TestMemorySearchIgnoresAnExportedRoot(unittest.TestCase):
     """The regression from the install re-test: an exported root whose
     config/embedding.toml answers gave the keyword-only tests semantic

@@ -12,7 +12,12 @@ digests raw_fold leaves behind):
 - each file is bounded to max_lines, ranked by entry count then
   recency;
 - a file with nothing to say keeps the stub, so readers that test for
-  the stub keep working.
+  the stub keep working;
+- a topic whose NEWEST entry is L5_OBSOLETE (`cousin-memory obsolete`,
+  the console's "mark obsolete") is left out of every file entirely -
+  no tombstone line, the boot packet should not spend lines on what
+  was retired - and counted in the report; raw keeps its history and a
+  later non-L5 entry on the topic revives it.
 
 Curated text survives. Everything above AUTO_MARKER in a distilled file
 was written by a person or another tool and is copied through verbatim;
@@ -150,9 +155,17 @@ def distill(home, *, max_lines=DEFAULT_MAX_LINES,
         total += 1
 
     per_file = defaultdict(list)
+    obsolete = 0
     for topic, entries in groups.items():
         entries.sort(key=_ts)
         newest = entries[-1]
+        # A topic whose newest word is "obsolete" is retired from the
+        # durable views; its history stays in raw, and any later entry
+        # (of another level) brings it back.
+        if memory.normalize_level(newest.get("truth_level")) \
+                == memory.OBSOLETE_LEVEL:
+            obsolete += 1
+            continue
         # Digests carry their own entry count (folded history).
         count = sum(int(e.get("entries", 1) or 1) for e in entries)
         distinct = {" ".join(str(e.get("content", "")).split())
@@ -161,7 +174,8 @@ def distill(home, *, max_lines=DEFAULT_MAX_LINES,
         per_file[classify(newest)].append(
             (count, _ts(newest), _line(newest, count, superseded)))
 
-    report = {"files": {}, "topics": len(groups), "entries": total}
+    report = {"files": {}, "topics": len(groups), "entries": total,
+              "obsolete": obsolete}
     ddir = memory.distilled_dir(home)
     for fname in memory.DISTILLED_FILES:
         ranked = sorted(per_file.get(fname, []),

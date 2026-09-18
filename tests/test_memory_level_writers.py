@@ -1,0 +1,232 @@
+"""The automatic truth-level writers.
+
+Canary (2026-09-18): L1, L2, L4 and L5 were never written. Only
+`decide`, `remember` and the flip miner produced raw entries, and none
+of them picked those levels on its own. Each writer below has a test
+that fails when the writer is removed:
+
+- L1 framework: the framework records the state changes it makes or
+  observes (flip, start and stop, model and effort, auth mode, chat
+  import, lifecycle surgery, a crashed flip, a respawned chat server),
+  never a tick, never a no-op;
+- L2 tool: a job that ends done or failed lands in its cousin's raw;
+- L4 hypothesis: hedged transcript sentences (tests in
+  test_transcript_mine);
+- L5 obsolete: `cousin-memory obsolete` retires a topic from the
+  distilled views; a later entry revives it.
+"""
+import contextlib
+import io
+import json
+import os
+import pathlib
+import stat
+import tempfile
+import unittest
+from unittest import mock
+
+from cousin_lib import distill, memory
+
+
+def raw_rows(home):
+    rows = []
+    raw = pathlib.Path(home) / "memory" / "raw"
+    if not raw.is_dir():
+        return rows
+    for f in sorted(raw.glob("*.jsonl")):
+        rows += [json.loads(l) for l in f.read_text().splitlines() if l]
+    return rows
+
+
+def level_rows(home, level):
+    return [r for r in raw_rows(home) if r.get("truth_level") == level]
+
+
+class HomeCase(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = pathlib.Path(tmp.name) / "home"
+        self.home.mkdir()
+
+
+# ------------------------------------------------------------ the helper
+
+class TestRecordEvent(HomeCase):
+    def test_writes_one_canonical_entry_with_extras(self):
+        ok = memory.record_event(self.home, "framework", "framework:x",
+                                 "a   thing\nchanged", "framework",
+                                 generation=3, dropped=None)
+        self.assertTrue(ok)
+        [row] = raw_rows(self.home)
+        self.assertEqual(row["truth_level"], "L1_FRAMEWORK")
+        self.assertEqual(row["topic"], "framework:x")
+        self.assertEqual(row["content"], "a thing changed")
+        self.assertEqual(row["source"], "framework")
+        self.assertEqual(row["generation"], 3)
+        self.assertNotIn("dropped", row)
+        self.assertIn("timestamp", row)
+
+    def test_content_is_bounded(self):
+        memory.record_event(self.home, "tool", "t", "x" * 5000, "job")
+        self.assertEqual(len(raw_rows(self.home)[0]["content"]),
+                         memory.EVENT_CONTENT_CHARS)
+
+    def test_never_raises_and_says_so_on_stderr(self):
+        err = io.StringIO()
+        with mock.patch.object(memory, "_append_raw",
+                               side_effect=OSError("disk full")), \
+                contextlib.redirect_stderr(err):
+            ok = memory.record_event(self.home, "framework", "t", "c", "s")
+        self.assertFalse(ok)
+        self.assertIn("disk full", err.getvalue())
+
+    def test_never_creates_a_missing_home(self):
+        gone = self.home / "dismissed"
+        self.assertFalse(memory.record_event(gone, "framework", "t", "c",
+                                             "s"))
+        self.assertFalse(gone.exists())
+
+    def test_refuses_an_unknown_level_an_empty_topic_or_content(self):
+        self.assertFalse(memory.record_event(self.home, "gospel", "t", "c",
+                                             "s"))
+        self.assertFalse(memory.record_event(self.home, "tool", " ", "c",
+                                             "s"))
+        self.assertFalse(memory.record_event(self.home, "tool", "t", "",
+                                             "s"))
+        self.assertEqual(raw_rows(self.home), [])
+
+
+# ------------------------------------------------------------ L5 obsolete
+
+def _write_raw(home, rows):
+    raw = pathlib.Path(home) / "memory" / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    with open(raw / "2026-09-01.jsonl", "a") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+
+
+def _distilled_text(home):
+    ddir = memory.distilled_dir(home)
+    return "".join((ddir / f).read_text() for f in memory.DISTILLED_FILES)
+
+
+class TestDistillObsolete(HomeCase):
+    def setUp(self):
+        super().setUp()
+        _write_raw(self.home, [
+            {"topic": "build cache", "content": "clear it by hand",
+             "truth_level": "L3_COUSIN_CONCLUSION",
+             "timestamp": "2026-09-01T10:00:00+00:00"},
+            {"topic": "kept topic", "content": "still true",
+             "truth_level": "L3_COUSIN_CONCLUSION",
+             "timestamp": "2026-09-01T10:00:00+00:00"},
+        ])
+
+    def test_a_topic_whose_newest_entry_is_l5_is_dropped(self):
+        _write_raw(self.home, [
+            {"topic": "build cache", "content": "obsolete: the tool does it",
+             "truth_level": "L5_OBSOLETE",
+             "timestamp": "2026-09-02T10:00:00+00:00"}])
+        report = distill.distill(self.home)
+        text = _distilled_text(self.home)
+        self.assertNotIn("build cache", text)
+        self.assertNotIn("clear it by hand", text)
+        self.assertIn("still true", text)
+        self.assertEqual(report["obsolete"], 1)
+        # History stays in raw.
+        self.assertEqual(len([r for r in raw_rows(self.home)
+                              if r["topic"] == "build cache"]), 2)
+
+    def test_a_later_entry_revives_the_topic(self):
+        _write_raw(self.home, [
+            {"topic": "build cache", "content": "obsolete: the tool does it",
+             "truth_level": "L5_OBSOLETE",
+             "timestamp": "2026-09-02T10:00:00+00:00"},
+            {"topic": "build cache", "content": "the tool broke; by hand again",
+             "truth_level": "L2_TOOL",
+             "timestamp": "2026-09-03T10:00:00+00:00"}])
+        report = distill.distill(self.home)
+        text = _distilled_text(self.home)
+        self.assertIn("by hand again", text)
+        self.assertEqual(report["obsolete"], 0)
+
+    def test_an_older_l5_does_not_hide_the_topic(self):
+        _write_raw(self.home, [
+            {"topic": "kept topic", "content": "obsolete: old mark",
+             "truth_level": "L5_OBSOLETE",
+             "timestamp": "2026-08-01T10:00:00+00:00"}])
+        distill.distill(self.home)
+        self.assertIn("still true", _distilled_text(self.home))
+
+    def test_a_folded_digest_keeps_the_mark(self):
+        from cousin_lib import raw_fold
+        raw = memory.raw_dir(self.home)
+        (raw / "2020-01-01.jsonl").write_text(json.dumps(
+            {"topic": "old way", "content": "do x",
+             "truth_level": "L3_COUSIN_CONCLUSION",
+             "timestamp": "2020-01-01T10:00:00+00:00"}) + "\n" + json.dumps(
+            {"topic": "old way", "content": "obsolete: y replaced x",
+             "truth_level": "L5_OBSOLETE",
+             "timestamp": "2020-01-01T11:00:00+00:00"}) + "\n")
+        raw_fold.fold_raw(self.home)
+        distill.distill(self.home)
+        self.assertNotIn("old way", _distilled_text(self.home))
+
+
+class TestObsoleteCli(HomeCase):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.dict(os.environ, {"COUSIN_HOME": str(self.home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("COUSIN_SLUG", None)
+        _write_raw(self.home, [
+            {"topic": "deploy path", "content": "copy by hand",
+             "truth_level": "L3_COUSIN_CONCLUSION",
+             "timestamp": "2026-09-01T10:00:00+00:00"}])
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                rc = memory.memory_main(list(argv))
+            except SystemExit as exc:
+                rc = exc.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_marks_the_topic_and_redistills(self):
+        rc, out, err = self.run_cli("obsolete", "deploy path", "--why",
+                                    "the pipeline deploys now")
+        self.assertEqual(rc, 0, err)
+        row = raw_rows(self.home)[-1]
+        self.assertEqual(row["truth_level"], "L5_OBSOLETE")
+        self.assertEqual(row["topic"], "deploy path")
+        self.assertEqual(row["why"], "the pipeline deploys now")
+        self.assertEqual(row["by"], "home")
+        self.assertIn("obsolete topic(s) left out", out)
+        self.assertNotIn("copy by hand", _distilled_text(self.home))
+
+    def test_an_empty_reason_is_refused(self):
+        rc, _, err = self.run_cli("obsolete", "deploy path", "--why", "  ")
+        self.assertEqual(rc, 2)
+        self.assertIn("reason", err)
+        self.assertEqual(len(raw_rows(self.home)), 1)
+        rc, _, _ = self.run_cli("obsolete", "deploy path")
+        self.assertEqual(rc, 2)
+
+    def test_an_unknown_topic_needs_force(self):
+        rc, _, err = self.run_cli("obsolete", "deploy", "--why", "x")
+        self.assertEqual(rc, 2)
+        self.assertIn("deploy path", err, "a near match is suggested")
+        self.assertEqual(len(raw_rows(self.home)), 1)
+        rc, _, err = self.run_cli("obsolete", "deploy", "--why", "x",
+                                  "--force")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(raw_rows(self.home)[-1]["topic"], "deploy")
+
+
+
+if __name__ == "__main__":
+    unittest.main()

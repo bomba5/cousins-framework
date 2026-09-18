@@ -175,6 +175,94 @@ def _append_raw(home, entry):
         fh.write(json.dumps(entry) + "\n")
 
 
+# Automatic writers (the framework, the job tracker) are bounded so one
+# noisy event cannot bloat raw memory.
+EVENT_CONTENT_CHARS = 600
+OBSOLETE_LEVEL = "L5_OBSOLETE"
+
+
+def record_event(home, level, topic, content, source, **extra):
+    """One raw entry from an automatic writer (the framework observing a
+    state change, a job finishing). Best-effort by contract: it never
+    raises into the caller, whose own work already happened, and it
+    never creates a cousin home that is not there (a dismissed cousin
+    must not be resurrected by a late event). Returns True when the
+    entry was written. Extra keyword fields ride along on the entry;
+    None values are dropped."""
+    try:
+        if not home:
+            return False
+        home = Path(home)
+        if not home.is_dir():
+            return False
+        canonical = normalize_level(level)
+        topic = str(topic or "").strip()
+        content = " ".join(str(content or "").split())
+        if canonical == "other" or not topic or not content:
+            return False
+        entry = {"topic": topic,
+                 "content": content[:EVENT_CONTENT_CHARS],
+                 "truth_level": canonical,
+                 "source": str(source or "event")}
+        entry.update({k: v for k, v in extra.items()
+                      if v is not None and k not in entry
+                      and k != "timestamp"})
+        _append_raw(home, entry)
+        return True
+    except Exception as err:  # noqa: BLE001 - best-effort by contract
+        try:
+            print("warning: raw memory event not recorded (%s: %s)"
+                  % (type(err).__name__, err), file=sys.stderr)
+        except Exception:  # noqa: BLE001 - stderr itself may be gone
+            pass
+        return False
+
+
+def topic_entries(home, topic):
+    """The raw entries (daily files and digests) whose topic is exactly
+    `topic`, oldest first."""
+    topic = str(topic or "").strip()
+    rows = [e for e in list_raw(home, since_days=36500)
+            if str(e.get("topic") or "").strip() == topic]
+    rows.sort(key=lambda e: entry_timestamp(e) or 0.0)
+    return rows
+
+
+class ObsoleteRefused(ValueError):
+    pass
+
+
+def mark_obsolete(home, topic, why, *, by=None, force=False,
+                  source="obsolete"):
+    """Append an L5_OBSOLETE entry for `topic`: the distiller leaves a
+    topic whose newest entry is L5 out of the distilled views, and a
+    later entry of any other level revives it. The history stays in
+    raw. Refuses an empty reason, and a topic with no raw entries
+    unless force (a typo would otherwise retire nothing, silently).
+    Returns the entry written."""
+    topic = str(topic or "").strip()
+    why = " ".join(str(why or "").split())
+    if not topic:
+        raise ObsoleteRefused("a topic is required")
+    if not why:
+        raise ObsoleteRefused("a reason is required (--why): an obsolete"
+                              " mark says what superseded the topic")
+    home = Path(home)
+    if not force and not topic_entries(home, topic):
+        near = sorted({str(e.get("topic") or "").strip()
+                       for e in list_raw(home, since_days=36500)
+                       if topic.lower() in str(e.get("topic") or "").lower()})
+        hint = (" (similar: %s)" % ", ".join(near[:5])) if near else ""
+        raise ObsoleteRefused("no raw entries for topic %r%s; pass --force"
+                              " to mark it anyway" % (topic, hint))
+    entry = {"topic": topic, "content": "obsolete: %s" % why,
+             "truth_level": OBSOLETE_LEVEL, "source": source, "why": why}
+    if by:
+        entry["by"] = str(by)
+    _append_raw(home, entry)
+    return entry
+
+
 def _rotate_decisions_if_needed(path):
     """Rotate an oversized decisions log; returns the archive path if
     rotation happened. Append-mode archive: same-day re-rotation is
@@ -318,6 +406,21 @@ def _cmd_remember(args):
     return 0
 
 
+def _cmd_obsolete(args):
+    """Mark a topic superseded (L5): out of the distilled views, kept in
+    raw. A later entry on the topic brings it back."""
+    home = _home(args)
+    try:
+        mark_obsolete(home, args.topic, args.why, force=args.force,
+                      by=os.environ.get("COUSIN_SLUG") or home.name)
+    except ObsoleteRefused as err:
+        print("error: %s" % err, file=sys.stderr)
+        return 2
+    print("Marked obsolete [%s]: %s" % (args.topic.strip(),
+                                        " ".join(args.why.split())))
+    return _run_distill(home)
+
+
 def _cmd_recall(args):
     home = _home(args)
     keyword = (args.keyword or "").lower()
@@ -369,6 +472,9 @@ def _run_distill(home, max_lines=None):
     report = distill.distill(home, **kwargs)
     print("distilled %d topics from %d raw entries:"
           % (report["topics"], report["entries"]))
+    if report.get("obsolete"):
+        print("  (%d obsolete topic(s) left out; history kept in raw)"
+              % report["obsolete"])
     for fname, count in report["files"].items():
         print("  %s: %d" % (fname, count))
     return 0
@@ -598,6 +704,17 @@ def memory_main(argv=None):
     p.add_argument("fact", nargs="?")
     _level_args(p)
     p.set_defaults(func=_cmd_remember)
+    p = sub.add_parser(
+        "obsolete",
+        help="mark a topic superseded (L5_OBSOLETE): the distiller drops"
+             " it from the distilled views, raw keeps the history; a"
+             " later entry on the topic revives it")
+    p.add_argument("topic")
+    p.add_argument("--why", required=True,
+                   help="what superseded it (required, non-empty)")
+    p.add_argument("--force", action="store_true",
+                   help="mark a topic that has no raw entries")
+    p.set_defaults(func=_cmd_obsolete)
     p = sub.add_parser("recall")
     p.add_argument("keyword", nargs="?", default="")
     p.add_argument("--last", type=int, default=20)

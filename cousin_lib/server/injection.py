@@ -15,6 +15,11 @@ from datetime import datetime, timezone
 # otherwise interleave keystrokes and merge messages in the pane.
 _INJECT_LOCK = threading.Lock()
 
+# Longest line typed with send-keys; longer ones go through a paste
+# buffer. tmux's own ceiling is its ~16 KB message size, less the rest
+# of the command: 12 KB leaves room for that and for multibyte text.
+SEND_KEYS_MAX_BYTES = 12000
+
 
 def default_settle(text_length):
     """Seconds to wait between the paste and the Enter. send-keys returns
@@ -144,13 +149,28 @@ class TmuxInjector:
         self.verify_delay = verify_delay
         self.log = log if log is not None else sys.stderr
 
-    def _tmux(self, *args, capture=False):
+    def _tmux(self, *args, capture=False, input=None):
         cmd = [self.tmux_bin]
         if self.socket:
             cmd += ["-S", self.socket]
         cmd += list(args)
         return subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=3, check=False)
+                              timeout=3, check=False, input=input)
+
+    def _paste(self, text):
+        """Put the text in the input box. A short line goes as literal
+        keys; a long one through a paste buffer, because tmux refuses
+        a command over its ~16 KB message size ("command too long")
+        and send-keys carries the text as an argument. The buffer is
+        named per session and deleted by the paste (-d)."""
+        if len(text.encode("utf-8")) <= SEND_KEYS_MAX_BYTES:
+            return self._tmux("send-keys", "-t", self.session, "-l", text)
+        buffer = "cf-inject-%s" % self.session
+        r = self._tmux("load-buffer", "-b", buffer, "-", input=text)
+        if r.returncode != 0:
+            return r
+        return self._tmux("paste-buffer", "-b", buffer, "-d", "-t",
+                          self.session)
 
     def _submitted(self, text):
         """Did the Enter actually submit? The probe is the normalized tail
@@ -225,7 +245,7 @@ class TmuxInjector:
                         # text as commands; put it back in typing mode.
                         self._tmux("send-keys", "-t", self.session, "-l",
                                    mode["insert_keys"])
-                r = self._tmux("send-keys", "-t", self.session, "-l", text)
+                r = self._paste(text)
                 if r.returncode != 0:
                     # The only trace that the cousin never received the
                     # message (dead or renamed session, tmux down).

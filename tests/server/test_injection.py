@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from cousin_lib.server.injection import (
+    SEND_KEYS_MAX_BYTES,
     TmuxInjector,
     compose_delivery,
     default_settle,
@@ -25,6 +26,7 @@ from cousin_lib.server.injection import (
 
 _FAKE_TMUX = """#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
+if [ "$1" = load-buffer ]; then cat > "${FAKE_TMUX_STDIN:-/dev/null}"; fi
 for a in "$@"; do
   if [ "$a" = capture-pane ]; then cat "$FAKE_TMUX_PANE" 2>/dev/null; fi
   if [ "$a" = -l ]; then sleep "${FAKE_TMUX_PASTE_DELAY:-0}"; fi
@@ -194,6 +196,51 @@ class TestInjector(InjectorCase):
         thread = self._injector().inject_async("hello")
         thread.join(timeout=5)
         self.assertTrue(any(" -l " in c for c in self._calls()))
+
+
+class TestLongLine(InjectorCase):
+    """tmux refuses a command over its ~16 KB message size, and
+    send-keys carries the text as an argument: a long line goes through
+    a paste buffer instead (seen live 2026-09-18, a loops delivery
+    failing every tick with "command too long")."""
+
+    def setUp(self):
+        super().setUp()
+        self.stdin = self.log.parent / "stdin.txt"
+        patcher = mock.patch.dict(os.environ,
+                                  {"FAKE_TMUX_STDIN": str(self.stdin)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_short_line_stays_on_send_keys(self):
+        self.pane.write_text("> _\n")
+        self._injector().inject("x" * SEND_KEYS_MAX_BYTES)
+        self.assertTrue(self._calls()[0].startswith("send-keys -t wren -l "))
+        self.assertFalse(self.stdin.exists())
+
+    def test_long_line_goes_through_a_paste_buffer(self):
+        self.pane.write_text("> _\n")
+        text = "y" * (SEND_KEYS_MAX_BYTES + 1)
+        self.assertTrue(self._injector().inject(text))
+        self.assertEqual(self._calls(), [
+            "load-buffer -b cf-inject-wren -",
+            "paste-buffer -b cf-inject-wren -d -t wren",
+            "send-keys -t wren Enter",
+            "capture-pane -p -t wren",
+        ])
+        self.assertEqual(self.stdin.read_text(), text)
+
+    def test_multibyte_length_counts_bytes_not_characters(self):
+        self.pane.write_text("> _\n")
+        self._injector().inject("\u00e8" * (SEND_KEYS_MAX_BYTES // 2 + 1))
+        self.assertTrue(self._calls()[0].startswith("load-buffer"))
+
+    def test_failed_buffer_load_stops_before_any_keys(self):
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):
+            ok = self._injector().inject("z" * (SEND_KEYS_MAX_BYTES + 1))
+        self.assertFalse(ok)
+        self.assertEqual(self._calls(), ["load-buffer -b cf-inject-wren -"])
+        self.assertIn("FAILED", self.errors.getvalue())
 
 
 class TestMakeDeliver(InjectorCase):

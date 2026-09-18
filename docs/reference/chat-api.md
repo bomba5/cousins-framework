@@ -153,7 +153,7 @@ An inbound message becomes one line typed into the cousin's tmux session:
 - An inbound image adds `[image attached -> Read /path/to/cousins/wren/chat/inbound/413.png]`, so the cousin can open it.
 - Messages from another cousin arrive the same way, `(Chat Kestrel): ...`. That's how a cousin tells you from a peer: your name is `[operator] name`.
 
-The typing itself: the line is pasted with `send-keys -l`, the server waits a moment scaled to the length (0.1 s plus a bit per character, at most 0.6 s) so the terminal takes the whole paste, sends Enter, then checks the bottom three lines of the pane. If the text is still sitting in the input box it sends Enter once more. One lock covers all typing in the process, so two messages (or a message and a reaction line, or a keystroke from the console's pane) never interleave.
+The typing itself: the line is pasted with `send-keys -l` (a line over 12000 bytes goes through `load-buffer` and `paste-buffer` instead, since tmux refuses a command over its ~16 KB message size), the server waits a moment scaled to the length (0.1 s plus a bit per character, at most 0.6 s) so the terminal takes the whole paste, sends Enter, then checks the bottom three lines of the pane. If the text is still sitting in the input box it sends Enter once more. One lock covers all typing in the process, so two messages (or a message and a reaction line, or a keystroke from the console's pane) never interleave.
 
 Two guards from `config/harness.toml` run before anything is typed:
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework loops daemon (heartbeats, loops, timed flips)
+Description=cousins-framework loops daemon (heartbeats, loops, timed flips)
 After=network.target
 
 [Service]

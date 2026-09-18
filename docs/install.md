@@ -36,8 +36,8 @@ package lists, `python3.12-venv` can 404 on a stale `.deb`.
 ## 2. Clone and install into a venv
 
 ```
-git clone <repo-url> ~/cousin-framework     # private repo: deploy key or token
-cd ~/cousin-framework
+git clone <repo-url> ~/cousins-framework     # private repo: deploy key or token
+cd ~/cousins-framework
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[mcp]"
@@ -53,7 +53,7 @@ Every later shell starts in the checkout with the venv on PATH and the
 root named (the steps below use paths relative to the checkout):
 
 ```
-cd ~/cousin-framework && . .venv/bin/activate && export FRAMEWORK_ROOT=$PWD
+cd ~/cousins-framework && . .venv/bin/activate && export FRAMEWORK_ROOT=$PWD
 ```
 
 (or put the last two in your shell profile). To point the memory and job
@@ -217,7 +217,7 @@ mkdir -p ~/.config/systemd/user/cousin-console.service.d
 cat > ~/.config/systemd/user/cousin-console.service.d/lan.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=%h/cousin-framework/.venv/bin/cousin-console --host 0.0.0.0 --port 8600
+ExecStart=%h/cousins-framework/.venv/bin/cousin-console --host 0.0.0.0 --port 8600
 EOF
 systemctl --user daemon-reload && systemctl --user restart cousin-console
 ```
@@ -256,8 +256,8 @@ rm -rf ~/.config/systemd/user/cousin-*   # -r: the LAN drop-in is a directory
 systemctl --user daemon-reload
 systemctl --user reset-failed
 tmux kill-session -t testa                # one per cousin
-kill "$(cat ~/cousin-framework/cousins/testa/data/chat-server.pid)"
-rm -rf ~/cousin-framework                 # the checkout, venv, config, every cousin home
+kill "$(cat ~/cousins-framework/cousins/testa/data/chat-server.pid)"
+rm -rf ~/cousins-framework                 # the checkout, venv, config, every cousin home
 ```
 
 `cousins/` holds every cousin's memory and nothing else has a copy:

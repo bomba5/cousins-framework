@@ -46,7 +46,7 @@ _GENERIC_PATTERNS = {
 
 _DENYLIST = pathlib.Path(
     os.environ.get("COUSIN_DENYLIST",
-                   os.path.expanduser("~/.config/cousin-framework/denylist.txt")))
+                   os.path.expanduser("~/.config/cousins-framework/denylist.txt")))
 
 
 def _spec_routes():

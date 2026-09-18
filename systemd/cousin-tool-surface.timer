@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework daily tool-surface manifest refresh
+Description=cousins-framework daily tool-surface manifest refresh
 
 [Timer]
 OnCalendar=*-*-* 06:00:00

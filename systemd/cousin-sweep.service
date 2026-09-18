@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework weekly memory compaction sweep across every cousin home
+Description=cousins-framework weekly memory compaction sweep across every cousin home
 
 [Service]
 Type=oneshot

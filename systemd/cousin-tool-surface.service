@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework tool-surface manifest (data/tool-surface.md from every cousin-* --help)
+Description=cousins-framework tool-surface manifest (data/tool-surface.md from every cousin-* --help)
 
 [Service]
 Type=oneshot

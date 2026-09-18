@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework weekly compaction sweep, Sunday early morning after the flip window
+Description=cousins-framework weekly compaction sweep, Sunday early morning after the flip window
 
 [Timer]
 OnCalendar=Sun *-*-* 05:30:00

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from cousin_lib.config import FrameworkConfig, MissingConfigError
 
-DISTRIBUTION = "cousin-framework"
+DISTRIBUTION = "cousins-framework"
 MANIFEST_RELPATH = Path("data") / "tool-surface.md"
 NO_HELP = "(no --help available)"
 HELP_TIMEOUT_S = 20

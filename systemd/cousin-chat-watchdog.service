@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework chat-server watchdog (spawn a missing server, alert on a sick one, never kill)
+Description=cousins-framework chat-server watchdog (spawn a missing server, alert on a sick one, never kill)
 After=network.target
 
 [Service]

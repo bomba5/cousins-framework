@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework web console (a view over the stores, owns only sessions and the users file)
+Description=cousins-framework web console (a view over the stores, owns only sessions and the users file)
 After=network.target
 
 [Service]

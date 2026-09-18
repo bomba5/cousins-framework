@@ -20,7 +20,7 @@ private, so the clone needs a deploy key or token):
 
 ```
 sudo apt-get update && sudo apt-get install -y python3-venv tmux git
-git clone <this repo> cousin-framework && cd cousin-framework
+git clone <this repo> cousins-framework && cd cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp]"              # from the checkout; not on PyPI
 python3 -m unittest discover -s tests   # before any cousin exists

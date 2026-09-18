@@ -1,4 +1,4 @@
-# A guided tour of the cousin framework
+# A guided tour of cousins-framework
 
 This narrates the whole framework with worked examples. The
 [specifications](.) are the precise contracts; this is the path
@@ -23,7 +23,7 @@ procedure, including the agent, the units and the uninstall, is
 `docs/install.md`; this section is the short path.
 
 ```
-git clone <repo> cousin-framework && cd cousin-framework
+git clone <repo> cousins-framework && cd cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp]"                     # from the checkout; not on PyPI
 python3 -m unittest discover -s tests

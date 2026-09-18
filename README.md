@@ -1,4 +1,4 @@
-# cousin-framework
+# cousins-framework
 
 A framework for persistent, co-located AI agents ("cousins"): durable
 identity across sessions, layered memory, lifecycle machinery, and
@@ -67,7 +67,7 @@ The repository may be private: cloning it needs GitHub access (a
 deploy key or a token).
 
 ```
-git clone <this repo> cousin-framework && cd cousin-framework
+git clone <this repo> cousins-framework && cd cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp]"                     # not on PyPI: install from the checkout
 python3 -m unittest discover -s tests       # before any cousin exists; ends in OK

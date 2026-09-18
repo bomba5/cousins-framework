@@ -1,5 +1,5 @@
 [Unit]
-Description=cousin-framework chat-server watchdog, every ten minutes
+Description=cousins-framework chat-server watchdog, every ten minutes
 
 [Timer]
 OnCalendar=*:0/10

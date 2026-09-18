@@ -44,6 +44,7 @@ in one line: a component that dies loses nothing that was not already
 in a store some other component owns. Every optional install seam is
 listed in `docs/configuration.md`.
 
+To install on a new machine, follow `docs/install.md` top to bottom.
 For a narrated walk through every feature with worked examples, see
 `docs/guide.md`. To run it unattended (systemd unit templates, the
 daily flip, backups, the weekly sweep, what to check when a cousin goes
@@ -55,14 +56,27 @@ extracted from, phase by phase; the plan and its results log are in
 
 ## Quickstart: a cousin with memory, from a cold clone
 
+Prerequisites: Python >= 3.11, `python3-venv`, `tmux` and `git`. On
+stock Ubuntu 24.04 (which refuses `pip install` outside a venv):
+
+```
+sudo apt-get update && sudo apt-get install -y python3-venv tmux git
+```
+
+The repository may be private: cloning it needs GitHub access (a
+deploy key or a token).
+
 ```
 git clone <this repo> cousin-framework && cd cousin-framework
-pip install -e .
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[mcp]"                     # not on PyPI: install from the checkout
+python3 -m unittest discover -s tests       # before any cousin exists; ends in OK
 
-# Create a cousin. --root is the checkout itself (it holds templates/).
-cousin-spawn testa --root . --name Testa --role "test cousin" \
+# Create a cousin. The root is the checkout itself (it holds templates/);
+# pass it absolute. Inside the checkout it is also the default.
+cousin-spawn testa --root "$PWD" --name Testa --role "test cousin" \
     --voice "Plain and helpful."
-#   -> created testa at ./cousins/testa (chat port 8090)
+#   -> created testa at <checkout>/cousins/testa (chat port 8090)
 
 # Give it a memory, then find it again.
 export COUSIN_HOME=$PWD/cousins/testa
@@ -72,26 +86,59 @@ cousin-memory search "espresso descale"
 #   -> 1. [memory] .../memory/upkeep.md  "The [espresso] machine..."
 ```
 
-That is the core loop: spawn from the template (the single identity
-source - an unfilled voice is a spawn failure, not a TODO), write
-memory where the tools index it, search finds what you wrote.
+Later shells need the venv again (`. .venv/bin/activate`, or
+`.venv/bin` on PATH). That is the core loop: spawn from the template
+(the single identity source - an unfilled voice is a spawn failure,
+not a TODO), write memory where the tools index it, search finds what
+you wrote.
 
-Search is keyword-first and needs nothing installed. To add the
-optional semantic leg, point `config/embedding.toml` at any HTTP
-embedding service (`url`, `model`, `timeout_s`; the endpoint takes
-`{"model", "prompt"}` and returns `{"embedding": [...]}`). As one
-non-normative example, a local Ollama exposes that contract at
-`http://localhost:11434/api/embeddings` with a model such as
-`nomic-embed-text`. If the configured service is unreachable, search
-degrades to keyword and SAYS SO - it never quietly pretends. To run
-the cousin as a live agent, put the command line that starts your
-agent in `config/agent-cmd` (with `{session_id}`, `{model}` and
-`{effort}` placeholders if your agent takes them; the values come
-from each cousin's `cousin.toml [runtime]` or the install's
-`config/harness.toml [agent]` defaults) and pass `--start`; its chat
-server then serves the ports in `cousins/*/cousin.toml`. To watch the fleet in a
-browser, run `cousin-console --port 8600` - it renders what the framework
-persists and never becomes a source of truth of its own.
+**The full install** - the agent, its login, semantic search, the
+user units, the console and its first user, a cousin answering chat,
+and the uninstall - is one ordered procedure in `docs/install.md`.
+The short version of each piece:
+
+- **Live agent.** The framework starts whatever `config/agent-cmd`
+  names and writes Claude Code's project files for each cousin. Install
+  Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`), log
+  in once interactively (`~/.local/bin/claude`, or `claude auth
+  login`) before any cousin starts, then:
+
+  ```
+  printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
+  cp config/harness.toml.claude-code.example config/harness.toml
+  cousin-mcp approve testa                 # trust the home, enable its MCP server
+  cousin-spawn testa --start               # starts an existing cousin
+  ```
+
+  The permission flag lets an unattended cousin run every tool without
+  asking; leave it out to answer prompts yourself. `harness.toml`
+  turns on token counts, transcript mining at flip, the
+  transcript-size guard, `cousin-mcp approve`, the `{model}`/`{effort}`
+  defaults and the console's "needs attention" flag for a pane stuck at
+  the login menu; without it the console's token view says
+  `config/harness.toml absent`. `--start` checks tmux and the agent
+  executable before it creates or starts anything.
+- **Semantic search.** Search is keyword-first and needs nothing
+  installed. For the semantic leg, point `config/embedding.toml` at
+  an HTTP embedding service (`url`, `model`, `timeout_s`; the endpoint
+  takes `{"model", "prompt"}` and returns `{"embedding": [...]}`). With
+  a local Ollama: `curl -fsSL https://ollama.com/install.sh | sh`,
+  `ollama pull nomic-embed-text`, and copy `config/embedding.toml.example`
+  with `url = "http://localhost:11434/api/embeddings"` and
+  `timeout_s = 120`. Budget about 2.4 GB of disk for Ollama even
+  CPU-only; the long timeout is for CPUs without AVX, where one chunk
+  took 32 s. An unreachable service degrades search to keyword and
+  SAYS SO - it never quietly pretends.
+- **Console.** `cousin-console --port 8600` serves the fleet view on
+  loopback; it renders what the framework persists and never becomes a
+  source of truth. Create a login first with `cousin-console adduser
+  <name>` (from inside the checkout, or with `--root <checkout>`). For
+  LAN access run it with `--host 0.0.0.0` (plain HTTP: only on a
+  trusted LAN, TLS in front otherwise); or keep loopback and tunnel:
+  `ssh -L 8600:127.0.0.1:8600 <user>@<machine>`.
+- **Unattended.** `systemd/` ships user-unit templates (loops daemon,
+  console, sweep, tool surface, chat watchdog); `docs/install.md`
+  step 7 installs them, with `loginctl enable-linger "$USER"`.
 
 ## The gate
 
@@ -105,8 +152,14 @@ python3 -m unittest discover -s tests   # the suite includes the self-gate
 cousin-gate --root . --denylist /path/outside/any/tree
 ```
 
+`cousin-gate --git-visible` scans only what git would publish, so a
+checkout that also hosts a live install (gitignored `cousins/`,
+`config/`) can be gated in place; the suite's self-gate does exactly
+that.
+
 Zero third-party dependencies; Python 3.11+. The one optional extra,
-`pip install "cousin-framework[mcp]"`, is needed only to serve MCP.
+`pip install -e ".[mcp]"` from the checkout, is needed only to serve
+MCP.
 
 ## License
 

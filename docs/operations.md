@@ -13,17 +13,31 @@ this page names a real host.
 
 ## 1. Install from a cold clone
 
+The complete procedure for a new machine, prerequisites to uninstall,
+is `docs/install.md`; follow it rather than this summary on a fresh
+box. The shape, on Ubuntu 24.04 (Python >= 3.11; the repository may be
+private, so the clone needs a deploy key or token):
+
 ```
+sudo apt-get update && sudo apt-get install -y python3-venv tmux git
 git clone <this repo> cousin-framework && cd cousin-framework
-pip install -e .                     # or a wheel; no third-party deps
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[mcp]"              # from the checkout; not on PyPI
+python3 -m unittest discover -s tests   # before any cousin exists
 export FRAMEWORK_ROOT="$PWD"         # the checkout is the root
-mkdir -p config
-printf '%s\n' '<your agent command line; {session_id}, {model}, {effort} allowed>' > config/agent-cmd
-cousin-spawn testa --root . --name Testa --role "test cousin" \
-    --voice "Plain and helpful." --start
-cousin-tool-surface --root .         # so the first boot is not degraded
-python3 -m unittest discover -s tests
+printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
+cp config/harness.toml.claude-code.example config/harness.toml
+cousin-spawn testa --root "$PWD" --name Testa --role "test cousin" \
+    --voice "Plain and helpful."
+cousin-tool-surface                  # so the first boot is not degraded
+cousin-spawn testa --start
 ```
+
+The agent line assumes Claude Code, installed and logged in once
+(`docs/install.md` step 4); any agent works, with an absolute path to
+its executable. `cousin-spawn <slug> --start` starts an existing
+cousin and checks tmux and the agent executable before touching
+anything; it is a no-op on a cousin that is already running.
 
 `config/` holds every install seam and is gitignored except for
 `*.example` files; `docs/configuration.md` lists each file and what its
@@ -43,15 +57,18 @@ no placeholder survived. What each one owns:
 | `cousin-loops.service` | the scheduler: heartbeats, `[[loops]]`, timed-flip requests, and the per-cousin daily `flip_at` |
 | `cousin-sweep.timer` | the weekly compaction sweep (Sunday 05:30) |
 | `cousin-tool-surface.timer` | the daily manifest refresh (06:00) |
-| `cousin-chat-server@<slug>.service` | one cousin's chat server, when systemd rather than spawn/flip should own it |
+| `cousin-chat-server@<slug>.service` | one cousin's chat server, ONLY when systemd rather than spawn/flip should own it: not for a cousin started with `--start`, and not together with the watchdog timer |
 | `cousin-chat-watchdog.timer` | the chat-server watchdog (every 10 minutes) for spawn/flip-owned servers |
 | `cousin-console.service` | the web console on loopback port 8600: a view over every store above, owning only browser sessions and the users file (section 8) |
 
-Every service sets `FRAMEWORK_ROOT` and a `PATH` that finds the
-wrappers first; a unit that carries neither fails in ways that read
-like a broken install (a command "not found" from inside a working
-checkout). Enable lingering (`loginctl enable-linger`) or the user
-units stop when you log out.
+Every service sets `FRAMEWORK_ROOT`, a `PATH` that finds the wrappers
+first and then `%h/.local/bin` (where the Claude Code installer puts
+`claude`, so a flip the loops daemon runs can start the agent), and
+`PYTHONUNBUFFERED=1` so status lines reach the journal as they are
+printed. A unit that carries none of this fails in ways that read like
+a broken install (a command "not found" from inside a working
+checkout). Enable lingering (`loginctl enable-linger "$USER"`) or the
+user units stop when you log out.
 
 The loops daemon is the one owner of recurring work. Do not add a cron
 entry that also fires a loop or a flip: two owners means the "fired"
@@ -156,9 +173,15 @@ Work from the outside in; stop at the first thing that is wrong.
    `cousin-chat-watchdog --dry-run` gives this answer for the whole
    fleet in one line per cousin (ok, spawn, alert, skip).
 3. **Is the agent session alive?** `tmux ls` (or your agent's own
-   listing) for the cousin's session. No session: `cousin-flip
-   --confirm <slug>` starts a fresh generation with a boot packet;
-   `config/agent-cmd` must exist or the flip names it and stops.
+   listing) for the cousin's session. No session (after a reboot
+   there is none): `cousin-spawn <slug> --start` starts it with the
+   chat server; `cousin-flip --confirm <slug>` instead starts a fresh
+   generation with a boot packet. Either stops and names the cause
+   when `config/agent-cmd` is missing or tmux or the agent executable
+   does not resolve. A session that is alive but parked on the agent's
+   login menu shows "needs attention" on its console card when
+   `config/harness.toml` lists `attention_patterns` (the Claude Code
+   preset does); log the agent in once (`docs/install.md` step 4).
 4. **Did delivery fail rather than the loop?** Firing state commits
    only after delivery, so a loop that "never fired" is usually a
    delivery that keeps failing; the daemon prints each error to its
@@ -196,15 +219,16 @@ journalctl --user -u cousin-console.service -n 20
 ```
 
 That parenthesis is the first thing to act on. Out of the box the
-console is open to every address the network guard admits
-(`config/net-allowlist.json`; loopback only when the file is absent),
+console is open to every address the network guard admits (loopback
+and the RFC1918 private ranges; `config/net-allowlist.json` adds
+more),
 and it says so on its account panel. Before the console is reachable
 from anything but the machine it runs on, create the first user; the
 password is read from a prompt, never from argv, so it lands in no
 shell history or process listing:
 
 ```
-cousin-console --root "$FRAMEWORK_ROOT" adduser ana
+cousin-console --root "$FRAMEWORK_ROOT" adduser ana   # --root optional inside the checkout
 #   password for ana: ********
 #   again: ********
 #   -> cousin-console: user ana set in <root>/config/console-users.json
@@ -217,9 +241,12 @@ file on every request, and from the moment it holds one user every
 `/api/*` route but login and `me` answers 401 without a session. There
 is no loopback or trusted-LAN bypass to fall back on, by design.
 
-First login: open `http://127.0.0.1:8600/` (or the host the unit
-binds when you pass `--host`, behind TLS with `--secure-cookie` so the
-cookie is marked Secure). The page loads without a session; the login
+First login: open `http://127.0.0.1:8600/` on the machine, or tunnel
+from another one (`ssh -L 8600:127.0.0.1:8600 <user>@<machine>`, then
+the same URL). For direct LAN access put `--host 0.0.0.0` in the
+unit's `ExecStart`; that is plain HTTP, so only on a trusted LAN, and
+behind TLS with `--secure-cookie` (the cookie is then marked Secure)
+anywhere else. The page loads without a session; the login
 form is part of it. Sign in with the user just created; the account
 panel then lists the configured users and offers a password change and
 logout. A cousin created later by `cousin-spawn` appears on the next

@@ -212,6 +212,29 @@ from the tokens seam below.
 | `lastMsgTs` | int | unix time of the newest message of type `<slug>` in the operator's thread (proxied history, newest 20 rows), 0 when no operator, no port, or the server is down |
 | `tokensSpent` | int | today's total from the tokens seam, 0 when unavailable |
 
+With the hive on (`config/hive.toml`, see "Hive: the console as
+queen" below), the list continues with one row per remote cousin the
+queen knows, after the local ones. A remote row has every key above
+(the local-only ones null or zero: `home`, `tmuxSession`, `operator`,
+`memoryScope`, `heartbeat`, `pid`, `uptime_seconds`, `tokensSpent` 0,
+`lastMsgTs` 0) plus:
+
+| key | type | source |
+|---|---|---|
+| `type` | `"remote"` | a hive node on another machine |
+| `remote` | `true` | |
+| `remoteState` | `"online"`, `"offline"`, `"pending"` or `"revoked"` | pending = a token was minted (built) and the node has not checked in |
+| `online` | bool | last checkin within 2.5 x `checkin_seconds` |
+| `host`, `port` | str, int or null | where the node last checked in from (the peer address the console saw) and the chat port it reported |
+| `lastSeen` | float or null | unix time of the last checkin |
+| `version` | str or null | the node runtime's version, from its checkin |
+| `revoked`, `checkedIn` | bool | token state; whether a node row exists |
+| `status` | `"running"` when online, else `"stopped"` | so the sidebar and chat treat it like a local cousin |
+| `chat` | `"ok"` when online, `"down"` when checked in and offline, `"none"` before the first checkin | derived, never probed (a remote probe per row would stall the listing) |
+
+A slug that is both a local cousin and a node stays local: the local
+row wins and no remote row is emitted.
+
 Rows the source carried and this one does not: `main_tenant`,
 `framework_managed`, `livenessTick`, `tokenBudget`, `auto_start`,
 `cpu`, `mem`, `chatCount`, `lastTick`. The first four are
@@ -725,6 +748,83 @@ beat composition for that name). `202 {"ok": true, "slug": str,
 "name": str, "request_id": int}`. The row's status is visible in
 `cousin-loops requests` and expires loudly if the daemon is down;
 the view's toast says "fire requested", not "fired".
+
+## Hive: the console as queen
+
+Off unless `config/hive.toml` says `enabled = true` (see
+`docs/configuration.md` and `docs/hive-spec.md`). Absent, disabled or
+unusable: every `/hive/` path answers 404, `GET /api/hive` answers
+`{"enabled": false}` (plus `error` when the file is unusable), the
+other routes below answer 404, `GET /api/cousins` carries no remote
+row, and nothing under `shared/hive/` is created.
+
+On, the console's own server and port host the queen routes of
+`docs/hive-spec.md` under `/hive/` (health, memory, recall, msg,
+inbox, checkin). They are the node side: they bypass the network
+guard and the operator login and authenticate with the hive bearer
+token only (identity is the token's slug). No `/api/` route reads an
+`Authorization` header, so a hive token opens nothing on the operator
+side. The route logic is the same code `cousin-hive serve` runs.
+
+### `GET /api/hive`
+`{"enabled": false}` or `{"enabled": true, "public_url": str,
+"checkin_seconds": int, "home_chat_url": str or null, "default_port":
+8210}`. The spawn dialog offers "Remote (another machine)" only when
+`enabled`.
+
+### `GET /api/hive/nodes`
+`{"nodes": [remote row]}`: the remote rows alone (the same shape
+`GET /api/cousins` appends).
+
+### `POST /api/hive/nodes` (build a remote cousin)
+Body: `{"slug": str, "name": str, "role": str, "port": int? (8210),
+"brain": "placeholder" | "agent", "agent_cmd": str (with "agent"),
+"home_chat": bool?, "reachable": bool? (true)}`. Mints (or reuses)
+the slug's token in the queen store and builds the node archive
+(`cousin_lib.spawn_node.build_node_archive`) with `queen_url` =
+`public_url`, into a fresh mode-0700 directory under
+`<root>/shared/hive/downloads/` (itself 0700).
+`home_chat` bakes `home_chat_url` from hive.toml as the node's
+`HOME_CHAT_URL` (400 when hive.toml sets none). `reachable` (default
+true) binds the node's chat on 0.0.0.0 so the console can proxy chat
+to it; off loopback the node answers `/api/*` only to its own token,
+which the console presents. The brain command is not pre-filled from
+`config/agent-cmd`: that is the interactive agent this host runs in
+tmux, with placeholders and a local path, not a prompt-on-stdin
+command for another machine.
+`201 {"ok": true, "slug", "download_url", "download_path",
+"expires_at", "expires_in": 900, "filename", "install", "curl",
+"note"}`: `download_url` is `<public_url>/hive/download/<nonce>`, a
+one-time link (32 random bytes) that expires after 15 minutes or its
+first download, whichever comes first; the file is deleted then (and
+when the console stops; a directory a killed console left behind is
+swept once it is older than a link lives). `install` is `tar xzf <slug>-node.tar.gz &&
+cd <slug>-node && ./install.sh`; `curl` downloads from the link and
+runs the same. `400` on validation, `409` when the slug is a local
+cousin.
+
+### `GET /hive/download/<nonce>`
+The archive, once (`application/gzip`, attachment). Needs no session:
+the node machine has none, and the nonce is the credential. A second
+request, an expired nonce or an unknown one: 404.
+
+### `POST /api/hive/nodes/<slug>/revoke`
+Revokes every live token of the slug; from then on every queen route
+answers that token 401. `200 {"ok": true, "slug", "revoked": n}`,
+`404` when the slug has no live token. The card turns "revoked".
+
+### `DELETE /api/hive/nodes/<slug>` (forget)
+Removes a revoked node's node row and token rows (its memory and
+inbox rows stay: they are the fleet's record). `409` while the slug
+still has a live token (revoke first), `404` for an unknown slug.
+
+### Chat with a remote cousin
+The chat routes above resolve a slug that is not a local cousin
+through the queen's node table: `host` and `port` from the last
+checkin, and the node's own token as a bearer on every proxied call.
+A revoked node is 404, one that has not checked in is 502. Remote rows
+have no pane, no inbox files, no media folders, no archive and no
+search (the node serves `/api/send` and `/api/history` only).
 
 ## Memory and the shared-tier review
 

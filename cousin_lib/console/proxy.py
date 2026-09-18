@@ -89,6 +89,15 @@ def find_cousin(req, slug):
     for cousin in framework(req).list_cousins():
         if cousin.slug == slug:
             return cousin
+    # A remote node the console's queen knows (hive on): its chat
+    # server is where it last checked in from.
+    from cousin_lib.console import hive as console_hive
+    remote, refusal = console_hive.find_remote(
+        getattr(req, "server", None), slug)
+    if remote is not None:
+        return remote
+    if refusal is not None:
+        raise RouteError(refusal[0], {"ok": False, "error": refusal[1]})
     raise RouteError(404, {"ok": False, "error": "unknown cousin"})
 
 
@@ -104,9 +113,15 @@ def _upstream(cousin, path, *, query=None, body=None, timeout=_READ_TIMEOUT):
         url += "?" + urllib.parse.urlencode(
             {k: v for k, v in query.items() if v is not None})
     data = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json"} if data else {}
+    token = getattr(cousin, "auth_token", None)
+    if token:
+        # A remote node answers a non-loopback caller only with its
+        # own hive token; the console, as its queen, holds it.
+        headers["Authorization"] = "Bearer %s" % token
     request = urllib.request.Request(
         url, data=data, method="POST" if data is not None else "GET",
-        headers={"Content-Type": "application/json"} if data else {})
+        headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             status, raw = resp.status, resp.read()
@@ -170,6 +185,8 @@ def _annotate(cousin, messages):
     file named by the message id (an image), else the row's
     attachment_path when it sits in a media folder. `kind` is the
     display kind: image, video or audio (a stored 'voice' is audio)."""
+    if getattr(cousin, "home", None) is None:
+        return messages  # a remote node: no files on this machine
     files = _inbox_files(cousin)
     for msg in messages:
         name = files.get(msg.get("id"))
@@ -290,7 +307,7 @@ def register():
     def inbound(req, slug, name):
         cousin = find_cousin(req, slug)
         name = urllib.parse.unquote(name)
-        if not _INBOX_NAME_RE.match(name):
+        if cousin.home is None or not _INBOX_NAME_RE.match(name):
             raise RouteError(404, {"error": "not found"})
         inbox = (cousin.home / "chat" / "inbound").resolve()
         candidate = (inbox / name).resolve()
@@ -309,7 +326,8 @@ def register():
         cousin = find_cousin(req, slug)
         name = urllib.parse.unquote(name)
         kind = _MEDIA_FOLDERS.get(folder)
-        if kind is None or not _MEDIA_NAME_RE.match(name):
+        if (cousin.home is None or kind is None
+                or not _MEDIA_NAME_RE.match(name)):
             raise RouteError(404, {"error": "not found"})
         base = (cousin.home / "chat" / folder).resolve()
         candidate = (base / name).resolve()

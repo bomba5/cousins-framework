@@ -57,6 +57,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.routes_shared",
     "cousin_lib.console.routes_admin",
     "cousin_lib.console.routes_tracker",
+    "cousin_lib.console.hive",
     "cousin_lib.console.proxy",
     "cousin_lib.console.pane",
     "cousin_lib.console.sse",
@@ -251,8 +252,10 @@ class ConsoleServer:
         self._thread.start()
 
     def stop(self):
+        from cousin_lib.console import hive as console_hive
         from cousin_lib.console import sse
         sse.stop_poller()
+        console_hive.cleanup(self)
         self.httpd.shutdown()
         self.httpd.server_close()
         if self._thread:
@@ -306,13 +309,32 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle(self, method):
         server = self.console
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        # The hive's door (cousin_lib/console/hive.py): nodes have no
+        # session and may sit on any network, so /hive/ authenticates
+        # with the hive token alone, ahead of the guard and the login.
+        # With the hive off it is a 404 like any unknown path. Its body
+        # is bounded BEFORE it is read: nothing in front of this door
+        # has vetted the caller yet.
+        from cousin_lib.console import hive as console_hive
+        if console_hive.is_hive_path(parsed.path):
+            if length < 0 or length > console_hive.MAX_BODY_BYTES:
+                self.close_connection = True
+                self.send_json(413, {"error": "body too large"})
+                return
+            body = self.rfile.read(length) if length else b""
+            console_hive.serve(self, method, parsed.path, parsed.query, body)
+            return
+        length = max(0, length)
+        body = self.rfile.read(length) if length else b""
         if server.guard is not None and not server.guard(
                 self.client_address[0]):
             self.send_json(403, {"error": "address not allowed"})
             return
-        parsed = urllib.parse.urlparse(self.path)
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length else b""
         if not (parsed.path == "/api" or parsed.path.startswith("/api/")):
             if method != "GET":
                 self.send_json(404, {"error": "not found"})

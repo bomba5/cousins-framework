@@ -107,6 +107,20 @@ class TestShippedTemplate(unittest.TestCase):
         self.assertIn("cousin-chat send", out)
         self.assertIn("DOES NOT deliver", out)
 
+    def test_mcp_tools_are_named_as_the_preferred_interface(self):
+        # The MCP tools were one table row; a cousin reading the CLI
+        # table reached for the CLIs and the tools went unused.
+        out = self._render()
+        self.assertIn("## Tools: MCP first, CLIs as the fallback", out)
+        for tool in ("mcp__cousin__memory", "mcp__cousin__send",
+                     "mcp__cousin__job", "mcp__cousin__schedule"):
+            self.assertIn(tool, out)
+
+    def test_automatic_job_tracking_is_stated(self):
+        out = self._render()
+        self.assertIn("tracked automatically", out)
+        self.assertIn("run_in_background", out)
+
 
 if __name__ == "__main__":
     unittest.main()

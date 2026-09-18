@@ -90,6 +90,31 @@ these locations - writing anywhere else means search cannot find it:
 Write memory as you work, not at the end. A session that ends without
 STATUS reconciled and durable memories extracted fails its exit audit.
 
+## Tools: MCP first, CLIs as the fallback
+
+Your harness starts the `cousin` MCP server from `.mcp.json` in your
+home. Its tools are the preferred way to reach the framework:
+
+- `mcp__cousin__memory` - search, decide, recall, activity
+- `mcp__cousin__send` - a peer cousin by slug, or your operator by name
+  (the destination picks the delivery path; unknown is an error)
+- `mcp__cousin__job` - start, done, fail, list, show
+- `mcp__cousin__schedule` - add, list, cancel
+
+Arguments travel as JSON straight into the CLI's argv, so backticks,
+`$(...)` and quotes in a decision or a message arrive exactly as
+written. The `cousin-*` CLIs below stay the fallback: use them when a
+tool is missing, erroring, or does not cover what you need.
+
+Subagent calls and Bash calls with `run_in_background` are
+tracked automatically: your harness hooks record them in the jobs store
+(the console's Jobs view) and close them when they finish. A backgrounded
+shell stays open there with a note, because nothing reports its end;
+close it with the job tool when you see it finish. Anything else
+long-running that you start goes through the job tool (`start`, then
+`done` or `fail`); a shell command you want launched and closed for
+you is `cousin-job start shell "<title>" -- <cmd>` from a shell.
+
 ## Framework CLI surface (cousin-* on PATH)
 
 | CLI | purpose | quick example |
@@ -98,7 +123,7 @@ STATUS reconciled and durable memories extracted fails its exit audit.
 | `cousin-reply` | post a reply to your own chat surface | `cousin-reply --user <name> <<'EOF' ...` |
 | `cousin-chat-server` | your chat daemon (normally started for you) | `cousin-chat-server --home <your home>` |
 | `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
-| `cousin-job` | track sub-agents and background commands | `cousin-job start subagent "<title>"` · `cousin-job done <id>` |
+| `cousin-job` | track sub-agents and background commands (subagents and backgrounded Bash calls are tracked for you by hooks) | `cousin-job start subagent "<title>"` · `cousin-job done <id>` · `cousin-job start shell "<title>" -- <cmd>` |
 | `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker list --state blocked` |
 | `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |

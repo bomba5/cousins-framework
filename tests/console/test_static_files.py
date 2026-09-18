@@ -100,6 +100,36 @@ class StaticFilesPresent(unittest.TestCase):
         self.assertRegex(html, r"@babel/standalone@\d+\.\d+\.\d+", "Babel tag is not pinned to a version")
 
 
+class StaticFilesBrand(unittest.TestCase):
+    """The product name the operator sees: the top bar and the tab."""
+
+    def test_page_title_is_the_product_name(self):
+        html = (_STATIC / "index.html").read_text(encoding="utf-8")
+        titles = re.findall(r"<title>(.*?)</title>", html, re.S)
+        self.assertEqual(titles, ["cousins // framework"])
+
+    def test_top_bar_brand_reads_cousins_slash_slash_framework(self):
+        app = (_STATIC / "app.jsx").read_text(encoding="utf-8")
+        m = re.search(r'<span className="brand">(.*?)</span>\s*\n', app)
+        self.assertIsNotNone(m, "no brand span in app.jsx")
+        self.assertEqual(
+            m.group(1),
+            'cousins<span className="dim">//</span>framework')
+        # the rendered text, markup stripped: the dim span's margin gives
+        # the spaces around the slashes
+        self.assertEqual(re.sub(r"<[^>]+>", " ", m.group(1)).split(),
+                         ["cousins", "//", "framework"])
+
+    def test_no_view_sets_a_different_document_title(self):
+        for path in _static_files():
+            if path.suffix != ".jsx":
+                continue
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"document\.title\s*=([^;\n]*)", text):
+                self.assertIn("cousins // framework", m.group(1),
+                              "%s sets a title off the product name" % path.name)
+
+
 class StaticFilesSterile(unittest.TestCase):
     def test_gate_generic_classes_find_nothing(self):
         terms = []

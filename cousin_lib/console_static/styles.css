@@ -62,7 +62,11 @@ body {
      space-reserving mode (env returns 0), but env() also covers the
      translucent fallback if the meta tag changes. */
   grid-template-rows: calc(36px + env(safe-area-inset-top, 0px)) 1fr;
+  /* 100vh is the viewport with a mobile browser's toolbars retracted, so
+     the bottom of the shell would sit under them; dvh tracks what is
+     visible. The vh line stays as the fallback for engines without dvh. */
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
 }
 .topbar {
@@ -1056,7 +1060,7 @@ body.chat-fullscreen .shell {
   grid-template-rows: 1fr !important;
   grid-template-columns: 1fr !important;
 }
-body.chat-fullscreen .main { height: 100vh; }
+body.chat-fullscreen .main { height: 100vh; height: 100dvh; }
 
 /* Fullscreen toggle: desktop hides it unless already in fullscreen; on mobile
    always show it. This keeps the desktop header uncluttered. */

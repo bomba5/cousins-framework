@@ -11,6 +11,8 @@ import json
 import os
 import pathlib
 import re
+import shutil
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -20,12 +22,14 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _STATIC = _REPO_ROOT / "cousin_lib" / "console_static"
 _SPEC = _REPO_ROOT / "docs" / "console-spec.md"
 
-_MINE = ("chat.jsx", "styles.css", "manifest.webmanifest", "favicon.svg")
+_MINE = ("chat.jsx", "media.jsx", "styles.css", "manifest.webmanifest", "favicon.svg")
 
 # Names of surfaces the contract dropped. None may appear, in any case,
-# in the files this module owns.
+# in the files this module owns. The media viewer and inline players came
+# back on 2026-09-18 (docs/console-spec.md, "The chat media viewer"); the
+# engagement pings, the recorder and the media-kind filter stay out.
 _DROPPED_NAMES = (
-    "lightbox", "InlineVideo", "engagement", "presence",
+    "engagement", "presence",
     "favorite", "favourite", "MediaRecorder", "getUserMedia",
     "/api/chat/audio", "/api/chat/image", "/api/chat/video",
     # the source injected a vendor slash command ("/effort <level>")
@@ -123,7 +127,7 @@ class StaticChatFiles(unittest.TestCase):
         self.assertIn("attachment", text)
 
     def test_nothing_the_spec_dropped_survives_by_name(self):
-        for name in ("chat.jsx", "styles.css"):
+        for name in ("chat.jsx", "media.jsx", "styles.css"):
             text = (_STATIC / name).read_text().lower()
             for dropped in _DROPPED_NAMES:
                 self.assertNotIn(dropped.lower(), text,
@@ -175,9 +179,6 @@ class StaticChatFiles(unittest.TestCase):
         self.assertNotIn("<image", text)
         self.assertNotIn("<text", text)
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SeenWatermarkLinkage(unittest.TestCase):
@@ -318,3 +319,137 @@ class PaneScrollsTheProgram(unittest.TestCase):
         body = self.pane[start:self.pane.index("};", start)]
         self.assertLess(body.index("paneStateRef.current"),
                         body.index("mouseTrackingMode"))
+
+
+class ChatMediaViewer(unittest.TestCase):
+    """The media port (docs/console-spec.md, "The chat media viewer"):
+    the on/off toggle and its browser key, kind detection, the inline
+    players and the viewer with its keys, counter and links."""
+
+    def setUp(self):
+        self.media = (_STATIC / "media.jsx").read_text()
+        self.chat = (_STATIC / "chat.jsx").read_text()
+        self.css = (_STATIC / "styles.css").read_text()
+
+    def test_index_loads_media_before_chat(self):
+        html = (_STATIC / "index.html").read_text()
+        at = html.index('<script type="text/babel" src="media.jsx"></script>')
+        self.assertLess(at, html.index('src="chat.jsx"'),
+                        "chat.jsx reads media.jsx's names off window")
+
+    def test_toggle_key_and_default_on(self):
+        self.assertIn('const MEDIA_PREF_KEY = "fw_chat_media";', self.media)
+        read = _function_body(self.media, "readMediaShown")
+        # only an explicit "0" hides; absent or unreadable storage shows
+        self.assertIn('localStorage.getItem(MEDIA_PREF_KEY) !== "0"', read)
+        self.assertRegex(read, r"catch \(e\) \{ return true; \}")
+        write = _function_body(self.media, "writeMediaShown")
+        self.assertIn("try {", write)
+        self.assertIn('localStorage.setItem(MEDIA_PREF_KEY, on ? "1" : "0")', write)
+
+    def test_header_toggle_reads_and_writes_the_preference(self):
+        view = _function_body(self.chat, "ChatView")
+        self.assertIn("React.useState(() => readMediaShown())", view)
+        self.assertIn("writeMediaShown(mediaShown)", view)
+        header = _function_body(self.chat, "ChatHeader")
+        self.assertIn("setMediaShown(v => !v)", header)
+        self.assertIn('mediaShown ? "media on" : "media off"', header)
+
+    def test_kind_prefers_the_api_then_the_row_then_the_extension(self):
+        body = _function_body(self.media, "attachmentMedia")
+        api = body.index("msg.attachment && msg.attachment.kind")
+        row = body.index("msg.attachment_kind")
+        ext = body.index("mediaKindFromUrl(src)")
+        self.assertLess(api, row)
+        self.assertLess(row, ext)
+        norm = _function_body(self.media, "normalizeMediaKind")
+        self.assertIn('k === "audio" || k === "voice"', norm)
+        for kind, ext in (("image", '"png"'), ("image", '"webp"'),
+                          ("video", '"mp4"'), ("video", '"webm"'),
+                          ("audio", '"mp3"'), ("audio", '"ogg"')):
+            self.assertRegex(self.media, r"%s: \[[^\]]*%s" % (kind, ext))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_kind_detection_behaves(self):
+        # The pure helpers run under node, lifted out of the file as is.
+        src = self.media[self.media.index("const _MEDIA_EXT"):
+                         self.media.index("// Inline video preview")]
+        probe = src + """
+const cases = [
+  mediaKindFromUrl("/api/chat/media/s/video/a_1_b.mp4"),
+  mediaKindFromUrl("/x/clip.WEBM?v=1#t"),
+  mediaKindFromUrl("/api/chat/inbound/s/12.png"),
+  mediaKindFromUrl("/x/voice.mp3"),
+  mediaKindFromUrl("data:image/png;base64,AAAA"),
+  mediaKindFromUrl("/x/readme.txt"),
+  mediaKindFromUrl(""),
+  attachmentMedia({attachment: {url: "/x/a.bin", kind: "video"}}),
+  attachmentMedia({attachment: {url: "/x/a.bin"}, attachment_kind: "voice"}),
+  attachmentMedia({attachment: {url: "/x/a.ogg"}}),
+  attachmentMedia({image: "data:image/jpeg;base64,AA"}),
+  attachmentMedia({image: "/not/a/data/uri.png"}),
+  attachmentMedia({message: "text only"}),
+];
+process.stdout.write(JSON.stringify(cases));
+"""
+        out = subprocess.run(["node", "-e", probe], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout), [
+            "video", "video", "image", "audio", "image", None, None,
+            {"src": "/x/a.bin", "kind": "video"},
+            {"src": "/x/a.bin", "kind": "audio"},
+            {"src": "/x/a.ogg", "kind": "audio"},
+            {"src": "data:image/jpeg;base64,AA", "kind": "image"},
+            None, None,
+        ])
+
+    def test_inline_players_by_kind(self):
+        preview = _function_body(self.media, "LoopingPreview")
+        tag = re.search(r"<video.*?/>", preview, re.S).group(0)
+        for attr in ("muted", "loop", "playsInline", 'preload="metadata"'):
+            self.assertIn(attr, tag)
+        self.assertNotIn("controls", tag, "the inline preview is silent, the viewer has the controls")
+        self.assertIn("IntersectionObserver", preview)
+        inline = _function_body(self.media, "InlineMedia")
+        self.assertIn("[{media.kind} hidden]", inline)
+        self.assertRegex(inline, r"<audio[^>]*controls")
+        bubble = _function_body(self.chat, "ChatBubble")
+        self.assertIn("attachmentMedia(msg)", bubble)
+        self.assertIn("<InlineMedia", bubble)
+        self.assertIn("mediaShown", bubble)
+
+    def test_viewer_handles_keys_counter_and_links(self):
+        viewer = _function_body(self.media, "MediaViewer")
+        for key in ('"Escape"', '"ArrowLeft"', '"ArrowRight"'):
+            self.assertIn(key, viewer)
+        self.assertIn('addEventListener("keydown"', viewer)
+        self.assertIn('removeEventListener("keydown"', viewer)
+        self.assertIn("{index + 1} / {count}", viewer)
+        self.assertRegex(viewer, r"<video[^>]*controls[^>]*autoPlay")
+        self.assertIn("onClick={onClose}", viewer, "a click outside closes")
+        self.assertIn("media-viewer-prev", viewer)
+        self.assertIn("media-viewer-next", viewer)
+        self.assertRegex(viewer, r'href=\{current\.src\}[^>]*target="_blank"')
+        self.assertRegex(viewer, r"href=\{current\.src\} download")
+        # A ref callback re-runs on every poll render and would restart a
+        # video the reader paused; the start is an effect keyed on the item.
+        self.assertNotRegex(viewer, r"ref=\{\(el\)")
+        self.assertIn("[currentSrc]", viewer)
+
+    def test_chat_body_owns_the_viewer_and_snapshots_the_gallery(self):
+        body = _function_body(self.chat, "ChatBody")
+        self.assertIn("threadMedia(messages)", body)
+        self.assertIn("<MediaViewer", body)
+        self.assertIn("onOpenMedia={openMedia}", body)
+
+    def test_viewer_styles_exist_with_a_phone_layout(self):
+        for sel in (".media-viewer {", ".media-viewer-item {", ".media-viewer-bar {",
+                    ".chat-media-hidden {", ".chat-media-audio {"):
+            self.assertIn(sel, self.css)
+        phone = self.css[self.css.rindex("@media (max-width: 540px)"):]
+        self.assertIn(".media-viewer-item", phone)
+
+
+if __name__ == "__main__":
+    unittest.main()

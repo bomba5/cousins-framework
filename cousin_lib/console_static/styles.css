@@ -1077,8 +1077,136 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   .main { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); }
 }
 
-/* Inbound attachment inside a bubble */
-.chat-bubble .chat-attachment { max-width: 100%; height: auto; }
+/* Attachments inside a bubble (media.jsx): bounded thumbnails, a looping
+   muted video preview, a native audio player, or a one-line placeholder
+   when media is off. */
+.chat-media-slot { max-width: 100%; }
+.chat-media {
+  display: block;
+  height: auto;
+  max-width: min(100%, 420px);
+  border-radius: 4px;
+}
+.chat-media-image,
+.chat-media-video {
+  max-height: 300px;
+  cursor: zoom-in;
+  background: var(--bg-0);
+  border: 1px solid var(--line-soft);
+}
+/* A fixed width: the bubble shrink-wraps its content, so a percentage
+   alone collapses the player to its minimum. */
+.chat-media-audio { width: 320px; max-width: 64vw; height: 40px; }
+.chat-media-hidden {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.7;
+}
+.chat-media-toggle[aria-pressed="true"] { border-color: var(--accent); }
+
+/* The media viewer: full-size image or video over the page, prev/next,
+   a counter and the original's links. */
+.media-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: oklch(0.08 0.01 250 / 0.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  touch-action: pan-y pinch-zoom;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(56px, env(safe-area-inset-bottom));
+}
+.media-viewer-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+.media-viewer-item {
+  display: block;
+  max-width: calc(100vw - 136px);
+  max-height: calc(100dvh - 96px);
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: default;
+  background: #000;
+  box-shadow: 0 8px 40px oklch(0 0 0 / 0.6);
+}
+.media-viewer-nav,
+.media-viewer-close {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: oklch(0.15 0.012 250 / 0.75);
+  color: var(--fg-0);
+  font-family: var(--mono);
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+.media-viewer-nav {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  font-size: 30px;
+}
+.media-viewer-nav:hover,
+.media-viewer-close:hover { border-color: var(--accent); color: var(--accent-bright); }
+.media-viewer-prev { left: 14px; }
+.media-viewer-next { right: 14px; }
+.media-viewer-close {
+  top: max(12px, env(safe-area-inset-top));
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+}
+.media-viewer-bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line-soft);
+  background: oklch(0.15 0.012 250 / 0.8);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-1);
+  cursor: default;
+  white-space: nowrap;
+}
+.media-viewer-count { color: var(--fg-0); }
+.media-viewer-link { color: var(--accent-bright); text-decoration: none; }
+.media-viewer-link:hover { text-decoration: underline; }
+
+@media (max-width: 540px) {
+  .chat-media-image, .chat-media-video { max-height: 220px; }
+  .media-viewer { padding-left: 0; padding-right: 0; }
+  .media-viewer-item { max-width: 100vw; max-height: calc(100dvh - 120px); border-radius: 0; }
+  .media-viewer-nav {
+    top: auto;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    transform: none;
+    width: 40px;
+    height: 40px;
+    font-size: 24px;
+  }
+  .media-viewer-prev { left: 10px; }
+  .media-viewer-next { right: 10px; }
+  .media-viewer-bar { bottom: max(16px, env(safe-area-inset-bottom)); gap: 10px; padding: 5px 10px; }
+}
 
 /* Search highlights inside chat bubbles */
 .chat-md mark.hl-match {

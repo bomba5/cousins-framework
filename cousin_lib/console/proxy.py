@@ -3,10 +3,12 @@
 
 Every route names the cousin, resolves its `host`/`port` from the
 filesystem registry on that call, and forwards to the routes in
-docs/chat-server-spec.md. The console stores no message: the only file
-it touches under a cousin home is the inbox it serves read-only, and
-the attachment annotation on history rows is one directory listing per
-request, a projection and not a store.
+docs/chat-server-spec.md. The console stores no message: the only files
+it touches under a cousin home are the inbox and the generated-media
+folders (`chat/images`, `chat/audio`, `chat/video`), served read-only,
+and the attachment annotation on history rows is one directory listing
+per request plus a check of each row's attachment_path, a projection
+and not a store.
 
 Error mapping: `400 {"error": "bad slug"}` before any lookup, `404`
 unknown cousin, `502 {"ok": false, "error": ...}` when the server is
@@ -23,6 +25,7 @@ already turned malformed JSON into its 400).
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import urllib.error
 import urllib.parse
@@ -41,6 +44,24 @@ _INBOX_TYPES = {
     ".webp": "image/webp",
 }
 _INBOX_NAME_RE = re.compile(r"^(\d+)\.(png|jpg|jpeg|gif|webp)$")
+# Generated media lands under <home>/chat/<folder>/ (docs/media-spec.md,
+# "Storage"); the row's attachment_path names the file. Each folder
+# holds one display kind, and only these suffixes are served from it.
+_MEDIA_FOLDERS = {"images": "image", "audio": "audio", "video": "video"}
+_MEDIA_TYPES = {
+    "image": dict(_INBOX_TYPES),
+    "audio": {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".oga": "audio/ogg",
+              ".opus": "audio/ogg", ".wav": "audio/wav", ".m4a": "audio/mp4",
+              ".webm": "audio/webm"},
+    "video": {".mp4": "video/mp4", ".webm": "video/webm",
+              ".mov": "video/quicktime", ".m4v": "video/mp4"},
+}
+# The stored kind vocabulary ('image' | 'voice' | 'video') mapped to
+# the display one the view renders by.
+_DISPLAY_KIND = {"image": "image", "voice": "audio", "audio": "audio",
+                 "video": "video"}
+_MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 _READ_TIMEOUT = 5.0
 _SEND_TIMEOUT = 15.0   # an image can be megabytes
 
@@ -124,16 +145,71 @@ def _inbox_files(cousin):
     return out
 
 
+def _media_file(cousin, stored):
+    """(folder, name) for a row's attachment_path when it names a
+    servable file directly inside one of the media folders, else None."""
+    if not stored or not isinstance(stored, str):
+        return None
+    try:
+        candidate = pathlib.Path(stored).resolve()
+        chat = (cousin.home / "chat").resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    folder = candidate.parent.name
+    kind = _MEDIA_FOLDERS.get(folder)
+    if (kind is None or candidate.parent.parent != chat
+            or not _MEDIA_NAME_RE.match(candidate.name)
+            or candidate.suffix.lower() not in _MEDIA_TYPES[kind]
+            or not candidate.is_file()):
+        return None
+    return folder, candidate.name
+
+
 def _annotate(cousin, messages):
+    """Project each row's attachment as `{"url", "kind"}`: the inbox
+    file named by the message id (an image), else the row's
+    attachment_path when it sits in a media folder. `kind` is the
+    display kind: image, video or audio (a stored 'voice' is audio)."""
     files = _inbox_files(cousin)
-    if not files:
-        return messages
     for msg in messages:
         name = files.get(msg.get("id"))
         if name:
             msg["attachment"] = {
-                "url": "/api/chat/inbound/%s/%s" % (cousin.slug, name)}
+                "url": "/api/chat/inbound/%s/%s" % (cousin.slug, name),
+                "kind": "image"}
+            continue
+        found = _media_file(cousin, msg.get("attachment_path"))
+        if found:
+            folder, fname = found
+            kind = (_DISPLAY_KIND.get(msg.get("attachment_kind") or "")
+                    or _MEDIA_FOLDERS[folder])
+            msg["attachment"] = {
+                "url": "/api/chat/media/%s/%s/%s"
+                       % (cousin.slug, folder, urllib.parse.quote(fname)),
+                "kind": kind}
     return messages
+
+
+def _byte_range(header, size):
+    """(start, end) inclusive for a single `bytes=` range the file can
+    satisfy, None for no usable header, or "unsatisfiable"."""
+    if not header:
+        return None
+    m = _RANGE_RE.match(header.strip())
+    if not m or (not m.group(1) and not m.group(2)):
+        return None
+    if m.group(1):
+        start = int(m.group(1))
+        end = int(m.group(2)) if m.group(2) else size - 1
+    else:
+        length = int(m.group(2))
+        if length == 0:
+            return "unsatisfiable"
+        start, end = max(0, size - length), size - 1
+    end = min(end, size - 1)
+    if start >= size or start > end:
+        return "unsatisfiable"
+    return start, end
 
 
 def guarded(fn):
@@ -226,6 +302,42 @@ def register():
             ("Cache-Control", "private, max-age=3600"),
             ("Content-Length", str(len(payload))),
         ], payload)
+
+    @router.route("GET", "/api/chat/media/{slug}/{folder}/{name}")
+    @guarded
+    def media(req, slug, folder, name):
+        cousin = find_cousin(req, slug)
+        name = urllib.parse.unquote(name)
+        kind = _MEDIA_FOLDERS.get(folder)
+        if kind is None or not _MEDIA_NAME_RE.match(name):
+            raise RouteError(404, {"error": "not found"})
+        base = (cousin.home / "chat" / folder).resolve()
+        candidate = (base / name).resolve()
+        ctype = _MEDIA_TYPES[kind].get(candidate.suffix.lower())
+        if (ctype is None or candidate.parent != base
+                or not candidate.is_file()):
+            raise RouteError(404, {"error": "not found"})
+        size = candidate.stat().st_size
+        headers = getattr(req, "headers", None)
+        wanted = _byte_range(headers.get("Range") if headers else None, size)
+        if wanted == "unsatisfiable":
+            return 416, RawResponse([
+                ("Content-Range", "bytes */%d" % size),
+                ("Content-Length", "0")], b"")
+        common = [("Content-Type", ctype),
+                  ("Cache-Control", "private, max-age=3600"),
+                  ("Accept-Ranges", "bytes")]
+        if wanted is None:
+            payload = candidate.read_bytes()
+            return 200, RawResponse(
+                common + [("Content-Length", str(len(payload)))], payload)
+        start, end = wanted
+        with candidate.open("rb") as fh:
+            fh.seek(start)
+            payload = fh.read(end - start + 1)
+        return 206, RawResponse(common + [
+            ("Content-Range", "bytes %d-%d/%d" % (start, end, size)),
+            ("Content-Length", str(len(payload)))], payload)
 
 
 register()

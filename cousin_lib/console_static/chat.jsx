@@ -42,6 +42,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
     try { return localStorage.getItem("fw_chat_fullscreen") === "1"; }
     catch (e) { return false; }
   });
+  // Media on/off: a browser preference (media.jsx), default on.
+  const [mediaShown, setMediaShown] = React.useState(() => readMediaShown());
+  React.useEffect(() => { writeMediaShown(mediaShown); }, [mediaShown]);
 
   // Per-tab last-viewed marker: stamp localStorage whenever the operator
   // is on this cousin's chat tab + the document is visible. This is what
@@ -126,7 +129,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
             transition: "flex 240ms cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
-          <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneOpen} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} />
+          <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneOpen} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} />
           {fullscreen && (
             <button className="chat-fullscreen-exit"
                     onClick={() => setFullscreen(false)}
@@ -136,7 +139,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
               draft state reset to empty. Without this React reuses the instance
               and the previous cousin's messages render until the new fetch lands
               -- a cross-cousin content leak between private chats. */}
-          <ChatBody key={c.slug + "|" + chatUser} cousin={c} search={search} setSearch={setSearch} chatUser={chatUser} showArchived={showArchived} />
+          <ChatBody key={c.slug + "|" + chatUser} cousin={c} search={search} setSearch={setSearch} chatUser={chatUser} showArchived={showArchived} mediaShown={mediaShown} />
           {toast && (
             <div style={{
               position: "absolute", bottom: 90, left: "50%", transform: "translateX(-50%)",
@@ -166,7 +169,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   );
 }
 
-function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived }) {
+function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown }) {
   const btnH = 24;  // shared height for input + buttons
 
   // Effort: the levels come from the server (GET /api/spawn/options),
@@ -252,6 +255,19 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
           color: showArchived ? "var(--bg-0)" : undefined,
         }}
       >{showArchived ? "live" : "archived"}</button>
+      {setMediaShown && (
+        <button
+          className="btn ghost chat-media-toggle"
+          onClick={() => setMediaShown(v => !v)}
+          aria-pressed={!mediaShown}
+          title={mediaShown ? "media shown: click to hide images, videos and audio" : "media hidden: click to show"}
+          style={{
+            height: btnH, padding: "0 10px", boxSizing: "border-box",
+            background: mediaShown ? undefined : "var(--accent)",
+            color: mediaShown ? undefined : "var(--bg-0)",
+          }}
+        >{mediaShown ? "media on" : "media off"}</button>
+      )}
       <input
         className="chat-search"
         value={search}
@@ -285,7 +301,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   );
 }
 
-function ChatBody({ cousin, search, setSearch, chatUser, showArchived }) {
+function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShown }) {
   const c = cousin;
   const [messages, setMessages] = React.useState([]);
   const [draft, setDraft] = React.useState("");
@@ -462,6 +478,18 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived }) {
     setAtBottom(true);
   };
 
+  // The media viewer: a snapshot of the thread's images and videos taken
+  // at the click, so a poll landing while it is open does not move it.
+  const [viewer, setViewer] = React.useState(null);  // {items, start}
+  const openMedia = React.useCallback((msg) => {
+    const items = threadMedia(messages);
+    const at = items.findIndex(x => x.id === msg.id);
+    if (at < 0) return;
+    setViewer({ items, start: at });
+  }, [messages]);
+  const closeViewer = React.useCallback(() => setViewer(null), []);
+  React.useEffect(() => { if (!mediaShown) setViewer(null); }, [mediaShown]);
+
   const [attachment, setAttachment] = React.useState(null); // {dataUrl, name}
   const [replyingTo, setReplyingTo] = React.useState(null);  // {id, user, snippet}
   const fileInputRef = React.useRef(null);
@@ -606,6 +634,8 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived }) {
             search={searchActive ? search : ""}
             isLast={i === messages.length - 1}
             chatUser={chatUser}
+            mediaShown={mediaShown !== false}
+            onOpenMedia={openMedia}
             onReply={() => setReplyingTo({
               id: m.id, user: m.user,
               snippet: (m.message || "").replace(/\s+/g, " ").slice(0, 120),
@@ -614,6 +644,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived }) {
         ))}
         <div ref={chatAnchorRef} style={{ height: 1 }} />
       </div>
+      {viewer && <MediaViewer items={viewer.items} start={viewer.start} onClose={closeViewer} />}
       {!atBottom && (
         <button
           onClick={jumpToBottom}
@@ -1186,16 +1217,11 @@ function groupReactions(rows) {
   return Array.from(by.values());
 }
 
-// An inbound attachment is a file the cousin's chat server wrote; the
-// console projects it as `attachment.url` on the message. A `data:` image
-// on a row (a client-side echo) is accepted too. Nothing else renders.
-function attachmentSrc(msg) {
-  if (msg.attachment && typeof msg.attachment.url === "string") return msg.attachment.url;
-  if (typeof msg.image === "string" && msg.image.startsWith("data:image/")) return msg.image;
-  return null;
-}
-
-function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser }) {
+// An attachment is a file the cousin's chat server wrote (the inbox) or a
+// generated asset; the console projects it as `attachment: {url, kind}`
+// on the message. attachmentMedia (media.jsx) resolves it, a `data:`
+// image echo included, and InlineMedia renders it by kind.
+function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown, onOpenMedia }) {
   const isUser = msg.type === "user";
   // Parse incoming reply_to. The server stores it as a JSON string when the
   // sender provided a dict; older rows may already be objects.
@@ -1388,7 +1414,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser }) {
     });
   }, [rendered, streaming]);
 
-  const imgSrc = attachmentSrc(msg);
+  const media = attachmentMedia(msg);
   const chips = groupReactions(reactions);
 
   return (
@@ -1428,14 +1454,11 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser }) {
             </div>
           </div>
         )}
-        {imgSrc && (
-          // The attachment opens in its own tab at full size; there is no
-          // in-page viewer.
-          <a href={imgSrc} target="_blank" rel="noopener noreferrer" title="open full size"
-             style={{ display: "block", marginBottom: visible ? 6 : 0 }}>
-            <img src={imgSrc} alt="attachment" className="chat-attachment"
-                 style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 3, display: "block" }} />
-          </a>
+        {media && (
+          <div className="chat-media-slot" style={{ marginBottom: visible ? 6 : 0 }}>
+            <InlineMedia media={media} shown={mediaShown !== false}
+                         onOpen={onOpenMedia ? () => onOpenMedia(msg) : null} />
+          </div>
         )}
         <div ref={divRef} className="chat-md" dangerouslySetInnerHTML={{ __html: rendered }} />
         <div className="chat-meta">{fmtShortTime(msg.timestamp)}</div>

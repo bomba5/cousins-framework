@@ -24,8 +24,9 @@ at a time, chat with the live terminal pane typed into from the
 browser, jobs with live log tails, the memory tree with the
 shared-tier review, loops with drift, tokens from the harness
 transcripts, the tracker, settings, account, and the restart panel.
-Dropped with the operator's decision: media generation and the display
-of generated media, the backlog board, the embedded game, presence and
+Dropped with the operator's decision: media generation (the display
+of generated media and inbound images came back on 2026-09-18: inline
+players, a media on/off toggle and a viewer), the backlog board, the embedded game, presence and
 engagement, the GPU box controls and the legacy agents table. The
 scheduler the source console carried is not ported: the loops daemon
 owns recurring work here (`docs/loops-spec.md`).

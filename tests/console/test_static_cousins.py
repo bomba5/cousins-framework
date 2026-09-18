@@ -57,6 +57,59 @@ class SpawnDialog(unittest.TestCase):
         self.assertNotRegex(self.src, r'\[\s*"low"\s*,')
 
 
+class RemoteCousins(unittest.TestCase):
+    """Remote cousins (hive nodes): their own card with no start, stop,
+    restart or pane control, revoke behind a confirm and forget after
+    it; the spawn dialog offers Remote only when the hive is on and
+    shows both install commands with copy buttons and the token note;
+    the chat header drops the local-only controls."""
+
+    def setUp(self):
+        self.cousins = _read("cousins.jsx")
+        self.card = _component(self.cousins, "RemoteCousinCard")
+        self.form = _component(self.cousins, "RemoteSpawnForm")
+        self.modal = _component(self.cousins, "SpawnModal")
+
+    def test_the_view_routes_remote_rows_to_their_own_card(self):
+        view = _component(self.cousins, "CousinsView")
+        self.assertIn("c.remote ?", view)
+        self.assertIn("<RemoteCousinCard", view)
+        self.assertIn("/api/hive/nodes/${c.slug}/revoke", view)
+        self.assertIn("window.confirm(", view)
+        self.assertIn('apiSend("DELETE", `/api/hive/nodes/${c.slug}`)', view)
+
+    def test_the_card_has_no_local_controls(self):
+        for word in ('"start"', '"stop"', '"restart"', "pane", "tmux",
+                     '"flip"'):
+            self.assertNotIn(word, self.card, word)
+        for word in ("remote", "last seen", "c.host", "c.port", '"revoke"',
+                     '"forget"', "open chat"):
+            self.assertIn(word, self.card, word)
+
+    def test_remote_is_offered_only_when_the_hive_is_on(self):
+        self.assertIn('apiGet("/api/hive")', self.modal)
+        self.assertIn("hive?.enabled &&", self.modal)
+        self.assertIn("Remote (another machine)", self.modal)
+
+    def test_the_form_sends_the_build_fields_and_shows_both_commands(self):
+        self.assertIn('apiSend("POST", "/api/hive/nodes", body)', self.form)
+        for key in ("slug", "name", "role", "brain", "home_chat",
+                    "reachable", "body.port", "body.agent_cmd"):
+            self.assertIn(key, self.form, key)
+        self.assertIn("built.curl", self.form)
+        self.assertIn("built.install", self.form)
+        self.assertEqual(self.form.count("<CopyButton"), 2)
+        self.assertIn("carries the node's bearer token", self.form)
+
+    def test_the_chat_header_drops_local_only_controls_for_remote(self):
+        header = _component(_read("chat.jsx"), "ChatHeader")
+        self.assertIn("const remote = !!cousin.remote", header)
+        self.assertIn("!embed && !remote", header)
+        self.assertIn("!paneOpen && !embed && !remote", header)
+        view = _component(_read("chat.jsx"), "ChatView")
+        self.assertIn("paneOpen && !c.remote", view)
+
+
 class InspectorAuthField(unittest.TestCase):
     """The inspector's auth control reads the mode names from GET
     /api/cousins/<slug>/auth (no catalogue of its own), takes the key

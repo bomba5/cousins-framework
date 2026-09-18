@@ -25,19 +25,21 @@ max_output = 16000    # characters of stdout returned per call; the rest is cut 
 
 [tools.memory]
 command = "cousin-memory"
-description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), recall past decisions, checkpoint your current activity."
+description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall past decisions, checkpoint your current activity."
 
 [tools.memory.properties]
 query = { type = "string", description = "search text (search)" }
 top = { type = "integer", description = "max results (search)" }
 collection = { type = "string", enum = ["memory", "notes", "harness"], description = "limit to one collection (search)" }
 json = { type = "boolean", description = "hits as a JSON list (search)" }
-topic = { type = "string", description = "decision topic (decide)" }
+topic = { type = "string", description = "decision topic (decide, remember); the topic to retire (obsolete)" }
 decision = { type = "string", description = "the decision (decide)" }
 reasoning = { type = "string", description = "why (decide)" }
 fact = { type = "string", description = "the fact to keep (remember)" }
 level = { type = "string", optional = true, enum = ["operator", "framework", "tool", "conclusion", "hypothesis", "obsolete"], description = "truth level (decide, remember); default conclusion; operator needs cite" }
 cite = { type = "string", optional = true, description = "where it comes from: chat message id, quote, file, date (decide, remember); required for level operator" }
+why = { type = "string", description = "what superseded the topic (obsolete); required, non-empty" }
+force = { type = "boolean", description = "mark a topic that has no raw entries yet (obsolete)" }
 keyword = { type = "string", optional = true, description = "filter (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
 text = { type = "string", description = "what you are doing now (activity)" }
@@ -55,6 +57,10 @@ stdin_sep = "---"
 [tools.memory.commands.remember]
 argv = ["remember", "{topic}", "{fact}"]
 options = { level = "--level", cite = "--cite" }
+
+[tools.memory.commands.obsolete]
+argv = ["obsolete", "{topic}"]
+options = { why = "--why", force = "--force" }
 
 [tools.memory.commands.recall]
 argv = ["recall", "{keyword}"]

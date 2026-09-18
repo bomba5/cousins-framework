@@ -175,6 +175,37 @@ def register():
                                           "id": manifest["id"]})
         return 200, {"ok": True, "trash": manifest, "effects": effects}
 
+    @router.route("POST", "/api/memory/{slug}/obsolete")
+    def obsolete(req, slug):
+        """{"topic", "why", "force"?}: append an L5_OBSOLETE entry for the
+        topic, recorded as by the logged-in user, then regenerate the
+        distilled views (which leave the topic out until a later entry
+        revives it). Nothing is removed from raw."""
+        from cousin_lib import distill, memory
+
+        home = cousin_home(req.server, slug)
+        topic = req.body.get("topic")
+        why = req.body.get("why")
+        if not isinstance(topic, str) or not isinstance(why, str):
+            raise HttpError(400, "topic and why must be strings")
+        try:
+            entry = memory.mark_obsolete(home, topic, why, by=_who(req),
+                                         force=_flag(req.body.get("force")),
+                                         source="console")
+        except memory.ObsoleteRefused as err:
+            raise HttpError(400, str(err))
+        effects = {"distilled": False}
+        try:
+            report = distill.distill(home)
+            effects = {"distilled": True,
+                       "obsolete_topics": report.get("obsolete", 0)}
+        except Exception as err:  # noqa: BLE001 - the mark is written
+            effects["distill_error"] = "%s: %s" % (type(err).__name__, err)
+        req.server.emit("memory-change", {"slug": slug,
+                                          "action": "obsolete",
+                                          "topic": entry["topic"]})
+        return 200, {"ok": True, "entry": entry, "effects": effects}
+
     @router.route("POST", "/api/memory/{slug}/restore")
     def restore(req, slug):
         home = cousin_home(req.server, slug)

@@ -64,6 +64,16 @@ class ExplorerLayersAndRemoval(unittest.TestCase):
         self.assertIn("/api/memory/${slug}/restore", explorer)
         self.assertIn("undo", explorer)
 
+    def test_raw_entries_offer_mark_obsolete_with_a_reason(self):
+        # Canary (2026-09-18): the explorer's L5 writer.
+        raw = _component(self.src, "RawEntries")
+        self.assertIn("onObsolete(e.topic)", raw)
+        self.assertIn("mark obsolete", raw)
+        explorer = _component(self.src, "MemoryExplorer")
+        self.assertIn("/api/memory/${slug}/obsolete", explorer)
+        self.assertIn("window.prompt", explorer)
+        self.assertIn("onObsolete={markObsolete}", explorer)
+
     def test_a_removal_refetches_without_dropping_the_filters(self):
         # keyed remounts reset the level chips after every delete
         explorer = _component(self.src, "MemoryExplorer")

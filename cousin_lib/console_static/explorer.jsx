@@ -173,6 +173,19 @@ function MemoryExplorer({ slug }) {
     refresh();
     return true;
   };
+  // Mark a topic obsolete (L5): a new raw entry, never a removal. The
+  // reason is required; the server records the logged-in user as `by`.
+  const markObsolete = async (topic) => {
+    const why = window.prompt(`Mark topic "${topic}" obsolete?\nIt leaves the distilled views; raw keeps its history, and a later entry on the topic revives it.\n\nWhy (what superseded it)?`, "");
+    if (why === null) return false;
+    if (!why.trim()) { flash({ ok: false, msg: "not marked: a reason is required" }); return false; }
+    const { r, d } = await apiSend("POST", `/api/memory/${slug}/obsolete`, { topic, why: why.trim() });
+    if (!r.ok || !d.ok) { flash({ ok: false, msg: `could not mark "${topic}" obsolete: ${d.error || r.status}` }); return false; }
+    flash({ ok: true, msg: `marked "${topic}" obsolete${d.effects && d.effects.distilled ? " · distilled views regenerated" : ""}` });
+    setTick(t => t + 1);
+    refresh();
+    return true;
+  };
   const restore = async (id) => {
     const { r, d } = await apiSend("POST", `/api/memory/${slug}/restore`, { id });
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `restore failed: ${d.error || r.status}` }); return; }
@@ -235,7 +248,7 @@ function MemoryExplorer({ slug }) {
         )}
         {layer === "insights" && <MemoryInsights ov={ov} slug={slug} onPick={setLayer} />}
         {(layer === "raw" || layer === "digest" || layer === "archive") &&
-          <RawEntries key={layer} slug={slug} tier={layer === "raw" ? "daily" : layer} reload={tick} onRemove={remove} />}
+          <RawEntries key={layer} slug={slug} tier={layer === "raw" ? "daily" : layer} reload={tick} onRemove={remove} onObsolete={markObsolete} />}
         {layer === "decisions" && <DecisionList slug={slug} reload={tick} onRemove={remove} />}
         {["active", "index", "distilled", "memory", "notes", "harness", "legacy"].includes(layer) &&
           <LayerFiles key={layer} slug={slug} layer={layer} info={byId[layer]} reload={tick} onRemove={remove} />}
@@ -265,7 +278,7 @@ function MemoryInsights({ ov, only }) {
   const months = Object.entries(ins.per_month || {});
   const maxMonth = Math.max(1, ...months.map(([, v]) => v));
   const flags = [];
-  if (ins.obsolete) flags.push(`${ins.obsolete} obsolete (L5) entries still in raw: candidates to remove`);
+  if (ins.obsolete) flags.push(`${ins.obsolete} obsolete (L5) marks in raw: a topic whose newest entry is one stays out of the distilled views`);
   if (ins.hypotheses) flags.push(`${ins.hypotheses} hypotheses (L4) never confirmed or retired`);
   if (ins.pending_fold_files) flags.push(`${ins.pending_fold_files} daily raw files are past the fold window (cousin-memory compact --target raw folds them)`);
   if (ins.distilled_behind_raw) flags.push("raw has entries newer than the distilled views (they regenerate at the next boot or cousin-memory distill)");
@@ -360,7 +373,7 @@ function SearchInfo({ l }) {
   );
 }
 
-function RawEntries({ slug, tier, reload, onRemove }) {
+function RawEntries({ slug, tier, reload, onRemove, onObsolete }) {
   const [levels, setLevels] = React.useState([]);
   const [topic, setTopic] = React.useState("");
   const [q, setQ] = React.useState("");
@@ -423,6 +436,10 @@ function RawEntries({ slug, tier, reload, onRemove }) {
               {Object.entries(e.extra || {}).map(([k, v]) => <span key={k}>{k} · <b>{typeof v === "object" ? JSON.stringify(v) : String(v)}</b></span>)}
               <span className="muted">{e.file}{e.ref ? ":" + e.ref.line_no : ""}</span>
               <span style={{ flex: 1 }} />
+              {e.topic && e.level !== "L5_OBSOLETE" && onObsolete &&
+                <button className="btn ghost" data-mark-obsolete={e.topic}
+                        title="mark this topic superseded (L5): out of the distilled views, history kept in raw"
+                        onClick={(ev) => { ev.stopPropagation(); onObsolete(e.topic); }}>mark obsolete</button>}
               {e.ref && <ConfirmButton className="btn ghost danger-text" label="remove"
                                        onConfirm={() => onRemove({ kind: "entry", ...e.ref }, `entry "${e.topic}"`)} />}
             </div>

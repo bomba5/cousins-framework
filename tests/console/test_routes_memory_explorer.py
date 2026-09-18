@@ -161,6 +161,51 @@ class RemoveAndRestore(ExplorerCase):
                                    {"id": "nope"})[0], 404)
 
 
+class MarkObsolete(ExplorerCase):
+    """Canary (2026-09-18): L5 had no writer. The explorer marks a topic
+    obsolete by appending an L5 entry (nothing is removed), recorded as
+    by the logged-in user, and the distilled views drop the topic."""
+
+    def _login(self):
+        auth.Users(self.root / "config" / "console-users.json") \
+            .set_password("ana", "correct horse")
+        self.serve()
+        status, _ = self.post("/api/auth/login",
+                              {"user": "ana", "password": "correct horse"})
+        self.assertEqual(status, 200)
+
+    def test_marks_as_the_logged_in_user_and_redistills(self):
+        self._login()
+        status, body = self.post("/api/memory/wren/obsolete",
+                                 {"topic": "kestrel", "why": "superseded"})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["effects"]["distilled"])
+        self.assertEqual(body["entry"]["by"], "ana")
+        _, body = self.get("/api/memory/wren/raw?topic=kestrel")
+        newest = body["entries"][0]
+        self.assertEqual(newest["level"], "L5_OBSOLETE")
+        self.assertEqual(newest["source"], "console")
+        self.assertEqual(newest["extra"]["by"], "ana")
+        self.assertEqual(body["total"], 2, "the history stays in raw")
+        distilled = "".join(
+            p.read_text() for p in
+            (self.home / "memory" / "distilled").glob("*.md"))
+        self.assertNotIn("operator said so", distilled)
+
+    def test_refusals(self):
+        self.serve()
+        for payload in ({"topic": "kestrel", "why": "  "},
+                        {"topic": "kestrel"},
+                        {"topic": "no-such-topic", "why": "x"},
+                        {"topic": 3, "why": "x"}):
+            status, body = self.post("/api/memory/wren/obsolete", payload)
+            self.assertEqual(status, 400, payload)
+        status, _ = self.post("/api/memory/wren/obsolete",
+                              {"topic": "no-such-topic", "why": "x",
+                               "force": True})
+        self.assertEqual(status, 200)
+
+
 class BehindTheLogin(ExplorerCase):
     def test_every_new_route_is_401_without_a_session(self):
         auth.Users(self.root / "config" / "console-users.json") \
@@ -174,7 +219,9 @@ class BehindTheLogin(ExplorerCase):
             self.assertEqual(self.get(path)[0], 401, path)
         for path, payload in (("/api/memory/wren/delete",
                                {"kind": "file", "path": "notes/long.md"}),
-                              ("/api/memory/wren/restore", {"id": "x"})):
+                              ("/api/memory/wren/restore", {"id": "x"}),
+                              ("/api/memory/wren/obsolete",
+                               {"topic": "kestrel", "why": "x"})):
             self.assertEqual(self.post(path, payload)[0], 401, path)
         self.assertTrue((self.home / "notes" / "long.md").exists())
 

@@ -178,7 +178,8 @@ class SchemaCase(unittest.TestCase):
         self.assertEqual(schema["type"], "object")
         self.assertEqual(schema["required"], ["command"])
         self.assertEqual(sorted(schema["properties"]["command"]["enum"]),
-                         ["activity", "decide", "recall", "remember", "search"])
+                         ["activity", "decide", "obsolete", "recall", "remember",
+                          "search"])
         self.assertEqual(schema["properties"]["query"]["type"], "string")
         self.assertIn("search", schema["properties"]["query"]["description"])
         self.assertFalse(schema["additionalProperties"])
@@ -239,6 +240,21 @@ class CallAssemblyCase(unittest.TestCase):
         self.assertEqual(argv, ["cousin-memory", "search", "a b `c`",
                                 "--top", "3"])
         self.assertIsNone(stdin)
+
+    def test_the_memory_tool_can_mark_a_topic_obsolete(self):
+        # Canary (2026-09-18): L5 had no writer; the tool carries it
+        # with the reason as a flag and --force only when asked.
+        argv, stdin = mcp_server.build_call(
+            self.tool, "obsolete",
+            {"topic": "deploy path", "why": "the pipeline deploys"},
+            resolve=lambda name: name)
+        self.assertEqual(argv, ["cousin-memory", "obsolete", "deploy path",
+                                "--why", "the pipeline deploys"])
+        self.assertIsNone(stdin)
+        argv, _ = mcp_server.build_call(
+            self.tool, "obsolete", {"topic": "t", "why": "w", "force": True},
+            resolve=lambda name: name)
+        self.assertEqual(argv[-1], "--force")
 
     def test_missing_required_placeholder_is_a_tool_error(self):
         with self.assertRaises(ToolError) as cm:

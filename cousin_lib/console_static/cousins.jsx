@@ -1,5 +1,5 @@
 // Cousins view: cards, inspector drawer, editors, spawn / dismiss / flip
-function CousinsView({ cousins, setCousins, openLogs, setActiveCousin }) {
+function CousinsView({ cousins, setCousins, setActiveCousin }) {
   const [selected, setSelected] = React.useState(null);
   const [spawning, setSpawning] = React.useState(false);
   const [toast, setToast] = React.useState(null);
@@ -99,7 +99,6 @@ function CousinsView({ cousins, setCousins, openLogs, setActiveCousin }) {
           cousin={cousins.find(c => c.slug === selected)}
           onClose={() => setSelected(null)}
           onAct={act}
-          openLogs={openLogs}
         />
       )}
       {spawning && (
@@ -187,7 +186,16 @@ function CousinCard({ c, onClick, onAct, onChat }) {
   );
 }
 
-function Inspector({ cousin: c, onClose, onAct, openLogs }) {
+function Inspector({ cousin: c, onClose, onAct }) {
+  // The identity editors' catalogue and limits (scopes, heartbeat
+  // bounds, operator length) come from the server, like the spawn
+  // dialog's, so the two cannot drift from the routes' validation.
+  const [options, setOptions] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    apiGet("/api/spawn/options").then(d => { if (!cancelled && d) setOptions(d); });
+    return () => { cancelled = true; };
+  }, []);
   React.useEffect(() => {
     if (!c) return;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -211,11 +219,11 @@ function Inspector({ cousin: c, onClose, onAct, openLogs }) {
           <dt>slug</dt><dd>{c.slug}</dd>
           <dt>type</dt><dd>{c.type}</dd>
           <dt>home</dt><dd style={{ wordBreak: "break-all" }}>{c.home}</dd>
-          <dt>operator</dt><dd>{c.operator || <span style={{ color: "var(--fg-3)" }}>none</span>}</dd>
-          <dt>scope</dt><dd>{c.memoryScope}</dd>
+          <dt>operator</dt><dd><IdentityField cousin={c} field="operator" options={options} /></dd>
+          <dt>scope</dt><dd><IdentityField cousin={c} field="memory_scope" options={options} /></dd>
           <dt>tmux</dt><dd>{c.tmuxSession}{c.host ? ` @ ${c.host}` : ""}</dd>
           <dt>chat</dt><dd>{c.port ? `:${c.port} · ${c.chat}` : "none"}</dd>
-          <dt>heartbeat</dt><dd>{c.heartbeat}s</dd>
+          <dt>heartbeat</dt><dd><IdentityField cousin={c} field="heartbeat" options={options} /></dd>
           <dt>model</dt><dd>{c.model || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>effort</dt><dd>{c.effort || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
@@ -254,10 +262,132 @@ function Inspector({ cousin: c, onClose, onAct, openLogs }) {
               restart
             </button>
           )}
-          <button className="btn" onClick={() => openLogs(c.slug)}>tail logs →</button>
           <HideCousinButton cousin={c} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// "36000s (10h)": the raw seconds cousin.toml holds, and a readable form.
+function fmtBeat(sec) {
+  if (sec == null || sec === "") return "-";
+  const n = Number(sec);
+  if (!Number.isFinite(n)) return String(sec);
+  return `${n}s (${fmtDuration(n).replace(/ 0[smh]$/, "")})`;
+}
+
+// The identity keys the inspector edits in place. Each persists through
+// its own route (POST /api/cousins/<slug>/operator, /memory-scope,
+// /heartbeat); the route says whether a restart applies it, and the
+// hint follows the chat header's effort select: "restart to apply".
+const IDENTITY_FIELDS = {
+  operator:     { url: slug => `/api/cousins/${slug}/operator`,     row: "operator",    kind: "text" },
+  memory_scope: { url: slug => `/api/cousins/${slug}/memory-scope`, row: "memoryScope", kind: "select" },
+  heartbeat:    { url: slug => `/api/cousins/${slug}/heartbeat`,    row: "heartbeat",   kind: "seconds" },
+};
+
+function IdentityField({ cousin, field, options }) {
+  const spec = IDENTITY_FIELDS[field];
+  const current = cousin[spec.row];
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const [hint, setHint] = React.useState(null);
+  // A saved value shows at once; the fleet refresh the route emits
+  // replaces it with the row's own, which then wins.
+  const [saved, setSaved] = React.useState(null);
+  React.useEffect(() => { setSaved(null); }, [current]);
+  React.useEffect(() => { setEditing(false); setErr(null); setHint(null); setSaved(null); }, [cousin.slug]);
+  const shown = saved != null ? saved : current;
+
+  const scopes = options?.memory_scopes || [];
+  const bounds = options?.heartbeat_bounds || [60, 2592000];
+  const maxChars = options?.operator_max_chars || 64;
+
+  const start = () => {
+    setDraft(shown == null ? "" : String(shown));
+    setErr(null); setHint(null); setEditing(true);
+  };
+  const cancel = () => { setEditing(false); setErr(null); };
+
+  // Client-side check mirrors the route; the route stays the authority.
+  const problem = (() => {
+    if (spec.kind === "text") {
+      if (!draft.trim()) return "a name is required";
+      if (draft !== draft.trim()) return "no leading or trailing spaces";
+      if (draft.length > maxChars) return `at most ${maxChars} characters`;
+    }
+    if (spec.kind === "seconds") {
+      const n = Number(draft);
+      if (!/^\d+$/.test(draft.trim()) || n < bounds[0] || n > bounds[1])
+        return `whole seconds from ${bounds[0]} to ${bounds[1]}`;
+    }
+    if (spec.kind === "select" && !scopes.includes(draft)) return "pick a scope";
+    return null;
+  })();
+
+  const save = async () => {
+    if (busy || problem) return;
+    const value = spec.kind === "seconds" ? Number(draft.trim()) : draft;
+    setBusy(true); setErr(null);
+    try {
+      const { r, d } = await apiSend("POST", spec.url(cousin.slug), { [field]: value });
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setSaved(d[field]);
+      setEditing(false);
+      setHint(d.restart_required ? "restart to apply" : null);
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
+  if (!editing) {
+    const text = spec.kind === "seconds" ? fmtBeat(shown)
+      : (shown || <span style={{ color: "var(--fg-3)" }}>none</span>);
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span>{text}</span>
+        <button className="btn ghost" onClick={start} style={small}
+          title={`edit cousin.toml ${field === "operator" ? "[operator] name" : field === "memory_scope" ? "[memory] scope" : "[heartbeat] context_beat_seconds"}`}>edit</button>
+        {hint && <span style={{ color: "var(--fg-2)", fontSize: 11 }}>{hint}</span>}
+      </span>
+    );
+  }
+  const onKey = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); save(); }
+    if (e.key === "Escape") { e.stopPropagation(); cancel(); }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        {spec.kind === "select" ? (
+          <select className="sel" value={draft} onChange={e => setDraft(e.target.value)}
+                  autoFocus disabled={!scopes.length} style={{ flex: 1 }}>
+            {!scopes.includes(draft) && <option value={draft}>{draft || "..."}</option>}
+            {scopes.map(sc => <option key={sc} value={sc}>{sc}</option>)}
+          </select>
+        ) : (
+          <input className="txt" value={draft} onChange={e => setDraft(e.target.value)}
+                 onKeyDown={onKey} autoFocus style={{ flex: 1 }}
+                 inputMode={spec.kind === "seconds" ? "numeric" : undefined}
+                 maxLength={spec.kind === "text" ? maxChars : undefined} />
+        )}
+        <button className="btn" onClick={cancel} disabled={busy} style={small}>cancel</button>
+        <button className="btn primary" onClick={save} disabled={busy || !!problem} style={small}>
+          {busy ? "saving..." : "save"}
+        </button>
+      </div>
+      {spec.kind === "seconds" && !problem && (
+        <span style={{ fontSize: 10, color: "var(--fg-3)" }}>{fmtBeat(draft.trim())}</span>
+      )}
+      {problem && draft !== "" && <span style={{ fontSize: 10, color: "var(--fg-3)" }}>{problem}</span>}
+      {err && <div style={{ padding: "5px 9px", fontSize: 11, fontFamily: "var(--mono)",
+                            color: "var(--red)", background: "oklch(from var(--red) l c h / 0.08)", borderRadius: 3 }}>{err}</div>}
     </div>
   );
 }
@@ -416,13 +546,8 @@ function RoleEditor({ cousin }) {
   }
   return (
     <div style={{ marginBottom: 18 }}>
-      <textarea value={draft} onChange={e => setDraft(e.target.value)}
-        style={{
-          width: "100%", minHeight: 120, resize: "vertical",
-          fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1.5,
-          background: "var(--bg-0)", color: "var(--fg-0)",
-          border: "1px solid var(--amber)", borderRadius: 3, padding: 8, boxSizing: "border-box",
-        }} />
+      <textarea className="txt code" value={draft} onChange={e => setDraft(e.target.value)}
+        autoFocus style={{ minHeight: 120 }} />
       <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
         <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: draft.length > 5000 ? "var(--red)" : "var(--fg-3)" }}>{draft.length} / 5000 chars</span>
         <span style={{ flex: 1 }} />
@@ -502,14 +627,8 @@ function ClaudeMdEditor({ cousin }) {
           {!loaded && <div style={{ fontSize: 11, color: "var(--fg-3)" }}>loading...</div>}
           {loaded && (
             <>
-              <textarea value={content} onChange={e => setContent(e.target.value)}
-                style={{
-                  width: "100%", minHeight: 320, resize: "vertical",
-                  fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1.5,
-                  background: "var(--bg-0)", color: "var(--fg-0)",
-                  border: `1px solid ${dirty ? "var(--amber)" : "var(--line)"}`,
-                  borderRadius: 3, padding: 8, boxSizing: "border-box",
-                }} />
+              <textarea className="txt code" value={content} onChange={e => setContent(e.target.value)}
+                style={{ minHeight: 320 }} />
               <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: 10, fontFamily: "var(--mono)",
                                 color: dirty ? "var(--amber)" : "var(--fg-3)" }}>
@@ -959,4 +1078,4 @@ function FormField({ label, hint, children }) {
   );
 }
 
-Object.assign(window, { CousinsView, CousinCard, Inspector, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });
+Object.assign(window, { CousinsView, CousinCard, Inspector, IdentityField, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });

@@ -116,14 +116,96 @@ class ChatHeaderEffort(unittest.TestCase):
 
 
 class CousinTagColour(unittest.TestCase):
-    """The fleet-wide cousin tag uses the accent colour; the hash hue
-    is kept for log lines only."""
+    """The fleet-wide cousin tag uses the accent colour. The per-slug
+    hash hue served only the log drawer and went with it."""
 
-    def test_tag_uses_the_accent_and_log_lines_keep_the_hash_hue(self):
+    def test_tag_uses_the_accent_and_no_hash_hue_is_left(self):
         views = _read("views.jsx")
         tag = _component(views, "CousinTag")
         self.assertIn("var(--accent)", tag)
-        self.assertNotIn("cousinColor", tag)
-        rest = views.replace(tag, "")
-        self.assertEqual(rest.count("cousinColor("), 1)
-        self.assertIn("l.cousin", rest[rest.index("cousinColor("):][:80])
+        for name in ("views.jsx", "data.jsx", "cousins.jsx", "app.jsx"):
+            self.assertNotIn("cousinColor", _read(name), name)
+
+
+class NoTailLogs(unittest.TestCase):
+    """The inspector's "tail logs" button opened a drawer polling
+    GET /api/logs; it was deprecated and did not work, so the button,
+    the drawer, its fetcher, its styles and the route are gone. The
+    canary fails if any of them comes back."""
+
+    def test_the_button_and_its_plumbing_are_gone(self):
+        inspector = _component(_read("cousins.jsx"), "Inspector")
+        self.assertNotIn("tail logs", inspector)
+        for name in ("cousins.jsx", "app.jsx", "views.jsx", "data.jsx"):
+            text = _read(name)
+            for word in ("openLogs", "LogDrawer", "fetchLogs", "/api/logs",
+                         "LOG_SEED"):
+                self.assertNotIn(word, text, (name, word))
+        self.assertNotIn(".logtail", _read("styles.css"))
+
+
+class PanelEditorsUseTheAccent(unittest.TestCase):
+    """The inspector's role and CLAUDE.md textareas showed an amber
+    border (the role editor always, the CLAUDE.md editor once dirty)
+    while every other field in the console focuses in the accent. They
+    now take the shared `.txt` field style, whose focus ring is the
+    accent token; the canary fails if an amber border comes back."""
+
+    def setUp(self):
+        self.cousins = _read("cousins.jsx")
+        self.css = _read("styles.css")
+
+    def test_the_editors_carry_no_amber_border(self):
+        for name in ("RoleEditor", "ClaudeMdEditor"):
+            src = _component(self.cousins, name)
+            self.assertNotRegex(src, r"border[^\n]*var\(--amber\)", name)
+            self.assertRegex(src, r'<textarea className="txt[ "]', name)
+
+    def test_the_shared_focus_ring_is_the_accent(self):
+        rule = re.search(r"textarea\.txt:focus[^{]*\{([^}]*)\}", self.css)
+        self.assertIsNotNone(rule)
+        self.assertIn("border-color: var(--accent)", rule.group(1))
+        self.assertIn("var(--accent)", rule.group(1).split("box-shadow")[1])
+
+
+class InspectorIdentityEditors(unittest.TestCase):
+    """Operator, memory scope and heartbeat are editable in the
+    inspector's identity block through their routes, with the restart
+    hint the chat header's effort select uses; the other identity rows
+    stay read-only."""
+
+    def setUp(self):
+        cousins = _read("cousins.jsx")
+        self.inspector = _component(cousins, "Inspector")
+        self.field = _component(cousins, "IdentityField")
+        self.cousins = cousins
+
+    def test_three_rows_use_the_editor_and_the_rest_do_not(self):
+        for field in ("operator", "memory_scope", "heartbeat"):
+            self.assertRegex(self.inspector,
+                             r'<IdentityField cousin=\{c\} field="%s"' % field)
+        self.assertEqual(self.inspector.count("<IdentityField"), 3)
+        for row in ("slug", "type", "home", "tmux", "chat", "pid",
+                    "uptime"):
+            dd = re.search(r"<dt>%s</dt><dd[^>]*>(.*?)</dd>" % row,
+                           self.inspector)
+            self.assertIsNotNone(dd, row)
+            self.assertNotIn("IdentityField", dd.group(1), row)
+
+    def test_routes_limits_and_restart_hint(self):
+        for route in ("operator", "memory-scope", "heartbeat"):
+            self.assertIn("`/api/cousins/${slug}/%s`" % route, self.cousins)
+        self.assertIn("spec.url(cousin.slug)", self.field)
+        self.assertIn("restart_required", self.field)
+        self.assertIn("restart to apply", self.field)
+        for key in ("memory_scopes", "heartbeat_bounds",
+                    "operator_max_chars"):
+            self.assertIn(key, self.field, key)
+        self.assertIn("/api/spawn/options", self.inspector)
+        self.assertIn("cancel", self.field)
+        self.assertIn("setErr(", self.field)
+
+    def test_heartbeat_reads_in_seconds_and_a_human_form(self):
+        beat = _component(self.cousins, "fmtBeat")
+        self.assertIn("fmtDuration(", beat)
+        self.assertRegex(beat, r"`\$\{n\}s \(")

@@ -513,6 +513,69 @@ def persist_runtime(home, key, value):
     _persist_runtime_line(home, key, value)
 
 
+
+# The identity keys the console edits in place, by the name its routes
+# use: (table, key) in cousin.toml.
+IDENTITY_KEYS = {
+    "operator": ("operator", "name"),
+    "memory_scope": ("memory", "scope"),
+    "heartbeat": ("heartbeat", "context_beat_seconds"),
+}
+OPERATOR_MAX_CHARS = 64
+HEARTBEAT_MIN_SECONDS = 60
+HEARTBEAT_MAX_SECONDS = 30 * 86400
+
+
+def check_identity_value(key, value):
+    """The value `persist_identity` accepts for an identity key, or a
+    SpawnError naming what was wrong. The operator is a display name
+    compared against chat senders, so it is one non-empty line; the
+    heartbeat is whole seconds between a minute and thirty days."""
+    if key not in IDENTITY_KEYS:
+        raise SpawnError("%s is not an identity key set this way; the"
+                         " settable keys are %s"
+                         % (key, ", ".join(IDENTITY_KEYS)))
+    if key == "operator":
+        if not isinstance(value, str) or not value.strip():
+            raise SpawnError("operator must be a non-empty name")
+        if value != value.strip():
+            raise SpawnError("operator must not start or end with"
+                             " whitespace")
+        if len(value) > OPERATOR_MAX_CHARS:
+            raise SpawnError("operator must be at most %d characters"
+                             % OPERATOR_MAX_CHARS)
+        if any(ord(ch) < 32 or 127 <= ord(ch) < 160 for ch in value):
+            raise SpawnError("operator must not contain control"
+                             " characters")
+    elif key == "memory_scope":
+        if value not in MEMORY_SCOPES:
+            raise SpawnError("memory_scope must be one of %s, got %r"
+                             % (", ".join(MEMORY_SCOPES), value))
+    elif key == "heartbeat":
+        if isinstance(value, bool) or not isinstance(value, int) \
+                or not HEARTBEAT_MIN_SECONDS <= value \
+                <= HEARTBEAT_MAX_SECONDS:
+            raise SpawnError("heartbeat must be whole seconds from %d to"
+                             " %d, got %r" % (HEARTBEAT_MIN_SECONDS,
+                                              HEARTBEAT_MAX_SECONDS, value))
+    return value
+
+
+def persist_identity(home, key, value):
+    """Set one identity key in cousin.toml after check_identity_value:
+    a targeted edit that keeps comments and every other table,
+    re-parsed and round-trip checked before the atomic rename, so a
+    refused value leaves the file as it was."""
+    from cousin_lib.console.toml_edit import write_key
+    check_identity_value(key, value)
+    table, toml_key = IDENTITY_KEYS[key]
+    try:
+        write_key(home, table, toml_key, value)
+    except (ValueError, tomllib.TOMLDecodeError) as err:
+        raise SpawnError("%s.%s could not be written: %s"
+                         % (table, toml_key, err))
+
+
 def _resolve_root(home, root):
     """The framework root a start needs for config/harness.toml: the
     caller's, else FRAMEWORK_ROOT, else the home's grandparent (homes

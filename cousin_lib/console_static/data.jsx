@@ -6,7 +6,6 @@ const NOW = () => Date.now();
 
 const COUSINS_SEED = [];
 const LOOPS_SEED = [];
-const LOG_SEED = [];
 const MEMORY_SEED = {};
 const HOST_SEED = {
   host: "",
@@ -79,13 +78,6 @@ async function fetchMemory() {
   const d = await apiGet("/api/memory");
   return d?.tree ?? {};
 }
-async function fetchLogs(filter = null, n = 80) {
-  const params = new URLSearchParams();
-  if (filter) params.set("cousin", filter);
-  params.set("n", String(n));
-  const d = await apiGet("/api/logs?" + params.toString());
-  return d?.lines ?? [];
-}
 async function fetchAuthMe() {
   return (await apiGet("/api/auth/me")) ?? { user: null, configured: false, users: [] };
 }
@@ -115,17 +107,6 @@ function fmtTokens(n) {
 }
 function fmtPct(n) { return (isFinite(n) ? n : 0).toFixed(1) + "%"; }
 
-// A stable hue per slug so every cousin gets its own colour without a
-// table keyed on names. Used by CousinTag and the log drawer.
-function cousinHue(slug) {
-  let h = 0;
-  for (const ch of String(slug || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h % 360;
-}
-function cousinColor(slug) {
-  return `oklch(0.75 0.14 ${cousinHue(slug)})`;
-}
-
 // The browser-side "seen" watermark for the unread dot, keyed on the
 // cousin and the chat user (never a defaulted operator name). The chat
 // view writes it; the sidebar reads it.
@@ -134,9 +115,9 @@ function chatSeenKey(slug, user) {
 }
 
 Object.assign(window, {
-  COUSINS_SEED, LOOPS_SEED, MEMORY_SEED, LOG_SEED, HOST_SEED,
+  COUSINS_SEED, LOOPS_SEED, MEMORY_SEED, HOST_SEED,
   fmtDuration, fmtAgo, fmtTokens, fmtPct, NOW,
-  cousinHue, cousinColor, chatSeenKey,
+  chatSeenKey,
   apiGet, apiSend, fetchCousins, fetchLoops, fetchLoopsFull, fetchTokens, fetchHost,
-  fetchMemory, fetchLogs, fetchAuthMe,
+  fetchMemory, fetchAuthMe,
 });

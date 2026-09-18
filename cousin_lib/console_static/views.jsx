@@ -1,4 +1,4 @@
-// Jobs, Memory, Loops, Tokens, Tracker, Settings, Host, Logs views
+// Jobs, Memory, Loops, Tokens, Tracker, Settings, Host views
 
 function CousinTag({ slug }) {
   // The fleet-wide tag reads in the accent colour, as the source console
@@ -1809,53 +1809,7 @@ function MetricCard({ label, value, sub, pct, spark }) {
   );
 }
 
-// ============ LOG DRAWER ============
-function LogDrawer({ open, onClose, filter }) {
-  const [lines, setLines] = React.useState([]);
-  const ref = React.useRef(null);
-
-  // Poll the chat-server logs from the console
-  React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    async function pull() {
-      const ls = await fetchLogs(filter, 80);
-      if (!cancelled) setLines(ls.slice().reverse());
-    }
-    pull();
-    const id = setInterval(pull, 2500);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [open, filter]);
-
-  if (!open) return null;
-  const shown = filter ? lines.filter(l => l.cousin === filter) : lines;
-
-  return (
-    <div className="inspector" style={{ width: 620 }}>
-      <div className="hdr">
-        <span>logs · tail -f</span>
-        {filter && <Pill tone="cyan">@{filter}</Pill>}
-        <span style={{ color: "var(--fg-3)", fontFamily: "var(--mono)", fontSize: 11 }}>{shown.length} lines</span>
-        <button className="close" onClick={onClose}>×</button>
-      </div>
-      <div className="body" style={{ padding: 10 }}>
-        <div className="logtail" ref={ref} style={{ height: "100%" }}>
-          {shown.map((l, i) => (
-            <div className="line" key={i}>
-              <span className="t">{l.t === 0 ? "now" : fmtAgo(l.t)}</span>
-              <span className="c" style={{ color: cousinColor(l.cousin) }}>@{l.cousin}</span>
-              <span className={`lvl ${l.level}`}>{l.level}</span>
-              <span className="msg">{l.msg}</span>
-            </div>
-          ))}
-          {shown.length === 0 && <div className="line muted">no log lines</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 Object.assign(window, {
   JobsView, MemoryView, LoopsView, TokensView, TrackerView, SettingsView, AccountPanel, RestartPanel,
-  HostView, LogDrawer, CousinTag, Field, Stat, TRACKER_STATES,
+  HostView, CousinTag, Field, Stat, TRACKER_STATES,
 });

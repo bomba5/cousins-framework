@@ -43,7 +43,7 @@ Retained, with the routes each one calls (all detailed below):
 | view | routes |
 |---|---|
 | overview (the host panel, cousin table, totals, recent fires) | `GET /api/host`, `GET /api/cousins`, `GET /api/loops`, `GET /api/loops/recent` |
-| cousins: cards, inspector, role editor, CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel`, `GET /api/logs` |
+| cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
 | chat with the live pane | `GET /api/messages`, `GET /api/search`, `POST /api/chat/send`, `/api/chat/archive`, `/api/chat/reactions`, `GET /api/chat/inbound/...`, `GET /api/pane`, `GET /api/pane/stream`, `POST /api/pane/input`, `/api/pane/resize` |
 | jobs | `GET /api/jobs`, `GET /api/jobs/<id>`, `GET /api/jobs/<id>/log`, `POST /api/jobs/<id>`, `DELETE /api/jobs/<id>` |
 | memory with the shared-tier review | `GET /api/memory`, `GET /api/shared/list`, `.../content`, `.../diff`, `.../audit`, `POST /api/shared/approve`, `/api/shared/reject` |
@@ -235,7 +235,9 @@ What the spawn dialog offers and preselects: `{"models": [str],
 "default_model": str or null, "efforts": ["low", "medium", "high",
 "max"], "default_effort": str, "memory_scopes": ["private", "shared",
 "both"], "default_memory_scope": "private", "default_heartbeat":
-3600}`. `models` and the two defaults read `config/harness.toml
+3600, "heartbeat_bounds": [60, 2592000], "operator_max_chars": 64}`.
+The bounds and the length are the ones the identity routes below
+enforce, so the inspector's editors check the same limits. `models` and the two defaults read `config/harness.toml
 [agent]` (`models`, `default_model`, `default_effort`); with no
 `models` the built-in catalogue of three names is offered, with no
 `default_model` the first catalogue entry is preselected, with no
@@ -312,6 +314,26 @@ Body `{"model": str}`, one word of letters, digits and `._:/+-` (it is
 rendered into an argv). Persists `[runtime] model` the same way. `200
 {"ok": true, "slug": str, "model": str, "restart_required": true}`.
 `400` empty, non-string or splittable, `404` unknown cousin.
+
+### `POST /api/cousins/<slug>/operator`, `POST /api/cousins/<slug>/memory-scope`, `POST /api/cousins/<slug>/heartbeat`
+The inspector's identity editors. Bodies `{"operator": str}`,
+`{"memory_scope": "private" | "shared" | "both"}` and
+`{"heartbeat": int}`; each is validated by
+`spawn.check_identity_value` and written by `spawn.persist_identity`
+into `[operator] name`, `[memory] scope` and `[heartbeat]
+context_beat_seconds` with the targeted, re-parsed, atomically
+renamed edit that keeps comments and every other table. The operator
+is one non-empty line of at most 64 characters, no leading or trailing
+whitespace, no control characters (clearing it is not offered here);
+the heartbeat is whole seconds from 60 to 2592000 (thirty days). `200
+{"ok": true, "slug": str, <key>: value, "restart_required": bool}`
+and a `cousins-refresh` event. `restart_required` is true for the
+operator only: the chat server loads `cousin.toml` once at its start
+and uses the operator to tell operator messages from peers (a cousin
+restart stops and starts it). The scope is read on each shared-tier
+call and the loops daemon loads every `cousin.toml` on each tick, so
+those two apply without a restart. `400` for any other value (the
+file is left untouched), `404` unknown cousin.
 
 ### `POST /api/cousins/<slug>/hidden`
 Body `{"hidden": bool}`. Sets or removes `[cousin] hidden` in
@@ -690,7 +712,7 @@ recycle.
 - `DELETE /api/tracker/<id>` returns `{"ok": true, "deleted": id}`;
   `404` unknown id.
 
-## Host, logs, restart
+## Host, restart
 
 ### `GET /api/host`
 `{"host": str, "kernel": str, "uptime": int, "cpu": {"pct": float,
@@ -702,14 +724,6 @@ running machine's hostname at request time (never a literal), memory
 in GB from `MemTotal` minus `MemAvailable`, disk for `/`, network as
 MB/s since the previous call. Each block degrades to zeros on a
 platform without the `/proc` files.
-
-### `GET /api/logs?cousin=<slug>&n=N`
-`{"lines": [{"cousin": str, "unit": "chat-server", "level": "info",
-"msg": str, "t": int}]}`: the last `n` (default 80) lines across every
-cousin's `<home>/data/chat-server.log` (the file spawn's chat-server
-launcher writes), optionally one cousin; `t` is seconds since the
-line's timestamp when the line carries one, else 0. The source also
-tailed the journal of install-specific units; not ported.
 
 ### `POST /api/admin/restart/framework`
 Restarts the console itself. The console answers `200 {"ok": true,
@@ -876,6 +890,10 @@ For the record, so the list is checked rather than rediscovered:
 it), `/api/network-devices`, the three GPU-box routes,
 `/api/admin/restart/cousin/<slug>` (the views use
 `/api/cousins/<slug>/restart`), and `POST /api/jobs` (creation).
+`/api/logs` was ported and later removed: its only caller was the
+inspector's "tail logs" drawer, which read `<home>/data/chat-server.log`
+and was retired; that file is still written and is read by the chat
+watchdog and by an operator on the host.
 
 ### What the plan expected and the source did not contain
 

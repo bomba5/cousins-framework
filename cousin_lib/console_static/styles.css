@@ -336,10 +336,13 @@ input.txt, textarea.txt, select.sel {
   outline: none;
 }
 input.txt:focus, textarea.txt:focus, select.sel:focus {
-  border-color: var(--cyan);
-  box-shadow: 0 0 0 2px oklch(0.80 0.13 220 / 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px oklch(from var(--accent) l c h / 0.20);
 }
 textarea.txt { resize: vertical; min-height: 64px; font-family: var(--sans); }
+/* The inspector's text editors (role, CLAUDE.md): monospace, the same
+   field border and accent focus as every other input. */
+textarea.txt.code { font-family: var(--mono); line-height: 1.5; padding: 8px; }
 .field {
   display: flex; flex-direction: column; gap: 5px;
 }
@@ -510,29 +513,6 @@ textarea.txt { resize: vertical; min-height: 64px; font-family: var(--sans); }
 .kv { font-family: var(--mono); font-size: 12px; display: grid; grid-template-columns: 110px 1fr; gap: 4px 14px; }
 .kv dt { color: var(--fg-3); text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; padding-top: 3px; }
 .kv dd { margin: 0; color: var(--fg-0); }
-
-/* === Logs === */
-.logtail {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  background: var(--bg-0);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  overflow: auto;
-  padding: 10px 14px;
-  color: var(--fg-1);
-  line-height: 1.7;
-}
-.logtail .line { display: flex; gap: 10px; }
-.logtail .t { color: var(--fg-3); flex-shrink: 0; width: 72px; }
-.logtail .c { flex-shrink: 0; width: 64px; font-weight: 500; }
-/* per-cousin log colour is a hue from a hash of the slug, set inline by the view */
-.logtail .lvl { flex-shrink: 0; width: 46px; font-size: 10px; }
-.logtail .lvl.info { color: var(--fg-2); }
-.logtail .lvl.debug { color: var(--fg-3); }
-.logtail .lvl.warn { color: var(--amber); }
-.logtail .lvl.error { color: var(--red); }
-.logtail .msg { color: var(--fg-0); flex: 1; word-break: break-word; }
 
 /* === Memory tree === */
 .tree { font-family: var(--mono); font-size: 12px; }

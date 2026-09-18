@@ -454,6 +454,40 @@ def register():
     def set_model(req, slug):
         return _set_runtime(req, slug, "model")
 
+    # Whether a saved identity value needs a restart to take effect.
+    # The chat server loads cousin.toml once at its start and uses the
+    # operator to tell operator messages from peers; a console restart
+    # stops and starts it. The memory scope is read from cousin.toml on
+    # each shared-tier call, and the loops daemon loads every
+    # cousin.toml on each tick, so both apply without one.
+    identity_restart = {"operator": True, "memory_scope": False,
+                        "heartbeat": False}
+
+    def _set_identity(req, slug, key):
+        home = cousin_home(req.server, slug)
+        if key not in req.body:
+            raise HttpError(400, "%s is required" % key)
+        value = req.body.get(key)
+        try:
+            spawn.persist_identity(home, key, value)
+        except spawn.SpawnError as err:
+            raise HttpError(400, str(err))
+        req.server.emit("cousins-refresh", fleet_rows(req.server))
+        return 200, {"ok": True, "slug": slug, key: value,
+                     "restart_required": identity_restart[key]}
+
+    @router.route("POST", "/api/cousins/{slug}/operator")
+    def set_operator(req, slug):
+        return _set_identity(req, slug, "operator")
+
+    @router.route("POST", "/api/cousins/{slug}/memory-scope")
+    def set_memory_scope(req, slug):
+        return _set_identity(req, slug, "memory_scope")
+
+    @router.route("POST", "/api/cousins/{slug}/heartbeat")
+    def set_heartbeat(req, slug):
+        return _set_identity(req, slug, "heartbeat")
+
     @router.route("GET", "/api/spawn/options")
     def spawn_options(req):
         try:
@@ -470,6 +504,9 @@ def register():
             "memory_scopes": list(MEMORY_SCOPES),
             "default_memory_scope": CousinConfig.memory_scope,
             "default_heartbeat": CousinConfig.heartbeat_seconds,
+            "heartbeat_bounds": [spawn.HEARTBEAT_MIN_SECONDS,
+                                 spawn.HEARTBEAT_MAX_SECONDS],
+            "operator_max_chars": spawn.OPERATOR_MAX_CHARS,
         }
 
     @router.route("POST", "/api/cousins/{slug}/hidden")

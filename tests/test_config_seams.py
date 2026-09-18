@@ -157,3 +157,28 @@ class AgentDefaultsSeam(unittest.TestCase):
             config.agent_config(self._root('[agent]\nmodels = "m-one"\n'))
         with self.assertRaises(config.MissingConfigError):
             config.agent_config(self._root('[agent]\nmodels = [1, 2]\n'))
+
+
+class TestClaudeCodePreset(unittest.TestCase):
+    """The shipped Claude Code preset (config/harness.toml.claude-code.example).
+
+    Canaries from the clean-machine install re-test (2026-09-18): the
+    attention flag cleared once the login screen turned into an OAuth
+    error, and a pinned `models` list hid the current model family."""
+
+    def _preset(self):
+        import tomllib
+        here = Path(__file__).resolve().parent.parent
+        return tomllib.loads(
+            (here / "config" / "harness.toml.claude-code.example").read_text())
+
+    def test_every_blocking_first_run_screen_needs_attention(self):
+        patterns = self._preset()["attention_patterns"]
+        for screen in ("Select login method", "Paste code here if prompted",
+                       "OAuth error", "Press Enter to retry",
+                       "Choose the text style", "Yes, I trust this folder",
+                       "Do you want to use this API key"):
+            self.assertIn(screen, patterns)
+
+    def test_the_preset_does_not_pin_a_model_catalogue(self):
+        self.assertNotIn("models", self._preset().get("agent", {}))

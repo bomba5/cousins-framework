@@ -49,9 +49,12 @@ wires up for every cousin, so install it unless you know you will not
 use it. The package is not on PyPI: always install from the checkout
 (`-e .` or `-e ".[mcp]"`).
 
-Every later shell needs the venv on PATH: `. ~/cousin-framework/.venv/bin/activate`,
-or add `~/cousin-framework/.venv/bin` to PATH in your shell profile.
-The units below carry it themselves.
+Every later shell needs the venv on PATH and the root named:
+`. ~/cousin-framework/.venv/bin/activate && export FRAMEWORK_ROOT=~/cousin-framework`
+(or put both in your shell profile). The units below carry them
+themselves. Commands you type inside the checkout find the root on their
+own, and a cousin's tools find it from the cousin's home, but naming it
+keeps every command in agreement.
 
 ## 3. Run the suite
 
@@ -59,7 +62,7 @@ The units below carry it themselves.
 python3 -m unittest discover -s tests
 ```
 
-About 1300 tests in about four minutes on a small VM; the last line
+About 1380 tests in about five minutes on a small VM; the last line
 must be `OK` (a few `skipped` are fine). Run it now, before any cousin
 exists, so a failure is the framework's and not your install's.
 
@@ -115,6 +118,7 @@ meaning-based search with a local Ollama:
 
 ```
 curl -fsSL https://ollama.com/install.sh | sh
+until ollama list >/dev/null 2>&1; do sleep 1; done   # the service needs a moment
 ollama pull nomic-embed-text
 cat > config/embedding.toml <<'EOF'
 url = "http://localhost:11434/api/embeddings"
@@ -144,8 +148,8 @@ cousin-spawn testa --start
 `--operator` is the name the cousin's `send` tool may reach (use the
 name you will chat as); leave it out for a cousin with no operator.
 `cousin-mcp approve` records in `~/.claude.json` that the cousin's
-home is trusted and its `cousin` MCP server enabled; it needs the
-login from step 4 to have created that file. `cousin-spawn <slug>
+home is trusted and its `cousin` MCP server enabled (the Claude Code
+installer creates that file; no login is needed for this step). `cousin-spawn <slug>
 --start` starts an existing cousin (tmux session plus chat server) and
 is a no-op when it is already running. Before creating or starting
 anything, spawn checks that tmux and the agent command's executable
@@ -198,8 +202,19 @@ machine itself, or from another one through a tunnel:
 ssh -L 8600:127.0.0.1:8600 <user>@<machine>     # then open http://127.0.0.1:8600/
 ```
 
-For direct LAN access, change the unit's `ExecStart` to
-`cousin-console --host 0.0.0.0 --port 8600` and restart it. Caution:
+For direct LAN access, give the unit a drop-in (re-running step 7 does
+not overwrite a drop-in; it would overwrite an edited unit file):
+
+```
+mkdir -p ~/.config/systemd/user/cousin-console.service.d
+cat > ~/.config/systemd/user/cousin-console.service.d/lan.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=%h/cousin-framework/.venv/bin/cousin-console --host 0.0.0.0 --port 8600
+EOF
+systemctl --user daemon-reload && systemctl --user restart cousin-console
+```
+ Caution:
 that is plain HTTP, so passwords and chat cross the network in clear,
 and the network guard admits loopback and the private ranges
 (`config/net-allowlist.json` adds more); create the user first, and

@@ -74,11 +74,23 @@ def _home():
 def _root():
     """The framework root when one is declared, else None: without a
     root there is no config/ to read, and the module behaves as an
-    install that promised nothing (keyword only, own files only)."""
+    install that promised nothing (keyword only, own files only).
+
+    Declared means FRAMEWORK_ROOT, or else the cousin's own home: a
+    home lives at <root>/cousins/<slug>, so when that grandparent holds
+    a config/ it is the root. Without this, a shell that exported only
+    COUSIN_HOME quietly lost the semantic leg the install configured
+    (found by a clean-machine install test)."""
     try:
         return FrameworkConfig.resolve().root
     except MissingConfigError:
-        return None
+        pass
+    home = os.environ.get("COUSIN_HOME")
+    if home:
+        home = Path(os.path.abspath(home))
+        if home.parent.name == "cousins" and (home.parent.parent / "config").is_dir():
+            return home.parent.parent
+    return None
 
 
 def _fts_path(home):

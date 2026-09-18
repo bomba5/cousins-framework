@@ -24,9 +24,18 @@ settings_file = "~/.claude.json"
 # Claude Code's first-run login menu and its OAuth code prompt. Run
 # `claude` once interactively (or `claude auth login`) before starting
 # a cousin so neither appears.
-attention_patterns = ["Select login method", "Paste code here if prompted"]
+attention_patterns = [
+    "Select login method",
+    "Paste code here if prompted",
+    "OAuth error",
+    "Press Enter to retry",
+    "Choose the text style",
+    "Yes, I trust this folder",
+    "Do you want to use this API key",
+]
 
 [agent]
 default_model = "claude-opus-5"
 default_effort = "high"
-models = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]
+# models: leave unset so the console offers the built-in catalogue
+# (cousin_lib/config.py DEFAULT_MODELS), which tracks code updates.

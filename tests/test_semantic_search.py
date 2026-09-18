@@ -110,6 +110,20 @@ class TestSemanticLeg(SemanticCase):
         self.assertTrue(hits, "semantic leg found nothing")
         self.assertIn("sky.md", hits[0]["path"])
 
+    def test_semantic_leg_runs_without_framework_root_in_the_env(self):
+        # Canary (install re-test 2026-09-18): a new shell inside the
+        # checkout had COUSIN_HOME but no FRAMEWORK_ROOT, and search went
+        # keyword-only with no notice although config/embedding.toml
+        # existed. The home lives at <root>/cousins/<slug>, so the root
+        # is derived from it when the env does not name one.
+        self._configure_embedding(self._serve_fake())
+        env = {k: v for k, v in os.environ.items() if k != "FRAMEWORK_ROOT"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            hits, notice = search("dawn")
+        self.assertIsNone(notice)
+        self.assertTrue(hits, "semantic leg did not run")
+        self.assertIn("sky.md", hits[0]["path"])
+
     def test_merged_results_keep_keyword_hits(self):
         self._configure_embedding(self._serve_fake())
         hits, notice = search("claimed set port")

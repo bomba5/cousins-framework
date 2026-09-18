@@ -281,9 +281,16 @@ path silently fails to deliver.
 cousin-job start subagent "map the auth module"
 cousin-job list --mine
 cousin-job done 1 "mapped; notes in data/"
+
+# a shell command as a job: runs detached, logs to shared/job-logs/,
+# and closes itself with the command's exit code
+cousin-job start shell "rebuild the index" -- cousin-memory reindex
+cousin-job tail 2 -f
 ```
 
 Jobs live in a database the module owns, so they survive anything.
+A cousin's harness hooks also record every subagent and every
+background shell as a job on their own, closed at completion.
 
 Jobs are what is running right now; the tracker is what is in flight
 across the whole framework, whoever holds it - the operator's list of

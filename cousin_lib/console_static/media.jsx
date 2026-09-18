@@ -1,6 +1,21 @@
-// Chat media: how an attachment renders inside a bubble.
+// Chat media: how an attachment renders inside a bubble and the media
+// on/off preference.
 // docs/console-spec.md, "The chat media viewer". Loaded before chat.jsx,
 // which reads these names off window.
+
+// The media on/off choice is a browser preference, never server state.
+// "0" hides every attachment; absent (the default) or anything else shows.
+const MEDIA_PREF_KEY = "fw_chat_media";
+
+function readMediaShown() {
+  try { return localStorage.getItem(MEDIA_PREF_KEY) !== "0"; }
+  catch (e) { return true; }
+}
+
+function writeMediaShown(on) {
+  try { localStorage.setItem(MEDIA_PREF_KEY, on ? "1" : "0"); }
+  catch (e) { /* private window or blocked storage: the toggle still works for this page */ }
+}
 
 const _MEDIA_EXT = {
   image: ["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"],
@@ -79,9 +94,13 @@ function LoopingPreview({ src, onOpen }) {
   );
 }
 
-// One attachment inside a bubble, by kind.
-function InlineMedia({ media, onOpen }) {
+// One attachment inside a bubble, by kind; a one-line placeholder when
+// media is off so the text around it stays readable.
+function InlineMedia({ media, shown, onOpen }) {
   if (!media) return null;
+  if (!shown) {
+    return <div className="chat-media-hidden">[{media.kind} hidden]</div>;
+  }
   if (media.kind === "image") {
     return (
       <img src={media.src} alt="attachment" className="chat-media chat-media-image"
@@ -96,6 +115,7 @@ function InlineMedia({ media, onOpen }) {
 }
 
 Object.assign(window, {
+  MEDIA_PREF_KEY, readMediaShown, writeMediaShown,
   mediaKindFromUrl, normalizeMediaKind, attachmentMedia,
   LoopingPreview, InlineMedia,
 });

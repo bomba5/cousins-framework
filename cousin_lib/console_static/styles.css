@@ -1078,7 +1078,8 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 }
 
 /* Attachments inside a bubble (media.jsx): bounded thumbnails, a looping
-   muted video preview, a native audio player. */
+   muted video preview, a native audio player, or a one-line placeholder
+   when media is off. */
 .chat-media-slot { max-width: 100%; }
 .chat-media {
   display: block;
@@ -1096,6 +1097,13 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 /* A fixed width: the bubble shrink-wraps its content, so a percentage
    alone collapses the player to its minimum. */
 .chat-media-audio { width: 320px; max-width: 64vw; height: 40px; }
+.chat-media-hidden {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.7;
+}
+.chat-media-toggle[aria-pressed="true"] { border-color: var(--accent); }
 
 @media (max-width: 540px) {
   .chat-media-image, .chat-media-video { max-height: 220px; }

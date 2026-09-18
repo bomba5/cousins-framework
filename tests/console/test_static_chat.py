@@ -335,6 +335,24 @@ class ChatMediaViewer(unittest.TestCase):
         self.assertLess(at, html.index('src="chat.jsx"'),
                         "chat.jsx reads media.jsx's names off window")
 
+    def test_toggle_key_and_default_on(self):
+        self.assertIn('const MEDIA_PREF_KEY = "fw_chat_media";', self.media)
+        read = _function_body(self.media, "readMediaShown")
+        # only an explicit "0" hides; absent or unreadable storage shows
+        self.assertIn('localStorage.getItem(MEDIA_PREF_KEY) !== "0"', read)
+        self.assertRegex(read, r"catch \(e\) \{ return true; \}")
+        write = _function_body(self.media, "writeMediaShown")
+        self.assertIn("try {", write)
+        self.assertIn('localStorage.setItem(MEDIA_PREF_KEY, on ? "1" : "0")', write)
+
+    def test_header_toggle_reads_and_writes_the_preference(self):
+        view = _function_body(self.chat, "ChatView")
+        self.assertIn("React.useState(() => readMediaShown())", view)
+        self.assertIn("writeMediaShown(mediaShown)", view)
+        header = _function_body(self.chat, "ChatHeader")
+        self.assertIn("setMediaShown(v => !v)", header)
+        self.assertIn('mediaShown ? "media on" : "media off"', header)
+
     def test_kind_prefers_the_api_then_the_row_then_the_extension(self):
         body = _function_body(self.media, "attachmentMedia")
         api = body.index("msg.attachment && msg.attachment.kind")
@@ -392,10 +410,12 @@ process.stdout.write(JSON.stringify(cases));
         self.assertNotIn("controls", tag, "the inline preview is silent, the viewer has the controls")
         self.assertIn("IntersectionObserver", preview)
         inline = _function_body(self.media, "InlineMedia")
+        self.assertIn("[{media.kind} hidden]", inline)
         self.assertRegex(inline, r"<audio[^>]*controls")
         bubble = _function_body(self.chat, "ChatBubble")
         self.assertIn("attachmentMedia(msg)", bubble)
         self.assertIn("<InlineMedia", bubble)
+        self.assertIn("mediaShown", bubble)
 
 
 

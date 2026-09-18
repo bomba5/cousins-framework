@@ -799,9 +799,9 @@ replacement:
 | `cousins.jsx:305` | the agent-log fetch inside the inspector | removed |
 | `cousins.jsx:358` | the token-budget save | removed (dead key) |
 | `cousins.jsx:403` | the peer-message history fetch | removed |
-| `cousins.jsx:923-931` | the spawn body with a vendor model catalogue and memory scope | the spawn body above (`voice` added) |
+| `cousins.jsx:923-931` | the spawn body with a vendor model catalogue and memory scope | the spawn body above (`voice` added; `model`, `effort`, `heartbeat` and `memory_scope` offered from `GET /api/spawn/options`, never from a list in the file) |
 | `cousins.jsx:956`, `957`, `960` | spawn-modal placeholders using a real cousin's name and slug | the repository's fictional example cousin |
-| `data.jsx:8` | a vendor model catalogue | removed |
+| `data.jsx:8` | a vendor model catalogue | removed; the catalogue is `config/harness.toml [agent] models`, served by `GET /api/spawn/options` |
 | `data.jsx:17` | the host seed is a host name | `""` (the overview shows what `/api/host` returns) |
 | `data.jsx:43-46` | the agents fetch helper | removed |
 | `styles.css:1` | a header comment with a host name | reworded |

@@ -781,6 +781,33 @@ function SpawnModal({ onClose, onSpawn }) {
   const [voice, setVoice] = React.useState("");
   const [port, setPort] = React.useState("");
   const [operator, setOperator] = React.useState("");
+  // The runtime fields: what the agent command's {model} / {effort}
+  // placeholders render to, the heartbeat cadence and the memory
+  // scope. The catalogue and every default come from the server
+  // (GET /api/spawn/options, read from config/harness.toml [agent]);
+  // the dialog carries no list of its own to drift from it.
+  const [options, setOptions] = React.useState(null);
+  const [model, setModel] = React.useState("");
+  const [effort, setEffort] = React.useState("");
+  const [heartbeat, setHeartbeat] = React.useState("");
+  const [scope, setScope] = React.useState("");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const d = await apiGet("/api/spawn/options");
+      if (cancelled || !d) return;
+      setOptions(d);
+      setModel(m => m || d.default_model || "");
+      setEffort(e => e || d.default_effort || "");
+      setHeartbeat(h => h || String(d.default_heartbeat || 3600));
+      setScope(s => s || d.default_memory_scope || "private");
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const models = options?.models || [];
+  const efforts = options?.efforts || [];
+  const scopes = options?.memory_scopes || [];
 
   React.useEffect(() => {
     if (!slug && name) setSlug(name.toLowerCase().replace(/[^a-z0-9]/g, ""));
@@ -801,6 +828,10 @@ function SpawnModal({ onClose, onSpawn }) {
       if (roleParagraph.trim()) body.role_paragraph = roleParagraph.trim();
       if (String(port).trim()) body.port = Number(port);
       if (operator.trim()) body.operator = operator.trim();
+      if (model) body.model = model;
+      if (effort) body.effort = effort;
+      if (String(heartbeat).trim()) body.heartbeat = Number(heartbeat);
+      if (scope) body.memory_scope = scope;
       const { r, d } = await apiSend("POST", "/api/cousins", body);
       if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
       // 2. Start it so the cousin is immediately usable (create and start stay separate)
@@ -808,7 +839,9 @@ function SpawnModal({ onClose, onSpawn }) {
       if (!r2.ok || !d2.ok) throw new Error("created but start failed: " + (d2.error || `HTTP ${r2.status}`));
       onSpawn({
         slug, name, role, type: "cousin", port: d.port, host: null, home: d.home,
-        tmuxSession: slug, operator: operator.trim() || null, memoryScope: "", heartbeat: 3600,
+        tmuxSession: slug, operator: operator.trim() || null,
+        memoryScope: scope || "private", heartbeat: Number(heartbeat) || 3600,
+        model: model || null, effort: effort || null, pid: null, uptime_seconds: null,
         flipAt: null, hidden: false, status: "running", chat: "ok", active: false,
         activity: "", lastMsgTs: 0, tokensSpent: 0,
       });
@@ -854,6 +887,34 @@ function SpawnModal({ onClose, onSpawn }) {
             </FormField>
             <FormField label="operator (optional)" hint="The person this cousin answers to; blank is a real state.">
               <input className="txt" value={operator} onChange={e => setOperator(e.target.value)} placeholder="none" />
+            </FormField>
+          </div>
+          <div style={{ marginTop: 14 }} />
+          <div className="grid2">
+            <FormField label="model" hint="Rendered into the agent command's {model} placeholder.">
+              <select className="sel" value={model} onChange={e => setModel(e.target.value)} disabled={!options}>
+                {!options && <option value="">loading...</option>}
+                {models.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </FormField>
+            <FormField label="effort" hint="Rendered into the {effort} placeholder.">
+              <select className="sel" value={effort} onChange={e => setEffort(e.target.value)} disabled={!options}>
+                {!options && <option value="">loading...</option>}
+                {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </FormField>
+          </div>
+          <div style={{ marginTop: 14 }} />
+          <div className="grid2">
+            <FormField label="heartbeat · seconds" hint="The context heartbeat cadence ([heartbeat] context_beat_seconds).">
+              <input className="txt" type="number" min="1" value={heartbeat} onChange={e => setHeartbeat(e.target.value)} placeholder="3600" />
+            </FormField>
+            <FormField label="memory scope" hint="[memory] scope: private, shared with the fleet, or both.">
+              <div className="radio-row">
+                {scopes.map(s => (
+                  <button key={s} type="button" className={scope === s ? "sel" : ""} onClick={() => setScope(s)}>{s}</button>
+                ))}
+              </div>
             </FormField>
           </div>
         </div>

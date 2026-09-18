@@ -92,4 +92,7 @@ strip_settings_keys = [
 preserve_settings_keys = ["customApiKeyResponses"]
 # Present in the isolated dir = a login: the launch refuses.
 login_files = [".credentials.json"]
+# The harness also stores plugin MCP sign-in state in that file; only the
+# account login (this key) makes it a login. Unreadable = login (fail closed).
+login_file_keys = ["claudeAiOauth"]
 login_settings_keys = ["oauthAccount"]

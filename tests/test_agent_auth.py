@@ -267,6 +267,29 @@ class TestIsolatedDir(AuthCase):
         copy = json.loads((iso / ".kestrel.json").read_text())
         self.assertEqual(copy["keyApprovals"], ["accepted"])
 
+    def test_a_login_file_without_the_login_key_is_not_a_login(self):
+        # Canary (live, 2026-09-18): the harness itself wrote a
+        # .credentials.json into the isolated dir holding only plugin
+        # MCP sign-in state; treating mere existence as a login would
+        # refuse the cousin's next start. With login_file_keys set, only
+        # a file carrying one of those keys (or an unreadable one) counts.
+        (self.root / "config" / "harness.toml").write_text(
+            (self.root / "config" / "harness.toml").read_text()
+            + 'login_file_keys = ["kestrelOauth"]\n')
+        cfg = self.cfg()
+        agent_auth.build_isolated_dir(cfg)
+        iso = cfg["isolated_dir"]
+        (iso / ".credentials.json").write_text(json.dumps(
+            {"mcpOAuth": {"plugin|1": {"accessToken": ""}}}))
+        agent_auth.check_isolated_dir(cfg)
+        (iso / ".credentials.json").write_text(json.dumps(
+            {"kestrelOauth": {"accessToken": "t"}}))
+        with self.assertRaisesRegex(AuthError, "holds a login"):
+            agent_auth.check_isolated_dir(cfg)
+        (iso / ".credentials.json").write_text("not json")
+        with self.assertRaisesRegex(AuthError, "holds a login"):
+            agent_auth.check_isolated_dir(cfg)
+
     def test_a_login_in_the_isolated_dir_refuses(self):
         cfg = self.cfg()
         agent_auth.build_isolated_dir(cfg)

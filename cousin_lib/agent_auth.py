@@ -159,7 +159,7 @@ def api_key_config(root):
     out["isolated_dir"] = (iso_path if iso_path.is_absolute()
                            else Path(root) / iso_path)
     for key in ("exclude", "strip_settings_keys", "preserve_settings_keys",
-                "login_files", "login_settings_keys"):
+                "login_files", "login_settings_keys", "login_file_keys"):
         out[key] = _str_list(table, key, where)
     return out
 
@@ -380,6 +380,23 @@ def build_isolated_dir(cfg):
     return {"dir": str(iso), "linked": linked, "settings": wrote}
 
 
+def _holds_login(file_path, login_keys):
+    """Whether a login file really carries a login. Without login_keys
+    its existence is the login. With them (the harness also writes
+    unrelated state into the same file, e.g. plugin sign-in data), only a
+    JSON object carrying one of those keys counts, and a file that is not
+    a readable JSON object counts too: fail closed."""
+    if not login_keys:
+        return True
+    try:
+        data = _load_json(file_path)
+    except AuthError:
+        return True
+    if not isinstance(data, dict):
+        return True
+    return any(k in data for k in login_keys)
+
+
 def check_isolated_dir(cfg):
     """Refuse an isolated directory that is missing or holds a login:
     one of login_files, or a settings copy carrying one of
@@ -391,7 +408,8 @@ def check_isolated_dir(cfg):
                         " switch to api_key with cousin-auth to build it"
                         % iso)
     for name in cfg["login_files"]:
-        if os.path.lexists(iso / name):
+        if os.path.lexists(iso / name) and _holds_login(
+                iso / name, cfg.get("login_file_keys") or []):
             raise AuthError(
                 "the api_key config directory holds a login (%s); remove"
                 " it, then switch again: with a login present the harness"

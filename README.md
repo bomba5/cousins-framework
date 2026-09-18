@@ -33,6 +33,8 @@ serving the tool surface over MCP is the one optional extra.
 | hive: cross-machine cousins over an authed bus, and the copy-over node archive | `cousin-hive`, `cousin-spawn-node` | `docs/hive-spec.md`, `docs/deploying-a-node.md` |
 | the web console (a view, never a source of truth) | `cousin-console` (`cousin-ui` is its retired alias) | `docs/ui-spec.md` |
 | the console's API contract: routes, live streams, auth, what was dropped | `cousin-console` | `docs/console-spec.md` |
+| per-cousin auth mode: the harness login or an API key | `cousin-auth` | `docs/guide.md`, `docs/configuration.md` |
+| the framework version and its bump; history in `CHANGELOG.md` | `cousin-version` | `docs/guide.md` |
 | the contamination gate | `cousin-gate` | `docs/gate.md` |
 | unattended operation: units, the fleet sweep, the tool-surface manifest | `cousin-sweep`, `cousin-tool-surface`, `systemd/` | `docs/operations.md` |
 | the same CLIs as tools over MCP stdio, provisioned at spawn | `cousin-mcp` | `docs/mcp-spec.md` |

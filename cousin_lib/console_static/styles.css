@@ -84,6 +84,7 @@ body {
 }
 .topbar .brand { color: var(--fg-0); font-weight: 600; letter-spacing: 0.02em; }
 .topbar .brand .dim { color: var(--fg-3); font-weight: 400; margin: 0 6px; }
+.topbar .build { color: var(--fg-3); font-family: var(--mono); font-size: 10px; margin-left: 10px; white-space: nowrap; }
 .topbar .host { color: var(--fg-2); }
 .topbar .spacer { flex: 1; }
 .topbar .stat { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); }

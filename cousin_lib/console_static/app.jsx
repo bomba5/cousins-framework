@@ -309,6 +309,14 @@ function App() {
   const embedUser = urlParams.get("user") || "";
   const embedMode = urlParams.get("embed") === "1";
 
+  // The release this console runs (GET /api/version, public): shown dim
+  // beside the brand. Read at console start, so a bumped or pulled
+  // checkout that was not restarted still shows the old value.
+  const [build, setBuild] = React.useState(null);
+  React.useEffect(() => {
+    apiGet("/api/version").then(d => { if (d && d.version) setBuild(d); });
+  }, []);
+
   // Auth: null until /api/auth/me answers; then {user, configured, users}.
   const [auth, setAuth] = useStateApp(null);
   useEffectApp(() => {
@@ -505,6 +513,7 @@ function App() {
           style={{ minHeight: 24, padding: "0 6px", fontSize: 12, marginRight: 4 }}
         >{sidebarCollapsed ? "›" : "‹"}</button>
         <span className="brand">cousins<span className="dim">//</span>console</span>
+        {build && <span className="build" title={build.commit ? `version ${build.version}, commit ${build.commit} (read when the console started)` : `version ${build.version}`}>v{build.version}{build.commit ? ` ${build.commit}` : ""}</span>}
         <span className="spacer" />
         <button
           className="btn ghost"

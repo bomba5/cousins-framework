@@ -134,6 +134,7 @@ you is `cousin-job start shell "<title>" -- <cmd>` from a shell.
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |
 | `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |
 | `cousin-auth` | show or switch how a cousin's agent authenticates (the harness login or an API key) | operator-driven; it restarts the agent, so DO NOT run it on yourself |
+| `cousin-version` | print the framework version; `bump` edits pyproject.toml | read-only for a cousin; bumping is the operator's release step |
 | `cousin-reincarnate` | change a cousin's role, keep its memory, flip it | operator-driven; when asked for a bequest, write `data/handoff.md` before the flip |
 | `cousin-transplant` | move memory or body between two cousins (soul-donation, body-swap, merge) | operator-driven; both cousins are flipped afterwards |
 | `cousin-chat-import` | bring a cousin's chat history over from the previous framework | operator-driven, at migration, with the cousin's chat server stopped |

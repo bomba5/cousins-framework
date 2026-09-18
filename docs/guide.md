@@ -509,6 +509,22 @@ this API key?" once; answer it in the pane (the console flags it as
 needing attention). The answer is kept across rebuilds of the isolated
 directory.
 
+### Which version is running: cousin-version
+
+The framework's version lives in `pyproject.toml` only; it is
+`cousin_lib.__version__` at runtime, `GET /api/version` in the console
+(public, no login), and the dim `v0.1.0 <commit>` beside the brand in
+the console's top bar. The console reads both when it starts, so a
+checkout that was bumped or pulled but not restarted still shows the
+old values. `CHANGELOG.md` has one entry per version.
+
+```
+cousin-version                    # the running version, with the commit in a git checkout
+#   -> 0.1.0 (0a119f6)
+cousin-version bump minor         # edits pyproject.toml in place, nothing else
+#   -> 0.1.0 -> 0.2.0 (<checkout>/pyproject.toml)
+```
+
 ### Changing who a cousin is: reincarnate and transplant
 
 Editing CLAUDE.md does nothing to a running session, and killing the

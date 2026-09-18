@@ -96,6 +96,14 @@ def host_stats(server):
 
 
 def register():
+    @router.route("GET", "/api/version")
+    def running_version(req):
+        """Public (app.AUTH_EXEMPT): the release this console runs and,
+        for a git checkout, its short commit, both read at startup."""
+        from cousin_lib import version
+        return 200, {"version": version.version(),
+                     "commit": version.git_commit()}
+
     @router.route("GET", "/api/host")
     def host(req):
         return 200, host_stats(req.server)

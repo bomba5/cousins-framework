@@ -62,7 +62,10 @@ ROUTE_MODULES = [
     "cousin_lib.console.sse",
 ]
 
-AUTH_EXEMPT = {("POST", "/api/auth/login"), ("GET", "/api/auth/me")}
+# /api/version is public: the login page may show it, and it says only
+# which release (and commit) this console runs.
+AUTH_EXEMPT = {("POST", "/api/auth/login"), ("GET", "/api/auth/me"),
+               ("GET", "/api/version")}
 
 DEFAULT_STATIC_DIR = STATIC_DIR
 
@@ -166,6 +169,12 @@ class ConsoleServer:
         self.sessions = auth.Sessions()
         self._last_users_error = None
         self.started_at = time.time()
+        # Read the version and commit now, once: the top bar shows what
+        # this process RUNS, so a bumped or pulled checkout that was not
+        # restarted is visible as the old values.
+        from cousin_lib import version as _version
+        _version.version()
+        _version.git_commit()
         self.listeners = []
         self.state = {}
         self.static_dir = DEFAULT_STATIC_DIR

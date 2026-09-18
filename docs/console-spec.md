@@ -756,6 +756,15 @@ recycle.
 
 ## Host, restart
 
+### `GET /api/version`
+Public (no session needed, like `GET /api/auth/me`). `200 {"version":
+str, "commit": str|null}`: the framework version from the checkout's
+`pyproject.toml` (else the installed distribution's metadata) and the
+checkout's short git commit (null outside a git checkout), both read
+once when the console starts. The top bar shows them dim beside the
+brand, so a console that was not restarted after a bump shows the old
+values.
+
 ### `GET /api/host`
 `{"host": str, "kernel": str, "uptime": int, "cpu": {"pct": float,
 "load1": float, "load5": float, "load15": float}, "mem": {"total":

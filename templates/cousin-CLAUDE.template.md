@@ -80,6 +80,14 @@ these locations - writing anywhere else means search cannot find it:
   use `cousin-memory decide --stdin <<'EOF'` with the three parts
   separated by a line that is exactly `---`: a quoted heredoc is never
   shell-expanded.
+- `cousin-memory remember "<topic>" "<fact>" --level <level>` - keep one
+  fact with its truth level. Levels: `operator` (the operator told you;
+  needs `--cite` with where: chat message id, quote, date), `framework`,
+  `tool` (a measurement or command output), `conclusion` (the default,
+  your own reasoning), `hypothesis` (unverified), `obsolete`. `decide`
+  takes the same `--level` and `--cite`. When the operator states a
+  preference, a fact about their life or a rule, record it at
+  `operator` with the citation, not as your conclusion.
 - `cousin-memory distill` - rebuild `memory/distilled/` from raw (the
   boot packet's floor; runs at every boot and on `consolidate`). Text
   above the `distilled:auto` marker line is yours and survives.

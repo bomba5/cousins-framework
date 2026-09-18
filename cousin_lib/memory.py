@@ -11,6 +11,7 @@ Search and reindex dispatch to the keyword search module
 """
 import argparse
 import json
+import re
 import os
 import sys
 from collections import Counter, defaultdict
@@ -33,7 +34,57 @@ DISTILLED_FILES = (
     "known-failures.md", "operator-calibration.md", "glossary.md",
 )
 STUB_TEXT = "_(empty - awaiting distillation)_"
-DEFAULT_TRUTH_LEVEL = "cousin-conclusion"
+DEFAULT_TRUTH_LEVEL = "L3_COUSIN_CONCLUSION"
+
+# The truth-level taxonomy. Writers store the canonical name; older
+# entries carry short forms, which normalize_level maps on read.
+TRUTH_LEVELS = ("L0_OPERATOR", "L1_FRAMEWORK", "L2_TOOL",
+                "L3_COUSIN_CONCLUSION", "L4_COUSIN_HYPOTHESIS",
+                "L5_OBSOLETE")
+OPERATOR_LEVEL = "L0_OPERATOR"
+LEVEL_ALIASES = {
+    "operator-stated": "L0_OPERATOR", "operator": "L0_OPERATOR",
+    "framework": "L1_FRAMEWORK", "framework-observed": "L1_FRAMEWORK",
+    "tool": "L2_TOOL", "tool-result": "L2_TOOL",
+    "cousin-conclusion": "L3_COUSIN_CONCLUSION",
+    "conclusion": "L3_COUSIN_CONCLUSION",
+    "cousin-hypothesis": "L4_COUSIN_HYPOTHESIS",
+    "hypothesis": "L4_COUSIN_HYPOTHESIS",
+    "obsolete": "L5_OBSOLETE", "superseded": "L5_OBSOLETE",
+}
+# What a writer may pass: the short words (and the canonical names).
+LEVEL_CHOICES = ("operator", "framework", "tool", "conclusion",
+                 "hypothesis", "obsolete")
+
+
+def normalize_level(value):
+    """The canonical name for a stored or given truth level; the default
+    (L3) for an empty one, 'other' for a value that is not a level."""
+    if value is None or str(value).strip() == "":
+        return DEFAULT_TRUTH_LEVEL
+    text = str(value).strip()
+    upper = text.upper()
+    if upper in TRUTH_LEVELS:
+        return upper
+    if re.match(r"^L[0-5]_", upper):
+        for level in TRUTH_LEVELS:
+            if upper[:3] == level[:3]:
+                return level
+    return LEVEL_ALIASES.get(text.lower(), "other")
+
+
+def resolve_level(level, cite):
+    """(canonical level, error). An operator-stated entry must cite where
+    the operator said it (a chat message id, a quote, a date): the level
+    is the strongest claim a memory can make, so it carries its source."""
+    canonical = normalize_level(level)
+    if canonical == "other":
+        return None, "unknown truth level %r (use one of: %s)" % (
+            level, ", ".join(LEVEL_CHOICES))
+    if canonical == OPERATOR_LEVEL and not (cite or "").strip():
+        return None, ("an operator-stated entry needs --cite (where the"
+                      " operator said it: chat message id, quote, date)")
+    return canonical, None
 
 
 class _NoContext(Exception):
@@ -177,6 +228,16 @@ def parse_decide_stdin(text):
     return chunks[0], chunks[1], chunks[2]
 
 
+def _level_args(p):
+    p.add_argument("--level", default="conclusion",
+                   help="truth level: %s (default conclusion); operator"
+                        " = the operator stated it, needs --cite"
+                        % ", ".join(LEVEL_CHOICES))
+    p.add_argument("--cite", default=None,
+                   help="where it comes from (chat message id, quote,"
+                        " file, date); required for --level operator")
+
+
 _DECIDE_USAGE = (
     "Usage: cousin-memory decide TOPIC DECISION REASONING\n"
     "   or: cousin-memory decide --stdin <<'EOF'\n"
@@ -195,6 +256,11 @@ def _cmd_decide(args):
             return 2
     if not (topic and decision and reasoning):
         print(_DECIDE_USAGE, file=sys.stderr)
+        return 2
+    level, err = resolve_level(getattr(args, "level", None),
+                               getattr(args, "cite", None))
+    if err:
+        print("error: %s" % err, file=sys.stderr)
         return 2
     # The resolved values replace the originals so the rest of decide
     # (the raw bridge included) never reads an unresolved argument.
@@ -220,12 +286,35 @@ def _cmd_decide(args):
         _append_raw(home, {
             "topic": args.topic,
             "content": "%s - why: %s" % (args.decision, args.reasoning),
-            "truth_level": DEFAULT_TRUTH_LEVEL,
+            "truth_level": level,
             "source": "decision",
+            **({"cite": args.cite} if getattr(args, "cite", None) else {}),
         })
     except OSError as err:
         print("warning: raw-memory bridge failed (%s); decision logged"
               " anyway" % err, file=sys.stderr)
+    return 0
+
+
+def _cmd_remember(args):
+    """One durable fact straight into raw memory (no decision record):
+    what the operator told you, what a tool measured, a hypothesis."""
+    home = _home(args)
+    topic, fact = (args.topic or "").strip(), (args.fact or "").strip()
+    if not (topic and fact):
+        print("Usage: cousin-memory remember TOPIC FACT [--level operator"
+              " --cite SOURCE]", file=sys.stderr)
+        return 2
+    level, err = resolve_level(args.level, args.cite)
+    if err:
+        print("error: %s" % err, file=sys.stderr)
+        return 2
+    entry = {"topic": topic, "content": fact, "truth_level": level,
+             "source": "remember"}
+    if args.cite:
+        entry["cite"] = args.cite
+    _append_raw(home, entry)
+    print("Remembered [%s] (%s): %s" % (topic, level, fact))
     return 0
 
 
@@ -499,7 +588,16 @@ def memory_main(argv=None):
                    help="read topic, decision and reasoning from stdin,"
                         " separated by a line that is exactly '---'"
                         " (a quoted heredoc cannot be shell-expanded)")
+    _level_args(p)
     p.set_defaults(func=_cmd_decide)
+    p = sub.add_parser(
+        "remember",
+        help="record one fact in raw memory with its truth level;"
+             " --level operator (what the operator said) needs --cite")
+    p.add_argument("topic", nargs="?")
+    p.add_argument("fact", nargs="?")
+    _level_args(p)
+    p.set_defaults(func=_cmd_remember)
     p = sub.add_parser("recall")
     p.add_argument("keyword", nargs="?", default="")
     p.add_argument("--last", type=int, default=20)

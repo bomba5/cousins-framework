@@ -34,7 +34,7 @@ from cousin_lib import memory
 DEFAULT_MAX_LINES = 40
 DEFAULT_SINCE_DAYS = 3650
 LINE_CONTENT_CHARS = 220
-DEFAULT_TRUTH_LEVEL = "cousin-conclusion"
+DEFAULT_TRUTH_LEVEL = memory.DEFAULT_TRUTH_LEVEL
 OPERATOR_TRUTH_LEVEL = "operator-stated"
 
 AUTO_MARKER = ("<!-- distilled:auto - lines below are regenerated from"
@@ -57,7 +57,7 @@ _KEYWORDS = (
 
 def classify(entry):
     """Pick the distilled file for a raw entry."""
-    if entry.get("truth_level") == OPERATOR_TRUTH_LEVEL:
+    if memory.normalize_level(entry.get("truth_level")) == memory.OPERATOR_LEVEL:
         return "operator-calibration.md"
     hay = ("%s %s" % (entry.get("topic", ""), entry.get("source", ""))).lower()
     for fname, words in _KEYWORDS:

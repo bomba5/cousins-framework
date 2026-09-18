@@ -44,22 +44,11 @@ from pathlib import Path
 from cousin_lib import memory, reinforce
 from cousin_lib.memory_trash import TRASH_NAME, line_sha, list_trash
 
-TRUTH_LEVELS = ("L0_OPERATOR", "L1_FRAMEWORK", "L2_TOOL",
-                "L3_COUSIN_CONCLUSION", "L4_COUSIN_HYPOTHESIS",
-                "L5_OBSOLETE")
-DEFAULT_LEVEL = "L3_COUSIN_CONCLUSION"
-_ALIASES = {
-    "operator-stated": "L0_OPERATOR", "operator": "L0_OPERATOR",
-    "framework": "L1_FRAMEWORK", "framework-observed": "L1_FRAMEWORK",
-    "tool": "L2_TOOL", "tool-result": "L2_TOOL",
-    "cousin-conclusion": "L3_COUSIN_CONCLUSION",
-    "conclusion": "L3_COUSIN_CONCLUSION",
-    "cousin-hypothesis": "L4_COUSIN_HYPOTHESIS",
-    "hypothesis": "L4_COUSIN_HYPOTHESIS",
-    "obsolete": "L5_OBSOLETE", "superseded": "L5_OBSOLETE",
-}
+TRUTH_LEVELS = memory.TRUTH_LEVELS
+DEFAULT_LEVEL = memory.DEFAULT_TRUTH_LEVEL
+_ALIASES = memory.LEVEL_ALIASES
 _KNOWN_FIELDS = {"topic", "content", "truth_level", "source", "timestamp",
-                 "created_at", "id", "entries", "first_at", "last_at"}
+                 "created_at", "id", "entries", "first_at", "last_at", "cite"}
 ACTIVE_FILES = ("STATUS.md", "data/active-threads.md", "data/handoff.md",
                 "data/handoff-manual.md", "data/session-checkpoint.md",
                 "data/pre-compact-checkpoint.md")
@@ -81,16 +70,7 @@ MAX_LIMIT = 1000
 def normalize_level(value):
     """The taxonomy name for a stored truth level; 'other' for a value
     that is not one."""
-    if value is None or str(value).strip() == "":
-        return DEFAULT_LEVEL
-    text = str(value).strip()
-    upper = text.upper()
-    if upper in TRUTH_LEVELS:
-        return upper
-    for level in TRUTH_LEVELS:
-        if upper[:3] == level[:3] and re.match(r"^L[0-5]_", upper):
-            return level
-    return _ALIASES.get(text.lower(), "other")
+    return memory.normalize_level(value)
 
 
 # ------------------------------------------------------------ helpers

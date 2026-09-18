@@ -62,8 +62,11 @@ You must now (INTERNALLY, do not announce):
    bullet per in-flight thread). The framework falls back to a
    STATUS-derived baseline if you skip the last one, but your richer
    per-thread view is better boot fuel.
-6. Memory writes default to the cousin-conclusion truth level; cite a
-   source for anything you record as operator-stated.
+6. Memory writes default to the cousin-conclusion truth level (L3).
+   What the operator told you is operator-stated (L0): record it with
+   `cousin-memory remember "<topic>" "<fact>" --level operator --cite
+   "<where they said it>"`; unverified guesses go in at --level
+   hypothesis.
 """
 
 

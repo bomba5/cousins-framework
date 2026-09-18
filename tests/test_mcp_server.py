@@ -787,7 +787,7 @@ class CliCase(unittest.TestCase):
         self.assertIn("t", out)
         self.assertIn("echo", out)
         self.assertIn("1 tool", out)
-        self.assertIn("cousin-framework[mcp]", out + err)
+        self.assertIn('pip install -e ".[mcp]"', out + err)
         self.assertIn("selftest ok", out)
 
     def test_selftest_reports_the_sdk_either_way(self):
@@ -822,13 +822,13 @@ class CliCase(unittest.TestCase):
                                            "mcp.shared.version": None}):
             rc, out, err = _main(["--registry", str(self.registry), "--versions"])
         self.assertEqual(rc, 2)
-        self.assertIn('pip install "cousin-framework[mcp]"', err)
+        self.assertIn('pip install -e ".[mcp]"', err)
 
     def test_serving_without_the_sdk_exits_2_with_the_remediation(self):
         with mock.patch.dict(sys.modules, {"mcp": None, "anyio": None}):
             rc, out, err = _main(["--registry", str(self.registry)])
         self.assertEqual(rc, 2)
-        self.assertIn('pip install "cousin-framework[mcp]"', err)
+        self.assertIn('pip install -e ".[mcp]"', err)
 
     def test_bad_registry_is_exit_2_with_the_reason(self):
         p = _write(self.tmp, '[tools.x]\ndescription = "d"\n'

@@ -31,7 +31,9 @@ DEFAULT_MAX_OUTPUT = 16000
 REGISTRY_NAME = "mcp-registry.toml"
 SERVER_NAME = "cousin"
 SDK_REMEDIATION = ('the MCP SDK is not importable; serving needs the extra:'
-                   ' pip install "cousin-framework[mcp]"')
+                   ' pip install -e ".[mcp]" from the checkout, in the'
+                   ' venv the framework is installed in (the package is'
+                   ' not on PyPI)')
 _PLACEHOLDER = re.compile(r"^\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 _KINDS = ("command", "send", "job")
 

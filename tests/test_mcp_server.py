@@ -291,6 +291,32 @@ class CallAssemblyCase(unittest.TestCase):
             mcp_server.build_call(self.tool, "nope", {},
                                   resolve=lambda name: name)
 
+    def test_a_value_outside_a_declared_enum_is_refused(self):
+        # The enum is enforced by the adapter, not only advertised: a
+        # value the registry leaves out on purpose never reaches argv.
+        with self.assertRaises(ToolError) as cm:
+            mcp_server.build_call(
+                self.tool, "search", {"query": "q", "collection": "bogus"},
+                resolve=lambda name: name)
+        text = str(cm.exception)
+        self.assertIn("bogus", text)
+        self.assertIn("memory, notes, harness", text)
+
+    def test_a_value_inside_the_enum_passes(self):
+        argv, _ = mcp_server.build_call(
+            self.tool, "search", {"query": "q", "collection": "notes"},
+            resolve=lambda name: name)
+        self.assertEqual(argv[-2:], ["--collection", "notes"])
+
+    def test_array_elements_are_checked_against_an_item_enum(self):
+        tool = {"kind": "command", "command": "c", "description": "d",
+                "properties": {"k": {"type": "array", "enum": ["a", "b"]}},
+                "commands": {"x": {"argv": ["{k}"]}}}
+        mcp_server._validate_tool("t", tool)
+        with self.assertRaises(ToolError):
+            mcp_server.build_call(tool, "x", {"k": ["a", "z"]},
+                                  resolve=lambda name: name)
+
 
 class ResolveCase(unittest.TestCase):
     """A bare name resolves beside the running interpreter first, then
@@ -970,6 +996,20 @@ class ShippedRegistryGuards(unittest.TestCase):
     def test_every_schema_builds(self):
         for tool in mcp_server.list_tools(self.reg):
             self.assertEqual(tool["inputSchema"]["type"], "object")
+
+    def test_job_start_shell_is_refused_before_anything_runs(self):
+        # `job start` takes no command, so a shell row started here
+        # would stay "running" forever. It is refused, with the two
+        # paths that do launch and close a shell job.
+        with mock.patch.object(mcp_server, "run_call",
+                               side_effect=AssertionError("ran")):
+            text, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "start", "kind": "shell",
+                                  "title": "t"}, {})
+        self.assertTrue(is_error)
+        self.assertIn("shell", text)
+        self.assertIn("run_in_background", text)
+        self.assertIn("cousin-job start shell", text)
 
 
 class ParityCase(unittest.TestCase):

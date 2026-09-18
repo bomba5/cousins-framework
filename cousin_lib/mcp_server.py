@@ -288,6 +288,27 @@ def _as_elements(value):
     return [str(value)]
 
 
+def check_enums(props, args, cmd_name):
+    """A value outside its property's declared enum is a ToolError
+    naming the allowed values and the property's description. The enum
+    is enforced here, not only advertised in the schema: a registry
+    leaves a value out of an enum on purpose, and a client that skips
+    schema validation must not get it through."""
+    for name, value in args.items():
+        spec = props.get(name)
+        if not spec or "enum" not in spec or value is None:
+            continue
+        allowed = list(spec["enum"])
+        values = value if isinstance(value, list) else [value]
+        for v in values:
+            if v not in allowed:
+                desc = spec.get("description", "")
+                raise ToolError(
+                    "%s: %s=%r is not one of %s%s"
+                    % (cmd_name, name, v, ", ".join(map(str, allowed)),
+                       ("; " + desc) if desc else ""))
+
+
 def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
     """The argv list and stdin bytes for one call. Never a string: a
     placeholder becomes whole elements, an option becomes flag elements,
@@ -297,6 +318,7 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
         raise ToolError("unknown command %r; known: %s"
                         % (cmd_name, ", ".join(sorted(tool["commands"]))))
     props = tool["properties"]
+    check_enums(props, args, cmd_name)
     head = list(cmd["command"])
     head[0] = resolve(head[0])
     argv = head + list(extra_argv)
@@ -678,13 +700,28 @@ def render_registry(text, operators):
     return rendered
 
 
+ADAPTER_NAME = "cousin-mcp"
+
+
+def adapter_command():
+    """The cousin-mcp of the install that is running: the one beside
+    this interpreter, by absolute path, else the bare name. PATH is
+    never consulted - on a machine carrying two installs, whatever is
+    first on PATH is exactly the one that must not be baked in."""
+    beside = pathlib.Path(sys.executable).parent / ADAPTER_NAME
+    if beside.is_file() and os.access(beside, os.X_OK):
+        return str(beside)
+    return ADAPTER_NAME
+
+
 def mcp_json(home, slug, root):
-    """The harness-side registration: the adapter over stdio, pointed
-    at the home's own registry, with the cousin's identity in env."""
+    """The harness-side registration: the adapter over stdio (the one
+    beside this interpreter, see adapter_command), pointed at the
+    home's own registry, with the cousin's identity in env."""
     home = pathlib.Path(home)
     return {"mcpServers": {SERVER_NAME: {
         "type": "stdio",
-        "command": "cousin-mcp",
+        "command": adapter_command(),
         "args": ["--registry", str(home / REGISTRY_NAME)],
         "env": {"COUSIN_HOME": str(home), "COUSIN_SLUG": slug,
                 "FRAMEWORK_ROOT": str(pathlib.Path(root))}}}}

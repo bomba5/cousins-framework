@@ -83,7 +83,10 @@ command = "cousin-job"
 description = "Track sub-agents and background work: start, done, fail, list, show."
 
 [tools.job.properties]
-kind = { type = "string", enum = ["subagent", "shell", "build", "other"], description = "(start)" }
+# shell is left out of the kind enum on purpose: start takes no command,
+# so a shell row started here would stay "running" forever. The adapter
+# enforces the enum and answers with the description below.
+kind = { type = "string", enum = ["subagent", "build", "other"], description = "(start) not shell: start takes no command, so a shell row would never close. For long shell work use a Bash call with run_in_background (tracked automatically by the job hooks), or run `cousin-job start shell TITLE -- CMD` from a shell, which launches CMD and closes the row with its exit code" }
 title = { type = "string", description = "(start)" }
 desc = { type = "string", description = "context for the job (start)" }
 id = { type = "integer", description = "job id (done, fail, show)" }

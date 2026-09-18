@@ -9,11 +9,14 @@ an existing file is never overwritten.
 import contextlib
 import io
 import json
+import os
 import pathlib
 import shutil
+import sys
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 
 from cousin_lib import mcp_server
 from cousin_lib.spawn import create_cousin, spawn_main
@@ -76,7 +79,7 @@ class ProvisionCase(unittest.TestCase):
         cfg = json.loads((home / ".mcp.json").read_text())
         srv = cfg["mcpServers"]["cousin"]
         self.assertEqual(srv["type"], "stdio")
-        self.assertEqual(srv["command"], "cousin-mcp")
+        self.assertTrue(srv["command"].endswith("cousin-mcp"))
         self.assertEqual(srv["args"],
                          ["--registry", str(home / "mcp-registry.toml")])
         self.assertEqual(srv["env"]["COUSIN_HOME"], str(home))
@@ -128,6 +131,48 @@ class ProvisionCase(unittest.TestCase):
         reg = tomllib.loads(
             (root / "cousins" / "testa" / "mcp-registry.toml").read_text())
         self.assertEqual(reg["tools"]["send"]["operators"], ["Sam"])
+
+
+class TestAdapterCommand(unittest.TestCase):
+    """.mcp.json names the cousin-mcp of the install that wrote it: a
+    bare name would run whichever cousin-mcp is first on the agent's
+    PATH, which on a machine with two installs is the other one."""
+
+    def _bin(self, with_adapter):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bindir = pathlib.Path(tmp.name) / "bin"
+        bindir.mkdir()
+        if with_adapter:
+            adapter = bindir / "cousin-mcp"
+            adapter.write_text("#!/bin/sh\n")
+            adapter.chmod(0o755)
+        return bindir
+
+    def test_the_adapter_beside_the_interpreter_is_named_absolutely(self):
+        bindir = self._bin(True)
+        with mock.patch.object(sys, "executable", str(bindir / "python3")):
+            cfg = mcp_server.mcp_json("/h/testa", "testa", "/r")
+        self.assertEqual(cfg["mcpServers"]["cousin"]["command"],
+                         str(bindir / "cousin-mcp"))
+
+    def test_no_adapter_beside_the_interpreter_falls_back_to_the_name(self):
+        bindir = self._bin(False)
+        with mock.patch.object(sys, "executable", str(bindir / "python3")):
+            cfg = mcp_server.mcp_json("/h/testa", "testa", "/r")
+        self.assertEqual(cfg["mcpServers"]["cousin"]["command"],
+                         "cousin-mcp")
+
+    def test_path_is_never_consulted(self):
+        # The fallback is the bare name, not a PATH lookup: baking in
+        # whichever wrapper PATH finds first is the bug.
+        bindir = self._bin(False)
+        other = self._bin(True)
+        with mock.patch.object(sys, "executable", str(bindir / "python3")), \
+                mock.patch.dict(os.environ, {"PATH": str(other)}):
+            cfg = mcp_server.mcp_json("/h/testa", "testa", "/r")
+        self.assertEqual(cfg["mcpServers"]["cousin"]["command"],
+                         "cousin-mcp")
 
 
 class TestProjectSettings(ProvisionCase):

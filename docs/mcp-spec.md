@@ -156,7 +156,11 @@ next session. No hot registration is promised.
   keep a registry honest at test time: every flag it declares must
   appear in that CLI's `--help`, and the tool and the CLI produce the
   same effect on the same home (parity, for `decide`, `search`, `job
-  start`).
+  start`). One exception: a declared `enum` is enforced by the adapter
+  before anything runs, because a registry leaves a value out of an
+  enum on purpose (the default registry's `job start` has no `shell`
+  kind: it takes no command, so a shell row would never close). The
+  refusal names the allowed values and the property's description.
 - **Results** carry the CLI's stdout as text, capped at `max_output`
   with the cut stated. A non-zero exit is a tool execution error
   (`isError`) carrying stderr, never a protocol error. A timeout is an
@@ -193,10 +197,15 @@ absent (`docs/spawn-and-template-spec.md`):
   `operators` filled from `--operator` (the same name goes to
   `cousin.toml [operator]`).
 - `<home>/.mcp.json`: `{"mcpServers": {"cousin": {"type": "stdio",
-  "command": "cousin-mcp", "args": ["--registry",
+  "command": "<bin>/cousin-mcp", "args": ["--registry",
   "<home>/mcp-registry.toml"], "env": {"COUSIN_HOME", "COUSIN_SLUG",
   "FRAMEWORK_ROOT"}}}}`. The env block carries the three variables the
   registered CLIs read; it is what makes the process a cousin.
+  `<bin>` is the directory of the interpreter that ran spawn when a
+  `cousin-mcp` sits there, so the registration runs the adapter of the
+  install that wrote it; otherwise the bare name. PATH is never
+  consulted at write time: on a machine with two installs, the first
+  one on PATH is the one that must not be baked in.
 
 A `.mcp.json` is a registration the harness has not necessarily
 accepted. Approval is per project path in the harness's own settings

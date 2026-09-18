@@ -150,6 +150,11 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         <div>beat · <b>{c.heartbeat}s</b></div>
         <div>flip at · <b>{c.flipAt || "-"}</b></div>
         <div>host · <b>{c.host || "local"}</b></div>
+        {/* model is what the next start renders; pid and uptime are the
+            agent process tmux reports, "-" when there is none to ask */}
+        <div>model · <b>{c.model || "-"}</b></div>
+        <div>pid · <b>{c.pid ?? "-"}</b></div>
+        <div>uptime · <b>{c.uptime_seconds == null ? "-" : fmtDuration(c.uptime_seconds)}</b></div>
       </div>
       {c.activity && (
         <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
@@ -205,6 +210,10 @@ function Inspector({ cousin: c, onClose, onAct, openLogs }) {
           <dt>tmux</dt><dd>{c.tmuxSession}{c.host ? ` @ ${c.host}` : ""}</dd>
           <dt>chat</dt><dd>{c.port ? `:${c.port} · ${c.chat}` : "none"}</dd>
           <dt>heartbeat</dt><dd>{c.heartbeat}s</dd>
+          <dt>model</dt><dd>{c.model || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
+          <dt>effort</dt><dd>{c.effort || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
+          <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
+          <dt>uptime</dt><dd>{c.uptime_seconds == null ? <span style={{ color: "var(--fg-3)" }}>-</span> : fmtDuration(c.uptime_seconds)}</dd>
           <dt>flip at</dt><dd>{c.flipAt || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>activity</dt><dd>{c.activity || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
         </dl>

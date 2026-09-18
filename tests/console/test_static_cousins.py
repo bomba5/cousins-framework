@@ -59,3 +59,23 @@ class SpawnDialog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CousinCardRows(unittest.TestCase):
+    """The card shows the role under the name and the model, pid and
+    uptime rows beside the rows it already had; null reads as "-"."""
+
+    def setUp(self):
+        self.src = _component(_read("cousins.jsx"), "CousinCard")
+
+    def test_role_sits_under_the_name(self):
+        self.assertRegex(self.src, r'className="role"[^\n]*\{c\.role\}')
+
+    def test_model_pid_and_uptime_rows_join_the_existing_ones(self):
+        for row in ("chat ·", "scope ·", "operator ·", "beat ·", "flip at ·",
+                    "host ·", "model ·", "pid ·", "uptime ·"):
+            self.assertIn(row, self.src, row)
+        self.assertIn("tokens today", self.src)
+        self.assertRegex(self.src, r"pid · <b>\{c\.pid \?\? \"-\"\}")
+        self.assertRegex(self.src, r"uptime · <b>\{[^}]*uptime_seconds")
+        self.assertRegex(self.src, r"model · <b>\{c\.model")

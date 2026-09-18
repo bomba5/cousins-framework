@@ -253,6 +253,7 @@ own uninstall.
 systemctl --user disable --now cousin-loops.service cousin-console.service \
     cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
 rm -rf ~/.config/systemd/user/cousin-*   # -r: the LAN drop-in is a directory
+rm -f ~/.local/share/systemd/timers/stamp-cousin-*   # the timers' last-run stamps
 systemctl --user daemon-reload
 systemctl --user reset-failed
 tmux kill-session -t testa                # one per cousin
@@ -265,9 +266,11 @@ archive it first if you may want it back (`cousin-backup`, or a tar of
 the directory). Turn linger off only if nothing else of yours needs
 it: `loginctl disable-linger "$USER"`.
 
-Claude Code: `rm -rf ~/.local/bin/claude ~/.local/share/claude`, and
-`~/.claude` plus `~/.claude.json` if you do not use it otherwise (they
-hold its login and every project's transcripts, the cousins' included).
+Claude Code: `rm -rf ~/.local/bin/claude ~/.local/share/claude
+~/.cache/claude ~/.local/state/claude` (the binary, its versions, the
+installer's staging directory and its lock directory), and `~/.claude`
+plus `~/.claude.json` if you do not use it otherwise (they hold its
+login and every project's transcripts, the cousins' included).
 
 Ollama (its installer creates a system service, a user and a group):
 
@@ -276,7 +279,8 @@ sudo systemctl disable --now ollama
 sudo rm -f /etc/systemd/system/ollama.service && sudo systemctl daemon-reload
 sudo rm -rf /usr/local/bin/ollama /usr/local/lib/ollama /usr/share/ollama
 sudo gpasswd -d "$USER" ollama   # the installer adds you to its group
-sudo userdel ollama; sudo groupdel ollama
+sudo userdel ollama
+getent group ollama >/dev/null && sudo groupdel ollama   # userdel usually removed it already
 ```
 
 The apt packages are ordinary system packages; if nothing else uses

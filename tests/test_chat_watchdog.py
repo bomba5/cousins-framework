@@ -347,7 +347,8 @@ class TestDefaultProbes(unittest.TestCase):
 class TestMain(unittest.TestCase):
     def test_no_root_is_a_usage_error(self):
         err = io.StringIO()
-        with mock.patch.dict(os.environ, {}, clear=False):
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
             os.environ.pop("FRAMEWORK_ROOT", None)
             with contextlib.redirect_stderr(err):
                 rc = W.watchdog_main([])

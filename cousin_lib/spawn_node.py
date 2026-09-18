@@ -206,7 +206,7 @@ def spawn_node_main(argv=None):
                         help="where <slug>-node.tar.gz is written")
     args = parser.parse_args(argv)
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
         print("cousin-spawn-node: %s" % err, file=sys.stderr)
         return 2

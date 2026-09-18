@@ -384,7 +384,7 @@ def _parser():
 
 
 def _resolve_root(flag):
-    root = FrameworkConfig.resolve(flag).root
+    root = FrameworkConfig.resolve(flag, cwd_fallback=True).root
     # Every library the console calls reads FRAMEWORK_ROOT; the flag is
     # the same fact told once, so it wins here and is exported.
     os.environ["FRAMEWORK_ROOT"] = str(root)
@@ -447,7 +447,8 @@ def console_main(argv=None):
     print("cousin-console: serving %s on %s:%d%s"
           % (server.root, server.httpd.server_address[0], server.port,
              "" if server.users.configured()
-             else " (auth not configured: cousin-console adduser <name>)"))
+             else " (auth not configured: cousin-console adduser <name>)"),
+          flush=True)  # a unit's stdout is a pipe: flush or never seen
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -142,7 +142,7 @@ def tool_surface_main(argv=None):
                              " through this interpreter")
     args = parser.parse_args(argv)
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
         print("cousin-tool-surface: %s" % err, file=sys.stderr)
         return 2

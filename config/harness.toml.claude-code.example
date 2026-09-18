@@ -1,0 +1,32 @@
+# config/harness.toml preset for Claude Code as the agent harness.
+# Copy to config/harness.toml:
+#   cp config/harness.toml.claude-code.example config/harness.toml
+# See config/harness.toml.example for what every key means.
+#
+# What it turns on: transcript mining at flip, the harness auto-memory
+# search collection, the console's token counts, the loops daemon's
+# transcript-size guard, `cousin-mcp approve`, and the console's
+# "needs attention" flag for a session parked on the login menu.
+#
+# A leading ~ is the home of the account the framework runs as.
+# {home_encoded} is Claude Code's project-directory name for the cousin
+# home: every "/" becomes "-". If your checkout path holds characters
+# other than letters, digits, "-" and "/", compare with the directory
+# Claude Code actually created under ~/.claude/projects/ and write that
+# path out instead.
+
+transcripts_dir = "~/.claude/projects/{home_encoded}"
+auto_memory_dir = "~/.claude/projects/{home_encoded}/memory"
+flip_when_transcript_mb = 100
+settings_file = "~/.claude.json"
+
+# Pane text that means the agent is waiting on a person, not working:
+# Claude Code's first-run login menu and its OAuth code prompt. Run
+# `claude` once interactively (or `claude auth login`) before starting
+# a cousin so neither appears.
+attention_patterns = ["Select login method", "Paste code here if prompted"]
+
+[agent]
+default_model = "claude-opus-5"
+default_effort = "high"
+models = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]

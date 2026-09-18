@@ -135,7 +135,9 @@ class TestCli(unittest.TestCase):
             self.assertTrue((pathlib.Path(tmp) / MANIFEST_RELPATH).exists())
 
     def test_missing_root_is_a_usage_error(self):
-        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": ""}):
+        # Outside any checkout: inside one, the root defaults to it.
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": ""}), \
+                tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
             self.assertEqual(self._main([]), 2)
 
     def test_no_scripts_found_is_a_failure_not_an_empty_manifest(self):

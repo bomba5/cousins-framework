@@ -17,7 +17,8 @@ from pathlib import Path
 from cousin_lib import loops, spawn
 from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
                                CousinConfig, FrameworkConfig,
-                               MissingConfigError, agent_config)
+                               MissingConfigError, agent_config,
+                               harness_config)
 from cousin_lib.console import router, tokens
 from cousin_lib.console._common import (chat_call, chat_health, check_slug,
                                         cousin_home, load_cousin, read_toml,
@@ -32,17 +33,47 @@ CLAUDE_MD_MAX_CHARS = 200000
 
 # ---- the fleet projection ----------------------------------------------
 
-def _pane_active(server, config):
-    """The pane's last 20 lines changed within the window, by hash kept
-    per server: a projection of the terminal, not a store."""
+def _pane_tail(server, config):
+    """The pane's last 20 lines, or None when there is no local pane to
+    read or tmux fails."""
     if config.chat_host or not config.tmux_session:
-        return False
+        return None
     try:
         r = tmux(server, ["capture-pane", "-p", "-t", config.tmux_session,
                           "-S", "-20"])
     except Exception:
+        return None
+    return r.stdout or ""
+
+
+def attention_patterns(root):
+    """config/harness.toml attention_patterns; [] when absent or when
+    the file is unusable (the fleet listing must not fail on it)."""
+    try:
+        cfg = harness_config(root)
+    except MissingConfigError:
+        return []
+    return (cfg or {}).get("attention_patterns") or []
+
+
+def _attention(tail, patterns):
+    """The first attention pattern the pane shows, else None."""
+    if not tail:
+        return None
+    for pattern in patterns:
+        if pattern in tail:
+            return pattern
+    return None
+
+
+def _pane_active(server, config, tail=None):
+    """The pane's last 20 lines changed within the window, by hash kept
+    per server: a projection of the terminal, not a store."""
+    if tail is None:
+        tail = _pane_tail(server, config)
+    if tail is None:
         return False
-    digest = hashlib.sha1((r.stdout or "").encode()).hexdigest()
+    digest = hashlib.sha1(tail.encode()).hexdigest()
     hashes = server.state.setdefault("pane_hashes", {})
     now = time.time()
     prev = hashes.get(config.slug)
@@ -163,12 +194,15 @@ def effective_runtime(config, defaults):
             "effort": config.effort or defaults["default_effort"]}
 
 
-def fleet_row(server, config, defaults=None):
+def fleet_row(server, config, defaults=None, patterns=None):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
     chat = chat_health(config)
     if defaults is None:
         defaults = agent_defaults(server.root)
+    if patterns is None:
+        patterns = attention_patterns(server.root)
+    attention = None
     if config.type == "worker":
         status = "running"
         active = False
@@ -177,7 +211,13 @@ def fleet_row(server, config, defaults=None):
         active = False
     else:
         status = "running" if session_alive(server, config) else "stopped"
-        active = _pane_active(server, config) if status == "running" else False
+        active = False
+        if status == "running":
+            tail = _pane_tail(server, config)
+            active = _pane_active(server, config, tail)
+            # "running" says the session exists, not that the agent is
+            # working: a pane parked on a login menu is flagged.
+            attention = _attention(tail, patterns)
     # The agent process and its age: only a local, running session has
     # one to ask tmux about; everything else is null, not zero.
     pid = None
@@ -200,6 +240,7 @@ def fleet_row(server, config, defaults=None):
         **effective_runtime(config, defaults),
         "hidden": bool(cousin.get("hidden", False)),
         "status": status,
+        "attention": attention,
         "chat": chat,
         "active": active,
         "pid": pid,
@@ -212,7 +253,8 @@ def fleet_row(server, config, defaults=None):
 
 def fleet_rows(server):
     defaults = agent_defaults(server.root)
-    return [fleet_row(server, config, defaults)
+    patterns = attention_patterns(server.root)
+    return [fleet_row(server, config, defaults, patterns)
             for config in FrameworkConfig(server.root).list_cousins()]
 
 

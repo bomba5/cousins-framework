@@ -232,5 +232,102 @@ class TestProjectSettings(ProvisionCase):
                 spawn_main(["testa", "--root", str(root)])
 
 
+class TestRelativeRoot(ProvisionCase):
+    """A root given as a relative path (the documented `--root .` from
+    inside the checkout) must never reach the files the harness reads:
+    the agent runs with the cousin home as its working directory, where
+    `cousins/<slug>` and `.` name nothing. And an existing .mcp.json
+    written relative by an older spawn is repaired in place."""
+
+    def _main(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = spawn_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def _assert_absolute(self, home, root):
+        root = pathlib.Path(os.path.abspath(root))
+        entry = json.loads((home / ".mcp.json").read_text())[
+            "mcpServers"]["cousin"]
+        registry = pathlib.Path(
+            entry["args"][entry["args"].index("--registry") + 1])
+        self.assertTrue(registry.is_absolute(), entry)
+        self.assertTrue(registry.is_file(), entry)
+        self.assertEqual(pathlib.Path(entry["env"]["COUSIN_HOME"]),
+                         root / "cousins" / "testa")
+        self.assertEqual(pathlib.Path(entry["env"]["FRAMEWORK_ROOT"]), root)
+        settings = json.loads(
+            (home / ".claude" / "settings.json").read_text())
+        commands = [h["command"] for groups in settings["hooks"].values()
+                    for g in groups for h in g["hooks"]]
+        self.assertTrue(commands)
+        for command in commands:
+            self.assertIn(str(root / "cousins" / "testa"), command)
+            self.assertNotIn(" cousins/testa", command)
+            self.assertNotIn("--root .", command)
+
+    def test_spawn_main_with_root_dot_writes_absolute_paths(self):
+        root = self._framework_root()
+        with contextlib.chdir(root):
+            rc, _out, err = self._main(["testa", "--root", ".", "--role",
+                                        "x", "--voice", "v", "--port",
+                                        "8100"])
+        self.assertEqual(rc, 0, err)
+        self._assert_absolute(root / "cousins" / "testa", root)
+
+    def test_create_cousin_with_a_relative_root_returns_an_absolute_home(self):
+        root = self._framework_root()
+        with contextlib.chdir(root.parent):
+            out = self._create(pathlib.Path(root.name))
+        self.assertTrue(out["home"].is_absolute(), out["home"])
+        self._assert_absolute(root / "cousins" / "testa", root)
+
+    def test_repair_settings_rewrites_a_relative_mcp_json(self):
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        stale = json.loads((home / ".mcp.json").read_text())
+        entry = stale["mcpServers"]["cousin"]
+        entry["args"] = ["--registry", "cousins/testa/mcp-registry.toml"]
+        entry["env"].update({"COUSIN_HOME": "cousins/testa",
+                             "FRAMEWORK_ROOT": ".", "EXTRA": "kept"})
+        stale["mcpServers"]["other"] = {"command": "elsewhere"}
+        (home / ".mcp.json").write_text(json.dumps(stale))
+        with contextlib.chdir(root):
+            rc, out, err = self._main(["testa", "--root", ".",
+                                       "--repair-settings"])
+        self.assertEqual(rc, 0, err)
+        self.assertIn(".mcp.json", out)
+        self._assert_absolute(home, root)
+        data = json.loads((home / ".mcp.json").read_text())
+        self.assertEqual(data["mcpServers"]["other"],
+                         {"command": "elsewhere"})
+        self.assertEqual(data["mcpServers"]["cousin"]["env"]["EXTRA"],
+                         "kept")
+        first = (home / ".mcp.json").read_text()
+        rc, _out, err = self._main(["testa", "--root", str(root),
+                                    "--repair-settings"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual((home / ".mcp.json").read_text(), first)
+
+    def test_repair_settings_writes_a_missing_mcp_json(self):
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        (home / ".mcp.json").unlink()
+        rc, _out, err = self._main(["testa", "--root", str(root),
+                                    "--repair-settings"])
+        self.assertEqual(rc, 0, err)
+        self._assert_absolute(home, root)
+
+    def test_a_non_object_mcp_json_is_refused_not_clobbered(self):
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        (home / ".mcp.json").write_text("[1, 2]")
+        rc, _out, err = self._main(["testa", "--root", str(root),
+                                    "--repair-settings"])
+        self.assertEqual(rc, 2)
+        self.assertIn(".mcp.json", err)
+        self.assertEqual((home / ".mcp.json").read_text(), "[1, 2]")
+
+
 if __name__ == "__main__":
     unittest.main()

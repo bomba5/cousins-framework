@@ -82,6 +82,8 @@ class LifecycleCase(unittest.TestCase):
         })
         patcher.start()
         self.addCleanup(patcher.stop)
+        from tests._fakes import agent_on_path
+        agent_on_path(self, self.root)
 
     def _cousin(self, slug, name, role):
         home = self.root / "cousins" / slug

@@ -140,6 +140,12 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         </div>
       </div>
       <div className="role">{c.role}</div>
+      {c.attention && (
+        <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber)" }}
+             title="the pane shows text config/harness.toml attention_patterns lists: the agent is waiting on a person">
+          needs attention · the pane shows "{c.attention}"
+        </div>
+      )}
       <div style={{ margin: "4px 0" }}>
         <HeartbeatGraph state={c.status === "running" ? (c.active ? "active" : "idle") : "stopped"} width={240} height={22} />
       </div>

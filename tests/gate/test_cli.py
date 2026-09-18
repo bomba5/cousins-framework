@@ -9,6 +9,20 @@ from cousin_lib.gate.cli import main
 
 
 class TestCli(unittest.TestCase):
+    @unittest.skipUnless(__import__("shutil").which("git"), "needs git")
+    def test_git_visible_skips_ignored_paths(self):
+        import subprocess
+        root = self._tree({".gitignore": "cousins/\n",
+                           "cousins/testa/x.txt": "who = 'zorblatt'\n",
+                           "a.py": "x = 1\n"})
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        deny = self._denylist(["zorblatt"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["--root", str(root), "--denylist",
+                                   str(deny), "--git-visible"]), 0)
+            self.assertEqual(main(["--root", str(root), "--denylist",
+                                   str(deny)]), 1)
+
     def _tree(self, files):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

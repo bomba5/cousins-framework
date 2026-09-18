@@ -32,7 +32,8 @@ from cousin_lib.config import (
     harness_config,
 )
 from cousin_lib.harness_settings import SettingsError, apply_project_settings
-from cousin_lib.mcp_server import provision_mcp
+from cousin_lib.mcp_server import (RegistrationError, provision_mcp,
+                                   refresh_mcp_json)
 from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
@@ -614,6 +615,75 @@ def _read_agent_cmd(root):
     return cmd
 
 
+def start_preflight(agent_cmd, *, tmux_bin="tmux", which=shutil.which):
+    """What a start needs from the host, checked with no side effects:
+    tmux (it hosts every agent session) and the agent command's
+    executable, resolved the way the session will resolve it. Returns
+    the failures as remediation lines; empty means go. The agent check
+    is best-effort by nature: only the first word is resolvable, and a
+    wrapper such as `env` passes it."""
+    failures = []
+    if which(tmux_bin) is None:
+        failures.append(
+            "tmux not found (%r on PATH): it hosts every cousin's agent"
+            " session; install it first (Debian/Ubuntu: sudo apt-get"
+            " install -y tmux)" % tmux_bin)
+    try:
+        argv = shlex.split(agent_cmd)
+    except ValueError as err:
+        failures.append("the agent command in config/agent-cmd does not"
+                        " parse: %s" % err)
+        return failures
+    head = argv[0] if argv else ""
+    if head and which(head) is None:
+        failures.append(
+            "agent command %r (config/agent-cmd) not found on PATH; install"
+            " the agent, or write its absolute path into config/agent-cmd"
+            " (services started by systemd do not see a login shell's"
+            " PATH)" % head)
+    return failures
+
+
+def _session_alive(session, tmux_bin="tmux"):
+    try:
+        r = subprocess.run([tmux_bin, "has-session", "-t", "=" + session],
+                           capture_output=True, text=True, timeout=10,
+                           check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def _chat_server_unless_live(home):
+    """Start the chat server only when nothing answers on the cousin's
+    port: a watchdog or unit may already own it, and a second server
+    would only fail to bind."""
+    try:
+        port = CousinConfig.load(home).chat_port
+    except MissingConfigError:
+        port = None
+    if port and _is_live(port):
+        return
+    _default_chat_server(home)
+
+
+def _start_existing(root, slug, agent_cmd):
+    home = root / "cousins" / slug
+    config = CousinConfig.load(home)
+    if _session_alive(config.tmux_session):
+        print("%s is already running (tmux session %s); nothing started"
+              % (slug, config.tmux_session))
+        return 0
+    try:
+        start_cousin(home, agent_cmd=agent_cmd, root=root,
+                     start_chat_server=_chat_server_unless_live)
+    except SpawnError as err:
+        print("cousin-spawn: start failed: %s" % err, file=sys.stderr)
+        return 1
+    print("started %s" % slug)
+    return 0
+
+
 def _repair_settings(root, slug):
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
@@ -622,12 +692,16 @@ def _repair_settings(root, slug):
         return 2
     try:
         out = apply_project_settings(home, root=root)
-    except SettingsError as err:
+        reg = refresh_mcp_json(home, root=root, slug=slug)
+    except (SettingsError, RegistrationError) as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)
         return 2
     print("settings %s: hooks for %s; \"cousin\" MCP server approved;"
           " read at the cousin's next session start"
           % (out["path"], ", ".join(out["events"])))
+    print("registration %s: %s" % (
+        reg["path"], "rewritten with absolute paths" if reg["changed"]
+        else "already current"))
     for missing in out["missing"]:
         print("cousin-spawn: hook script not found, not wired: %s"
               % missing, file=sys.stderr)
@@ -673,25 +747,65 @@ def spawn_main(argv=None):
                              " (absent: the documented default)")
     parser.add_argument("--memory-scope", choices=MEMORY_SCOPES,
                         help="cousin.toml [memory] scope (absent: private)")
-    parser.add_argument("--start", action="store_true")
+    parser.add_argument("--start", action="store_true",
+                        help="start the cousin (tmux session + chat"
+                             " server) after creating it; on an EXISTING"
+                             " cousin, given without --role/--voice, just"
+                             " start it (a no-op when already running)")
     parser.add_argument("--repair-settings", action="store_true",
                         help="create nothing: (re)write an EXISTING"
                              " cousin's harness project settings"
                              " (<home>/.claude/settings.json: its hooks"
-                             " and its MCP server approval), merging"
-                             " with what is there; safe to repeat")
+                             " and its MCP server approval) and its"
+                             " <home>/.mcp.json `cousin` entry (absolute"
+                             " paths), merging with what is there; safe"
+                             " to repeat")
     args = parser.parse_args(argv)
-    if not args.repair_settings:
+    try:
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
+    except MissingConfigError as err:
+        root = None
+        root_error = err
+    exists = root is not None and (
+        root / "cousins" / args.slug / "cousin.toml").is_file()
+    # `cousin-spawn <slug> --start` on an existing cousin starts it;
+    # with --role or --voice it is still a create, refused below.
+    start_existing = (args.start and exists and not args.role
+                      and not args.voice)
+    if not args.repair_settings and not start_existing:
         for flag, value in (("--role", args.role), ("--voice", args.voice)):
             if not value:
                 parser.error("%s is required to create a cousin" % flag)
-    try:
-        root = FrameworkConfig.resolve(args.root).root
-    except MissingConfigError as err:
-        print("cousin-spawn: %s" % err, file=sys.stderr)
+    if root is None:
+        print("cousin-spawn: %s" % root_error, file=sys.stderr)
         return 2
     if args.repair_settings:
         return _repair_settings(root, args.slug)
+    if exists and not start_existing:
+        print("cousin-spawn: cousin %r already exists; to start it:"
+              " cousin-spawn %s --start" % (args.slug, args.slug),
+              file=sys.stderr)
+        return 2
+    agent_cmd = None
+    if args.start:
+        # Everything a start needs is checked before anything is
+        # created: a half-made cousin whose start then crashes is the
+        # failure this exists to prevent.
+        try:
+            agent_cmd = _read_agent_cmd(root)
+        except SpawnError as err:
+            print("cousin-spawn: %s; nothing created or started" % err,
+                  file=sys.stderr)
+            return 2
+        failures = start_preflight(agent_cmd)
+        if failures:
+            for line in failures:
+                print("cousin-spawn: %s" % line, file=sys.stderr)
+            print("cousin-spawn: nothing created or started",
+                  file=sys.stderr)
+            return 2
+    if start_existing:
+        return _start_existing(root, args.slug, agent_cmd)
     try:
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,
@@ -707,12 +821,13 @@ def spawn_main(argv=None):
           % (out["slug"], out["home"], out["port"]))
     if args.start:
         try:
-            start_cousin(out["home"], agent_cmd=_read_agent_cmd(root),
-                         root=root)
+            start_cousin(out["home"], agent_cmd=agent_cmd, root=root,
+                         start_chat_server=_chat_server_unless_live)
         except SpawnError as err:
             print("cousin-spawn: created but start failed: %s\n"
-                  "the home is kept; fix the cause and start it again"
-                  % err, file=sys.stderr)
+                  "the home is kept; fix the cause and start it with:"
+                  " cousin-spawn %s --start" % (err, out["slug"]),
+                  file=sys.stderr)
             return 1
         print("started %s" % out["slug"])
     return 0

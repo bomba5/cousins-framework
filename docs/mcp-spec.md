@@ -176,14 +176,15 @@ next session. No hot registration is promised.
 ## Protocol
 
 The adapter speaks MCP through the reference Python SDK, installed as
-the extra `cousin-framework[mcp]` (the 1.x SDK; the 2.x SDK changed the
+the extra `[mcp]` (`pip install -e ".[mcp]"` from the checkout; the 1.x SDK; the 2.x SDK changed the
 server API and the extra excludes it). The default install pulls nothing;
 that is what the zero-dependency policy is for. The SDK is imported
 inside `serve()` only: registry parsing, schema building, argv
 assembly, provisioning and approval import nothing but the standard
 library and are tested without the extra. Serving without the SDK
-exits 2 with the one line that fixes it: `pip install
-"cousin-framework[mcp]"`. There is no alternative launcher: the SDK
+exits 2 with the one line that fixes it: `pip install -e ".[mcp]"`,
+run from the checkout in the framework's venv (the package is not on
+PyPI). There is no alternative launcher: the SDK
 lives in the same interpreter as the framework, so a cold cache or a
 pruned tool store cannot make the tool surface vanish at some later
 session start.

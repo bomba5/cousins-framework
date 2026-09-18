@@ -7,15 +7,23 @@ a stated degradation, never a silent default that becomes somebody's
 value. This page lists every file the code reads; a test asserts the
 list stays complete, so a new seam cannot ship undocumented.
 
-The `config/` directory does not exist in a fresh checkout - create it
-and add only the files you need.
+A fresh checkout's `config/` holds only the shipped `*.example` files
+(and is gitignored apart from them); copy the ones you need to their
+real names and add the rest by hand.
 
 **The framework root** (which contains `cousins/`, `config/`, and
 `templates/`) is named the same way by every entry point that needs
 it: an explicit `--root` flag wins, else the `FRAMEWORK_ROOT`
-environment variable, else a loud error naming both. `cousin-spawn`
-and `cousin-console` take it identically; a flag is discoverable from
-`--help`, the env var suits a service unit.
+environment variable, else - for a command you type - the working
+directory when it is a checkout (it holds
+`templates/cousin-CLAUDE.template.md` and `config/`), else a loud
+error naming all three. `cousin-spawn`, `cousin-flip`,
+`cousin-console`, `cousin-mcp`, `cousin-sweep`, `cousin-tool-surface`
+and `cousin-chat-watchdog` take `--root` identically; a flag is
+discoverable from `--help`, the env var suits a service unit. Library
+code (the chat server, memory search) never guesses from its working
+directory. The root is made absolute before it is written anywhere, so
+`--root .` is safe, but `--root "$PWD"` reads better in a script.
 
 | file | read by | absent means |
 |---|---|---|
@@ -26,7 +34,7 @@ and `cousin-console` take it identically; a flag is discoverable from
 | `config/console-users.json` | `cousin-console` (the web console's login) | auth is not configured: the console is open to every address the guard admits, and `GET /api/auth/me` says so |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
-| `config/harness.toml` | transcript mining at flip, the harness auto-memory search collection, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`), the `agent-cmd` `{model}`/`{effort}` defaults and the console's spawn catalogue (`[agent]`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out, a `{model}`/`{effort}` placeholder needs the cousin's own `[runtime]` value or the start fails naming this file |
+| `config/harness.toml` (for Claude Code: copy the shipped `config/harness.toml.claude-code.example`) | transcript mining at flip, the harness auto-memory search collection, the console's token counts, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`), the console's "needs attention" flag (`attention_patterns`), the `agent-cmd` `{model}`/`{effort}` defaults and the console's spawn catalogue (`[agent]`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out, a `{model}`/`{effort}` placeholder needs the cousin's own `[runtime]` value or the start fails naming this file |
 | `config/mcp-registry.toml` (edited copy of the shipped `config/mcp-registry.toml.example`) | `cousin-spawn` (copied into every new home as `mcp-registry.toml`), `cousin-mcp` when no `--registry` is given and the cousin home carries none | the shipped example is the default; the adapter itself is off until a home carries a `.mcp.json` the harness has approved |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
@@ -43,7 +51,20 @@ and `cousin-console` take it identically; a flag is discoverable from
   placeholder with no value in either file is a spawn error naming
   both files; nothing guesses a vendor default. `worker-cmd` carries
   `{prompt}` and `{home}`. The binary and its trust posture are
-  yours - the framework hardcodes neither.
+  yours - the framework hardcodes neither. Name the binary by absolute
+  path: units and the tmux server do not see your login shell's PATH.
+  `cousin-spawn --start` and `cousin-flip` check, before anything is
+  created or killed, that tmux and the command's first word resolve.
+  For Claude Code (installed to `~/.local/bin` by its installer):
+
+  ```
+  /home/<you>/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}
+  ```
+
+  `--dangerously-skip-permissions` lets an unattended cousin run every
+  tool without asking; leave it out to answer the prompts yourself in
+  the pane. Log Claude Code in once interactively before the first
+  start (`docs/install.md` step 4).
 - `law.md`: markdown; the framework law every cousin boots with.
 - `net-allowlist.json`: `{"allow": ["203.0.113.0/24", ...]}`. Extends
   the defaults; can never remove loopback.
@@ -58,7 +79,14 @@ and `cousin-console` take it identically; a flag is discoverable from
   authorization is enforced, so none is stored (`docs/console-spec.md`).
 - `outbound-filter.json`: the filter's per-surface additions;
   see the outbound filter module for the shape.
-- `embedding.toml`: `url`, `model`, `timeout_s`. The endpoint takes
+- `embedding.toml`: `url`, `model`, `timeout_s` (seconds per
+  embedding request; 10 when absent). Set it above the time one chunk
+  takes to embed, or every search waits the full timeout and then
+  degrades to keyword: with Ollama and `nomic-embed-text` on a CPU
+  without AVX one 560-character chunk took 32 s, so 120 is the
+  documented value for CPU-only hosts and 30 is plenty with a GPU. The
+  chat server's proactive recall embeds each qualifying operator
+  message within the same limit. The endpoint takes
   `{"model", "prompt"}` and returns `{"embedding": [...]}`; front any
   service with that contract. A configured-but-unreachable service
   degrades to keyword AND says so - it never quietly pretends.
@@ -77,7 +105,11 @@ and `cousin-console` take it identically; a flag is discoverable from
 - `harness.toml`: `transcripts_dir`, `auto_memory_dir`, each a path
   template with `{home}` (the cousin home) and `{home_encoded}` (the
   harness's project-dir encoding of it: every `/` becomes `-`, so
-  `/a/b` is `-a-b`). `transcripts_dir` is where the harness writes a
+  `/a/b` is `-a-b`); a leading `~` is the user's home. The Claude Code
+  preset (`config/harness.toml.claude-code.example`) sets
+  `transcripts_dir = "~/.claude/projects/{home_encoded}"`, its
+  `/memory` subdirectory as `auto_memory_dir`, and `settings_file =
+  "~/.claude.json"`. `transcripts_dir` is where the harness writes a
   session's transcript; `auto_memory_dir` is the harness's own memory
   directory for that cousin. A key left out is None, never a guessed
   location. Unparsable is loud: the file promised something.
@@ -92,10 +124,16 @@ and `cousin-console` take it identically; a flag is discoverable from
   file that records per-project MCP approval; `cousin-mcp approve
   <slug>` edits exactly this file and nothing else. Absent: `approve`
   refuses and prints the edit to make by hand. `~` is expanded.
+  `attention_patterns` (optional, a list of strings): pane text that
+  means the agent is waiting on a person rather than working, such as
+  the harness's login menu; the console's fleet row carries the first
+  one a running cousin's pane shows (`attention`) and the card says
+  "needs attention". Absent: nothing is flagged. Not a list of
+  non-empty strings: loud.
   `[agent]` (optional table): `default_model` and `default_effort`
   are what the `agent-cmd` placeholders `{model}` and `{effort}`
   render to for a cousin whose `cousin.toml [runtime]` sets neither
-  (`effort` is one of `low`, `medium`, `high`, `max`; another value
+  (`effort` is one of `low`, `medium`, `high`, `xhigh`, `max`; another value
   is loud); `models` is the catalogue the console's spawn dialog
   offers (`GET /api/spawn/options`), a list of strings. Absent table:
   no default model, no default effort (a placeholder then needs the

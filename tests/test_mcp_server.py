@@ -801,14 +801,35 @@ class CliCase(unittest.TestCase):
                          ["job", "memory", "schedule", "send"])
 
     def test_selftest_prints_every_tool_and_its_commands_without_the_sdk(self):
-        with mock.patch.dict(sys.modules, {"mcp": None}):
+        # Every module the SDK probe imports is blocked, not just the
+        # package: with the [mcp] extra installed and the submodule
+        # already imported by an earlier test, blocking "mcp" alone
+        # still finds mcp.shared.version in sys.modules.
+        with mock.patch.dict(sys.modules, {"mcp": None, "mcp.shared": None,
+                                           "mcp.shared.version": None}):
             rc, out, err = _main(["--registry", str(self.registry), "--selftest"])
         self.assertEqual(rc, 0, err)
         self.assertIn("t", out)
         self.assertIn("echo", out)
         self.assertIn("1 tool", out)
-        self.assertIn("cousin-framework[mcp]", out + err)
+        self.assertIn('pip install -e ".[mcp]"', out + err)
         self.assertIn("selftest ok", out)
+
+    def test_selftest_reports_the_sdk_either_way(self):
+        # Passes on an install with or without the [mcp] extra: the
+        # line names the state it found, and absent carries the fix.
+        rc, out, err = _main(["--registry", str(self.registry), "--selftest"])
+        self.assertEqual(rc, 0, err)
+        try:
+            import mcp.shared.version  # noqa: F401
+            present = True
+        except ImportError:
+            present = False
+        if present:
+            self.assertIn("mcp sdk: present", out)
+        else:
+            self.assertIn("mcp sdk: absent", out)
+            self.assertIn('pip install -e ".[mcp]"', out)
 
     def test_selftest_fails_when_a_command_cannot_be_resolved(self):
         p = _write(self.tmp, '[tools.t]\ncommand = "cousin-nowhere-at-all"\n'
@@ -826,13 +847,13 @@ class CliCase(unittest.TestCase):
                                            "mcp.shared.version": None}):
             rc, out, err = _main(["--registry", str(self.registry), "--versions"])
         self.assertEqual(rc, 2)
-        self.assertIn('pip install "cousin-framework[mcp]"', err)
+        self.assertIn('pip install -e ".[mcp]"', err)
 
     def test_serving_without_the_sdk_exits_2_with_the_remediation(self):
         with mock.patch.dict(sys.modules, {"mcp": None, "anyio": None}):
             rc, out, err = _main(["--registry", str(self.registry)])
         self.assertEqual(rc, 2)
-        self.assertIn('pip install "cousin-framework[mcp]"', err)
+        self.assertIn('pip install -e ".[mcp]"', err)
 
     def test_bad_registry_is_exit_2_with_the_reason(self):
         p = _write(self.tmp, '[tools.x]\ndescription = "d"\n'

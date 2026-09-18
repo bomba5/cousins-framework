@@ -75,7 +75,7 @@ def sweep_main(argv=None):
                    help="framework root (else FRAMEWORK_ROOT)")
     args = parser.parse_args(argv)
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
         print("cousin-sweep: %s" % err, file=sys.stderr)
         return 2

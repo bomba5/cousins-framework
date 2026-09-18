@@ -170,15 +170,23 @@ class TestStatic(ConsoleCase):
 
 class TestEntryPoint(ConsoleCase):
     def test_main_needs_a_root(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        import contextlib
+        import tempfile
+        # Outside any checkout: inside one, the root defaults to it.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp), \
+                mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(app.console_main(["--port", "0"]), 2)
 
     def test_cousin_ui_points_at_cousin_console(self):
         import contextlib
         import io
         from cousin_lib.ui import ui_main
+        import tempfile
         err = io.StringIO()
-        with mock.patch.dict(os.environ, {}, clear=True), \
+        # Outside any checkout: inside one, the root defaults to it.
+        with tempfile.TemporaryDirectory() as tmp, \
+                contextlib.chdir(tmp), \
+                mock.patch.dict(os.environ, {}, clear=True), \
                 contextlib.redirect_stderr(err):
             rc = ui_main(["--port", "0"])
         self.assertEqual(rc, 2)
@@ -198,6 +206,36 @@ class TestEntryPoint(ConsoleCase):
         _, body = self.get("/api/cousins")
         self.assertEqual([c["slug"] for c in body["cousins"]], ["wren"])
         self.assertEqual(os.environ.get("FRAMEWORK_ROOT"), str(self.root))
+
+
+class TestServingLineReachesAPipe(unittest.TestCase):
+    """Under systemd stdout is a pipe, block-buffered by default: the
+    documented "serving" journal line must be flushed when it is
+    printed, not when the buffer fills (it never did)."""
+
+    def test_serving_line_arrives_while_the_console_runs(self):
+        import pathlib
+        import select
+        import subprocess
+        import sys
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "config").mkdir()
+            env = dict(os.environ, FRAMEWORK_ROOT=tmp)
+            env.pop("PYTHONUNBUFFERED", None)
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "cousin_lib.console.app",
+                 "--root", tmp, "--port", "0"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL, env=env)
+            try:
+                ready, _, _ = select.select([proc.stdout], [], [], 20)
+                line = proc.stdout.readline().decode() if ready else ""
+            finally:
+                proc.kill()
+                proc.wait()
+                proc.stdout.close()
+        self.assertIn("cousin-console: serving", line)
 
 
 if __name__ == "__main__":

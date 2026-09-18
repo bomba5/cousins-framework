@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,11 +32,37 @@ class GateResult:
     hits: list
 
 
-def run_gate(root, name_terms=None, denylist_path=None):
+def git_visible_files(root):
+    """The files git would publish from root: tracked, plus untracked
+    ones .gitignore does not exclude, relative to root. None when root
+    is not inside a git work tree (or git is absent): the caller then
+    scans the whole tree, never less."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached",
+             "--others", "--exclude-standard"],
+            capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return sorted({p for p in r.stdout.decode("utf-8", "replace")
+                   .split("\0") if p})
+
+
+def run_gate(root, name_terms=None, denylist_path=None, git_visible=False):
+    """git_visible: scan only what git would publish (see
+    git_visible_files), so a live install's gitignored cousins/ and
+    config/ under the checkout are not reported as tree content."""
     terms = list(name_terms or [])
     if denylist_path is not None:
         terms += load_denylist(denylist_path)
-    hits = Scanner(name_terms=terms).scan_tree(root)
+    scanner = Scanner(name_terms=terms)
+    files = git_visible_files(root) if git_visible else None
+    if files is None:
+        hits = scanner.scan_tree(root)
+    else:
+        hits = scanner.scan_files(root, files)
     return GateResult(passed=not hits, hits=hits)
 
 
@@ -273,6 +300,15 @@ class Scanner:
                 )
         return hits
 
+    def _scan_file(self, path, rel):
+        raw = path.read_bytes()
+        if b"\x00" in raw[:8192]:
+            if path.suffix.lower() not in _BINARY_ALLOWLIST:
+                return [Hit(term=path.name, file=rel, kind="binary",
+                            position="binary")]
+            return []
+        return self.scan_text(raw.decode("utf-8", "replace"), rel)
+
     def scan_tree(self, root):
         root = Path(root)
         hits = []
@@ -284,13 +320,19 @@ class Scanner:
                     # main checkout's absolute path, never tree content
                     continue
                 path = Path(dirpath) / name
-                rel = path.relative_to(root).as_posix()
-                raw = path.read_bytes()
-                if b"\x00" in raw[:8192]:
-                    if path.suffix.lower() not in _BINARY_ALLOWLIST:
-                        hits.append(
-                            Hit(term=name, file=rel, kind="binary", position="binary")
-                        )
-                    continue
-                hits.extend(self.scan_text(raw.decode("utf-8", "replace"), rel))
+                hits.extend(self._scan_file(
+                    path, path.relative_to(root).as_posix()))
+        return hits
+
+    def scan_files(self, root, relpaths):
+        """Scan exactly these files under root (a listing such as
+        git_visible_files). A listed path that is not a regular file
+        (deleted in the work tree, a submodule) is skipped."""
+        root = Path(root)
+        hits = []
+        for rel in sorted(relpaths):
+            path = root / rel
+            if path.is_symlink() or not path.is_file():
+                continue
+            hits.extend(self._scan_file(path, Path(rel).as_posix()))
         return hits

@@ -43,7 +43,9 @@ class HarnessSeam(unittest.TestCase):
             cfg = config.harness_config(Path(root))
             self.assertEqual(set(cfg), {"transcripts_dir", "auto_memory_dir",
                                         "flip_when_transcript_mb",
-                                        "settings_file"})
+                                        "settings_file",
+                                        "attention_patterns"})
+            self.assertEqual(cfg["attention_patterns"], [])
             self.assertIsNone(cfg["auto_memory_dir"])
             self.assertIsNone(cfg["settings_file"])
 
@@ -57,6 +59,38 @@ class HarnessSeam(unittest.TestCase):
         self.assertEqual(
             config.expand_harness_path("/var/lib/harness", Path("/x")),
             Path("/var/lib/harness"))
+
+    def test_a_leading_tilde_is_the_user_home(self):
+        # The harness keeps its state under the user's home; a preset
+        # must be copyable without editing in the account's path.
+        home = Path("/srv/fw/cousins/testa")
+        self.assertEqual(
+            config.expand_harness_path("~/.h/projects/{home_encoded}", home),
+            Path.home() / ".h" / "projects" / "-srv-fw-cousins-testa")
+
+    def test_attention_patterns_are_a_list_of_strings_or_loud(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "config").mkdir()
+            path = Path(root) / "config" / "harness.toml"
+            path.write_text('attention_patterns = ["Select login method"]\n')
+            self.assertEqual(config.harness_config(Path(root))
+                             ["attention_patterns"], ["Select login method"])
+            path.write_text('attention_patterns = "Select login method"\n')
+            with self.assertRaises(config.MissingConfigError):
+                config.harness_config(Path(root))
+
+    def test_the_shipped_claude_code_preset_parses(self):
+        preset = (Path(__file__).resolve().parents[1] / "config"
+                  / "harness.toml.claude-code.example")
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "config").mkdir()
+            (Path(root) / "config" / "harness.toml").write_text(
+                preset.read_text())
+            cfg = config.harness_config(Path(root))
+            self.assertTrue(cfg["transcripts_dir"])
+            self.assertTrue(cfg["auto_memory_dir"])
+            self.assertTrue(cfg["settings_file"])
+            self.assertTrue(cfg["attention_patterns"])
 
     def test_unparsable_file_is_loud(self):
         with tempfile.TemporaryDirectory() as root:

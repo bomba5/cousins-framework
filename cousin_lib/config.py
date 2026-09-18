@@ -121,7 +121,11 @@ class FrameworkConfig:
     has to be running for the fleet to be enumerable."""
 
     def __init__(self, root):
-        self.root = Path(root)
+        # Absolute from the start: the root is written into files the
+        # agent reads from the cousin home (.mcp.json, hook commands),
+        # where a relative root such as "." names the wrong directory.
+        # abspath, not resolve: a symlinked checkout keeps its name.
+        self.root = Path(os.path.abspath(root))
 
     @classmethod
     def from_env(cls):
@@ -134,20 +138,36 @@ class FrameworkConfig:
         return cls(root)
 
     @classmethod
-    def resolve(cls, flag_value=None):
+    def resolve(cls, flag_value=None, *, cwd_fallback=False):
         """The one root-discovery rule every entry point uses: an
-        explicit --root flag wins, else FRAMEWORK_ROOT, else a loud
-        error naming both channels. Sharing it is what keeps two
+        explicit --root flag wins, else FRAMEWORK_ROOT, else - for a
+        command a person types (cwd_fallback) - the working directory
+        when it is a checkout (see looks_like_checkout), else a loud
+        error naming the channels. Sharing it is what keeps two
         commands from disagreeing about how to be told the same fact -
-        a disagreement an adopter finds by failing, not by --help."""
+        a disagreement an adopter finds by failing, not by --help.
+        Library code never passes cwd_fallback: a daemon's working
+        directory is not a statement about which install it serves."""
         root = flag_value or os.environ.get("FRAMEWORK_ROOT")
+        if not root and cwd_fallback and cls.looks_like_checkout(
+                os.getcwd()):
+            root = os.getcwd()
         if not root:
             raise MissingConfigError(
-                "no framework root; pass --root <checkout> or set "
-                "FRAMEWORK_ROOT. The root locates the cousin registry "
-                "and config/ (typically the checkout itself)."
+                "no framework root; pass --root <checkout>, set "
+                "FRAMEWORK_ROOT, or run from inside the checkout. The "
+                "root locates the cousin registry and config/ "
+                "(typically the checkout itself)."
             )
         return cls(root)
+
+    @staticmethod
+    def looks_like_checkout(directory):
+        """A directory holding templates/cousin-CLAUDE.template.md and a
+        config/ directory: the shape of a framework checkout."""
+        d = Path(directory)
+        return ((d / "templates" / "cousin-CLAUDE.template.md").is_file()
+                and (d / "config").is_dir())
 
     def list_cousins(self):
         base = self.root / "cousins"
@@ -215,7 +235,9 @@ def harness_config(root):
     and scripted MCP approval are all off).
     Unparsable, or a threshold that is not a positive number: loud,
     because it was promised. Path values are templates; expand them
-    per cousin with expand_harness_path."""
+    per cousin with expand_harness_path. attention_patterns: pane text
+    that means the agent is waiting on a human (a login menu), which
+    the console flags on a running cousin's row; absent, []."""
     data = _read_harness_toml(root)
     if data is None:
         return None
@@ -227,17 +249,25 @@ def harness_config(root):
         raise MissingConfigError(
             "config/harness.toml flip_when_transcript_mb must be a"
             " positive number of megabytes, got %r" % (threshold,))
+    patterns = data.get("attention_patterns", [])
+    if (not isinstance(patterns, list)
+            or not all(isinstance(p, str) and p for p in patterns)):
+        raise MissingConfigError(
+            "config/harness.toml attention_patterns must be a list of"
+            " non-empty strings, got %r" % (patterns,))
     return {"transcripts_dir": data.get("transcripts_dir"),
             "auto_memory_dir": data.get("auto_memory_dir"),
             "flip_when_transcript_mb": threshold,
-            "settings_file": data.get("settings_file")}
+            "settings_file": data.get("settings_file"),
+            "attention_patterns": list(patterns)}
 
 
 def expand_harness_path(template, home):
     """Expand a harness.toml path template for one cousin home. {home}
     is the home verbatim; {home_encoded} is the harness's project-dir
-    encoding of it: every '/' becomes '-', so /a/b -> -a-b."""
+    encoding of it: every '/' becomes '-', so /a/b -> -a-b. A leading
+    ~ is the user's home, as the shell would read it."""
     home = Path(home)
     encoded = str(home).replace("/", "-")
     return Path(template.replace("{home_encoded}", encoded)
-                        .replace("{home}", str(home)))
+                        .replace("{home}", str(home))).expanduser()

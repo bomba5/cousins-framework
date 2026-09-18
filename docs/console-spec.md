@@ -185,9 +185,10 @@ from the tokens seam below.
 | `heartbeat` | int | `[heartbeat] context_beat_seconds` (3600 default) |
 | `flipAt` | str or null | `[lifecycle] flip_at` |
 | `model` | str or null | what the next start renders into the agent command's `{model}`: `[runtime] model`, else `config/harness.toml [agent] default_model`, else null (a start with the placeholder would then fail naming both files; the row shows nothing rather than a guess) |
-| `effort` | str or null | likewise for `{effort}`: `[runtime] effort`, else `[agent] default_effort`, else null; one of `low`, `medium`, `high`, `max` |
+| `effort` | str or null | likewise for `{effort}`: `[runtime] effort`, else `[agent] default_effort`, else null; one of `low`, `medium`, `high`, `xhigh`, `max` |
 | `hidden` | bool | `[cousin] hidden` (default false; the console is this key's consumer) |
 | `status` | `"running"` or `"stopped"` | tmux session exists (workers: always `"running"`, meaning enrolled) |
+| `attention` | str or null | for a local running cousin, the first of `config/harness.toml attention_patterns` found in the pane's last 20 lines (the same capture `active` hashes), else null. "running" says a session exists, not that the agent works: a pane parked on the harness's login menu is flagged, and the card shows "needs attention" |
 | `chat` | `"ok"`, `"down"` or `"none"` | `/health` reachable, not reachable, no port |
 | `active` | bool | the pane's last 20 lines changed within 60 s (capture-pane hash) |
 | `pid` | int or null | the agent process in the session: `tmux display-message -p -t =<session> '#{pane_pid}'` through the console's binary and socket, only for a local running cousin; null otherwise or when tmux prints nothing usable |

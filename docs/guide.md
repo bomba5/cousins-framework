@@ -15,18 +15,30 @@ answer is almost always "nothing," and that is the design.
 
 ## 1. Install and make a cousin
 
+Prerequisites: Python >= 3.11, `python3-venv`, `tmux` and `git`
+(Ubuntu 24.04: `sudo apt-get update && sudo apt-get install -y
+python3-venv tmux git`). The repository may be private, so the clone
+needs GitHub access (a deploy key or a token). The complete new-machine
+procedure, including the agent, the units and the uninstall, is
+`docs/install.md`; this section is the short path.
+
 ```
 git clone <repo> cousin-framework && cd cousin-framework
-pip install -e .
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[mcp]"                     # from the checkout; not on PyPI
+python3 -m unittest discover -s tests
 
-cousin-spawn testa --root . --name Testa --role "a test cousin" \
+cousin-spawn testa --root "$PWD" --name Testa --role "a test cousin" \
     --voice "Plain and helpful. Answer the question first."
-#   -> created testa at ./cousins/testa (chat port 8090)
+#   -> created testa at <checkout>/cousins/testa (chat port 8090)
 ```
 
 `--root` is the checkout (it holds `templates/` and `cousins/`); every
 command that needs the root takes `--root` or `FRAMEWORK_ROOT`
-identically. The voice is not optional: a cousin with no authored
+identically, and a command typed inside the checkout defaults to it.
+The root is made absolute before it is written into the cousin's
+files, because the agent runs from the cousin home, where a relative
+path would name nothing. The voice is not optional: a cousin with no authored
 voice would improvise one on a degraded boot, so an empty `--voice` is
 a spawn failure, not a TODO.
 
@@ -72,8 +84,15 @@ embedding service.
 # config/embedding.toml  (this file is gitignored)
 url = "http://localhost:11434/api/embeddings"   # e.g. a local Ollama
 model = "nomic-embed-text"
-timeout_s = 30
+timeout_s = 120
 ```
+
+For a local Ollama: `curl -fsSL https://ollama.com/install.sh | sh`
+(about 2.4 GB of disk even CPU-only), then `ollama pull
+nomic-embed-text`. `timeout_s` must exceed the time one chunk takes to
+embed: on a CPU without AVX that was 32 s, and a shorter timeout makes
+every search wait it out and fall back to keyword; 30 is plenty with a
+GPU.
 
 With it, `cousin-memory search "coffee upkeep"` finds `upkeep.md` by
 meaning even though "coffee" is nowhere in it. Long files are embedded
@@ -130,6 +149,7 @@ directory. The destination is always yours to name:
 ```
 cousin-backup --dest /var/backups/cousins
 #   -> snapshot written to /var/backups/cousins/testa/2026-09-17
+```
 
 **Decision prose with shell characters:** the argv form runs through
 the caller's shell first, so backticks and `$(...)` in a double-quoted
@@ -601,9 +621,13 @@ SQLite databases (`data/*.db`, `memory/fts_index.db`) are opaque
 binaries, and `cousins/` holds private homes. Those hits mean the gate
 is doing its job, which is exactly why `config/` and `cousins/` are
 gitignored: a credential or a private home must never reach a
-published tree in the first place. The gate also runs inside this
-framework's own test suite on every commit, over its own tree, so
-"the gate runs on every commit" is enforced, not just asserted.
+published tree in the first place. On a checkout that also hosts a
+live install, `cousin-gate --git-visible` scans only what git would
+publish (tracked files and untracked ones `.gitignore` does not
+exclude). The gate also runs inside this framework's own test suite on
+every commit, over its own tree in exactly that mode, so "the gate
+runs on every commit" is enforced, not just asserted, and a live
+`cousins/` under the checkout does not fail the suite.
 
 ## 12. Running it unattended
 
@@ -677,7 +701,7 @@ cousin-mcp --registry config/mcp-registry.toml.example --selftest
 #        cousin-reply -> beside the interpreter
 #        cousin-job -> beside the interpreter
 #        cousin-schedule -> beside the interpreter
-#      mcp sdk: absent; the MCP SDK is not importable; serving needs the extra: pip install "cousin-framework[mcp]"
+#      mcp sdk: absent; the MCP SDK is not importable; serving needs the extra: pip install -e ".[mcp]" from the checkout, ...
 #      selftest ok: 4 schema(s) built
 ```
 
@@ -687,8 +711,8 @@ and says where each command resolves - beside the interpreter this
 resolves nowhere. Serving does need the SDK, as the optional extra:
 
 ```
-pip install "cousin-framework[mcp]"
-cousin-mcp approve testa --root .
+pip install -e ".[mcp]"                  # from the checkout, in its venv
+cousin-mcp approve testa --root "$PWD"
 #   -> approved ./cousins/testa in ~/.harness-settings.json: trusted, "cousin" enabled; ...
 ```
 
@@ -699,8 +723,13 @@ and `"cousin"` in `enabledMcpjsonServers`. For a cousin spawned
 before that:
 
 ```
-cousin-spawn testa --root . --repair-settings
+cousin-spawn testa --root "$PWD" --repair-settings
 ```
+
+The same command rewrites the `cousin` entry of the home's `.mcp.json`
+(its command, `--registry` path and identity env, all absolute),
+keeping any other server or env key there; run it on a cousin spawned
+with a relative `--root` by an older release.
 
 `approve` records the harness's acceptance in the settings file
 `config/harness.toml settings_file` names and edits nothing else; with
@@ -723,9 +752,8 @@ The contract, the registry shape and the stated limits are in
 
 Every subsystem above has a contract under `docs/`:
 `spawn-and-template-spec.md`, `chat-server-spec.md`,
-`lifecycle-spec.md`, `session-hooks.md`, `loops-spec.md`, `memory-tiers.md`,
-`lifecycle-spec.md`, `lifecycle-surgery.md`, `loops-spec.md`, `memory-tiers.md`,
-`media-spec.md`, `telegram-spec.md`, `hive-spec.md`, `mcp-spec.md`,
+`lifecycle-spec.md`, `lifecycle-surgery.md`, `session-hooks.md`,
+`loops-spec.md`, `memory-tiers.md`, `media-spec.md`, `telegram-spec.md`, `hive-spec.md`, `mcp-spec.md`,
 `ui-spec.md`, `operator-interface.md`, `configuration.md`,
-`operations.md`, and `gate.md`. The specs say exactly what each feature does, including in
+`operations.md`, `install.md`, and `gate.md`. The specs say exactly what each feature does, including in
 its unconfigured state; this guide is the way in.

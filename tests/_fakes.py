@@ -10,7 +10,11 @@ text always embeds the same, different text usually differs.
 import contextlib
 import http.server
 import json
+import os
+import pathlib
+import stat
 import threading
+from unittest import mock
 
 
 def default_vector(text):
@@ -60,3 +64,20 @@ def fake_embedder(vector_for=None, calls=None):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def agent_on_path(testcase, directory, name="my-agent"):
+    """Put an executable stub named `name` in <directory>/bin and that
+    bin first on PATH for the test: a start's preflight resolves the
+    agent command's executable, and fixtures name a stand-in agent
+    that must resolve without being a real one."""
+    bindir = pathlib.Path(directory) / "bin"
+    bindir.mkdir(exist_ok=True)
+    stub = bindir / name
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    patcher = mock.patch.dict(os.environ, {
+        "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")})
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
+    return stub

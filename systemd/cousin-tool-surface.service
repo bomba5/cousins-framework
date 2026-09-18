@@ -5,6 +5,7 @@ Description=cousin-framework tool-surface manifest (data/tool-surface.md from ev
 Type=oneshot
 WorkingDirectory={{ROOT}}
 Environment=FRAMEWORK_ROOT={{ROOT}}
-Environment=PATH={{USER_BIN}}:{{SYSTEM_PATH}}
+Environment=PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}
+Environment=PYTHONUNBUFFERED=1
 ExecStart={{USER_BIN}}/cousin-tool-surface --bin {{USER_BIN}}
 TimeoutStartSec=10min

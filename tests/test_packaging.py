@@ -127,6 +127,14 @@ class TestPerimeterHygiene(unittest.TestCase):
                           "cousins/wren/cousin.toml"),
             "a live fleet's private home would stage")
 
+    def test_the_root_shared_tier_is_ignored(self):
+        # <root>/shared/ holds the shared memory tier and the hive
+        # database with its bearer tokens: runtime state of one
+        # install, and a live one under the checkout must not stage
+        # (nor fail the self-gate as untracked content).
+        for rel in ("shared/hive/hive.db", "shared/proposed/x.md"):
+            self.assertTrue(self._ignored(self.gitignore, rel), rel)
+
     def test_an_example_config_is_NOT_ignored(self):
         # The carve-out that lets safe examples ship: it can only fire
         # if the ignore excludes config's CONTENTS, not the directory -

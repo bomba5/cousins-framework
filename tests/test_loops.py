@@ -462,5 +462,104 @@ class TestCliAndRun(LoopsCase):
         self.assertIn("report", out)
 
 
+class TestOneShotsFireFromTheTick(LoopsCase):
+    """docs/loops-spec.md tick step 4: the daemon fires due one-shots
+    from the scheduler store. Canary: before the fix nothing but a
+    hand-run `cousin-schedule tick` ever fired them."""
+
+    def _add_job(self, slug, prompt, target_ts):
+        from cousin_lib import schedule
+        conn = schedule._db()
+        try:
+            cur = conn.execute(
+                "INSERT INTO scheduled_jobs (cousin, target_ts, prompt,"
+                " created_at) VALUES (?, ?, ?, ?)",
+                (slug, int(target_ts), prompt, int(target_ts) - 60))
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+    def _status(self, job_id):
+        from cousin_lib import schedule
+        conn = schedule._db()
+        try:
+            return conn.execute(
+                "SELECT status FROM scheduled_jobs WHERE id=?",
+                (job_id,)).fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_due_one_shot_fires_from_a_loops_tick_exactly_once(self):
+        self._cousin("wren")
+        now = time.time()
+        job = self._add_job("wren", "check the kettle", now - 5)
+        self._tick(now=now)
+        texts = [t for s, t in self.delivered if s == "wren"]
+        self.assertEqual(len(texts), 1, self.delivered)
+        # Provenance prefix is contract (schedule.tick docstring).
+        self.assertTrue(texts[0].startswith("[cousin-schedule] "))
+        self.assertIn("check the kettle", texts[0])
+        self.assertEqual(self._status(job), "fired")
+        self._tick(now=now + 30)
+        self.assertEqual(len(self.delivered), 1)
+
+    def test_future_one_shot_waits(self):
+        self._cousin("wren")
+        now = time.time()
+        job = self._add_job("wren", "later", now + 3600)
+        self._tick(now=now)
+        self.assertEqual(self.delivered, [])
+        self.assertEqual(self._status(job), "pending")
+
+    def test_failed_delivery_keeps_it_pending_and_others_still_fire(self):
+        self._cousin("wren")
+        self._cousin("testa")
+        now = time.time()
+        bad = self._add_job("wren", "first", now - 10)
+        good = self._add_job("testa", "second", now - 5)
+
+        def deliver(slug, text):
+            if slug == "wren":
+                raise RuntimeError("pane gone")
+            self.delivered.append((slug, text))
+            return True
+
+        report = self._tick(now=now, deliver=deliver)
+        self.assertEqual(self._status(bad), "pending")
+        self.assertEqual(self._status(good), "fired")
+        self.assertTrue(any("#%d" % bad in e for e in report["errors"]),
+                        report["errors"])
+        self.assertIsNotNone(report.get("scheduled"))
+
+    def test_false_delivery_is_a_failure_not_a_fire(self):
+        self._cousin("wren")
+        now = time.time()
+        job = self._add_job("wren", "x", now - 5)
+        self._tick(now=now, deliver=lambda slug, text: False)
+        self.assertEqual(self._status(job), "pending")
+
+    def test_dead_cousin_holds_its_one_shot_until_it_returns(self):
+        self._cousin("wren")
+        now = time.time()
+        job = self._add_job("wren", "x", now - 5)
+        self._tick(now=now, is_alive=lambda slug: False)
+        self.assertEqual(self.delivered, [])
+        self.assertEqual(self._status(job), "pending")
+        self._tick(now=now + 30)
+        self.assertEqual(self._status(job), "fired")
+
+    def test_a_broken_scheduler_store_never_costs_the_tick(self):
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "report"\ninterval_seconds = 60\n'
+            'prompt = "write the report"\n'))
+        with mock.patch("cousin_lib.schedule._db",
+                        side_effect=RuntimeError("disk on fire")):
+            report = self._tick()
+        self.assertTrue(any("write the report" in t
+                            for _, t in self.delivered))
+        self.assertTrue(any("disk on fire" in e for e in report["errors"]))
+
+
 if __name__ == "__main__":
     unittest.main()

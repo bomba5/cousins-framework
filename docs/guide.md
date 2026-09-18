@@ -390,6 +390,11 @@ one-shot future prompt:
 cousin-schedule add "in 30m" "Remember to restart the indexer."
 ```
 
+The loops daemon fires it on the first tick after its time, with a
+`[cousin-schedule]` prefix, once the cousin is alive; a failed
+delivery stays pending and retries next tick. `cousin-schedule tick`
+does the same by hand when no daemon runs.
+
 A cousin can also keep its own session-cadence breadcrumbs with
 `cousin-cycle` (`cousin-cycle inc --action "shipped the report"`,
 `cousin-cycle state`) - counters the boot packet reads to notice when

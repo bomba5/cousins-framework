@@ -828,6 +828,36 @@ def _guard_transcript_size(is_alive, now, report):
         return  # one cousin per tick
 
 
+class _CousinNotAlive(Exception):
+    """A one-shot whose cousin is down: held pending, not an error."""
+
+
+def _fire_one_shots(deliver, is_alive, now, report):
+    """Tick step 4: fire due one-shots from the scheduler store
+    (cousin_lib.schedule) through the daemon's own delivery seam.
+    schedule.tick owns the store semantics - mark fired only after
+    delivery returned, per-job isolation - and this adapter only maps
+    the daemon's seam onto it: the provenance prefix, the liveness
+    gate (a down cousin keeps its job pending until it returns), and a
+    False delivery counted as the failure it is."""
+    from cousin_lib import schedule
+
+    def deliver_one(slug, prompt):
+        if not is_alive(slug):
+            raise _CousinNotAlive(slug)
+        if not deliver(slug, "[cousin-schedule] %s" % prompt):
+            raise RuntimeError("delivery failed for %s" % slug)
+
+    def on_error(job_id, err):
+        if isinstance(err, _CousinNotAlive):
+            return
+        report["errors"].append(
+            "scheduled job #%d kept pending: %s" % (job_id, err))
+
+    report["scheduled"] = schedule.tick(
+        now_ts=int(now), deliver=deliver_one, on_error=on_error)
+
+
 def _default_do_flip(slug):
     from cousin_lib.flip import flip
     return flip(slug)
@@ -836,12 +866,12 @@ def _default_do_flip(slug):
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     """One scheduler tick, per docs/loops-spec.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
-    commit-after-delivery, request consumption, one-shot firing,
-    persist. Returns a report."""
+    commit-after-delivery, request consumption, one-shot firing
+    (_fire_one_shots), persist. Returns a report."""
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
-              "ready": [], "guarded": []}
+              "ready": [], "guarded": [], "scheduled": 0}
     _walk_timed_flips(state, deliver, do_flip, now, report)
     _fire_daily_flips(state, do_flip, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
@@ -906,6 +936,11 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
             # the rest of the walk.
             report["errors"].append("%s: %s" % (config.slug, err))
     _consume_requests(state, deliver, report["errors"])
+    try:
+        _fire_one_shots(deliver, is_alive, now, report)
+    except Exception as err:
+        # A broken scheduler store never costs the loops their tick.
+        report["errors"].append("one-shots: %s" % err)
     try:
         _guard_transcript_size(is_alive, now, report)
     except Exception as err:

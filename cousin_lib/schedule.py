@@ -1,9 +1,9 @@
 """One-shot prompt scheduler.
 
-`cousin-schedule add` stores a prompt with a target time; a periodic
-`cousin-schedule tick` (run by whatever timer the install prefers -
-cron, a systemd timer, a heartbeat) fires everything due by handing the
-prompt to the delivery seam. Jobs are scoped per cousin; the database
+`cousin-schedule add` stores a prompt with a target time; the loops
+daemon's tick (cousin_lib.loops, step 4 of docs/loops-spec.md) fires
+everything due by handing the prompt to its delivery seam, and
+`cousin-schedule tick` does the same by hand when no daemon runs. Jobs are scoped per cousin; the database
 is shared per install so one tick serves the whole fleet.
 
 Identity and root come from the environment (COUSIN_HOME,
@@ -78,7 +78,12 @@ def parse_when(when, *, now=None):
     )
 
 
-def tick(*, now_ts=None, deliver):
+def _print_error(job_id, err):
+    print("cousin-schedule: job #%d delivery failed,"
+          " kept pending: %s" % (job_id, err), file=sys.stderr)
+
+
+def tick(*, now_ts=None, deliver, on_error=_print_error):
     """Fire every pending job whose time has come and return how many
     fired.
 
@@ -96,7 +101,13 @@ def tick(*, now_ts=None, deliver):
     unlabelled it is indistinguishable from the operator having said
     it. The scheduled text is preserved verbatim AFTER the prefix;
     callers must never assume the delivered line equals the scheduled
-    string byte-for-byte."""
+    string byte-for-byte.
+
+    `deliver(cousin, prompt)` receives the RAW prompt; adding the
+    provenance prefix is the deliverer's job (`_default_deliver` here,
+    the loops daemon's adapter there). Any exception it raises keeps
+    that job pending and is reported through `on_error(job_id, err)`;
+    one failing job never stops the rest of the walk."""
     now_ts = now_ts or int(datetime.now().timestamp())
     conn = _db()
     try:
@@ -110,9 +121,7 @@ def tick(*, now_ts=None, deliver):
             try:
                 deliver(cousin, prompt)
             except Exception as err:
-                print("cousin-schedule: job #%d delivery failed,"
-                      " kept pending: %s" % (job_id, err),
-                      file=sys.stderr)
+                on_error(job_id, err)
                 continue
             conn.execute(
                 "UPDATE scheduled_jobs SET status='fired', fired_at=?"

@@ -121,7 +121,11 @@ class FrameworkConfig:
     has to be running for the fleet to be enumerable."""
 
     def __init__(self, root):
-        self.root = Path(root)
+        # Absolute from the start: the root is written into files the
+        # agent reads from the cousin home (.mcp.json, hook commands),
+        # where a relative root such as "." names the wrong directory.
+        # abspath, not resolve: a symlinked checkout keeps its name.
+        self.root = Path(os.path.abspath(root))
 
     @classmethod
     def from_env(cls):

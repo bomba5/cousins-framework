@@ -79,7 +79,10 @@ def desired_hooks(home, *, root, python=None, hooks_root=None):
     and the shell scripts that could not be found. The job hook runs
     under `python` (default: this interpreter, so the hook imports the
     same install that wrote it)."""
-    home = pathlib.Path(home)
+    # Absolute whatever the caller passed: the harness runs these
+    # commands from the cousin home, where a relative path misleads.
+    home = pathlib.Path(os.path.abspath(home))
+    root = os.path.abspath(root)
     hooks_root = pathlib.Path(hooks_root) if hooks_root else hooks_dir()
     python = python or sys.executable
     wanted, missing = {}, []

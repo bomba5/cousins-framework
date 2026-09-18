@@ -32,7 +32,8 @@ from cousin_lib.config import (
     harness_config,
 )
 from cousin_lib.harness_settings import SettingsError, apply_project_settings
-from cousin_lib.mcp_server import provision_mcp
+from cousin_lib.mcp_server import (RegistrationError, provision_mcp,
+                                   refresh_mcp_json)
 from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
@@ -622,12 +623,16 @@ def _repair_settings(root, slug):
         return 2
     try:
         out = apply_project_settings(home, root=root)
-    except SettingsError as err:
+        reg = refresh_mcp_json(home, root=root, slug=slug)
+    except (SettingsError, RegistrationError) as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)
         return 2
     print("settings %s: hooks for %s; \"cousin\" MCP server approved;"
           " read at the cousin's next session start"
           % (out["path"], ", ".join(out["events"])))
+    print("registration %s: %s" % (
+        reg["path"], "rewritten with absolute paths" if reg["changed"]
+        else "already current"))
     for missing in out["missing"]:
         print("cousin-spawn: hook script not found, not wired: %s"
               % missing, file=sys.stderr)
@@ -678,8 +683,10 @@ def spawn_main(argv=None):
                         help="create nothing: (re)write an EXISTING"
                              " cousin's harness project settings"
                              " (<home>/.claude/settings.json: its hooks"
-                             " and its MCP server approval), merging"
-                             " with what is there; safe to repeat")
+                             " and its MCP server approval) and its"
+                             " <home>/.mcp.json `cousin` entry (absolute"
+                             " paths), merging with what is there; safe"
+                             " to repeat")
     args = parser.parse_args(argv)
     if not args.repair_settings:
         for flag, value in (("--role", args.role), ("--voice", args.voice)):

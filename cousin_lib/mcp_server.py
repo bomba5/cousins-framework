@@ -718,13 +718,71 @@ def mcp_json(home, slug, root):
     """The harness-side registration: the adapter over stdio (the one
     beside this interpreter, see adapter_command), pointed at the
     home's own registry, with the cousin's identity in env."""
-    home = pathlib.Path(home)
+    home = pathlib.Path(os.path.abspath(home))
+    root = os.path.abspath(root)
     return {"mcpServers": {SERVER_NAME: {
         "type": "stdio",
         "command": adapter_command(),
         "args": ["--registry", str(home / REGISTRY_NAME)],
         "env": {"COUSIN_HOME": str(home), "COUSIN_SLUG": slug,
                 "FRAMEWORK_ROOT": str(pathlib.Path(root))}}}}
+
+
+class RegistrationError(Exception):
+    """An existing .mcp.json cannot be merged; the message says why."""
+
+
+def refresh_mcp_json(home, *, root, slug):
+    """Bring <home>/.mcp.json's `cousin` entry up to date: its command,
+    its --registry path and the three identity env values are rewritten
+    to what spawn would write today (absolute paths), everything else
+    in the file - other servers, other args, other env keys - is kept.
+    Absent: written whole. Not a JSON object: refused, never clobbered.
+    Idempotent: a second run writes the same bytes. Returns
+    {path, changed}."""
+    home = pathlib.Path(os.path.abspath(home))
+    path = home / ".mcp.json"
+    fresh = mcp_json(home, slug, root)
+    want = fresh["mcpServers"][SERVER_NAME]
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError) as err:
+            raise RegistrationError("%s is unreadable, left as it is: %s"
+                                    % (path, err))
+        if not isinstance(data, dict):
+            raise RegistrationError("%s is not a JSON object, left as it is"
+                                    % path)
+        servers = data.setdefault("mcpServers", {})
+        if not isinstance(servers, dict):
+            raise RegistrationError("%s: mcpServers is not an object, left"
+                                    " as it is" % path)
+        entry = servers.get(SERVER_NAME)
+        if not isinstance(entry, dict):
+            entry = {}
+        args = entry.get("args")
+        if isinstance(args, list) and "--registry" in args \
+                and args.index("--registry") + 1 < len(args):
+            args = list(args)
+            args[args.index("--registry") + 1] = want["args"][1]
+        else:
+            args = list(want["args"])
+        env = entry.get("env")
+        env = dict(env) if isinstance(env, dict) else {}
+        env.update(want["env"])
+        servers[SERVER_NAME] = dict(entry, type=want["type"],
+                                    command=want["command"], args=args,
+                                    env=env)
+    else:
+        data = fresh
+    text = json.dumps(data, indent=2) + "\n"
+    changed = not path.exists() or path.read_text() != text
+    if changed:
+        fd, tmp = tempfile.mkstemp(dir=home, suffix=".tmp")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    return {"path": path, "changed": changed}
 
 
 def provision_mcp(home, *, root, slug, operator=None):

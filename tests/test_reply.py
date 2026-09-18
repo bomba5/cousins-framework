@@ -140,3 +140,97 @@ class TestReplyImage(TestSendReply):
         self.assertEqual(rc, 0)
         self.assertTrue((self.home / "chat" / "inbound" / "7.jpg").is_file())
         self.assertTrue(_Capture.received["payload"]["message"].strip())
+
+
+class TestReplyOutboundFilter(TestSendReply):
+    """cousin-reply crosses the outbound filter every outbound surface
+    crosses (docs/operations.md: exit 3 on a block, nothing sent).
+    Canary: before the fix the filter was wired into cousin-chat and
+    the media captions only, and a reply naming a protected term went
+    straight to the chat server."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "config").mkdir()
+        (self.root / "config" / "outbound-filter.json").write_text(
+            json.dumps({"terms": ["zorblatt"], "protected": ["kestrel"]}))
+        self.home = self.root / "cousins" / "wren"
+        self.home.mkdir(parents=True)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = %d\n'
+            '[operator]\nname = "Operator"\n' % self.port)
+
+    def _main(self, argv, *, root_env=True):
+        import contextlib
+        import io
+        import os
+        import sys
+        from unittest import mock
+        from cousin_lib.reply import reply_main
+        env = {"COUSIN_HOME": str(self.home)}
+        if root_env:
+            env["FRAMEWORK_ROOT"] = str(self.root)
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(sys, "stdin", io.StringIO("")), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(err):
+            if not root_env:
+                os.environ.pop("FRAMEWORK_ROOT", None)
+            rc = reply_main(argv)
+        return rc, err.getvalue()
+
+    def test_blocked_reply_exits_3_and_posts_nothing(self):
+        rc, err = self._main(["-m", "ask Zorblatt about it"])
+        self.assertEqual(rc, 3)
+        self.assertIn("zorblatt", err)
+        self.assertIsNone(_Capture.received)
+
+    def test_protected_slug_is_blocked(self):
+        rc, _ = self._main(["-m", "kestrel said hi"])
+        self.assertEqual(rc, 3)
+        self.assertIsNone(_Capture.received)
+
+    def test_blocked_reply_with_image_posts_nothing_and_lands_nothing(self):
+        png = self.home / "shot.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+        rc, _ = self._main(["-m", "zorblatt preview", "--image", str(png)])
+        self.assertEqual(rc, 3)
+        self.assertIsNone(_Capture.received)
+        self.assertFalse((self.home / "chat" / "inbound").exists())
+
+    def test_image_default_body_is_filtered_too(self):
+        png = self.home / "zorblatt.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+        rc, _ = self._main(["--image", str(png)])
+        self.assertEqual(rc, 3)
+        self.assertIsNone(_Capture.received)
+
+    def test_clean_reply_still_posts(self):
+        rc, _ = self._main(["-m", "all good here"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(_Capture.received["payload"]["message"],
+                         "all good here")
+
+    def test_root_falls_back_to_the_home_grandparent(self):
+        # A shell that exported only COUSIN_HOME must not lose the filter.
+        rc, _ = self._main(["-m", "zorblatt"], root_env=False)
+        self.assertEqual(rc, 3)
+        self.assertIsNone(_Capture.received)
+
+    def test_override_is_the_documented_escape_hatch(self):
+        import os
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"COUSIN_FILTER_OVERRIDE": "1"}):
+            rc, _ = self._main(["-m", "zorblatt"])
+        self.assertEqual(rc, 0)
+
+    def test_send_reply_checks_a_given_policy(self):
+        from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
+        cfg = CousinConfig.load(self.home)
+        with self.assertRaises(FilterBlocked):
+            send_reply(cfg, "zorblatt", policy=OutboundPolicy.load(self.root))
+        self.assertIsNone(_Capture.received)

@@ -5,6 +5,10 @@ cousin's surface. Two contract rules: a process without cousin context is
 refused rather than guessed, because a reply on the wrong surface is a
 disclosure; and the body travels as JSON so newlines survive shell
 quoting.
+
+The body crosses the outbound filter before anything touches the wire,
+exactly as cousin-chat and the media captions do: a blocked reply exits
+3 and nothing is posted (no message, no attachment).
 """
 import argparse
 import json
@@ -16,6 +20,7 @@ import urllib.error
 import urllib.request
 
 from cousin_lib.config import CousinConfig, MissingConfigError
+from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
 from cousin_lib.trace import traced_cli
 
 
@@ -35,10 +40,25 @@ def attach_image(home, message_id, image):
     return target
 
 
-def send_reply(cfg, body, user=None, reply_to=None):
+def framework_root_for(home):
+    """FRAMEWORK_ROOT, else the home's grandparent (homes live at
+    <root>/cousins/<slug>): a shell that exported only COUSIN_HOME must
+    not reply unfiltered."""
+    env = os.environ.get("FRAMEWORK_ROOT")
+    if env:
+        return pathlib.Path(env)
+    return pathlib.Path(os.path.abspath(home)).parent.parent
+
+
+def send_reply(cfg, body, user=None, reply_to=None, policy=None):
     body = body.rstrip("\n")
     if not body.strip():
         raise ValueError("empty message body")
+    if policy is not None:
+        # The recipient is a person on the operator surface, not a
+        # cousin: dest_slug is empty, as for a media caption.
+        policy.check(body, from_slug=cfg.slug, dest_slug="",
+                     surface="chat", context="reply")
     recipient = user or cfg.operator_name
     if not recipient:
         raise MissingConfigError(
@@ -94,7 +114,12 @@ def reply_main(argv=None):
         body = "(image: %s)" % image.name
     try:
         cfg = CousinConfig.from_env()
-        result = send_reply(cfg, body, user=args.user, reply_to=args.reply_to)
+        policy = OutboundPolicy.load(framework_root_for(cfg.home))
+        result = send_reply(cfg, body, user=args.user,
+                            reply_to=args.reply_to, policy=policy)
+    except FilterBlocked as e:
+        print("cousin-reply: %s" % e, file=sys.stderr)
+        return 3
     except (MissingConfigError, ValueError) as e:
         print("cousin-reply: %s" % e, file=sys.stderr)
         return 2

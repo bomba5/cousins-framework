@@ -150,7 +150,9 @@ class TestSweepCli(SweepCase):
             self.assertEqual(self._main(["compact"])[0], 0)
 
     def test_missing_root_is_a_usage_error(self):
-        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": ""}):
+        # Outside any checkout: inside one, the root defaults to it.
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": ""}), \
+                tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
             self.assertEqual(self._main(["compact"])[0], 2)
 
 

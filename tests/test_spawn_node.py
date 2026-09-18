@@ -220,7 +220,9 @@ class TestCli(SpawnNodeCase):
         self.assertNotIn("hive_", out)
 
     def test_no_root_is_a_usage_error(self):
-        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": ""}):
+        # Outside any checkout: inside one, the root defaults to it.
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": ""}), \
+                tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
             rc, _, err = self._main([
                 "testa", "--queen-url", QUEEN, "--name", "Testa",
                 "--role", "r", "--out", str(self.out)])

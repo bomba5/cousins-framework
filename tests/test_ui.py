@@ -1,4 +1,4 @@
-"""The web UI daemon: docs/ui-spec.md as executable contract.
+"""The web UI daemon: docs/reference/console-api.md as executable contract.
 
 The first test is the spec's opening sentence made executable: the
 daemon holds no state, so a fresh process serves every view from the

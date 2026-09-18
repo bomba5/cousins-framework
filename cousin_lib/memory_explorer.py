@@ -1,4 +1,4 @@
-"""The memory explorer's read model (docs/console-spec.md, "Memory
+"""The memory explorer's read model (docs/reference/console-api.md, "Memory
 explorer"): one cousin's memory as the layers it is actually built
 from, never a flat file list.
 

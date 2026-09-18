@@ -1,7 +1,7 @@
 # config/hive.toml - the console as the hive's queen. Copy to
 # config/hive.toml and fill in. Absent (or enabled = false): there is
 # no hive at all - no /hive/ route, no remote cousin cards, no token.
-# See docs/hive-spec.md and docs/deploying-a-node.md.
+# See docs/reference/hive-api.md and docs/remote-cousins.md.
 #
 # On: the console's own server answers the queen routes under /hive/,
 # shows remote cousins beside the local ones, and its spawn dialog can

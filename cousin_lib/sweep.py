@@ -4,7 +4,7 @@ Runs `cousin-memory compact` for every cousin home under the framework
 root, one at a time, and reports per cousin. The sweep only enumerates,
 sequences and reports: every safety rule (budget, hot window, lossless
 raw fold, uncertainty keeps) lives in the compactor itself. Two rules
-earned in the source framework:
+earned in an earlier version:
 
 - One cousin's failure never aborts the rest; the exit code carries
   "any failed" so the service unit's journal shows the alert.

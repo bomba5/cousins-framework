@@ -1,5 +1,5 @@
 """Static files for the console: the committed frontend under
-`cousin_lib/console_static/` (docs/console-spec.md, "Static files").
+`cousin_lib/console_static/` (docs/reference/console-api.md, "Static files").
 
 `serve_static(path) -> (status, headers, bytes)` is the whole surface;
 the server calls it for every non-`/api/` GET. Suffix allowlist, a

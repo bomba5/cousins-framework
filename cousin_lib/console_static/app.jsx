@@ -14,7 +14,7 @@ const NAV = [
 
 // Sidebar groups are a browser preference, not framework state: they live
 // in local storage under this key ({groups, assignments}) and nothing on
-// the server knows them (docs/console-spec.md, "the sidebar store moves
+// the server knows them (docs/reference/console-api.md, "the sidebar store moves
 // to the browser").
 const SIDEBAR_KEY = "console_sidebar_v1";
 const DEFAULT_GROUPS = [{ id: "sessions", name: "Sessions", collapsed: false }];
@@ -248,7 +248,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
 }
 
 // The login form, shown when the users file is configured and the
-// browser holds no session (docs/console-spec.md, "The auth model").
+// browser holds no session (docs/reference/console-api.md, "The auth model").
 function LoginScreen({ onLogin }) {
   const [user, setUser] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -393,7 +393,7 @@ function App() {
   }, []);
 
   // SSE event stream: the server sends a full snapshot on connect, then
-  // deltas (docs/console-spec.md, "/api/events"). Reconnect backs off from
+  // deltas (docs/reference/console-api.md, "/api/events"). Reconnect backs off from
   // 1 s to 15 s; a reconnect costs a fresh snapshot, never data.
   useEffectApp(() => {
     if (needLogin) return;

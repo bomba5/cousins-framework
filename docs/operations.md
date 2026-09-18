@@ -1,288 +1,334 @@
 # Operations
 
-How to run the framework unattended: install from a cold clone, the
-service units, the daily flip, backups, the fleet sweep, the
-tool-surface manifest, what to check when a cousin goes quiet, and
-the web console with its first user and first login.
-`docs/guide.md` narrates the features; this page is for the machine
-that runs them overnight.
+Running an install day to day: what each service does, where the logs are,
+backups, the weekly sweep, upgrades, and what to check when something looks
+wrong. It assumes you've done [install](install.md).
 
-Every value that belongs to one install (the checkout, the user, the
-wrapper directory) is a placeholder here and in `systemd/`. Nothing on
-this page names a real host.
+## What runs
 
-## 1. Install from a cold clone
+Five things run under your systemd user manager. The templates and how to
+install them are in [the units](../systemd/README.md).
 
-The complete procedure for a new machine, prerequisites to uninstall,
-is `docs/install.md`; follow it rather than this summary on a fresh
-box. The shape, on Ubuntu 24.04 (Python >= 3.11; the repository may be
-private, so the clone needs a deploy key or token):
+- **`cousin-loops.service`** is the scheduler. Every 30 seconds it ticks:
+  heartbeats, each cousin's `[[loops]]`, one-shot schedules, timed flip
+  requests, the daily `flip_at` flips and the transcript-size guard. It's the
+  only thing that fires recurring work, so don't add a cron job that also
+  fires a loop or a flip.
+- **`cousin-console.service`** is the web console on port 8600. It owns
+  nothing but browser sessions and `config/console-users.json`; everything it
+  shows it reads from the other stores on each request. Restarting it costs
+  every open browser a login and nothing else.
+- **`cousin-chat-watchdog.timer`** runs every 10 minutes and makes sure every
+  running cousin's chat server answers (more below).
+- **`cousin-tool-surface.timer`** runs daily at 06:00 and rewrites
+  `data/tool-surface.md`.
+- **`cousin-sweep.timer`** runs Sundays at 05:30 and compacts every cousin's
+  memory.
+
+Outside systemd, each running cousin is two processes: its agent in a tmux
+session, and its chat server (`cousin-chat-server --home <home>`), started
+detached by `cousin-spawn --start`, a flip, the console, or the watchdog.
+Both the loops and console units use `KillMode=process`, so restarting them
+doesn't take the chat servers they started down with them.
+
+Check everything at once:
 
 ```
-sudo apt-get update && sudo apt-get install -y python3-venv tmux git
-git clone <this repo> cousins-framework && cd cousins-framework
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[mcp]"              # from the checkout; not on PyPI
-python3 -m unittest discover -s tests   # before any cousin exists
-export FRAMEWORK_ROOT="$PWD"         # the checkout is the root
-printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
-cp config/harness.toml.claude-code.example config/harness.toml
-cousin-spawn testa --root "$PWD" --name Testa --role "test cousin" \
-    --voice "Plain and helpful."
-cousin-tool-surface                  # so the first boot is not degraded
-cousin-spawn testa --start
+systemctl --user list-units 'cousin-*'
+systemctl --user list-timers 'cousin-*'
+cousin-loops status
+cousin-chat-watchdog --dry-run
+tmux ls
 ```
 
-The agent line assumes Claude Code, installed and logged in once
-(`docs/install.md` step 4); any agent works, with an absolute path to
-its executable. `cousin-spawn <slug> --start` starts an existing
-cousin and checks tmux and the agent executable before touching
-anything; it is a no-op on a cousin that is already running.
+## Logs
 
-`config/` holds every install seam and is gitignored except for
-`*.example` files; `docs/configuration.md` lists each file and what its
-absence means. The root's `data/` directory (loop state, the request
-store, job logs, the tool-surface manifest) is runtime state and is
-gitignored too.
-
-## 2. The units
-
-`systemd/` ships templates with three placeholders (`{{ROOT}}`,
-`{{USER_BIN}}`, `{{SYSTEM_PATH}}`); `systemd/README.md` gives the
-`sed` loop that turns them into user units and the one-line check that
-no placeholder survived. What each one owns:
-
-| unit | owns |
+| what | where |
 |---|---|
-| `cousin-loops.service` | the scheduler: heartbeats, `[[loops]]`, timed-flip requests, and the per-cousin daily `flip_at` |
-| `cousin-sweep.timer` | the weekly compaction sweep (Sunday 05:30) |
-| `cousin-tool-surface.timer` | the daily manifest refresh (06:00) |
-| `cousin-chat-server@<slug>.service` | one cousin's chat server, ONLY when systemd rather than spawn/flip should own it: not for a cousin started with `--start`, and not together with the watchdog timer |
-| `cousin-chat-watchdog.timer` | the chat-server watchdog (every 10 minutes) for spawn/flip-owned servers |
-| `cousin-console.service` | the web console on loopback port 8600: a view over every store above, owning only browser sessions and the users file (section 8) |
+| loops daemon | `journalctl --user -u cousin-loops.service` |
+| console | `journalctl --user -u cousin-console.service` |
+| watchdog | `journalctl --user -u cousin-chat-watchdog.service` |
+| sweep | `journalctl --user -u cousin-sweep.service` |
+| tool surface | `journalctl --user -u cousin-tool-surface.service` |
+| a cousin's chat server | `cousins/<slug>/data/chat-server.log` |
+| background jobs | `data/job-logs/` under the root, or `cousin-job tail <id>` |
+| what a loop fired, and when | `data/loops-fires.jsonl` under the root |
 
-Every service sets `FRAMEWORK_ROOT`, a `PATH` that finds the wrappers
-first and then `%h/.local/bin` (where the Claude Code installer puts
-`claude`, so a flip the loops daemon runs can start the agent), and
-`PYTHONUNBUFFERED=1` so status lines reach the journal as they are
-printed. A unit that carries none of this fails in ways that read like
-a broken install (a command "not found" from inside a working
-checkout). Enable lingering (`loginctl enable-linger "$USER"`) or the
-user units stop when you log out.
+The chat server writes every failed or skipped delivery into its log as
+`[chat-server] tmux delivery FAILED` or `tmux delivery SKIPPED`. That's the
+first thing to grep when a cousin didn't see a message.
 
-The loops daemon is the one owner of recurring work. Do not add a cron
-entry that also fires a loop or a flip: two owners means the "fired"
-state each one commits is a lie to the other.
+## The chat-server watchdog
 
-The chat server started by `cousin-spawn --start` or `cousin-flip` has
-no supervisor of its own; `cousin-chat-watchdog` is that supervisor,
-one ensure pass per timer fire. For every cousin in the registry it
-decides one of four things: no tmux session or no `chat.port`, skip;
-`/health` answers with the cousin's slug, ok; the port is occupied but
-health does not answer for this slug, alert (a line in the journal,
-exit 1, and nothing touched, because the occupant may be a squatter or
-a wedged server and a watchdog must never kill blind); the port is
-free, spawn `cousin-chat-server --home <home>` detached with its output
-appended to `<home>/data/chat-server.log`, then wait up to 5 seconds
-for `/health`. `cousin-chat-watchdog --dry-run` prints the decision per
-cousin and spawns nothing. An flock on `<root>/data/chat-watchdog.lock`
-makes an overlapping fire exit 0 with "another pass is running". Do
-not enable the timer for cousins the `cousin-chat-server@` units own:
-systemd restarts those itself, and two owners of one port is the
-failure the README warns about.
+A chat server started by spawn or a flip has nobody watching it. The
+watchdog is that somebody. Each run it looks at every cousin and does one of
+four things:
 
-## 3. The daily flip
+- **skip**: no tmux session (a stopped cousin needs no chat) or no chat port
+- **ok**: `/health` answers with the cousin's slug
+- **alert**: the port is taken but `/health` doesn't answer with this slug.
+  It logs an alert, exits 1 and touches nothing, because the thing on the
+  port might be a squatter or a stuck server, and killing blind is worse.
+- **spawn**: the port is free, so it starts `cousin-chat-server` detached,
+  logging to `<home>/data/chat-server.log`, and waits up to 5 seconds for it
+  to answer
 
-There is no daily-flip unit. The daemon carries the driver: set
-`flip_at = "HH:MM"` under `[lifecycle]` in a cousin's `cousin.toml` and
-the daemon flips that cousin once per day at or after that time, at
-most one cousin per tick, so boot packets never assemble at the same
-moment. Stagger the times across cousins yourself (a few minutes apart
-is enough). A missed time (the daemon was down) fires on the next tick
-after it comes back, once, not once per missed day. Worker-type
-cousins are skipped.
+```
+cousin-chat-watchdog --dry-run
+#   [chat-watchdog] wren: ok
+#   [chat-watchdog] kestrel: spawn (would spawn cousin-chat-server --home ...)
+```
 
-`cousin-loops requests` lists pending timed flips; `cousin-loops status`
-says whether the daemon has ticked recently. A manual flip is
-`cousin-flip --confirm <slug>`, never from inside the cousin itself.
+A lock in `data/chat-watchdog.lock` makes an overlapping run exit quietly. If
+your agents live on a non-default tmux socket, add
+`Environment=COUSIN_TMUX_SOCKET=<path>` to the watchdog service.
 
-## 4. Backups
+If you'd rather have systemd own a cousin's chat server, use
+`cousin-chat-server@<slug>.service` instead and leave the watchdog timer off.
+Never both: see [the units](../systemd/README.md#chat-server-pick-one-owner).
 
-`cousin-backup --home <home> --dest <dir>` snapshots one cousin: every
-database under its `data/` through `VACUUM INTO` (a file copy of a
-database another process holds open can be torn), plus `memory/`,
-`MEMORY.md`, `STATUS.md`, `CLAUDE.md`, `cousin.toml`, staged then
-renamed so a failed run leaves no half-written snapshot. Rebuildable
-search indexes are skipped. It lands at `<dest>/<slug>/<date>/`.
+## The daily flip
 
-There is no fleet backup unit because what to do with a directory of
-snapshots is yours to decide (rsync, restic, a git remote). A loop over
-the registry is one line:
+A flip ends a cousin's session and starts a fresh one with a boot packet
+built from its memory. There's no unit for it; the loops daemon does it. Set
+`flip_at = "HH:MM"` under `[lifecycle]` in a cousin's `cousin.toml` and it
+flips once a day at or after that time. The daemon flips at most one cousin
+per tick, but give them times a few minutes apart anyway. If the daemon was
+down at flip time, the flip happens once on the next tick after it comes
+back, not once per missed day. Worker cousins are skipped.
+
+```
+cousin-loops requests          # pending timed flips
+cousin-flip wren --dry-run     # what a flip would do
+cousin-flip wren --confirm     # flip now; --confirm has it post one line in chat once it's back
+```
+
+Never run a flip from inside the cousin itself. More in
+[cousins](cousins.md).
+
+## Backups
+
+```
+cousin-backup --home cousins/wren --dest /srv/backups/cousins
+```
+
+That writes `<dest>/wren/<YYYY-MM-DD>/`. Every SQLite database under the
+cousin's `data/` is copied with `VACUUM INTO` (a plain file copy of a
+database another process has open can come out torn), plus `memory/`,
+`MEMORY.md`, `STATUS.md` and `CLAUDE.md`. Search indexes are skipped; they're
+rebuilt on the next search. A second run on the same day overwrites that
+day's snapshot.
+
+What it doesn't copy: `cousin.toml`, `notes/`, the other files in `data/`
+(`decisions.jsonl`, `corrections.jsonl`, `handoff.md` and friends), and
+anything else in the home. It also only does one home, not the root's own
+`data/` (jobs, schedules, the tracker, loop requests) or `shared/` (the
+shared memory tier and the hive database). For a full copy, stop the cousin
+and tar its home. What I do is the snapshot for the databases, then a plain
+copy of the rest:
 
 ```
 for home in "$FRAMEWORK_ROOT"/cousins/*/; do
-  cousin-backup --home "$home" --dest /path/to/snapshots
+  cousin-backup --home "$home" --dest /srv/backups/cousins
 done
+rsync -a --exclude '*.db' --exclude '*.db-wal' --exclude '*.db-shm' \
+    "$FRAMEWORK_ROOT"/cousins/ /srv/backups/cousins-files/
 ```
 
-Restore is a copy back into the home while the cousin is stopped; the
-chat server and the loops daemon open their databases lazily and pick
-the restored files up on their next access.
+There's no backup unit on purpose: where snapshots go (rsync, restic, a git
+remote) is your call. The root's `data/*.db` and `shared/hive/` are worth
+copying the same way with `sqlite3 <db> "VACUUM INTO '<dest>'"`.
 
-## 5. The sweep
+To restore, stop the cousin and copy the files back into its home. The chat
+server and the loops daemon open their databases lazily and pick up the
+restored files.
 
-`cousin-sweep compact --target both` runs `cousin-memory compact` for
-every cousin in registry order: `index` retires old reachable pointers
-from `MEMORY.md` until it fits its byte budget (hygiene, never
-deletion), `raw` folds daily raw files older than the hot window into
-monthly gzip archives plus a digest (lossless). One cousin's failure
-never stops the rest; the exit code is 1 if any failed, which marks the
-unit failed so the journal carries it:
+## The sweep
 
 ```
-journalctl --user -u cousin-sweep.service -n 50
+cousin-sweep compact --target both
 ```
 
-Run it by hand with `--target index` first on a new fleet and read the
-per-cousin lines before enabling the timer.
+Runs `cousin-memory compact` for every cousin, one after the other. `index`
+retires old pointers from `MEMORY.md` until it fits its size budget (it
+never deletes the memory itself), `raw` folds daily raw files older than the
+hot window into monthly gzip archives plus a digest (lossless). One cousin's
+failure doesn't stop the rest; the exit code is 1 if any failed, so the unit
+shows as failed in the journal.
 
-## 6. The tool surface
+On a new install, run it by hand with `--target index` first and read the
+per-cousin lines before you enable the timer. See [memory](memory.md).
 
-`cousin-tool-surface` writes `<root>/data/tool-surface.md`: one line
-per console script with the first line of its `--help`, the script
-list taken from the installed package's entry points (from
-`pyproject.toml` when running from an uninstalled checkout). The boot
-packet quotes it as section "Tool Surface", bounded to 1500
-characters, and marks the boot degraded when the file is absent, so run
-it once at install and let the daily timer keep it current after every
-upgrade. The unit passes `--bin {{USER_BIN}}` so the manifest describes
-the wrappers actually on PATH.
-
-## 7. When a cousin is silent
-
-Work from the outside in; stop at the first thing that is wrong.
-
-1. **Is the daemon ticking?** `cousin-loops status`. "never run" or
-   "down" means nothing recurring fires for anyone; `systemctl --user
-   status cousin-loops.service` and its journal say why.
-2. **Is the chat server up, and is it THIS cousin's?** A port answers
-   `GET /health` with its slug. A port that answers with a
-   different slug (or an unrelated service) reads as "running" to a
-   port check while the cousin is dead; kill the squatter, then start
-   the right server. Its log is `<home>/data/chat-server.log`.
-   `cousin-chat-watchdog --dry-run` gives this answer for the whole
-   fleet in one line per cousin (ok, spawn, alert, skip).
-3. **Is the agent session alive?** `tmux ls` (or your agent's own
-   listing) for the cousin's session. No session (after a reboot
-   there is none): `cousin-spawn <slug> --start` starts it with the
-   chat server; `cousin-flip --confirm <slug>` instead starts a fresh
-   generation with a boot packet. Either stops and names the cause
-   when `config/agent-cmd` is missing or tmux or the agent executable
-   does not resolve. A session that is alive but parked on the agent's
-   login menu shows "needs attention" on its console card when
-   `config/harness.toml` lists `attention_patterns` (the Claude Code
-   preset does), and every delivery to it is skipped with a "tmux
-   delivery SKIPPED" line in the sender's log (chat server, loops
-   daemon); log the agent in once (`docs/install.md` step 4).
-4. **Did delivery fail rather than the loop?** Firing state commits
-   only after delivery, so a loop that "never fired" is usually a
-   delivery that keeps failing; the daemon prints each error to its
-   stderr (the unit's journal). Fix the target, and the loop fires on
-   the next tick, once.
-5. **Did it boot degraded?** The boot packet header lists `DEGRADED
-   layers`. A missing self-portrait, calibration, active state or
-   tool surface each has a one-command fix named in its section.
-6. **Is STATUS stale?** The packet warns when decisions were logged
-   after STATUS.md's last edit; the cousin anchors on STATUS, so
-   reconcile it (`cousin-sync-state` afterwards) before blaming
-   memory.
-7. **Did the outbound filter block the reply?** Exit 3 from
-   `cousin-reply` or `cousin-chat` is a protected term in the text;
-   the message was not sent and the CLI said which rule.
-
-What the framework promises across all of this: a component that dies
-loses nothing that was not already in a store some other component
-owns. A silent cousin is a process to restart, not memory to recover.
-
-## 8. The console: unit, first user, first login
-
-`cousin-console.service` runs `cousin-console --port 8600` from the
-root, on loopback. It is the same unit shape as the others (root,
-`FRAMEWORK_ROOT`, the wrappers first on `PATH`, `Restart=on-failure`)
-and it may be restarted at any time: the console owns nothing but
-in-memory browser sessions and `config/console-users.json`, so a
-restart costs every open tab a login and nothing else
-(`docs/ui-spec.md`). Enable it with the rest:
+## The tool-surface manifest
 
 ```
-systemctl --user enable --now cousin-console.service
-journalctl --user -u cousin-console.service -n 20
-#   -> cousin-console: serving <root> on 127.0.0.1:8600 (auth not configured: cousin-console adduser <name>)
+cousin-tool-surface
+#   wrote <root>/data/tool-surface.md (37 tools)
 ```
 
-That parenthesis is the first thing to act on. Out of the box the
-console is open to every address the network guard admits (loopback
-and the RFC1918 private ranges; `config/net-allowlist.json` adds
-more),
-and it says so on its account panel. Before the console is reachable
-from anything but the machine it runs on, create the first user; the
-password is read from a prompt, never from argv, so it lands in no
-shell history or process listing:
+Writes `<root>/data/tool-surface.md`: one line per `cousin-*` command with
+the first line of its `--help`. The boot packet quotes it so a cousin knows
+what it can run. Without the file, every boot is marked degraded. The timer
+refreshes it daily; run it by hand after an upgrade that adds commands.
+
+## Upgrades
 
 ```
-cousin-console --root "$FRAMEWORK_ROOT" adduser ana   # --root optional inside the checkout
-#   password for ana: ********
-#   again: ********
-#   -> cousin-console: user ana set in <root>/config/console-users.json
+cd ~/cousins-framework && git pull
+. .venv/bin/activate && pip install -e ".[mcp]"
+cousin-tool-surface
+systemctl --user restart cousin-loops.service cousin-console.service
 ```
 
-The file is written atomically with mode 0600 (PBKDF2-HMAC-SHA256, a
-random salt per user); the same command with an existing name resets
-that user's password. No restart is needed: the console reads the
-file on every request, and from the moment it holds one user every
-`/api/*` route but login and `me` answers 401 without a session. There
-is no loopback or trusted-LAN bypass to fall back on, by design.
+If `systemd/` changed, re-render the units first (see
+[the units](../systemd/README.md)). Chat servers keep running the old code
+until they're restarted; a cousin picks up everything on its next flip. To
+restart one chat server by hand, kill it and let the watchdog bring it back,
+or run the watchdog now:
 
-Once the file exists, only its absence reopens the console. A users
-file that is present but unusable (corrupt, truncated, unreadable, or
-holding no users) closes it instead: every `/api/*` route answers 503
-naming the file, the startup line says `CLOSED`, and the journal
-carries the reason. Restore the file from a backup, or remove it and
-run `adduser` again; `adduser` will not write over a broken file.
+```
+kill "$(cat cousins/wren/data/chat-server.pid)"
+cousin-chat-watchdog
+```
 
-First login: open `http://127.0.0.1:8600/` on the machine, or tunnel
-from another one (`ssh -L 8600:127.0.0.1:8600 <user>@<machine>`, then
-the same URL). For direct LAN access put `--host 0.0.0.0` in the
-unit's `ExecStart`; that is plain HTTP, so only on a trusted LAN, and
-behind TLS with `--secure-cookie` (the cookie is then marked Secure)
-anywhere else. The page loads without a session; the login
-form is part of it. Sign in with the user just created; the account
-panel then lists the configured users and offers a password change and
-logout. A cousin created later by `cousin-spawn` appears on the next
-request, and a cousin whose chat server is down shows `chat: down` on
-its card rather than vanishing: the console asks each store every
-time and caches nothing anything else trusts.
+`cousin-version` prints the version and commit of the checkout; the
+console's top bar shows the one the console process is running.
 
-What to check when the console misbehaves, outside in:
+## After a reboot
 
-1. **403 on every route** is the network guard: the client's address
-   is not loopback and not in `config/net-allowlist.json`.
-2. **401 on every route but the page** is the users file: it exists
-   and holds a user, and this browser has no session (a console
-   restart drops every session; log in again).
-3. **A card says `stopped` for a cousin whose tmux session is up**
-   means the console and the session use different tmux sockets; pass
-   `--tmux-socket` in the unit's `ExecStart`, the same seam the chat
-   server reads as `COUSIN_TMUX_SOCKET`.
-4. **The page loads but stays blank** is the one runtime network fetch
-   the browser makes (React, Babel, marked, mermaid and xterm from a
-   CDN, named in `index.html`): vendor those files under the static
-   directory and edit the tags if the browser cannot reach them; the
-   backend fetches nothing.
+The units come back by themselves (with linger on). The cousins don't:
+nothing restarts an agent session on its own. Start each one from the
+console or with `cousin-spawn <slug> --start`. The watchdog then keeps its
+chat server up.
 
-The end-to-end walk of exactly this session - one cousin spawned in a
-temp root, its real chat server, a fake tmux, one user, login, fleet,
-chat through the proxy, the pane and its stream, jobs, loops, memory,
-the tracker, the static bundle - is `tests/console/test_console_e2e.py`,
-in process and on loopback, so the flow above is run on every test run
-rather than remembered.
+## Troubleshooting
+
+Work from the outside in and stop at the first thing that's wrong. Nothing
+here loses memory: a dead component is a process to restart, not data to
+recover.
+
+**Nothing recurring happens (no heartbeats, loops or flips)**
+- Check: `cousin-loops status`. "loops daemon has never run" or "loops daemon
+  down (last tick Ns ago)" means nothing fires for anyone.
+- Fix: `systemctl --user status cousin-loops.service` and its journal say
+  why. After a fix, a loop that was due fires once on the next tick.
+
+**A loop "never fires"**
+- Check: the loops daemon's journal. A loop only counts as fired once its
+  text was delivered, so a loop that never fires is usually a delivery that
+  keeps failing, and every failure is logged there. A cousin.toml that
+  doesn't parse, or a loop with two schedule forms or an empty prompt, is
+  also logged by name.
+- Fix: fix the delivery (usually the tmux session, see below) or the loop
+  entry. For a worker cousin, check that `config/worker-cmd` exists.
+
+**A cousin looks stopped, but its tmux session is up**
+- Check: `tmux ls` shows the session, but the console card says stopped. The
+  console and the session are on different tmux sockets, or the session's
+  name isn't `[chat] tmux_session` from `cousin.toml`.
+- Fix: pass `--tmux-socket <path>` in the console unit's `ExecStart`, and
+  `COUSIN_TMUX_SOCKET` for the chat server and watchdog. Or rename the
+  session to match.
+
+**A cousin looks running, but it's dead**
+- Check: `curl -s http://127.0.0.1:<port>/health`. It should answer with this
+  cousin's slug. Something else on the port (another cousin, or an unrelated
+  service) makes a plain port check read "running". The watchdog reports it
+  as ALERT and leaves it alone.
+- Fix: find the process on the port (`ss -ltnp | grep :<port>`), stop it,
+  then run `cousin-chat-watchdog` to start the right server.
+
+**Chat messages don't reach the pane**
+- Check: `grep 'tmux delivery' cousins/<slug>/data/chat-server.log`.
+  - `SKIPPED ... the pane shows "Select login method"` (or another attention
+    pattern): the agent is waiting on a person. The console card also says
+    "needs attention". Log Claude Code in once (`claude` in a shell, or
+    `tmux attach -t <slug>`), or answer the trust prompt, which
+    `cousin-mcp approve <slug>` prevents.
+  - `FAILED ... can't find session`: the tmux session is gone or has another
+    name. Start the cousin, or fix `[chat] tmux_session`.
+  - Nothing at all: the message never reached this chat server. Check the
+    server answers `/health`, and that it wasn't started with
+    `--no-terminal-delivery`.
+- Also: with no `config/harness.toml`, nothing is skipped and text is typed
+  into whatever the pane shows, menus included. Copy the Claude Code preset.
+
+**The console shows 0 cousins**
+- Check: the startup line in `journalctl --user -u cousin-console.service`
+  names the root it serves. It has to be the directory whose `cousins/` holds
+  your homes. A wrong `{{ROOT}}` in the unit or a wrong `--root` gives an
+  empty fleet.
+- Check: a card marked hidden disappears unless "show hidden" is on in
+  Settings.
+- Check: one `cousin.toml` that doesn't parse breaks the whole list (the API
+  answers 500 with the parse error). Find it:
+  `for f in cousins/*/cousin.toml; do python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$f" || echo "$f"; done`
+- Fix: correct the root and restart the console, or fix the file.
+
+**The console: 403, 401 or 503 on every request**
+- 403: your address isn't loopback or a private range, and isn't in
+  `config/net-allowlist.json`.
+- 401: login required and this browser has no session. A console restart
+  drops every session; log in again.
+- 503 and `CLOSED` in the startup line: `config/console-users.json` exists
+  but can't be used. Restore it, or delete it and `cousin-console adduser`
+  again.
+
+**The console page loads but stays blank**
+- Check: the browser's console. The page loads React, Babel, marked, mermaid
+  and xterm from unpkg and jsdelivr; a browser that can't reach them gets a
+  blank page.
+- Fix: give the browser internet access, or download those files next to
+  `cousin_lib/console_static/index.html` and point its script tags at them.
+
+**The console's restart button stops the console**
+- Check: the button exits the console process cleanly and relies on systemd
+  to start it again. The shipped unit has `Restart=on-failure`, which doesn't
+  restart after a clean exit.
+- Fix: `systemctl --user start cousin-console`, or add a drop-in with
+  `Restart=always` if you want the button to work.
+
+**A cousin keeps getting restarted**
+- Check: `cousin-loops requests` and the loops journal. A flip ends the
+  session and starts a new one. The usual causes: `flip_at` in its
+  `cousin.toml`, or `flip_when_transcript_mb` in `config/harness.toml`
+  (a long session crosses the size and gets flipped).
+- Check: `systemctl --user list-units 'cousin-chat-server@*'`. If a
+  `cousin-chat-server@<slug>` unit is enabled for a cousin whose chat server
+  spawn also starts, the unit loses the port and restarts every 5 seconds.
+- Fix: raise or remove the threshold, move `flip_at`, or disable the extra
+  unit.
+
+**Port already in use**
+- A chat server: `chat-server.log` says `cannot bind chat port`. Something
+  else holds `[chat] port`. Stop it, or give the cousin another port in
+  `cousin.toml` and restart it. Spawn picks ports from 8090 up that no other
+  `cousin.toml` claims and nothing listens on, but it can't know about a
+  service that starts later. One such line right after a flip is normal: a
+  flip always launches a chat server, and when the old one is still
+  answering, the new one exits.
+- The console: the unit fails at start with "Address already in use". Change
+  `--port` in a drop-in, or stop whatever holds 8600.
+
+**A start fails right away**
+- `cousin-spawn <slug> --start` and the console name the cause: no
+  `config/agent-cmd`, tmux not on PATH, or the agent command's first word not
+  found. Under systemd, PATH is the unit's, not your login shell's; write the
+  agent's absolute path into `config/agent-cmd`.
+- `auth:` errors come from the `api_key` mode's checks (no key file, a login
+  left in the isolated directory). See [cousins](cousins.md).
+
+**The cousin booted degraded**
+- Check: the boot packet header lists `DEGRADED layers`. A missing tool
+  surface means `cousin-tool-surface` hasn't run. The other layers
+  (self-portrait, calibration, active state) each say how to fix them in
+  their own section. See [lifecycle](reference/lifecycle.md).
+
+**Search is keyword only**
+- Check: `config/embedding.toml` exists and the service answers. When it's
+  configured but unreachable, search says so under the results. A timeout
+  shorter than one chunk's embedding time looks the same: raise `timeout_s`.
+
+**A reply was blocked**
+- `cousin-reply` or `cousin-chat send` exits 3 and names the word:
+  `config/outbound-filter.json` matched. Nothing was sent.

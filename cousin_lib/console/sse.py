@@ -1,5 +1,5 @@
 """`GET /api/events`: the live stream every dashboard tab holds
-(docs/console-spec.md, "`GET /api/events`: the live stream").
+(docs/reference/console-api.md, "`GET /api/events`: the live stream").
 
 Three parts, none of them a store:
 

@@ -1,4 +1,4 @@
-"""The loops daemon: docs/loops-spec.md as executable contract.
+"""The loops daemon: docs/reference/loops.md as executable contract.
 
 The first test is the one the SOURCE architecture cannot pass: a
 request written by a different process, consumed by the daemon, its
@@ -463,7 +463,7 @@ class TestCliAndRun(LoopsCase):
 
 
 class TestOneShotsFireFromTheTick(LoopsCase):
-    """docs/loops-spec.md tick step 4: the daemon fires due one-shots
+    """docs/reference/loops.md tick step 4: the daemon fires due one-shots
     from the scheduler store. Canary: before the fix nothing but a
     hand-run `cousin-schedule tick` ever fired them."""
 

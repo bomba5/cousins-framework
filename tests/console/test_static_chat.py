@@ -2,7 +2,7 @@
 
 Covers `chat.jsx`, `styles.css`, `manifest.webmanifest` and `favicon.svg`
 under `cousin_lib/console_static/`: the files exist, every route the
-chat view calls is one `docs/console-spec.md` defines, nothing the spec
+chat view calls is one `docs/reference/console-api.md` defines, nothing the spec
 dropped survives by name, and the contamination scanner finds nothing
 in the directory. The shell files (`index.html`, `app.jsx`, ...) have
 their own test module.
@@ -20,13 +20,13 @@ from cousin_lib.gate.scanner import Scanner, load_denylist
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _STATIC = _REPO_ROOT / "cousin_lib" / "console_static"
-_SPEC = _REPO_ROOT / "docs" / "console-spec.md"
+_SPEC = _REPO_ROOT / "docs" / "reference" / "console-api.md"
 
 _MINE = ("chat.jsx", "media.jsx", "styles.css", "manifest.webmanifest", "favicon.svg")
 
 # Names of surfaces the contract dropped. None may appear, in any case,
 # in the files this module owns. The media viewer and inline players came
-# back on 2026-09-18 (docs/console-spec.md, "The chat media viewer"); the
+# back on 2026-09-18 (docs/reference/console-api.md, "The chat media viewer"); the
 # engagement pings, the recorder and the media-kind filter stay out.
 _DROPPED_NAMES = (
     "engagement", "presence",
@@ -322,7 +322,7 @@ class PaneScrollsTheProgram(unittest.TestCase):
 
 
 class ChatMediaViewer(unittest.TestCase):
-    """The media port (docs/console-spec.md, "The chat media viewer"):
+    """The media port (docs/reference/console-api.md, "The chat media viewer"):
     the on/off toggle and its browser key, kind detection, the inline
     players and the viewer with its keys, counter and links."""
 

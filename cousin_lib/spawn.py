@@ -1,7 +1,7 @@
 """cousin-spawn: how a cousin comes to exist.
 
 The creation sequence and its cleanup contract are specified in
-docs/spawn-and-template-spec.md. The rule that shapes the code: a
+docs/cousins.md. The rule that shapes the code: a
 failed create removes everything it made, a completed create is a real
 cousin whatever happens afterwards.
 """

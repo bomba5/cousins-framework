@@ -1,6 +1,6 @@
 """The transcript-size guard inside the loops daemon.
 
-A harness session transcript grows without bound; the source framework
+A harness session transcript grows without bound; an earlier version
 reached hundreds of megabytes before a separate timer script force-
 flipped the worst offender. Here the guard is a tick step that submits
 ONE timed-flip request through the daemon's own request store - the

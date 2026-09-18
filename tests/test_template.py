@@ -100,7 +100,7 @@ class TestShippedTemplate(unittest.TestCase):
         self.assertIn("authored, never improvised", out)
 
     def test_peer_reply_pitfall_is_stated(self):
-        # The one instruction the source framework's drifted copy got
+        # The one instruction an earlier version's drifted copy got
         # backwards: peer replies go out via cousin-chat, and using the
         # own-surface reply path for a peer silently fails to deliver.
         out = self._render()

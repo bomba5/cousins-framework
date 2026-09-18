@@ -1,6 +1,6 @@
 """The example cousin is a living render of the template.
 
-The source framework ran two definitions of cousin identity and they
+An earlier version ran two definitions of cousin identity and they
 drifted apart. This suite is the receipt that this repository cannot:
 the checked-in example must equal a fresh render of the current
 template, so editing one without the other fails the build.
@@ -15,7 +15,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _WREN = _REPO_ROOT / "examples" / "wren"
 
 # The canonical values Wren was generated with. Regenerate the example
-# (see docs/spawn-and-template-spec.md) when the template changes.
+# (see docs/cousins.md) when the template changes.
 WREN_VALUES = {
     "NAME": "Wren",
     "SLUG": "wren",

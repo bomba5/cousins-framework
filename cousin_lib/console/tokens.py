@@ -1,5 +1,5 @@
 """Token usage from the harness transcripts, through the seam
-config/harness.toml defines (docs/console-spec.md, "Tokens"). For each
+config/harness.toml defines (docs/reference/console-api.md, "Tokens"). For each
 cousin with a persisted session id the transcript
 <transcripts_dir>/<session_id>.jsonl is scanned incrementally (byte
 offset remembered per server) and each message's usage block summed

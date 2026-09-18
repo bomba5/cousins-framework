@@ -1,5 +1,5 @@
-"""The console as the hive's queen (docs/hive-spec.md, "The console
-is the queen"; docs/deploying-a-node.md).
+"""The console as the hive's queen (docs/reference/hive-api.md, "The console
+is the queen"; docs/remote-cousins.md).
 
 Off unless config/hive.toml says `enabled = true`: then, and only then,
 the console's own server answers the queen routes under /hive/, lists

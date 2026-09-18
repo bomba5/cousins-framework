@@ -1,44 +1,57 @@
 # systemd unit templates
 
-These are templates, not units. Every install-specific value is a
-placeholder, and a unit is produced by substituting all of them. Nothing
-here knows where your checkout lives, which user runs it, or where pip
-put the `cousin-*` wrappers; those are install facts and a test refuses
-any absolute path in this directory.
+The files here are templates, not units. Anything that depends on your
+install is a placeholder, and you make real units by replacing the
+placeholders with `sed`. Nothing in this directory knows where your checkout
+is or where pip put the `cousin-*` commands (a test refuses absolute paths
+here).
 
-| placeholder | meaning | typical value |
+## The placeholders
+
+- `{{ROOT}}` - the framework root: the directory holding `cousins/`,
+  `config/` and `templates/`. Normally the checkout.
+- `{{USER_BIN}}` - the directory with the installed `cousin-*` commands. For
+  the venv install in [install](../docs/install.md) that's `<checkout>/.venv/bin`.
+  If they're on your PATH already: `dirname "$(command -v cousin-loops)"`.
+- `{{SYSTEM_PATH}}` - the PATH the units see after `{{USER_BIN}}` and
+  `%h/.local/bin`, so `tmux` and your agent command resolve. Take it from
+  the user manager: `systemctl --user show-environment | sed -n 's/^PATH=//p'`.
+
+## The units
+
+| unit | runs | when |
 |---|---|---|
-| `{{ROOT}}` | the framework root: the checkout that holds `cousins/`, `config/`, `templates/` | the directory you cloned into |
-| `{{USER_BIN}}` | the directory holding the installed `cousin-*` console scripts | `<checkout>/.venv/bin` for the documented venv install; `dirname "$(command -v cousin-loops)"` once it is on PATH |
-| `{{SYSTEM_PATH}}` | the PATH each unit sees after `{{USER_BIN}}` and `%h/.local/bin`, so `tmux` and your agent command resolve | `systemctl --user show-environment \| sed -n 's/^PATH=//p'` |
+| `cousin-loops.service` | `cousin-loops run --interval 30`: heartbeats, loops, one-shot schedules, timed flips, the daily `flip_at` | always |
+| `cousin-console.service` | `cousin-console --port 8600`: the web console, on loopback | always |
+| `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: starts a missing chat server for any running cousin, logs an alert for a sick one, never kills | every 10 minutes |
+| `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
+| `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
+| `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the slug after the `@` | always, one per cousin, only if you want systemd to own chat servers (see below) |
 
-## Units
+A `.timer` starts the `.service` with the same name. Enable the timer, not
+the service.
 
-| unit | what it runs | cadence |
-|---|---|---|
-| `cousin-loops.service` | `cousin-loops run`: the one owner of heartbeats, `[[loops]]`, timed flips and the per-cousin daily `flip_at` | always on |
-| `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both` over every cousin home | weekly, Sunday 05:30 |
-| `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily, 06:00 |
-| `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the instance name after `@` | always on, one instance per cousin |
-| `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: one ensure pass over every cousin; spawns a missing chat server, alerts on a sick one, never kills | every 10 minutes |
-| `cousin-console.service` | `cousin-console --port 8600`: the web console on loopback, a projection of the stores the other units own; a restart costs every browser its login and nothing else | always on |
+Every service runs from the root and sets three things:
 
-Every service carries the environment the framework needs
-(`FRAMEWORK_ROOT`; a `PATH` of the wrappers, then `%h/.local/bin`,
-then the system PATH; and `PYTHONUNBUFFERED=1`) and runs from the root
-as its working directory. `%h` is systemd's home-directory specifier:
-the Claude Code installer puts `claude` in `~/.local/bin`, which the
-user manager's PATH does not carry, and without it a flip started by
-the loops daemon could not find the agent. Unbuffered output is what
-makes a status line such as the console's "serving" line reach the
-journal when it is printed rather than when a buffer fills. A `.timer` activates the
-`.service` of the same name; enable the timer, not the service.
+- `FRAMEWORK_ROOT={{ROOT}}`, so every command agrees on the install.
+- `PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}`. `%h` is systemd's
+  shorthand for your home directory. The Claude Code installer puts `claude`
+  in `~/.local/bin`, which the user manager's PATH doesn't include; without
+  it, a flip started by the loops daemon can't find the agent.
+- `PYTHONUNBUFFERED=1`, so status lines reach the journal when they're
+  printed, not when a buffer fills.
 
-## Substitute and install (user units)
+The console and loops units also set `KillMode=process`. Both start chat
+servers (the console's start button, a flip), and without it a plain
+`systemctl --user restart` would kill every chat server they started.
+
+## Install as user units
+
+From the checkout, with the venv install:
 
 ```
-ROOT="$PWD"                                   # the checkout
-USER_BIN="$PWD/.venv/bin"                     # the documented venv install
+ROOT="$PWD"
+USER_BIN="$PWD/.venv/bin"
 SYSTEM_PATH="$(systemctl --user show-environment | sed -n 's/^PATH=//p')"
 mkdir -p ~/.config/systemd/user
 for unit in systemd/*.service systemd/*.timer; do
@@ -47,52 +60,70 @@ for unit in systemd/*.service systemd/*.timer; do
       -e "s|{{SYSTEM_PATH}}|$SYSTEM_PATH|g" \
       "$unit" > ~/.config/systemd/user/"$(basename "$unit")"
 done
-grep -l '{{' ~/.config/systemd/user/cousin-* && echo "unsubstituted placeholder" 
+! grep -l '{{' ~/.config/systemd/user/cousin-*
 systemctl --user daemon-reload
-systemctl --user enable --now cousin-loops.service
-systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer
-systemctl --user enable --now cousin-chat-watchdog.timer          # supervises spawn/flip-owned servers
-systemctl --user enable --now cousin-console.service             # the web console
+systemctl --user enable --now cousin-loops.service cousin-console.service
+systemctl --user enable --now cousin-chat-watchdog.timer cousin-tool-surface.timer cousin-sweep.timer
+loginctl enable-linger "$USER"
 ```
 
-That block is the documented path: `cousin-spawn <slug> --start` (and
-every flip) starts the cousin's chat server, and the watchdog timer
-restarts it if it dies. It deliberately does NOT enable
-`cousin-chat-server@<slug>.service`: for a cousin whose server spawn
-already started, that unit fails to bind the port (EADDRINUSE) and
-restarts every five seconds. The unit is the alternative owner; see
-"Chat server: pick one owner" below.
+The `grep` line prints nothing when every placeholder was replaced. If it
+prints a file name, that unit still has a `{{...}}` in it and will fail at
+start with a path that doesn't exist, which looks like a broken install
+rather than a missed step.
 
-The `grep` line is the check that every placeholder was replaced; a
-unit with `{{` left in it fails at start with a path that does not
-exist, which reads like a broken install rather than a missed step.
+`loginctl enable-linger` keeps user units running while you're logged out.
+Run it once per account (with `sudo` if it's refused).
 
-For the units to run while you are logged out, enable lingering for
-the account once: `loginctl enable-linger "$USER"`. For system units
-instead of user units, add a `User=` line to each `[Service]`, change
-`WantedBy=default.target` to `multi-user.target`, replace `%h` with
-that user's home directory (in a system unit `%h` is root's home), and
-install under the system unit directory; the placeholders are the
-same.
+To change a unit later, use a drop-in (`systemctl --user edit <unit>`)
+rather than editing the rendered file: re-running the loop above overwrites
+the file but leaves drop-ins alone. That's how you put the console on the
+LAN, see [install](../docs/install.md#reaching-the-console-from-the-lan).
+
+## Install as system units
+
+Same placeholders, plus three changes per unit: add `User=<account>` to
+`[Service]`, change `WantedBy=default.target` to `multi-user.target`, and
+replace `%h` with that account's home directory (in a system unit `%h` is
+root's home). Put them in the system unit directory and use `systemctl`
+without `--user`.
 
 ## Chat server: pick one owner
 
-Both `cousin-console.service` and `cousin-loops.service` carry `KillMode=process`: a chat server started through the console, or respawned by a flip, lives in that unit's cgroup, and without it a plain `systemctl --user restart` of the console silently killed every chat server it had started.
+`cousin-spawn --start`, a flip and the console's start button all start a
+cousin's chat server themselves, detached. The watchdog timer then brings it
+back if it dies. That's the normal setup, and it's why the block above does
+not enable `cousin-chat-server@.service`.
 
-`cousin-spawn --start` and `cousin-flip` start a cousin's chat server
-themselves, detached. Use `cousin-chat-server@<slug>.service` only when
-you want systemd to own that lifetime instead: then stop the
-spawn-started server first (`kill "$(cat <home>/data/chat-server.pid)"`),
-enable the unit, and leave the watchdog timer disabled. Never both,
-since two servers on one port make the second one fail (a
-bind-and-restart loop every five seconds) and the first one look like
-the survivor. See `docs/operations.md`.
+Use `cousin-chat-server@<slug>.service` only if you want systemd to own that
+chat server instead:
 
-`cousin-chat-watchdog.timer` is the supervisor for the spawn/flip-owned
-case: every ten minutes it spawns a server for any running cousin whose
-port is free and logs an alert (never a kill) when the port is occupied
-but `/health` does not answer with the cousin's slug. With the
-`cousin-chat-server@` units, systemd already restarts the server, so
-leave the watchdog timer disabled. If your agent sessions live on a
-non-default tmux socket, add `Environment=COUSIN_TMUX_SOCKET=<path>` to
-the watchdog service, the same seam the chat server reads.
+```
+kill "$(cat cousins/<slug>/data/chat-server.pid)"      # stop the spawn-started one
+systemctl --user enable --now cousin-chat-server@<slug>.service
+systemctl --user disable --now cousin-chat-watchdog.timer
+```
+
+Never both. Two servers on one port means the second can't bind, and with
+`Restart=always` it retries every five seconds forever while the first one
+looks like it's fine. Spawn and the console check the port first and reuse a
+server that's already answering. A flip always launches one, and with the
+unit's server on the port it fails to bind and exits, leaving a line in
+`chat-server.log`; that's harmless. The watchdog is the one that has to be
+off.
+
+If your agents run on a non-default tmux socket, add
+`Environment=COUSIN_TMUX_SOCKET=<path>` to `cousin-chat-watchdog.service` and
+`cousin-chat-server@.service` (a drop-in is fine).
+
+## Remove
+
+```
+systemctl --user disable --now cousin-loops.service cousin-console.service \
+    cousin-chat-watchdog.timer cousin-tool-surface.timer cousin-sweep.timer
+rm -rf ~/.config/systemd/user/cousin-*
+systemctl --user daemon-reload
+systemctl --user reset-failed
+```
+
+The full uninstall is in [install](../docs/install.md#uninstall).

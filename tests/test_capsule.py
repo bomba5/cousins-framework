@@ -3,7 +3,7 @@ memory/distilled, the newest-first listing, the CLI, and the two
 integration points (boot's memories layer; the distiller leaving the
 file alone).
 
-The first block re-expresses the source framework's own unit tests for
+The first block re-expresses an earlier version's own unit tests for
 this module (path, create-on-write, appendable, optional sections,
 empty listing, newest N, rotation). Everything after is this tree's:
 the jsonl round trip, the curated-region rule against the distill

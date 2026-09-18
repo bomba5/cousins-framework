@@ -1,4 +1,4 @@
-"""Memory routes (docs/console-spec.md, "Memory and the shared-tier
+"""Memory routes (docs/reference/console-api.md, "Memory and the shared-tier
 review" and "Memory explorer").
 
 `GET /api/memory`: the tree of shared/*.md and each cousin's

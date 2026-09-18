@@ -1,4 +1,4 @@
-"""Jobs routes (docs/console-spec.md, "Jobs"): a projection of
+"""Jobs routes (docs/reference/console-api.md, "Jobs"): a projection of
 cousin_lib.jobs with the rate-limited reaper as maintenance the store
 accepts from any reader, log tails, field updates with SIGTERM on
 cancel, and delete limited to console-minted logs."""

@@ -1,5 +1,5 @@
 # config/mcp-registry.toml.example - the framework's default MCP tool
-# registry. Spec: docs/mcp-spec.md.
+# registry. Spec: docs/mcp.md.
 #
 # This file is the default: cousin-spawn copies it into every new
 # cousin's home as <home>/mcp-registry.toml (with the operator filled

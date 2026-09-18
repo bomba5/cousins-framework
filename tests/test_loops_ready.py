@@ -1,6 +1,6 @@
 """Ready-file triggers inside the loops daemon.
 
-The source framework ran a separate watcher process for `<name>.ready`
+An earlier version ran a separate watcher process for `<name>.ready`
 files - a second owner of delivery, with its own tmux path and its
 own dedup state. Here the trigger is a tick step: the daemon sees the
 file, delivers through its normal path, and removes the file only

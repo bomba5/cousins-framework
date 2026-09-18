@@ -1,4 +1,4 @@
-"""The shared memory tier: docs/memory-tiers.md as executable spec.
+"""The shared memory tier: docs/memory.md as executable spec.
 
 Every promise the doctrine page makes is a test here: one entry path,
 no silent overwrites, reviewed promotion, and above all the boundary -

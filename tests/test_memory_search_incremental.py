@@ -1,6 +1,6 @@
 """The incremental, self-healing vector index.
 
-Ported behaviours from the source framework's incremental-reindex
+Ported behaviours from an earlier version's incremental-reindex
 tests, re-expressed over this repository's explicit-argument API: a
 stale or empty embeddings index used to be served forever, and the
 only rebuild path re-embedded every file. ensure_index embeds only

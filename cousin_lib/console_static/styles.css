@@ -1,6 +1,6 @@
 /* cousin console: mission-control dark. Fonts are system stacks; the
    page fetches nothing from the network beyond the script tags
-   docs/console-spec.md names. */
+   docs/reference/console-api.md names. */
 
 :root {
   --bg-0: oklch(0.15 0.012 250);

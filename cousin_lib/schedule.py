@@ -1,7 +1,7 @@
 """One-shot prompt scheduler.
 
 `cousin-schedule add` stores a prompt with a target time; the loops
-daemon's tick (cousin_lib.loops, step 4 of docs/loops-spec.md) fires
+daemon's tick (cousin_lib.loops, step 4 of docs/reference/loops.md) fires
 everything due by handing the prompt to its delivery seam, and
 `cousin-schedule tick` does the same by hand when no daemon runs. Jobs are scoped per cousin; the database
 is shared per install so one tick serves the whole fleet.

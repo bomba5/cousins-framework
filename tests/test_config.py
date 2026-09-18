@@ -1,6 +1,6 @@
 """Configuration seam.
 
-Every hardcoded root, port, and personal default in the source framework
+Every hardcoded root, port, and personal default in an earlier version
 becomes a lookup here. Fail-loud rule: a missing COUSIN_HOME is an error
 with a message, never a silent fallback to somebody's home directory.
 """

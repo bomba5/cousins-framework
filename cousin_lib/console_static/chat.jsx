@@ -1,6 +1,6 @@
 // Chat view: the per-cousin chat widget and the live terminal pane.
 // Renders markdown via marked, diagrams via mermaid. Polls /api/messages
-// every 3.5 s in live mode. Every route it calls is in docs/console-spec.md.
+// every 3.5 s in live mode. Every route it calls is in docs/reference/console-api.md.
 
 // The chat user is the thread the view reads and writes: `?user=` on the
 // page (passed in as embedUser), else the cousin's configured operator,

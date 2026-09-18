@@ -5,7 +5,7 @@ so it must stay bounded - but compacting it is HYGIENE: a pointer may
 be retired only when its topic file is independently reachable, on
 disk AND in the search index, so retiring the line loses nothing.
 
-The invariants, each earned in the source framework:
+The invariants, each earned in an earlier version:
 
 - Uncertainty keeps. An unparsable date is a keep, not a candidate -
   a retention transform and a privacy gate default in opposite
@@ -17,7 +17,7 @@ The invariants, each earned in the source framework:
   safe.
 - Single atomic rename: readers must never see a half-written index.
 
-The source framework had a second transform (an append-only timeline
+An earlier version had a second transform (an append-only timeline
 whose old entries relocate to an archive); the public layout has no
 timeline convention, so that transform stays out until something
 defines one.

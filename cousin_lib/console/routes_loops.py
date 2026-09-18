@@ -1,4 +1,4 @@
-"""Loops routes (docs/console-spec.md, "Loops"): rows from every
+"""Loops routes (docs/reference/console-api.md, "Loops"): rows from every
 cousin's [[loops]] plus a synthetic context-heartbeat row per
 non-worker cousin, the daemon status on every response, recent fires,
 drift from the daemon's fire log, the per-cousin editor, and fire as a

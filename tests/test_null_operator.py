@@ -3,7 +3,7 @@
 A zero-operator install is not a degraded configuration; it is a
 framework with one subsystem absent - and this suite is the claim
 made executable, because a documented seam with no test is a claim.
-docs/operator-interface.md cites this file.
+docs/cousins.md cites this file.
 
 The pattern each test pins: the surface WORKS without an operator,
 and wherever the operator's absence changes behavior, the change is

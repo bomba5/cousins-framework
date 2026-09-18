@@ -1,6 +1,6 @@
 """Console authentication: PBKDF2-HMAC-SHA256 users in
 config/console-users.json, in-memory sessions behind an HttpOnly
-cookie, and the four account routes (docs/console-spec.md, "The auth
+cookie, and the four account routes (docs/reference/console-api.md, "The auth
 model").
 
 First run: with no users file the console is open to everyone the

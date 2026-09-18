@@ -1,4 +1,4 @@
-"""Host stats and the console's own restart (docs/console-spec.md,
+"""Host stats and the console's own restart (docs/reference/console-api.md,
 "Host, restart"). Each host block
 degrades to zeros on a platform without the /proc files; the restart
 never names a service manager."""

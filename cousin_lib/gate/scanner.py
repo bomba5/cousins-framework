@@ -1,7 +1,7 @@
 """Contamination scanner: one engine behind the gate and the triage.
 
 The denylist of real terms never lives in this repository; it is loaded
-from a path outside the tree. See docs/gate.md.
+from a path outside the tree. See docs/development.md.
 """
 import ast
 import io

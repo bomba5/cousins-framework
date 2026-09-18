@@ -40,6 +40,16 @@ class StopCase(unittest.TestCase):
         })
         patcher.start()
         self.addCleanup(patcher.stop)
+        # stop_cousin falls back to "whatever chat server holds the
+        # cousin's port on this host". With fixture ports that is some
+        # other process on the machine running the suite (another
+        # checkout's test server, or a live cousin), and the fallback
+        # would SIGTERM it. A test that wants the fallback passes its
+        # own port_pid.
+        kw = mock.patch.dict(stop_cousin.__kwdefaults__,
+                             {"port_pid": lambda port: None})
+        kw.start()
+        self.addCleanup(kw.stop)
 
     def _cousin(self, slug="wren", port=8100):
         home = self.root / "cousins" / slug
@@ -80,6 +90,25 @@ class TestStopCousin(StopCase):
         self.assertEqual(out, {"tmux": "already stopped",
                                "chat_server": "not running"})
         self.assertNotIn("kill-session", self.log.read_text())
+
+    def test_a_chat_server_elsewhere_on_this_host_is_never_touched(self):
+        # Canary for the fixture guard in setUp: a process that looks
+        # like a chat server and holds the cousin's port, with no pid
+        # file, must survive a stop from this suite.
+        proc = subprocess.Popen(
+            [sys.executable, "-c",
+             "import socket, sys, time  # cousin_lib.server.app\n"
+             "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()\n"
+             "print(s.getsockname()[1], flush=True); time.sleep(30)"],
+            stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        port = int(proc.stdout.readline())
+        home = self._cousin(port=port)
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC_HAS_SESSION": "1"}):
+            out = stop_cousin(home, tmux_bin=str(self.tmux))
+        self.assertEqual(out["chat_server"], "not running")
+        time.sleep(0.1)
+        self.assertIsNone(proc.poll())
 
     def test_a_stale_pid_pointing_at_another_program_is_not_killed(self):
         home = self._cousin()

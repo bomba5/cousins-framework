@@ -202,6 +202,7 @@ function Inspector({ cousin: c, onClose, onAct }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [c, onClose]);
+  const [filesOpen, setFilesOpen] = React.useState(false);
   if (!c) return null;
   return (
     <div className="inspector">
@@ -237,6 +238,13 @@ function Inspector({ cousin: c, onClose, onAct }) {
         <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--fg-1)", marginTop: 6 }}>
           {fmtTokens(c.tokensSpent)} spent
         </div>
+
+        <SectionLabel style={{ marginTop: 20 }}>files</SectionLabel>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+          <button className="btn" data-open-files onClick={() => setFilesOpen(true)}>browse home</button>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)" }}>read-only tree of the home; .secrets/ never shown</span>
+        </div>
+        {filesOpen && <CousinFilesModal slug={c.slug} onClose={() => setFilesOpen(false)} />}
 
         <PeerMessagePanel cousin={c} />
 

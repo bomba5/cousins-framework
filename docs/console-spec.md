@@ -43,7 +43,7 @@ Retained, with the routes each one calls (all detailed below):
 | view | routes |
 |---|---|
 | overview (the host panel, cousin table, totals, recent fires) | `GET /api/host`, `GET /api/cousins`, `GET /api/loops`, `GET /api/loops/recent` |
-| cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
+| cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, file explorer, spawn, dismiss, flip, restart, hide | `GET /api/cousins/<slug>/files`, `.../files/read`, `.../files/download`, `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
 | chat with the live pane | `GET /api/messages`, `GET /api/search`, `POST /api/chat/send`, `/api/chat/archive`, `/api/chat/reactions`, `GET /api/chat/inbound/...`, `GET /api/chat/media/...`, `GET /api/pane`, `GET /api/pane/stream`, `POST /api/pane/input`, `/api/pane/resize` |
 | jobs | `GET /api/jobs`, `GET /api/jobs/<id>`, `GET /api/jobs/<id>/log`, `POST /api/jobs/<id>`, `DELETE /api/jobs/<id>` |
 | memory with the shared-tier review | `GET /api/memory`, `GET /api/shared/list`, `.../content`, `.../diff`, `.../audit`, `POST /api/shared/approve`, `/api/shared/reject` |
@@ -768,6 +768,36 @@ the proposer reviewing themselves) is `403` with the tier's message;
 a missing proposal `404`. `200 {"ok": true, "file": str}`. The
 source's git commit of the shared directory is not ported: the audit
 log is the record.
+
+## Cousin files
+
+A read-only view of one cousin home for the inspector, through
+`cousin_lib.home_files`, behind the login like every other route.
+Paths are home-relative: absolute paths and `..` are `400`, a path
+that resolves outside the home (a link out) `403`. `.secrets/` is
+never listed, read or downloaded, at any depth or through a link
+(`404`); a link that leaves the home is listed with `outside: true`
+and never followed.
+
+### `GET /api/cousins/<slug>/files?path=<dir>&hidden=0|1`
+`{"path", "entries": [{"name", "path", "type": "dir"|"file"|"link"|
+"other", "size", "mtime", "outside"?, "target_type"?}], "truncated",
+"total"}`, one level, directories first, at most 2000 rows. Dotfiles
+only with `hidden=1`. `404` not a directory.
+
+### `GET /api/cousins/<slug>/files/read?path=<file>&start=N&count=N`
+`{"kind": "markdown"|"text"|"image"|"binary", "path", "size",
+"mtime", "mime"}` plus, for Markdown up to 2 MB, `text` (whole); for
+text (and larger Markdown), `lines` from 1-based `start` (at most
+`count`, default 1000, cap 5000), `total_lines`, `more`. A file whose
+first 8 KB hold a NUL or invalid UTF-8 is `binary` and carries no
+content; images carry none either (the download serves them).
+
+### `GET /api/cousins/<slug>/files/download?path=<file>`
+The bytes, streamed. Raster images `inline` with their type; anything
+else (SVG included) `application/octet-stream` as an `attachment`.
+Always `X-Content-Type-Options: nosniff` and a sandboxing
+`Content-Security-Policy`.
 
 ## Tokens
 

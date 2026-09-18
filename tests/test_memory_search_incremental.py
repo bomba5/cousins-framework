@@ -223,5 +223,110 @@ class TestEnsureIndex(unittest.TestCase):
             self.assertFalse(pathlib.Path(src).exists())
 
 
+class TestSingleFlight(unittest.TestCase):
+    """One refresh per home at a time. A recall past its budget keeps
+    refreshing on its own thread, so N operator messages used to mean
+    N full re-embeds at once (2026-09-18: 19 of them, the embedding
+    service at 18 s a request)."""
+
+    def _hold_lock(self, home):
+        import fcntl
+        lock = open(memory_search._lock_path(home), "a")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        self.addCleanup(lock.close)
+        return lock
+
+    def test_held_lock_makes_a_nonwaiting_pass_return_busy_at_once(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as root, \
+                fake_embedder(calls=calls) as url:
+            home = _home_with(root, {"memory/a.md": "alpha"})
+            self._hold_lock(home)
+            rep = memory_search.ensure_index(home, _cfg(url), wait=False)
+            self.assertTrue(rep["busy"])
+            self.assertEqual(calls, [])
+            self.assertFalse((home / "memory" / "embeddings.json").exists())
+
+    def test_free_lock_runs_the_pass(self):
+        with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
+            home = _home_with(root, {"memory/a.md": "alpha"})
+            rep = memory_search.ensure_index(home, _cfg(url), wait=False)
+            self.assertFalse(rep["busy"])
+            self.assertEqual(rep["embedded"], 1)
+
+    def test_search_during_a_refresh_uses_the_index_as_it_stands(self):
+        with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
+            home = _home_with(root, {"memory/a.md": "alpha"})
+            memory_search.ensure_index(home, _cfg(url))
+            (home / "memory" / "b.md").write_text("beta")
+            self._hold_lock(home)
+            hits, report = memory_search._semantic_search(
+                "alpha", home, 5, _cfg(url))
+            self.assertTrue(report["busy"])
+            self.assertEqual([pathlib.Path(h["path"]).name for h in hits],
+                             ["a.md"])
+
+
+class TestCheckpoint(unittest.TestCase):
+    def test_a_pass_that_dies_keeps_what_it_embedded(self):
+        files = {"memory/f%02d.md" % i: "body %d" % i for i in range(7)}
+        with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
+            home = _home_with(root, files)
+            real = memory_search._embed
+            seen = []
+
+            def dying(text, config):
+                if len(seen) == 5:
+                    raise KeyboardInterrupt  # the process goes away
+                seen.append(text)
+                return real(text, config)
+
+            with mock.patch.object(memory_search, "_CHECKPOINT_CHUNKS", 2), \
+                    mock.patch.object(memory_search, "_embed", dying):
+                with self.assertRaises(KeyboardInterrupt):
+                    memory_search.ensure_index(home, _cfg(url))
+            kept = _index(home)
+            self.assertEqual(len(kept), 4)  # two checkpoints of two
+            # The next pass embeds only the rest.
+            calls = []
+            with fake_embedder(calls=calls) as url2:
+                rep = memory_search.ensure_index(home, _cfg(url2))
+            self.assertEqual(rep["embedded"], 3)
+            self.assertEqual(rep["reused"], 4)
+
+
+class TestServiceOptions(unittest.TestCase):
+    def _payload(self, config):
+        captured = {}
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"embedding": [1.0]}'
+
+        def fake_urlopen(request, timeout=None):
+            captured["body"] = json.loads(request.data)
+            return Resp()
+
+        with mock.patch.object(memory_search.urllib.request, "urlopen",
+                               fake_urlopen):
+            memory_search._embed("hello", config)
+        return captured["body"]
+
+    def test_options_table_passes_through(self):
+        body = self._payload({"url": "http://x", "model": "m",
+                              "options": {"num_thread": 8}})
+        self.assertEqual(body["options"], {"num_thread": 8})
+
+    def test_no_options_sends_no_options_key(self):
+        body = self._payload({"url": "http://x", "model": "m"})
+        self.assertNotIn("options", body)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,6 +23,12 @@
 #chunk_chars = 2000
 #chunk_overlap = 200
 #
+# Passed to the service as "options" in every request. For Ollama,
+# num_thread caps the cores one embedding takes; it uses them all by
+# default, which on a CPU-only host stalls everything else.
+#[options]
+#num_thread = 8
+#
 # Proactive recall: the chat server searches memory for operator
 # messages of at least min_chars characters and appends up to top
 # hits scoring at least min_score as a "possibly relevant" line.

@@ -39,6 +39,7 @@ Context comes from COUSIN_HOME and fails loud: a search that silently
 reads nothing teaches its caller that memory is empty, which is worse
 than an error.
 """
+import fcntl
 import hashlib
 import json
 import math
@@ -60,6 +61,10 @@ _SNIPPET_CHARS = 160
 _DEFAULTS = {"chunk_chars": 2000, "chunk_overlap": 200}
 _RECALL_DEFAULTS = {"min_chars": 24, "min_score": 0.45, "top": 3}
 _TRASH_DIR = ".trash"
+# A long refresh saves what it has every this many embedded chunks, so
+# a pass that dies (a recall past its budget, a killed server) leaves
+# its work behind instead of starting the next one from zero.
+_CHECKPOINT_CHUNKS = 32
 
 
 def _home():
@@ -277,10 +282,16 @@ def _embedding_config(root=None):
 
 
 def _embed(text, config):
-    payload = json.dumps({
+    body = {
         "model": config.get("model", ""),
         "prompt": text[:_EMBED_CAP_CHARS],
-    }).encode()
+    }
+    # [options] passes through to the service as is: for Ollama,
+    # num_thread caps the cores one embedding takes (it uses them all
+    # by default, which on a CPU-only host is the whole machine).
+    if config.get("options"):
+        body["options"] = dict(config["options"])
+    payload = json.dumps(body).encode()
     request = urllib.request.Request(
         config["url"], data=payload,
         headers={"Content-Type": "application/json"})
@@ -353,7 +364,11 @@ def _write_index_atomic(home, index):
     os.replace(tmp, path)
 
 
-def ensure_index(home, config, *, force=False, root=None):
+def _lock_path(home):
+    return Path(home) / "memory" / ".embeddings.lock"
+
+
+def ensure_index(home, config, *, force=False, root=None, wait=True):
     """Bring <home>/memory/embeddings.json up to date, embedding only
     what changed, and report what the pass did:
 
@@ -361,14 +376,41 @@ def ensure_index(home, config, *, force=False, root=None):
        "reused": chunks whose stored vector was kept,
        "dropped": stored keys whose chunk no longer exists,
        "failed": chunks the service could not embed,
-       "stale_reason": why any work was needed, or None}
+       "stale_reason": why any work was needed, or None,
+       "busy": True when another pass held the index and this one
+               did nothing (only with wait=False)}
+
+    One pass per home at a time, under an flock on
+    memory/.embeddings.lock: concurrent searches each re-embedding the
+    same chunks is a thundering herd on the embedding service (seen
+    2026-09-18: one recall thread per operator message, 19 at once, the
+    service at 18 s a request and every recall past its budget). With
+    wait=False a held lock returns at once with busy=True and the
+    caller searches the index as it stands; wait=True queues behind it.
 
     A chunk is unchanged when its text hash matches the stored one; an
     mtime bump alone is not a change. A failed embed keeps the prior
     vector when there is one (stale beats invisible) and stores nothing
     otherwise, so a dead service never poisons the index with empty
-    vectors. The file is rewritten only when something changed."""
+    vectors. The file is rewritten only when something changed, and
+    every _CHECKPOINT_CHUNKS embeddings along the way."""
     home = Path(home)
+    lock_path = _lock_path(home)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX
+                        | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            return {"embedded": 0, "reused": 0, "dropped": 0,
+                    "failed": 0, "stale_reason": None, "busy": True}
+        try:
+            return _refresh_index(home, config, force=force, root=root)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _refresh_index(home, config, *, force, root):
     chunks = _chunks(home, config, root)
     old = None if force else _load_index(home)
     missing = old is None
@@ -409,13 +451,20 @@ def ensure_index(home, config, *, force=False, root=None):
         embedded += 1
         index[key] = {"mtime": mtime, "vector": vector,
                       "text_hash": digest}
+        if embedded % _CHECKPOINT_CHUNKS == 0:
+            # Everything embedded so far, and the prior entry for every
+            # key not reached yet: a pass that dies here loses nothing
+            # it already paid for.
+            partial = dict(old)
+            partial.update(index)
+            _write_index_atomic(home, partial)
     dropped = len(set(old) - set(chunks))
     if reason is None and (fresh or dropped):
         reason = "%d new or changed chunk(s), %d gone" % (fresh, dropped)
     if missing or fresh or dropped or index != old:
         _write_index_atomic(home, index)
     return {"embedded": embedded, "reused": reused, "dropped": dropped,
-            "failed": failed, "stale_reason": reason}
+            "failed": failed, "stale_reason": reason, "busy": False}
 
 
 def _first_line(text):
@@ -435,7 +484,7 @@ def _semantic_search(query, home, top, config, collection=None):
     (hits, failed) where failed counts chunks the pass could not
     embed."""
     query_vector = _embed(query, config)
-    report = ensure_index(home, config)
+    report = ensure_index(home, config, wait=False)
     index = _load_index(home) or {}
     chunks = _chunks(home, config)
     best = {}
@@ -455,7 +504,7 @@ def _semantic_search(query, home, top, config, collection=None):
                 "similarity": score,
             }
     hits = sorted(best.values(), key=lambda h: h["score"], reverse=True)
-    return hits[:top], report["failed"]
+    return hits[:top], report
 
 
 # ----------------------------------------------------------------- fusion
@@ -541,13 +590,17 @@ def search(query, *, top=5, home=None, collection=None):
                   " results (fix or remove config/embedding.toml)")
     elif config is not None:
         try:
-            semantic_hits, failed = _semantic_search(
+            semantic_hits, report = _semantic_search(
                 query, home, top, config, collection)
         except Exception as err:
             notice = ("embedding service unreachable (%s); keyword-only"
                       " results" % err)
         else:
-            if failed:
+            failed = report["failed"]
+            if report.get("busy"):
+                notice = ("another search is refreshing the index; ranked"
+                          " by meaning against the index as it stands")
+            elif failed:
                 notice = ("embedding service failed for %d chunk(s);"
                           " prior vectors kept where available, new"
                           " text unranked by meaning" % failed)

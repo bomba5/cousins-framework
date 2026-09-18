@@ -163,3 +163,15 @@ class TopBar(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BadgeLinks(unittest.TestCase):
+    """Operator (2026-09-18): links in the accent colour, and a link's
+    tooltip is its address."""
+
+    def test_links_are_accent_and_title_their_address(self):
+        css = (_REPO / "cousin_lib" / "console_static" / "styles.css").read_text()
+        self.assertRegex(css, r"(?m)^a \{ color: var\(--accent\); \}")
+        app = (_REPO / "cousin_lib" / "console_static" / "app.jsx").read_text()
+        self.assertIn("title={build.repo_url}", app)
+        self.assertIn("title={build.commit_url}", app)

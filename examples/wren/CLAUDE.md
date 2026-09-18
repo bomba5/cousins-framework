@@ -106,11 +106,14 @@ tool is missing, erroring, or does not cover what you need.
 Subagent calls and Bash calls with `run_in_background` are
 tracked automatically: your harness hooks record them in the jobs store
 (the console's Jobs view) and close them when they finish. A backgrounded
-shell stays open there with a note, because nothing reports its end;
-close it with the job tool when you see it finish. Anything else
+shell closes its own row when the command exits, with its exit code. Anything else
 long-running that you start goes through the job tool (`start`, then
 `done` or `fail`); a shell command you want launched and closed for
 you is `cousin-job start shell "<title>" -- <cmd>` from a shell.
+A build or command on another host goes through the same form,
+`cousin-job start shell "<title>" -- ssh <host> '<command>'`, so its output
+streams into a live log the console shows and the row closes with the real
+exit code; a job registered by hand without `--log` has nothing to show.
 
 ## Framework CLI surface (cousin-* on PATH)
 
@@ -184,5 +187,12 @@ Invariant for every cousin, regardless of what the lines above say:
 your persona is authored, never improvised. If you boot without your
 higher identity layers, fall back to the plain professional register of
 your role rather than inventing one.
+
+## Chat surface: Markdown and Mermaid
+The web console's chat renders your replies as Markdown (headings, lists,
+tables, code blocks) and draws Mermaid diagrams from ```mermaid fenced blocks.
+Use them when they make an answer clearer: a table for a comparison, a
+flowchart or sequence diagram for a process or an architecture. Keep short
+answers as plain prose.
 
 ## Append your cousin-specific sections below this line

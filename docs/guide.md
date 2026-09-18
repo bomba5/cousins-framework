@@ -227,6 +227,23 @@ ls cousins/testa/memory/raw/
 #   -> 2026-07-digest.jsonl  2026-08-digest.jsonl  2026-09-16.jsonl  archive/
 ```
 
+**Removing a memory:** the console's memory explorer (Memory view,
+pick a cousin) shows the layers above with counts, truth levels and
+recall use, and can remove a single raw entry, a decision (with the
+raw copy `decide` wrote for it) or a memory or note file. Nothing is
+destroyed: the line or file moves to `memory/.trash/<id>/` with its
+original path, an audit line lands in `memory/.trash/audit.jsonl`,
+the distilled views regenerate when raw changed, and search stops
+finding a removed file on its next run. Restore from the explorer's
+trash layer or here:
+
+```
+cousin-memory trash
+#   -> 20260918T134746-314733  ana  memory/raw/2026-09-04.jsonl:3
+cousin-memory trash restore 20260918T134746-314733
+#   -> restored memory/raw/2026-09-04.jsonl:3 (distilled views regenerated)
+```
+
 **Auditing the prompt cache:** the provider's prompt cache is
 prefix-matched, so a file that changes between turns and sits in the
 prefix silently invalidates everything after it. `cousin-cache-audit`

@@ -54,6 +54,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.routes_jobs",
     "cousin_lib.console.routes_loops",
     "cousin_lib.console.routes_memory",
+    "cousin_lib.console.routes_files",
     "cousin_lib.console.routes_shared",
     "cousin_lib.console.routes_admin",
     "cousin_lib.console.routes_tracker",

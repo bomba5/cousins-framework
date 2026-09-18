@@ -58,23 +58,6 @@ function JobsView() {
     return ["all", ...[...set].sort()];
   }, [jobs, kind]);
 
-  // Live log tail for the open job: poll its /log every 2s while open.
-  React.useEffect(() => {
-    if (!openJob) return;
-    let cancelled = false;
-    const pull = async () => {
-      try {
-        const r = await fetch(`/api/jobs/${openJob.id}/log?lines=200`, { cache: "no-store" });
-        const d = await r.json();
-        if (cancelled) return;
-        if (d.ok) setOpenJob(j => j ? { ...j, log: d.log || "(empty)", size: d.size, log_path: d.log_path } : null);
-      } catch (e) { /* keep last */ }
-    };
-    pull();
-    const id = setInterval(pull, 2000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [openJob?.id]);
-
   const counts = {
     running: jobs.filter(j => j.status === "running").length,
     done: jobs.filter(j => j.status === "done").length,
@@ -221,6 +204,9 @@ function JobsView() {
                 $ {j.command}
               </div>
             )}
+            {!j.log_path && (
+              <div style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--fg-3)", marginBottom: 4 }}>no log attached</div>
+            )}
             {j.status === "running" && tails[j.id] && (
               <pre style={{ margin: 0, padding: 6, background: "var(--bg-0)", border: "1px solid var(--line)",
                             borderRadius: 3, fontSize: 10, fontFamily: "var(--mono)", color: "var(--fg-2)",
@@ -245,26 +231,13 @@ function JobsView() {
       {openJob && (
         <div className="modal-bg" onClick={() => setOpenJob(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}
-               style={{ width: "min(960px, 95vw)", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+               style={{ width: "min(960px, 95vw)", height: "85vh", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
             <div className="hdr">
               <span>job #{openJob.id} · @{openJob.spawned_by} · {openJob.title}</span>
-              <span style={{ color: "var(--fg-3)", marginLeft: "auto", fontFamily: "var(--mono)", fontSize: 10 }}>
-                live · polls every 2s{openJob.size ? ` · ${(openJob.size/1024).toFixed(1)}kb` : ""}
-              </span>
-              <button className="close" onClick={() => setOpenJob(null)}>×</button>
+              <button className="close" style={{ marginLeft: "auto" }} onClick={() => setOpenJob(null)}>×</button>
             </div>
-            <div className="body" style={{ padding: 0, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-              {openJob.log_path && (
-                <div style={{ padding: "6px 14px", fontSize: 10, fontFamily: "var(--mono)", color: "var(--fg-3)", borderBottom: "1px solid var(--line)" }}>
-                  {openJob.log_path}
-                </div>
-              )}
-              <pre style={{
-                margin: 0, padding: 12, flex: 1, overflow: "auto",
-                fontSize: 11, fontFamily: "var(--mono)", lineHeight: 1.4,
-                color: "var(--fg-2)", background: "var(--bg-0)",
-                whiteSpace: "pre-wrap", wordBreak: "break-all",
-              }}>{openJob.log || ""}</pre>
+            <div className="body" style={{ padding: 0, overflow: "hidden", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <JobLogPanel jobId={openJob.id} />
             </div>
           </div>
         </div>
@@ -273,9 +246,111 @@ function JobsView() {
   );
 }
 
+// The open job's log: loads the tail, then follows with ?from=<next>
+// every 2 s and appends (docs/console-spec.md, jobs log). The box
+// scrolls; it follows the end while the reader sits at the bottom,
+// holds still once they scroll up, and resumes when they return to the
+// bottom or press "follow". The browser keeps the last 2 MB.
+const JOB_LOG_KEEP = 2 * 1024 * 1024;
+function JobLogPanel({ jobId }) {
+  const [text, setText] = React.useState("");
+  const [meta, setMeta] = React.useState({ loaded: false, hasLog: true, path: null, size: 0 });
+  const [following, setFollowing] = React.useState(true);
+  const boxRef = React.useRef(null);
+  const offsetRef = React.useRef(null);
+  const followRef = React.useRef(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    offsetRef.current = null;
+    setText("");
+    const pull = async () => {
+      for (let round = 0; round < 16 && !cancelled; round++) {
+        let d;
+        try {
+          const url = offsetRef.current === null
+            ? `/api/jobs/${jobId}/log?lines=2000`
+            : `/api/jobs/${jobId}/log?from=${offsetRef.current}`;
+          const r = await fetch(url, { cache: "no-store" });
+          d = await r.json();
+        } catch (_e) { return; }
+        if (cancelled || !d || !d.ok) return;
+        const hasLog = d.has_log !== false && !!d.log_path;
+        setMeta({ loaded: true, hasLog, path: d.log_path, size: d.size || 0 });
+        if (!hasLog) return;
+        if (!d.size) { setText(d.log || ""); offsetRef.current = null; return; }
+        if (offsetRef.current === null) {
+          setText(d.log || "");
+        } else if (d.size < offsetRef.current) {
+          offsetRef.current = null;  // truncated or replaced: re-tail
+          continue;
+        } else if (d.log) {
+          setText(t => {
+            const n = t + d.log;
+            return n.length > JOB_LOG_KEEP ? n.slice(n.length - JOB_LOG_KEEP) : n;
+          });
+        }
+        const next = d.next !== undefined ? d.next : d.size;
+        const caughtUp = next >= d.size;
+        offsetRef.current = next;
+        if (caughtUp) return;
+      }
+    };
+    pull();
+    const id = setInterval(pull, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [jobId]);
+
+  React.useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (box && followRef.current) box.scrollTop = box.scrollHeight;
+  }, [text]);
+
+  const onScroll = () => {
+    const box = boxRef.current;
+    if (!box) return;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    if (atBottom !== followRef.current) {
+      followRef.current = atBottom;
+      setFollowing(atBottom);
+    }
+  };
+  const jump = () => {
+    followRef.current = true;
+    setFollowing(true);
+    const box = boxRef.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  };
+
+  if (meta.loaded && !meta.hasLog) {
+    return (
+      <div className="joblog-hint" data-job-log-none>
+        no log attached; start the job with <code>cousin-job start shell TITLE -- CMD</code> or <code>--log PATH</code> to stream one
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="joblog-bar">
+        <span className="joblog-path">{meta.path || ""}</span>
+        <span style={{ flex: 1 }} />
+        <span>{meta.size ? `${(meta.size / 1024).toFixed(1)} kB · ` : ""}polls every 2s</span>
+        <button className={"btn ghost" + (following ? " active" : "")} onClick={jump} data-job-log-follow={following ? "on" : "off"}
+                title={following ? "following the end of the log" : "scrolled up: press to jump to the end and follow again"}>
+          {following ? "following" : "follow"}
+        </button>
+      </div>
+      <pre ref={boxRef} onScroll={onScroll} className="joblog" data-job-log>{text || (meta.loaded ? "(empty)" : "loading...")}</pre>
+    </>
+  );
+}
+
 // ============ MEMORY ============
 // Unified view: the shared tier (with the review workflow) + each cousin's
-// private memory directory as a file tree with previews.
+// private memory as the layers it is built from (MemoryExplorer, in
+// explorer.jsx): raw entries by truth level, digests and archive,
+// distilled views, decisions, memory and note files, indexes, recall,
+// trash.
 function MemoryView() {
   const showHidden = (window.useSetting && window.useSetting("showHidden")) || false;
   const [scope, setScope] = React.useState("shared"); // "shared" | "<slug>"
@@ -285,7 +360,6 @@ function MemoryView() {
     [allCousins, showHidden]);
   const [shared, setShared] = React.useState({ canonical: [], pending: [] });
   const [audit, setAudit] = React.useState([]);
-  const [privateTree, setPrivateTree] = React.useState({}); // "slug/" -> {filename: {size, updated, preview}}
   const [selected, setSelected] = React.useState(null);
   const [content, setContent] = React.useState("");
   const [diff, setDiff] = React.useState("");
@@ -294,17 +368,15 @@ function MemoryView() {
   const [me, setMe] = React.useState(null);
 
   const refresh = React.useCallback(async () => {
-    const [cs, sl, au, pv, auth] = await Promise.all([
+    const [cs, sl, au, auth] = await Promise.all([
       fetchCousins(),
       apiGet("/api/shared/list"),
       apiGet("/api/shared/audit?n=50"),
-      fetchMemory(),
       fetchAuthMe(),
     ]);
     setAllCousins(cs);
     if (sl) setShared({ canonical: sl.canonical || [], pending: sl.pending || [] });
     if (au) setAudit(au.entries || []);
-    setPrivateTree(pv || {});
     if (auth) setMe(auth);
   }, []);
 
@@ -324,12 +396,6 @@ function MemoryView() {
       const d = await apiGet(`/api/shared/diff?file=${encodeURIComponent(entry.origin)}&slug=${encodeURIComponent(entry.slug)}`);
       setDiff(d?.diff || "");
     }
-  };
-
-  const openPrivate = (slug, name, entry) => {
-    setSelected({ scope: "private", slug, name });
-    setDiff("");
-    setContent(entry.preview || "");
   };
 
   const act = async (kind) => {
@@ -359,34 +425,38 @@ function MemoryView() {
     }
   };
 
-  const treeSlugs = Object.keys(privateTree).filter(k => k !== "shared/").map(k => k.replace(/\/$/, ""));
   const scopes = [
     { id: "shared", label: "shared", count: shared.canonical.length + shared.pending.length },
-    ...cousins.map(c => ({
-      id: c.slug,
-      label: `@${c.slug} private`,
-      count: Object.keys(privateTree[c.slug + "/"] || {}).length,
-    })),
-    ...treeSlugs.filter(s => !cousins.some(c => c.slug === s) && (showHidden || !allCousins.some(c => c.slug === s && c.hidden)))
-      .map(s => ({ id: s, label: `@${s} private`, count: Object.keys(privateTree[s + "/"] || {}).length })),
+    ...cousins.map(c => ({ id: c.slug, label: `@${c.slug}` })),
   ];
+  const scopeBar = (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }} data-memory-scopes>
+      {scopes.map(s => (
+        <button key={s.id}
+          className={scope === s.id ? "btn active" : "btn"}
+          onClick={() => { setScope(s.id); setSelected(null); setContent(""); setDiff(""); }}
+          style={{ fontSize: 11 }}>
+          {s.label} {s.count !== undefined && <span style={{ color: "var(--fg-3)" }}>{s.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (scope !== "shared") {
+    return (
+      <div className="wrap-pad mx-page">
+        {scopeBar}
+        <MemoryExplorer slug={scope} />
+      </div>
+    );
+  }
 
   return (
     <div className="wrap-pad" data-memory-grid style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14, height: "calc(100vh - 50px)" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {scopes.map(s => (
-            <button key={s.id}
-              className={scope === s.id ? "btn active" : "btn"}
-              onClick={() => { setScope(s.id); setSelected(null); setContent(""); setDiff(""); }}
-              style={{ fontSize: 11 }}>
-              {s.label} <span style={{ color: "var(--fg-3)" }}>{s.count}</span>
-            </button>
-          ))}
-        </div>
+        {scopeBar}
 
-        {scope === "shared" ? (
-          <>
+        <>
             <div className="panel" style={{ flex: "0 0 auto" }}>
               <div className="panel-hdr"><span className="title">pending</span>
                 <span style={{ color: "var(--fg-3)" }}>{shared.pending.length}</span></div>
@@ -420,28 +490,6 @@ function MemoryView() {
               </div>
             </div>
           </>
-        ) : (
-          <div className="panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div className="panel-hdr"><span className="title">@{scope} memory/</span></div>
-            <div className="panel-body" style={{ padding: 0, overflowY: "auto", flex: 1 }}>
-              {(() => {
-                const entries = Object.entries(privateTree[scope + "/"] || {});
-                if (entries.length === 0) {
-                  return <div style={{ padding: 14, color: "var(--fg-3)", fontFamily: "var(--mono)", fontSize: 11 }}>no memory files for @{scope}.</div>;
-                }
-                return entries.map(([name, v]) => (
-                  <div key={name} onClick={() => openPrivate(scope, name, v)}
-                    style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)", cursor: "pointer",
-                             fontFamily: "var(--mono)", fontSize: 11,
-                             background: selected?.name === name && selected?.slug === scope ? "var(--bg-2)" : "transparent" }}>
-                    <div style={{ color: "var(--fg-1)" }}>{name}</div>
-                    <div style={{ color: "var(--fg-3)" }}>{v.size} b · {fmtAgo(v.updated)}</div>
-                  </div>
-                ));
-              })()}
-            </div>
-          </div>
-        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
@@ -450,7 +498,7 @@ function MemoryView() {
             <span className="title">{selected
               ? (selected.scope === "shared"
                   ? `${selected.kind === "pending" ? "proposal" : "canonical"}: ${selected.origin || selected.name}`
-                  : `@${selected.slug}/${selected.name} (preview, first 400 chars)`)
+                  : selected.name)
               : "select a file"}</span>
             {selected?.scope === "shared" && selected.kind === "pending" && (
               <>
@@ -471,8 +519,7 @@ function MemoryView() {
                             background: "var(--bg-0)", borderBottom: "1px solid var(--line)",
                             whiteSpace: "pre-wrap" }}>{diff}</pre>
             )}
-            <pre style={{ margin: 0, padding: 12, fontSize: 11, color: "var(--fg-2)",
-                          whiteSpace: "pre-wrap" }}>{content}</pre>
+            {content && <div style={{ padding: 12 }}><MarkdownDoc text={content} /></div>}
           </div>
         </div>
         {scope === "shared" && (

@@ -43,10 +43,10 @@ Retained, with the routes each one calls (all detailed below):
 | view | routes |
 |---|---|
 | overview (the host panel, cousin table, totals, recent fires) | `GET /api/host`, `GET /api/cousins`, `GET /api/loops`, `GET /api/loops/recent` |
-| cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
+| cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, file explorer, spawn, dismiss, flip, restart, hide | `GET /api/cousins/<slug>/files`, `.../files/read`, `.../files/download`, `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
 | chat with the live pane | `GET /api/messages`, `GET /api/search`, `POST /api/chat/send`, `/api/chat/archive`, `/api/chat/reactions`, `GET /api/chat/inbound/...`, `GET /api/chat/media/...`, `GET /api/pane`, `GET /api/pane/stream`, `POST /api/pane/input`, `/api/pane/resize` |
 | jobs | `GET /api/jobs`, `GET /api/jobs/<id>`, `GET /api/jobs/<id>/log`, `POST /api/jobs/<id>`, `DELETE /api/jobs/<id>` |
-| memory with the shared-tier review | `GET /api/memory`, `GET /api/shared/list`, `.../content`, `.../diff`, `.../audit`, `POST /api/shared/approve`, `/api/shared/reject` |
+| memory with the shared-tier review and the per-cousin explorer | `GET /api/memory`, `GET /api/memory/<slug>/overview`, `.../raw`, `.../decisions`, `.../files`, `.../file`, `.../trash`, `POST /api/memory/<slug>/delete`, `.../restore`, `GET /api/shared/list`, `.../content`, `.../diff`, `.../audit`, `POST /api/shared/approve`, `/api/shared/reject` |
 | loops with drift | `GET /api/loops`, `GET /api/loops/drift/<slug>/<name>`, `GET/POST /api/cousins/<slug>/loops`, `POST .../loops/<name>/fire`, `.../loops/<name>/hidden` |
 | tokens | `GET /api/tokens`, `GET /api/cousins` |
 | tracker | `GET/POST /api/tracker`, `POST/DELETE /api/tracker/<id>` |
@@ -623,11 +623,21 @@ reader; a failure there is logged, never a 500 on the poll.
 `{"ok": true, "job": row}` or `404`.
 
 ### `GET /api/jobs/<id>/log?lines=N&from=BYTE`
-`{"ok": true, "log": str, "log_path": str, "size": int}`. Without
-`from`: the last `lines` (default 40) of the final 64 KB. With `from`:
-the bytes from that offset, at most 64 KB, so a follower prints each
-line once. A job without a log path returns `log: ""`; a path not yet
-present returns a placeholder line. `404` unknown job.
+`{"ok": true, "log": str, "log_path": str, "size": int, "next": int,
+"has_log": bool}`. Without `from`: the last `lines` (default 40) of
+the final 64 KB, and `next` is the size. With `from`: the bytes from
+that offset, at most 64 KB and, when the cap cut the read short,
+ending on the last newline inside it; `next` is the offset after
+them, so a follower that always asks `from=<next>` prints each line
+exactly once. A job without a log path returns `log: ""`, `log_path:
+null`, `has_log: false` (the view says how to attach one); a path not
+yet present returns a placeholder line. `404` unknown job.
+
+The jobs view's log panel is such a follower: it loads the tail, then
+polls `from=<next>` every 2 s and appends. It scrolls, follows the end
+while the reader is at the bottom, stops following when the reader
+scrolls up (a "follow" button jumps back), and keeps at most the last
+2 MB in the browser.
 
 ### `POST /api/jobs/<id>`
 Body: any of `status`, `result_summary`, `exit_code`, `title`,
@@ -768,6 +778,138 @@ the proposer reviewing themselves) is `403` with the tier's message;
 a missing proposal `404`. `200 {"ok": true, "file": str}`. The
 source's git commit of the shared directory is not ported: the audit
 log is the record.
+
+## Memory explorer
+
+A per-cousin projection of `cousin_lib.memory_explorer` (read) and
+`cousin_lib.memory_trash` (remove, restore). Every route resolves
+`<slug>` to a registered home (`404` otherwise) and sits behind the
+login like every other route. Paths are home-relative and resolved by
+`cousin_lib.home_files`: absolute paths and `..` are `400`, a path
+that resolves outside the home (a link out) `403`, anything under
+`.secrets/` `404`.
+
+The layers, as the memory code builds them: active state (`STATUS.md`,
+`data/active-threads.md`, `data/handoff.md`, `data/handoff-manual.md`,
+`data/session-checkpoint.md`, `data/pre-compact-checkpoint.md`), the
+`MEMORY.md` index, raw entries (`memory/raw/<YYYY-MM-DD>.jsonl`),
+monthly digests (`memory/raw/<YYYY-MM>-digest.jsonl`), the gzip
+archive (`memory/raw/archive/*.jsonl.gz`), the distilled views
+(`memory/distilled/*.md`), the decisions log (`data/decisions.jsonl`
+and its rotations), memory files (`memory/**`, generated layers and
+index artifacts excluded), notes (`notes/**`), the harness auto-memory
+directory (`config/harness.toml` `auto_memory_dir`), the search indexes
+(`memory/fts_index.db`, `memory/embeddings.json`), the recall log
+(`memory/.recall-log.jsonl`, `.recall-counts.json`), the trash
+(`memory/.trash/`) and `legacy/`. Truth levels are the taxonomy
+`L0_OPERATOR`..`L5_OBSOLETE`; the short forms `operator-stated` and
+`cousin-conclusion` map to L0 and L3, a missing level to L3.
+
+### `GET /api/memory/<slug>/overview`
+`{"slug", "layers": [{"id", "title", "count", "updated", ...}],
+"insights": {...}}`. `updated` is an epoch mtime or null. Layer extras:
+`files` (raw, digest, archive; the path list for active), `stubs`
+(distilled), `represents` (digest: the entries folded into it),
+`bytes`, `months` (archive), `archives` (decisions), `configured` and
+`directory` (harness), `fts` and `embeddings` (search), `last`
+(recall). Insights: `levels` (entries per truth level over daily plus
+digest entries), `sources`, `topics`, `multi_entry_topics`,
+`top_topics`, `obsolete`, `hypotheses`, `operator`, `undated`,
+`unparsable_lines`, `pending_fold_files` (daily files older than the
+fold window), `per_month`, `newest_raw`, `distilled_behind_raw`,
+`most_recalled` (`[{"path", "count", "last"}]`), `cold_files` (memory
+and note Markdown never recalled), `dangling_index_links` (relative
+links in `MEMORY.md` whose target is gone, as after a removal: the
+index is the cousin's to edit, the explorer only flags it),
+`recall_events`, `last_recall`.
+
+### `GET /api/memory/<slug>/raw?level=L0_OPERATOR,...&topic=&q=&source=&since=YYYY-MM-DD&until=YYYY-MM-DD&tier=live|daily|digest|archive|all&limit=N&offset=N`
+`{"entries": [entry], "total", "offset", "limit", "facets": {"levels",
+"sources", "topics"}}`, newest first. An entry is fields, never the
+JSON line: `tier`, `file`, `topic`, `content`, `truth_level` (as
+stored), `level` (normalized), `source`, `timestamp`, `when`, `id`,
+`extra` (the other keys), `entries`/`first_at`/`last_at` on a digest,
+and `ref: {"path", "line_no", "sha"}` addressing the line for removal
+(`null` on archive entries: the forensic tier stays whole). `tier`
+defaults to `live` (daily plus digest, what the distiller reads); an
+unknown tier is `400`. `limit` is at most 1000.
+
+### `GET /api/memory/<slug>/decisions?q=&limit=N&offset=N&archives=0|1`
+`{"entries": [{"timestamp", "topic", "decision", "reasoning", "file",
+"ref", "mirrors": [ref]}], "total", "offset", "limit"}` newest first;
+`mirrors` are the raw entries `cousin-memory decide` wrote for the
+decision. `ref` is null for rotated archive lines.
+
+### `GET /api/memory/<slug>/files?layer=active|index|distilled|memory|notes|harness|legacy`
+`{"layer", "files": [{"path", "name", "size", "mtime", "recalls",
+"deletable", "stub"?, "legacy"?}]}`; harness paths are relative to the
+harness directory. `400` for another layer.
+
+### `GET /api/memory/<slug>/file?path=<rel>&layer=harness?&start=N&count=N`
+The reader of `GET /api/cousins/<slug>/files/read` (below) over the
+home, or over the harness directory with `layer=harness`. A Markdown
+file up to 2 MB comes back whole in `text`: the view renders all of
+it.
+
+### `GET /api/memory/<slug>/trash`
+`{"batches": [manifest]}` newest first. A manifest is `{"id",
+"deleted_at", "by", "items": [...]}`; an item is `{"kind": "line",
+"path", "line_no", "sha", "line"}` or `{"kind": "file", "path",
+"size"}`.
+
+### `POST /api/memory/<slug>/delete`
+Body `{"kind": "entry", "path": "memory/raw/<file>.jsonl", "line_no",
+"sha"}`, `{"kind": "decision", "path": "data/decisions.jsonl",
+"line_no", "sha", "mirrors": bool}` or `{"kind": "file", "path",
+"legacy": bool}`. Nothing is destroyed: the line or file moves into
+`<home>/memory/.trash/<id>/` (the line in the manifest, the file under
+`files/<path>`), one audit line per item goes to
+`<home>/memory/.trash/audit.jsonl` with the session user, and a raw
+change reruns the distiller. Removable: lines of `memory/raw/*.jsonl`
+and `data/decisions.jsonl`; files under `memory/` (not `distilled/`,
+which regenerates from raw, not `raw/` files, not the index and recall
+artifacts, not the trash) and `notes/`; a file under `legacy/` only
+with `"legacy": true`. A line whose hash no longer matches is looked up
+by hash; gone is `409`. `200 {"ok": true, "trash": manifest,
+"effects": {"distilled": bool, "index": str}}`; the search index needs
+no call (its staleness check sees the change, and it skips the trash).
+
+### `POST /api/memory/<slug>/restore`
+Body `{"id": str}`. Files go back to their path (`409` when something
+is there again), lines into their file at their old position (`409`
+when the same line is back already); the batch directory is removed
+and the restore audited. `404` unknown id. Also by CLI:
+`cousin-memory trash [list]` and `cousin-memory trash restore <id>`.
+
+## Cousin files
+
+A read-only view of one cousin home for the inspector, through
+`cousin_lib.home_files`, behind the login like every other route.
+Paths are home-relative: absolute paths and `..` are `400`, a path
+that resolves outside the home (a link out) `403`. `.secrets/` is
+never listed, read or downloaded, at any depth or through a link
+(`404`); a link that leaves the home is listed with `outside: true`
+and never followed.
+
+### `GET /api/cousins/<slug>/files?path=<dir>&hidden=0|1`
+`{"path", "entries": [{"name", "path", "type": "dir"|"file"|"link"|
+"other", "size", "mtime", "outside"?, "target_type"?}], "truncated",
+"total"}`, one level, directories first, at most 2000 rows. Dotfiles
+only with `hidden=1`. `404` not a directory.
+
+### `GET /api/cousins/<slug>/files/read?path=<file>&start=N&count=N`
+`{"kind": "markdown"|"text"|"image"|"binary", "path", "size",
+"mtime", "mime"}` plus, for Markdown up to 2 MB, `text` (whole); for
+text (and larger Markdown), `lines` from 1-based `start` (at most
+`count`, default 1000, cap 5000), `total_lines`, `more`. A file whose
+first 8 KB hold a NUL or invalid UTF-8 is `binary` and carries no
+content; images carry none either (the download serves them).
+
+### `GET /api/cousins/<slug>/files/download?path=<file>`
+The bytes, streamed. Raster images `inline` with their type; anything
+else (SVG included) `application/octet-stream` as an `attachment`.
+Always `X-Content-Type-Options: nosniff` and a sandboxing
+`Content-Security-Policy`.
 
 ## Tokens
 

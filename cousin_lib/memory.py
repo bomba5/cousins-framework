@@ -442,6 +442,12 @@ def _cmd_propose_shared(args):
     return 0
 
 
+def _cmd_trash(args):
+    from cousin_lib import memory_trash
+
+    return memory_trash.cli(args.rest, _home(args))
+
+
 @traced_cli("cousin-memory")
 def memory_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-memory")
@@ -501,6 +507,13 @@ def memory_main(argv=None):
     p = sub.add_parser("activity")
     p.add_argument("text", nargs="*")
     p.set_defaults(func=_cmd_activity)
+    p = sub.add_parser(
+        "trash",
+        help="removed memories: `trash` or `trash list` shows the"
+             " batches the console moved to memory/.trash, `trash"
+             " restore <id>` puts one back")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p.set_defaults(func=_cmd_trash)
     p = sub.add_parser(
         "consolidate",
         help="list recurring topics, then rebuild memory/distilled/"

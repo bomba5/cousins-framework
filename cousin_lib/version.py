@@ -79,6 +79,54 @@ def git_commit():
     return commit if r.returncode == 0 and commit else None
 
 
+def browse_url(remote):
+    """An https URL a browser can open for a git remote, or None.
+
+    Accepts scp-style (git@host:owner/repo.git), ssh:// and http(s)
+    remotes; drops a trailing .git, any port, and any user or token
+    embedded in the remote (the route that shows this is public). Local
+    paths and file:// remotes have nothing to browse: None."""
+    if not remote or not isinstance(remote, str):
+        return None
+    remote = remote.strip()
+    m = re.match(r"^[\w.-]+@([\w.-]+):(?!//)(.+)$", remote)
+    if m:
+        host, path = m.group(1), m.group(2)
+    else:
+        m = re.match(r"^(?:https?|ssh|git)://(?:[^@/]*@)?([\w.-]+)(?::\d+)?/(.+)$",
+                     remote)
+        if not m:
+            return None
+        host, path = m.group(1), m.group(2)
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not path or "/" not in path:
+        return None
+    return "https://%s/%s" % (host, path)
+
+
+def commit_url(repo_url, commit):
+    if not repo_url or not commit:
+        return None
+    return "%s/commit/%s" % (repo_url, commit)
+
+
+@functools.lru_cache(maxsize=None)
+def repo_url():
+    """The browsable URL of the checkout's origin remote, read once;
+    None outside a git checkout or without a usable remote."""
+    if not (CHECKOUT / ".git").exists():
+        return None
+    try:
+        r = subprocess.run(["git", "-C", str(CHECKOUT), "remote", "get-url",
+                            "origin"], capture_output=True, text=True,
+                           timeout=3, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return browse_url((r.stdout or "").strip()) if r.returncode == 0 else None
+
+
 def bumped(current, part):
     if part not in PARTS:
         raise VersionError("part must be one of %s" % ", ".join(PARTS))

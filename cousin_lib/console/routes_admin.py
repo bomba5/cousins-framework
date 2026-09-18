@@ -101,8 +101,11 @@ def register():
         """Public (app.AUTH_EXEMPT): the release this console runs and,
         for a git checkout, its short commit, both read at startup."""
         from cousin_lib import version
-        return 200, {"version": version.version(),
-                     "commit": version.git_commit()}
+        repo = version.repo_url()
+        commit = version.git_commit()
+        return 200, {"version": version.version(), "commit": commit,
+                     "repo_url": repo,
+                     "commit_url": version.commit_url(repo, commit)}
 
     @router.route("GET", "/api/host")
     def host(req):

@@ -513,7 +513,7 @@ function App() {
           style={{ minHeight: 24, padding: "0 6px", fontSize: 12, marginRight: 4 }}
         >{sidebarCollapsed ? "›" : "‹"}</button>
         <span className="brand">cousins<span className="dim">//</span>console</span>
-        {build && <span className="build" title={build.commit ? `version ${build.version}, commit ${build.commit} (read when the console started)` : `version ${build.version}`}>v{build.version}{build.commit ? ` ${build.commit}` : ""}</span>}
+        {build && <span className="build" title={build.commit ? `version ${build.version}, commit ${build.commit} (read when the console started)` : `version ${build.version}`}>{build.repo_url ? <a href={build.repo_url} target="_blank" rel="noopener noreferrer">v{build.version}</a> : `v${build.version}`}{build.commit ? " " : ""}{build.commit ? (build.commit_url ? <a href={build.commit_url} target="_blank" rel="noopener noreferrer">{build.commit}</a> : build.commit) : ""}</span>}
         <span className="spacer" />
         <button
           className="btn ghost"

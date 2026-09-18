@@ -107,9 +107,43 @@ class VersionRoute(ConsoleCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["version"], cousin_lib.__version__)
         self.assertIn("commit", body)
-        self.assertEqual(set(body), {"version", "commit"})
+        self.assertEqual(set(body), {"version", "commit", "repo_url",
+                                     "commit_url"})
         # and the rest stays behind the login
         self.assertEqual(self.get("/api/cousins")[0], 401)
+
+
+class RepoUrl(unittest.TestCase):
+    """The badge links to the repository the checkout came from. Canary:
+    operator asked for the version to be a link to the repo (2026-09-18)."""
+
+    def test_remote_forms_become_a_browsable_https_url(self):
+        cases = {
+            "git@github.com:kestrel/wren-kit.git": "https://github.com/kestrel/wren-kit",
+            "https://github.com/kestrel/wren-kit.git": "https://github.com/kestrel/wren-kit",
+            "https://github.com/kestrel/wren-kit": "https://github.com/kestrel/wren-kit",
+            "ssh://git@git.example.org:2222/kestrel/wren-kit.git": "https://git.example.org/kestrel/wren-kit",
+        }
+        for remote, url in cases.items():
+            with self.subTest(remote=remote):
+                self.assertEqual(version.browse_url(remote), url)
+
+    def test_credentials_in_the_remote_never_leak(self):
+        url = version.browse_url("https://kestrel:s3cr3t-token@github.com/kestrel/wren-kit.git")
+        self.assertEqual(url, "https://github.com/kestrel/wren-kit")
+        self.assertNotIn("s3cr3t", url)
+
+    def test_local_or_odd_remotes_give_no_link(self):
+        for remote in ("/srv/git/wren-kit.git", "file:///srv/wren", "", None,
+                       "../wren-kit.bundle"):
+            with self.subTest(remote=remote):
+                self.assertIsNone(version.browse_url(remote))
+
+    def test_commit_url_appends_the_commit(self):
+        self.assertEqual(version.commit_url("https://github.com/kestrel/wren-kit", "abc1234"),
+                         "https://github.com/kestrel/wren-kit/commit/abc1234")
+        self.assertIsNone(version.commit_url(None, "abc1234"))
+        self.assertIsNone(version.commit_url("https://github.com/kestrel/wren-kit", None))
 
 
 class TopBar(unittest.TestCase):
@@ -121,6 +155,10 @@ class TopBar(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertIn("version", m.group(1))
         self.assertIn("commit", m.group(1))
+        # both are links when the route gives the urls, opened safely
+        self.assertIn("repo_url", m.group(1))
+        self.assertIn("commit_url", m.group(1))
+        self.assertIn('rel="noopener noreferrer"', m.group(1))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ to #3 in a note or a chat line cannot come to mean another item.
 import argparse
 import json
 import sqlite3
+import time
 import sys
 from datetime import datetime, timezone
 
@@ -46,7 +47,20 @@ def _db(root):
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    # A journal-mode switch needs an exclusive lock and SQLite does not
+    # run the busy handler for it: with several processes opening the
+    # store at once (the first write of a fresh install, the
+    # concurrency test) it raises "database is locked" straight away.
+    # WAL is a performance choice, not a correctness one, so retry
+    # briefly and carry on in rollback mode if it still refuses.
+    for attempt in range(20):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as err:
+            if "locked" not in str(err) or attempt == 19:
+                break
+            time.sleep(0.05 * (attempt + 1))
     conn.execute(
         "CREATE TABLE IF NOT EXISTS items ("
         " id         INTEGER PRIMARY KEY AUTOINCREMENT,"

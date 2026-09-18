@@ -74,6 +74,29 @@ def install_attention_patterns(root=None):
     return (cfg or {}).get("attention_patterns") or []
 
 
+def install_input_mode(root=None):
+    """config/harness.toml [input_mode] for `root` (or the install this
+    process serves): {"normal_marker": text shown while a modal input box
+    is in its command mode, "insert_keys": literal keys that return it to
+    typing}. {} when absent or unusable: like the attention guard, a
+    safety net that never costs a delivery on its own configuration."""
+    from cousin_lib.config import (FrameworkConfig, MissingConfigError,
+                                   _read_harness_toml)
+    try:
+        data = _read_harness_toml(root if root is not None
+                                  else FrameworkConfig.resolve().root) or {}
+    except (MissingConfigError, OSError, ValueError):
+        return {}
+    table = data.get("input_mode")
+    if not isinstance(table, dict):
+        return {}
+    marker, keys = table.get("normal_marker"), table.get("insert_keys")
+    if not (isinstance(marker, str) and marker and isinstance(keys, str)
+            and keys):
+        return {}
+    return {"normal_marker": marker, "insert_keys": keys}
+
+
 def pane_attention(pane_text, patterns):
     """The first attention pattern the pane shows, else None."""
     if not pane_text:
@@ -110,9 +133,10 @@ class TmuxInjector:
 
     def __init__(self, session, *, tmux_bin="tmux", socket=None,
                  settle=default_settle, verify_delay=0.2, log=None,
-                 attention_patterns=None, root=None):
+                 attention_patterns=None, root=None, input_mode=None):
         self.session = session
         self.attention_patterns = attention_patterns
+        self.input_mode = input_mode
         self.root = root
         self.tmux_bin = tmux_bin
         self.socket = socket
@@ -154,6 +178,15 @@ class TmuxInjector:
             return list(self.attention_patterns)
         return install_attention_patterns(self.root)
 
+    def _mode(self):
+        if self.input_mode is not None:
+            return dict(self.input_mode)
+        return install_input_mode(self.root)
+
+    def _capture(self):
+        r = self._tmux("capture-pane", "-p", "-t", self.session)
+        return (r.stdout or "") if r.returncode == 0 else None
+
     def _blocked_by(self):
         """The attention pattern the pane shows now, else None. An
         unreadable pane is not evidence of a menu: the paste that
@@ -184,6 +217,14 @@ class TmuxInjector:
                         file=self.log, flush=True,
                     )
                     return False
+                mode = self._mode()
+                if mode:
+                    pane = self._capture()
+                    if pane and mode["normal_marker"] in pane:
+                        # A modal input box in its command mode reads the
+                        # text as commands; put it back in typing mode.
+                        self._tmux("send-keys", "-t", self.session, "-l",
+                                   mode["insert_keys"])
                 r = self._tmux("send-keys", "-t", self.session, "-l", text)
                 if r.returncode != 0:
                     # The only trace that the cousin never received the

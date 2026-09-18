@@ -44,6 +44,13 @@ busy_patterns = [
     "^\\s*\\S\\s+\\w+(\u2026|\\.\\.\\.)\\s+\\(\\d+[smh]",
 ]
 
+# Claude Code's vim editing mode: in NORMAL mode typed text is read as
+# commands. The injector presses insert_keys first when the pane shows
+# normal_marker, so a chat line is typed, not swallowed.
+[input_mode]
+normal_marker = "-- NORMAL --"
+insert_keys = "i"
+
 [agent]
 default_model = "claude-opus-5"
 default_effort = "high"

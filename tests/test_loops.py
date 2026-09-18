@@ -563,3 +563,21 @@ class TestOneShotsFireFromTheTick(LoopsCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDefaultDeliverReportsTheInjection(unittest.TestCase):
+    """Canary (2026-09-18): the default deliver returned True even when
+    the injector skipped a pane parked on a menu, so a skipped heartbeat
+    counted as sent and was lost."""
+
+    def test_default_deliver_returns_the_injector_result(self):
+        from unittest import mock
+        from cousin_lib import loops
+        for result in (True, False):
+            with self.subTest(result=result), \
+                    mock.patch("cousin_lib.server.injection.TmuxInjector") as inj, \
+                    mock.patch.object(loops, "CousinConfig") as cc, \
+                    mock.patch.object(loops, "FrameworkConfig"):
+                cc.load.return_value.tmux_session = "wren"
+                inj.return_value.inject.return_value = result
+                self.assertIs(loops._default_deliver("wren", "beat"), result)

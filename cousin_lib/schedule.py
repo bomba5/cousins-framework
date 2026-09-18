@@ -228,8 +228,8 @@ def _default_deliver(slug, prompt):
     for cfg in root.list_cousins():
         if cfg.slug == slug:
             injector = TmuxInjector(cfg.tmux_session)
-            injector.inject("[cousin-schedule] %s" % prompt)
-            return
+            # False (skipped at a menu, or failed) keeps the job pending.
+            return injector.inject("[cousin-schedule] %s" % prompt)
     raise RuntimeError("no cousin %r under %s" % (slug, root.root))
 
 

@@ -299,3 +299,42 @@ class TestSettle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInputModeGuard(InjectorCase):
+    """A modal input box (vim editing in the agent) left in NORMAL mode
+    reads injected text as commands and swallows it. Canary: a live
+    cousin lost two of three operator messages after scrolling the pane
+    sent ESC-prefixed keys (2026-09-18). With [input_mode] configured the
+    injector presses the insert key first when the pane shows the
+    normal-mode marker."""
+
+    MODE = {"normal_marker": "-- NORMAL --", "insert_keys": "i"}
+
+    def _moded(self):
+        return TmuxInjector("wren", tmux_bin=str(self.tmux),
+                            settle=lambda n: 0, verify_delay=0,
+                            log=self.errors, attention_patterns=[],
+                            input_mode=dict(self.MODE))
+
+    def test_normal_mode_pane_gets_the_insert_key_first(self):
+        self.pane.write_text("> \n  -- NORMAL -- bypass permissions on\n")
+        self.assertTrue(self._moded().inject("hello"))
+        calls = self._calls()
+        self.assertEqual(calls[:3], ["capture-pane -p -t wren",
+                                     "send-keys -t wren -l i",
+                                     "send-keys -t wren -l hello"])
+
+    def test_insert_mode_pane_gets_nothing_extra(self):
+        self.pane.write_text("> \n  -- INSERT -- bypass permissions on\n")
+        self.assertTrue(self._moded().inject("hello"))
+        self.assertNotIn("send-keys -t wren -l i", self._calls())
+
+    def test_unconfigured_injector_does_not_read_the_pane_for_it(self):
+        self.pane.write_text("  -- NORMAL --\n")
+        inj = TmuxInjector("wren", tmux_bin=str(self.tmux),
+                           settle=lambda n: 0, verify_delay=0,
+                           log=self.errors, attention_patterns=[],
+                           input_mode={})
+        self.assertTrue(inj.inject("hello"))
+        self.assertEqual(self._calls()[0], "send-keys -t wren -l hello")

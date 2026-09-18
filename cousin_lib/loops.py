@@ -974,8 +974,9 @@ def _default_deliver(slug, text):
     config = CousinConfig.load(
         FrameworkConfig.from_env().root / "cousins" / slug)
     injector = TmuxInjector(config.tmux_session)
-    injector.inject(text)
-    return True
+    # False (skipped at a menu, or failed) is not a delivery: the caller
+    # keeps the beat or prompt due instead of recording it as sent.
+    return injector.inject(text)
 
 
 def loops_main(argv=None):

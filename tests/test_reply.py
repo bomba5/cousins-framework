@@ -96,7 +96,7 @@ class TestReplyImage(TestSendReply):
         self.home = pathlib.Path(tmp.name)
         (self.home / "cousin.toml").write_text(
             '[cousin]\nslug = "wren"\n[chat]\nport = %d\n'
-            '[operator]\nname = "Priya"\n' % self.port)
+            '[operator]\nname = "Operator"\n' % self.port)
 
     def _png(self, name="render.png"):
         p = self.home / name
@@ -108,14 +108,15 @@ class TestReplyImage(TestSendReply):
         from unittest import mock
         from cousin_lib.reply import reply_main
         env = {"COUSIN_HOME": str(self.home)}
-        import io, sys
+        import contextlib, io, sys
         with mock.patch.dict(os.environ, env), \
-                mock.patch.object(sys, "stdin", io.StringIO("")):
+                mock.patch.object(sys, "stdin", io.StringIO("")), \
+                contextlib.redirect_stdout(io.StringIO()):
             return reply_main(argv)
 
     def test_image_lands_under_the_reply_id(self):
         png = self._png()
-        rc = self._main(["--user", "Priya", "-m", "preview", "--image", str(png)])
+        rc = self._main(["--user", "Operator", "-m", "preview", "--image", str(png)])
         self.assertEqual(rc, 0)
         landed = self.home / "chat" / "inbound" / "7.png"
         self.assertTrue(landed.is_file())

@@ -282,7 +282,7 @@ cousin-job start subagent "map the auth module"
 cousin-job list --mine
 cousin-job done 1 "mapped; notes in data/"
 
-# a shell command as a job: runs detached, logs to shared/job-logs/,
+# a shell command as a job: runs detached, logs to <root>/data/job-logs/,
 # and closes itself with the command's exit code
 cousin-job start shell "rebuild the index" -- cousin-memory reindex
 cousin-job tail 2 -f

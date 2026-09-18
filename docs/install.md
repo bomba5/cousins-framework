@@ -49,9 +49,16 @@ wires up for every cousin, so install it unless you know you will not
 use it. The package is not on PyPI: always install from the checkout
 (`-e .` or `-e ".[mcp]"`).
 
-Every later shell needs the venv on PATH and the root named:
-`. ~/cousin-framework/.venv/bin/activate && export FRAMEWORK_ROOT=~/cousin-framework`
-(or put both in your shell profile). The units below carry them
+Every later shell starts in the checkout with the venv on PATH and the
+root named (the steps below use paths relative to the checkout):
+
+```
+cd ~/cousin-framework && . .venv/bin/activate && export FRAMEWORK_ROOT=$PWD
+```
+
+(or put the last two in your shell profile). To point the memory and job
+tools at one cousin from a shell, also `export COUSIN_HOME=$PWD/cousins/<slug>`;
+without it they stop with "no cousin context". The units below carry them
 themselves. Commands you type inside the checkout find the root on their
 own, and a cousin's tools find it from the cousin's home, but naming it
 keeps every command in agreement.
@@ -62,8 +69,8 @@ keeps every command in agreement.
 python3 -m unittest discover -s tests
 ```
 
-About 1380 tests in about five minutes on a small VM; the last line
-must be `OK` (a few `skipped` are fine). Run it now, before any cousin
+About 1380 tests in about five minutes on a small VM; the summary line
+must read `OK` (a few `skipped` are fine). Run it now, before any cousin
 exists, so a failure is the framework's and not your install's.
 
 ## 4. The agent: Claude Code
@@ -245,7 +252,7 @@ own uninstall.
 ```
 systemctl --user disable --now cousin-loops.service cousin-console.service \
     cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
-rm -f ~/.config/systemd/user/cousin-*
+rm -rf ~/.config/systemd/user/cousin-*   # -r: the LAN drop-in is a directory
 systemctl --user daemon-reload
 systemctl --user reset-failed
 tmux kill-session -t testa                # one per cousin

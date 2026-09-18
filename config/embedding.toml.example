@@ -5,9 +5,17 @@
 #
 # The endpoint takes {"model": ..., "prompt": ...} as JSON and returns
 # {"embedding": [...]}. Front any service with that contract.
+# A local Ollama (curl -fsSL https://ollama.com/install.sh | sh, then
+# ollama pull nomic-embed-text; about 2.4 GB of disk even CPU-only)
+# serves it at http://localhost:11434/api/embeddings.
 #url = "http://embeddings.example.invalid:11434/api/embeddings"
 #model = "nomic-embed-text"
-#timeout_s = 10
+#
+# Seconds per embedding request (10 when absent). Set it above the time
+# ONE chunk takes, or every search waits it out and degrades to keyword:
+# on a CPU without AVX one 560-character chunk took 32 s, so 120 on a
+# CPU-only host; 30 is plenty with a GPU.
+#timeout_s = 120
 #
 # Long files are embedded in chunks of chunk_chars characters, each
 # overlapping the previous by chunk_overlap characters, so a fact near

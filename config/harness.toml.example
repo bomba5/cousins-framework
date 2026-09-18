@@ -1,5 +1,7 @@
 # config/harness.toml - where the agent harness keeps its per-project
-# state for this install. Copy to config/harness.toml and fill in.
+# state for this install. Copy to config/harness.toml and fill in. For
+# Claude Code, copy config/harness.toml.claude-code.example instead:
+# the same keys, filled in.
 #
 # Absent file: transcript mining at flip, the harness auto-memory
 # search collection and the loops daemon's transcript-size guard are
@@ -41,7 +43,7 @@
 # with no value in either place is a spawn error that names both
 # files. `models` is the catalogue the console's spawn dialog offers;
 # absent, a built-in list of three names is offered. `default_effort`
-# is one of low, medium, high, max.
+# is one of low, medium, high, xhigh, max.
 #[agent]
 #default_model = "some-model"
 #default_effort = "high"

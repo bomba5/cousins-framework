@@ -3,11 +3,12 @@
 # <home>/data/session-checkpoint.md so the next session can recover
 # context quickly, then prints a one-line JSON system message naming it.
 #
-# Reads COUSIN_HOME (required) and COUSIN_SLUG (optional; defaults to the
-# home's directory name). Writes only under <home>/data/. Without a home
+# The home is the first argument when given (the per-cousin harness
+# settings write it into the hook command), else COUSIN_HOME.
+# COUSIN_SLUG is optional and defaults to the home's directory name. Writes only under <home>/data/. Without a home
 # it says so and exits 0: a hook must never break the harness.
 
-HOME_DIR="${COUSIN_HOME:-}"
+HOME_DIR="${1:-${COUSIN_HOME:-}}"
 if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
   echo '{"systemMessage":"Session ending - COUSIN_HOME is not set, checkpoint skipped."}'
   exit 0

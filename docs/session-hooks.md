@@ -77,8 +77,8 @@ the kind is a hook in the table.
 ## The harness hooks
 
 Three POSIX shell scripts under `hooks/`, executable in the tree. Each
-reads `COUSIN_HOME` (required) and `COUSIN_SLUG` (optional, else the
-home's directory name) and nothing else, writes only under
+reads its home (first argument, else `COUSIN_HOME`) and `COUSIN_SLUG`
+(optional, else the home's directory name) and nothing else, writes only under
 `<home>/data/`, and never exits non-zero: a hook that breaks the
 harness costs more than the checkpoint it was writing. The two that
 write answer on stdout with a one-line JSON object carrying a
@@ -96,11 +96,17 @@ the file was missing rather than empty. The decision bullets are
 formatted with `python3` from PATH; without one, the raw JSON lines
 are listed instead.
 
-Wiring is the operator's, per harness: point the harness's
-pre-compaction, stop and session-start hook settings at these scripts
-with `COUSIN_HOME` in the hook's environment. The framework does not
-edit harness settings and has no opinion on which harness it is; the
-scripts only assume a POSIX `sh`, `date`, `wc`, `grep`, `tail`.
+The home is the first argument when one is given, else `COUSIN_HOME`;
+an argument wins over an inherited environment, because an agent
+started from another cousin's shell inherits that cousin's home.
+
+Wiring is per cousin: spawn writes `<home>/.claude/settings.json`
+(`docs/spawn-and-template-spec.md`, step 6) with SessionStart,
+PreCompact and Stop pointing at these scripts by absolute path, the
+home as the argument. `cousin-spawn <slug> --repair-settings` writes
+the same into an existing home. An install on another harness wires
+them by hand; the scripts only assume a POSIX `sh`, `date`, `wc`,
+`grep`, `tail`.
 
 ## Where the pieces meet
 

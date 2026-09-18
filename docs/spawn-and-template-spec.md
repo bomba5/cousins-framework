@@ -95,10 +95,22 @@ value). The console's spawn dialog sends the same four fields.
    (the harness registration: `cousin-mcp --registry <that file>` over
    stdio with `COUSIN_HOME`, `COUSIN_SLUG`, `FRAMEWORK_ROOT` in its
    env), each only if absent. The same function is safe to run on a
-   cousin that predates it. Spawn does NOT approve the registration:
-   approval lives in the harness's own settings and is an operator's
-   act (`cousin-mcp approve <slug>`), so a spawned cousin boots with the
-   adapter registered and, until approved, ignored by the harness.
+   cousin that predates it.
+   Then **write the harness project settings**
+   (`cousin_lib.harness_settings`): `<home>/.claude/settings.json`,
+   created or merged (keys it does not own are kept, a second run
+   writes the same bytes, a file that is not a JSON object is refused
+   and left alone). It carries `"cousin"` in `enabledMcpjsonServers`
+   (the approval of the adapter for this project) and this cousin's
+   hooks: the three bookend scripts under the checkout's `hooks/`, each
+   by absolute path with the home written into the command, so a hook
+   never depends on the agent's environment or working directory.
+   Folder trust stays the operator's act (`cousin-mcp approve <slug>`
+   edits the harness's user-wide file). An existing cousin is brought
+   up to date with `cousin-spawn <slug> --repair-settings` (creates
+   nothing, safe to repeat). The harness merges hook lists across its
+   settings scopes: a user-wide hook still fires in a cousin session
+   alongside these.
 7. On any failure after step 3: **remove everything this run created**.
    A failed spawn leaves no orphan tree and does not block the slug.
    This includes the partial state where `cousin.toml` was already

@@ -4,11 +4,13 @@
 # <home>/data/pre-compact-checkpoint.md, then prints a one-line JSON
 # system message naming it (the shape harness hooks read from stdout).
 #
-# Reads COUSIN_HOME (required) and COUSIN_SLUG (optional; defaults to the
-# home's directory name). Writes only under <home>/data/. Without a home
+# The home is the first argument when given (the per-cousin harness
+# settings write it into the hook command, so the hook does not depend
+# on the agent's environment), else COUSIN_HOME. COUSIN_SLUG is
+# optional and defaults to the home's directory name. Writes only under <home>/data/. Without a home
 # it says so and exits 0: a hook must never break the harness.
 
-HOME_DIR="${COUSIN_HOME:-}"
+HOME_DIR="${1:-${COUSIN_HOME:-}}"
 if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
   echo '{"systemMessage":"Context compaction imminent - COUSIN_HOME is not set, checkpoint skipped."}'
   exit 0

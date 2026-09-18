@@ -130,5 +130,62 @@ class ProvisionCase(unittest.TestCase):
         self.assertEqual(reg["tools"]["send"]["operators"], ["Sam"])
 
 
+class TestProjectSettings(ProvisionCase):
+    """Spawn gives the new home its own harness project settings: its
+    hooks and the approval of its `cousin` server. An existing home is
+    brought up to date with `cousin-spawn <slug> --repair-settings`."""
+
+    def _main(self, argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = spawn_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_new_cousin_gets_project_settings(self):
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        data = json.loads((home / ".claude" / "settings.json").read_text())
+        self.assertIn("cousin", data["enabledMcpjsonServers"])
+        self.assertIn("Stop", data["hooks"])
+
+    def test_repair_settings_applies_to_an_existing_home(self):
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        path = home / ".claude" / "settings.json"
+        path.write_text(json.dumps({"model": "kept"}))
+        rc, out, err = self._main(["testa", "--root", str(root),
+                                   "--repair-settings"])
+        self.assertEqual(rc, 0, err)
+        data = json.loads(path.read_text())
+        self.assertEqual(data["model"], "kept")
+        self.assertIn("cousin", data["enabledMcpjsonServers"])
+        self.assertIn("Stop", data["hooks"])
+        self.assertIn(str(path), out)
+
+    def test_repair_settings_is_idempotent(self):
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        path = home / ".claude" / "settings.json"
+        first = path.read_text()
+        rc, _out, err = self._main(["testa", "--root", str(root),
+                                    "--repair-settings"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(path.read_text(), first)
+
+    def test_repair_settings_on_an_unknown_slug_is_a_usage_error(self):
+        root = self._framework_root()
+        rc, _out, err = self._main(["ghost", "--root", str(root),
+                                    "--repair-settings"])
+        self.assertEqual(rc, 2)
+        self.assertIn("ghost", err)
+        self.assertFalse((root / "cousins" / "ghost").exists())
+
+    def test_create_still_requires_role_and_voice(self):
+        root = self._framework_root()
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                spawn_main(["testa", "--root", str(root)])
+
+
 if __name__ == "__main__":
     unittest.main()

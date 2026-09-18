@@ -31,6 +31,7 @@ from cousin_lib.config import (
     expand_harness_path,
     harness_config,
 )
+from cousin_lib.harness_settings import SettingsError, apply_project_settings
 from cousin_lib.mcp_server import provision_mcp
 from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
@@ -236,9 +237,13 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
                               role=role)
         # The harness-side registration of the cousin's tool surface:
         # the registry (default, operator filled) and the .mcp.json
-        # that points the harness at it. Approval is a separate,
-        # operator-run step (cousin-mcp approve).
+        # that points the harness at it.
         provision_mcp(home, root=root, slug=slug, operator=operator)
+        # The cousin's own harness project settings: its hooks, by
+        # absolute path with the home in each command, and the approval
+        # of its `cousin` server. Without them a session inherits
+        # whatever hooks the user-wide settings carry.
+        apply_project_settings(home, root=root)
     except Exception as err:
         # The partial state is the one that squats a slug; a failed
         # create leaves nothing.
@@ -609,6 +614,26 @@ def _read_agent_cmd(root):
     return cmd
 
 
+def _repair_settings(root, slug):
+    home = root / "cousins" / slug
+    if not (home / "cousin.toml").is_file():
+        print("cousin-spawn: no cousin %r under %s"
+              % (slug, root / "cousins"), file=sys.stderr)
+        return 2
+    try:
+        out = apply_project_settings(home, root=root)
+    except SettingsError as err:
+        print("cousin-spawn: %s" % err, file=sys.stderr)
+        return 2
+    print("settings %s: hooks for %s; \"cousin\" MCP server approved;"
+          " read at the cousin's next session start"
+          % (out["path"], ", ".join(out["events"])))
+    for missing in out["missing"]:
+        print("cousin-spawn: hook script not found, not wired: %s"
+              % missing, file=sys.stderr)
+    return 0
+
+
 @traced_cli("cousin-spawn")
 def spawn_main(argv=None):
     """Console entry point. Exit codes are the interface: 0 created
@@ -623,11 +648,12 @@ def spawn_main(argv=None):
              " and cousins/ (typically the checkout itself), not an"
              " install prefix. Falls back to FRAMEWORK_ROOT.")
     parser.add_argument("--name")
-    parser.add_argument("--role", required=True)
+    parser.add_argument("--role", help="required to create")
     parser.add_argument("--role-paragraph")
-    parser.add_argument("--voice", required=True,
+    parser.add_argument("--voice",
                         help="the authored voice guide; a cousin is "
-                             "never shipped without one")
+                             "never shipped without one (required to"
+                             " create)")
     parser.add_argument("--port", type=int)
     parser.add_argument("--operator",
                         help="the operator's name: written to cousin.toml"
@@ -648,12 +674,24 @@ def spawn_main(argv=None):
     parser.add_argument("--memory-scope", choices=MEMORY_SCOPES,
                         help="cousin.toml [memory] scope (absent: private)")
     parser.add_argument("--start", action="store_true")
+    parser.add_argument("--repair-settings", action="store_true",
+                        help="create nothing: (re)write an EXISTING"
+                             " cousin's harness project settings"
+                             " (<home>/.claude/settings.json: its hooks"
+                             " and its MCP server approval), merging"
+                             " with what is there; safe to repeat")
     args = parser.parse_args(argv)
+    if not args.repair_settings:
+        for flag, value in (("--role", args.role), ("--voice", args.voice)):
+            if not value:
+                parser.error("%s is required to create a cousin" % flag)
     try:
         root = FrameworkConfig.resolve(args.root).root
     except MissingConfigError as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)
         return 2
+    if args.repair_settings:
+        return _repair_settings(root, args.slug)
     try:
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,

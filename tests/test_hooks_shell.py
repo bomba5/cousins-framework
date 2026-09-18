@@ -43,12 +43,12 @@ class HookCase(unittest.TestCase):
                         "decision": "keep 30 days",
                         "reasoning": "audits need a month"}) + "\n")
 
-    def _run(self, name, env_extra=None, clear_home=False):
+    def _run(self, name, env_extra=None, clear_home=False, args=()):
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
         if not clear_home:
             env["COUSIN_HOME"] = str(self.home)
         env.update(env_extra or {})
-        return subprocess.run([str(_HOOKS / name)], env=env,
+        return subprocess.run([str(_HOOKS / name)] + list(args), env=env,
                               capture_output=True, text=True, timeout=30)
 
 
@@ -75,6 +75,41 @@ class TestShape(HookCase):
             proc = self._run(name, clear_home=True)
             self.assertEqual(proc.returncode, 0, (name, proc.stderr))
             self.assertEqual(_tree(self.home), before, name)
+
+
+class TestHomeArgument(HookCase):
+    """The harness runs a hook with whatever environment its own process
+    has; a cousin whose agent was started without COUSIN_HOME still
+    names its home in the hook command itself, as the first argument."""
+
+    def test_home_as_first_argument_works_without_the_environment(self):
+        proc = self._run("pre_compact.sh", clear_home=True,
+                         args=[str(self.home)])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(
+            (self.home / "data" / "pre-compact-checkpoint.md").is_file())
+        proc = self._run("session_checkpoint.sh", clear_home=True,
+                         args=[str(self.home)])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(
+            (self.home / "data" / "session-checkpoint.md").is_file())
+        proc = self._run("session_init.sh", clear_home=True,
+                         args=[str(self.home)])
+        self.assertIn(str(self.home), proc.stdout)
+        self.assertIn("testa", proc.stdout)
+
+    def test_the_argument_wins_over_an_inherited_environment(self):
+        # An agent started from another cousin's shell inherits that
+        # cousin's COUSIN_HOME; the home written into the hook command
+        # is the one this cousin's settings named.
+        other = self.home.parent / "other"
+        (other / "data").mkdir(parents=True)
+        self._run("pre_compact.sh", {"COUSIN_HOME": str(other)},
+                  args=[str(self.home)])
+        self.assertTrue(
+            (self.home / "data" / "pre-compact-checkpoint.md").is_file())
+        self.assertFalse(
+            (other / "data" / "pre-compact-checkpoint.md").exists())
 
 
 class TestPreCompact(HookCase):

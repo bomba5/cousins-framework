@@ -4,11 +4,13 @@
 # which identity files and checkpoints exist on disk. It reminds; it does
 # not cat the files (the harness delivers them itself).
 #
-# Reads COUSIN_HOME and COUSIN_SLUG (optional; the slug defaults to the
-# home's directory name). Writes nothing. Without a home it prints the
+# The home is the first argument when given (the per-cousin harness
+# settings write it into the hook command), else COUSIN_HOME.
+# COUSIN_SLUG is optional; the slug defaults to the home's directory
+# name. Writes nothing. Without a home it prints the
 # banner without file details and exits 0.
 
-HOME_DIR="${COUSIN_HOME:-}"
+HOME_DIR="${1:-${COUSIN_HOME:-}}"
 SLUG="${COUSIN_SLUG:-}"
 if [ -z "$SLUG" ] && [ -n "$HOME_DIR" ]; then
   SLUG=$(basename "$HOME_DIR")

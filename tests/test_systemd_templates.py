@@ -112,7 +112,15 @@ class TestEachUnit(unittest.TestCase):
             with self.subTest(unit=unit.name):
                 text = unit.read_text()
                 self.assertIn("FRAMEWORK_ROOT={{ROOT}}", text)
-                self.assertIn("PATH={{USER_BIN}}:{{SYSTEM_PATH}}", text)
+                # The user's ~/.local/bin (%h is systemd's home
+                # specifier) sits before the system PATH: the agent
+                # CLI's installer puts it there, and a flip started by
+                # a unit must find it without a login shell's PATH.
+                self.assertIn(
+                    "PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}", text)
+                # Unbuffered: a service's stdout is a pipe, and a
+                # block-buffered status line never reaches the journal.
+                self.assertIn("Environment=PYTHONUNBUFFERED=1", text)
 
     def test_timers_are_persistent_with_a_calendar(self):
         for unit in _units():

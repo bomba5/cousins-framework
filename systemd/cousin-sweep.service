@@ -5,6 +5,7 @@ Description=cousin-framework weekly memory compaction sweep across every cousin 
 Type=oneshot
 WorkingDirectory={{ROOT}}
 Environment=FRAMEWORK_ROOT={{ROOT}}
-Environment=PATH={{USER_BIN}}:{{SYSTEM_PATH}}
+Environment=PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}
+Environment=PYTHONUNBUFFERED=1
 ExecStart={{USER_BIN}}/cousin-sweep compact --target both
 TimeoutStartSec=1h

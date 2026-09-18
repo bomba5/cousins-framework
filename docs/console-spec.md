@@ -44,7 +44,7 @@ Retained, with the routes each one calls (all detailed below):
 |---|---|
 | overview (the host panel, cousin table, totals, recent fires) | `GET /api/host`, `GET /api/cousins`, `GET /api/loops`, `GET /api/loops/recent` |
 | cousins: cards, inspector, role editor, identity editors (operator, scope, heartbeat), CLAUDE.md editor, loops editor, spawn, dismiss, flip, restart, hide | `GET/POST /api/cousins`, `DELETE /api/cousins/<slug>`, `POST .../start`, `.../stop`, `.../restart`, `.../role`, `.../operator`, `.../memory-scope`, `.../heartbeat`, `GET/POST .../claude-md`, `GET/POST .../loops`, `POST .../hidden`, `POST .../peer`, `GET/POST .../flip`, `POST .../flip/cancel` |
-| chat with the live pane | `GET /api/messages`, `GET /api/search`, `POST /api/chat/send`, `/api/chat/archive`, `/api/chat/reactions`, `GET /api/chat/inbound/...`, `GET /api/pane`, `GET /api/pane/stream`, `POST /api/pane/input`, `/api/pane/resize` |
+| chat with the live pane | `GET /api/messages`, `GET /api/search`, `POST /api/chat/send`, `/api/chat/archive`, `/api/chat/reactions`, `GET /api/chat/inbound/...`, `GET /api/chat/media/...`, `GET /api/pane`, `GET /api/pane/stream`, `POST /api/pane/input`, `/api/pane/resize` |
 | jobs | `GET /api/jobs`, `GET /api/jobs/<id>`, `GET /api/jobs/<id>/log`, `POST /api/jobs/<id>`, `DELETE /api/jobs/<id>` |
 | memory with the shared-tier review | `GET /api/memory`, `GET /api/shared/list`, `.../content`, `.../diff`, `.../audit`, `POST /api/shared/approve`, `/api/shared/reject` |
 | loops with drift | `GET /api/loops`, `GET /api/loops/drift/<slug>/<name>`, `GET/POST /api/cousins/<slug>/loops`, `POST .../loops/<name>/fire`, `.../loops/<name>/hidden` |
@@ -55,9 +55,10 @@ Retained, with the routes each one calls (all detailed below):
 | the shell (sidebar, unread dots, keyboard shortcuts, live updates) | `GET /api/events` |
 
 Dropped, with the reason: the backlog view (excluded by the operator);
-display of generated media in chat, the media lightbox, the audio
-recorder and the media filter (the media subsystem has its own spec
-and no console surface); the GPU box controls (install-specific
+the audio recorder and the media filter (the media display came back
+on 2026-09-18 by the operator's decision: inline images, looping muted
+video previews, audio players, a media on/off toggle and a viewer with
+prev/next; see "The chat media viewer" below); the GPU box controls (install-specific
 remote machine; see the note under "what the plan expected"); the
 embedded game; presence and engagement pings (no daemon-owned store,
 deferred with that decision in `docs/ui-spec.md`); the legacy agents
@@ -449,9 +450,15 @@ Forwards to `/api/history` with the same parameters (`limit` default
 `"cousin": str`. Each message is the server's row (`id`, `chat_user`,
 `user`, `message`, `timestamp`, `type`, `archived`, `reply_to`,
 `reply_to_user`, `reactions: [{user, emoji, tap_count}]`), and the
-console adds `"attachment": {"url": "/api/chat/inbound/<slug>/<id>.<ext>"}`
-to any message whose id has a file under `<home>/chat/inbound/` (one
-directory listing per request; a projection, not a store).
+console adds `"attachment": {"url": str, "kind": "image" | "video" | "audio"}`:
+`/api/chat/inbound/<slug>/<id>.<ext>` (kind `image`) for any message
+whose id has a file under `<home>/chat/inbound/` (one directory
+listing per request), else `/api/chat/media/<slug>/<folder>/<file>`
+when the row's `attachment_path` names an existing file directly
+inside `<home>/chat/images/`, `chat/audio/` or `chat/video/` with a
+suffix that folder serves. `kind` is the row's `attachment_kind` in
+display terms (a stored `voice` is `audio`), else the folder's. A
+projection, not a store.
 
 ### `GET /api/search?cousin=<slug>&q=<text>&user=<name>&archived=0|1|all`
 Forwards to `/api/search`. Response is the server's `{"messages":
@@ -486,8 +493,36 @@ Serves one inbound attachment from `<home>/chat/inbound/`. The file
 name must be `<message id>.<ext>` with an extension in the image
 allowlist; the resolved path must sit strictly inside that directory;
 anything else is `404`. Content type from the extension,
-`Cache-Control: private, max-age=3600`. This is the only file the
-console serves from a cousin home, and it is read-only.
+`Cache-Control: private, max-age=3600`. Read-only.
+
+### `GET /api/chat/media/<slug>/<folder>/<file>`
+Serves one generated asset (docs/media-spec.md, "Storage") from
+`<home>/chat/<folder>/`, `<folder>` one of `images`, `audio`, `video`.
+The file name must start with a letter or digit and use only letters,
+digits, `.`, `_` and `-`; its suffix must be in that folder's
+allowlist (images: png, jpg, jpeg, gif, webp; audio: mp3, ogg, oga,
+opus, wav, m4a, webm; video: mp4, webm, mov, m4v); the resolved path
+must sit strictly inside the folder; anything else is `404`. A single
+`Range: bytes=` header answers `206` with `Content-Range` (a browser
+seeks a video this way), an unsatisfiable one `416`; otherwise `200`
+with `Accept-Ranges: bytes`. `Cache-Control: private, max-age=3600`.
+With the inbox route above, these are the only files the console
+serves from a cousin home, all read-only.
+
+### The chat media viewer
+The chat view renders an attachment by its `kind` (from the file
+extension when a row carries none): an image as a bounded thumbnail,
+a video as a muted looping inline preview that plays only while on
+screen, audio as a native player. A header toggle, "media on" /
+"media off", hides every attachment behind a one-line placeholder
+(`[image hidden]`, `[video hidden]`, `[audio hidden]`); the choice is
+a browser preference under the `localStorage` key `fw_chat_media`
+(`"0"` hides; absent or anything else shows). Clicking an image or a
+video opens the viewer over the page: the full-size image or the video
+with controls and sound, the thread's images and videos in order with
+prev/next (arrow keys and on-screen buttons), a `n / total` counter
+and an open-original link; Escape or a click outside closes it. It
+calls no route beyond the two file routes above.
 
 ## The pane
 

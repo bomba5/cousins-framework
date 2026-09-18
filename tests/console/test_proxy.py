@@ -131,7 +131,8 @@ class TestRoundTrip(ProxyCase):
                          / ("%d.png" % mid)).is_file())
         _, hist = self._get("/api/messages", cousin="testa", user="Sam")
         self.assertEqual(hist["messages"][0]["attachment"],
-                         {"url": "/api/chat/inbound/testa/%d.png" % mid})
+                         {"url": "/api/chat/inbound/testa/%d.png" % mid,
+                          "kind": "image"})
 
     def test_search_returns_messages_key_newest_first(self):
         self._post("/api/chat/send", cousin="testa", user="Sam",
@@ -253,6 +254,105 @@ class TestInboundFiles(ProxyCase):
                      ("POST", "/api/chat/reactions"),
                      ("GET", "/api/chat/inbound/{slug}/{name}")):
             self.assertIn(want, have)
+
+
+class TestGeneratedMedia(ProxyCase):
+    """A cousin's own reply can carry a generated asset: the row's
+    attachment_kind/attachment_path point at <home>/chat/<folder>/. The
+    console projects it as {url, kind} and serves the file read-only,
+    with byte ranges so a browser can seek a video."""
+
+    _CLIP = bytes(range(256)) * 4   # 1024 bytes standing in for a video
+
+    def _reply(self, kind, path, message="here"):
+        import urllib.request
+        body = json.dumps({"message": message, "reply_to_user": "Sam",
+                           "attachment": {"kind": kind, "path": str(path)}})
+        request = urllib.request.Request(
+            "http://127.0.0.1:%d/api/testa_reply" % self.server.port,
+            data=body.encode(), headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=5) as resp:
+            return json.loads(resp.read())["id"]
+
+    def _asset(self, folder, name, data):
+        target = self.home / "chat" / folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        return target
+
+    def _attachments(self):
+        _, hist = self._get("/api/messages", cousin="testa", user="Sam")
+        return [m.get("attachment") for m in hist["messages"]]
+
+    def test_each_kind_is_annotated_with_url_and_display_kind(self):
+        self._reply("video", self._asset("video", "testa_1_ab.mp4", self._CLIP))
+        self._reply("voice", self._asset("audio", "testa_2_cd.mp3", b"ID3"))
+        self._reply("image", self._asset("images", "testa_3_ef.png",
+                                          base64.b64decode(_PNG)))
+        self.assertEqual(self._attachments(), [
+            {"url": "/api/chat/media/testa/video/testa_1_ab.mp4", "kind": "video"},
+            {"url": "/api/chat/media/testa/audio/testa_2_cd.mp3", "kind": "audio"},
+            {"url": "/api/chat/media/testa/images/testa_3_ef.png", "kind": "image"},
+        ])
+
+    def test_search_rows_are_annotated_the_same_way(self):
+        self._reply("video", self._asset("video", "c.mp4", self._CLIP),
+                    message="the clip")
+        _, found = self._get("/api/search", cousin="testa", q="clip", user="Sam")
+        self.assertEqual(found["messages"][0]["attachment"]["kind"], "video")
+
+    def test_a_path_outside_the_media_folders_is_not_projected(self):
+        stray = self.root / "elsewhere" / "x.mp4"
+        stray.parent.mkdir()
+        stray.write_bytes(self._CLIP)
+        self._reply("video", stray)
+        self._reply("video", self.home / "chat" / "video" / "missing.mp4")
+        self._reply("video", self._asset("video", "notes.txt", b"hi"))
+        self.assertEqual(self._attachments(), [None, None, None])
+
+    def test_serves_the_whole_file_with_its_type(self):
+        self._asset("video", "c.mp4", self._CLIP)
+        status, body = self._get("/api/chat/media/testa/video/c.mp4")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(body, proxy.RawResponse)
+        headers = {k.lower(): v for k, v in body.headers}
+        self.assertEqual(headers["content-type"], "video/mp4")
+        self.assertEqual(headers["accept-ranges"], "bytes")
+        self.assertEqual(body.body, self._CLIP)
+
+    def test_a_byte_range_is_a_206_with_its_slice(self):
+        self._asset("video", "c.mp4", self._CLIP)
+        req = self._req()
+        req.headers = {"Range": "bytes=100-199"}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+        self.assertEqual(status, 206)
+        headers = {k.lower(): v for k, v in body.headers}
+        self.assertEqual(headers["content-range"], "bytes 100-199/1024")
+        self.assertEqual(body.body, self._CLIP[100:200])
+        req.headers = {"Range": "bytes=-24"}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+        self.assertEqual((status, body.body), (206, self._CLIP[-24:]))
+        req.headers = {"Range": "bytes=5000-"}
+        status, body = router.dispatch(
+            "GET", "/api/chat/media/testa/video/c.mp4", req=req)
+        self.assertEqual(status, 416)
+
+    def test_bad_folders_names_and_traversal_are_404(self):
+        self._asset("video", "c.mp4", self._CLIP)
+        (self.home / "chat" / "video" / "c.exe").write_bytes(b"x")
+        for tail in ("inbound/1.png", "video/c.exe", "video/..%2F..%2Fcousin.toml",
+                     "video/.hidden.mp4", "images/c.mp4", "video/none.mp4"):
+            status, body = self._get("/api/chat/media/testa/" + tail)
+            self.assertEqual(status, 404, tail)
+            self.assertNotIsInstance(body, proxy.RawResponse)
+        status, _ = self._get("/api/chat/media/nobody/video/c.mp4")
+        self.assertEqual(status, 404)
+
+    def test_the_route_is_registered(self):
+        self.assertIn(("GET", "/api/chat/media/{slug}/{folder}/{name}"),
+                      set(router.routes()))
 
 
 if __name__ == "__main__":

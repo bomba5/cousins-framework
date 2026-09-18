@@ -191,10 +191,21 @@ class TestQueenOnTheConsole(HiveConsoleCase):
     def test_an_oversized_body_is_refused_unread(self):
         self.enable()
         self.serve()
+        import socket
         token = self.store().mint_token("kestrel", scope=("own",))
-        big = {"text": "x" * (console_hive.MAX_BODY_BYTES + 10)}
-        self.assertEqual(self.hive("POST", "/hive/memory", token, big)[0],
-                         413)
+        # Declare a body over the cap and send none of it: the answer
+        # must come from the headers alone (the body is never read).
+        with socket.create_connection(("127.0.0.1", self.server.port),
+                                      timeout=10) as sock:
+            sock.sendall((
+                "POST /hive/memory HTTP/1.1\r\nHost: x\r\n"
+                "Authorization: Bearer %s\r\n"
+                "Content-Type: application/json\r\n"
+                "Content-Length: %d\r\n\r\n"
+                % (token, console_hive.MAX_BODY_BYTES + 10)).encode())
+            answer = sock.recv(4096).decode()
+        self.assertTrue(answer.startswith("HTTP/1.0 413")
+                        or answer.startswith("HTTP/1.1 413"), answer[:40])
         self.assertEqual(self.store().conn.execute(
             "SELECT COUNT(*) FROM memory").fetchone()[0], 0)
 

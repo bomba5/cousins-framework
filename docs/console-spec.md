@@ -127,10 +127,23 @@ by more than the operator.
   bypass: not for loopback, not for a "trusted LAN". The source had
   both, and a bypass that wide is no auth. Local CLIs never call the
   console (the reverse-dependency rule), so nothing needs one.
-- **Not configured means open, and said.** With no users file the
-  console serves everyone the guard admits, `GET /api/auth/me`
-  reports `configured: false`, and the account panel shows the
-  `adduser` line instead of a password form.
+- **Not configured means open, and said.** With NO users file (the
+  file is absent) the console serves everyone the guard admits -
+  loopback, the RFC1918 private ranges and `config/net-allowlist.json`,
+  not loopback alone - `GET /api/auth/me` reports `configured: false`,
+  and the account panel shows the `adduser` line instead of a password
+  form. Absent is the only state that opens the console.
+- **Broken means closed.** A users file that is present but unusable
+  (unreadable, not JSON, not an object, holding no users, or with an
+  entry that is not an object) is never read as "no users": every
+  `/api/*` route answers `503 {"ok": false, "error": "<file> is present
+  but unusable (...)..."}`, login included and any live session
+  regardless; `GET /api/auth/me` answers `200` with `configured: true`,
+  `user: null` and that `error`, so the page can say why. The error is
+  printed to stderr (the unit's journal) at startup and on each new
+  error, and the startup line says `CLOSED`. `cousin-console adduser`
+  refuses to write over a broken file (exit 1, before any prompt).
+  Fix: restore the file from a backup, or remove it and run `adduser`.
 - **Session cookie:** `console_session`, a 32-byte random token,
   `HttpOnly; SameSite=Strict; Path=/`, `Secure` when the console
   runs behind TLS. Sessions live in the console's memory only: a
@@ -143,7 +156,7 @@ Body `{"user": str, "password": str}`. `200 {"ok": true, "user": str}`
 and the cookie; `401 {"ok": false, "error": "bad credentials"}` after
 a constant-time compare; `400` when either field is missing;
 `409 {"ok": false, "error": "auth not configured"}` when there is no
-users file.
+users file; `503` when the users file is present but unusable.
 
 ### `POST /api/auth/logout`
 `200 {"ok": true}`; clears the cookie and forgets the session.

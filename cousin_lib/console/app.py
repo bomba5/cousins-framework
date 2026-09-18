@@ -164,6 +164,7 @@ class ConsoleServer:
             Path(users_path) if users_path
             else self.root / "config" / "console-users.json")
         self.sessions = auth.Sessions()
+        self._last_users_error = None
         self.started_at = time.time()
         self.listeners = []
         self.state = {}
@@ -215,6 +216,14 @@ class ConsoleServer:
             loops=lambda: routes_loops.loops_rows(self)["loops"])
         sse.stop_poller()
         sse.start_poller(root=self.root)
+
+    def report_users_error(self, error):
+        """Log a broken users file to stderr (the unit's journal) once
+        per distinct error, not once per request."""
+        if error != self._last_users_error:
+            self._last_users_error = error
+            print("cousin-console: %s" % error, file=sys.stderr,
+                  flush=True)
 
     def serve_forever(self):
         """The foreground entry the CLI uses: wire the event sources,
@@ -308,9 +317,19 @@ class _Handler(BaseHTTPRequestHandler):
         if token:
             req.session_token = token
             req.user = server.sessions.lookup(token)
-        if (server.users.configured() and req.user is None
-                and (method, parsed.path.rstrip("/") or parsed.path)
-                not in AUTH_EXEMPT):
+        route = (method, parsed.path.rstrip("/") or parsed.path)
+        users_state, users_error = server.users.state()
+        if users_state == "broken":
+            # Fail closed: a users file that is present but unusable
+            # never reads as "no users". Only `me` answers (it says
+            # why); every other route, login included and any live
+            # session regardless, is refused.
+            server.report_users_error(users_error)
+            if route != ("GET", "/api/auth/me"):
+                self.send_json(503, {"ok": False, "error": users_error})
+                return
+        elif (users_state == "ok" and req.user is None
+                and route not in AUTH_EXEMPT):
             self.send_json(401, {"ok": False, "error": "login required"})
             return
         try:
@@ -402,6 +421,18 @@ def build_console_from_cli(argv=None):
                          secure_cookie=args.secure_cookie)
 
 
+def auth_banner(users):
+    """The startup line's auth suffix: empty when enforced, the first-run
+    hint when absent, a CLOSED warning when the file is broken."""
+    state, _ = users.state()
+    if state == "ok":
+        return ""
+    if state == "missing":
+        return " (auth not configured: cousin-console adduser <name>)"
+    return (" (CLOSED: %s is present but unusable; every /api route"
+            " answers 503 until it is fixed)" % users.path)
+
+
 def _adduser(root, name):
     import getpass
 
@@ -410,6 +441,14 @@ def _adduser(root, name):
     if not name:
         print("cousin-console: adduser needs a name", file=sys.stderr)
         return 2
+    users = auth.Users(root / "config" / "console-users.json")
+    state, error = users.state()
+    if state == "broken":
+        # Never paper over a corrupt file with a fresh one: it may be
+        # the only copy of every other user's hash.
+        print("cousin-console: %s; nothing written" % error,
+              file=sys.stderr)
+        return 1
     first = getpass.getpass("password for %s: " % name)
     second = getpass.getpass("again: ")
     if first != second:
@@ -420,8 +459,11 @@ def _adduser(root, name):
         print("cousin-console: password shorter than %d characters;"
               " nothing written" % auth.MIN_PASSWORD_CHARS, file=sys.stderr)
         return 2
-    users = auth.Users(root / "config" / "console-users.json")
-    users.set_password(name, first)
+    try:
+        users.set_password(name, first)
+    except auth.UsersFileError as err:
+        print("cousin-console: %s; nothing written" % err, file=sys.stderr)
+        return 1
     print("cousin-console: user %s set in %s" % (name, users.path))
     return 0
 
@@ -446,9 +488,11 @@ def console_main(argv=None):
                            secure_cookie=args.secure_cookie)
     print("cousin-console: serving %s on %s:%d%s"
           % (server.root, server.httpd.server_address[0], server.port,
-             "" if server.users.configured()
-             else " (auth not configured: cousin-console adduser <name>)"),
+             auth_banner(server.users)),
           flush=True)  # a unit's stdout is a pipe: flush or never seen
+    state, error = server.users.state()
+    if state == "broken":
+        server.report_users_error(error)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

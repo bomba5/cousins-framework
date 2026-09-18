@@ -398,6 +398,46 @@ class TestBodySwap(LifecycleCase):
         self.assertTrue((self.b / "memory" / "testb-fact.md").is_file())
         self.assertEqual(sorted(self.flips), ["testa", "testb"])
 
+    def test_each_slot_keeps_its_own_port_and_reply_route(self):
+        # The template renders the slot's port and reply route into
+        # CLAUDE.md; a swap that moves the file whole hands each cousin
+        # the other's address. Canary: after a swap testa's CLAUDE.md
+        # named testb's port and /api/testb_reply.
+        from cousin_lib.template import render_template
+        template = (pathlib.Path(lifecycle.__file__).resolve().parents[1]
+                    / "templates" / "cousin-CLAUDE.template.md").read_text()
+        ports = {"testa": 8211, "testb": 8222}
+        for home, slug, name, role in (
+                (self.a, "testa", "Testa", "keeper of the ledger"),
+                (self.b, "testb", "Testb", "reader of the weather")):
+            toml = (home / "cousin.toml").read_text()
+            (home / "cousin.toml").write_text(
+                toml.replace("port = %d" % self.port,
+                             "port = %d" % ports[slug]))
+            text = render_template(template, {
+                "NAME": name, "SLUG": slug, "PORT": ports[slug],
+                "ROLE_ONE_LINE": role, "ROLE_PARAGRAPH": role,
+                "VOICE_GUIDE": "Plain."})
+            # A cousin-specific section that names its own route again.
+            text += "\n## Local notes\n\nPOST to `/api/%s_reply`.\n" % slug
+            (home / "CLAUDE.md").write_text(text)
+        out = self._transplant("body-swap")
+        self.assertTrue(out["ok"], out)
+        a_md = (self.a / "CLAUDE.md").read_text()
+        b_md = (self.b / "CLAUDE.md").read_text()
+        # The identity moved ...
+        self.assertTrue(a_md.startswith("# Testb - reader of the weather"))
+        self.assertIn("--from Testb", a_md)
+        self.assertTrue(b_md.startswith("# Testa - keeper of the ledger"))
+        # ... the address did not.
+        self.assertIn("runs on port 8211 and binds `/api/testa_reply`", a_md)
+        self.assertIn("runs on port 8222 and binds `/api/testb_reply`", b_md)
+        self.assertNotIn("8222", a_md)
+        self.assertNotIn("testb_reply", a_md)
+        self.assertNotIn("8211", b_md)
+        self.assertNotIn("testa_reply", b_md)
+        self.assertIn("POST to `/api/testa_reply`", a_md)
+
     def test_missing_self_portrait_on_one_side_moves_not_crashes(self):
         (self.b / "self-portrait.md").unlink()
         out = self._transplant("body-swap")

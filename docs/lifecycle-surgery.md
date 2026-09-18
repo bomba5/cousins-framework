@@ -102,7 +102,12 @@ is the operator's call.
 | `merge` | kept | recipient's MEMORY.md, then a dated heading `## Memories inherited from <Donor> (<date>)`, then the donor's; `memory/raw` unioned (missing files copied, shared files gain the donor's lines they lacked) | unchanged |
 
 Slug, chat port, and tmux session always stay with the slot; a body
-swap changes who lives at a slot, never where the slot is.
+swap changes who lives at a slot, never where the slot is. Because the
+template renders the slot's port and reply route into CLAUDE.md, a
+body swap re-addresses each swapped CLAUDE.md to its new slot: the
+template's "Your chat-server runs on port ..." line takes the slot's
+own port and slug, and any other `/api/<old slug>_reply` in the file
+becomes the slot's own route.
 
 Refusals (exit 2, nothing touched): unknown donor or recipient, a mode
 outside the three, donor and recipient the same slug.

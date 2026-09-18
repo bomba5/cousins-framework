@@ -8,6 +8,12 @@ network guard admits and `GET /api/auth/me` says `configured: false`.
 `cousin-console adduser <name>` (password from a prompt, never argv)
 creates the file; from then on every `/api/*` route but login and
 `me` needs a session, with no address-based bypass.
+
+Fail closed: a users file that is PRESENT but cannot be read as a
+non-empty user map (unreadable, not JSON, not an object, no users, an
+entry that is not an object) is never read as "no users". Every
+`/api/*` route but `me` answers 503 naming the file and the fix, until
+the operator repairs or removes it. Only an ABSENT file is first run.
 """
 from __future__ import annotations
 
@@ -37,22 +43,66 @@ def hash_password(password, salt, iterations=ITERATIONS):
                                iterations).hex()
 
 
+class UsersFileError(Exception):
+    """The users file is present but unusable; the console stays
+    closed until it is fixed or removed."""
+
+
 class Users:
     """The users file. Shape: {"<user>": {"salt": hex, "hash": hex,
-    "iterations": N}}; written atomically with mode 0600."""
+    "iterations": N}}; written atomically with mode 0600.
+
+    Three states (`state()`): "missing" (no file: first run, open),
+    "ok" (a non-empty map of user objects: enforced), "broken"
+    (present but unusable: closed). load() and everything built on it
+    raise UsersFileError in the broken state rather than return {}."""
 
     def __init__(self, path):
         self.path = Path(path)
 
-    def load(self):
+    def _broken(self, why):
+        return UsersFileError(
+            "%s is present but unusable (%s); the console refuses every"
+            " authenticated route until it is fixed. Restore it from a"
+            " backup, or remove it and run `cousin-console adduser"
+            " <name>` to recreate it" % (self.path, why))
+
+    def _read(self):
+        """The user map, None when the file is absent, or raise."""
         try:
-            data = json.loads(self.path.read_text())
-        except (OSError, ValueError):
-            return {}
-        return data if isinstance(data, dict) else {}
+            raw = self.path.read_text()
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError) as err:
+            raise self._broken("unreadable: %s" % err)
+        try:
+            data = json.loads(raw)
+        except ValueError as err:
+            raise self._broken("not valid JSON: %s" % err)
+        if not isinstance(data, dict):
+            raise self._broken("not a JSON object")
+        if not data:
+            raise self._broken("holds no users")
+        bad = sorted(str(k) for k, v in data.items()
+                     if not isinstance(v, dict))
+        if bad:
+            raise self._broken("entry for %s is not an object"
+                               % ", ".join(bad))
+        return data
+
+    def state(self):
+        """("missing", None) | ("ok", None) | ("broken", message)."""
+        try:
+            data = self._read()
+        except UsersFileError as err:
+            return "broken", str(err)
+        return ("missing" if data is None else "ok"), None
+
+    def load(self):
+        return self._read() or {}
 
     def configured(self):
-        return bool(self.load())
+        return self._read() is not None
 
     def names(self):
         return sorted(self.load())
@@ -165,7 +215,13 @@ def register():
     @router.route("GET", "/api/auth/me")
     def me(req):
         server = req.server
-        return 200, {"user": req.user, "configured": server.users.configured(),
+        state, error = server.users.state()
+        if state == "broken":
+            # Answered, not refused, so the page can say why it is
+            # closed; it names nobody and grants nothing.
+            return 200, {"user": None, "configured": True, "users": [],
+                         "error": error}
+        return 200, {"user": req.user, "configured": state == "ok",
                      "users": server.users.names() if req.user else []}
 
 

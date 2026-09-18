@@ -522,6 +522,7 @@ def register():
             spawn.persist_runtime(home, key, value)
         except spawn.SpawnError as err:
             raise HttpError(400, str(err))
+        req.server.emit("cousins-refresh", fleet_rows(req.server))
         # The running agent keeps the value it started with; the row
         # already shows the new one, so the client is told which.
         return 200, {"ok": True, "slug": slug, key: value,

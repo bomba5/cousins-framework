@@ -303,8 +303,8 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>tmux</dt><dd>{c.tmuxSession}{c.host ? ` @ ${c.host}` : ""}</dd>
           <dt>chat</dt><dd>{c.port ? `:${c.port} · ${c.chat}` : "none"}</dd>
           <dt>heartbeat</dt><dd><IdentityField cousin={c} field="heartbeat" options={options} /></dd>
-          <dt>model</dt><dd>{c.model || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
-          <dt>effort</dt><dd>{c.effort || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
+          <dt>model</dt><dd><IdentityField cousin={c} field="model" options={options} /></dd>
+          <dt>effort</dt><dd><IdentityField cousin={c} field="effort" options={options} /></dd>
           <dt>auth</dt><dd><AuthField cousin={c} /></dd>
           <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>uptime</dt><dd>{c.uptime_seconds == null ? <span style={{ color: "var(--fg-3)" }}>-</span> : fmtDuration(c.uptime_seconds)}</dd>
@@ -364,14 +364,23 @@ function fmtBeat(sec) {
   return `${n}s (${fmtDuration(n).replace(/ 0[smh]$/, "")})`;
 }
 
-// The identity keys the inspector edits in place. Each persists through
-// its own route (POST /api/cousins/<slug>/operator, /memory-scope,
-// /heartbeat); the route says whether a restart applies it, and the
-// hint follows the chat header's effort select: "restart to apply".
+// The keys the inspector edits in place. Each persists through its own
+// route (POST /api/cousins/<slug>/operator, /memory-scope, /heartbeat,
+// /model, /effort); the route says whether a restart applies it, and
+// the hint follows the chat header's effort select: "restart to apply".
+// A select's choices come from /api/spawn/options, so the catalogue is
+// the install's (config/harness.toml), never one written here.
 const IDENTITY_FIELDS = {
-  operator:     { url: slug => `/api/cousins/${slug}/operator`,     row: "operator",    kind: "text" },
-  memory_scope: { url: slug => `/api/cousins/${slug}/memory-scope`, row: "memoryScope", kind: "select" },
-  heartbeat:    { url: slug => `/api/cousins/${slug}/heartbeat`,    row: "heartbeat",   kind: "seconds" },
+  operator:     { url: slug => `/api/cousins/${slug}/operator`,     row: "operator",    kind: "text",
+                  title: "[operator] name" },
+  memory_scope: { url: slug => `/api/cousins/${slug}/memory-scope`, row: "memoryScope", kind: "select",
+                  title: "[memory] scope", choices: o => o?.memory_scopes },
+  heartbeat:    { url: slug => `/api/cousins/${slug}/heartbeat`,    row: "heartbeat",   kind: "seconds",
+                  title: "[heartbeat] context_beat_seconds" },
+  model:        { url: slug => `/api/cousins/${slug}/model`,        row: "model",       kind: "select",
+                  title: "[runtime] model", choices: o => o?.models },
+  effort:       { url: slug => `/api/cousins/${slug}/effort`,       row: "effort",      kind: "select",
+                  title: "[runtime] effort", choices: o => o?.efforts },
 };
 
 function IdentityField({ cousin, field, options }) {
@@ -389,7 +398,7 @@ function IdentityField({ cousin, field, options }) {
   React.useEffect(() => { setEditing(false); setErr(null); setHint(null); setSaved(null); }, [cousin.slug]);
   const shown = saved != null ? saved : current;
 
-  const scopes = options?.memory_scopes || [];
+  const choices = (spec.choices && spec.choices(options)) || [];
   const bounds = options?.heartbeat_bounds || [60, 2592000];
   const maxChars = options?.operator_max_chars || 64;
 
@@ -411,7 +420,7 @@ function IdentityField({ cousin, field, options }) {
       if (!/^\d+$/.test(draft.trim()) || n < bounds[0] || n > bounds[1])
         return `whole seconds from ${bounds[0]} to ${bounds[1]}`;
     }
-    if (spec.kind === "select" && !scopes.includes(draft)) return "pick a scope";
+    if (spec.kind === "select" && !choices.includes(draft)) return "pick one";
     return null;
   })();
 
@@ -440,7 +449,7 @@ function IdentityField({ cousin, field, options }) {
       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span>{text}</span>
         <button className="btn ghost" onClick={start} style={small}
-          title={`edit cousin.toml ${field === "operator" ? "[operator] name" : field === "memory_scope" ? "[memory] scope" : "[heartbeat] context_beat_seconds"}`}>edit</button>
+          title={`edit cousin.toml ${spec.title}`}>edit</button>
         {hint && <span style={{ color: "var(--fg-2)", fontSize: 11 }}>{hint}</span>}
       </span>
     );
@@ -454,9 +463,9 @@ function IdentityField({ cousin, field, options }) {
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         {spec.kind === "select" ? (
           <select className="sel" value={draft} onChange={e => setDraft(e.target.value)}
-                  autoFocus disabled={!scopes.length} style={{ flex: 1 }}>
-            {!scopes.includes(draft) && <option value={draft}>{draft || "..."}</option>}
-            {scopes.map(sc => <option key={sc} value={sc}>{sc}</option>)}
+                  autoFocus disabled={!choices.length} style={{ flex: 1, minWidth: 0 }}>
+            {!choices.includes(draft) && <option value={draft}>{draft || "..."}</option>}
+            {choices.map(ch => <option key={ch} value={ch}>{ch}</option>)}
           </select>
         ) : (
           <input className="txt" value={draft} onChange={e => setDraft(e.target.value)}

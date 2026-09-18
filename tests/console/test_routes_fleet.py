@@ -517,7 +517,14 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(data["runtime"]["model"], "m-two")
         self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["model"],
                          "m-two")
-        for bad in ({"model": "two words"}, {"model": ""}, {"model": 1}, {}):
+        # A context-window suffix is one word: it persists and renders.
+        status, body = self.post("/api/cousins/wren/model",
+                                 {"model": "m-two[1m]"})
+        self.assertEqual(status, 200, body)
+        data = tomllib.loads((home / "cousin.toml").read_text())
+        self.assertEqual(data["runtime"]["model"], "m-two[1m]")
+        for bad in ({"model": "two words"}, {"model": "m;rm"},
+                    {"model": "[1m]"}, {"model": ""}, {"model": 1}, {}):
             status, body = self.post("/api/cousins/wren/model", bad)
             self.assertEqual(status, 400, bad)
             self.assertIn("model", body["error"])

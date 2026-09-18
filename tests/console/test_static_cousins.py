@@ -255,10 +255,10 @@ class PanelEditorsUseTheAccent(unittest.TestCase):
 
 
 class InspectorIdentityEditors(unittest.TestCase):
-    """Operator, memory scope and heartbeat are editable in the
-    inspector's identity block through their routes, with the restart
-    hint the chat header's effort select uses; the other identity rows
-    stay read-only."""
+    """Operator, memory scope, heartbeat, model and effort are editable
+    in the inspector's identity block through their routes, with the
+    restart hint the chat header's effort select uses; the other
+    identity rows stay read-only."""
 
     def setUp(self):
         cousins = _read("cousins.jsx")
@@ -266,11 +266,12 @@ class InspectorIdentityEditors(unittest.TestCase):
         self.field = _component(cousins, "IdentityField")
         self.cousins = cousins
 
-    def test_three_rows_use_the_editor_and_the_rest_do_not(self):
-        for field in ("operator", "memory_scope", "heartbeat"):
+    def test_five_rows_use_the_editor_and_the_rest_do_not(self):
+        for field in ("operator", "memory_scope", "heartbeat", "model",
+                      "effort"):
             self.assertRegex(self.inspector,
                              r'<IdentityField cousin=\{c\} field="%s"' % field)
-        self.assertEqual(self.inspector.count("<IdentityField"), 3)
+        self.assertEqual(self.inspector.count("<IdentityField"), 5)
         for row in ("slug", "type", "home", "tmux", "chat", "pid",
                     "uptime"):
             dd = re.search(r"<dt>%s</dt><dd[^>]*>(.*?)</dd>" % row,
@@ -279,14 +280,19 @@ class InspectorIdentityEditors(unittest.TestCase):
             self.assertNotIn("IdentityField", dd.group(1), row)
 
     def test_routes_limits_and_restart_hint(self):
-        for route in ("operator", "memory-scope", "heartbeat"):
+        for route in ("operator", "memory-scope", "heartbeat", "model",
+                      "effort"):
             self.assertIn("`/api/cousins/${slug}/%s`" % route, self.cousins)
         self.assertIn("spec.url(cousin.slug)", self.field)
         self.assertIn("restart_required", self.field)
         self.assertIn("restart to apply", self.field)
-        for key in ("memory_scopes", "heartbeat_bounds",
-                    "operator_max_chars"):
+        for key in ("heartbeat_bounds", "operator_max_chars"):
             self.assertIn(key, self.field, key)
+        # The select catalogues come from the options route, never a
+        # list written into the page.
+        for key in ("o?.memory_scopes", "o?.models", "o?.efforts"):
+            self.assertIn(key, self.cousins, key)
+        self.assertIn("spec.choices(options)", self.field)
         self.assertIn("/api/spawn/options", self.inspector)
         self.assertIn("cancel", self.field)
         self.assertIn("setErr(", self.field)

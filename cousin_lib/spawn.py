@@ -42,8 +42,10 @@ from cousin_lib.trace import traced_cli
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 # A [runtime] value renders into the agent command and is then split
 # by shlex: anything a shell would treat as more than one word, or as
-# quoting, is refused before it is persisted.
-_RUNTIME_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
+# quoting, is refused before it is persisted. Brackets are admitted
+# for context-window suffixes ("some-model[1m]"): shlex keeps them in
+# one word and the spawn passes argv, never a shell, so no glob runs.
+_RUNTIME_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+\[\]-]{0,127}$")
 # The [runtime] keys the placeholders read; session_id has its own
 # mint-and-persist path and is never set by hand through these.
 _RUNTIME_KEYS = ("model", "effort")
@@ -62,7 +64,7 @@ def check_runtime_value(key, value):
                          % (key, ", ".join(_RUNTIME_KEYS)))
     if not isinstance(value, str) or not _RUNTIME_VALUE_RE.match(value):
         raise SpawnError(
-            "runtime.%s must be one word of letters, digits and ._:/+-"
+            "runtime.%s must be one word of letters, digits and ._:/+-[]"
             " (it is rendered into the agent command), got %r"
             % (key, value))
     if key == "effort" and value not in EFFORT_LEVELS:

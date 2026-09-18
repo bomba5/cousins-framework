@@ -336,10 +336,13 @@ input.txt, textarea.txt, select.sel {
   outline: none;
 }
 input.txt:focus, textarea.txt:focus, select.sel:focus {
-  border-color: var(--cyan);
-  box-shadow: 0 0 0 2px oklch(0.80 0.13 220 / 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px oklch(from var(--accent) l c h / 0.20);
 }
 textarea.txt { resize: vertical; min-height: 64px; font-family: var(--sans); }
+/* The inspector's text editors (role, CLAUDE.md): monospace, the same
+   field border and accent focus as every other input. */
+textarea.txt.code { font-family: var(--mono); line-height: 1.5; padding: 8px; }
 .field {
   display: flex; flex-direction: column; gap: 5px;
 }

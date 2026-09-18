@@ -416,13 +416,8 @@ function RoleEditor({ cousin }) {
   }
   return (
     <div style={{ marginBottom: 18 }}>
-      <textarea value={draft} onChange={e => setDraft(e.target.value)}
-        style={{
-          width: "100%", minHeight: 120, resize: "vertical",
-          fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1.5,
-          background: "var(--bg-0)", color: "var(--fg-0)",
-          border: "1px solid var(--amber)", borderRadius: 3, padding: 8, boxSizing: "border-box",
-        }} />
+      <textarea className="txt code" value={draft} onChange={e => setDraft(e.target.value)}
+        autoFocus style={{ minHeight: 120 }} />
       <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
         <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: draft.length > 5000 ? "var(--red)" : "var(--fg-3)" }}>{draft.length} / 5000 chars</span>
         <span style={{ flex: 1 }} />
@@ -502,14 +497,8 @@ function ClaudeMdEditor({ cousin }) {
           {!loaded && <div style={{ fontSize: 11, color: "var(--fg-3)" }}>loading...</div>}
           {loaded && (
             <>
-              <textarea value={content} onChange={e => setContent(e.target.value)}
-                style={{
-                  width: "100%", minHeight: 320, resize: "vertical",
-                  fontFamily: "var(--mono)", fontSize: 12, lineHeight: 1.5,
-                  background: "var(--bg-0)", color: "var(--fg-0)",
-                  border: `1px solid ${dirty ? "var(--amber)" : "var(--line)"}`,
-                  borderRadius: 3, padding: 8, boxSizing: "border-box",
-                }} />
+              <textarea className="txt code" value={content} onChange={e => setContent(e.target.value)}
+                style={{ minHeight: 320 }} />
               <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: 10, fontFamily: "var(--mono)",
                                 color: dirty ? "var(--amber)" : "var(--fg-3)" }}>

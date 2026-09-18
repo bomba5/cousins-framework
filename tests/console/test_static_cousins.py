@@ -127,3 +127,27 @@ class CousinTagColour(unittest.TestCase):
         rest = views.replace(tag, "")
         self.assertEqual(rest.count("cousinColor("), 1)
         self.assertIn("l.cousin", rest[rest.index("cousinColor("):][:80])
+
+
+class PanelEditorsUseTheAccent(unittest.TestCase):
+    """The inspector's role and CLAUDE.md textareas showed an amber
+    border (the role editor always, the CLAUDE.md editor once dirty)
+    while every other field in the console focuses in the accent. They
+    now take the shared `.txt` field style, whose focus ring is the
+    accent token; the canary fails if an amber border comes back."""
+
+    def setUp(self):
+        self.cousins = _read("cousins.jsx")
+        self.css = _read("styles.css")
+
+    def test_the_editors_carry_no_amber_border(self):
+        for name in ("RoleEditor", "ClaudeMdEditor"):
+            src = _component(self.cousins, name)
+            self.assertNotRegex(src, r"border[^\n]*var\(--amber\)", name)
+            self.assertRegex(src, r'<textarea className="txt[ "]', name)
+
+    def test_the_shared_focus_ring_is_the_accent(self):
+        rule = re.search(r"textarea\.txt:focus[^{]*\{([^}]*)\}", self.css)
+        self.assertIsNotNone(rule)
+        self.assertIn("border-color: var(--accent)", rule.group(1))
+        self.assertIn("var(--accent)", rule.group(1).split("box-shadow")[1])

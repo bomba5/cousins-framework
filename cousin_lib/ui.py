@@ -77,7 +77,7 @@ def build_ui_from_cli(argv=None):
     from cousin_lib.server.netguard import NetGuard
 
     args = _ui_parser().parse_args(argv)
-    root = FrameworkConfig.resolve(args.root).root
+    root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     guard = NetGuard.from_config(root)
     return build_ui(root, guard=guard, host=args.host, port=args.port)
 

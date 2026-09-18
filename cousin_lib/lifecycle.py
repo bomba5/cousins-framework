@@ -477,7 +477,7 @@ def transplant(*, donor, recipient, mode, root, do_flip=None):
 
 def _root_or_exit(prog, flag):
     try:
-        return FrameworkConfig.resolve(flag).root
+        return FrameworkConfig.resolve(flag, cwd_fallback=True).root
     except MissingConfigError as err:
         print("%s: %s" % (prog, err), file=sys.stderr)
         return None

@@ -856,7 +856,7 @@ def approve_registration(settings_path, home):
 
 def _approve(args):
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
         print("cousin-mcp: %s" % err, file=sys.stderr)
         return 2

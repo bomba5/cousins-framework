@@ -762,7 +762,7 @@ def spawn_main(argv=None):
                              " to repeat")
     args = parser.parse_args(argv)
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     except MissingConfigError as err:
         root = None
         root_error = err

@@ -138,20 +138,36 @@ class FrameworkConfig:
         return cls(root)
 
     @classmethod
-    def resolve(cls, flag_value=None):
+    def resolve(cls, flag_value=None, *, cwd_fallback=False):
         """The one root-discovery rule every entry point uses: an
-        explicit --root flag wins, else FRAMEWORK_ROOT, else a loud
-        error naming both channels. Sharing it is what keeps two
+        explicit --root flag wins, else FRAMEWORK_ROOT, else - for a
+        command a person types (cwd_fallback) - the working directory
+        when it is a checkout (see looks_like_checkout), else a loud
+        error naming the channels. Sharing it is what keeps two
         commands from disagreeing about how to be told the same fact -
-        a disagreement an adopter finds by failing, not by --help."""
+        a disagreement an adopter finds by failing, not by --help.
+        Library code never passes cwd_fallback: a daemon's working
+        directory is not a statement about which install it serves."""
         root = flag_value or os.environ.get("FRAMEWORK_ROOT")
+        if not root and cwd_fallback and cls.looks_like_checkout(
+                os.getcwd()):
+            root = os.getcwd()
         if not root:
             raise MissingConfigError(
-                "no framework root; pass --root <checkout> or set "
-                "FRAMEWORK_ROOT. The root locates the cousin registry "
-                "and config/ (typically the checkout itself)."
+                "no framework root; pass --root <checkout>, set "
+                "FRAMEWORK_ROOT, or run from inside the checkout. The "
+                "root locates the cousin registry and config/ "
+                "(typically the checkout itself)."
             )
         return cls(root)
+
+    @staticmethod
+    def looks_like_checkout(directory):
+        """A directory holding templates/cousin-CLAUDE.template.md and a
+        config/ directory: the shape of a framework checkout."""
+        d = Path(directory)
+        return ((d / "templates" / "cousin-CLAUDE.template.md").is_file()
+                and (d / "config").is_dir())
 
     def list_cousins(self):
         base = self.root / "cousins"

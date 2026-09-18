@@ -23,6 +23,51 @@ class TestFrameworkConfig(unittest.TestCase):
                 (d / "cousin.toml").write_text(toml_text)
         return root
 
+    def _checkout(self):
+        root = self._root({})
+        (root / "templates").mkdir()
+        (root / "templates" / "cousin-CLAUDE.template.md").write_text("x")
+        (root / "config").mkdir()
+        return root
+
+    def test_cli_resolution_defaults_to_a_checkout_cwd(self):
+        import contextlib
+        import os
+        root = self._checkout()
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                contextlib.chdir(root):
+            got = FrameworkConfig.resolve(None, cwd_fallback=True).root
+        self.assertEqual(got, pathlib.Path(os.path.abspath(root)))
+
+    def test_cwd_is_not_a_root_unless_it_looks_like_a_checkout(self):
+        import contextlib
+        root = self._root({})
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                contextlib.chdir(root):
+            with self.assertRaises(MissingConfigError) as ctx:
+                FrameworkConfig.resolve(None, cwd_fallback=True)
+        self.assertIn("--root", str(ctx.exception))
+
+    def test_flag_and_env_still_win_over_the_cwd(self):
+        import contextlib
+        root = self._checkout()
+        other = self._root({})
+        with mock.patch.dict("os.environ", {"FRAMEWORK_ROOT": str(other)},
+                             clear=True), contextlib.chdir(root):
+            self.assertEqual(
+                FrameworkConfig.resolve(None, cwd_fallback=True).root, other)
+            self.assertEqual(
+                FrameworkConfig.resolve(str(root), cwd_fallback=True).root,
+                root)
+
+    def test_library_resolution_never_guesses_from_the_cwd(self):
+        import contextlib
+        root = self._checkout()
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                contextlib.chdir(root):
+            with self.assertRaises(MissingConfigError):
+                FrameworkConfig.resolve(None)
+
     def test_missing_root_env_fails_loud(self):
         with mock.patch.dict("os.environ", {}, clear=True):
             with self.assertRaises(MissingConfigError):

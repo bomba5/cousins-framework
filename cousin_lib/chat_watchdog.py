@@ -226,7 +226,7 @@ def watchdog_main(argv=None):
                         help="framework root (else FRAMEWORK_ROOT)")
     args = parser.parse_args(argv)
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
         return watchdog_run(root, dry_run=args.dry_run)
     except (MissingConfigError, OSError) as err:
         # a root that is absent or unwritable cannot hold the lock: a

@@ -198,8 +198,11 @@ class TestCommandsThroughStores(UICase):
 
 class TestCli(UICase):
     def test_main_needs_a_framework_root(self):
+        import contextlib
         from cousin_lib.ui import ui_main
-        with mock.patch.dict(os.environ, {}, clear=True):
+        # Outside any checkout: inside one, the root defaults to it.
+        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp), \
+                mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(ui_main(["--port", "0"]), 2)
 
     def test_root_accepts_the_same_flag_as_spawn(self):

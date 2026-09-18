@@ -371,7 +371,7 @@ def flip_main(argv=None):
              " FRAMEWORK_ROOT")
     args = parser.parse_args(argv)
     try:
-        root = FrameworkConfig.resolve(args.root).root
+        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
         # The flip's stages (boot assembly, audits, the respawned
         # session) read the root from the environment; the CLI owns its
         # process environment, so --root is exported for all of them.

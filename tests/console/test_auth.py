@@ -153,6 +153,24 @@ class TestAdduserCli(ConsoleCase):
         users = auth.Users(self.root / "config" / "console-users.json")
         self.assertTrue(users.verify("ana", "pw pw pw pw"))
 
+    def test_adduser_from_inside_a_checkout_needs_no_root(self):
+        import contextlib
+        import os
+        from cousin_lib.console.app import console_main
+        (self.root / "templates").mkdir(exist_ok=True)
+        (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
+            "x")
+        (self.root / "config").mkdir(exist_ok=True)
+        with mock.patch.dict(os.environ):
+            os.environ.pop("FRAMEWORK_ROOT", None)
+            with contextlib.chdir(self.root), \
+                    mock.patch("getpass.getpass",
+                               side_effect=["pw pw pw pw", "pw pw pw pw"]):
+                rc = console_main(["adduser", "ana"])
+        self.assertEqual(rc, 0)
+        users = auth.Users(self.root / "config" / "console-users.json")
+        self.assertTrue(users.verify("ana", "pw pw pw pw"))
+
     def test_adduser_refuses_a_mismatch_or_a_short_password(self):
         from cousin_lib.console.app import console_main
         with mock.patch("getpass.getpass", side_effect=["aaaaaaaa", "b"]):

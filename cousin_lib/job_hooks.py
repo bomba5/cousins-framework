@@ -19,7 +19,13 @@ console's Jobs view reads (cousin_lib.jobs):
   no event when a backgrounded command finishes, so the command closes
   its own row. When the home or root path holds characters the trap
   cannot quote safely, the command runs unchanged and the row falls back
-  to the store's 24h reap. Foreground Bash calls are not recorded.
+  to the store's 24h reap. The rewrite also copies the output into the
+  job's log. Foreground Bash calls get no job row.
+- every tool call (PostToolUse, PostToolUseFailure, any tool): one
+  readable line in the cousin's activity log (cousin_lib.activity).
+- job logs: a subagent's log gets its prompt at start and its rendered
+  transcript and outcome at the close; a background shell's gets the
+  command and its output.
 
 Pre and Post are correlated by tool_use_id, a background agent by its
 agent id, through small files under <home>/data/job-hooks/.
@@ -39,6 +45,8 @@ import sys
 import time
 import traceback
 from datetime import datetime, timezone
+
+from cousin_lib import activity
 
 SUBAGENT_TOOLS = ("Agent", "Task")
 SHELL_TOOLS = ("Bash",)
@@ -167,21 +175,29 @@ def _is_error(response):
 
 # ----------------------------------------------------- self-closing shell
 
-def _wrap(command, home, root, job_id):
+def _wrap(command, home, root, job_id, log_path=None):
     """The command with an EXIT trap that closes job `job_id` with the
     exit code, or None when a path is unsafe to splice. TERM, INT and HUP
     are turned into exits so the EXIT trap runs when the harness kills a
     background task; only SIGKILL escapes it (the 24h reap covers that).
-    Plain POSIX trap syntax: the cousin's Bash tool may run bash or zsh."""
+    Plain POSIX trap syntax: the cousin's Bash tool may run bash or zsh.
+
+    With log_path, the command's output is also copied into the job's
+    log (`exec > >(tee -a LOG) 2>&1`, which bash and zsh both take): the
+    harness still gets every line, the console's Jobs view gets the same
+    lines live, and the exit code the trap reports is the command's."""
     python = sys.executable
     for part in (str(home), str(root), python):
         if not _SAFE_PATH.match(part):
             return None
+    tee = ""
+    if log_path and _SAFE_PATH.match(str(log_path)):
+        tee = "exec > >(tee -a %s) 2>&1\n" % log_path
     closer = ("%s -m cousin_lib.job_hooks --close %d --rc $? --home %s"
               " --root %s >/dev/null 2>&1" % (python, int(job_id), home, root))
     return ("trap '%s' EXIT\n"
             "trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP\n"
-            "%s\n" % (closer, command))
+            "%s%s\n" % (closer, tee, command))
 
 
 def close_from_trap(job_id, rc):
@@ -193,6 +209,32 @@ def close_from_trap(job_id, rc):
     status = "done" if rc == 0 else "failed"
     jobs.finish_job(job_id, status=status, exit_code=rc,
                     summary="exit %d" % rc)
+
+
+# ------------------------------------------------------------- job logs
+
+def _mint_log(job_id):
+    """A log file in the store's own log directory, recorded on the row;
+    None when it cannot be made (the job still runs, without a log)."""
+    from cousin_lib import jobs
+    try:
+        path = jobs._default_log_path(job_id)
+        path.touch()
+        jobs.set_log_path(job_id, path)
+        return path
+    except OSError:
+        return None
+
+
+def _close_subagent_log(job_id, payload, tool_use_id, status, summary):
+    from cousin_lib import jobs
+    row = jobs.get_job(job_id)
+    log_path = row.get("log_path") if row else None
+    if not log_path:
+        return
+    transcript = activity.find_subagent_transcript(payload, tool_use_id)
+    activity.append_transcript(log_path, transcript, status=status,
+                               summary=summary)
 
 
 # --------------------------------------------------------------- events
@@ -212,6 +254,13 @@ def _pre(home, slug, payload):
                            prompt[:400])
         job_id = jobs.register_job(kind="subagent", title=str(title),
                                    description=desc, spawned_by=slug)
+        log_path = _mint_log(job_id)
+        if log_path:
+            activity.write_header(log_path, title=str(title),
+                                  kind="subagent (%s)" % (
+                                      tool_input.get("subagent_type")
+                                      or "agent"),
+                                  detail=prompt)
     elif tool in SHELL_TOOLS and tool_input.get("run_in_background"):
         command = str(tool_input.get("command") or "")
         title = tool_input.get("description") or _one_line(command, 80)
@@ -220,8 +269,14 @@ def _pre(home, slug, payload):
                                    spawned_by=slug, command=command)
         _remember(home, "tool", tid, job_id)
         _prune(home)
+        log_path = _mint_log(job_id)
+        if log_path:
+            activity.write_header(log_path, title=str(title),
+                                  kind="background shell", detail="$ "
+                                  + command)
         root = os.environ.get("FRAMEWORK_ROOT") or ""
-        wrapped = _wrap(command, home, root, job_id) if command else None
+        wrapped = (_wrap(command, home, root, job_id, log_path)
+                   if command else None)
         if wrapped is None:
             return None
         updated = dict(tool_input)
@@ -256,8 +311,11 @@ def _post(home, payload):
             jobs.update_job(job_id, result_summary=note)
             return
         status = "failed" if _is_error(response) else "done"
+        text = _response_text(response)
+        _close_subagent_log(job_id, payload, payload.get("tool_use_id"),
+                            status, text)
         jobs.finish_job(job_id, status=status,
-                        summary=_one_line(_response_text(response)) or status)
+                        summary=_one_line(text) or status)
         return
     # A backgrounded shell: the result names the task, not an outcome.
     if isinstance(response, dict):
@@ -285,6 +343,9 @@ def _failure(home, payload):
         return
     from cousin_lib import jobs
     status = "cancelled" if payload.get("is_interrupt") else "failed"
+    if payload.get("tool_name") in SUBAGENT_TOOLS:
+        _close_subagent_log(job_id, payload, payload.get("tool_use_id"),
+                            status, payload.get("error"))
     jobs.finish_job(job_id, status=status,
                     summary=_one_line(payload.get("error")) or status)
 
@@ -294,6 +355,8 @@ def _subagent_stop(home, payload):
     if job_id is None:
         return
     from cousin_lib import jobs
+    _close_subagent_log(job_id, payload, None, "done",
+                        payload.get("last_assistant_message"))
     jobs.finish_job(job_id, status="done", summary=_one_line(
         payload.get("last_assistant_message")) or "done")
 
@@ -303,7 +366,7 @@ def _is_tracked(payload):
     acts on. A foreground Bash PreToolUse returns here."""
     event = payload.get("hook_event_name")
     tool = payload.get("tool_name")
-    if event == "SubagentStop":
+    if event in ("SubagentStop", "PostToolUse", "PostToolUseFailure"):
         return True
     if tool in SUBAGENT_TOOLS:
         return True
@@ -323,6 +386,15 @@ def handle(payload, home, root):
     os.environ["COUSIN_HOME"] = str(home)
     os.environ["FRAMEWORK_ROOT"] = str(root)
     event = payload.get("hook_event_name")
+    if event in ("PostToolUse", "PostToolUseFailure"):
+        # Every tool call, whatever the tool, lands in the activity log;
+        # only subagents and shells go on to the jobs store.
+        try:
+            activity.record(home, payload)
+        except Exception as err:  # noqa: BLE001 - never fail the call
+            _log(home, "activity: %s" % err)
+        if payload.get("tool_name") not in SUBAGENT_TOOLS + SHELL_TOOLS:
+            return
     if event == "PreToolUse":
         try:
             from cousin_lib.config import CousinConfig

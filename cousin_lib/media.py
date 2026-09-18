@@ -97,8 +97,14 @@ def generate_tracked(kind, prompt, *, home=None, **params):
     if load_provider(kind) is None:
         return generate(kind, prompt, home=home, **params)
     title = "%s: %s" % (kind, " ".join(str(prompt).split())[:80])
+    provider = load_provider(kind)
     with track_job("media", title, description=str(prompt)[:500]) as job:
+        job.log("request: %s via %s (model %s)%s" % (
+            kind, provider.get("url"), provider.get("model") or "-",
+            " params %s" % json.dumps(params, sort_keys=True)
+            if params else ""))
         path = generate(kind, prompt, home=home, **params)
+        job.log("saved %s (%d bytes)" % (path, Path(path).stat().st_size))
         job.summary = str(path)
     return path
 

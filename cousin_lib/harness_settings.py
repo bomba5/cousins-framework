@@ -29,15 +29,18 @@ SHELL_HOOKS = (("SessionStart", "session_init.sh"),
                ("Stop", "session_checkpoint.sh"))
 
 # The job-tracking hook (cousin_lib.job_hooks): one module, several
-# events. A matcher of None means the event takes none (it is not about
-# one tool). PostToolUse fires only on success; a failed or interrupted
-# call arrives as PostToolUseFailure, and an agent launched in the
-# background finishes as a SubagentStop.
+# events. A matcher of None means every tool (or, for SubagentStop, an
+# event that is not about one tool). PreToolUse needs only subagents and
+# shells (it registers their jobs); PostToolUse and PostToolUseFailure
+# take every tool, because each call also lands in the cousin's activity
+# log (cousin_lib.activity). PostToolUse fires only on success; a failed
+# or interrupted call arrives as PostToolUseFailure, and an agent
+# launched in the background finishes as a SubagentStop.
 JOB_HOOK_MODULE = "cousin_lib.job_hooks"
 JOB_HOOK_MATCHERS = ("Agent|Task", "Bash")
 JOB_HOOK_EVENTS = (("PreToolUse", JOB_HOOK_MATCHERS),
-                   ("PostToolUse", JOB_HOOK_MATCHERS),
-                   ("PostToolUseFailure", JOB_HOOK_MATCHERS),
+                   ("PostToolUse", (None,)),
+                   ("PostToolUseFailure", (None,)),
                    ("SubagentStop", (None,)))
 JOB_HOOK_TIMEOUT = 10
 

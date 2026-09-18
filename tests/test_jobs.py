@@ -212,11 +212,44 @@ class TestTailCommand(JobsCase):
         self.assertEqual(rc, 0)
         self.assertEqual(out.strip().splitlines(), ["98", "99", "100"])
 
-    def test_tail_without_log_is_an_error(self):
-        _, out, _ = self._main(["start", "shell", "no log"])
-        rc, _, err = self._main(["tail", out.strip()])
-        self.assertEqual(rc, 1)
+    def test_a_hand_registered_job_gets_a_log_with_its_outcome(self):
+        # No command, no --log: the row still gets a readable log, its
+        # header at start and its outcome at done.
+        _, out, _ = self._main(["start", "subagent", "review the diff",
+                                "--desc", "check the flip changes"])
+        job_id = int(out.strip())
+        path = get_job(job_id)["log_path"]
+        self.assertTrue(path)
+        self._main(["done", str(job_id), "two nits"])
+        text = pathlib.Path(path).read_text()
+        self.assertIn("# subagent: review the diff", text)
+        self.assertIn("check the flip changes", text)
+        self.assertIn("## done", text)
+        self.assertIn("two nits", text)
+        rc, out, _ = self._main(["tail", str(job_id)])
+        self.assertEqual(rc, 0)
+        self.assertIn("two nits", out)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrackedJobsLog(JobsCase):
+    """An in-process tracked job (media, for one) gets a log: header,
+    what the caller logged, and the outcome."""
+
+    def test_done_and_failed_both_land_in_the_log(self):
+        from cousin_lib.jobs import track_job
+        with track_job("media", "image: a robot", "a robot") as job:
+            job.log("request: image via http://x (model m)")
+            job.summary = "/tmp/out.png"
+        text = pathlib.Path(get_job(job.job_id)["log_path"]).read_text()
+        self.assertIn("# media: image: a robot", text)
+        self.assertIn("request: image via http://x", text)
+        self.assertIn("done: /tmp/out.png", text)
+        with self.assertRaises(RuntimeError):
+            with track_job("media", "image: b", "b") as job:
+                raise RuntimeError("HTTP Error 429: quota cap")
+        text = pathlib.Path(get_job(job.job_id)["log_path"]).read_text()
+        self.assertIn("FAILED: RuntimeError: HTTP Error 429: quota cap", text)

@@ -320,7 +320,12 @@ class track_job:
     leave rows stuck at 'running' forever. A clean sys.exit(0) unwinds
     as SystemExit too and is a SUCCESS - mislabeling it as failed just
     because it unwinds that way was the bug this class carries the
-    scar of. Everything is marked, then re-raised unchanged."""
+    scar of. Everything is marked, then re-raised unchanged.
+
+    Every tracked job gets a readable log in the store's log directory:
+    a header with the description, whatever the caller adds with
+    log(), and the outcome. Logging is best-effort and never fails the
+    job it describes."""
 
     def __init__(self, kind, title, description="", spawned_by=None):
         self.kind = kind
@@ -329,15 +334,42 @@ class track_job:
         self.spawned_by = spawned_by
         self.job_id = None
         self.summary = ""
+        self.log_path = None
+
+    def log(self, text):
+        if not self.log_path:
+            return
+        try:
+            with open(self.log_path, "a", encoding="utf-8") as fh:
+                fh.write("%s  %s\n" % (
+                    datetime.now().strftime("%H:%M:%S"), text))
+        except OSError:
+            pass
 
     def __enter__(self):
         self.job_id = register_job(
             kind=self.kind, title=self.title,
             description=self.description, spawned_by=self.spawned_by,
         )
+        try:
+            path = _default_log_path(self.job_id)
+            path.write_text("# %s: %s\n# started %s\n\n%s\n\n" % (
+                self.kind, self.title,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                (self.description or "").rstrip()))
+            set_log_path(self.job_id, path)
+            self.log_path = path
+        except OSError:
+            self.log_path = None
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if exc is None:
+            self.log("done: %s" % (self.summary or "ok"))
+        elif isinstance(exc, SystemExit) and (exc.code or 0) == 0:
+            self.log("done: %s" % (self.summary or "ok (exit 0)"))
+        else:
+            self.log("FAILED: %s: %s" % (exc_type.__name__, exc))
         if exc is None:
             finish_job(self.job_id, status="done",
                        summary=self.summary or "ok")
@@ -350,6 +382,15 @@ class track_job:
                 summary="%s: %s" % (exc_type.__name__, str(exc)[:180]),
             )
         return False
+
+
+def _write_log_header(path, kind, title, detail):
+    """The first lines of a minted job log: what the job is and when it
+    started, so the log reads on its own."""
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("# %s: %s\n# started %s\n\n%s\n\n" % (
+            kind, title, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            (detail or "").rstrip()))
 
 
 def _default_log_path(job_id):
@@ -415,6 +456,8 @@ def _cmd_start(args):
     if cmd:
         log_path = log_path or str(_default_log_path(job_id))
         set_log_path(job_id, log_path)
+        _write_log_header(log_path, args.kind, args.title,
+                          "$ " + " ".join(cmd))
         pid = _spawn_tracked(cmd, log_path, job_id)
         conn = _db()
         try:
@@ -423,6 +466,17 @@ def _cmd_start(args):
             conn.commit()
         finally:
             conn.close()
+    elif not log_path:
+        # A job with no process of its own (a hand-registered subagent,
+        # a manual step) still gets a log: its header now, its outcome
+        # at done/fail/cancel.
+        try:
+            log_path = str(_default_log_path(job_id))
+            _write_log_header(log_path, args.kind, args.title,
+                              args.desc or "")
+            set_log_path(job_id, log_path)
+        except OSError:
+            log_path = None
     if args.json:
         print(json.dumps({"job_id": job_id, "log_path": log_path}))
     else:
@@ -437,6 +491,14 @@ def _close_cmd(args, status):
         return 1
     finish_job(args.id, status=status, summary=args.summary or "",
                exit_code=getattr(args, "exit_code", None))
+    if job.get("log_path") and is_minted_log(job["log_path"]):
+        try:
+            with open(job["log_path"], "a", encoding="utf-8") as fh:
+                fh.write("\n## %s %s\n%s\n" % (
+                    status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    args.summary or ""))
+        except OSError:
+            pass
     print("job #%d %s" % (args.id, status))
     return 0
 

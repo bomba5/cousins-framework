@@ -34,7 +34,10 @@ cousin-job tail 15 -f
 With a command after `--`, the job runs detached, writes its output to
 `data/job-logs/job-<id>.log` under the framework root (or wherever
 `--log` says), and closes itself as `done` or `failed` with the
-command's exit code. You don't call `done` for those. Don't point
+command's exit code. You don't call `done` for those. A job started
+without a command still gets a log in the same place: its title and
+`--desc` at start, its outcome and summary at `done`, `fail` or
+`cancel`. Don't point
 `--log` at a file the command itself reads, or it will read its own
 output forever.
 
@@ -73,16 +76,38 @@ doesn't have to remember:
   becomes a `subagent` job titled by its description. It closes `done`
   with the start of the answer, or `failed` (`cancelled` if you
   interrupted it). A subagent launched in the background stays running
-  until it actually finishes.
+  until it actually finishes. Its log starts with the prompt; when it
+  ends, the hook finds the subagent's own transcript (the harness keeps
+  it beside a `.meta.json` naming the launching call) and appends it as
+  text: what the agent said, each tool call on one line (`-> Grep: def
+  main in src`), the first lines of each result, then the outcome.
 - **Background shells.** A `Bash` call with `run_in_background` becomes
   a `shell` job with the command. The hook wraps the command in an exit
   trap, so the row closes with the command's real exit code when it
-  ends. If the home or root path has characters the trap can't quote
+  ends, and copies its output (stdout and stderr) into the job's log as
+  it runs, so the console shows it live; the harness still gets every
+  line. If the home or root path has characters the trap can't quote
   safely, the command runs unwrapped and the row is left to the 24-hour
   reap.
+- **Media.** An image, voice or video request is a `media` job whose log
+  has the provider, the request, and the saved file or the error.
 
-Foreground Bash calls aren't recorded. The hook never blocks or fails a
-tool call; its errors go to `data/job-hooks.log` in the cousin home.
+Foreground calls get no job row, but nothing goes unrecorded: every tool
+call, by the cousin or one of its subagents, success or failure, is one
+line in the cousin's **activity log**, `data/activity/<YYYY-MM-DD>.log`
+in its home (local date):
+
+```
+21:17:03  Bash         ok    git status --short  # Show working tree status
+21:17:05  Edit         ok    <root>/cousins/wren/STATUS.md
+21:17:09  Bash         FAIL  make test  -> Exit code 2
+21:17:12  Grep         ok    [Explore] def main in src
+```
+
+A subagent's lines carry its type in brackets. The hook never blocks or
+fails a tool call; its errors go to `data/job-hooks.log` in the cousin
+home. Commands are logged as written, one more reason never to put a
+secret on a command line.
 
 A cousin spawned before these hooks existed gets them with:
 

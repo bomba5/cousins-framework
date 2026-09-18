@@ -87,13 +87,18 @@ class TestJobHooks(SettingsCase):
     failures, and subagent stops, under the interpreter that wrote the
     settings, with home and root in the command."""
 
-    def test_tool_events_carry_both_matchers(self):
+    def test_tool_events_carry_their_matchers(self):
+        # Pre registers jobs, so only subagents and shells; Post and its
+        # failure take every tool (no matcher), because each call also
+        # lands in the activity log.
         self._apply()
         data = self._read()
-        for event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
-            matchers = sorted(g.get("matcher")
-                              for g in data["hooks"][event])
-            self.assertEqual(matchers, ["Agent|Task", "Bash"], event)
+        pre = sorted(g.get("matcher") for g in data["hooks"]["PreToolUse"])
+        self.assertEqual(pre, ["Agent|Task", "Bash"])
+        for event in ("PostToolUse", "PostToolUseFailure"):
+            groups = data["hooks"][event]
+            self.assertEqual(len(groups), 1, event)
+            self.assertNotIn("matcher", groups[0], event)
 
     def test_subagent_stop_is_wired(self):
         self._apply()

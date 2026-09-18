@@ -255,6 +255,147 @@ class TestSpawnMain(CreateCase):
         self.assertFalse((root / "cousins").exists())
 
 
+_STUB_TMUX = """#!/bin/sh
+printf '%s\\n' "$*" >> "$STUB_TMUX_LOG"
+case "$1" in
+  has-session) exit "${STUB_TMUX_ALIVE_RC:-1}" ;;
+esac
+exit 0
+"""
+
+
+class TestStartPreflightAndExisting(CreateCase):
+    """`cousin-spawn --start` checks what a start needs (tmux, the
+    agent command's executable) BEFORE creating anything, and
+    `cousin-spawn <slug> --start` starts a cousin that already exists:
+    the recovery its own "start failed" message promises."""
+
+    def setUp(self):
+        super().setUp()
+        import os as _os
+        import stat as _stat
+        self.root = self._framework_root()
+        (self.root / "config").mkdir()
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.log = self.root / "tmux.log"
+        self.started = []
+        for name, text in (("tmux", _STUB_TMUX),
+                           ("my-agent", "#!/bin/sh\nexit 0\n")):
+            f = self.bin / name
+            f.write_text(text)
+            f.chmod(f.stat().st_mode | _stat.S_IEXEC)
+        (self.root / "config" / "agent-cmd").write_text("my-agent --x\n")
+        patcher = mock.patch.dict(_os.environ, {
+            "PATH": str(self.bin), "STUB_TMUX_LOG": str(self.log)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        chat = mock.patch("cousin_lib.spawn._default_chat_server",
+                          side_effect=lambda home: self.started.append(home))
+        chat.start()
+        self.addCleanup(chat.stop)
+
+    def _main(self, argv):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = spawn_main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def _create_argv(self):
+        return ["wren", "--root", str(self.root), "--role", "x",
+                "--voice", "v", "--port", "8100", "--start"]
+
+    def test_no_tmux_refuses_before_creating_anything(self):
+        (self.bin / "tmux").unlink()
+        rc, _out, err = self._main(self._create_argv())
+        self.assertEqual(rc, 2)
+        self.assertIn("tmux", err)
+        self.assertNotIn("Traceback", err)
+        self.assertFalse((self.root / "cousins").exists())
+
+    def test_unresolvable_agent_refuses_before_creating_anything(self):
+        (self.bin / "my-agent").unlink()
+        rc, _out, err = self._main(self._create_argv())
+        self.assertEqual(rc, 2)
+        self.assertIn("my-agent", err)
+        self.assertIn("agent-cmd", err)
+        self.assertFalse((self.root / "cousins").exists())
+
+    def test_no_agent_cmd_refuses_before_creating_anything(self):
+        (self.root / "config" / "agent-cmd").unlink()
+        rc, _out, err = self._main(self._create_argv())
+        self.assertEqual(rc, 2)
+        self.assertIn("agent-cmd", err)
+        self.assertFalse((self.root / "cousins").exists())
+
+    def test_create_and_start_passes_preflight(self):
+        rc, out, err = self._main(self._create_argv())
+        self.assertEqual(rc, 0, err)
+        self.assertIn("started wren", out)
+        self.assertIn("new-session", self.log.read_text())
+
+    def test_an_existing_cousin_starts_with_start_alone(self):
+        # A port nothing listens on, so the chat server is started.
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        free = sock.getsockname()[1]
+        sock.close()
+        self._create(self.root, port=free)
+        rc, out, err = self._main(["wren", "--root", str(self.root),
+                                   "--start"])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("started wren", out)
+        self.assertIn("new-session", self.log.read_text())
+        self.assertEqual(self.started, [self.root / "cousins" / "wren"])
+
+    def test_a_chat_server_already_on_the_port_is_not_doubled(self):
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        self.addCleanup(sock.close)
+        self._create(self.root, port=sock.getsockname()[1])
+        rc, _out, err = self._main(["wren", "--root", str(self.root),
+                                    "--start"])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("new-session", self.log.read_text())
+        self.assertEqual(self.started, [])
+
+    def test_an_existing_live_cousin_is_left_alone(self):
+        self._create(self.root)
+        with mock.patch.dict("os.environ", {"STUB_TMUX_ALIVE_RC": "0"}):
+            rc, out, err = self._main(["wren", "--root", str(self.root),
+                                       "--start"])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("already running", out)
+        self.assertNotIn("new-session", self.log.read_text())
+        self.assertEqual(self.started, [])
+
+    def test_an_existing_cousin_start_checks_tmux_too(self):
+        self._create(self.root)
+        (self.bin / "tmux").unlink()
+        rc, _out, err = self._main(["wren", "--root", str(self.root),
+                                    "--start"])
+        self.assertEqual(rc, 2)
+        self.assertIn("tmux", err)
+
+    def test_create_over_an_existing_cousin_names_the_start_path(self):
+        self._create(self.root)
+        rc, _out, err = self._main(self._create_argv())
+        self.assertEqual(rc, 2)
+        self.assertIn("already exists", err)
+        self.assertIn("cousin-spawn wren --start", err)
+
+    def test_start_alone_on_an_unknown_slug_still_needs_role_and_voice(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                spawn_main(["ghost", "--root", str(self.root), "--start"])
+        self.assertFalse((self.root / "cousins").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
 

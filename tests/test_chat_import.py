@@ -68,13 +68,13 @@ class ImportCase(unittest.TestCase):
         old = sqlite3.connect(self.old_home / "data" / "chat.db")
         old.executescript(OLD_SCHEMA)
         rows = [
-            (1, "priya", None, "Priya", "hi", "2026-05-01T10:00:00", "user", 1, None, None, None),
-            (2, "priya", 2, "Juno", "a render", "2026-05-01T10:01:00", "juno", 1, None, "Priya",
+            (1, "operator", None, "Operator", "hi", "2026-05-01T10:00:00", "user", 1, None, None, None),
+            (2, "operator", 2, "Wren", "a render", "2026-05-01T10:01:00", "wren", 1, None, "Operator",
              "/api/chat/image/render.png"),
-            (4, "priya", None, "Priya", "a photo", "2026-05-01T10:02:00", "user", 0,
+            (4, "operator", None, "Operator", "a photo", "2026-05-01T10:02:00", "user", 0,
              json.dumps({"id": 2}), None,
              "data:image/png;base64," + base64.b64encode(PNG).decode()),
-            (5, "juno", None, "Juno", "peer note", "2026-05-01T10:03:00", "user", 0, None, None,
+            (5, "kestrel", None, "Kestrel", "peer note", "2026-05-01T10:03:00", "user", 0, None, None,
              "/api/chat/image/gone.png"),
         ]
         old.executemany(
@@ -82,7 +82,7 @@ class ImportCase(unittest.TestCase):
             " timestamp, type, archived, reply_to, reply_to_user, image)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
         old.execute("INSERT INTO reactions (message_id, user, emoji, created)"
-                    " VALUES (2, 'Priya', 'thumbs', '2026-05-01T10:05:00')")
+                    " VALUES (2, 'Operator', 'thumbs', '2026-05-01T10:05:00')")
         old.commit()
         old.close()
 
@@ -91,11 +91,11 @@ class ImportCase(unittest.TestCase):
         new.executemany(
             "INSERT INTO messages (id, chat_user, user, message, timestamp,"
             " type, reply_to) VALUES (?,?,?,?,?,?,?)",
-            [(1, "priya", "Priya", "first on new", "2026-09-18T10:00:00", "user", None),
-             (2, "priya", "Juno", "reply on new", "2026-09-18T10:00:05", "juno",
+            [(1, "operator", "Operator", "first on new", "2026-09-18T10:00:00", "user", None),
+             (2, "operator", "Wren", "reply on new", "2026-09-18T10:00:05", "wren",
               json.dumps({"id": 1}))])
         new.execute("INSERT INTO reactions (message_id, user, emoji, created)"
-                    " VALUES (1, 'Priya', 'wave', '2026-09-18T10:01:00')")
+                    " VALUES (1, 'Operator', 'wave', '2026-09-18T10:01:00')")
         new.commit()
         new.close()
         (self.new_home / "chat" / "inbound" / "1.jpg").write_bytes(b"newpic")
@@ -153,7 +153,7 @@ class TestImport(ImportCase):
         self._run()
         c = sqlite3.connect(self.new_home / "data" / "chat.db")
         c.execute("INSERT INTO messages (chat_user, user, message, timestamp,"
-                  " type) VALUES ('priya', 'Priya', 'next', 't', 'user')")
+                  " type) VALUES ('operator', 'Operator', 'next', 't', 'user')")
         self.assertEqual(c.execute("SELECT max(id) FROM messages").fetchone()[0], 8)
 
     def test_a_second_import_is_refused(self):

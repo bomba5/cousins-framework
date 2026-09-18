@@ -160,5 +160,44 @@ class TestCli(MediaCase):
         self.assertIn("config/media.toml", err)
 
 
+class TestJobTracking(MediaCase):
+    """Every generation the media CLIs run is a row in the jobs store,
+    so a slow render shows in the Jobs view like any other job."""
+
+    _main = TestCli._main
+
+    def _jobs(self):
+        from cousin_lib.jobs import list_jobs
+        return list_jobs()
+
+    def test_a_generation_creates_and_finishes_a_media_job(self):
+        self._configure(self._serve())
+        rc, out, _ = self._main(["gen", "a cat on a mat"])
+        self.assertEqual(rc, 0)
+        jobs = self._jobs()
+        self.assertEqual(len(jobs), 1)
+        job = jobs[0]
+        self.assertEqual(job["kind"], "media")
+        self.assertEqual(job["status"], "done")
+        self.assertEqual(job["spawned_by"], "wren")
+        self.assertIn("image", job["title"])
+        self.assertIn("a cat on a mat", job["title"])
+        self.assertIn(out.strip(), job["result_summary"])
+
+    def test_a_provider_error_finishes_the_job_failed(self):
+        self._configure("http://127.0.0.1:9/nothing-here")
+        rc, _, _ = self._main(["gen", "a cat"])
+        self.assertEqual(rc, 4)
+        job = self._jobs()[0]
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("MediaError", job["result_summary"])
+
+    def test_an_unconfigured_kind_records_no_job(self):
+        # A refusal before any work is not a job.
+        rc, _, _ = self._main(["gen", "a cat"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(self._jobs(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

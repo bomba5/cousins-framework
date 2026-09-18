@@ -69,6 +69,13 @@ There is no retention policy and no garbage collection - the directory
 is the cousin's to manage, like the inbound-image inbox. Nothing else
 reads it; the file is the handoff.
 
+## Job tracking
+
+Every generation the CLIs run is a `media` row in the jobs store
+(`cousin-job`, the console's Jobs view): running while the provider
+works, then done with the asset path as its summary, or failed with
+the error. An unconfigured kind is refused before a row is made.
+
 ## Posting to chat
 
 Posting is explicit: a `gen` subcommand generates and writes a file; a

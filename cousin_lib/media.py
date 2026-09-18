@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.jobs import track_job
 
 _KIND_EXT = {"image": "png", "voice": "mp3", "video": "mp4"}
 _KIND_SUBDIR = {"image": "images", "voice": "audio", "video": "video"}
@@ -88,6 +89,20 @@ def generate(kind, prompt, *, home=None, **params):
     return _write_asset(kind, asset, home=home)
 
 
+def generate_tracked(kind, prompt, *, home=None, **params):
+    """generate() recorded as a `media` job in the jobs store: running
+    while the provider works, then done with the asset path or failed
+    with the error. An unconfigured kind is refused before a row is
+    made - a refusal before any work is not a job."""
+    if load_provider(kind) is None:
+        return generate(kind, prompt, home=home, **params)
+    title = "%s: %s" % (kind, " ".join(str(prompt).split())[:80])
+    with track_job("media", title, description=str(prompt)[:500]) as job:
+        path = generate(kind, prompt, home=home, **params)
+        job.summary = str(path)
+    return path
+
+
 def _post_reply(*, slug, port, user, message, attachment):
     """Post a generated asset to the cousin's own chat surface via its
     slug-bound reply endpoint - the same path cousin-reply uses. The
@@ -122,7 +137,7 @@ def _run_cli(kind, argv):
     c.add_argument("--caption", default="")
     args = parser.parse_args(argv)
     try:
-        path = generate(kind, args.prompt)
+        path = generate_tracked(kind, args.prompt)
     except NoProviderConfigured as err:
         print("cousin-%s: %s" % (kind, err), file=sys.stderr)
         return 2

@@ -112,7 +112,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   }
 
   return (
-    <div style={{ position: "relative", height: "100%", minHeight: 420 }}>
+    <div style={{ position: "relative", height: "100%", minHeight: 0 }}>
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
         {/* LEFT: chat - fills the window until the pane takes over */}
         <div
@@ -749,6 +749,32 @@ function PaneView({ cousin, onClose }) {
   const lastTextRef = React.useRef("");
   const inputBufRef = React.useRef("");
   const flushTimerRef = React.useRef(null);
+  // Following: the reader is at the bottom, so every `pane` frame is
+  // written as it lands. Scrolled up, the latest frame waits in
+  // pendingRef (a rewrite would yank the viewport back to the bottom) and
+  // is applied the moment the reader returns to the bottom.
+  const followRef = React.useRef(true);
+  const pendingRef = React.useRef(null);
+  const applyingRef = React.useRef(false);
+  const [held, setHeld] = React.useState(false);
+
+  // Rewrite the terminal with one full frame and land on its last line.
+  // Only refs are read, so the closure a stale render captured still
+  // writes to the live terminal.
+  const applyFrame = (text) => {
+    const term = termRef.current;
+    if (!term) return;
+    applyingRef.current = true;
+    term.reset();
+    term.write(text, () => {
+      try { term.scrollToBottom(); } catch (_e) {}
+      applyingRef.current = false;
+    });
+    lastTextRef.current = text;
+    // reset() drops xterm's internal focus state; re-focus so the
+    // onData handler keeps picking up keystrokes.
+    setTimeout(() => { try { term.focus(); } catch (_) {} }, 10);
+  };
 
   // Boot an xterm.Terminal once per slug. `pane` frames reset and rewrite
   // the terminal; `delta` frames append, so the cursor stays at the tail
@@ -878,11 +904,49 @@ function PaneView({ cousin, onClose }) {
     host.addEventListener("touchend", onTouchEnd, { passive: true });
     host.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
+    // Follow or hold, from where the viewport is. xterm moves its own
+    // viewport on wheel, drag and keyboard scroll; both its onScroll and
+    // the viewport element's scroll event report it, and a rewrite in
+    // flight (applyingRef) is not the reader moving.
+    const syncFollow = () => {
+      if (applyingRef.current) return;
+      const b = term.buffer.active;
+      const atBottom = b.viewportY >= b.baseY;
+      if (atBottom && !followRef.current) {
+        followRef.current = true;
+        setHeld(false);
+        const next = pendingRef.current;
+        pendingRef.current = null;
+        if (next !== null && next !== lastTextRef.current) applyFrame(next);
+      } else if (!atBottom && followRef.current) {
+        followRef.current = false;
+        setHeld(true);
+      }
+    };
+    const scrollSub = term.onScroll(syncFollow);
+    const viewportEl = host.querySelector(".xterm-viewport");
+    if (viewportEl) viewportEl.addEventListener("scroll", syncFollow, { passive: true });
+    followRef.current = true;
+    pendingRef.current = null;
+    setHeld(false);
+
+    // Refit whenever the host box changes, not only on a window resize:
+    // the pane column slides open over a transition and the sidebar
+    // collapses without a window event, and a fit taken mid-change
+    // leaves rows hanging below the bottom edge.
     const onResize = () => debouncedResize();
+    let observer = null;
+    if (window.ResizeObserver) {
+      observer = new window.ResizeObserver(onResize);
+      observer.observe(host);
+    }
     window.addEventListener("resize", onResize);
 
     return () => {
       window.removeEventListener("resize", onResize);
+      if (observer) observer.disconnect();
+      try { scrollSub.dispose(); } catch (_e) {}
+      if (viewportEl) viewportEl.removeEventListener("scroll", syncFollow);
       host.removeEventListener("touchstart", onTouchStart);
       host.removeEventListener("touchmove", onTouchMove);
       host.removeEventListener("touchend", onTouchEnd);
@@ -917,14 +981,11 @@ function PaneView({ cousin, onClose }) {
         try {
           const payload = JSON.parse(ev.data);
           const text = payload.text || "";
-          const term = termRef.current;
-          if (term) {
-            term.reset();
-            term.write(text);
-            lastTextRef.current = text;
-            // reset() drops xterm's internal focus state; re-focus so the
-            // onData handler keeps picking up keystrokes.
-            setTimeout(() => { try { term.focus(); } catch (_) {} }, 10);
+          if (followRef.current) {
+            applyFrame(text);
+          } else {
+            // the reader is scrolled up: keep their place, hold the frame
+            pendingRef.current = text;
           }
           setStatus("live");
           const ts = payload.ts ? new Date(payload.ts) : new Date();
@@ -955,15 +1016,15 @@ function PaneView({ cousin, onClose }) {
       });
       es.addEventListener("geom", function (ev) {
         // The tmux pane resized (usually because another client attached
-        // with a different window size). Resize xterm to match so
-        // rendering doesn't wrap at the wrong column.
+        // with a different window size). Match its columns so rendering
+        // doesn't wrap at the wrong place, but keep the rows the host was
+        // fitted to: taller tmux rows would hang below the window's
+        // bottom edge, and the extra lines are in the scrollback anyway.
         try {
           const payload = JSON.parse(ev.data);
           const term = termRef.current;
-          if (term && payload.cols && payload.rows) {
-            if (term.cols !== payload.cols || term.rows !== payload.rows) {
-              term.resize(payload.cols, payload.rows);
-            }
+          if (term && payload.cols && term.cols !== payload.cols) {
+            term.resize(payload.cols, term.rows);
           }
         } catch (_e) { /* ignore */ }
       });
@@ -1012,17 +1073,32 @@ function PaneView({ cousin, onClose }) {
         {lastChange && <span style={{ marginLeft: 10 }}>changed {fmtAgoShort((Date.now() - lastChange.getTime()) / 1000)}</span>}
         {sendError && <span style={{ marginLeft: 10, color: "var(--red)" }}>input err: {sendError}</span>}
         <span style={{ flex: 1 }} />
+        {held && (
+          <button className="btn ghost"
+                  onClick={() => { const t = termRef.current; if (t) t.scrollToBottom(); }}
+                  title="scrolled back: live updates are held until you return to the bottom"
+                  style={{ padding: "0 6px", minHeight: 20, marginRight: 6, color: "var(--amber)" }}
+          >scrolled back &middot; jump to live</button>
+        )}
         {onClose && <button className="btn ghost" onClick={onClose} title="collapse the terminal pane" style={{ padding: "0 6px", minHeight: 20 }}>x</button>}
       </div>
-      <div
-        ref={hostRef}
-        style={{
-          flex: 1, minHeight: 0,
-          padding: "6px 10px",
-          background: "#0a0a0a",
-          overflow: "hidden",
-        }}
-      />
+      {/* The padding lives on this wrapper, not on the xterm host:
+          FitAddon counts rows from the host's computed height, which
+          includes padding under box-sizing: border-box. */}
+      <div style={{
+        flex: 1, minHeight: 0,
+        display: "flex",
+        padding: "6px 10px",
+        background: "#0a0a0a",
+      }}>
+        <div
+          ref={hostRef}
+          style={{
+            flex: 1, minWidth: 0, minHeight: 0,
+            overflow: "hidden",
+          }}
+        />
+      </div>
     </React.Fragment>
   );
 }

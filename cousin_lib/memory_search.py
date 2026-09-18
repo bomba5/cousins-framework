@@ -59,6 +59,7 @@ _RRF_K = 60
 _SNIPPET_CHARS = 160
 _DEFAULTS = {"chunk_chars": 2000, "chunk_overlap": 200}
 _RECALL_DEFAULTS = {"min_chars": 24, "min_score": 0.45, "top": 3}
+_TRASH_DIR = ".trash"
 
 
 def _home():
@@ -125,8 +126,12 @@ def _sources(home, root=None):
     for collection, base in bases:
         if base.is_dir():
             for path in sorted(base.rglob("*.md")):
-                out.append((collection, path,
-                            path.relative_to(base).as_posix()))
+                rel = path.relative_to(base)
+                # The memory trash (cousin_lib.memory_trash) keeps
+                # removed files for restore; removed is not recalled.
+                if _TRASH_DIR in rel.parts:
+                    continue
+                out.append((collection, path, rel.as_posix()))
     return out
 
 

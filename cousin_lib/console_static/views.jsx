@@ -275,7 +275,10 @@ function JobsView() {
 
 // ============ MEMORY ============
 // Unified view: the shared tier (with the review workflow) + each cousin's
-// private memory directory as a file tree with previews.
+// private memory as the layers it is built from (MemoryExplorer, in
+// explorer.jsx): raw entries by truth level, digests and archive,
+// distilled views, decisions, memory and note files, indexes, recall,
+// trash.
 function MemoryView() {
   const showHidden = (window.useSetting && window.useSetting("showHidden")) || false;
   const [scope, setScope] = React.useState("shared"); // "shared" | "<slug>"
@@ -285,7 +288,6 @@ function MemoryView() {
     [allCousins, showHidden]);
   const [shared, setShared] = React.useState({ canonical: [], pending: [] });
   const [audit, setAudit] = React.useState([]);
-  const [privateTree, setPrivateTree] = React.useState({}); // "slug/" -> {filename: {size, updated, preview}}
   const [selected, setSelected] = React.useState(null);
   const [content, setContent] = React.useState("");
   const [diff, setDiff] = React.useState("");
@@ -294,17 +296,15 @@ function MemoryView() {
   const [me, setMe] = React.useState(null);
 
   const refresh = React.useCallback(async () => {
-    const [cs, sl, au, pv, auth] = await Promise.all([
+    const [cs, sl, au, auth] = await Promise.all([
       fetchCousins(),
       apiGet("/api/shared/list"),
       apiGet("/api/shared/audit?n=50"),
-      fetchMemory(),
       fetchAuthMe(),
     ]);
     setAllCousins(cs);
     if (sl) setShared({ canonical: sl.canonical || [], pending: sl.pending || [] });
     if (au) setAudit(au.entries || []);
-    setPrivateTree(pv || {});
     if (auth) setMe(auth);
   }, []);
 
@@ -324,12 +324,6 @@ function MemoryView() {
       const d = await apiGet(`/api/shared/diff?file=${encodeURIComponent(entry.origin)}&slug=${encodeURIComponent(entry.slug)}`);
       setDiff(d?.diff || "");
     }
-  };
-
-  const openPrivate = (slug, name, entry) => {
-    setSelected({ scope: "private", slug, name });
-    setDiff("");
-    setContent(entry.preview || "");
   };
 
   const act = async (kind) => {
@@ -359,34 +353,38 @@ function MemoryView() {
     }
   };
 
-  const treeSlugs = Object.keys(privateTree).filter(k => k !== "shared/").map(k => k.replace(/\/$/, ""));
   const scopes = [
     { id: "shared", label: "shared", count: shared.canonical.length + shared.pending.length },
-    ...cousins.map(c => ({
-      id: c.slug,
-      label: `@${c.slug} private`,
-      count: Object.keys(privateTree[c.slug + "/"] || {}).length,
-    })),
-    ...treeSlugs.filter(s => !cousins.some(c => c.slug === s) && (showHidden || !allCousins.some(c => c.slug === s && c.hidden)))
-      .map(s => ({ id: s, label: `@${s} private`, count: Object.keys(privateTree[s + "/"] || {}).length })),
+    ...cousins.map(c => ({ id: c.slug, label: `@${c.slug}` })),
   ];
+  const scopeBar = (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }} data-memory-scopes>
+      {scopes.map(s => (
+        <button key={s.id}
+          className={scope === s.id ? "btn active" : "btn"}
+          onClick={() => { setScope(s.id); setSelected(null); setContent(""); setDiff(""); }}
+          style={{ fontSize: 11 }}>
+          {s.label} {s.count !== undefined && <span style={{ color: "var(--fg-3)" }}>{s.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (scope !== "shared") {
+    return (
+      <div className="wrap-pad mx-page">
+        {scopeBar}
+        <MemoryExplorer slug={scope} />
+      </div>
+    );
+  }
 
   return (
     <div className="wrap-pad" data-memory-grid style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14, height: "calc(100vh - 50px)" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {scopes.map(s => (
-            <button key={s.id}
-              className={scope === s.id ? "btn active" : "btn"}
-              onClick={() => { setScope(s.id); setSelected(null); setContent(""); setDiff(""); }}
-              style={{ fontSize: 11 }}>
-              {s.label} <span style={{ color: "var(--fg-3)" }}>{s.count}</span>
-            </button>
-          ))}
-        </div>
+        {scopeBar}
 
-        {scope === "shared" ? (
-          <>
+        <>
             <div className="panel" style={{ flex: "0 0 auto" }}>
               <div className="panel-hdr"><span className="title">pending</span>
                 <span style={{ color: "var(--fg-3)" }}>{shared.pending.length}</span></div>
@@ -420,28 +418,6 @@ function MemoryView() {
               </div>
             </div>
           </>
-        ) : (
-          <div className="panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div className="panel-hdr"><span className="title">@{scope} memory/</span></div>
-            <div className="panel-body" style={{ padding: 0, overflowY: "auto", flex: 1 }}>
-              {(() => {
-                const entries = Object.entries(privateTree[scope + "/"] || {});
-                if (entries.length === 0) {
-                  return <div style={{ padding: 14, color: "var(--fg-3)", fontFamily: "var(--mono)", fontSize: 11 }}>no memory files for @{scope}.</div>;
-                }
-                return entries.map(([name, v]) => (
-                  <div key={name} onClick={() => openPrivate(scope, name, v)}
-                    style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)", cursor: "pointer",
-                             fontFamily: "var(--mono)", fontSize: 11,
-                             background: selected?.name === name && selected?.slug === scope ? "var(--bg-2)" : "transparent" }}>
-                    <div style={{ color: "var(--fg-1)" }}>{name}</div>
-                    <div style={{ color: "var(--fg-3)" }}>{v.size} b · {fmtAgo(v.updated)}</div>
-                  </div>
-                ));
-              })()}
-            </div>
-          </div>
-        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
@@ -450,7 +426,7 @@ function MemoryView() {
             <span className="title">{selected
               ? (selected.scope === "shared"
                   ? `${selected.kind === "pending" ? "proposal" : "canonical"}: ${selected.origin || selected.name}`
-                  : `@${selected.slug}/${selected.name} (preview, first 400 chars)`)
+                  : selected.name)
               : "select a file"}</span>
             {selected?.scope === "shared" && selected.kind === "pending" && (
               <>
@@ -471,8 +447,7 @@ function MemoryView() {
                             background: "var(--bg-0)", borderBottom: "1px solid var(--line)",
                             whiteSpace: "pre-wrap" }}>{diff}</pre>
             )}
-            <pre style={{ margin: 0, padding: 12, fontSize: 11, color: "var(--fg-2)",
-                          whiteSpace: "pre-wrap" }}>{content}</pre>
+            {content && <div style={{ padding: 12 }}><MarkdownDoc text={content} /></div>}
           </div>
         </div>
         {scope === "shared" && (

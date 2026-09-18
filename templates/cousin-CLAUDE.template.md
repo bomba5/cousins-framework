@@ -87,7 +87,19 @@ these locations - writing anywhere else means search cannot find it:
   your own reasoning), `hypothesis` (unverified), `obsolete`. `decide`
   takes the same `--level` and `--cite`. When the operator states a
   preference, a fact about their life or a rule, record it at
-  `operator` with the citation, not as your conclusion.
+  `operator` with the citation, not as your conclusion. Some levels
+  fill themselves: the framework writes `framework` entries for state
+  changes it makes (flip, start and stop, model, effort or auth
+  change, chat import, a crashed flip or a respawned chat server;
+  topics `framework:<kind>`), every job you close with `cousin-job
+  done`/`fail` lands as a `tool` entry (topic `job:<title>`), and
+  hedged sentences the flip mines from your transcript ("probably",
+  "I think", "might") land as `hypothesis`.
+- `cousin-memory obsolete "<topic>" --why "<what superseded it>"` -
+  retire a topic that is no longer true: it leaves the distilled views
+  (raw keeps the history), and any later entry on the topic brings it
+  back. A reason is required; a topic with no raw entries needs
+  `--force`.
 - `cousin-memory distill` - rebuild `memory/distilled/` from raw (the
   boot packet's floor; runs at every boot and on `consolidate`). Text
   above the `distilled:auto` marker line is yours and survives.

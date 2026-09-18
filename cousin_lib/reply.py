@@ -8,12 +8,31 @@ quoting.
 """
 import argparse
 import json
+import os
+import pathlib
+import shutil
 import sys
 import urllib.error
 import urllib.request
 
 from cousin_lib.config import CousinConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
+
+
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def attach_image(home, message_id, image):
+    """Copy `image` to <home>/chat/inbound/<message_id>.<ext>: the name
+    the console keys a message's attachment by."""
+    message_id = int(message_id)
+    inbox = pathlib.Path(home) / "chat" / "inbound"
+    inbox.mkdir(parents=True, exist_ok=True)
+    target = inbox / ("%d%s" % (message_id, pathlib.Path(image).suffix.lower()))
+    tmp = target.with_name(target.name + ".tmp")
+    shutil.copyfile(image, tmp)
+    os.replace(tmp, target)
+    return target
 
 
 def send_reply(cfg, body, user=None, reply_to=None):
@@ -49,9 +68,30 @@ def reply_main(argv=None):
     parser.add_argument("--user", help="recipient (default: configured operator)")
     parser.add_argument("--message", "-m", help="body (default: read from stdin)")
     parser.add_argument("--reply-to", type=int, help="message id to quote")
+    parser.add_argument("--image", help="a PNG/JPEG/GIF/WebP file to attach;"
+                        " it lands as <home>/chat/inbound/<reply id>.<ext>,"
+                        " which the console shows on the reply")
     args = parser.parse_args(argv)
 
-    body = args.message if args.message is not None else sys.stdin.read()
+    image = None
+    if args.image:
+        image = pathlib.Path(args.image)
+        if image.suffix.lower() not in IMAGE_EXTS:
+            print("cousin-reply: --image must be one of %s, got %s"
+                  % (", ".join(IMAGE_EXTS), image.name), file=sys.stderr)
+            return 2
+        if not image.is_file():
+            print("cousin-reply: --image %s: no such file" % image,
+                  file=sys.stderr)
+            return 2
+    if args.message is not None:
+        body = args.message
+    elif image is not None and sys.stdin.isatty():
+        body = ""
+    else:
+        body = sys.stdin.read()
+    if image is not None and not body.strip():
+        body = "(image: %s)" % image.name
     try:
         cfg = CousinConfig.from_env()
         result = send_reply(cfg, body, user=args.user, reply_to=args.reply_to)
@@ -64,5 +104,12 @@ def reply_main(argv=None):
     if not result.get("ok"):
         print("cousin-reply: server returned %s" % result, file=sys.stderr)
         return 1
+    if image is not None:
+        try:
+            attach_image(cfg.home, result.get("id"), image)
+        except (OSError, ValueError) as e:
+            print("cousin-reply: reply %s posted but the image did not land: %s"
+                  % (result.get("id"), e), file=sys.stderr)
+            return 1
     print("reply posted (id=%s)" % result.get("id"))
     return 0

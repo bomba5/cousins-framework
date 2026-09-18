@@ -80,3 +80,62 @@ class TestSendReply(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReplyImage(TestSendReply):
+    """cousin-reply --image: the picture rides the reply. The console
+    attaches <home>/chat/inbound/<message id>.<ext> to that message, so
+    the reply is posted first and the file lands under the returned id.
+    Canary: the migrated render-preview workflow (a cousin posting its own
+    PNG) had no path in this framework (operator report 2026-09-18)."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = pathlib.Path(tmp.name)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = %d\n'
+            '[operator]\nname = "Priya"\n' % self.port)
+
+    def _png(self, name="render.png"):
+        p = self.home / name
+        p.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+        return p
+
+    def _main(self, argv):
+        import os
+        from unittest import mock
+        from cousin_lib.reply import reply_main
+        env = {"COUSIN_HOME": str(self.home)}
+        import io, sys
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(sys, "stdin", io.StringIO("")):
+            return reply_main(argv)
+
+    def test_image_lands_under_the_reply_id(self):
+        png = self._png()
+        rc = self._main(["--user", "Priya", "-m", "preview", "--image", str(png)])
+        self.assertEqual(rc, 0)
+        landed = self.home / "chat" / "inbound" / "7.png"
+        self.assertTrue(landed.is_file())
+        self.assertEqual(landed.read_bytes(), png.read_bytes())
+        self.assertEqual(_Capture.received["payload"]["message"], "preview")
+
+    def test_a_missing_image_fails_before_any_request(self):
+        rc = self._main(["-m", "x", "--image", str(self.home / "nope.png")])
+        self.assertNotEqual(rc, 0)
+        self.assertIsNone(_Capture.received)
+
+    def test_a_non_image_extension_is_refused_before_any_request(self):
+        bad = self.home / "model.stl"
+        bad.write_bytes(b"solid x")
+        rc = self._main(["-m", "x", "--image", str(bad)])
+        self.assertNotEqual(rc, 0)
+        self.assertIsNone(_Capture.received)
+
+    def test_image_only_reply_gets_a_default_body(self):
+        rc = self._main(["--image", str(self._png("a.jpg"))])
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.home / "chat" / "inbound" / "7.jpg").is_file())
+        self.assertTrue(_Capture.received["payload"]["message"].strip())

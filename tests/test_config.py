@@ -176,10 +176,34 @@ class TestRuntimeModelAndEffort(unittest.TestCase):
 
     def test_effort_outside_the_levels_is_loud(self):
         from cousin_lib.config import EFFORT_LEVELS
-        self.assertEqual(EFFORT_LEVELS, ("low", "medium", "high", "max"))
+        self.assertEqual(EFFORT_LEVELS,
+                         ("low", "medium", "high", "xhigh", "max"))
         with self.assertRaises(MissingConfigError) as ctx:
             CousinConfig.load(self._home(
                 '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
-                '[runtime]\neffort = "xhigh"\n'))
+                '[runtime]\neffort = "ultra"\n'))
         self.assertIn("effort", str(ctx.exception))
-        self.assertIn("xhigh", str(ctx.exception))
+        self.assertIn("ultra", str(ctx.exception))
+
+    def test_xhigh_is_a_level(self):
+        # Canary: the agent CLI's --effort takes low, medium, high,
+        # xhigh, max. A catalogue without xhigh hides a level the
+        # harness accepts, which the console user found 2026-09-18.
+        cfg = CousinConfig.load(self._home(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[runtime]\neffort = "xhigh"\n'))
+        self.assertEqual(cfg.effort, "xhigh")
+
+    def test_default_model_catalogue_covers_the_current_family(self):
+        # Canary: the spawn dialog offered three models while the
+        # harness accepted six (2026-09-18). Every id here was probed
+        # against the CLI; a fable [1m] id is absent on purpose because
+        # the CLI silently served plain fable for it.
+        from cousin_lib.config import DEFAULT_MODELS
+        for model in ("claude-fable-5-1", "claude-opus-5",
+                      "claude-opus-5[1m]", "claude-sonnet-5",
+                      "claude-sonnet-5[1m]", "claude-haiku-4-5-20251001"):
+            self.assertIn(model, DEFAULT_MODELS)
+        self.assertNotIn("claude-fable-5-1[1m]", DEFAULT_MODELS)
+        self.assertEqual(DEFAULT_MODELS[0], "claude-opus-5")
+        self.assertEqual(len(set(DEFAULT_MODELS)), len(DEFAULT_MODELS))

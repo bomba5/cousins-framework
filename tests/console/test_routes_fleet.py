@@ -460,7 +460,7 @@ class TestModelAndEffort(ConsoleCase):
                                            "effort": "max"})
         self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["effort"],
                          "max")
-        for bad in ({"effort": "xhigh"}, {"effort": 3}, {}):
+        for bad in ({"effort": "ultra"}, {"effort": 3}, {}):
             status, body = self.post("/api/cousins/wren/effort", bad)
             self.assertEqual(status, 400, bad)
             self.assertIn("effort", body["error"])
@@ -528,7 +528,7 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual((row["model"], row["effort"], row["heartbeat"],
                           row["memoryScope"]),
                          ("m-one", "medium", 600, "both"))
-        for bad in ({"effort": "xhigh"}, {"memory_scope": "all"},
+        for bad in ({"effort": "ultra"}, {"memory_scope": "all"},
                     {"heartbeat": 0}, {"heartbeat": "x"},
                     {"model": "two words"}):
             status, body = self.post("/api/cousins", {

@@ -416,7 +416,7 @@ class TestPersistRuntimeValues(CreateCase):
             with self.assertRaises(SpawnError, msg=bad):
                 persist_runtime(out["home"], "model", bad)
         with self.assertRaises(SpawnError):
-            persist_runtime(out["home"], "effort", "xhigh")
+            persist_runtime(out["home"], "effort", "ultra")
         with self.assertRaises(SpawnError):
             persist_runtime(out["home"], "session_id", "not-through-here")
         self.assertNotIn("runtime", tomllib.loads(
@@ -447,7 +447,7 @@ class TestCreateWithRuntimeOptions(CreateCase):
 
     def test_bad_options_fail_before_anything_is_written(self):
         root = self._framework_root()
-        for kw in (dict(effort="xhigh"), dict(memory_scope="everyone"),
+        for kw in (dict(effort="ultra"), dict(memory_scope="everyone"),
                    dict(heartbeat=0), dict(heartbeat="soon"),
                    dict(model="two words")):
             with self.assertRaises(SpawnError, msg=kw):
@@ -482,5 +482,5 @@ class TestSpawnMainRuntimeFlags(CreateCase):
         root = self._framework_root()
         with self.assertRaises(SystemExit):
             self._main(["wren", "--root", str(root), "--role", "x",
-                        "--voice", "v", "--effort", "xhigh"])
+                        "--voice", "v", "--effort", "ultra"])
         self.assertFalse((root / "cousins").exists())

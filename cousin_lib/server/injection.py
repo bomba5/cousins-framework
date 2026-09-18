@@ -58,15 +58,17 @@ def compose_delivery(name, message, *, marker_path, attachments=(),
     return "%s (Chat %s): %s" % (prefix, name, text)
 
 
-def install_attention_patterns():
-    """config/harness.toml attention_patterns for the install this
-    process serves, or [] when there is no root, no file, or the file
-    is unusable: the guard is a safety net and never costs a delivery
-    on its own configuration."""
+def install_attention_patterns(root=None):
+    """config/harness.toml attention_patterns for `root`, or for the
+    install this process serves (FrameworkConfig.resolve()) when none
+    is given; [] when there is no root, no file, or the file is
+    unusable: the guard is a safety net and never costs a delivery on
+    its own configuration."""
     from cousin_lib.config import (FrameworkConfig, MissingConfigError,
                                    harness_config)
     try:
-        cfg = harness_config(FrameworkConfig.resolve().root)
+        cfg = harness_config(root if root is not None
+                             else FrameworkConfig.resolve().root)
     except MissingConfigError:
         return []
     return (cfg or {}).get("attention_patterns") or []
@@ -101,15 +103,17 @@ class TmuxInjector:
     pane is read once: a pane showing one (the agent's login or trust
     menu) is waiting on a person, and typed text there selects menu
     options. The line is then logged and skipped, never typed.
-    attention_patterns=None reads them from the install's
-    config/harness.toml at each inject; a list pins them.
+    attention_patterns=None reads them from config/harness.toml at
+    each inject, under `root` when given, else under the install the
+    environment names; a list pins them.
     """
 
     def __init__(self, session, *, tmux_bin="tmux", socket=None,
                  settle=default_settle, verify_delay=0.2, log=None,
-                 attention_patterns=None):
+                 attention_patterns=None, root=None):
         self.session = session
         self.attention_patterns = attention_patterns
+        self.root = root
         self.tmux_bin = tmux_bin
         self.socket = socket
         self.settle = settle
@@ -148,7 +152,7 @@ class TmuxInjector:
     def _patterns(self):
         if self.attention_patterns is not None:
             return list(self.attention_patterns)
-        return install_attention_patterns()
+        return install_attention_patterns(self.root)
 
     def _blocked_by(self):
         """The attention pattern the pane shows now, else None. An

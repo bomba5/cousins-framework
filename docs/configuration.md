@@ -14,10 +14,12 @@ real names and add the rest by hand.
 **The framework root** (which contains `cousins/`, `config/`, and
 `templates/`) is named the same way by every entry point that needs
 it: an explicit `--root` flag wins, else the `FRAMEWORK_ROOT`
-environment variable, else - for a command you type - the working
-directory when it is a checkout (it holds
-`templates/cousin-CLAUDE.template.md` and `config/`), else a loud
-error naming all three. `cousin-spawn`, `cousin-flip`,
+environment variable, else the root `COUSIN_HOME` names (a home lives
+at `<root>/cousins/<slug>`, so its grandparent counts when it holds a
+`config/` directory; a cousin's own shell often carries only its
+home), else - for a command you type - the working directory when it
+is a checkout (it holds `templates/cousin-CLAUDE.template.md` and
+`config/`), else a loud error naming the channels. `cousin-spawn`, `cousin-flip`,
 `cousin-console`, `cousin-mcp`, `cousin-sweep`, `cousin-tool-surface`
 and `cousin-chat-watchdog` take `--root` identically; a flag is
 discoverable from `--help`, the env var suits a service unit. Library

@@ -139,6 +139,16 @@ a `cousin.toml [runtime]` fact and the install-wide fallback is a
 `config/harness.toml [agent]` fact - the command line itself stays one
 line for the whole install.
 
+The session's command is the agent command behind a small launcher
+(`cousin_lib/agent_launch.py`, run by path on the spawning
+interpreter). The launcher reads the cousin's auth mode
+(`cousin.toml [runtime] auth`, `cousin_lib/agent_auth.py`) at exec
+time and execs the agent with the environment that mode needs: in the
+key mode the key is read from the cousin's `.secrets/api-key.env`
+there, so it is in no argv, tmux's included. The same checks run at
+the spawn site first, so a refused mode is a start error, not a pane
+that closes.
+
 There is exactly ONE tmux-session-creation site in the codebase, and
 `cousin-spawn --start` calls it. The source framework had two (spawn
 and respawn), with duplicated environment dicts and constants that

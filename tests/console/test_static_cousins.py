@@ -57,6 +57,39 @@ class SpawnDialog(unittest.TestCase):
         self.assertNotRegex(self.src, r'\[\s*"low"\s*,')
 
 
+class InspectorAuthField(unittest.TestCase):
+    """The inspector's auth control reads the mode names from GET
+    /api/cousins/<slug>/auth (no catalogue of its own), takes the key
+    in a password field that is cleared as it is sent, and shows only
+    whether a key is set and its last four characters."""
+
+    def setUp(self):
+        text = _read("cousins.jsx")
+        self.src = _component(text, "AuthField")
+        self.inspector = _component(text, "Inspector")
+
+    def test_the_inspector_carries_it(self):
+        self.assertIn("<AuthField cousin={c} />", self.inspector)
+
+    def test_modes_come_from_the_server(self):
+        self.assertIn("/auth`", self.src)
+        self.assertRegex(self.src, r"st\.modes\s*\|\|")
+        self.assertNotIn('"api_key"', self.src)
+
+    def test_the_key_is_a_password_field_sent_once(self):
+        self.assertIn('type="password"', self.src)
+        self.assertIn("/auth/key`", self.src)
+        # the draft is emptied before the request goes out
+        send = self.src[self.src.index("const sendKey"):]
+        self.assertLess(send.index('setKeyDraft("")'),
+                        send.index("apiSend("))
+        self.assertIn("last4", self.src)
+
+    def test_a_busy_refusal_offers_a_forced_restart(self):
+        self.assertIn("409", self.src)
+        self.assertIn("force", self.src)
+
+
 if __name__ == "__main__":
     unittest.main()
 

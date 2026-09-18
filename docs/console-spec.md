@@ -200,6 +200,7 @@ from the tokens seam below.
 | `model` | str or null | what the next start renders into the agent command's `{model}`: `[runtime] model`, else `config/harness.toml [agent] default_model`, else null (a start with the placeholder would then fail naming both files; the row shows nothing rather than a guess) |
 | `effort` | str or null | likewise for `{effort}`: `[runtime] effort`, else `[agent] default_effort`, else null; one of `low`, `medium`, `high`, `xhigh`, `max` |
 | `hidden` | bool | `[cousin] hidden` (default false; the console is this key's consumer) |
+| `auth` | str or null | `[runtime] auth`, the agent's auth mode (see `GET /api/cousins/<slug>/auth`); the default mode when unset, null when the file holds a value the framework does not know |
 | `status` | `"running"` or `"stopped"` | tmux session exists (workers: always `"running"`, meaning enrolled) |
 | `attention` | str or null | for a local running cousin, the first of `config/harness.toml attention_patterns` found in the pane's last 20 lines (the same capture `active` hashes), else null. "running" says a session exists, not that the agent works: a pane parked on the harness's login menu is flagged, and the card shows "needs attention" |
 | `chat` | `"ok"`, `"down"` or `"none"` | `/health` reachable, not reachable, no port |
@@ -354,6 +355,34 @@ Body `{"hidden": bool}`. Sets or removes `[cousin] hidden` in
 {"ok": true, "slug": str, "hidden": bool}`. Hidden cousins are
 filtered out of the sidebar and views unless the "show hidden"
 setting is on; the flag has no other consumer.
+
+### `GET /api/cousins/<slug>/auth`
+`200 {"ok": true, "slug": str, "mode": str, "modes": [str], "default":
+str, "configured": bool, "key": {"set": bool, "last4": str|null,
+"error": str|null}, "key_env": str}` (`key_env` only when configured).
+`modes` is the catalogue the inspector offers; the names live in
+`cousin_lib/agent_auth.py` and nowhere else. `configured` is whether
+`config/harness.toml [auth.api_key]` exists. `key` says whether the
+cousin's `.secrets/api-key.env` is usable, its last four characters
+when the key is at least 16 long, and why it is not usable; the key
+itself is never in any response.
+
+### `POST /api/cousins/<slug>/auth/key`
+Body `{"key": str}`: a bare key or a `<key_env>=<key>` line. Writes the
+key file (directory 0700, file 0600, renamed into place). `200` with
+the `GET` body above, `400` for an unusable key or no `[auth.api_key]`;
+the body never repeats the key.
+
+### `POST /api/cousins/<slug>/auth`
+Body `{"mode": str, "force": bool = false, "restart": bool = true}`.
+`agent_auth.switch`: for the key mode, the key file is checked and the
+isolated harness config dir rebuilt; a running agent restarts on the
+same session (`[agent.resume]`). `200 {"ok": true, "mode", "previous",
+"running", "restarted", "session_id"?, "auth": <the GET body>}`; `409
+{"busy": true}` when the pane matches `busy_patterns` and `force` is
+false; `400` for an unknown mode, an unusable key file, an isolated
+dir holding a login, or a restart that cannot resume. A refusal
+changes nothing.
 
 ### `POST /api/cousins/<slug>/peer`
 Body `{"to": str, "text": str}`. Delivers the text to the destination

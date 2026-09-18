@@ -21,12 +21,14 @@ import tomllib
 import uuid
 from pathlib import Path
 
+from cousin_lib import agent_auth
 from cousin_lib.config import (
     EFFORT_LEVELS,
     MEMORY_SCOPES,
     CousinConfig,
     FrameworkConfig,
     MissingConfigError,
+    _read_harness_toml,
     agent_config,
     expand_harness_path,
     harness_config,
@@ -402,6 +404,16 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
     return {"tmux": tmux_state, "chat_server": chat_state}
 
 
+def _skip_secrets(info):
+    """tarfile filter: the home's .secrets/ (the api_key mode's key
+    file) never enters an archive; the key is revoked or reissued, not
+    kept beside a dismissed cousin."""
+    parts = Path(info.name).parts
+    if agent_auth.SECRETS_DIR in parts[1:]:
+        return None
+    return info
+
+
 def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
                    stop=None):
     """Stop, archive the whole home to <root>/data/dismissed/
@@ -425,7 +437,7 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
     try:
         archive_dir.mkdir(parents=True, exist_ok=True)
         with tarfile.open(archive, "w:gz") as tf:
-            tf.add(home, arcname=slug)
+            tf.add(home, arcname=slug, filter=_skip_secrets)
     except (OSError, tarfile.TarError) as err:
         try:
             archive.unlink(missing_ok=True)
@@ -617,6 +629,46 @@ def render_agent_cmd(agent_cmd, home, *, root=None):
     return agent_cmd
 
 
+def resume_rule(root):
+    """config/harness.toml [agent.resume]: how the agent command resumes
+    an existing session instead of starting a new one. session_arg is
+    the words of config/agent-cmd that start a session under a given
+    id (e.g. "--session-id {session_id}"), resume_arg the words that
+    resume one (e.g. "--resume {session_id}"). None when absent."""
+    try:
+        data = _read_harness_toml(root) or {}
+    except MissingConfigError as err:
+        raise SpawnError(str(err))
+    table = (data.get("agent") or {}).get("resume")
+    if table is None:
+        return None
+    if not isinstance(table, dict) or not all(
+            isinstance(table.get(k), str) and "{session_id}" in table[k]
+            for k in ("session_arg", "resume_arg")):
+        raise SpawnError(
+            "config/harness.toml [agent.resume] needs session_arg and"
+            " resume_arg, each carrying {session_id}")
+    return {"session_arg": table["session_arg"],
+            "resume_arg": table["resume_arg"]}
+
+
+def resume_agent_cmd(agent_cmd, root, session_id):
+    """The agent command that resumes session_id: the [agent.resume]
+    session_arg in agent_cmd swapped for resume_arg, the id rendered.
+    A SpawnError says why a resume is not possible."""
+    if not re.fullmatch(r"[a-z0-9-]+", session_id or ""):
+        raise SpawnError("session id %r is not resumable" % (session_id,))
+    rule = resume_rule(root)
+    if rule is None:
+        raise SpawnError("config/harness.toml has no [agent.resume]")
+    if rule["session_arg"] not in agent_cmd:
+        raise SpawnError("config/agent-cmd does not carry %r, the"
+                         " [agent.resume] session_arg"
+                         % rule["session_arg"])
+    return agent_cmd.replace(rule["session_arg"], rule["resume_arg"]) \
+        .replace("{session_id}", session_id)
+
+
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
                  start_chat_server=_default_chat_server, root=None):
     """THE tmux-session-creation site - the only one in this codebase,
@@ -631,6 +683,14 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
     grandparent."""
     config = CousinConfig.load(home)
     agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
+    # The auth mode's checks (key file, isolated harness config) run
+    # here so a refusal is this call's error, not a pane that closes;
+    # the launcher repeats them at exec time, where they bind.
+    launch_root = _resolve_root(home, root)
+    try:
+        agent_auth.preflight(home, launch_root)
+    except agent_auth.AuthError as err:
+        raise SpawnError("auth: %s" % err)
     # A {session_id} placeholder is rendered HERE, at the single
     # spawn site, so a plain start (console, cousin-spawn --start) and
     # a flip mint identity the same way. flip.py renders its own copy
@@ -648,7 +708,7 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
         "-c", str(home),
         "-e", "COUSIN_HOME=%s" % home,
         "/usr/bin/env", "COUSIN_HOME=%s" % home,
-    ] + shlex.split(agent_cmd)
+    ] + agent_auth.launcher_argv(home, launch_root) + shlex.split(agent_cmd)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
                        check=False)
     if r.returncode != 0:

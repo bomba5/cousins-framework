@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import loops, spawn
+from cousin_lib import agent_auth, loops, spawn
 from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
                                CousinConfig, FrameworkConfig,
                                MissingConfigError, agent_config,
@@ -239,6 +239,7 @@ def fleet_row(server, config, defaults=None, patterns=None):
         "flipAt": config.flip_at,
         **effective_runtime(config, defaults),
         "hidden": bool(cousin.get("hidden", False)),
+        "auth": _auth_mode(config.home),
         "status": status,
         "attention": attention,
         "chat": chat,
@@ -249,6 +250,29 @@ def fleet_row(server, config, defaults=None, patterns=None):
         "lastMsgTs": _last_msg_ts(config, chat),
         "tokensSpent": tokens.today_total(server, config.home),
     }
+
+
+def _auth_mode(home):
+    """The cousin's auth mode for its row; null when cousin.toml holds
+    a value the framework does not know (the start would refuse it)."""
+    try:
+        return agent_auth.read_mode(home)
+    except agent_auth.AuthError:
+        return None
+
+
+def auth_status(server, slug):
+    """GET /api/cousins/<slug>/auth: the mode, the modes, and what may
+    be shown about the key file (set or not, its last four characters
+    at most). The key itself never leaves the host through here."""
+    cousin_home(server, slug)
+    try:
+        out = agent_auth.status(server.root, slug)
+    except agent_auth.AuthError as err:
+        raise HttpError(500, str(err))
+    out.pop("key_file", None)
+    out.pop("isolated_dir", None)
+    return {"ok": True, **out}
 
 
 def fleet_rows(server):
@@ -390,6 +414,58 @@ def register():
                                 "stop": stopped, "start": err.body}
         return 200, {"ok": True, "target": "cousin/%s" % slug,
                      "stop": stopped, "start": started}
+
+    @router.route("GET", "/api/cousins/{slug}/auth")
+    def get_auth(req, slug):
+        return 200, auth_status(req.server, slug)
+
+    @router.route("POST", "/api/cousins/{slug}/auth")
+    def set_auth(req, slug):
+        """Switch the auth mode; a running agent restarts on the same
+        session unless restart is false. 409 when it is mid-turn (force
+        overrides), 400 when the mode cannot be used."""
+        cousin_home(req.server, slug)
+        mode = req.body.get("mode")
+        if mode not in agent_auth.AUTH_MODES:
+            raise HttpError(400, "mode must be one of %s"
+                                 % ", ".join(agent_auth.AUTH_MODES))
+        force = req.body.get("force", False)
+        restart = req.body.get("restart", True)
+        if not isinstance(force, bool) or not isinstance(restart, bool):
+            raise HttpError(400, "force and restart must be booleans")
+        req.server.emit("cousin-status", {"slug": slug,
+                                          "status": "switching auth"})
+        try:
+            out = agent_auth.switch(
+                req.server.root, slug, mode, restart=restart, force=force,
+                tmux_bin=req.server.tmux_bin,
+                tmux_socket=req.server.tmux_socket)
+        except agent_auth.AgentBusy as err:
+            raise HttpError(409, str(err), busy=True)
+        except agent_auth.AuthError as err:
+            raise HttpError(400, str(err))
+        req.server.emit("cousins-refresh", fleet_rows(req.server))
+        return 200, {"ok": True, **out,
+                     "auth": auth_status(req.server, slug)}
+
+    @router.route("POST", "/api/cousins/{slug}/auth/key")
+    def set_auth_key(req, slug):
+        """Write the cousin's key file from the pasted key. The answer
+        says only whether a key is set and its last four characters;
+        the key is never echoed, logged or read back."""
+        home = cousin_home(req.server, slug)
+        key = req.body.get("key")
+        if not isinstance(key, str):
+            raise HttpError(400, "key must be a string")
+        try:
+            cfg = agent_auth.api_key_config(req.server.root)
+            if cfg is None:
+                raise agent_auth.AuthError(
+                    "config/harness.toml has no [auth.api_key]")
+            agent_auth.write_key(home, key, cfg["key_env"])
+        except agent_auth.AuthError as err:
+            raise HttpError(400, str(err))
+        return 200, auth_status(req.server, slug)
 
     @router.route("POST", "/api/cousins/{slug}/role")
     def set_role(req, slug):

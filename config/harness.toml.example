@@ -48,3 +48,42 @@
 #default_model = "some-model"
 #default_effort = "high"
 #models = ["some-model", "another-model"]
+#
+# Pane text (regular expressions, searched in the agent's visible
+# pane) that means the agent is mid-turn. `cousin-auth` and the
+# console refuse to restart a busy cousin unless forced. Absent: no
+# busy detection. A top-level key: it goes above the first [table].
+#busy_patterns = ["press esc to stop"]
+#
+# How config/agent-cmd resumes an existing session: session_arg is
+# the words of agent-cmd that start a session under a given id,
+# resume_arg the words that resume one. An auth-mode switch restarts
+# a running agent on the SAME session through this; absent, the
+# switch refuses to restart and says so.
+#[agent.resume]
+#session_arg = "--session {session_id}"
+#resume_arg = "--resume {session_id}"
+#
+# The api_key auth mode (`cousin-auth <slug> api_key`): the agent runs
+# on a key from <home>/.secrets/api-key.env instead of the harness's
+# own login. key_env is the variable the key is handed over in;
+# config_dir_env the variable that points the harness at another
+# config directory. The isolated directory (relative: under the root)
+# symlinks every entry of source_dir except `exclude`, plus a copy of
+# settings_file (as settings_name) without strip_settings_keys, keeping
+# preserve_settings_keys from the previous copy. A launch refuses when
+# the isolated directory holds one of login_files, or its settings copy
+# one of login_settings_keys. In the default mode both variables are
+# removed from the agent's environment. Absent: api_key mode refused.
+#[auth.api_key]
+#key_env = "HARNESS_API_KEY"
+#config_dir_env = "HARNESS_CONFIG_DIR"
+#source_dir = "~/.harness"
+#settings_file = "~/.harness.json"
+#settings_name = ".harness.json"
+#isolated_dir = "data/harness-api-key-config"
+#exclude = ["credentials.json"]
+#strip_settings_keys = ["account"]
+#preserve_settings_keys = []
+#login_files = ["credentials.json"]
+#login_settings_keys = ["account"]

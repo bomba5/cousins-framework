@@ -453,6 +453,62 @@ out. Beside these, `hooks/` ships three scripts for the agent harness
 itself - a pre-compaction checkpoint, a stop checkpoint and a start
 banner - that read only `COUSIN_HOME` and write only under `data/`;
 `docs/session-hooks.md` has the wiring and what each one writes.
+### Login or API key: cousin-auth
+
+A cousin's agent authenticates in one of two modes, set per cousin in
+`cousin.toml [runtime] auth` and read at every start (so a flip or a
+restart keeps it):
+
+- `claude` (the default): the harness's own login. The key variable
+  and the config-dir variable are removed from the agent's
+  environment, so a key exported somewhere upstream cannot quietly
+  switch the cousin to metered billing.
+- `api_key`: a key from the cousin's own
+  `<home>/.secrets/api-key.env` (one line `ANTHROPIC_API_KEY=<key>`
+  for Claude Code; file 600, directory 700, refused otherwise). The
+  key reaches the agent only through its environment: a small
+  launcher in front of the agent command reads the file at exec time,
+  so no argv (tmux's included) and no log line ever holds it.
+
+The billing lesson that shapes the second mode: with its own login
+present AND `ANTHROPIC_API_KEY` set, Claude Code bills the LOGIN (it
+warns "Both claude.ai and ANTHROPIC_API_KEY set"). A key in the
+environment is not enough. So `api_key` mode also points the agent at
+an isolated config directory (`<root>/data/harness-api-key-config/`)
+that symlinks everything in `~/.claude` except the login and
+account-bound files, plus a copy of `~/.claude.json` without the
+account block; a launch refuses if that directory holds a login.
+Transcripts are symlinked through, so both modes share the same
+sessions. The names involved (the variables, the files, the account
+keys) are in `config/harness.toml [auth.api_key]`; the Claude Code
+preset has them.
+
+```
+cousin-auth testa                        # the mode and the key file's state
+#   -> testa: auth claude (modes: claude, api_key)
+#      key: not set (<checkout>/cousins/testa/.secrets/api-key.env)
+cousin-auth testa --key-stdin < key.txt  # writes the key file, 600 (a tty prompts, no echo)
+#   -> key written to .../testa/.secrets/api-key.env (ends WXYZ)
+cousin-auth testa api_key                # switch; a running agent restarts on the SAME session
+#   -> testa: auth claude -> api_key; restarted on session 1b4e...
+cousin-auth testa claude --no-restart    # set it, apply at the next start
+```
+
+A switch restarts a running agent with the harness's resume
+(`config/harness.toml [agent.resume]`: the preset swaps
+`--session-id {session_id}` in `config/agent-cmd` for
+`--resume {session_id}`), so the conversation carries over. It refuses
+a cousin that is mid-turn (its pane matches `busy_patterns`, Claude
+Code's spinner line) unless `--force`, and it checks everything (key
+file, isolated directory, resume possible) before it changes
+`cousin.toml` or kills anything. The console's cousin inspector has
+the same control: a mode select, and a key field that sends the key
+once and afterwards shows only "key set" and its last four characters.
+The first `api_key` start of Claude Code may ask "Do you want to use
+this API key?" once; answer it in the pane (the console flags it as
+needing attention). The answer is kept across rebuilds of the isolated
+directory.
+
 ### Changing who a cousin is: reincarnate and transplant
 
 Editing CLAUDE.md does nothing to a running session, and killing the

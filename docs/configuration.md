@@ -34,7 +34,7 @@ directory. The root is made absolute before it is written anywhere, so
 | `config/console-users.json` | `cousin-console` (the web console's login) | auth is not configured: the console is open to every address the guard admits, and `GET /api/auth/me` says so |
 | `config/outbound-filter.json` | the outbound content filter | no extra protected terms; the framework ships no vocabulary of its own |
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
-| `config/harness.toml` (for Claude Code: copy the shipped `config/harness.toml.claude-code.example`) | transcript mining at flip, the harness auto-memory search collection, the console's token counts, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`), the console's "needs attention" flag (`attention_patterns`), the `agent-cmd` `{model}`/`{effort}` defaults and the console's spawn catalogue (`[agent]`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out, a `{model}`/`{effort}` placeholder needs the cousin's own `[runtime]` value or the start fails naming this file |
+| `config/harness.toml` (for Claude Code: copy the shipped `config/harness.toml.claude-code.example`) | transcript mining at flip, the harness auto-memory search collection, the console's token counts, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`), the console's "needs attention" flag (`attention_patterns`), the `agent-cmd` `{model}`/`{effort}` defaults and the console's spawn catalogue (`[agent]`), `cousin-auth` (`busy_patterns`, `[agent.resume]`, `[auth.api_key]`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out, a `{model}`/`{effort}` placeholder needs the cousin's own `[runtime]` value or the start fails naming this file |
 | `config/mcp-registry.toml` (edited copy of the shipped `config/mcp-registry.toml.example`) | `cousin-spawn` (copied into every new home as `mcp-registry.toml`), `cousin-mcp` when no `--registry` is given and the cousin home carries none | the shipped example is the default; the adapter itself is off until a home carries a `.mcp.json` the harness has approved |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
@@ -140,6 +140,26 @@ directory. The root is made absolute before it is written anywhere, so
   cousin's own value or the spawn fails naming this file), and a
   built-in catalogue of three names that never reaches an agent on
   its own.
+  `busy_patterns` (optional, a list of regular expressions): searched
+  in a running agent's visible pane; a match means it is mid-turn,
+  and `cousin-auth` and the console refuse to restart it unless
+  forced. `[agent.resume]` (optional): `session_arg` and `resume_arg`,
+  each carrying `{session_id}`; an auth-mode switch restarts a running
+  agent on the same session by swapping the first, found verbatim in
+  `agent-cmd`, for the second. Absent: the switch refuses to restart
+  and says so. `[auth.api_key]` (optional): the `api_key` auth mode
+  (`cousin.toml [runtime] auth`, see `cousin-auth` in
+  `docs/guide.md`): `key_env` (the variable the key is handed over
+  in), `config_dir_env` (the variable that points the harness at
+  another config dir), `source_dir` (the harness's normal config
+  dir), `settings_file` / `settings_name` (its settings JSON and the
+  name of the copy), `isolated_dir` (default
+  `data/harness-api-key-config`, relative to the root), `exclude`
+  (entries of `source_dir` not linked), `strip_settings_keys`,
+  `preserve_settings_keys`, `login_files` and `login_settings_keys`
+  (present in the isolated dir = a login: the launch refuses).
+  Absent: `api_key` mode is refused, and the default mode strips
+  nothing.
 - `shared-reviewers.json`: `{"reviewers": ["name-or-slug", ...]}`. A
   reviewer may never be the proposer; that boundary is enforced at the
   promote site regardless of what this file says.

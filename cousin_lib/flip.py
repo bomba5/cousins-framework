@@ -21,7 +21,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import audits, boot, transcript_mine
+from cousin_lib import agent_auth, audits, boot, transcript_mine
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, harness_config)
 from cousin_lib.server.injection import TmuxInjector
@@ -205,6 +205,13 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
             failures.extend(start_preflight(
                 rendered.replace("{session_id}", "x"), tmux_bin=tmux_bin,
                 which=which))
+        # The auth mode (cousin.toml [runtime] auth) is checked before
+        # the kill too: a missing key file would otherwise leave the
+        # cousin with no session at all.
+        try:
+            agent_auth.preflight(home, root)
+        except agent_auth.AuthError as err:
+            failures.append("auth: %s" % err)
     if failures:
         result["stages"].append({"stage": "preflight", "ok": False,
                                  "failures": failures})

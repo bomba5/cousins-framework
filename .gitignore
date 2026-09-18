@@ -15,6 +15,9 @@ build/
 config/*
 !config/*.example
 cousins/
+# A cousin home's secrets (the api_key auth mode's key file), wherever
+# the home lives; the directory also carries its own "*" .gitignore.
+.secrets/
 
 # Runtime state the framework writes under the root: the loops daemon's
 # request store and state, job logs, the tool-surface manifest. All of

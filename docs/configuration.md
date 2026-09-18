@@ -40,6 +40,7 @@ directory. The root is made absolute before it is written anywhere, so
 | `config/mcp-registry.toml` (edited copy of the shipped `config/mcp-registry.toml.example`) | `cousin-spawn` (copied into every new home as `mcp-registry.toml`), `cousin-mcp` when no `--registry` is given and the cousin home carries none | the shipped example is the default; the adapter itself is off until a home carries a `.mcp.json` the harness has approved |
 | `config/external-peers.toml` (copy of `config/external-peers.toml.example`) | `cousin-chat send`/`list`, and so the MCP `send` tool's peer path | only the cousins under `cousins/` are reachable; a malformed file is an error for every `cousin-chat` call |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
+| `config/hive.toml` (copy of `config/hive.toml.example`) | `cousin-console` (the console as the hive's queen), `cousin-hive serve` and `cousin-hive nodes` (checkin period) | no hive: no `/hive/` route (404), no remote cousin cards, no build dialog, no socket, no token; a present-but-unusable file is the same off state plus a stderr line naming the problem |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
 ## Formats
@@ -176,6 +177,15 @@ directory. The root is made absolute before it is written anywhere, so
   console-script names resolved beside the interpreter first, then
   on PATH. The example ships with `operators = []`; spawn fills that
   one line per cousin.
+- `hive.toml`: `enabled` (bool; anything but `true` is off),
+  `public_url` (required when enabled: the queen as NODES reach it,
+  `http://<lan-ip>:<console-port>`; it is baked into every archive
+  the console builds and prefixes the one-time download link),
+  `checkin_seconds` (default 60, at least 5: how often a node checks
+  in; a node is online within 2.5 periods of its last checkin),
+  `home_chat_url` (optional: the chat server a console-built node's
+  `[tell-home: ...]` marker posts to; the build dialog's "home chat"
+  switch needs it). See `docs/hive-spec.md`.
 - `media.toml`: per-kind sections `[image]` / `[voice]` / `[video]`,
   each `url`, `model`, optional `key_file`, `timeout_s`. See
   `docs/media-spec.md`. A configured provider or an inert refusal -

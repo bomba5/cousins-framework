@@ -181,7 +181,9 @@ Work from the outside in; stop at the first thing that is wrong.
    does not resolve. A session that is alive but parked on the agent's
    login menu shows "needs attention" on its console card when
    `config/harness.toml` lists `attention_patterns` (the Claude Code
-   preset does); log the agent in once (`docs/install.md` step 4).
+   preset does), and every delivery to it is skipped with a "tmux
+   delivery SKIPPED" line in the sender's log (chat server, loops
+   daemon); log the agent in once (`docs/install.md` step 4).
 4. **Did delivery fail rather than the loop?** Firing state commits
    only after delivery, so a loop that "never fired" is usually a
    delivery that keeps failing; the daemon prints each error to its

@@ -14,10 +14,12 @@ real names and add the rest by hand.
 **The framework root** (which contains `cousins/`, `config/`, and
 `templates/`) is named the same way by every entry point that needs
 it: an explicit `--root` flag wins, else the `FRAMEWORK_ROOT`
-environment variable, else - for a command you type - the working
-directory when it is a checkout (it holds
-`templates/cousin-CLAUDE.template.md` and `config/`), else a loud
-error naming all three. `cousin-spawn`, `cousin-flip`,
+environment variable, else the root `COUSIN_HOME` names (a home lives
+at `<root>/cousins/<slug>`, so its grandparent counts when it holds a
+`config/` directory; a cousin's own shell often carries only its
+home), else - for a command you type - the working directory when it
+is a checkout (it holds `templates/cousin-CLAUDE.template.md` and
+`config/`), else a loud error naming the channels. `cousin-spawn`, `cousin-flip`,
 `cousin-console`, `cousin-mcp`, `cousin-sweep`, `cousin-tool-surface`
 and `cousin-chat-watchdog` take `--root` identically; a flag is
 discoverable from `--help`, the env var suits a service unit. Library
@@ -36,6 +38,7 @@ directory. The root is made absolute before it is written anywhere, so
 | `config/embedding.toml` | `cousin-memory search`, proactive recall in the chat server | keyword search only, silently - nothing was promised; proactive recall stays silent unless the cousin opts in with `cousin.toml [memory] recall_keyword_only = true` |
 | `config/harness.toml` (for Claude Code: copy the shipped `config/harness.toml.claude-code.example`) | transcript mining at flip, the harness auto-memory search collection, the console's token counts, the loops daemon's transcript-size guard, `cousin-mcp approve` (`settings_file`), the console's "needs attention" flag (`attention_patterns`), the `agent-cmd` `{model}`/`{effort}` defaults and the console's spawn catalogue (`[agent]`), `cousin-auth` (`busy_patterns`, `[agent.resume]`, `[auth.api_key]`) | all off; mining says so once at flip, the guard is silent, `approve` refuses with the manual edit spelled out, a `{model}`/`{effort}` placeholder needs the cousin's own `[runtime]` value or the start fails naming this file |
 | `config/mcp-registry.toml` (edited copy of the shipped `config/mcp-registry.toml.example`) | `cousin-spawn` (copied into every new home as `mcp-registry.toml`), `cousin-mcp` when no `--registry` is given and the cousin home carries none | the shipped example is the default; the adapter itself is off until a home carries a `.mcp.json` the harness has approved |
+| `config/external-peers.toml` (copy of `config/external-peers.toml.example`) | `cousin-chat send`/`list`, and so the MCP `send` tool's peer path | only the cousins under `cousins/` are reachable; a malformed file is an error for every `cousin-chat` call |
 | `config/shared-reviewers.json` | `cousin-shared` promotion | promotion refuses with remediation - never a defaulted approver |
 | `config/media.toml` | `cousin-image`/`cousin-voice`/`cousin-video` | media generation is off; the CLIs refuse naming this file, nothing leaves the box |
 
@@ -128,7 +131,11 @@ directory. The root is made absolute before it is written anywhere, so
   means the agent is waiting on a person rather than working, such as
   the harness's login menu; the console's fleet row carries the first
   one a running cousin's pane shows (`attention`) and the card says
-  "needs attention". Absent: nothing is flagged. Not a list of
+  "needs attention". Every injection into a cousin's pane (chat
+  delivery, loops, schedule, flip) reads the visible pane first and
+  skips, with a "tmux delivery SKIPPED" log line, while it shows one:
+  typed text in a login or trust menu selects options. Absent:
+  nothing is flagged and nothing is skipped. Not a list of
   non-empty strings: loud.
   `[agent]` (optional table): `default_model` and `default_effort`
   are what the `agent-cmd` placeholders `{model}` and `{effort}`

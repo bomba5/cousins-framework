@@ -275,6 +275,33 @@ another cousin messages it with `cousin-chat send kestrel "..."`. The
 distinction is load-bearing and the template spells it out - the wrong
 path silently fails to deliver.
 
+A cousin still running on a different framework instance (on this
+host or the LAN, not under this install's `cousins/`) is reachable
+once `config/external-peers.toml` names its chat server
+(`config/external-peers.toml.example` documents every key):
+
+```
+cat > config/external-peers.toml <<'EOF'
+[peers.wren]
+url = "http://127.0.0.1:8085"
+send_path = "/api/send"      # POST {"user": <sender name>, "message": <text>}
+EOF
+cousin-chat list
+#   -> testa        port=8090   (self)
+#      kestrel      port=8091
+#      wren         url=http://127.0.0.1:8085 (external)
+cousin-chat send wren "the descaling schedule moved to Fridays"
+#   -> {"id": 12, "ok": true, "to": "wren"}
+```
+
+The MCP `send` tool routes by that same list, so `to = "wren"`
+works from inside the agent too. The peer's address must pass the
+network guard (loopback and the private ranges, plus
+`config/net-allowlist.json`); the request goes direct, never through a
+proxy or a redirect. A slug that is neither a local cousin nor an
+external peer is still an error, and a local cousin of the same slug
+wins over the file.
+
 ## 4. Track work: jobs and the console
 
 ```

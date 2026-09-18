@@ -213,6 +213,83 @@ class TestMakeDeliver(InjectorCase):
         self.assertIn("[now: ", paste)
 
 
+class TestAttentionGuard(InjectorCase):
+    """A pane parked on a login or trust menu is waiting on a person:
+    typed text there selects menu options (the install re-test saw a
+    fresh cousin's pane move from the theme picker to the login menu
+    before anyone had written to it). Every injection skips it."""
+
+    MENU = "Select login method:\n 1. Claude account\n 2. API key\n"
+
+    def _guarded(self, patterns=("Select login method",)):
+        return TmuxInjector("wren", tmux_bin=str(self.tmux),
+                            settle=lambda n: 0, verify_delay=0,
+                            log=self.errors,
+                            attention_patterns=list(patterns))
+
+    def test_menu_pane_is_never_typed_into(self):
+        self.pane.write_text(self.MENU)
+        typed = self._guarded().inject("Context heartbeat.\nline two")
+        self.assertFalse(typed)
+        self.assertEqual(self._calls(), ["capture-pane -p -t wren"])
+        self.assertIn("SKIPPED", self.errors.getvalue())
+        self.assertIn("Select login method", self.errors.getvalue())
+
+    def test_ready_pane_is_typed_into_after_the_check(self):
+        self.pane.write_text("> _\n")
+        typed = self._guarded().inject("hello there")
+        self.assertTrue(typed)
+        self.assertEqual(self._calls(), [
+            "capture-pane -p -t wren",
+            "send-keys -t wren -l hello there",
+            "send-keys -t wren Enter",
+            "capture-pane -p -t wren",
+        ])
+
+    def test_no_patterns_means_no_extra_capture(self):
+        self.pane.write_text(self.MENU)
+        self._guarded(patterns=()).inject("hello")
+        self.assertEqual(self._calls()[0], "send-keys -t wren -l hello")
+
+    def test_patterns_come_from_the_install_harness_toml(self):
+        root = self.tmux.parent / "root"
+        (root / "config").mkdir(parents=True)
+        (root / "config" / "harness.toml").write_text(
+            'attention_patterns = ["Choose the text style"]\n')
+        self.pane.write_text("Choose the text style\n > Dark mode\n")
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+            typed = self._injector().inject("hello")
+        self.assertFalse(typed)
+        self.assertFalse(any(" -l " in c for c in self._calls()))
+
+    def test_loops_heartbeat_does_not_type_into_a_login_menu(self):
+        # The path the re-test caught: the loops daemon's first context
+        # beat for a fresh cousin, delivered by its default deliver.
+        from cousin_lib import loops
+
+        root = self.tmux.parent / "root"
+        home = root / "cousins" / "wren"
+        (root / "config").mkdir(parents=True)
+        home.mkdir(parents=True)
+        (root / "config" / "harness.toml").write_text(
+            'attention_patterns = ["Select login method"]\n')
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 18123\n')
+        (home / "CLAUDE.md").write_text("# Wren\n")
+        self.pane.write_text(self.MENU)
+        bindir = self.tmux.parent
+        with mock.patch.dict(os.environ, {
+                "FRAMEWORK_ROOT": str(root),
+                "PATH": str(bindir) + os.pathsep + os.environ["PATH"]}), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            loops.tick(deliver=loops._default_deliver,
+                       is_alive=lambda slug: True)
+        self.assertIn("SKIPPED", err.getvalue())
+        self.assertTrue(self._calls(), "the beat never reached tmux")
+        self.assertFalse(any("send-keys" in c for c in self._calls()),
+                         self._calls())
+
+
 class TestSettle(unittest.TestCase):
     def test_scales_with_length_and_caps(self):
         self.assertLess(default_settle(0), 0.2)

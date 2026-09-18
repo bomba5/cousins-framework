@@ -129,37 +129,63 @@ class FrameworkConfig:
 
     @classmethod
     def from_env(cls):
-        root = os.environ.get("FRAMEWORK_ROOT")
+        """The root from the environment alone: FRAMEWORK_ROOT, else the
+        root a COUSIN_HOME names (see root_from_home). Library code and
+        daemons use this; a person's command uses resolve()."""
+        root = os.environ.get("FRAMEWORK_ROOT") or cls._root_from_env_home()
         if not root:
             raise MissingConfigError(
-                "FRAMEWORK_ROOT is not set; the framework root locates the "
-                "cousin registry and shared configuration"
+                "FRAMEWORK_ROOT is not set and COUSIN_HOME does not name a"
+                " cousin home under a root; the framework root locates the"
+                " cousin registry and shared configuration"
             )
         return cls(root)
 
     @classmethod
     def resolve(cls, flag_value=None, *, cwd_fallback=False):
         """The one root-discovery rule every entry point uses: an
-        explicit --root flag wins, else FRAMEWORK_ROOT, else - for a
-        command a person types (cwd_fallback) - the working directory
-        when it is a checkout (see looks_like_checkout), else a loud
-        error naming the channels. Sharing it is what keeps two
-        commands from disagreeing about how to be told the same fact -
-        a disagreement an adopter finds by failing, not by --help.
+        explicit --root flag wins, else FRAMEWORK_ROOT, else the root
+        COUSIN_HOME names (a cousin's own shell may carry only its
+        home; see root_from_home), else - for a command a person types
+        (cwd_fallback) - the working directory when it is a checkout
+        (see looks_like_checkout), else a loud error naming the
+        channels. Sharing it is what keeps two commands from
+        disagreeing about how to be told the same fact - a
+        disagreement an adopter finds by failing, not by --help.
         Library code never passes cwd_fallback: a daemon's working
         directory is not a statement about which install it serves."""
-        root = flag_value or os.environ.get("FRAMEWORK_ROOT")
+        root = (flag_value or os.environ.get("FRAMEWORK_ROOT")
+                or cls._root_from_env_home())
         if not root and cwd_fallback and cls.looks_like_checkout(
                 os.getcwd()):
             root = os.getcwd()
         if not root:
             raise MissingConfigError(
                 "no framework root; pass --root <checkout>, set "
-                "FRAMEWORK_ROOT, or run from inside the checkout. The "
+                "FRAMEWORK_ROOT (or COUSIN_HOME to a cousin home under "
+                "the root), or run from inside the checkout. The "
                 "root locates the cousin registry and config/ "
                 "(typically the checkout itself)."
             )
         return cls(root)
+
+    @staticmethod
+    def root_from_home(home):
+        """The root a cousin home implies, or None. Homes live at
+        <root>/cousins/<slug>; the grandparent counts as the root only
+        when it holds a config/ directory, so an arbitrary directory
+        that happens to be called cousins/ names nothing."""
+        if not home:
+            return None
+        home = Path(os.path.abspath(home))
+        root = home.parent.parent
+        if home.parent.name == "cousins" and (root / "config").is_dir():
+            return root
+        return None
+
+    @classmethod
+    def _root_from_env_home(cls):
+        return cls.root_from_home(os.environ.get("COUSIN_HOME"))
 
     @staticmethod
     def looks_like_checkout(directory):

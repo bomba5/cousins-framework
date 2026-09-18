@@ -286,7 +286,8 @@ def build_server(home, *, framework_root=None, tmux_bin=None,
         config.require_chat_port()
     except MissingConfigError as err:
         raise StartupError(str(err))
-    root = framework_root or os.environ.get("FRAMEWORK_ROOT")
+    root = (framework_root or os.environ.get("FRAMEWORK_ROOT")
+            or FrameworkConfig.root_from_home(config.home))
     guard = NetGuard.from_config(Path(root)) if root else NetGuard()
     deliver = notify = None
     if terminal_delivery:
@@ -297,7 +298,8 @@ def build_server(home, *, framework_root=None, tmux_bin=None,
                 "cannot work without it"
             )
         injector = TmuxInjector(config.tmux_session, tmux_bin=tmux_bin,
-                                socket=os.environ.get("COUSIN_TMUX_SOCKET"))
+                                socket=os.environ.get("COUSIN_TMUX_SOCKET"),
+                                root=Path(root) if root else None)
         deliver = make_deliver(config.home, injector)
         notify = injector.inject_async
     try:

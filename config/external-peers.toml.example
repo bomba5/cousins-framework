@@ -1,0 +1,28 @@
+# config/external-peers.toml - cousins on ANOTHER framework instance.
+# Copy to config/external-peers.toml and fill in. Absent: only the
+# cousins under <root>/cousins/ are reachable, as before.
+#
+# A cousin of this install reaches a peer that still runs on a
+# different framework instance on the same host (or the LAN) by its
+# slug: `cousin-chat send kestrel "..."`, and the MCP send tool with
+# to = "kestrel". `cousin-chat list` shows each one marked (external).
+#
+# One table per peer:
+#   url        the peer's chat server base URL (http or https, no path
+#              needed, no credentials, no query)
+#   send_path  the route that accepts a message; POSTed as JSON
+#              {"user": <sender display name>, "message": <text>}.
+#              Default "/api/send".
+#
+# The sender display name is the sending cousin's name, or --from.
+# Every address the host resolves to must pass the install's network
+# guard: loopback and the private ranges, extended by
+# config/net-allowlist.json. The request goes direct (no proxy) and a
+# redirect is refused. The outbound filter applies as for any send.
+# A slug that is also a local cousin is ignored here (the local cousin
+# wins, and `cousin-chat list` says so). A slug in neither place is an
+# error. A malformed file is an error for every cousin-chat call.
+
+#[peers.kestrel]
+#url = "http://127.0.0.1:8085"
+#send_path = "/api/send"

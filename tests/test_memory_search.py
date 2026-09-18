@@ -16,10 +16,12 @@ from unittest import mock
 from cousin_lib.config import MissingConfigError
 from cousin_lib.memory_search import build_index, search
 from tests._fakes import fake_embedder
+from tests._hermetic import HermeticCase
 
 
-class SearchCase(unittest.TestCase):
+class SearchCase(HermeticCase):
     def setUp(self):
+        super().setUp()
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.home = pathlib.Path(tmp.name) / "cousins" / "wren"

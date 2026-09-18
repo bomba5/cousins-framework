@@ -58,6 +58,32 @@ def compose_delivery(name, message, *, marker_path, attachments=(),
     return "%s (Chat %s): %s" % (prefix, name, text)
 
 
+def install_attention_patterns(root=None):
+    """config/harness.toml attention_patterns for `root`, or for the
+    install this process serves (FrameworkConfig.resolve()) when none
+    is given; [] when there is no root, no file, or the file is
+    unusable: the guard is a safety net and never costs a delivery on
+    its own configuration."""
+    from cousin_lib.config import (FrameworkConfig, MissingConfigError,
+                                   harness_config)
+    try:
+        cfg = harness_config(root if root is not None
+                             else FrameworkConfig.resolve().root)
+    except MissingConfigError:
+        return []
+    return (cfg or {}).get("attention_patterns") or []
+
+
+def pane_attention(pane_text, patterns):
+    """The first attention pattern the pane shows, else None."""
+    if not pane_text:
+        return None
+    for pattern in patterns:
+        if pattern in pane_text:
+            return pattern
+    return None
+
+
 def _normalize_for_verify(s):
     """Lowercase alphanumerics only: drops whitespace, punctuation, and
     the input box's border and wrap glyphs, so a wrapped line still
@@ -72,11 +98,22 @@ class TmuxInjector:
     drain, send Enter, then verify via capture-pane that the text left
     the input box and retry Enter exactly once. The tmux binary and
     socket come from configuration/PATH.
+
+    Before any of that, when attention patterns are configured, the
+    pane is read once: a pane showing one (the agent's login or trust
+    menu) is waiting on a person, and typed text there selects menu
+    options. The line is then logged and skipped, never typed.
+    attention_patterns=None reads them from config/harness.toml at
+    each inject, under `root` when given, else under the install the
+    environment names; a list pins them.
     """
 
     def __init__(self, session, *, tmux_bin="tmux", socket=None,
-                 settle=default_settle, verify_delay=0.2, log=None):
+                 settle=default_settle, verify_delay=0.2, log=None,
+                 attention_patterns=None, root=None):
         self.session = session
+        self.attention_patterns = attention_patterns
+        self.root = root
         self.tmux_bin = tmux_bin
         self.socket = socket
         self.settle = settle
@@ -112,12 +149,41 @@ class TmuxInjector:
         tail = "\n".join((r.stdout or "").splitlines()[-3:])
         return probe not in _normalize_for_verify(tail)
 
+    def _patterns(self):
+        if self.attention_patterns is not None:
+            return list(self.attention_patterns)
+        return install_attention_patterns(self.root)
+
+    def _blocked_by(self):
+        """The attention pattern the pane shows now, else None. An
+        unreadable pane is not evidence of a menu: the paste that
+        follows reports a dead session on its own."""
+        patterns = self._patterns()
+        if not patterns:
+            return None
+        r = self._tmux("capture-pane", "-p", "-t", self.session)
+        if r.returncode != 0:
+            return None
+        return pane_attention(r.stdout or "", patterns)
+
     def inject(self, text):
         """Type one line into the session. Failures are logged loudly and
         never raised: the message is already stored, and the HTTP
-        response that triggered this has long since returned."""
+        response that triggered this has long since returned. Returns
+        True when the line was typed, False when it was skipped or
+        failed."""
         with _INJECT_LOCK:
             try:
+                blocked = self._blocked_by()
+                if blocked is not None:
+                    print(
+                        "[chat-server] tmux delivery SKIPPED target=%r:"
+                        " the pane shows %r (waiting on a person, not"
+                        " ready); nothing typed"
+                        % (self.session, blocked),
+                        file=self.log, flush=True,
+                    )
+                    return False
                 r = self._tmux("send-keys", "-t", self.session, "-l", text)
                 if r.returncode != 0:
                     # The only trace that the cousin never received the
@@ -131,12 +197,13 @@ class TmuxInjector:
                            (r.stderr or "")[:200]),
                         file=self.log, flush=True,
                     )
-                    return
+                    return False
                 time.sleep(self.settle(len(text)))
                 self._tmux("send-keys", "-t", self.session, "Enter")
                 time.sleep(self.verify_delay)
                 if not self._submitted(text):
                     self._tmux("send-keys", "-t", self.session, "Enter")
+                return True
             except (subprocess.TimeoutExpired, FileNotFoundError,
                     OSError) as err:
                 print(
@@ -144,6 +211,7 @@ class TmuxInjector:
                     % (self.session, type(err).__name__, err),
                     file=self.log, flush=True,
                 )
+                return False
 
     def inject_async(self, text):
         """Fire inject on a background thread so the HTTP response never

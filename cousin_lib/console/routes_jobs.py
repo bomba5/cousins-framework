@@ -45,19 +45,29 @@ def _job(raw):
 
 
 def _tail(path, *, lines, from_byte):
+    """(text, size, next): the tail or the bytes from an offset, and the
+    offset a follower asks for next. A read that hit the TAIL_BYTES cap
+    ends on the last newline inside it, so a line (and a multi-byte
+    character) is never split across two reads."""
     try:
         size = os.path.getsize(path)
     except OSError:
-        return "(log not written yet: %s)" % path, 0
+        return "(log not written yet: %s)" % path, 0, 0
     with open(path, "rb") as fh:
         if from_byte is not None:
             start = max(0, min(from_byte, size))
             fh.seek(start)
-            return fh.read(TAIL_BYTES).decode("utf-8", "replace"), size
+            chunk = fh.read(TAIL_BYTES)
+            if len(chunk) == TAIL_BYTES and start + len(chunk) < size:
+                cut = chunk.rfind(b"\n")
+                if cut >= 0:
+                    chunk = chunk[:cut + 1]
+            return (chunk.decode("utf-8", "replace"), size,
+                    start + len(chunk))
         fh.seek(max(0, size - TAIL_BYTES))
         text = fh.read().decode("utf-8", "replace")
     parts = text.splitlines(keepends=True)
-    return "".join(parts[-lines:]), size
+    return "".join(parts[-lines:]), size, size
 
 
 def register():
@@ -85,11 +95,12 @@ def register():
         lines = req.int_query("lines", 40)
         from_byte = req.int_query("from")
         if not job.get("log_path"):
-            return 200, {"ok": True, "log": "", "log_path": None, "size": 0}
-        text, size = _tail(job["log_path"], lines=max(1, lines),
-                           from_byte=from_byte)
+            return 200, {"ok": True, "log": "", "log_path": None, "size": 0,
+                         "next": 0, "has_log": False}
+        text, size, nxt = _tail(job["log_path"], lines=max(1, lines),
+                                from_byte=from_byte)
         return 200, {"ok": True, "log": text, "log_path": job["log_path"],
-                     "size": size}
+                     "size": size, "next": nxt, "has_log": True}
 
     @router.route("POST", "/api/jobs/{job_id}")
     def update(req, job_id):

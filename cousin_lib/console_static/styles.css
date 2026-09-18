@@ -1333,3 +1333,10 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   .mx-grid, .mx-files { grid-template-columns: 1fr !important; }
   .mx-page { height: auto; }
 }
+
+/* === Jobs log (views.jsx JobLogPanel) === */
+.joblog-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 10px; font-family: var(--mono); color: var(--fg-3); border-bottom: 1px solid var(--line); }
+.joblog-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joblog { margin: 0; padding: 12px; flex: 1; min-height: 0; overflow: auto; font-size: 11px; font-family: var(--mono); line-height: 1.4; color: var(--fg-2); background: var(--bg-0); white-space: pre-wrap; word-break: break-all; }
+.joblog-hint { padding: 24px; font-family: var(--mono); font-size: 12px; color: var(--fg-2); }
+.joblog-hint code { background: var(--bg-2); padding: 1px 5px; border-radius: 2px; color: var(--fg-0); }

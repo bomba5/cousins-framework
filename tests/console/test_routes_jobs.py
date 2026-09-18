@@ -64,8 +64,47 @@ class TestJobs(ConsoleCase):
         _, body = self.get("/api/jobs/%d/log?lines=3" % jid)
         self.assertEqual(body["log"], "line 97\nline 98\nline 99\n")
         self.assertEqual(body["size"], log.stat().st_size)
+        self.assertEqual(body["next"], body["size"])
         _, body = self.get("/api/jobs/%d/log?from=%d" % (jid, body["size"] - 8))
         self.assertEqual(body["log"], "line 99\n")
+        self.assertEqual(body["next"], log.stat().st_size)
+
+    def test_a_follower_reads_a_growing_log_once_by_next(self):
+        jid = jobs.register_job(kind="shell", title="a", spawned_by="w")
+        log = self.root / "grow.log"
+        log.write_text("")
+        jobs.set_log_path(jid, str(log))
+        self.serve()
+        _, body = self.get("/api/jobs/%d/log" % jid)
+        seen, offset = body["log"], body["next"]
+        for i in range(3):
+            with open(log, "a") as fh:
+                fh.write("tick %d\n" % i)
+            _, body = self.get("/api/jobs/%d/log?from=%d" % (jid, offset))
+            seen += body["log"]
+            offset = body["next"]
+        self.assertEqual(seen, "tick 0\ntick 1\ntick 2\n")
+        # a chunk larger than one read ends on a line boundary, and the
+        # next read continues exactly there
+        with open(log, "a") as fh:
+            fh.write("".join("%05d %s\n" % (i, "x" * 90)
+                             for i in range(1500)))
+        text = ""
+        while True:
+            _, body = self.get("/api/jobs/%d/log?from=%d" % (jid, offset))
+            if not body["log"]:
+                break
+            text += body["log"]
+            offset = body["next"]
+        self.assertEqual(text.count("\n"), 1500)
+        self.assertTrue(text.endswith("01499 " + "x" * 90 + "\n"))
+
+    def test_a_job_without_a_log_says_so(self):
+        jid = jobs.register_job(kind="build", title="by hand", spawned_by="w")
+        self.serve()
+        _, body = self.get("/api/jobs/%d/log" % jid)
+        self.assertEqual((body["log"], body["log_path"]), ("", None))
+        self.assertFalse(body["has_log"])
 
     def test_update_and_cancel_sends_sigterm(self):
         proc = subprocess.Popen([sys.executable, "-c",

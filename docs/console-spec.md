@@ -623,11 +623,21 @@ reader; a failure there is logged, never a 500 on the poll.
 `{"ok": true, "job": row}` or `404`.
 
 ### `GET /api/jobs/<id>/log?lines=N&from=BYTE`
-`{"ok": true, "log": str, "log_path": str, "size": int}`. Without
-`from`: the last `lines` (default 40) of the final 64 KB. With `from`:
-the bytes from that offset, at most 64 KB, so a follower prints each
-line once. A job without a log path returns `log: ""`; a path not yet
-present returns a placeholder line. `404` unknown job.
+`{"ok": true, "log": str, "log_path": str, "size": int, "next": int,
+"has_log": bool}`. Without `from`: the last `lines` (default 40) of
+the final 64 KB, and `next` is the size. With `from`: the bytes from
+that offset, at most 64 KB and, when the cap cut the read short,
+ending on the last newline inside it; `next` is the offset after
+them, so a follower that always asks `from=<next>` prints each line
+exactly once. A job without a log path returns `log: ""`, `log_path:
+null`, `has_log: false` (the view says how to attach one); a path not
+yet present returns a placeholder line. `404` unknown job.
+
+The jobs view's log panel is such a follower: it loads the tail, then
+polls `from=<next>` every 2 s and appends. It scrolls, follows the end
+while the reader is at the bottom, stops following when the reader
+scrolls up (a "follow" button jumps back), and keeps at most the last
+2 MB in the browser.
 
 ### `POST /api/jobs/<id>`
 Body: any of `status`, `result_summary`, `exit_code`, `title`,

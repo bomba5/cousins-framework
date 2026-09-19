@@ -90,6 +90,29 @@ def save_cursors(home, state):
     os.replace(tmp, path)
 
 
+def _describe(err):
+    """An error for the log. An HTTPError's str() is only the status
+    line; the reason is in its body - Telegram's `description`, the chat
+    server's `error` - so read that once and keep it on the error."""
+    if not isinstance(err, urllib.error.HTTPError):
+        return str(err)
+    if not hasattr(err, "_bridge_detail"):
+        try:
+            raw = err.read() or b""
+        except Exception:
+            raw = b""
+        text = raw.decode("utf-8", "replace").strip()
+        try:
+            data = json.loads(text)
+            text = data.get("description") or data.get("error") or text
+        except (ValueError, AttributeError):
+            pass
+        err._bridge_detail = text[:300]
+    if err._bridge_detail:
+        return "HTTP %d: %s" % (err.code, err._bridge_detail)
+    return str(err)
+
+
 def _permanent(err):
     """A 4xx other than 429 will fail the same way on every retry;
     anything else (network, 5xx, rate limit) may pass next time."""
@@ -224,7 +247,7 @@ def relay_outbound(cfg, *, new_replies, tg_send_text,
                 if not _permanent(err):
                     raise
                 log("reply %s to %r rejected, skipped: %s"
-                    % (reply.get("id"), operator_id, err))
+                    % (reply.get("id"), operator_id, _describe(err)))
 
 
 def pump_inbound(cfg, state, updates, *, relay=None, log=None):
@@ -240,7 +263,7 @@ def pump_inbound(cfg, state, updates, *, relay=None, log=None):
             if not _permanent(err):
                 raise
             log("update %s rejected by the chat server, skipped: %s"
-                % (update.get("update_id"), err))
+                % (update.get("update_id"), _describe(err)))
         state["tg_offset"] = update["update_id"] + 1
         save_cursors(cfg.home, state)
 
@@ -360,7 +383,8 @@ def run_bridge(home, *, poll_interval=5):
                                timeout=15).get("result", [])
             pump_inbound(cfg, state, updates)
         except Exception as err:
-            print("cousin-telegram: inbound error, retrying: %s" % err,
+            print("cousin-telegram: inbound error, retrying: %s"
+                  % _describe(err),
                   file=sys.stderr)
             time.sleep(3)
         for thread in sorted(cfg.threads()):
@@ -377,7 +401,7 @@ def run_bridge(home, *, poll_interval=5):
                     tg_send_text=tg_send_text, tg_send_media=tg_send_media)
             except Exception as err:
                 print("cousin-telegram: outbound error, retrying: %s"
-                      % err, file=sys.stderr)
+                      % _describe(err), file=sys.stderr)
         time.sleep(poll_interval)
 
 

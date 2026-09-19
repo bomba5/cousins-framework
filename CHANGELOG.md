@@ -3,6 +3,12 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+- Telegram bridge: a rejected send or relay logs what the server said
+  (Telegram's `description`, such as "chat not found", or the chat
+  server's `error`), not only "HTTP Error 400: Bad Request".
+
 ## 0.10.0 - 2026-09-19
 
 - Every cousin's memory index is kept fresh by default: `cousin-loops`

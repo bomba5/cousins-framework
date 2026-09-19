@@ -171,9 +171,46 @@ class TestOutbound(_BridgeFixture):
         self.assertEqual(media[0]["path"], str(asset))
 
 
-def _http_error(code):
+def _http_error(code, body=None):
+    import io
     import urllib.error
-    return urllib.error.HTTPError("http://x", code, "err", {}, None)
+    return urllib.error.HTTPError(
+        "http://x", code, "err", {},
+        io.BytesIO(body) if body is not None else None)
+
+
+class TestErrorText(unittest.TestCase):
+    """A rejection logs what the server said, not only the status line."""
+
+    def test_telegram_description_is_included(self):
+        from cousin_lib.telegram import _describe
+        err = _http_error(400, b'{"ok": false, "error_code": 400,'
+                               b' "description": "Bad Request: chat not found"}')
+        self.assertIn("chat not found", _describe(err))
+        self.assertIn("400", _describe(err))
+
+    def test_chat_server_error_field_is_included(self):
+        from cousin_lib.telegram import _describe
+        err = _http_error(400, b'{"error": "user and a non-empty message'
+                               b' are required"}')
+        self.assertIn("non-empty message", _describe(err))
+
+    def test_describing_twice_keeps_the_text(self):
+        # The body is a stream; a second log line must not come out bare.
+        from cousin_lib.telegram import _describe
+        err = _http_error(403, b'{"description": "Forbidden: bot was blocked"}')
+        _describe(err)
+        self.assertIn("blocked", _describe(err))
+
+    def test_a_body_that_is_not_json_is_shown_raw(self):
+        from cousin_lib.telegram import _describe
+        self.assertIn("gateway down",
+                      _describe(_http_error(502, b"gateway down")))
+
+    def test_no_body_and_plain_errors_fall_back_to_str(self):
+        from cousin_lib.telegram import _describe
+        self.assertIn("400", _describe(_http_error(400)))
+        self.assertEqual(_describe(OSError("boom")), "boom")
 
 
 class TestCursors(_BridgeFixture):
@@ -297,6 +334,18 @@ class TestPumpOutbound(_BridgeFixture):
                       tg_send_text=send, log=logged.append)
         self.assertEqual(state["threads"]["Sam"], 12)
         self.assertTrue(logged)
+
+    def test_the_rejection_log_carries_telegrams_description(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {"Sam": 9}}
+        logged = []
+
+        def send(**kw):
+            raise _http_error(400, b'{"description":'
+                                   b' "Bad Request: chat not found"}')
+        pump_outbound(cfg, state, "Sam", self._rows()[:2],
+                      tg_send_text=send, log=logged.append)
+        self.assertIn("chat not found", logged[0])
 
     def test_rate_limit_is_transient(self):
         cfg = self._bridge()

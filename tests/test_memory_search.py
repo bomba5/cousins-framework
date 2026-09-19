@@ -191,3 +191,19 @@ class TestCollections(SearchCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRefreshIfStale(SearchCase):
+    """The unattended refresh cousin-loops runs for every cousin."""
+
+    def test_builds_when_missing_then_reports_fresh(self):
+        from cousin_lib import memory_search
+        with mock.patch.object(memory_search, "_embedding_config",
+                               return_value=None):
+            report = memory_search.refresh_if_stale(self.home)
+            self.assertEqual(report["files"], 2)
+            self.assertIsNone(memory_search.refresh_if_stale(self.home))
+            time.sleep(0.05)
+            (self.home / "notes" / "new.md").write_text("# New\n")
+            self.assertEqual(
+                memory_search.refresh_if_stale(self.home)["files"], 3)

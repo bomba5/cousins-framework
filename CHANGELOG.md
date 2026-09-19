@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.10.0 - 2026-09-19
+
+- Every cousin's memory index is kept fresh by default: `cousin-loops`
+  checks each home every 5 minutes and refreshes the keyword index and
+  the vectors when a source changed, embedding only what changed, one
+  home at a time on a background thread (never several homes against the
+  embedding service at once, never blocking the tick). Before, a cousin's
+  index moved only when that cousin searched, so a quiet cousin fell
+  behind. `memory_search.refresh_if_stale(home)` is the unattended entry.
+
 ## 0.9.0 - 2026-09-19
 
 - Telegram bridge (tracker #13): a reply with an image, video or voice

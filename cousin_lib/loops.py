@@ -863,6 +863,62 @@ def _fire_one_shots(deliver, is_alive, now, report):
         now_ts=int(now), deliver=deliver_one, on_error=on_error)
 
 
+# Every cousin's memory index is kept level with its sources by the
+# daemon, by default: a cousin that never searches still has a fresh
+# index, and a search never pays for a big catch-up. A home is checked
+# at most this often; the work runs on one background thread, one home
+# at a time, so the embedding service is never hit by several homes at
+# once and the tick never waits on it.
+INDEX_REFRESH_SECONDS = 300
+
+_index_worker = {"thread": None, "queue": [], "last": {}, "done": []}
+
+
+def _refresh_one(home):
+    from cousin_lib import memory_search
+    return memory_search.refresh_if_stale(home)
+
+
+def schedule_index_refresh(now, report, *, homes, refresh=_refresh_one,
+                           every=INDEX_REFRESH_SECONDS, background=True):
+    """Queue each home not checked in `every` seconds and make sure one
+    worker drains the queue. Results of finished passes land in
+    report["indexed"] on the next tick."""
+    import threading
+
+    state = _index_worker
+    report.setdefault("indexed", [])
+    while state["done"]:
+        report["indexed"].append(state["done"].pop(0))
+    for slug, home in homes:
+        if now - state["last"].get(slug, 0) < every:
+            continue
+        state["last"][slug] = now
+        if (slug, home) not in state["queue"]:
+            state["queue"].append((slug, home))
+
+    def drain():
+        while state["queue"]:
+            slug, home = state["queue"].pop(0)
+            try:
+                out = refresh(home)
+            except Exception as err:  # noqa: BLE001 - one home never stops the rest
+                out = {"error": str(err)}
+            if out:
+                state["done"].append((slug, out))
+
+    if not background:
+        drain()
+        while state["done"]:
+            report["indexed"].append(state["done"].pop(0))
+        return
+    thread = state["thread"]
+    if state["queue"] and (thread is None or not thread.is_alive()):
+        state["thread"] = threading.Thread(
+            target=drain, name="index-refresh", daemon=True)
+        state["thread"].start()
+
+
 def _default_do_flip(slug):
     from cousin_lib.flip import flip
     return flip(slug)
@@ -882,7 +938,8 @@ def _keep_distilled(slug, home, report):
         report["errors"].append("distill failed for %s: %s" % (slug, err))
 
 
-def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
+def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
+         index_refresh=False):
     """One scheduler tick, per docs/reference/loops.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
     commit-after-delivery, request consumption, one-shot firing
@@ -961,6 +1018,15 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     except Exception as err:
         # A broken scheduler store never costs the loops their tick.
         report["errors"].append("one-shots: %s" % err)
+    if index_refresh:
+        try:
+            root = FrameworkConfig.from_env().root
+            schedule_index_refresh(now, report, homes=[
+                (c.slug, root / "cousins" / c.slug)
+                for c in FrameworkConfig.from_env().list_cousins()
+                if c.type != "worker" and not c.chat_host])
+        except Exception as err:
+            report["errors"].append("index refresh: %s" % err)
     try:
         from cousin_lib import meetings
         report["meetings"] = meetings.tick(deliver=deliver, now=now)
@@ -1047,7 +1113,10 @@ def loops_main(argv=None):
     count = 0
     while True:
         report = tick(deliver=_default_deliver,
-                      is_alive=_default_is_alive)
+                      is_alive=_default_is_alive, index_refresh=True)
+        for slug, out in report.get("indexed", []):
+            print("cousin-loops: index %s: %s" % (slug, out),
+                  file=sys.stderr)
         for error in report["errors"]:
             print("cousin-loops: %s" % error, file=sys.stderr)
         count += 1

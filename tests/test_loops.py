@@ -594,3 +594,48 @@ class TestDefaultDeliverReportsTheInjection(unittest.TestCase):
                 cc.load.return_value.tmux_session = "wren"
                 inj.return_value.inject.return_value = result
                 self.assertIs(loops._default_deliver("wren", "beat"), result)
+
+
+class TestIndexRefresh(unittest.TestCase):
+    """Every cousin's index is refreshed by the daemon, by default: each
+    home at most once per window, one worker, results on the report."""
+
+    def setUp(self):
+        from cousin_lib import loops
+        self.loops = loops
+        loops._index_worker.update(thread=None, queue=[], last={}, done=[])
+        self.seen = []
+
+    def refresh(self, home):
+        self.seen.append(home)
+        return {"files": 1} if home == "/h/wren" else None
+
+    def run_tick(self, now):
+        report = {}
+        self.loops.schedule_index_refresh(
+            now, report, homes=[("wren", "/h/wren"), ("toki", "/h/toki")],
+            refresh=self.refresh, every=300, background=False)
+        return report
+
+    def test_each_home_once_per_window_and_only_changes_reported(self):
+        report = self.run_tick(1000)
+        self.assertEqual(self.seen, ["/h/wren", "/h/toki"])
+        self.assertEqual(report["indexed"], [("wren", {"files": 1})])
+        self.run_tick(1100)                  # inside the window
+        self.assertEqual(len(self.seen), 2)
+        self.run_tick(1301)                  # window passed
+        self.assertEqual(len(self.seen), 4)
+
+    def test_a_failing_home_does_not_stop_the_others(self):
+        def refresh(home):
+            if home == "/h/wren":
+                raise RuntimeError("service down")
+            self.seen.append(home)
+        report = {}
+        self.loops.schedule_index_refresh(
+            0 + 10 ** 6, report,
+            homes=[("wren", "/h/wren"), ("toki", "/h/toki")],
+            refresh=refresh, background=False)
+        self.assertEqual(self.seen, ["/h/toki"])
+        self.assertEqual(report["indexed"][0][0], "wren")
+        self.assertIn("error", report["indexed"][0][1])

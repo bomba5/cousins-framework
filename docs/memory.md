@@ -337,8 +337,12 @@ hits as a list with `path`, `collection`, `score`, `similarity`,
 clean. The trash is never searched.
 
 Out of the box search is keyword only: SQLite FTS5 in
-`memory/fts_index.db`, with nothing to install. The index rebuilds
-itself when files change, so you rarely need `reindex`.
+`memory/fts_index.db`, with nothing to install. Every cousin's indexes
+(keyword and, with an embedding service, vectors) are kept level with its
+files by the loops daemon: each home is checked every 5 minutes and only
+what changed is embedded, one home at a time, so the embedding service is
+never hit by several homes at once. A search still refreshes the index
+itself if it finds it behind, so you rarely need `reindex`.
 
 ### Semantic search
 

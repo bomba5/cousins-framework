@@ -210,6 +210,41 @@ def _index_stale(home):
     return any(p.stat().st_mtime > built_mtime for _, p, _r in sources)
 
 
+def index_stale(home):
+    """Either index behind its sources: the keyword index by its own
+    rule, the vector index when a source is newer than embeddings.json
+    (or it is missing while an embedding service is configured)."""
+    home = Path(home)
+    if _index_stale(home):
+        return True
+    if _embedding_config() in (None, "broken"):
+        return False
+    try:
+        built = _index_path(home).stat().st_mtime
+    except OSError:
+        return True
+    return any(p.stat().st_mtime > built for _, p, _r in _sources(home))
+
+
+def refresh_if_stale(home, root=None):
+    """Bring both indexes level with the sources, embedding only what
+    changed; the unattended counterpart of the refresh a search does.
+    Returns what it did, or None when both were fresh. Never waits on a
+    pass another process holds: that pass is doing this work already."""
+    home = Path(home)
+    if not index_stale(home):
+        return None
+    report = {"files": None, "embedded": 0, "failed": 0, "busy": False}
+    if _index_stale(home):
+        report["files"] = build_index(home)
+    config = _embedding_config(root)
+    if config not in (None, "broken"):
+        out = ensure_index(home, config, root=root, wait=False)
+        report.update(embedded=out["embedded"], failed=out["failed"],
+                      busy=out["busy"])
+    return report
+
+
 def _sanitize(query, max_tokens=32):
     """Make a natural-language query safe for FTS5 MATCH. FTS5 treats
     -, /, ', ( as query syntax; a raw cousin question used to error,

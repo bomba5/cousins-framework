@@ -156,8 +156,11 @@ console's Loops view, which writes the same `[[loops]]` tables back.
 
 ### The loops daemon
 
-One process fires everything: loops, heartbeats, one-shot schedules and
-timed flips.
+One process fires everything: loops, heartbeats, one-shot schedules,
+timed flips, meeting turns, and the memory index refresh that keeps every
+cousin's search index level with its files (checked every 5 minutes per
+cousin, one home at a time, only changed files embedded; each pass that
+did work is logged as `cousin-loops: index <slug>: ...`).
 
 ```
 cousin-loops run                     # the daemon, a tick every 30 s
@@ -169,7 +172,8 @@ cousin-loops requests
 
 `systemd/cousin-loops.service` runs it for you ([operations](operations.md)).
 If the daemon isn't running, nothing recurring happens: no heartbeats,
-no loops, no one-shots, no timed flips. Chat and every CLI keep working.
+no loops, no one-shots, no timed flips, no index refresh (a search still
+refreshes its own index). Chat and every CLI keep working.
 `cousin-loops status` and the console both say "loops daemon has never
 run" or "loops daemon down (last tick 312s ago)" rather than staying
 quiet.

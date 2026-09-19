@@ -146,7 +146,8 @@ cousin-sync-state --home cousins/wren
 ## Chat
 
 `cousin-reply` posts a reply from the cousin to a person on its own chat
-server. The body comes from stdin or `-m`; `--image` attaches a picture. It
+server. The body comes from stdin or `-m`; `--image` attaches a picture and
+`--video` a video. It
 has no positional text argument.
 
 ```

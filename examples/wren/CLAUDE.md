@@ -33,8 +33,9 @@ REPLY
 
 To show a picture on the reply (a render, a chart, a photo), add
 `--image <path>` (PNG, JPEG, GIF or WebP): `cousin-reply --user <their name>
---image preview.png -m "caption"`. Through MCP, pass `image` to the send
-tool. Pictures go to people watching your page only, not to other cousins.
+--image preview.png -m "caption"`; a video (MP4, WebM, MOV or M4V) goes
+with `--video <path>` instead. Through MCP, pass `image` or `video` to the
+send tool. Pictures go to people watching your page only, not to other cousins.
 
 Your chat-server runs on port 8100 and binds `/api/wren_reply`.
 

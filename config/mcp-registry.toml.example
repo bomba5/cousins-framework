@@ -83,6 +83,7 @@ errors_name_peers = true
 to = { type = "string", description = "peer slug or configured operator name" }
 text = { type = "string", description = "message body, verbatim" }
 image = { type = "string", optional = true, description = "path to a PNG, JPEG, GIF or WebP file to show on the reply; operator replies only (cousin-reply --image)" }
+video = { type = "string", optional = true, description = "path to an MP4, WebM, MOV or M4V file to show on the reply, instead of image; operator replies only (cousin-reply --video)" }
 
 [tools.send.commands.peer]
 command = "cousin-chat"
@@ -90,7 +91,7 @@ argv = ["send", "{to}", "{text}"]
 
 [tools.send.commands.operator]
 command = "cousin-reply"
-options = { to = "--user", image = "--image" }
+options = { to = "--user", image = "--image", video = "--video" }
 stdin = ["text"]
 
 [tools.job]

@@ -83,11 +83,14 @@ if __name__ == "__main__":
 
 
 class TestReplyImage(TestSendReply):
-    """cousin-reply --image: the picture rides the reply. The console
-    attaches <home>/chat/inbound/<message id>.<ext> to that message, so
-    the reply is posted first and the file lands under the returned id.
+    """cousin-reply --image / --video: the file rides the reply. It is
+    copied into <home>/chat/images/ or chat/video/ and the reply row
+    names it (attachment kind + path), the convention cousin-image uses
+    and both the console and the Telegram bridge read.
     Canary: the migrated render-preview workflow (a cousin posting its own
-    PNG) had no path in this framework (operator report 2026-09-18)."""
+    PNG) had no path in this framework (operator report 2026-09-18);
+    tracker #24: --image rows carried no attachment, so the bridge never
+    relayed the picture."""
 
     def setUp(self):
         super().setUp()
@@ -111,17 +114,56 @@ class TestReplyImage(TestSendReply):
         import contextlib, io, sys
         with mock.patch.dict(os.environ, env), \
                 mock.patch.object(sys, "stdin", io.StringIO("")), \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
             return reply_main(argv)
 
-    def test_image_lands_under_the_reply_id(self):
+    def test_image_is_staged_and_named_on_the_reply(self):
         png = self._png()
         rc = self._main(["--user", "Operator", "-m", "preview", "--image", str(png)])
         self.assertEqual(rc, 0)
-        landed = self.home / "chat" / "inbound" / "7.png"
-        self.assertTrue(landed.is_file())
-        self.assertEqual(landed.read_bytes(), png.read_bytes())
-        self.assertEqual(_Capture.received["payload"]["message"], "preview")
+        payload = _Capture.received["payload"]
+        self.assertEqual(payload["message"], "preview")
+        self.assertEqual(payload["attachment"]["kind"], "image")
+        staged = pathlib.Path(payload["attachment"]["path"])
+        self.assertEqual(staged.parent, self.home / "chat" / "images")
+        self.assertEqual(staged.suffix, ".png")
+        self.assertEqual(staged.read_bytes(), png.read_bytes())
+
+    def test_staged_name_is_one_the_console_serves(self):
+        from cousin_lib.console.proxy import _MEDIA_NAME_RE
+        self._main(["-m", "x", "--image", str(self._png("My Render.PNG"))])
+        name = pathlib.Path(
+            _Capture.received["payload"]["attachment"]["path"]).name
+        self.assertRegex(name, _MEDIA_NAME_RE)
+        self.assertTrue(name.endswith(".png"))
+
+    def test_video_is_staged_under_chat_video(self):
+        mp4 = self.home / "clip.mp4"
+        mp4.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+        rc = self._main(["-m", "the run", "--video", str(mp4)])
+        self.assertEqual(rc, 0)
+        att = _Capture.received["payload"]["attachment"]
+        self.assertEqual(att["kind"], "video")
+        self.assertEqual(pathlib.Path(att["path"]).parent,
+                         self.home / "chat" / "video")
+
+    def test_image_and_video_together_are_refused(self):
+        mp4 = self.home / "clip.mp4"
+        mp4.write_bytes(b"x")
+        with self.assertRaises(SystemExit):
+            self._main(["-m", "x", "--image", str(self._png()),
+                        "--video", str(mp4)])
+        self.assertIsNone(_Capture.received)
+
+    def test_a_non_video_extension_is_refused_before_any_request(self):
+        rc = self._main(["-m", "x", "--video", str(self._png())])
+        self.assertEqual(rc, 2)
+        self.assertIsNone(_Capture.received)
+
+    def test_no_inbox_copy_is_written_any_more(self):
+        self._main(["-m", "x", "--image", str(self._png())])
+        self.assertFalse((self.home / "chat" / "inbound").exists())
 
     def test_a_missing_image_fails_before_any_request(self):
         rc = self._main(["-m", "x", "--image", str(self.home / "nope.png")])
@@ -138,8 +180,37 @@ class TestReplyImage(TestSendReply):
     def test_image_only_reply_gets_a_default_body(self):
         rc = self._main(["--image", str(self._png("a.jpg"))])
         self.assertEqual(rc, 0)
-        self.assertTrue((self.home / "chat" / "inbound" / "7.jpg").is_file())
         self.assertTrue(_Capture.received["payload"]["message"].strip())
+        self.assertTrue(pathlib.Path(
+            _Capture.received["payload"]["attachment"]["path"]).is_file())
+
+
+class TestReplyRefusedUnstages(unittest.TestCase):
+    """A reply the server refuses leaves no staged file behind."""
+
+    def test_http_refusal_removes_the_staged_copy(self):
+        class _Refuse(_Capture):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(400)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        server = http.server.HTTPServer(("127.0.0.1", 0), _Refuse)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = pathlib.Path(tmp.name)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = %d\n'
+            % server.server_address[1])
+        png = home / "a.png"
+        png.write_bytes(b"\x89PNG")
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError):
+            send_reply(CousinConfig.load(home), "x", user="Sam",
+                       attachment=("image", png))
+        self.assertEqual(list((home / "chat" / "images").iterdir()), [])
 
 
 class TestReplyOutboundFilter(TestSendReply):
@@ -201,6 +272,7 @@ class TestReplyOutboundFilter(TestSendReply):
         self.assertEqual(rc, 3)
         self.assertIsNone(_Capture.received)
         self.assertFalse((self.home / "chat" / "inbound").exists())
+        self.assertFalse((self.home / "chat" / "images").exists())
 
     def test_image_default_body_is_filtered_too(self):
         png = self.home / "zorblatt.png"

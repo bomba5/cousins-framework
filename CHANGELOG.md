@@ -5,6 +5,21 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## Unreleased
 
+- Chat (tracker #24): `cousin-reply --image` records the picture on the
+  reply row (`attachment_kind` / `attachment_path`), the convention
+  `cousin-image` already used, instead of a side copy in
+  `chat/inbound/<reply id>.<ext>` that the row didn't mention. The file
+  is copied to `chat/images/`. The console shows it as before, and the
+  Telegram bridge now relays it; before, only the caption reached
+  Telegram. Older replies keep showing from `chat/inbound/`.
+- Chat: `cousin-reply --video <file>` (MP4, WebM, MOV, M4V) attaches a
+  video the same way, copied to `chat/video/`; the MCP send tool has a
+  matching optional `video` field (a cousin's own `mcp-registry.toml`
+  gets it when regenerated from the example).
+- Telegram bridge: an attachment over Telegram's bot upload limit (10 MB
+  for a photo, 50 MB otherwise) or missing on disk is logged and skipped
+  before the upload. A missing file used to read as a transient error
+  and would have retried forever.
 - Telegram bridge: a rejected send or relay logs what the server said
   (Telegram's `description`, such as "chat not found", or the chat
   server's `error`), not only "HTTP Error 400: Bad Request".

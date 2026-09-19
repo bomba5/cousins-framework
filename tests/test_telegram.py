@@ -401,6 +401,8 @@ class TestMediaUpload(_BridgeFixture):
 
     def test_a_relative_attachment_path_resolves_under_the_home(self):
         cfg = self._bridge()
+        (self.home / "chat" / "images").mkdir(parents=True)
+        (self.home / "chat" / "images" / "x.png").write_bytes(b"x")
         media = []
         relay_outbound(
             cfg,
@@ -410,6 +412,62 @@ class TestMediaUpload(_BridgeFixture):
             tg_send_media=lambda **kw: media.append(kw))
         self.assertEqual(media[0]["path"],
                          str(self.home / "chat" / "images" / "x.png"))
+
+
+class TestUploadGuards(_BridgeFixture):
+    """A file the bridge can never upload is logged and skipped up
+    front: missing on disk (an OSError would otherwise read as transient
+    and retry forever) or over Telegram's bot upload limit."""
+
+    def _reply(self, path, kind="video"):
+        return [{"id": 5, "message": "clip", "attachment_kind": kind,
+                 "attachment_path": str(path)}]
+
+    def test_a_missing_file_is_skipped_not_retried(self):
+        cfg = self._bridge()
+        media, logged = [], []
+        relay_outbound(cfg, new_replies=self._reply(self.home / "gone.mp4"),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw),
+                       log=logged.append)
+        self.assertEqual(media, [])
+        self.assertTrue(any("gone.mp4" in line for line in logged))
+
+    def test_a_video_over_50_mb_is_skipped(self):
+        cfg = self._bridge()
+        big = self.home / "big.mp4"
+        with open(big, "wb") as f:
+            f.truncate(50 * 1024 * 1024 + 1)
+        media, logged = [], []
+        relay_outbound(cfg, new_replies=self._reply(big),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw),
+                       log=logged.append)
+        self.assertEqual(media, [])
+        self.assertTrue(any("50 MB" in line for line in logged))
+
+    def test_a_photo_over_10_mb_is_skipped(self):
+        cfg = self._bridge()
+        big = self.home / "big.png"
+        with open(big, "wb") as f:
+            f.truncate(10 * 1024 * 1024 + 1)
+        media = []
+        relay_outbound(cfg, new_replies=self._reply(big, "image"),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw),
+                       log=lambda line: None)
+        self.assertEqual(media, [])
+
+    def test_a_video_at_the_limit_goes_out(self):
+        cfg = self._bridge()
+        ok = self.home / "ok.mp4"
+        with open(ok, "wb") as f:
+            f.truncate(50 * 1024 * 1024)
+        media = []
+        relay_outbound(cfg, new_replies=self._reply(ok),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw))
+        self.assertEqual([m["kind"] for m in media], ["video"])
 
 
 class TestInboundPhoto(_BridgeFixture):

@@ -196,6 +196,16 @@ class SchemaCase(unittest.TestCase):
         self.assertIn("image", schema["properties"])
         self.assertNotIn("image", schema["required"])
 
+    def test_shipped_send_tool_can_attach_a_video_to_an_operator_reply(self):
+        send = self.reg["tools"]["send"]
+        self.assertTrue(send["properties"]["video"].get("optional"))
+        self.assertEqual(send["commands"]["operator"]["options"].get("video"),
+                         "--video")
+        self.assertNotIn("{video}", send["commands"]["peer"]["argv"])
+        schema = mcp_server.build_schema("send", send)
+        self.assertIn("video", schema["properties"])
+        self.assertNotIn("video", schema["required"])
+
     def test_send_tool_schema_requires_to_and_text_and_has_no_command(self):
         schema = mcp_server.build_schema("send", self.reg["tools"]["send"])
         self.assertEqual(sorted(schema["required"]), ["text", "to"])

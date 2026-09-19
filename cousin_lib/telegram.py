@@ -36,6 +36,10 @@ _FILE_API = "https://api.telegram.org/file/bot%s/%s"
 # getFile serves up to 20 MB; the chat server keeps a photo inline in
 # one JSON body, so the bridge takes less than that.
 _MAX_INBOUND_BYTES = 10 * 1024 * 1024
+# The Bot API's upload limits: 10 MB for a photo, 50 MB for other files.
+_MB = 1024 * 1024
+_UPLOAD_LIMITS = {"image": 10 * _MB}
+_UPLOAD_LIMIT_DEFAULT = 50 * _MB
 
 
 class TelegramConfigError(Exception):
@@ -234,6 +238,11 @@ def relay_outbound(cfg, *, new_replies, tg_send_text,
         path = reply.get("attachment_path")
         if path:
             path = str(cfg.home / path)  # an absolute path stays as is
+        if kind and path and tg_send_media is not None:
+            unsendable = _unsendable(kind, path)
+            if unsendable:
+                log("reply %s: %s, skipped" % (reply.get("id"), unsendable))
+                continue
         for operator_id in sorted(operator_ids or cfg.operator_ids):
             try:
                 if kind and path and tg_send_media is not None:
@@ -248,6 +257,21 @@ def relay_outbound(cfg, *, new_replies, tg_send_text,
                     raise
                 log("reply %s to %r rejected, skipped: %s"
                     % (reply.get("id"), operator_id, _describe(err)))
+
+
+def _unsendable(kind, path):
+    """Why the file can never be uploaded, or None. Checked before the
+    upload: a missing file would raise an OSError, which reads as
+    transient and would hold the cursor on this reply for good."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return "attachment %s is missing" % path
+    limit = _UPLOAD_LIMITS.get(kind, _UPLOAD_LIMIT_DEFAULT)
+    if size > limit:
+        return ("attachment %s is %.1f MB, over Telegram's %d MB limit"
+                % (path, size / _MB, limit // _MB))
+    return None
 
 
 def pump_inbound(cfg, state, updates, *, relay=None, log=None):

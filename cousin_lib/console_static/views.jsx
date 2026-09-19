@@ -173,7 +173,7 @@ function JobsView() {
                  j.status === "done" ? "var(--green, #4a7)" :
                  j.status === "failed" ? "var(--red, #d24)" : "var(--fg-3)"
                }` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <div className="job-head" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
               <CousinTag slug={j.spawned_by} />
               <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}>#{j.id}</span>
               <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}>[{j.kind}]</span>
@@ -182,8 +182,8 @@ function JobsView() {
                 background: j.status === "running" ? "var(--accent)" : "var(--bg-1)",
                 color: j.status === "running" ? "var(--bg-0)" : "var(--fg-2)",
               }}>{j.status}</span>
-              <span style={{ flex: 1, fontWeight: 500 }}>{j.title}</span>
-              <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}
+              <span className="job-title" style={{ flex: 1, fontWeight: 500 }}>{j.title}</span>
+              <span className="job-time" style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}
                     title={j.started_at || ""}>
                 {fmtStart(j.started_at)} · {fmtAge(j.started_at, j.finished_at)}
               </span>
@@ -476,7 +476,7 @@ function MemoryView() {
             <div className="panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
               <div className="panel-hdr"><span className="title">canonical</span>
                 <span style={{ color: "var(--fg-3)" }}>{shared.canonical.length}</span></div>
-              <div className="panel-body" style={{ padding: 0, overflowY: "auto", flex: 1 }}>
+              <div className="panel-body mem-list-body" style={{ padding: 0, overflowY: "auto", flex: 1 }}>
                 {shared.canonical.map(c => (
                   <div key={c.name} onClick={() => openShared("canonical", { ...c, origin: c.name })}
                     style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)", cursor: "pointer",
@@ -493,7 +493,7 @@ function MemoryView() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14, minHeight: 0 }}>
-        <div className="panel" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div className="panel mem-viewer" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div className="panel-hdr">
             <span className="title">{selected
               ? (selected.scope === "shared"
@@ -527,14 +527,14 @@ function MemoryView() {
             <div className="panel-hdr"><span className="title">audit</span>
               <span style={{ color: "var(--fg-3)" }}>last {audit.length}</span></div>
             <div className="panel-body" style={{ padding: 0, overflowY: "auto", maxHeight: 180 }}>
-              <table className="data">
+              <table className="data audit-table">
                 <tbody>
                   {audit.map((e, i) => (
                     <tr key={i}>
                       <td className="muted" style={{ width: 110 }}>{(e.ts || "").slice(11, 19)}</td>
                       <td style={{ width: 80 }}><StatePill state={e.kind === "promote" ? "succeeded" : e.kind === "reject" ? "failed" : "queued"} /></td>
                       <td style={{ width: 90 }} className="accent">@{e.proposer || e.actor}</td>
-                      <td style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-1)" }}>{e.file}{e.reason ? <span className="muted"> · {e.reason}</span> : null}</td>
+                      <td className="wrap-any" style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-1)" }}>{e.file}{e.reason ? <span className="muted"> · {e.reason}</span> : null}</td>
                     </tr>
                   ))}
                   {audit.length === 0 && <tr><td colSpan={4} className="muted" style={{ padding: 14, textAlign: "center" }}>no audit entries yet</td></tr>}
@@ -1272,21 +1272,21 @@ function TrackerView({ cousins }) {
             {visible.map(it => (
               <React.Fragment key={it.id}>
                 <tr style={{ opacity: TRACKER_CLOSED.has(it.state) ? 0.6 : 1 }}>
-                  <td className="muted">#{it.id}</td>
-                  <td style={{ color: "var(--fg-0)" }}>
+                  <td className="muted" data-label="id">#{it.id}</td>
+                  <td data-label="title" style={{ color: "var(--fg-0)" }}>
                     {it.title}
                     {itemNotes(it) && <div style={{ fontSize: 10, color: "var(--fg-3)", whiteSpace: "pre-wrap" }}>{itemNotes(it)}</div>}
                   </td>
-                  <td>{it.owner ? <CousinTag slug={it.owner} /> : <span className="muted">-</span>}</td>
-                  <td className="muted">{it.domain || "-"}</td>
-                  <td>
+                  <td data-label="owner">{it.owner ? <CousinTag slug={it.owner} /> : <span className="muted">-</span>}</td>
+                  <td className="muted" data-label="domain">{it.domain || "-"}</td>
+                  <td data-label="state">
                     <select value={it.state} onChange={e => patch(it.id, { state: e.target.value })} style={{ ...selStyle, color: `var(--${stateTone(it.state)}, var(--fg-1))` }} disabled={busy}>
                       {TRACKER_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
-                  <td className="muted" style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{itemTags(it).join(", ") || "-"}</td>
-                  <td className="muted" title={itemUpdated(it)}>{itemUpdated(it).slice(0, 16).replace("T", " ") || "-"}</td>
-                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <td className="muted" data-label="tags" style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{itemTags(it).join(", ") || "-"}</td>
+                  <td className="muted" data-label="updated" title={itemUpdated(it)}>{itemUpdated(it).slice(0, 16).replace("T", " ") || "-"}</td>
+                  <td data-label="actions" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                     <button className="btn ghost" style={{ fontSize: 10, padding: "2px 6px", marginRight: 4 }}
                       onClick={() => setEditing(editing && editing.id === it.id ? null : { ...it, tagsText: itemTags(it).join(", "), notesText: itemNotes(it) })}>
                       {editing && editing.id === it.id ? "close" : "edit"}
@@ -1296,7 +1296,7 @@ function TrackerView({ cousins }) {
                 </tr>
                 {editing && editing.id === it.id && (
                   <tr>
-                    <td colSpan={8} style={{ background: "var(--bg-0)", padding: 10 }}>
+                    <td colSpan={8} data-label="edit" style={{ background: "var(--bg-0)", padding: 10 }}>
                       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
                         <input className="txt" value={editing.title} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="title" />
                         <input className="txt" value={editing.domain || ""} onChange={e => setEditing({ ...editing, domain: e.target.value })} placeholder="domain" />

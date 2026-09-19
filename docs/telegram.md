@@ -23,10 +23,10 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
   its own. The chat server owns all of that.
 - **Its only state:** where it is, in `data/telegram-bridge.json`
   ([below](#the-state-file)).
-- **What it depends on:** the bridge runs apart from the cousin's
-  session. A spawn, a flip or the console's start button does not start
-  it; its systemd unit does ([running it](#6-run-it-as-a-service)). If
-  the chat server is down, the bridge retries until it is back.
+- **What it depends on:** the bridge belongs to its cousin, like the
+  chat server. It starts and stops with the cousin
+  ([when it runs](#6-when-it-runs)). If the chat server is down, the
+  bridge retries until it is back.
 
 One bridge serves one cousin. For two cousins on Telegram, create two
 bots and run two bridges.
@@ -76,7 +76,8 @@ entry with no `name` lands in a thread called `operator`
 
 ## Set it up
 
-Steps 1-5 are done once per cousin. They need a shell on the host, and
+Steps 1-4 are done once per cousin. By hand they need a shell on the
+host. Section 5 does steps 3 and 4 from the console instead. Either way,
 the token never appears on a command line or in a chat.
 
 ### 1. Create a bot
@@ -86,7 +87,9 @@ and a username ending in `bot`. BotFather answers with the token, which
 looks like `123456789:AA...`. Anyone who has the token controls the bot,
 so treat it like a password. Don't paste it into a cousin's chat, a
 tracker item or a shell command. If it leaks, send `/revoke` to
-BotFather, then write the new token (step 3) and restart the bridge.
+BotFather, then save the new token: in the console panel, which
+restarts the bridge, or by hand (step 3), followed by a restart of the
+cousin.
 
 ### 2. Find your numeric Telegram user id
 
@@ -94,11 +97,16 @@ The allowlist uses the numeric id, not your `@username`. The id is a
 number such as `88487857`. The bridge can show it to you, without any
 third-party bot:
 
-1. Do steps 3-5 with a placeholder id: `operators = [{ user_id = 1, name = "ana" }]`.
-2. Start the bridge (step 6) and send the bot any message.
-3. The journal logs `rejected message from unauthorized Telegram id
-   88487857 (not in operators)`. That number is your id. Put it in
-   `operators` and restart the bridge.
+1. Do steps 3 and 4 with a placeholder id:
+   `operators = [{ user_id = 1, name = "ana" }]`. The bridge runs only
+   when at least one operator is set (`ready` in `telegram_admin.py`).
+2. Start the cousin, which starts the bridge ([section 6](#6-when-it-runs)),
+   and send the bot any message.
+3. `data/telegram.log` shows `rejected message from unauthorized
+   Telegram id 88487857 (not in operators)`, and the console lists the
+   sender under "waiting to be added". That number is your id. Replace
+   the placeholder with it, in the console or in `cousin.toml` followed by
+   a restart of the cousin.
 
 A lookup bot such as @userinfobot also shows your id, but that
 means messaging a third party.
@@ -183,7 +191,7 @@ cousin-telegram --home cousins/wren
 
 Open the bot in Telegram and press **Start**. A bot cannot send the
 first message to a user. Until you press Start, every reply fails with
-HTTP 400. The bridge treats a 4xx as permanent: the journal shows
+HTTP 400. The bridge treats a 4xx as permanent: `data/telegram.log` shows
 `reply <id> to <user id> rejected, skipped: HTTP 400: Bad Request: chat
 not found`, and the reply is **not** retried (`relay_outbound`,
 `_permanent`). Replies the cousin wrote before you pressed Start are not
@@ -239,7 +247,10 @@ Then send a message and check that the cousin answers on Telegram.
 - The allowlist is the perimeter. With no operators the bridge will not
   run, because an open bot would serve whoever finds its username.
 - Strangers get no answer, so the bot never confirms it exists. Their
-  ids are in the journal.
+  ids are in `data/telegram.log`. The five newest are also kept in
+  `data/telegram-pending.json` (`note_refused`), and the console offers
+  them as "waiting to be added". Anyone who messages the bot can land
+  on that list, so check the id and @name before you click **add**.
 - The token is read only from the file. It is never a flag, an
   environment variable or a config value, so it doesn't end up in `ps`,
   shell history or `cousin.toml`.

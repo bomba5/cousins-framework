@@ -350,25 +350,35 @@ How it relays:
 
 - In: a text message from an id in `operators` becomes a normal
   `/api/send` to the cousin's chat server, under the name you gave in
-  `operators`. The cousin sees it like any other chat line.
-- Out: every few seconds the bridge reads the thread of the first
-  operator in the list and sends each new reply from the cousin to every
-  operator id.
+  `operators` (`operator` if you gave none). The cousin sees it like any
+  other chat line.
+- Out: every few seconds the bridge reads each operator's thread and
+  sends each new reply from the cousin there to that operator's
+  Telegram id (every id that shares the name, if several do).
 - A message from anyone else gets no answer at all, so the bot never
   confirms it exists. The bridge logs the rejected id, so if you got
   your own id wrong you'll see it in the log instead of wondering
   whether the bridge is down.
-- Network errors are logged and retried; the bridge doesn't exit on
-  them.
+- Where it is gets saved in the cousin's `data/telegram-bridge.json`:
+  the Telegram update offset and one reply position per operator
+  thread. A restart picks up where the bridge stopped. On the very first
+  start it begins at the end of each thread, so it doesn't re-send your
+  chat history.
+- A position moves only past what was delivered. Network errors, a
+  chat server that's down, Telegram 5xx and rate limits (429) are
+  logged and retried on the next pass, so nothing is lost; the bridge
+  doesn't exit on them. A retry can send a reply twice to an operator
+  who already got it when another operator's send failed.
+- A permanent rejection (any other 4xx, such as a bot the operator
+  blocked) is logged with the message id and skipped, so one bad
+  message can't hold up everything behind it.
 
 Rough edges right now:
 
 - Only text goes in. A photo or voice message from Telegram isn't
-  relayed (the failure shows in the log).
+  relayed; the bridge logs that it skipped it.
 - Replies with an attachment (a generated image, voice or video) don't
   make it out: the file isn't uploaded, so Telegram rejects the send.
-- The reply position isn't saved. When the bridge starts, it reads the
-  thread from the beginning, so it re-sends old replies after every
-  restart.
+  The rejection is logged and the bridge moves on.
 
 Keep the token file private. Whoever has it controls the bot.

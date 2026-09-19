@@ -30,7 +30,7 @@ The password comes from a prompt, at least 8 characters. What the console does d
 | present, at least one user | Every `/api/*` route needs a session, except `POST /api/auth/login`, `GET /api/auth/me` and `GET /api/version`. No bypass for loopback. Static files need no session (the login form is part of the page). |
 | present but broken (unreadable, not JSON, empty, an entry that isn't an object) | Closed. Every `/api/*` route answers `503` with the file name and the fix, login included and live sessions too. `me` still answers so the page can say why. `adduser` refuses to write over it. Restore it from a backup, or delete it and run `adduser` again. |
 
-The session is a cookie called `console_session`: 32 random bytes, `HttpOnly; SameSite=Strict; Path=/`, plus `Secure` when you start the console with `--secure-cookie` (do that behind TLS). Sessions are kept in memory only, so restarting the console logs everyone out. An idle session expires after 30 days.
+The session is a cookie called `console_session`: 32 random bytes, `Max-Age=2592000; HttpOnly; SameSite=Strict; Path=/`, plus `Secure` when you start the console with `--secure-cookie` (do that behind TLS). The cookie is persistent, not a session cookie, because an iOS home-screen web app drops session cookies whenever the system closes it. Sessions are saved in `data/console-sessions.json` (mode 0600, a SHA-256 of each token, never the token), so a console restart keeps everyone logged in. An idle session expires after 30 days. Changing a password keeps the session that changed it and ends every other session of that user.
 
 Without a session on a protected route you get `401 {"ok": false, "error": "login required"}`.
 

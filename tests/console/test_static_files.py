@@ -39,7 +39,9 @@ _TEMPLATE_PARAM = re.compile(r"\$\{[^}]*\}")
 def _static_files():
     if not _STATIC.is_dir():
         return []
-    return sorted(p for p in _STATIC.iterdir() if p.is_file())
+    # Text files only: the PNG home-screen icons carry no words.
+    return sorted(p for p in _STATIC.iterdir()
+                  if p.is_file() and p.suffix != ".png")
 
 
 def _split_spec():

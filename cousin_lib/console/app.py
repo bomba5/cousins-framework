@@ -168,7 +168,8 @@ class ConsoleServer:
         self.users = auth.Users(
             Path(users_path) if users_path
             else self.root / "config" / "console-users.json")
-        self.sessions = auth.Sessions()
+        self.sessions = auth.Sessions(
+            path=self.root / "data" / "console-sessions.json")
         self._last_users_error = None
         self.started_at = time.time()
         # Read the version and commit now, once: the top bar shows what
@@ -349,7 +350,9 @@ class _Handler(BaseHTTPRequestHandler):
         token = self._cookie(auth.COOKIE)
         if token:
             req.session_token = token
-            req.user = server.sessions.lookup(token)
+            req.user = server.sessions.lookup(
+                token, stamp_of=lambda name: auth.user_stamp(
+                    server.users, name))
         route = (method, parsed.path.rstrip("/") or parsed.path)
         users_state, users_error = server.users.state()
         if users_state == "broken":

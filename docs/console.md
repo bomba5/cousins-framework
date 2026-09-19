@@ -8,7 +8,7 @@ are in [reference/console-api.md](reference/console-api.md).
 The console owns almost nothing. Cousins, chat history, jobs, loops and memory
 all live in their own stores, and every button calls the same library code a
 CLI would. Stop it, restart it, or never run it, and you lose nothing but the
-page. The only things it keeps are the login sessions (in memory) and the
+page. The only things it keeps are the login sessions (data/console-sessions.json) and the
 users file.
 
 ## Starting it

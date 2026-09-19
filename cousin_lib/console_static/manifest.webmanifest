@@ -1,6 +1,6 @@
 {
-  "name": "cousin console",
-  "short_name": "console",
+  "name": "cousins",
+  "short_name": "cousins",
   "description": "operator console for a fleet of cousins",
   "start_url": "/",
   "scope": "/",
@@ -14,6 +14,16 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
     }
   ]
 }

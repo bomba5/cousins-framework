@@ -46,6 +46,40 @@ class TestUsersFile(ConsoleCase):
         self.assertIsNone(sessions.lookup("nope", now=0))
 
 
+    def test_sessions_survive_a_restart_as_hashes_only(self):
+        path = self.root / "data" / "console-sessions.json"
+        token = auth.Sessions(path=path).create("ana", stamp="s1")
+        self.assertNotIn(token, path.read_text())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        again = auth.Sessions(path=path)
+        self.assertEqual(again.lookup(token, stamp_of=lambda u: "s1"),
+                         "ana")
+
+    def test_expired_sessions_are_not_loaded(self):
+        path = self.root / "data" / "console-sessions.json"
+        token = auth.Sessions(idle_seconds=100, path=path).create(
+            "ana", now=1000)
+        self.assertIsNone(auth.Sessions(idle_seconds=100, path=path)
+                          .lookup(token))
+
+    def test_a_changed_password_drops_the_session(self):
+        sessions = auth.Sessions()
+        token = sessions.create("ana", stamp="old")
+        self.assertIsNone(sessions.lookup(token, stamp_of=lambda u: "new"))
+        self.assertIsNone(sessions.lookup(token, stamp_of=lambda u: "old"))
+
+    def test_logout_is_persisted(self):
+        path = self.root / "data" / "console-sessions.json"
+        sessions = auth.Sessions(path=path)
+        token = sessions.create("ana")
+        sessions.drop(token)
+        self.assertIsNone(auth.Sessions(path=path).lookup(token))
+
+    def test_the_cookie_is_persistent(self):
+        self.assertIn("Max-Age=%d" % auth.SESSION_IDLE_SECONDS,
+                      auth.cookie_header("t"))
+
+
 class TestNotConfigured(ConsoleCase):
     def test_open_and_said(self):
         self.serve()

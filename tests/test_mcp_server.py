@@ -80,7 +80,7 @@ class RegistryCase(unittest.TestCase):
         self.assertEqual(reg["timeout"], 120)
         self.assertEqual(reg["max_output"], mcp_server.DEFAULT_MAX_OUTPUT)
         self.assertEqual(set(reg["tools"]),
-                         {"memory", "send", "job", "schedule"})
+                         {"memory", "send", "job", "schedule", "meeting"})
         self.assertTrue(reg["tools"]["memory"]["enabled"])
         self.assertEqual(reg["tools"]["memory"]["kind"], "command")
 
@@ -814,7 +814,7 @@ class CliCase(unittest.TestCase):
         self.assertEqual(rc, 0)
         tools = json.loads(out)
         self.assertEqual(sorted(t["name"] for t in tools),
-                         ["job", "memory", "schedule", "send"])
+                         ["job", "meeting", "memory", "schedule", "send"])
 
     def test_selftest_prints_every_tool_and_its_commands_without_the_sdk(self):
         # Every module the SDK probe imports is blocked, not just the

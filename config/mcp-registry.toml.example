@@ -131,6 +131,28 @@ options = { status = "--status", mine = "--mine", active = "--active", json = "-
 argv = ["show", "{id}"]
 options = { json = "--json" }
 
+[tools.meeting]
+command = "cousin-meeting"
+description = "Speak in a meeting when it is your turn: say, pass, minutes (when you facilitate the close), show. A turn arrives as a line starting (Meeting <id> ...). Speak only on your turn; one answer per turn."
+
+[tools.meeting.properties]
+id = { type = "integer", description = "meeting id" }
+text = { type = "string", optional = true, description = "what you say (say, minutes)" }
+
+[tools.meeting.commands.say]
+argv = ["say", "{id}", "--stdin"]
+stdin = ["text"]
+
+[tools.meeting.commands.pass]
+argv = ["pass", "{id}"]
+
+[tools.meeting.commands.minutes]
+argv = ["minutes", "{id}", "--stdin"]
+stdin = ["text"]
+
+[tools.meeting.commands.show]
+argv = ["show", "{id}"]
+
 [tools.schedule]
 command = "cousin-schedule"
 description = "One-shot future prompts to yourself: add, list, cancel."

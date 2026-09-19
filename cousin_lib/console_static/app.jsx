@@ -9,6 +9,7 @@ const NAV = [
   { id: "loops",    label: "Loops",    icon: I.loops,   kbd: "5" },
   { id: "tokens",   label: "Tokens",   icon: I.tokens,  kbd: "6" },
   { id: "tracker",  label: "Tracker",  icon: I.tracker, kbd: "7" },
+  { id: "meetings", label: "Meetings", icon: I.meetings, kbd: "8" },
   { id: "settings", label: "Settings", icon: I.host,    kbd: "0" },
 ];
 
@@ -336,12 +337,14 @@ function App() {
   //   ?cousin=<slug>        set the active cousin
   //   ?user=<name>          the chat view fetches this user's thread
   //   ?embed=1              hide the chrome (sidebar + topbar), chat fills the viewport
+  //   ?meeting=<id>         with ?view=meetings, open that meeting's thread
   const urlParams = typeof window !== "undefined"
     ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const initialView = urlParams.get("view") || "overview";
   const initialCousin = urlParams.get("cousin") || "";
   const embedUser = urlParams.get("user") || "";
   const embedMode = urlParams.get("embed") === "1";
+  const initialMeeting = urlParams.get("meeting") || "";
 
   // The release this console runs (GET /api/version, public): shown dim
   // beside the brand. Read at console start, so a bumped or pulled
@@ -455,6 +458,10 @@ function App() {
         // Re-dispatch as a DOM CustomEvent so FlipModal in cousins.jsx
         // can subscribe without taking a SSE handle of its own.
         window.dispatchEvent(new CustomEvent("fw-cousin-flip", { detail: data }));
+      } else if (kind === "meeting-change") {
+        // Re-dispatched like cousin-flip: the Meetings view refetches
+        // its list and the open thread without a SSE handle of its own.
+        window.dispatchEvent(new CustomEvent("fw-meeting-change", { detail: data }));
       } else if (kind === "tracker-change" || kind === "loop-fire") {
         // Views that care poll their own routes.
       }
@@ -595,6 +602,7 @@ function App() {
           {view === "loops"    && <LoopsView loops={loops} />}
           {view === "tokens"   && <TokensView cousins={cousins} />}
           {view === "tracker"  && <TrackerView cousins={cousins} />}
+          {view === "meetings" && window.MeetingsView && <MeetingsView cousins={cousins} sessionUser={sessionUser} initialMeeting={initialMeeting} />}
           {view === "settings" && <SettingsView auth={auth} setAuth={setAuth} />}
           {view === "overview" && <HostView />}
         </div>
@@ -635,6 +643,7 @@ function MainHeader({ view, cousins, activeCousin }) {
     loops: "loops.status",
     tokens: "tokens.meter",
     tracker: "tracker",
+    meetings: "meetings",
     settings: "settings",
     overview: "host.stats",
   };
@@ -646,6 +655,7 @@ function MainHeader({ view, cousins, activeCousin }) {
     loops: "/console/loops",
     tokens: "/console/tokens",
     tracker: "/console/tracker",
+    meetings: "/console/meetings",
     settings: "/console/settings",
     overview: "/console/host",
   };

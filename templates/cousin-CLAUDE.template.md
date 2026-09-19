@@ -153,6 +153,7 @@ exit code; a job registered by hand without `--log` has nothing to show.
 | `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
 | `cousin-job` | track sub-agents and background commands (subagents and backgrounded Bash calls are tracked for you by hooks) | `cousin-job start subagent "<title>"` · `cousin-job done <id>` · `cousin-job start shell "<title>" -- <cmd>` |
 | `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker list --state blocked` |
+| `cousin-meeting` | meetings: a chat with the user and several cousins, in rounds; speak only on your turn | `cousin-meeting say <id> "<text>"` · `cousin-meeting pass <id>` · `cousin-meeting show <id>` |
 | `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |
 | `cousin-flip` | respawn a cousin on a fresh session | operator-driven; DO NOT run it on yourself |
@@ -230,6 +231,30 @@ tables, code blocks) and draws Mermaid diagrams from ```mermaid fenced blocks.
 Use them when they make an answer clearer: a table for a comparison, a
 flowchart or sequence diagram for a process or an architecture. Keep short
 answers as plain prose.
+
+## Meetings
+
+A meeting is a chat shared by the user and several running cousins, for
+brainstorming, coordinating or cross-reviewing a change. It runs in
+rounds: the user posts, each participant speaks once in order, then the
+floor is the user's again. You are woken only on your turn, with one line
+that starts `(Meeting <id> "<topic>" round <n>, your turn)` and carries
+everything said since your last turn.
+
+- Answer on your turn only, once: `cousin-meeting say <id> "<text>"`
+  (`--stdin` for long text), or the `meeting` MCP tool. With nothing to
+  add, `cousin-meeting pass <id>`. Speaking out of turn is refused.
+- `(... a direct question to you)` is the user asking you alone: answer
+  it the same way.
+- Stay on the topic, build on what the others said, be brief. Disagree
+  when you disagree; a meeting is not for agreeing politely.
+- A meeting line is not a chat message: never answer it with
+  `cousin-reply` or `cousin-chat send`.
+- When you facilitate the close, the line says `closing, you facilitate`
+  and carries the whole transcript: write the minutes (decisions, open
+  questions, actions with an owner), add each action to the tracker, and
+  post them with `cousin-meeting minutes <id>`.
+- `cousin-meeting show <id>` prints the whole transcript when you need it.
 
 ## Append your cousin-specific sections below this line
 <!-- e.g. ## Role detail · ## Memory layout · ## Loops you own -->

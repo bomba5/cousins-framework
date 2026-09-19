@@ -962,6 +962,12 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
         # A broken scheduler store never costs the loops their tick.
         report["errors"].append("one-shots: %s" % err)
     try:
+        from cousin_lib import meetings
+        report["meetings"] = meetings.tick(deliver=deliver, now=now)
+    except Exception as err:
+        # A broken meetings store never costs the loops their tick.
+        report["errors"].append("meetings: %s" % err)
+    try:
         _guard_transcript_size(is_alive, now, report)
     except Exception as err:
         # The guard is advisory; it never costs the tick.

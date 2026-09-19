@@ -193,6 +193,19 @@ until `[telegram]` in its `cousin.toml` is complete). See [chat](chat.md).
 cousin-telegram --home cousins/wren
 ```
 
+`cousin-meeting` runs meetings: a chat shared by the user and several running
+cousins, in rounds ([meetings](meetings.md)). Subcommands: `list`, `show ID`,
+`open TOPIC SLUG... [--facilitator SLUG] [--timeout S]`, `post ID TEXT`,
+`skip ID`, `close ID` (the user's side, `--user NAME`), `say ID TEXT`,
+`pass ID`, `minutes ID TEXT` (the cousin's side, from `COUSIN_HOME`; `--stdin`
+for long text), and `teach [--apply]` to bring the Meetings section and tool
+to existing cousins.
+
+```
+cousin-meeting open "name the new sensor" wren kestrel --user ana
+cousin-meeting say 3 "Kestrel"
+```
+
 ## Media
 
 `cousin-image`, `cousin-voice` and `cousin-video` generate media through the

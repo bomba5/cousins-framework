@@ -23,7 +23,7 @@ _SPEC = _REPO_ROOT / "docs" / "reference" / "console-api.md"
 # Frontend A (this task). Frontend B extends the list with chat.jsx,
 # styles.css and the PWA assets.
 REQUIRED = ["index.html", "app.jsx", "views.jsx", "cousins.jsx", "ui.jsx", "data.jsx",
-            "media.jsx", "explorer.jsx"]
+            "media.jsx", "explorer.jsx", "meetings.jsx"]
 
 # Names of dropped surfaces. A file that mentions one has ported a view
 # the operator excluded, or a store the console must not own.

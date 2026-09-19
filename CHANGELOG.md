@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.6.0 - 2026-09-19
+
+Meetings: a chat shared by the user and several running cousins.
+
+- `cousin_lib/meetings.py` over `data/meetings.db`, and `cousin-meeting`
+  (list, show, open, post, say, pass, minutes, skip, close, teach). Rounds
+  by default: the user posts, each participant speaks once in order and
+  is woken only on its turn, with everything said since its last turn;
+  `@slug` asks one participant; out of turn is refused. `cousin-loops`
+  retries undelivered turns and skips a silent or stopped speaker. An
+  optional facilitator writes the minutes at closing.
+- Console: a Meetings page (list, new meeting by sidebar group, all or
+  single cousins, the thread with a turn banner, post, skip, close), the
+  `/api/meetings` routes and the `meeting-change` event.
+- Every cousin learns it: a Meetings section and a `cousin-meeting` row in
+  the CLAUDE.md template, `cousin-meeting teach [--apply]` for existing
+  cousins, the `meeting` MCP tool, and the how-to line in every turn.
+- Docs: meetings.md, console API, commands, MCP.
+
 ## 0.5.0 - 2026-09-19
 
 The shared tier reaches every cousin.

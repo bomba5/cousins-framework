@@ -63,6 +63,36 @@ Drops the session and clears the cookie. `200 {"ok": true}`.
 
 Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"ok": true, "user": "ana"}`. `400` new password under 8 characters, `403 current password incorrect`. Your other sessions stay logged in.
 
+## Meetings
+
+A chat shared by the signed-in user and several running cousins, in rounds ([meetings](../meetings.md)). The store is `data/meetings.db`; cousins speak through `cousin-meeting`, so changes also arrive from outside the console and the event stream reports them as `meeting-change` (`{"id", "op"}`). A refusal (not your floor, a stopped or remote participant, a closed meeting) is `400` with the reason in `error`; an unknown id is `404`. The user's entries carry the signed-in user name.
+
+A meeting: `{"id", "topic", "participants": [slug...], "facilitator", "state": "open"|"closing"|"closed", "mode": "floor"|"round"|"direct"|"minutes", "turn_slug", "turn_index", "round", "turn_started", "turn_delivered", "turn_timeout_s", "created_by", "created_at", "closed_at", "updated_at"}`. `turn_slug` empty means the floor is the user's.
+
+### `GET /api/meetings`
+
+`{"meetings": [...]}`, open and closing first, newest first, each with `entries` (the transcript length). `?state=` filters.
+
+### `POST /api/meetings`
+
+Body `{"topic", "participants": [slug...], "facilitator"?, "timeout_s"?}` (timeout at least 60, default 600). Every participant must be a running local cousin. Answers `{"ok": true, "meeting": {...}}`.
+
+### `GET /api/meetings/<id>`
+
+`{"meeting": {..., "transcript": [{"id", "speaker", "kind": "user"|"cousin"|"pass"|"system"|"minutes", "text", "round", "created_at"}]}}`.
+
+### `POST /api/meetings/<id>/post`
+
+Body `{"text"}`. Only on the user's floor. Text starting `@slug ` asks that participant alone; anything else starts a round.
+
+### `POST /api/meetings/<id>/skip`
+
+Skips the current speaker.
+
+### `POST /api/meetings/<id>/close`
+
+Closes the meeting, or, with a facilitator, moves it to `closing` and asks the facilitator for the minutes.
+
 ## Preferences
 
 Per-user console settings kept on the server, so every browser and the phone's home-screen app show the same thing. One file per console user in `data/console-prefs/<user>.json` (mode 0600); with no users file (open mode) they are shared under `_open`.

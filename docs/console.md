@@ -424,6 +424,14 @@ state, owner, tags and notes. Each row has "edit" (all fields, state
 included: open, active, blocked, done, dropped) and a delete button. Ids
 never get reused.
 
+## Meetings
+
+A chat shared by you and several running cousins, in rounds. "New meeting"
+takes a topic and participants (a sidebar group, all running cousins, or one
+by one), an optional facilitator and a timeout; the meeting view shows the
+transcript, whose turn it is, and lets you post, skip the speaker or close.
+See [meetings](meetings.md).
+
 ## Settings
 
 - **cosmetic**: accent hue and saturation, chat reveal speed (off, slow,
@@ -431,8 +439,8 @@ never get reused.
   scale. Stored in your browser.
 - **visibility**: show hidden cousins and loops.
 - **process control**: "restart console". The console exits and expects its
-  service manager to start it again (about 4 seconds); everyone has to log in
-  again. If it isn't running under a supervisor, it warns you that restart
+  service manager to start it again (about 4 seconds). Logins survive the
+  restart. If it isn't running under a supervisor, it warns you that restart
   means stop. Cousins are restarted from their inspector.
 - **account**: who you're logged in as, change password, log out. Without a
   users file it shows the `cousin-console adduser` line instead.

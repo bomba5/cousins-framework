@@ -29,7 +29,7 @@ import sys
 import threading
 import time
 
-from cousin_lib import jobs, loops, tracker
+from cousin_lib import jobs, loops, meetings, tracker
 from cousin_lib.config import FrameworkConfig
 from cousin_lib.console import router
 
@@ -148,6 +148,7 @@ def _default_sources(root):
         "last_fires": lambda: loops._load_state().get("last_fires") or {},
         "requests": lambda: loops.list_requests(limit=200),
         "tracker": lambda: tracker.list_items(root=root),
+        "meetings": lambda: meetings.list_meetings(root=root),
     }
 
 
@@ -206,6 +207,7 @@ class Poller:
         self._next_fast = self._next_slow = None
         self._jobs = None
         self._tracker = None
+        self._meetings = None
         self._flips = None
         self._fires = None
         self._thread = None
@@ -221,6 +223,7 @@ class Poller:
             self._diff_jobs(events)
             self._diff_flips(events)
             self._diff_tracker(events)
+            self._diff_meetings(events)
         if self._next_slow is None or now >= self._next_slow:
             self._next_slow = now + self.slow
             events.append(("cousins-refresh", _call(self.sources, "cousins", [])))
@@ -290,6 +293,18 @@ class Poller:
                     events.append(("tracker-change",
                                    {"id": iid, "op": "delete"}))
         self._tracker = rows
+
+    def _diff_meetings(self, events):
+        """Cousins speak through the CLI, outside the console: a change
+        in a meeting's row or entry count is the only signal."""
+        rows = {m["id"]: (m["updated_at"], m.get("entries"))
+                for m in _call(self.sources, "meetings", [])}
+        if self._meetings is not None:
+            for mid, sig in rows.items():
+                if self._meetings.get(mid) != sig:
+                    events.append(("meeting-change",
+                                   {"id": mid, "op": "update"}))
+        self._meetings = rows
 
     def _diff_fires(self, events):
         fires = dict(_call(self.sources, "last_fires", {}))

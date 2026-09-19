@@ -72,6 +72,7 @@ const I = {
   tokens:   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="8" r="6"/><path d="M6 6h2.5a1.5 1.5 0 0 1 0 3H6m0 0V12M6 9h4"/></svg>,
   tracker:  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 4h2M7 4h6M3 8h2M7 8h6M3 12h2M7 12h6"/></svg>,
   host:     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2" y="3" width="12" height="4" rx="0.5"/><rect x="2" y="9" width="12" height="4" rx="0.5"/><circle cx="4" cy="5" r="0.5" fill="currentColor"/><circle cx="4" cy="11" r="0.5" fill="currentColor"/></svg>,
+  meetings: <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><circle cx="8" cy="9.5" r="2.5"/><circle cx="8" cy="3" r="1.3"/><circle cx="2.8" cy="13" r="1.3"/><circle cx="13.2" cy="13" r="1.3"/></svg>,
   logs:     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 2h7l3 3v9H3z"/><path d="M5 8h6M5 11h6M5 5h3"/></svg>,
   plus:     <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v10M3 8h10"/></svg>,
   play:     <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M4 3l9 5-9 5z"/></svg>,

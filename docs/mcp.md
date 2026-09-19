@@ -8,7 +8,7 @@ file that defines it, and how to add your own tools.
 
 ## What a cousin gets
 
-Every cousin spawned by the framework comes with four tools:
+Every cousin spawned by the framework comes with five tools:
 
 | Tool | Runs | Commands |
 |---|---|---|
@@ -16,6 +16,7 @@ Every cousin spawned by the framework comes with four tools:
 | `send` | `cousin-chat send` or `cousin-reply` | picked by the destination |
 | `job` | `cousin-job` | `start`, `done`, `fail`, `list`, `show` |
 | `schedule` | `cousin-schedule` | `add`, `list`, `cancel` |
+| `meeting` | `cousin-meeting` | `say`, `pass`, `minutes`, `show` ([meetings](meetings.md)) |
 
 A call names the command and its arguments:
 

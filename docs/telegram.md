@@ -45,13 +45,24 @@ whether the message came from Telegram or from the console.
 | in | voice, video, sticker, document, anything else | not relayed. The log says `skipped a message from <id> that is neither text nor a photo` | not supported |
 | in | a message from an id not in `operators` | dropped, and the stranger gets no answer. The log says `rejected message from unauthorized Telegram id <id>` | by design |
 | out | a text reply | `sendMessage` to every Telegram id of that thread's operator | works |
-| out | an image reply (`cousin-reply --image`) | `sendPhoto`, with the reply text as the caption | **lands with tracker #24.** The upload code is there (`_tg_upload`, 0.9.0), but `cousin-reply` rows do not yet carry the attachment, so today the text goes out alone |
-| out | a video reply (`cousin-reply --video`) | `sendVideo` | **lands with tracker #24** |
-| out | a voice reply | would go out as `sendAudio` (`_upload_spec`) | skipped for now |
+| out | an image reply (`cousin-reply --image`, `cousin-image`) | `sendPhoto`, uploaded as a file (`_tg_upload`), with the reply text as the caption | works (0.11.0) |
+| out | a video reply (`cousin-reply --video`, `cousin-video`) | `sendVideo`, with the caption | works (0.11.0) |
+| out | a voice reply (`cousin-voice`, an mp3) | `sendAudio`, with the caption (`_upload_spec`). It arrives as an audio file, not as a Telegram voice note | code path present, not live-tested |
 
-Telegram's own size limits apply to uploads: 10 MB for a photo and 50 MB
-for anything else. Telegram rejects a bigger file, and the bridge logs
-and skips it.
+Outbound attachments ride the reply row: `cousin-reply --image` or
+`--video`, and the media commands, record `attachment_kind` and
+`attachment_path` on the row ([chat](chat.md)), and the bridge uploads
+that file. It relays nothing else from the cousin's disk.
+
+The bridge checks each attachment before uploading it (`_unsendable`).
+A file that is missing, a photo over 10 MB, or any other file over
+50 MB (Telegram's bot upload limits, `_UPLOAD_LIMITS`) is skipped
+with a log line such as `reply 14650: attachment <path> is 12.3 MB, over
+Telegram's 10 MB limit, skipped`. The **whole reply** is skipped,
+caption included, so the operator gets nothing on Telegram for it. It
+is still in the console. Without this check, a missing file would look
+like a transient error and hold the thread's cursor on that reply for
+good.
 
 The Telegram chat and the console thread are the same conversation only
 if the operator's `name` in `[telegram]` matches the thread you use in
@@ -170,9 +181,9 @@ cousin-telegram --home cousins/wren
 
 Open the bot in Telegram and press **Start**. A bot cannot send the
 first message to a user. Until you press Start, every reply fails with
-HTTP 400 ("chat not found"). The bridge treats a 4xx as permanent:
-the journal shows `reply <id> to <user id> rejected, skipped:` followed
-by the HTTP 400, and the reply is **not** retried (`relay_outbound`,
+HTTP 400. The bridge treats a 4xx as permanent: the journal shows
+`reply <id> to <user id> rejected, skipped: HTTP 400: Bad Request: chat
+not found`, and the reply is **not** retried (`relay_outbound`,
 `_permanent`). Replies the cousin wrote before you pressed Start are not
 delivered later.
 
@@ -215,6 +226,10 @@ Then send a message and check that the cousin answers on Telegram.
 - **Permanent** (any other 4xx, such as a bot the operator blocked, or no
   Start pressed yet): logged with the message id and skipped, so one bad
   message cannot hold up the ones behind it.
+- An HTTP error in the log carries the server's reason, taken from
+  Telegram's `description` or the chat server's `error`
+  (`_describe`, 0.11.0): `HTTP 403: Forbidden: bot was blocked by the
+  user`, not just `HTTP Error 403`.
 - A pass runs about every 5 seconds (`run_bridge`, `poll_interval`).
 
 ## Security notes

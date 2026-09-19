@@ -65,9 +65,11 @@ Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"o
 
 ## Telegram
 
-Per-cousin provisioning of the Telegram bridge ([chat](../chat.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it.
+Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it.
 
-A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last people who wrote to the bot and were refused, so they can be added without looking up a numeric id.
+A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last five people who wrote to the bot and were refused, so they can be added without looking up a numeric id. Anyone who messages the bot can appear there.
+
+Discovery: while no bridge runs, which is always the case before the first operator is added, the GET (when there are no operators), the token save and the check call `getUpdates` once. The call has no offset, so it confirms nothing, and every refused sender it finds is added to `pending` (`telegram_admin.discover`). This GET therefore calls Telegram and writes `data/telegram-pending.json`. It never runs beside a live bridge.
 
 ### `GET /api/cousins/<slug>/telegram`
 

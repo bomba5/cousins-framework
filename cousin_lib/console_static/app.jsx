@@ -12,10 +12,12 @@ const NAV = [
   { id: "settings", label: "Settings", icon: I.host,    kbd: "0" },
 ];
 
-// Sidebar groups are a browser preference, not framework state: they live
-// in local storage under this key ({groups, assignments}) and nothing on
-// the server knows them (docs/reference/console-api.md, "the sidebar store moves
-// to the browser").
+// Sidebar groups ({groups, assignments}) are a per-user preference kept on
+// the server (/api/prefs/sidebar), so every browser and the phone's
+// home-screen app show the same layout. Local storage under this key is
+// only a cache for the first paint and the one-time migration of a layout
+// made before the server kept it (docs/reference/console-api.md,
+// "Preferences").
 const SIDEBAR_KEY = "console_sidebar_v1";
 const DEFAULT_GROUPS = [{ id: "sessions", name: "Sessions", collapsed: false }];
 
@@ -34,11 +36,43 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
   const [draggingSlug, setDraggingSlug] = React.useState(null);
   const [draggingGroup, setDraggingGroup] = React.useState(null);
 
+  const cache = (value) => {
+    try { localStorage.setItem(SIDEBAR_KEY, JSON.stringify(value)); } catch (_e) {}
+  };
+  const save = (value) => apiSend("POST", "/api/prefs/sidebar", { sidebar: value })
+    .catch(e => console.error("sidebar save failed:", e));
+
   const persist = (next) => {
     const merged = { groups: next.groups || config.groups, assignments: next.assignments || config.assignments };
     setConfig(merged);
-    try { localStorage.setItem(SIDEBAR_KEY, JSON.stringify(merged)); } catch (_e) {}
+    cache(merged);
+    save(merged);
   };
+
+  // The server copy wins; refetched when the page comes back to the
+  // foreground, so a change made on another device shows up. With no
+  // server copy yet, a layout this browser already had is uploaded once.
+  React.useEffect(() => {
+    let alive = true;
+    const pull = async () => {
+      const d = await apiGet("/api/prefs/sidebar");
+      if (!alive || !d) return;
+      const remote = d.sidebar;
+      if (remote && Array.isArray(remote.groups) && remote.groups.length) {
+        setConfig(remote);
+        cache(remote);
+      } else {
+        const local = loadSidebar();
+        const custom = local.groups.length > 1 || Object.keys(local.assignments || {}).length
+          || local.groups[0].name !== DEFAULT_GROUPS[0].name;
+        if (custom) save(local);
+      }
+    };
+    pull();
+    const onVisible = () => { if (document.visibilityState === "visible") pull(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
 
   const groups = config.groups.length ? config.groups : DEFAULT_GROUPS;
   const assignments = config.assignments || {};

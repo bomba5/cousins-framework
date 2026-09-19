@@ -63,6 +63,18 @@ Drops the session and clears the cookie. `200 {"ok": true}`.
 
 Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"ok": true, "user": "ana"}`. `400` new password under 8 characters, `403 current password incorrect`. Your other sessions stay logged in.
 
+## Preferences
+
+Per-user console settings kept on the server, so every browser and the phone's home-screen app show the same thing. One file per console user in `data/console-prefs/<user>.json` (mode 0600); with no users file (open mode) they are shared under `_open`.
+
+### `GET /api/prefs/sidebar`
+
+`{"sidebar": {"groups": [{"id", "name", "collapsed"}], "assignments": {"<slug>": "<group id>"}}}`, or `{"sidebar": null}` when this user never saved one. The page keeps a copy in local storage for the first paint only, and uploads a layout made before the server kept it the first time it finds no server copy.
+
+### `POST /api/prefs/sidebar`
+
+Body `{"sidebar": {...}}` in the shape above: at least one group, unique string ids, string names, assignments mapping a slug to a group id. `400` for any other shape, `413` over 64 KB. Answers `{"ok": true, "sidebar": {...}}` with the stored value.
+
 ## Fleet (the cousin list and the inspector)
 
 ### `GET /api/cousins`

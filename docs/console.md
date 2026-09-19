@@ -84,7 +84,8 @@ greyed out and can't be clicked; start it from Cousins first. A dot next to
 a name means it has replied since you last looked at its chat. You can group
 cousins: right-click one to move it to a group or make a new group, drag
 cousins between groups, drag groups to reorder, right-click a group to rename
-or delete it. Groups are stored in your browser only.
+or delete it. Groups are saved on the server per console user, so every
+browser you log in from, the phone included, shows the same groups.
 
 The page stays live over one server-sent-events stream: a snapshot on
 connect, then updates. If the connection drops it reconnects with backoff

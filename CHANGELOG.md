@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.4.0 - 2026-09-19
+
+Console sidebar groups follow the user, not the browser.
+
+- Sidebar groups are saved on the server per console user
+  (`GET`/`POST /api/prefs/sidebar`, `data/console-prefs/<user>.json`),
+  so another browser, the phone and a restart keep them. A layout made
+  earlier in a browser is uploaded the first time no server copy exists.
+- Fixes since 0.3.0: the daily flip skips a stopped cousin instead of
+  starting it; the login cookie is persistent and sessions survive a
+  console restart (token hashes in `data/console-sessions.json`); PNG
+  home-screen icons.
+
 ## 0.3.0 - 2026-09-18
 
 Memory fills in its own truth levels, and the docs are new.

@@ -41,7 +41,12 @@ def _restart_bridge(req, home):
 def register():
     @router.route("GET", "/api/cousins/{slug}/telegram")
     def show(req, slug):
-        return 200, _status(req, slug, cousin_home(req.server, slug))
+        home = cousin_home(req.server, slug)
+        # First-time setup: a token but no operator yet, so no bridge
+        # runs to notice the Start press. Look for it here.
+        if not telegram_admin.operators(home):
+            telegram_admin.discover(home, req.server.root)
+        return 200, _status(req, slug, home)
 
     @router.route("POST", "/api/cousins/{slug}/telegram/token")
     def token(req, slug):
@@ -51,6 +56,7 @@ def register():
             raise HttpError(400, "token must be a string")
         _guard(telegram_admin.set_token, home, req.server.root, slug, value)
         check = telegram_admin.check_token(home, req.server.root)
+        telegram_admin.discover(home, req.server.root)
         _restart_bridge(req, home)
         out = _status(req, slug, home)
         out["check"] = check
@@ -86,6 +92,7 @@ def register():
     @router.route("POST", "/api/cousins/{slug}/telegram/check")
     def check(req, slug):
         home = cousin_home(req.server, slug)
+        telegram_admin.discover(home, req.server.root)
         return 200, telegram_admin.check_token(home, req.server.root)
 
 

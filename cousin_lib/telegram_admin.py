@@ -228,6 +228,42 @@ def _get_me(token):
     return data["result"]
 
 
+def discover(home, root, *, call=None):
+    """Offer the people who wrote to the bot while no bridge was polling
+    it: the first-time case, where there is no operator yet, so the
+    bridge cannot run and nothing records the Start press. getUpdates
+    without an offset confirms nothing, so the bridge still gets every
+    update when it starts; and it never runs beside a live bridge, which
+    Telegram would answer with 409. Serves nobody. Returns how many
+    senders were offered, or None when it did not look."""
+    if bridge_pid(home) is not None:
+        return None
+    token = _token(home, root)
+    if not token:
+        return None
+    call = call or _get_updates
+    try:
+        updates = call(token)
+    except Exception:
+        return None
+    ops = {o["user_id"] for o in operators(home)}
+    seen = 0
+    for update in updates:
+        sender = (update.get("message") or {}).get("from") or {}
+        if sender.get("id") and sender["id"] not in ops:
+            note_refused(home, sender)
+            seen += 1
+    return seen
+
+
+def _get_updates(token):
+    url = ("https://api.telegram.org/bot%s/getUpdates?timeout=0"
+           "&allowed_updates=%%5B%%22message%%22%%5D" % token)
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        data = json.loads(resp.read())
+    return data.get("result", []) if data.get("ok") else []
+
+
 # -- lifecycle ---------------------------------------------------------
 
 def _pid_path(home):
@@ -264,7 +300,8 @@ def ready(home, root):
     if not _token(home, root):
         return "no token set"
     if not operators(home):
-        return "no operators: nobody would be allowed to talk to the bot"
+        return ("no operators yet: press Start on the bot in Telegram,"
+                " then add yourself from 'waiting to be added'")
     return None
 
 

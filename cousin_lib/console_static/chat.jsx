@@ -6,6 +6,11 @@
 // page (passed in as embedUser), else the cousin's configured operator,
 // else the console session's user. With none of the three the composer is
 // disabled and says why: there is no default operator anywhere.
+// Everything term.reset() used to do for a full pane frame, as escape
+// codes, so the clear and the repaint land in one render.
+const FRAME_PREFIX = "\x1b[0m\x1b[r\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l"
+  + "\x1b[?25h\x1b[H\x1b[2J\x1b[3J";
+
 function resolveChatUser(embedUser, cousin, sessionUser) {
   return embedUser || (cousin && cousin.operator) || sessionUser || "";
 }
@@ -815,17 +820,21 @@ function PaneView({ cousin, onClose }) {
   const applyFrame = (text, state) => {
     const term = termRef.current;
     if (!term) return;
+    if (text === lastTextRef.current) return;
     applyingRef.current = true;
     paneStateRef.current = state || null;
-    term.reset();
-    term.write(text, () => {
+    // One write that clears and repaints, never reset() then write():
+    // reset() blanks the screen at once and the write lands a render
+    // later, so a busy pane (a spinner changes it every poll) flashed
+    // blank twice a second. The prefix does what reset() did for a
+    // frame - attributes, scroll region, mouse modes off, screen and
+    // scrollback cleared, cursor home - and the frame's own control
+    // tail sets the mouse mode and the cursor again.
+    term.write(FRAME_PREFIX + text, () => {
       try { term.scrollToBottom(); } catch (_e) {}
       applyingRef.current = false;
     });
     lastTextRef.current = text;
-    // reset() drops xterm's internal focus state; re-focus so the
-    // onData handler keeps picking up keystrokes.
-    setTimeout(() => { try { term.focus(); } catch (_) {} }, 10);
   };
 
   // Boot an xterm.Terminal once per slug. `pane` frames reset and rewrite

@@ -78,6 +78,25 @@ class TestOperatorsAndPending(AdminCase):
         self.assertNotIn(106, [r["user_id"] for r in ta.pending(self.home)])
 
 
+class TestDiscover(AdminCase):
+    def test_first_time_start_press_is_offered_without_a_bridge(self):
+        ta.set_token(self.home, self.root, "wren", TOKEN)
+        updates = [{"update_id": 1, "message": {"from": {
+            "id": 42, "username": "ana", "first_name": "Ana"}}},
+            {"update_id": 2, "message": {"from": {"id": 7}}}]
+        self.assertEqual(ta.discover(self.home, self.root,
+                                     call=lambda t: updates), 2)
+        self.assertEqual([r["user_id"] for r in ta.pending(self.home)],
+                         [42, 7])
+        ta.set_operators(self.home, [{"user_id": 42, "name": "Ana"}])
+        self.assertEqual(ta.discover(self.home, self.root,
+                                     call=lambda t: updates), 1)
+
+    def test_no_token_or_a_live_bridge_means_no_look(self):
+        self.assertIsNone(ta.discover(self.home, self.root,
+                                      call=lambda t: 1 / 0))
+
+
 class TestReady(AdminCase):
     def test_reasons_in_order_then_ready(self):
         self.assertEqual(ta.ready(self.home, self.root), "disabled")

@@ -2,13 +2,26 @@
 answered; enabling a stopped cousin's bridge waits for its start."""
 import json
 import unittest
+from unittest import mock
 
+from cousin_lib import telegram_admin
 from tests.console._harness import ConsoleCase
 
 TOKEN = "123456789:" + "B" * 35
 
 
 class TestTelegramRoutes(ConsoleCase):
+    def setUp(self):
+        super().setUp()
+        # Never the network: a fake bot and one pending Start press.
+        for name, fake in (
+                ("_get_me", lambda token: {"username": "WrenBot"}),
+                ("_get_updates", lambda token: [{"update_id": 1,
+                    "message": {"from": {"id": 42, "first_name": "Ana"}}}])):
+            patch = mock.patch.object(telegram_admin, name, fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def test_provision_flow_never_leaks_the_token(self):
         self.cousin("wren")
         self.serve()
@@ -19,6 +32,9 @@ class TestTelegramRoutes(ConsoleCase):
                                  {"token": TOKEN})
         self.assertEqual(status, 200, body)
         self.assertTrue(body["token_set"])
+        self.assertEqual(body["check"], {"ok": True, "bot": "WrenBot"})
+        # first time: no operator yet, the Start press is offered anyway
+        self.assertEqual([p["user_id"] for p in body["pending"]], [42])
         self.assertNotIn(TOKEN, json.dumps(body))
         self.assertEqual(self.post("/api/cousins/wren/telegram/token",
                                    {"token": "nope"})[0], 400)

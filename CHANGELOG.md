@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.12.1 - 2026-09-19
+
+- Console pane: no more flicker while a cousin works. A full frame was
+  applied as term.reset() and then a write, so the screen went blank for
+  a render between the two, and a busy pane (the spinner changes it on
+  every poll) blinked twice a second. The frame is now one write that
+  clears and repaints; the per-frame refocus that reset() needed, which
+  also pulled focus from other inputs, is gone.
+- Telegram: the first-time setup works. With no operator the bridge
+  cannot run, so nothing recorded the Start press and "waiting to be
+  added" stayed empty. While no bridge polls, the console reads the
+  bot's pending messages itself (getUpdates without an offset: nothing
+  is confirmed, nobody is served).
+
 ## 0.12.0 - 2026-09-19
 
 Telegram provisioning in the console.

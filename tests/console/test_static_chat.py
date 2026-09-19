@@ -277,8 +277,20 @@ class PaneScrollsBack(unittest.TestCase):
     def test_applying_a_frame_lands_on_its_last_line(self):
         start = self.pane.index("const applyFrame = ")
         body = self.pane[start:self.pane.index("};", start)]
-        self.assertIn("term.reset()", body)
         self.assertIn("scrollToBottom", body)
+
+    def test_a_frame_repaints_in_one_write_without_a_blank(self):
+        # reset() blanked the screen and the write landed a render
+        # later: a busy pane flickered twice a second (2026-09-19).
+        start = self.pane.index("const applyFrame = ")
+        body = self.pane[start:self.pane.index("};", start)]
+        self.assertNotIn("term.reset()", body)
+        self.assertIn("term.write(FRAME_PREFIX + text", body)
+        src = (_STATIC / "chat.jsx").read_text()
+        prefix = src[src.index("const FRAME_PREFIX"):]
+        prefix = prefix[:prefix.index(";")]
+        for code in ("[2J", "[3J", "[H", "[0m", "[?1006l"):
+            self.assertIn(code, prefix)
 
     def test_returning_to_the_bottom_resumes_following(self):
         self.assertIn("scrollToBottom", self.pane)

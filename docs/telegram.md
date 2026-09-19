@@ -163,9 +163,13 @@ does steps 3 and 4 without a shell:
 1. Paste the token from @BotFather and save it. It is written to
    `config/telegram/<slug>.token` (0600) and checked with `getMe`; the
    panel shows the bot's @name and never the token again.
-2. Open the bot in Telegram and press **Start**. The bridge refuses you
-   (you are not an operator yet) and remembers you: you appear under
-   "waiting to be added" with your numeric id. Click **add**.
+2. Open the bot in Telegram and press **Start**. You are not an operator
+   yet, so nobody is served; the panel shows you under "waiting to be
+   added" with your numeric id. On a fresh bot no bridge runs yet (it
+   needs an operator), so the console itself reads the bot's pending
+   messages (`getUpdates` without an offset, which confirms nothing and
+   never runs beside a live bridge). Check the id and @name, then click
+   **add**.
 3. Switch the bridge **on**.
 
 The same routes are in the console API reference (`/api/cousins/<slug>/telegram`).

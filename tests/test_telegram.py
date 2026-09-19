@@ -14,6 +14,8 @@ from unittest import mock
 from cousin_lib.telegram import (
     TelegramConfigError,
     load_bridge_config,
+    _multipart,
+    _upload_spec,
     load_cursors,
     pump_inbound,
     pump_outbound,
@@ -239,11 +241,12 @@ class TestPumpInbound(_BridgeFixture):
         self.assertEqual(state["tg_offset"], 6)
         self.assertTrue(any("5" in line for line in logged))
 
-    def test_a_non_text_message_is_skipped_with_a_log_line(self):
+    def test_a_voice_message_is_skipped_with_a_log_line(self):
         cfg = self._bridge()
         sent, logged = [], []
         relay_inbound(
-            cfg, update={"message": {"from": {"id": 42}, "photo": [{}]}},
+            cfg, update={"message": {"from": {"id": 42},
+                                     "voice": {"file_id": "v"}}},
             chat_send=lambda **kw: sent.append(kw), log=logged.append)
         self.assertEqual(sent, [])
         self.assertTrue(logged)
@@ -322,6 +325,111 @@ class TestOperatorThreads(TelegramCase):
                       [{"id": 3, "type": "wren", "message": "hi Ana"}],
                       tg_send_text=lambda **kw: tg.append(kw))
         self.assertEqual([m["chat_id"] for m in tg], [43])
+
+
+class TestMediaUpload(_BridgeFixture):
+    """Tracker #13: an attachment reply uploads the file, the method and
+    field matching its kind."""
+
+    def test_kind_picks_the_method_and_field(self):
+        self.assertEqual(_upload_spec("image"), ("sendPhoto", "photo"))
+        self.assertEqual(_upload_spec("video"), ("sendVideo", "video"))
+        self.assertEqual(_upload_spec("voice"), ("sendAudio", "audio"))
+
+    def test_multipart_carries_the_fields_and_the_file_bytes(self):
+        asset = self.home / "a.png"
+        asset.write_bytes(b"\x89PNGDATA")
+        body, ctype = _multipart({"chat_id": 42, "caption": "look"},
+                                 "photo", asset)
+        boundary = ctype.split("boundary=")[1].encode()
+        self.assertTrue(ctype.startswith("multipart/form-data"))
+        self.assertIn(b"--" + boundary, body)
+        self.assertIn(b'name="chat_id"\r\n\r\n42', body)
+        self.assertIn(b'name="caption"\r\n\r\nlook', body)
+        self.assertIn(b'name="photo"; filename="a.png"', body)
+        self.assertIn(b"\x89PNGDATA", body)
+        self.assertTrue(body.endswith(b"--" + boundary + b"--\r\n"))
+
+    def test_a_relative_attachment_path_resolves_under_the_home(self):
+        cfg = self._bridge()
+        media = []
+        relay_outbound(
+            cfg,
+            new_replies=[{"message": "", "attachment_kind": "image",
+                          "attachment_path": "chat/images/x.png"}],
+            tg_send_text=lambda **kw: None,
+            tg_send_media=lambda **kw: media.append(kw))
+        self.assertEqual(media[0]["path"],
+                         str(self.home / "chat" / "images" / "x.png"))
+
+
+class TestInboundPhoto(_BridgeFixture):
+    def test_a_photo_goes_in_as_an_image_with_its_caption(self):
+        cfg = self._bridge()
+        sent = []
+        relay_inbound(
+            cfg,
+            update={"message": {"from": {"id": 42}, "caption": "my board",
+                                "photo": [{"file_id": "small"},
+                                          {"file_id": "big"}]}},
+            chat_send=lambda **kw: sent.append(kw),
+            tg_fetch=lambda file_id: (b"JPEGBYTES", "photos/f.jpg")
+            if file_id == "big" else None)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["message"], "my board")
+        self.assertEqual(sent[0]["user"], "Sam")
+        self.assertTrue(sent[0]["attachment"].startswith(
+            "data:image/jpeg;base64,"))
+
+    def test_a_captionless_photo_still_has_a_message(self):
+        # The chat server refuses an empty message.
+        cfg = self._bridge()
+        sent = []
+        relay_inbound(
+            cfg,
+            update={"message": {"from": {"id": 42},
+                                "photo": [{"file_id": "big"}]}},
+            chat_send=lambda **kw: sent.append(kw),
+            tg_fetch=lambda file_id: (b"x", "photos/f.png"))
+        self.assertTrue(sent[0]["message"])
+        self.assertTrue(sent[0]["attachment"].startswith(
+            "data:image/png;base64,"))
+
+    def test_a_photo_from_a_stranger_is_never_downloaded(self):
+        cfg = self._bridge()
+        fetched = []
+        relay_inbound(
+            cfg,
+            update={"message": {"from": {"id": 999},
+                                "photo": [{"file_id": "big"}]}},
+            chat_send=lambda **kw: None,
+            tg_fetch=lambda file_id: fetched.append(file_id),
+            log=lambda line: None)
+        self.assertEqual(fetched, [])
+
+
+class TestRootFromHome(TelegramCase):
+    def test_home_alone_finds_the_root(self):
+        # FRAMEWORK_ROOT unset, COUSIN_HOME unset: --home must suffice.
+        self._token("bottok")
+        self._toml('[telegram]\nenabled = true\n'
+                   'token_file = "config/telegram-wren.token"\n'
+                   'operators = [{user_id = 42, name = "Sam"}]\n')
+        with mock.patch.dict(os.environ, {}, clear=True):
+            cfg = load_bridge_config(self.home)
+        self.assertEqual(cfg.token, "bottok")
+
+    def test_no_root_at_all_is_a_config_error_not_a_traceback(self):
+        stray = self.root / "elsewhere" / "wren"
+        stray.mkdir(parents=True)
+        (stray / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '[telegram]\nenabled = true\ntoken_file = "t"\n'
+            'operators = [{user_id = 42, name = "Sam"}]\n')
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(TelegramConfigError) as ctx:
+                load_bridge_config(stray)
+        self.assertIn("FRAMEWORK_ROOT", str(ctx.exception))
 
 
 class TestCli(TelegramCase):

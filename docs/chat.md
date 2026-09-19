@@ -340,9 +340,9 @@ Set it up:
    # or: COUSIN_HOME=$PWD/cousins/wren cousin-telegram
    ```
 
-It finds the framework root through `FRAMEWORK_ROOT` or `COUSIN_HOME`
-in the environment; `--home` alone isn't enough and ends in a Python
-error. No `[telegram]` table, `enabled` not true, no token file or an
+It finds the framework root through `FRAMEWORK_ROOT`, or from the home
+itself when that lives at `<root>/cousins/<slug>`, so `--home` alone is
+enough for a standard install. No framework root, no `[telegram]` table, `enabled` not true, no token file or an
 empty `operators` list are all refusals with exit 2 and a message
 naming the problem.
 
@@ -351,10 +351,16 @@ How it relays:
 - In: a text message from an id in `operators` becomes a normal
   `/api/send` to the cousin's chat server, under the name you gave in
   `operators` (`operator` if you gave none). The cousin sees it like any
-  other chat line.
+  other chat line. A photo goes in as an image attachment with its
+  caption (or `[photo]`), the largest size Telegram offers, up to
+  10 MB; the cousin gets the file path to read.
 - Out: every few seconds the bridge reads each operator's thread and
   sends each new reply from the cousin there to that operator's
   Telegram id (every id that shares the name, if several do).
+- A reply with an attachment is uploaded as the file: an image as a
+  photo, a video as a video, a voice reply (mp3) as audio. Telegram's
+  own limits apply (10 MB for a photo, 50 MB otherwise); a file over
+  them is rejected, logged and skipped.
 - A message from anyone else gets no answer at all, so the bot never
   confirms it exists. The bridge logs the rejected id, so if you got
   your own id wrong you'll see it in the log instead of wondering
@@ -375,10 +381,8 @@ How it relays:
 
 Rough edges right now:
 
-- Only text goes in. A photo or voice message from Telegram isn't
-  relayed; the bridge logs that it skipped it.
-- Replies with an attachment (a generated image, voice or video) don't
-  make it out: the file isn't uploaded, so Telegram rejects the send.
-  The rejection is logged and the bridge moves on.
+- Only text and photos go in. A voice message, video, sticker or
+  document from Telegram isn't relayed; the bridge logs that it skipped
+  it. The chat server takes image attachments only.
 
 Keep the token file private. Whoever has it controls the bot.

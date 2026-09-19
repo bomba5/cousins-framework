@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+- Telegram bridge (tracker #13): a reply with an image, video or voice
+  attachment is uploaded as the file (sendPhoto, sendVideo, sendAudio).
+  Before, the send carried only a caption and Telegram rejected it.
+- Telegram bridge: a photo from an operator goes in as an image
+  attachment with its caption, largest size, up to 10 MB; a stranger's
+  photo is never downloaded. Voice, video and documents are still
+  skipped with a log line.
+- Telegram bridge: `cousin-telegram --home <home>` finds the framework
+  root from the home when `FRAMEWORK_ROOT` is unset, and no root at all
+  is exit 2 with a message instead of a Python traceback.
+
 ## 0.8.2 - 2026-09-19
 
 - Telegram bridge (tracker #18): a failed relay no longer loses the

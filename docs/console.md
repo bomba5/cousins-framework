@@ -150,6 +150,13 @@ Click a card to open the inspector drawer. From top to bottom:
   Switching restarts a running agent on the same session; if the agent is in
   the middle of a turn you get "restart anyway" instead. See
   [cousins](cousins.md#auth-login-or-api-key).
+- **Telegram.** The cousin's Telegram bridge: status (enabled, token set,
+  bridge running, what is missing), the bot's @name after a check, an enable
+  switch, a write-only token field (stored at `config/telegram/<slug>.token`,
+  never shown again), the allowed people by numeric id, and "waiting to be
+  added": whoever pressed Start on the bot and was refused, with an add
+  button, so nobody has to look up a Telegram id. The bridge starts and
+  stops with the cousin. See [chat](chat.md).
 - **Tokens today.**
 - **Files.** "browse home" opens a read-only file explorer over the cousin's
   home: a tree on the left (dotfiles behind a checkbox), a viewer on the

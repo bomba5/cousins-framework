@@ -301,3 +301,53 @@ class InspectorIdentityEditors(unittest.TestCase):
         beat = _component(self.cousins, "fmtBeat")
         self.assertIn("fmtDuration(", beat)
         self.assertRegex(beat, r"`\$\{n\}s \(")
+
+
+class TelegramPanel(unittest.TestCase):
+    """The inspector's Telegram panel: status, a write-only token box
+    cleared on save, the operators replaced as a whole list, the
+    people waiting to be added, and the enable switch gated on a token
+    and at least one operator."""
+
+    def setUp(self):
+        self.cousins = _read("cousins.jsx")
+        self.src = _component(self.cousins, "TelegramPanel")
+
+    def test_the_inspector_mounts_it(self):
+        self.assertIn("<TelegramPanel cousin={c} />",
+                      _component(self.cousins, "Inspector"))
+
+    def test_uses_the_telegram_routes(self):
+        self.assertIn("/api/cousins/${cousin.slug}/telegram", self.src)
+        for path in ('"/token"', '"/operators"', '"/enabled"', '"/check"'):
+            self.assertIn(path, self.src, path)
+
+    def test_the_token_is_write_only(self):
+        self.assertIn('type="password"', self.src)
+        self.assertIn('autoComplete="off"', self.src)
+        # The draft is cleared before the send, and only token_set shows.
+        body = self.src[self.src.index("const saveToken"):]
+        body = body[:body.index("};")]
+        self.assertLess(body.index('setTokenDraft("")'),
+                        body.index('post("/token"'))
+        self.assertIn("st.token_set", self.src)
+        self.assertIn("never shown again", self.src)
+
+    def test_operators_are_sent_as_the_whole_list(self):
+        self.assertIn("{ operators: ops.map(", self.src)
+        self.assertIn("p.first_name || p.username", self.src)
+
+    def test_enable_is_gated_on_token_and_operators(self):
+        self.assertIn("!st.token_set", self.src)
+        self.assertIn("ops.length === 0", self.src)
+        self.assertIn("disabled={busy || !!blocker}", self.src)
+
+    def test_hints_are_present(self):
+        self.assertIn("A person presses Start on the bot; they appear here.",
+                      self.src)
+        self.assertIn("@BotFather", self.src)
+        self.assertIn("waiting to be added", self.src)
+
+    def test_no_em_dash(self):
+        self.assertNotIn("—", self.src)
+        self.assertNotIn("–", self.src)

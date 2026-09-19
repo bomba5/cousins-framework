@@ -6,8 +6,8 @@ that sends your content to a third party. It stays off until it is fully
 configured, and refuses to start otherwise.
 
 Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
-`cousin-telegram`). Tests: `tests/test_telegram.py`. Unit template:
-`systemd/cousin-telegram@.service`.
+`cousin-telegram`). Tests: `tests/test_telegram.py`. Provisioning and lifecycle:
+`cousin_lib/telegram_admin.py`.
 
 ## What it does
 
@@ -149,25 +149,27 @@ following is true (`load_bridge_config`):
 
 ### 5. Provisioning from the console
 
-> _Placeholder: the console is gaining a way to set the token and the
-> operator list without a shell (in progress). This section will
-> describe it once it lands. Until then, use steps 3 and 4._
+The cousin's inspector has a **Telegram** panel ([console](console.md)) that
+does steps 3 and 4 without a shell:
 
-### 6. Run it as a service
+1. Paste the token from @BotFather and save it. It is written to
+   `config/telegram/<slug>.token` (0600) and checked with `getMe`; the
+   panel shows the bot's @name and never the token again.
+2. Open the bot in Telegram and press **Start**. The bridge refuses you
+   (you are not an operator yet) and remembers you: you appear under
+   "waiting to be added" with your numeric id. Click **add**.
+3. Switch the bridge **on**.
 
-Render `systemd/cousin-telegram@.service` like the other unit templates
-([systemd/README.md](../systemd/README.md)). The install loop there
-renders every template, including this one. Then:
+The same routes are in the console API reference (`/api/cousins/<slug>/telegram`).
 
-```
-systemctl --user enable --now cousin-telegram@wren.service
-journalctl --user -u cousin-telegram@wren.service -f
-```
+### 6. When it runs
 
-The unit restarts the bridge after a crash (`Restart=on-failure`, 10 s).
-It does not restart it after exit 2, which is a configuration refusal
-that restarting can't fix. Fix the config, then `systemctl --user
-restart cousin-telegram@wren.service`.
+The bridge belongs to its cousin, like the chat server: it starts when the
+cousin starts (a console start, `cousin-start@`, a flip) if `[telegram]` is
+enabled and complete, and stops when the cousin stops. Its pid is in
+`data/telegram.pid` and its output in `data/telegram.log`. A token or operator
+change from the console restarts it. There is no separate service unit: two
+bridges polling the same bot make Telegram answer 409 Conflict.
 
 To run it by hand, `--home` alone is enough on a standard install. The
 root comes from `FRAMEWORK_ROOT` or from the home's location:

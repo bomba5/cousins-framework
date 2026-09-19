@@ -63,6 +63,32 @@ Drops the session and clears the cookie. `200 {"ok": true}`.
 
 Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"ok": true, "user": "ana"}`. `400` new password under 8 characters, `403 current password incorrect`. Your other sessions stay logged in.
 
+## Telegram
+
+Per-cousin provisioning of the Telegram bridge ([chat](../chat.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it.
+
+A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last people who wrote to the bot and were refused, so they can be added without looking up a numeric id.
+
+### `GET /api/cousins/<slug>/telegram`
+
+The status.
+
+### `POST /api/cousins/<slug>/telegram/token`
+
+Body `{"token"}`. Stores it and checks it with Telegram (`getMe`); answers the status plus `check: {"ok", "bot"?, "error"?}`. `400` for something that is not a bot token. A running bridge restarts on the new token.
+
+### `POST /api/cousins/<slug>/telegram/operators`
+
+Body `{"operators": [{"user_id", "name"}]}`, the whole list. `400` for a non-numeric or repeated id or a bad name.
+
+### `POST /api/cousins/<slug>/telegram/enabled`
+
+Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge: "started"`, or `"starts with the cousin"` when it is stopped), stops it when false.
+
+### `POST /api/cousins/<slug>/telegram/check`
+
+`getMe` with the stored token: `{"ok", "bot"?, "error"?}`.
+
 ## Meetings
 
 A chat shared by the signed-in user and several running cousins, in rounds ([meetings](../meetings.md)). The store is `data/meetings.db`; cousins speak through `cousin-meeting`, so changes also arrive from outside the console and the event stream reports them as `meeting-change` (`{"id", "op"}`). A refusal (not your floor, a stopped or remote participant, a closed meeting) is `400` with the reason in `error`; an unknown id is `404`. The user's entries carry the signed-in user name.

@@ -330,6 +330,8 @@ function Inspector({ cousin: c, onClose, onAct }) {
 
         <PeerMessagePanel cousin={c} />
 
+        <TelegramPanel cousin={c} />
+
         <ClaudeMdEditor cousin={c} />
 
         <LoopsEditor cousin={c} />
@@ -593,6 +595,251 @@ function AuthField({ cousin }) {
       {err && <div style={{ padding: "5px 9px", fontSize: 11, fontFamily: "var(--mono)",
                             color: "var(--red)", background: "oklch(from var(--red) l c h / 0.08)", borderRadius: 3 }}>{err}</div>}
     </div>
+  );
+}
+
+// The cousin's Telegram bridge (GET/POST /api/cousins/<slug>/telegram).
+// The token is write-only: it lives in the password box until the save
+// sends it, then the box is cleared and the page only ever shows
+// "token set". Operators are replaced as a whole list on every change;
+// people who pressed Start on the bot wait in `pending` until added.
+function fmtTgAt(iso) {
+  if (!iso) return "";
+  const t = new Date(iso);
+  if (isNaN(t.getTime())) return String(iso);
+  const hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return t.toDateString() === new Date().toDateString()
+    ? hm : `${t.toLocaleDateString([], { month: "short", day: "numeric" })} ${hm}`;
+}
+
+function TelegramPanel({ cousin }) {
+  const [st, setSt] = React.useState(null);
+  const [loadErr, setLoadErr] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+  const [note, setNote] = React.useState(null);
+  const [bot, setBot] = React.useState(null);
+  const [tokenDraft, setTokenDraft] = React.useState("");
+  const [newId, setNewId] = React.useState("");
+  const [newName, setNewName] = React.useState("");
+  const url = `/api/cousins/${cousin.slug}/telegram`;
+
+  const load = React.useCallback(async () => {
+    const d = await apiGet(url);
+    if (d) { setSt(d); setLoadErr(false); } else setLoadErr(true);
+  }, [url]);
+  React.useEffect(() => {
+    setSt(null); setLoadErr(false); setErr(null); setNote(null); setBot(null);
+    setTokenDraft(""); setNewId(""); setNewName("");
+    load();
+    // Poll so a person who just pressed Start shows up without a click.
+    const id = setInterval(load, 10000);
+    return () => clearInterval(id);
+  }, [cousin.slug, load]);
+
+  // One POST; the answer carries the whole status, which replaces ours.
+  const post = async (path, body) => {
+    setBusy(true); setErr(null); setNote(null);
+    try {
+      const { r, d } = await apiSend("POST", url + path, body);
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if ("enabled" in d) setSt(d);
+      return d;
+    } catch (e) {
+      setErr(String(e.message || e));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyCheck = (c) => {
+    if (!c) return;
+    if (c.ok) { setBot(c.bot || ""); setNote(c.bot ? `token works: @${c.bot}` : "token works"); }
+    else { setBot(null); setErr("check failed: " + (c.error || "unknown error")); }
+  };
+
+  const saveToken = async () => {
+    if (busy || !tokenDraft.trim()) return;
+    const token = tokenDraft;
+    setTokenDraft("");
+    const d = await post("/token", { token });
+    if (d) applyCheck(d.check);
+  };
+
+  const check = async () => {
+    const d = await post("/check");
+    applyCheck(d);
+  };
+
+  const setEnabled = async (enabled) => {
+    const d = await post("/enabled", { enabled });
+    if (d && d.bridge) setNote(`bridge: ${d.bridge}`);
+  };
+
+  const saveOperators = async (ops, msg) => {
+    const d = await post("/operators", { operators: ops.map(o => ({ user_id: o.user_id, name: o.name })) });
+    if (d) setNote(msg);
+    return !!d;
+  };
+
+  const ops = st?.operators || [];
+  const pending = st?.pending || [];
+  const idText = newId.trim();
+  const idProblem = idText === "" ? null
+    : !/^\d+$/.test(idText) || Number(idText) <= 0 ? "a numeric user id"
+    : ops.some(o => String(o.user_id) === idText) ? "already an operator" : null;
+  const nameProblem = newName.length > 64 ? "at most 64 characters" : null;
+
+  const addOperator = async () => {
+    if (busy || !idText || idProblem || nameProblem) return;
+    const ok = await saveOperators([...ops, { user_id: Number(idText), name: newName.trim() }],
+                                   `added ${newName.trim() || idText}`);
+    if (ok) { setNewId(""); setNewName(""); }
+  };
+  const removeOperator = (uid) => {
+    const gone = ops.find(o => o.user_id === uid);
+    saveOperators(ops.filter(o => o.user_id !== uid), `removed ${gone?.name || uid}`);
+  };
+  const addPending = (p) => {
+    const name = (p.first_name || p.username || "").slice(0, 64);
+    saveOperators([...ops, { user_id: p.user_id, name }], `added ${name || p.user_id}`);
+  };
+
+  const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
+  const mono = { fontFamily: "var(--mono)", fontSize: 11 };
+  const hintStyle = { fontSize: 10, color: "var(--fg-3)" };
+
+  if (!st) {
+    return (
+      <>
+        <SectionLabel style={{ marginTop: 20 }}>telegram</SectionLabel>
+        <div style={{ ...mono, color: "var(--fg-3)" }}>{loadErr ? "telegram status unavailable" : "loading..."}</div>
+      </>
+    );
+  }
+
+  // `ready` says "disabled" first while the bridge is off, so the enable
+  // gate reads the token and operators directly.
+  const blocker = !st.token_set ? "save a token first"
+    : ops.length === 0 ? "add an operator first" : null;
+  const empty = !st.token_set && ops.length === 0 && pending.length === 0;
+
+  return (
+    <>
+      <SectionLabel style={{ marginTop: 20 }}>telegram</SectionLabel>
+      <div data-telegram-panel style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ ...mono, color: "var(--fg-2)", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <Pill tone={st.enabled ? "green" : "gray"}>{st.enabled ? "enabled" : "disabled"}</Pill>
+          <Pill tone={st.running ? "green" : "gray"}>{st.running ? "bridge running" : "bridge not running"}</Pill>
+          <span style={{ color: st.token_set ? "var(--fg-1)" : "var(--fg-3)" }}>{st.token_set ? "token set" : "no token"}</span>
+          {bot && <span style={{ color: "var(--fg-1)" }}>@{bot}</span>}
+          <button className="btn ghost" style={small} disabled={busy || !st.token_set} onClick={check}
+                  title="ask Telegram (getMe) whether the stored token works">check</button>
+        </div>
+        {st.ready && st.ready !== "disabled" && (
+          <div style={{ ...mono, fontSize: 10, color: "var(--amber)" }}>{st.ready}</div>
+        )}
+
+        {empty && (
+          <div style={{ ...hintStyle, lineHeight: 1.6 }}>
+            Setup: 1) create the bot with @BotFather, 2) paste the token below,
+            3) open the bot in Telegram and press Start, 4) add yourself from
+            "waiting to be added", 5) enable.
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {st.enabled ? (
+            <button className="btn" disabled={busy} onClick={() => setEnabled(false)}>disable</button>
+          ) : (
+            <button className="btn primary" disabled={busy || !!blocker} onClick={() => setEnabled(true)}>enable</button>
+          )}
+          {!st.enabled && blocker && <span style={hintStyle}>{blocker}</span>}
+          {st.enabled && !st.running && cousin.status !== "running" && (
+            <span style={hintStyle}>starts with the cousin</span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <input className="txt" type="password" autoComplete="off" spellCheck={false}
+                   value={tokenDraft} placeholder={st.token_set ? "paste a new bot token" : "paste the bot token"}
+                   style={{ flex: "1 1 180px", minWidth: 0 }}
+                   onChange={e => setTokenDraft(e.target.value)}
+                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); saveToken(); }
+                                     if (e.key === "Escape") { e.stopPropagation(); setTokenDraft(""); } }} />
+            <button className="btn primary" style={small} disabled={busy || !tokenDraft.trim()} onClick={saveToken}>
+              save token
+            </button>
+          </div>
+          <span style={hintStyle}>From @BotFather: /newbot or /mybots &gt; API Token. Stored on the server only (0600); never shown again.</span>
+        </div>
+
+        <div>
+          <div style={{ ...mono, fontSize: 10, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+            operators ({ops.length})
+          </div>
+          <div style={{ border: "1px solid var(--line)", borderRadius: 3, background: "var(--bg-0)", padding: 8,
+                        display: "flex", flexDirection: "column", gap: 6 }}>
+            {ops.length === 0 && (
+              <div style={{ ...mono, color: "var(--fg-3)" }}>nobody yet: the bot answers no one.</div>
+            )}
+            {ops.map(o => (
+              <div key={o.user_id} style={{ ...mono, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ color: "var(--fg-0)" }}>{o.name || <span style={{ color: "var(--fg-3)" }}>(no name)</span>}</span>
+                <span style={{ color: "var(--fg-3)" }}>{o.user_id}</span>
+                <span style={{ flex: 1 }} />
+                <button className="btn danger" style={small} disabled={busy}
+                        onClick={() => removeOperator(o.user_id)} title="remove from the allowed list">remove</button>
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <input className="txt" value={newId} placeholder="user id" inputMode="numeric"
+                     style={{ flex: "1 1 90px", minWidth: 0 }} onChange={e => setNewId(e.target.value)}
+                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addOperator(); } }} />
+              <input className="txt" value={newName} placeholder="name" maxLength={64}
+                     style={{ flex: "2 1 120px", minWidth: 0 }} onChange={e => setNewName(e.target.value)}
+                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addOperator(); } }} />
+              <button className="btn" style={small} disabled={busy || !idText || !!idProblem || !!nameProblem}
+                      onClick={addOperator}>add</button>
+            </div>
+            {(idProblem || nameProblem) && <span style={hintStyle}>{idProblem || nameProblem}</span>}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ ...mono, fontSize: 10, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+            waiting to be added ({pending.length})
+          </div>
+          {pending.length === 0 ? (
+            <div style={{ ...mono, color: "var(--fg-3)" }}>no one waiting.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {pending.map(p => (
+                <div key={p.user_id} style={{ ...mono, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", color: "var(--fg-1)" }}>
+                  {p.username && <span>@{p.username}</span>}
+                  {p.first_name && <span>{p.username ? `(${p.first_name})` : p.first_name}</span>}
+                  <span style={{ color: "var(--fg-3)" }}>{p.user_id}</span>
+                  <span style={{ color: "var(--fg-3)" }}>pressed Start {fmtTgAt(p.at)}</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="btn" style={small} disabled={busy} onClick={() => addPending(p)}
+                          title="append to the operators">add</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ ...hintStyle, marginTop: 4 }}>A person presses Start on the bot; they appear here.</div>
+        </div>
+
+        {note && <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{note}</span>}
+        {err && <div style={{ padding: "5px 9px", fontSize: 11, fontFamily: "var(--mono)",
+                              color: "var(--red)", background: "oklch(from var(--red) l c h / 0.08)", borderRadius: 3 }}>{err}</div>}
+        <div>
+          <button className="btn ghost" style={small} disabled={busy} onClick={load}>refresh</button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1467,4 +1714,4 @@ function FormField({ label, hint, children }) {
   );
 }
 
-Object.assign(window, { CousinsView, CousinCard, RemoteCousinCard, RemoteSpawnForm, CopyButton, Inspector, IdentityField, AuthField, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });
+Object.assign(window, { CousinsView, CousinCard, RemoteCousinCard, RemoteSpawnForm, CopyButton, Inspector, IdentityField, AuthField, TelegramPanel, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });

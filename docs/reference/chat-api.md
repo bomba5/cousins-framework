@@ -180,7 +180,7 @@ Titles and paths only, never file contents. The stored message never gets the su
 | `cousin.toml [memory]` | `proactive_recall` | true |
 | | `recall_keyword_only` | false |
 
-Without `config/embedding.toml` there's no semantic score, so nothing is appended unless the cousin sets `recall_keyword_only = true`, in which case any keyword hit counts. The search runs before the send answers, so a slow embedding service slows the send down (by at most the embedding timeout). Any error means the line goes out without a suffix.
+Without `config/embedding.toml` there's no semantic score, so nothing is appended unless the cousin sets `recall_keyword_only = true`, in which case any keyword hit counts. The search runs before the send answers, so a slow search slows the send down, by at most 4 seconds (`RECALL_BUDGET_SECONDS` in `cousin_lib/server/app.py`). Past that budget the message goes out without the suffix, and the search finishes on its own thread. Any error also means the line goes out without a suffix.
 
 ## Chat hooks
 

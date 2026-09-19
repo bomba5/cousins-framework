@@ -108,9 +108,11 @@ these locations - writing anywhere else means search cannot find it:
   lossless.
 - `cousin-memory activity "<brief>"` - checkpoint what you are doing
   now, so a recovery has context.
-- `cousin-memory search "<query>"` - keyword search over `memory/`
-  and `notes/`. It finds only what you wrote: an empty memory
-  directory searches as empty.
+- `cousin-memory search "<query>"` - search over `memory/`, `notes/`
+  and the harness auto-memory when one is configured: keyword matches,
+  plus matches by meaning when `config/embedding.toml` sets up an
+  embedding service. It finds only what was written there: an empty
+  memory directory searches as empty.
 
 Write memory as you work, not at the end. A session that ends without
 STATUS reconciled and durable memories extracted fails its exit audit.

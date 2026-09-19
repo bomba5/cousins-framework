@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 0.9.0 - 2026-09-19
 
 - Telegram bridge (tracker #13): a reply with an image, video or voice
   attachment is uploaded as the file (sendPhoto, sendVideo, sendAudio).

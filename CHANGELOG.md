@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.7.0 - 2026-09-19
+
+The memory scope `both` is retired.
+
+- `[memory] scope` is `private` or `shared`. `shared` means the cousin may
+  propose memories to the shared tier; every cousin reads the shared tier
+  and keeps its private memory whatever its scope, so `both` behaved
+  exactly like `shared` and promised a difference that never existed.
+- Backward compatible: a `cousin.toml` with `both` is read as `shared`, and
+  spawn, the console and `--memory-scope` still accept `both` and store
+  `shared`. The spawn dialog offers only the two.
+
 ## 0.6.0 - 2026-09-19
 
 Meetings: a chat shared by the user and several running cousins.

@@ -26,6 +26,8 @@ from cousin_lib import agent_auth, memory
 from cousin_lib.config import (
     EFFORT_LEVELS,
     MEMORY_SCOPES,
+    RETIRED_SCOPES,
+    normalize_scope,
     CousinConfig,
     FrameworkConfig,
     MissingConfigError,
@@ -84,7 +86,8 @@ def _check_spawn_options(*, model, effort, heartbeat, memory_scope):
             or heartbeat <= 0):
         raise SpawnError("heartbeat must be a positive number of seconds,"
                          " got %r" % (heartbeat,))
-    if memory_scope is not None and memory_scope not in MEMORY_SCOPES:
+    if memory_scope is not None \
+            and normalize_scope(memory_scope) not in MEMORY_SCOPES:
         raise SpawnError("memory scope must be one of %s, got %r"
                          % (", ".join(MEMORY_SCOPES), memory_scope))
 
@@ -162,7 +165,8 @@ def _write_cousin_toml(home, *, slug, name, role, port, operator=None,
     if heartbeat is not None:
         text += "\n[heartbeat]\ncontext_beat_seconds = %d\n" % heartbeat
     if memory_scope is not None:
-        text += "\n[memory]\nscope = %s\n" % _toml_quote(memory_scope)
+        text += "\n[memory]\nscope = %s\n" % _toml_quote(
+            normalize_scope(memory_scope))
     tomllib.loads(text)
     fd, tmp = tempfile.mkstemp(dir=home, suffix=".toml.tmp")
     with os.fdopen(fd, "w") as fh:
@@ -594,7 +598,7 @@ def check_identity_value(key, value):
             raise SpawnError("operator must not contain control"
                              " characters")
     elif key == "memory_scope":
-        if value not in MEMORY_SCOPES:
+        if normalize_scope(value) not in MEMORY_SCOPES:
             raise SpawnError("memory_scope must be one of %s, got %r"
                              % (", ".join(MEMORY_SCOPES), value))
     elif key == "heartbeat":
@@ -613,6 +617,8 @@ def persist_identity(home, key, value):
     re-parsed and round-trip checked before the atomic rename, so a
     refused value leaves the file as it was."""
     from cousin_lib.console.toml_edit import write_key
+    if key == "memory_scope":
+        value = normalize_scope(value)
     check_identity_value(key, value)
     table, toml_key = IDENTITY_KEYS[key]
     try:
@@ -1018,8 +1024,11 @@ def spawn_main(argv=None):
     parser.add_argument("--heartbeat", type=int, metavar="SECONDS",
                         help="cousin.toml [heartbeat] context_beat_seconds"
                              " (absent: the documented default)")
-    parser.add_argument("--memory-scope", choices=MEMORY_SCOPES,
-                        help="cousin.toml [memory] scope (absent: private)")
+    parser.add_argument("--memory-scope",
+                        choices=MEMORY_SCOPES + tuple(RETIRED_SCOPES),
+                        metavar="{%s}" % ",".join(MEMORY_SCOPES),
+                        help="cousin.toml [memory] scope (absent: private);"
+                             " shared = may propose to the shared tier")
     parser.add_argument("--start", action="store_true",
                         help="start the cousin (tmux session + chat"
                              " server) after creating it; on an EXISTING"

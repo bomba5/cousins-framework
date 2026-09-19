@@ -571,7 +571,7 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(body["default_model"], DEFAULT_MODELS[0])
         self.assertEqual(body["efforts"], list(EFFORT_LEVELS))
         self.assertEqual(body["default_effort"], "high")
-        self.assertEqual(body["memory_scopes"], ["private", "shared", "both"])
+        self.assertEqual(body["memory_scopes"], ["private", "shared"])
         self.assertEqual(body["default_memory_scope"], "private")
         self.assertEqual(body["default_heartbeat"], 3600)
         self.assertEqual(body["heartbeat_bounds"], [60, 30 * 86400])
@@ -601,11 +601,11 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(data["runtime"], {"model": "m-one",
                                            "effort": "medium"})
         self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
-        self.assertEqual(data["memory"]["scope"], "both")
+        self.assertEqual(data["memory"]["scope"], "shared")
         row = self.get("/api/cousins")[1]["cousins"][0]
         self.assertEqual((row["model"], row["effort"], row["heartbeat"],
                           row["memoryScope"]),
-                         ("m-one", "medium", 600, "both"))
+                         ("m-one", "medium", 600, "shared"))
         for bad in ({"effort": "ultra"}, {"memory_scope": "all"},
                     {"heartbeat": 0}, {"heartbeat": "x"},
                     {"model": "two words"}):
@@ -627,7 +627,7 @@ class TestIdentityEditors(ConsoleCase):
     daemon loads every cousin.toml on each tick)."""
 
     ROUTES = (("operator", "operator", "Kestrel", True),
-              ("memory-scope", "memory_scope", "both", False),
+              ("memory-scope", "memory_scope", "shared", False),
               ("heartbeat", "heartbeat", 7200, False))
 
     def test_each_write_persists_round_trips_and_refreshes_the_fleet(self):
@@ -648,14 +648,14 @@ class TestIdentityEditors(ConsoleCase):
             self.assertTrue(refresh, route)
         cfg = CousinConfig.load(home)
         self.assertEqual((cfg.operator_name, cfg.memory_scope,
-                          cfg.heartbeat_seconds), ("Kestrel", "both", 7200))
+                          cfg.heartbeat_seconds), ("Kestrel", "shared", 7200))
         text = (home / "cousin.toml").read_text()
         self.assertIn("# a hand note", text)
         self.assertEqual(tomllib.loads(text)["runtime"],
                          {"session_id": "abc"})
         row = self.get("/api/cousins")[1]["cousins"][0]
         self.assertEqual((row["operator"], row["memoryScope"],
-                          row["heartbeat"]), ("Kestrel", "both", 7200))
+                          row["heartbeat"]), ("Kestrel", "shared", 7200))
         last = [d for k, d in seen if k == "cousins-refresh"][-1]
         self.assertEqual(last[0]["heartbeat"], 7200)
 

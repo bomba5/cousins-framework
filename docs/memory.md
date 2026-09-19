@@ -493,7 +493,7 @@ a cousin whose `cousin.toml` says:
 
 ```toml
 [memory]
-scope = "shared"     # or "both"; the default "private" never nominates
+scope = "shared"     # may nominate; the default "private" never does
 ```
 
 Every cousin's boot packet carries the canonical shared tier in its

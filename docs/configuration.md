@@ -445,7 +445,7 @@ name = "ana"
 
 | key | default | meaning |
 |---|---|---|
-| `scope` | `"private"` | `private`, `shared` or `both` |
+| `scope` | `"private"` | `private` or `shared`: whether the cousin may propose memories to the shared tier. Every cousin reads the shared tier and keeps its private memory either way. The retired `both` is read as `shared` |
 | `proactive_recall` | `true` | `false` stops the chat server adding recall lines to your messages |
 | `recall_keyword_only` | `false` | `true` lets keyword-only hits into recall lines when there's no embedding service |
 

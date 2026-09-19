@@ -137,7 +137,7 @@ Click a card to open the inspector drawer. From top to bottom:
   button:
   - operator: one line, up to 64 characters, no leading or trailing spaces.
     Needs a restart (the chat server reads it at start).
-  - scope: `private`, `shared` or `both`. Applies at once.
+  - scope: `private` or `shared` (may propose to the shared tier). Applies at once.
   - heartbeat: whole seconds from 60 to 2592000 (30 days). Applies at the
     loops daemon's next tick.
 
@@ -203,7 +203,7 @@ itself is described in [cousins](cousins.md#generations-and-the-flip).
 | operator | the person it answers to; blank is allowed |
 | model, effort | from `config/harness.toml [agent]` (`models`, `default_model`, `default_effort`); without `models` a built-in list is offered |
 | heartbeat | seconds, default 3600 |
-| memory scope | private, shared, both |
+| memory scope | private, shared |
 
 "create cousin" creates it and then starts it. If the create works and the
 start fails, the cousin exists and you can start it from its card once you

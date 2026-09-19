@@ -80,7 +80,8 @@ class TestCousinConfig(unittest.TestCase):
             '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
             '[memory]\nscope = "both"\n'
         )
-        self.assertEqual(CousinConfig.load(home).memory_scope, "both")
+        # "both" is retired: read as its successor "shared"
+        self.assertEqual(CousinConfig.load(home).memory_scope, "shared")
 
     def test_proactive_recall_defaults_on(self):
         # A colleague remembers without being asked unless told not to.

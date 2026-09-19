@@ -194,13 +194,13 @@ def _is_marked_shareable(body):
 def plan_bulk_propose(home, slug):
     """Plan (never write) the bulk nomination of a cousin's shareable
     memories. The perimeter, outermost first: the cousin's [memory]
-    scope must be 'shared' or 'both' (private and UNSET are excluded -
+    scope must be 'shared' (private and UNSET are excluded -
     deny-on-uncertainty, because a privacy gate defaults opposite to a
     retention default); only project_/reference_ files; only files
     marked shareable; deduplicated against canonical and pending."""
     config = CousinConfig.load(home)
     scope = getattr(config, "memory_scope", "private")
-    plan = {"eligible": scope in ("shared", "both"), "scope": scope,
+    plan = {"eligible": scope == "shared", "scope": scope,
             "propose": [], "skipped": []}
     if not plan["eligible"]:
         return plan

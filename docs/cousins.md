@@ -78,7 +78,7 @@ Every option:
 | `--model` | `[runtime] model` |
 | `--effort` | `[runtime] effort`: `low`, `medium`, `high`, `xhigh`, `max` |
 | `--heartbeat` | `[heartbeat] context_beat_seconds` (default 3600) |
-| `--memory-scope` | `[memory] scope`: `private` (default), `shared`, `both` |
+| `--memory-scope` | `[memory] scope`: `private` (default) or `shared` (may propose memories to the shared tier; the retired `both` is read as `shared`) |
 | `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
 

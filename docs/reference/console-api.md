@@ -155,7 +155,7 @@ What the spawn dialog offers:
 
 ```json
 {"models": [...], "default_model": "...", "efforts": ["low","medium","high","xhigh","max"],
- "default_effort": "high", "memory_scopes": ["private","shared","both"],
+ "default_effort": "high", "memory_scopes": ["private","shared"],
  "default_memory_scope": "private", "default_heartbeat": 3600,
  "heartbeat_bounds": [60, 2592000], "operator_max_chars": 64}
 ```

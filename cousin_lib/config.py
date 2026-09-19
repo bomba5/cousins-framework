@@ -23,7 +23,17 @@ class MissingConfigError(Exception):
 # default that ever reaches an agent: a {model} placeholder with no
 # value configured anywhere is a spawn error (cousin_lib.spawn).
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
-MEMORY_SCOPES = ("private", "shared", "both")
+MEMORY_SCOPES = ("private", "shared")
+# Retired scope names, still read so an older cousin.toml keeps working:
+# "both" behaved exactly like "shared" (may nominate to the shared tier)
+# and every cousin always keeps its private memory, so the name promised
+# a difference that never existed.
+RETIRED_SCOPES = {"both": "shared"}
+
+
+def normalize_scope(value):
+    """A scope as stored today: a retired name maps to its successor."""
+    return RETIRED_SCOPES.get(value, value)
 # The spawn dialog's catalogue when config/harness.toml [agent] sets no
 # `models`. Each id was accepted by the agent CLI; the [1m] ids are the
 # 1M-context variants. The first entry is the fallback default.
@@ -83,7 +93,8 @@ class CousinConfig:
             chat_host=data.get("chat", {}).get("host"),
             peer_visible=bool(cousin.get("peer_visible", True)),
             tmux_session=data.get("chat", {}).get("tmux_session", slug),
-            memory_scope=data.get("memory", {}).get("scope", "private"),
+            memory_scope=normalize_scope(
+                data.get("memory", {}).get("scope", "private")),
             heartbeat_seconds=int(
                 data.get("heartbeat", {})
                 .get("context_beat_seconds", 3600)),

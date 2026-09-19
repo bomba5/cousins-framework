@@ -573,7 +573,7 @@ class TestPersistIdentityValues(CreateCase):
         self.assertEqual(text.count("[heartbeat]"), 1)
         cfg = CousinConfig.load(out["home"])
         self.assertEqual((cfg.operator_name, cfg.memory_scope,
-                          cfg.heartbeat_seconds), ("Kestrel", "both", 600))
+                          cfg.heartbeat_seconds), ("Kestrel", "shared", 600))
 
     def test_refuses_bad_values_and_leaves_the_file_untouched(self):
         from cousin_lib.spawn import persist_identity
@@ -664,11 +664,11 @@ class TestCreateWithRuntimeOptions(CreateCase):
         self.assertEqual(data["runtime"], {"model": "m-one",
                                            "effort": "medium"})
         self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
-        self.assertEqual(data["memory"]["scope"], "both")
+        self.assertEqual(data["memory"]["scope"], "shared")
         from cousin_lib.config import CousinConfig
         cfg = CousinConfig.load(out["home"])
         self.assertEqual((cfg.model, cfg.effort, cfg.heartbeat_seconds,
-                          cfg.memory_scope), ("m-one", "medium", 600, "both"))
+                          cfg.memory_scope), ("m-one", "medium", 600, "shared"))
 
     def test_options_left_out_write_no_table(self):
         root = self._framework_root()

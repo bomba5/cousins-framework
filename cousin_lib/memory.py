@@ -617,8 +617,8 @@ def _cmd_propose_shared(args):
     slug = CousinConfig.load(home).slug
     plan = plan_bulk_propose(home, slug)
     if not plan["eligible"]:
-        print("not eligible: [memory] scope is %r (need 'shared' or"
-              " 'both'; private and unset are excluded by design)"
+        print("not eligible: [memory] scope is %r (need 'shared';"
+              " private and unset are excluded by design)"
               % plan["scope"])
         return 0
     for item in plan["propose"]:

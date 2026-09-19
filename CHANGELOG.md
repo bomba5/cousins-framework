@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.0.2 - 2026-09-19
+
+- Console on phones: nothing is cut off on the right any more, on any view,
+  the inspector and the modals included. Single-column grids used a bare
+  `1fr`, whose minimum is the widest child's content, so one unbreakable line
+  (an activity line, a path, a table) made the column wider than the screen,
+  and `.main`'s overflow hid the rest. Grids now use `minmax(0, 1fr)`, long
+  strings break, wide tables scroll in their own panel, the tracker becomes
+  labelled cards, and the inspector starts below the iPhone status bar.
+  Desktop is unchanged.
+
 ## 1.0.1 - 2026-09-19
 
 - Tokens page: the 14-day series showed only today. It read only the

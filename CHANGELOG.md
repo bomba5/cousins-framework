@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.0.3 - 2026-09-19
+
+From install re-test 5 (a clean Ubuntu 24.04, the docs followed literally;
+verdict: works as written).
+
+- Tests: the flip tests no longer leave a real chat server running on
+  :8100 after the suite (the respawn launched one for a temp home).
+- Install docs: a stand-in agent for trying it without a Claude login;
+  the console user is added before the console starts; a piped password
+  for scripted installs; the first-run theme picker; the test summary and
+  its duration; `~/.claude.json` entries and the ollama group on uninstall.
+- README quick start agrees with the install guide: `python3-venv` and
+  tmux, the clone location the LAN drop-in expects, `cousin-tool-surface`,
+  and port 8600.
+
 ## 1.0.2 - 2026-09-19
 
 - Console on phones: nothing is cut off on the right any more, on any view,

@@ -79,7 +79,9 @@ context". The systemd units set all of this themselves.
 python3 -m unittest discover -s tests
 ```
 
-It takes a few minutes. The last line has to say `OK` (a few skips are fine).
+It takes a few minutes (about ten on a 2-core VM). The summary has to say
+`OK` (a few skips are fine); a line or two of test output can print after
+it, so look for `OK` near the end rather than on the very last line.
 Do it now, before any cousin exists, so a failure is the framework's and not
 your install's.
 
@@ -91,8 +93,8 @@ curl -fsSL https://claude.ai/install.sh | bash     # puts claude in ~/.local/bin
 ```
 
 Log in once (interactively, or with `claude auth login`) before any cousin
-starts. A cousin started before that sits on the login menu in its tmux
-session. With the preset below, the console marks it "needs attention" and
+starts. A cousin started before that sits on Claude Code's first-run screens
+(the theme picker, then the login menu) in its tmux session. With the preset below, the console marks it "needs attention" and
 the framework types nothing into that pane: chat messages, heartbeats,
 scheduled prompts and a flip's boot text are all skipped with a
 `tmux delivery SKIPPED` line in the log. The chat message is stored, but the
@@ -113,6 +115,18 @@ cousin can do anything your account can. Leave it out if you'd rather answer
 permission prompts yourself in the console's terminal view or with
 `tmux attach -t wren`. `{model}`, `{effort}` and `{session_id}` are filled in
 on every start; see [configuration](configuration.md#agent-cmd).
+
+To try the framework without a Claude login (a test VM, a demo), give it a
+stand-in agent that reads its terminal, so what the framework types lands
+somewhere you can check:
+
+```
+printf '%s\n' 'bash -lc "cat > $HOME/agent-input.txt"' > config/agent-cmd
+```
+
+A chat message then shows up in `~/agent-input.txt` as `(Chat ana): ...`.
+Don't use something like `sleep infinity`: it never reads the terminal, the
+boot text fills the input buffer and later messages go nowhere.
 
 Without `config/harness.toml`, a lot quietly stays off: token counts in the
 console, transcript mining at flip, the transcript-size guard, the harness
@@ -185,18 +199,21 @@ for unit in systemd/*.service systemd/*.timer; do
 done
 ! grep -l '{{' ~/.config/systemd/user/cousin-*   # prints nothing when every placeholder was replaced
 systemctl --user daemon-reload
-systemctl --user enable --now cousin-loops.service cousin-console.service
 cousin-console adduser ana
+systemctl --user enable --now cousin-loops.service cousin-console.service
 systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
 loginctl enable-linger "$USER"
 ```
 
-Run `cousin-console adduser` right after the console starts. Until the first
-user exists the console has no login at all: anyone the network guard lets
-in can use it. By default it listens on loopback only, so in practice that's
-anyone on this machine. The console asks for the password twice (at least 8
-characters) and never takes it from the command line. Login is enforced from
-the moment the users file exists, no restart needed.
+Add the user before the console starts. Until the first user exists the
+console has no login at all: anyone the network guard lets in can use it. By
+default it listens on loopback only, so in practice that's anyone on this
+machine. `cousin-console adduser` doesn't need the console running. It asks
+for the password twice (at least 8 characters) and never takes it as an
+argument. For a scripted install, pipe it: `printf '%s\n%s\n' "$PW" "$PW" |
+cousin-console adduser ana` (Python warns that it can't hide the input; the
+password is set). Login is enforced from the moment the users file exists, no
+restart needed.
 
 `loginctl enable-linger` keeps your user units running after you log out. If
 it's refused, run it with `sudo`.
@@ -215,8 +232,9 @@ journalctl --user -u cousin-console.service -n 5
 ```
 
 If the line ends with `(auth not configured: cousin-console adduser <name>)`,
-it started before you added the user. That's fine, the suffix only goes away
-on the next restart.
+the console started before the user existed. Login is enforced anyway; the
+suffix only goes away on the next restart. On a machine that had the console
+before, `-n 5` can also show lines from earlier runs: look at the newest.
 
 Open `http://127.0.0.1:8600/` on the machine itself, or tunnel from another
 one:
@@ -321,14 +339,15 @@ in its `cousin.toml`. Turn linger off only if nothing else of yours needs it:
 
 Claude Code and Ollama are separate products with their own uninstall.
 Keep in mind that `~/.claude` and `~/.claude.json` hold Claude Code's login
-and every project's transcripts, the cousins' included. The Ollama installer
+and every project's transcripts, the cousins' included; `cousin-mcp approve`
+also wrote one entry per cousin home into `~/.claude.json`. The Ollama installer
 adds a system service, a user and a group:
 
 ```
 sudo systemctl disable --now ollama
 sudo rm -f /etc/systemd/system/ollama.service && sudo systemctl daemon-reload
 sudo rm -rf /usr/local/bin/ollama /usr/local/lib/ollama /usr/share/ollama
-sudo userdel ollama
+sudo userdel ollama        # "group ollama not removed": the installer added you to it
 getent group ollama >/dev/null && sudo groupdel ollama
 ```
 

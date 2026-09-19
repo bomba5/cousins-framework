@@ -51,6 +51,16 @@ class FlipCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         agent_on_path(self, self.root)
+        # A flip respawns through start_cousin, whose default launches a
+        # REAL chat server; in a test it outlived its deleted temp home
+        # on :8100 (install re-test 5). The respawn is what is tested,
+        # not the server.
+        import functools
+        from cousin_lib import flip as flip_mod
+        start = mock.patch.object(flip_mod, "start_cousin", functools.partial(
+            flip_mod.start_cousin, start_chat_server=lambda home: None))
+        start.start()
+        self.addCleanup(start.stop)
 
     def _flip(self, **kw):
         kw.setdefault("tmux_bin", str(self.tmux))

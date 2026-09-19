@@ -25,8 +25,9 @@ them, watch their terminal, and browse their memory.
 ## Quick start
 
 ```
-git clone https://github.com/bomba5/cousins-framework.git
-cd cousins-framework
+sudo apt-get install -y python3-venv tmux git    # Debian/Ubuntu
+git clone https://github.com/bomba5/cousins-framework.git ~/cousins-framework
+cd ~/cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp]"
 
@@ -38,14 +39,16 @@ cp config/harness.toml.claude-code.example config/harness.toml
 cousin-spawn wren --name Wren --role "helps me around the house" \
     --voice "Short, plain and honest." --operator ana
 cousin-mcp approve wren
+cousin-tool-surface
 cousin-spawn wren --start
 
 # open the console
 cousin-console adduser ana
-cousin-console --port 8150
+cousin-console --port 8600
 ```
 
-Then go to `http://localhost:8150`, log in, and say hi to Wren.
+Then go to `http://localhost:8600`, log in, and say hi to Wren. This assumes
+Claude Code is installed and logged in; the full guide covers that.
 
 That's the short version. The full one, with systemd units, the LAN setup
 and how to remove it all again, is in [install](docs/install.md).

@@ -18,6 +18,7 @@ import shutil
 import sys
 import urllib.error
 import urllib.request
+import uuid
 
 from cousin_lib.config import CousinConfig, MissingConfigError
 from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
@@ -25,17 +26,25 @@ from cousin_lib.trace import traced_cli
 
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+VIDEO_EXTS = (".mp4", ".webm", ".mov", ".m4v")
+# kind -> (accepted suffixes, the media folder under <home>/chat/ that
+# cousin-image and friends use, docs/media.md "Storage").
+ATTACHMENT_KINDS = {"image": (IMAGE_EXTS, "images"),
+                    "video": (VIDEO_EXTS, "video")}
 
 
-def attach_image(home, message_id, image):
-    """Copy `image` to <home>/chat/inbound/<message_id>.<ext>: the name
-    the console keys a message's attachment by."""
-    message_id = int(message_id)
-    inbox = pathlib.Path(home) / "chat" / "inbound"
-    inbox.mkdir(parents=True, exist_ok=True)
-    target = inbox / ("%d%s" % (message_id, pathlib.Path(image).suffix.lower()))
+def stage_attachment(home, kind, source):
+    """Copy `source` into <home>/chat/<folder>/ under a fresh name and
+    return the copy's path. The reply row then names it in
+    attachment_kind / attachment_path, the one convention the console
+    and the Telegram bridge both read (as cousin-image rows do)."""
+    source = pathlib.Path(source)
+    folder = pathlib.Path(home) / "chat" / ATTACHMENT_KINDS[kind][1]
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / ("reply_%s%s" % (uuid.uuid4().hex[:12],
+                                       source.suffix.lower()))
     tmp = target.with_name(target.name + ".tmp")
-    shutil.copyfile(image, tmp)
+    shutil.copyfile(source, tmp)
     os.replace(tmp, target)
     return target
 
@@ -50,7 +59,12 @@ def framework_root_for(home):
     return pathlib.Path(os.path.abspath(home)).parent.parent
 
 
-def send_reply(cfg, body, user=None, reply_to=None, policy=None):
+def send_reply(cfg, body, user=None, reply_to=None, policy=None,
+               attachment=None):
+    """Post one reply. `attachment` is (kind, source path): the file is
+    staged into the home's media folder only after the filter passed
+    and the recipient is known, and removed again when the server
+    refused the reply. A timeout keeps it: the row may have landed."""
     body = body.rstrip("\n")
     if not body.strip():
         raise ValueError("empty message body")
@@ -68,6 +82,22 @@ def send_reply(cfg, body, user=None, reply_to=None, policy=None):
     payload = {"message": body, "reply_to_user": recipient}
     if reply_to is not None:
         payload["reply_to"] = {"id": reply_to}
+    if attachment is not None:
+        kind, source = attachment
+        staged = stage_attachment(cfg.home, kind, source)
+        payload["attachment"] = {"kind": kind, "path": str(staged)}
+        try:
+            result = _post(cfg, payload)
+        except urllib.error.HTTPError:
+            staged.unlink(missing_ok=True)
+            raise
+        if not result.get("ok"):
+            staged.unlink(missing_ok=True)
+        return result
+    return _post(cfg, payload)
+
+
+def _post(cfg, payload):
     url = "http://localhost:%d/api/%s_reply" % (cfg.require_chat_port(), cfg.slug)
     req = urllib.request.Request(
         url,
@@ -88,35 +118,44 @@ def reply_main(argv=None):
     parser.add_argument("--user", help="recipient (default: configured operator)")
     parser.add_argument("--message", "-m", help="body (default: read from stdin)")
     parser.add_argument("--reply-to", type=int, help="message id to quote")
-    parser.add_argument("--image", help="a PNG/JPEG/GIF/WebP file to attach;"
-                        " it lands as <home>/chat/inbound/<reply id>.<ext>,"
-                        " which the console shows on the reply")
+    media = parser.add_mutually_exclusive_group()
+    media.add_argument("--image", help="a PNG/JPEG/GIF/WebP file to attach;"
+                       " it is copied to <home>/chat/images/ and shown on"
+                       " the reply (and relayed by the Telegram bridge)")
+    media.add_argument("--video", help="an MP4/WebM/MOV/M4V file to attach;"
+                       " it is copied to <home>/chat/video/ and shown on"
+                       " the reply (and relayed by the Telegram bridge)")
     args = parser.parse_args(argv)
 
-    image = None
-    if args.image:
-        image = pathlib.Path(args.image)
-        if image.suffix.lower() not in IMAGE_EXTS:
-            print("cousin-reply: --image must be one of %s, got %s"
-                  % (", ".join(IMAGE_EXTS), image.name), file=sys.stderr)
+    attachment = None
+    for kind, value in (("image", args.image), ("video", args.video)):
+        if not value:
+            continue
+        path = pathlib.Path(value)
+        exts = ATTACHMENT_KINDS[kind][0]
+        if path.suffix.lower() not in exts:
+            print("cousin-reply: --%s must be one of %s, got %s"
+                  % (kind, ", ".join(exts), path.name), file=sys.stderr)
             return 2
-        if not image.is_file():
-            print("cousin-reply: --image %s: no such file" % image,
+        if not path.is_file():
+            print("cousin-reply: --%s %s: no such file" % (kind, path),
                   file=sys.stderr)
             return 2
+        attachment = (kind, path)
     if args.message is not None:
         body = args.message
-    elif image is not None and sys.stdin.isatty():
+    elif attachment is not None and sys.stdin.isatty():
         body = ""
     else:
         body = sys.stdin.read()
-    if image is not None and not body.strip():
-        body = "(image: %s)" % image.name
+    if attachment is not None and not body.strip():
+        body = "(%s: %s)" % (attachment[0], attachment[1].name)
     try:
         cfg = CousinConfig.from_env()
         policy = OutboundPolicy.load(framework_root_for(cfg.home))
         result = send_reply(cfg, body, user=args.user,
-                            reply_to=args.reply_to, policy=policy)
+                            reply_to=args.reply_to, policy=policy,
+                            attachment=attachment)
     except FilterBlocked as e:
         print("cousin-reply: %s" % e, file=sys.stderr)
         return 3
@@ -126,15 +165,12 @@ def reply_main(argv=None):
     except urllib.error.URLError as e:
         print("cousin-reply: %s" % e, file=sys.stderr)
         return 1
+    except OSError as e:
+        print("cousin-reply: the attachment could not be staged: %s" % e,
+              file=sys.stderr)
+        return 1
     if not result.get("ok"):
         print("cousin-reply: server returned %s" % result, file=sys.stderr)
         return 1
-    if image is not None:
-        try:
-            attach_image(cfg.home, result.get("id"), image)
-        except (OSError, ValueError) as e:
-            print("cousin-reply: reply %s posted but the image did not land: %s"
-                  % (result.get("id"), e), file=sys.stderr)
-            return 1
     print("reply posted (id=%s)" % result.get("id"))
     return 0

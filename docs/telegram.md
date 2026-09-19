@@ -139,7 +139,7 @@ following is true (`load_bridge_config`):
 ### 5. Provisioning from the console
 
 > _Placeholder: the console is gaining a way to set the token and the
-> operator list without a shell (Juno, in progress). This section will
+> operator list without a shell (in progress). This section will
 > describe it once it lands. Until then, use steps 3 and 4._
 
 ### 6. Run it as a service

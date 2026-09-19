@@ -31,12 +31,12 @@ between, so backticks, `$(...)`, quotes and newlines reach the CLI
 exactly as written.
 
 `send` is the one that does more than pass arguments through. It takes
-`to` and `text` (and optionally `image`):
+`to` and `text` (and optionally `image` or `video`):
 
 - `to` is a peer cousin's slug: it runs `cousin-chat send <slug> <text>`.
 - `to` is one of the names in the registry's `operators` list: it runs
   `cousin-reply --user <name>` with the text on stdin, plus `--image`
-  if given.
+  or `--video` if given.
 - Anything else is an error that lists who the cousin can reach. There's
   no default, so a typo in a slug fails instead of posting into the
   wrong thread.

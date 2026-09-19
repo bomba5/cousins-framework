@@ -171,9 +171,46 @@ class TestOutbound(_BridgeFixture):
         self.assertEqual(media[0]["path"], str(asset))
 
 
-def _http_error(code):
+def _http_error(code, body=None):
+    import io
     import urllib.error
-    return urllib.error.HTTPError("http://x", code, "err", {}, None)
+    return urllib.error.HTTPError(
+        "http://x", code, "err", {},
+        io.BytesIO(body) if body is not None else None)
+
+
+class TestErrorText(unittest.TestCase):
+    """A rejection logs what the server said, not only the status line."""
+
+    def test_telegram_description_is_included(self):
+        from cousin_lib.telegram import _describe
+        err = _http_error(400, b'{"ok": false, "error_code": 400,'
+                               b' "description": "Bad Request: chat not found"}')
+        self.assertIn("chat not found", _describe(err))
+        self.assertIn("400", _describe(err))
+
+    def test_chat_server_error_field_is_included(self):
+        from cousin_lib.telegram import _describe
+        err = _http_error(400, b'{"error": "user and a non-empty message'
+                               b' are required"}')
+        self.assertIn("non-empty message", _describe(err))
+
+    def test_describing_twice_keeps_the_text(self):
+        # The body is a stream; a second log line must not come out bare.
+        from cousin_lib.telegram import _describe
+        err = _http_error(403, b'{"description": "Forbidden: bot was blocked"}')
+        _describe(err)
+        self.assertIn("blocked", _describe(err))
+
+    def test_a_body_that_is_not_json_is_shown_raw(self):
+        from cousin_lib.telegram import _describe
+        self.assertIn("gateway down",
+                      _describe(_http_error(502, b"gateway down")))
+
+    def test_no_body_and_plain_errors_fall_back_to_str(self):
+        from cousin_lib.telegram import _describe
+        self.assertIn("400", _describe(_http_error(400)))
+        self.assertEqual(_describe(OSError("boom")), "boom")
 
 
 class TestCursors(_BridgeFixture):
@@ -298,6 +335,18 @@ class TestPumpOutbound(_BridgeFixture):
         self.assertEqual(state["threads"]["Sam"], 12)
         self.assertTrue(logged)
 
+    def test_the_rejection_log_carries_telegrams_description(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {"Sam": 9}}
+        logged = []
+
+        def send(**kw):
+            raise _http_error(400, b'{"description":'
+                                   b' "Bad Request: chat not found"}')
+        pump_outbound(cfg, state, "Sam", self._rows()[:2],
+                      tg_send_text=send, log=logged.append)
+        self.assertIn("chat not found", logged[0])
+
     def test_rate_limit_is_transient(self):
         cfg = self._bridge()
         state = {"tg_offset": 0, "threads": {"Sam": 9}}
@@ -352,6 +401,8 @@ class TestMediaUpload(_BridgeFixture):
 
     def test_a_relative_attachment_path_resolves_under_the_home(self):
         cfg = self._bridge()
+        (self.home / "chat" / "images").mkdir(parents=True)
+        (self.home / "chat" / "images" / "x.png").write_bytes(b"x")
         media = []
         relay_outbound(
             cfg,
@@ -361,6 +412,62 @@ class TestMediaUpload(_BridgeFixture):
             tg_send_media=lambda **kw: media.append(kw))
         self.assertEqual(media[0]["path"],
                          str(self.home / "chat" / "images" / "x.png"))
+
+
+class TestUploadGuards(_BridgeFixture):
+    """A file the bridge can never upload is logged and skipped up
+    front: missing on disk (an OSError would otherwise read as transient
+    and retry forever) or over Telegram's bot upload limit."""
+
+    def _reply(self, path, kind="video"):
+        return [{"id": 5, "message": "clip", "attachment_kind": kind,
+                 "attachment_path": str(path)}]
+
+    def test_a_missing_file_is_skipped_not_retried(self):
+        cfg = self._bridge()
+        media, logged = [], []
+        relay_outbound(cfg, new_replies=self._reply(self.home / "gone.mp4"),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw),
+                       log=logged.append)
+        self.assertEqual(media, [])
+        self.assertTrue(any("gone.mp4" in line for line in logged))
+
+    def test_a_video_over_50_mb_is_skipped(self):
+        cfg = self._bridge()
+        big = self.home / "big.mp4"
+        with open(big, "wb") as f:
+            f.truncate(50 * 1024 * 1024 + 1)
+        media, logged = [], []
+        relay_outbound(cfg, new_replies=self._reply(big),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw),
+                       log=logged.append)
+        self.assertEqual(media, [])
+        self.assertTrue(any("50 MB" in line for line in logged))
+
+    def test_a_photo_over_10_mb_is_skipped(self):
+        cfg = self._bridge()
+        big = self.home / "big.png"
+        with open(big, "wb") as f:
+            f.truncate(10 * 1024 * 1024 + 1)
+        media = []
+        relay_outbound(cfg, new_replies=self._reply(big, "image"),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw),
+                       log=lambda line: None)
+        self.assertEqual(media, [])
+
+    def test_a_video_at_the_limit_goes_out(self):
+        cfg = self._bridge()
+        ok = self.home / "ok.mp4"
+        with open(ok, "wb") as f:
+            f.truncate(50 * 1024 * 1024)
+        media = []
+        relay_outbound(cfg, new_replies=self._reply(ok),
+                       tg_send_text=lambda **kw: None,
+                       tg_send_media=lambda **kw: media.append(kw))
+        self.assertEqual([m["kind"] for m in media], ["video"])
 
 
 class TestInboundPhoto(_BridgeFixture):

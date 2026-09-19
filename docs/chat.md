@@ -45,10 +45,11 @@ What it keeps, all under the cousin home:
 - `data/chat.db`: SQLite with every message and reaction. One thread
   per person, keyed by the name lowercased with spaces turned into
   underscores, so "Ana" and "ana" are the same thread.
-- `chat/inbound/<message id>.<ext>`: images people sent, and images the
-  cousin attached to a reply.
+- `chat/inbound/<message id>.<ext>`: images people sent (and, before
+  0.11, images the cousin attached with `cousin-reply --image`).
 - `chat/images/`, `chat/audio/`, `chat/video/`: generated media
-  ([media](media.md)).
+  ([media](media.md)) and files the cousin attached to a reply with
+  `cousin-reply --image` or `--video`.
 - `www/`: optional. Files here (HTML, CSS, JS, images) are served as
   static pages from the chat port.
 
@@ -204,14 +205,18 @@ REPLY
 echo "done" | cousin-reply --user ana
 cousin-reply -m "done" --reply-to 55
 cousin-reply --user ana --image chart.png -m "last week's disk use"
+cousin-reply --user ana --video run.mp4 -m "the bench run"
 ```
 
 - `--user` is who the reply is for; without it the reply goes to
   `[operator] name` from `cousin.toml`, and with neither it refuses.
 - `--reply-to <id>` quotes an earlier message.
-- `--image` attaches a PNG, JPEG, GIF or WebP. It's copied to
-  `chat/inbound/<reply id>.<ext>` and the console shows it on the reply.
-  With `--image` and no text, the caption is `(image: <file name>)`.
+- `--image` attaches a PNG, JPEG, GIF or WebP; `--video` an MP4, WebM,
+  MOV or M4V (one or the other). The file is copied to `chat/images/`
+  or `chat/video/` under a fresh name, and the reply row records it
+  (`attachment_kind`, `attachment_path`) the way `cousin-image` does, so
+  the console shows it and the Telegram bridge relays it. With no text,
+  the caption is `(image: <file name>)` or `(video: <file name>)`.
 - Exit codes: 0 posted, 1 the server said no or couldn't be reached, 2
   missing config or bad arguments, 3 blocked by the outbound filter.
 

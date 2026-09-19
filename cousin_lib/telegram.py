@@ -36,6 +36,10 @@ _FILE_API = "https://api.telegram.org/file/bot%s/%s"
 # getFile serves up to 20 MB; the chat server keeps a photo inline in
 # one JSON body, so the bridge takes less than that.
 _MAX_INBOUND_BYTES = 10 * 1024 * 1024
+# The Bot API's upload limits: 10 MB for a photo, 50 MB for other files.
+_MB = 1024 * 1024
+_UPLOAD_LIMITS = {"image": 10 * _MB}
+_UPLOAD_LIMIT_DEFAULT = 50 * _MB
 
 
 class TelegramConfigError(Exception):
@@ -88,6 +92,29 @@ def save_cursors(home, state):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state))
     os.replace(tmp, path)
+
+
+def _describe(err):
+    """An error for the log. An HTTPError's str() is only the status
+    line; the reason is in its body - Telegram's `description`, the chat
+    server's `error` - so read that once and keep it on the error."""
+    if not isinstance(err, urllib.error.HTTPError):
+        return str(err)
+    if not hasattr(err, "_bridge_detail"):
+        try:
+            raw = err.read() or b""
+        except Exception:
+            raw = b""
+        text = raw.decode("utf-8", "replace").strip()
+        try:
+            data = json.loads(text)
+            text = data.get("description") or data.get("error") or text
+        except (ValueError, AttributeError):
+            pass
+        err._bridge_detail = text[:300]
+    if err._bridge_detail:
+        return "HTTP %d: %s" % (err.code, err._bridge_detail)
+    return str(err)
 
 
 def _permanent(err):
@@ -211,6 +238,11 @@ def relay_outbound(cfg, *, new_replies, tg_send_text,
         path = reply.get("attachment_path")
         if path:
             path = str(cfg.home / path)  # an absolute path stays as is
+        if kind and path and tg_send_media is not None:
+            unsendable = _unsendable(kind, path)
+            if unsendable:
+                log("reply %s: %s, skipped" % (reply.get("id"), unsendable))
+                continue
         for operator_id in sorted(operator_ids or cfg.operator_ids):
             try:
                 if kind and path and tg_send_media is not None:
@@ -224,7 +256,22 @@ def relay_outbound(cfg, *, new_replies, tg_send_text,
                 if not _permanent(err):
                     raise
                 log("reply %s to %r rejected, skipped: %s"
-                    % (reply.get("id"), operator_id, err))
+                    % (reply.get("id"), operator_id, _describe(err)))
+
+
+def _unsendable(kind, path):
+    """Why the file can never be uploaded, or None. Checked before the
+    upload: a missing file would raise an OSError, which reads as
+    transient and would hold the cursor on this reply for good."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return "attachment %s is missing" % path
+    limit = _UPLOAD_LIMITS.get(kind, _UPLOAD_LIMIT_DEFAULT)
+    if size > limit:
+        return ("attachment %s is %.1f MB, over Telegram's %d MB limit"
+                % (path, size / _MB, limit // _MB))
+    return None
 
 
 def pump_inbound(cfg, state, updates, *, relay=None, log=None):
@@ -240,7 +287,7 @@ def pump_inbound(cfg, state, updates, *, relay=None, log=None):
             if not _permanent(err):
                 raise
             log("update %s rejected by the chat server, skipped: %s"
-                % (update.get("update_id"), err))
+                % (update.get("update_id"), _describe(err)))
         state["tg_offset"] = update["update_id"] + 1
         save_cursors(cfg.home, state)
 
@@ -360,7 +407,8 @@ def run_bridge(home, *, poll_interval=5):
                                timeout=15).get("result", [])
             pump_inbound(cfg, state, updates)
         except Exception as err:
-            print("cousin-telegram: inbound error, retrying: %s" % err,
+            print("cousin-telegram: inbound error, retrying: %s"
+                  % _describe(err),
                   file=sys.stderr)
             time.sleep(3)
         for thread in sorted(cfg.threads()):
@@ -377,7 +425,7 @@ def run_bridge(home, *, poll_interval=5):
                     tg_send_text=tg_send_text, tg_send_media=tg_send_media)
             except Exception as err:
                 print("cousin-telegram: outbound error, retrying: %s"
-                      % err, file=sys.stderr)
+                      % _describe(err), file=sys.stderr)
         time.sleep(poll_interval)
 
 

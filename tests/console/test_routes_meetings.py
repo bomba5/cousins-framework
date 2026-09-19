@@ -44,6 +44,9 @@ class TestMeetingRoutes(MeetingRoutesCase):
         self.assertEqual(body["meeting"]["state"], "closed")
         status, body = self.get("/api/meetings")
         self.assertEqual([m["id"] for m in body["meetings"]], [mid])
+        self.assertEqual(self.delete("/api/meetings/%d" % mid),
+                         (200, {"ok": True, "deleted": mid}))
+        self.assertEqual(self.get("/api/meetings/%d" % mid)[0], 404)
 
     def test_refusals_are_400_and_unknown_is_404(self):
         self.serve()

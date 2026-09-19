@@ -70,6 +70,12 @@ def register():
         req.server.emit("meeting-change", {"id": m["id"], "op": "skip"})
         return 200, {"ok": True, "meeting": m}
 
+    @router.route("DELETE", "/api/meetings/{meeting_id}")
+    def delete(req, meeting_id):
+        m = _call(req, meetings.delete, _mid(meeting_id), _user(req))
+        req.server.emit("meeting-change", {"id": m["id"], "op": "delete"})
+        return 200, {"ok": True, "deleted": m["id"]}
+
     @router.route("POST", "/api/meetings/{meeting_id}/close")
     def close(req, meeting_id):
         m = _call(req, meetings.close, _mid(meeting_id), _user(req))

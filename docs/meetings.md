@@ -23,6 +23,9 @@ sequenceDiagram
   M-->>U: the floor is yours again
 ```
 
+- **Everyone is told.** When the meeting opens, each participant gets one
+  line saying it is in the meeting, with whom, and to wait for its turn;
+  when it closes, one line saying it is over. Neither needs an answer.
 - **Participants** are running local cousins, in the order you pick them. A
   stopped cousin can't join: start it first. A remote cousin (on another
   machine) can't join yet.
@@ -37,6 +40,10 @@ sequenceDiagram
   (10 minutes by default), or whose session stops, is skipped by
   `cousin-loops` with a line in the transcript. You can also skip the
   current speaker yourself.
+- **Speaking order.** Every turn line says which turn is yours ("2 of 3")
+  and the whole order, with the current speaker marked; the opening line
+  says where you speak in every round. The console shows the same
+  numbered order above the thread.
 - **Closing.** Without a facilitator the meeting closes at once. With one,
   the facilitator gets the whole transcript, writes the minutes (decisions,
   open questions, actions with an owner), adds each action to the tracker
@@ -54,8 +61,10 @@ cousins, or one by one; stopped and remote cousins are greyed out), an
 optional facilitator and the timeout. Teams are simply your sidebar groups:
 the framework keeps no team state, so regroup as often as you like.
 
-The meeting view shows the transcript, a banner with whose turn it is, and a
-box to post in when the floor is yours. Skip and Close are next to it. The
+The meeting view shows the transcript, the numbered speaking order, a banner
+with whose turn it is, and a box to post in when the floor is yours. Skip and
+Close are next to it; Delete removes a meeting and its transcript (a running
+one tells its participants it is over). The
 page follows the meeting live.
 
 Your entries carry your console user name.
@@ -69,6 +78,7 @@ cousin-meeting post 3 "@wren what did you mean by a short name?" --user ana
 cousin-meeting show 3
 cousin-meeting skip 3 --user ana
 cousin-meeting close 3 --user ana
+cousin-meeting delete 3 --user ana
 cousin-meeting list
 ```
 
@@ -86,7 +96,7 @@ The `meeting` MCP tool does the same (`say`, `pass`, `minutes`, `show`).
 ## What a cousin receives
 
 ```
-(Meeting 3 "name the new sensor" round 1, your turn): ana: ideas? | wren: Kestrel || Answer with: cousin-meeting say 3 "<text>" (or: cousin-meeting pass 3). One turn; stay on topic; be brief.
+(Meeting 3 "name the new sensor" round 1, your turn: 2 of 2; order 1 kestrel > 2 wren (now)): ana: ideas? | wren: Kestrel || Answer with: cousin-meeting say 3 "<text>" (or: cousin-meeting pass 3). One turn; stay on topic; be brief.
 ```
 
 A direct question says `a direct question to you`; the facilitator's closing

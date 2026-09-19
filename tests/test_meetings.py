@@ -10,6 +10,12 @@ from cousin_lib import meetings
 from cousin_lib.meetings import MeetingError
 
 
+class _Notices(list):
+    def append_pair(self, slug, text):
+        self.append((slug, text))
+        return True
+
+
 class MeetingCase(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -21,6 +27,7 @@ class MeetingCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.delivered = []
+        self.notices = _Notices()
         self.alive = {}
         self.accept = True
         for slug in ("wren", "toki", "moss"):
@@ -44,6 +51,7 @@ class MeetingCase(unittest.TestCase):
 
     def open(self, participants=("wren", "toki"), **kw):
         kw.setdefault("is_alive", self.is_alive)
+        kw.setdefault("deliver", self.notices.append_pair)
         return meetings.open_meeting("pick a name", list(participants),
                                      created_by="ana", **kw)
 
@@ -78,12 +86,38 @@ class TestOpen(MeetingCase):
         self.assertEqual(self.delivered, [])
 
 
+class TestNotices(MeetingCase):
+    def test_every_participant_is_told_at_open_and_at_close(self):
+        m = self.open(("wren", "toki", "moss"))
+        self.assertEqual([s for s, _ in self.notices],
+                         ["wren", "toki", "moss"])
+        self.assertIn("you are a participant, with toki, moss",
+                      self.notices[0][1])
+        self.assertIn("Do not answer this one", self.notices[0][1])
+        self.assertIn("Speaking order: 1 wren > 2 toki > 3 moss; you speak"
+                      " 2 of 3", self.notices[1][1])
+        meetings.close(m["id"], "ana", deliver=self.deliver)
+        self.assertEqual([s for s, t in self.delivered if "closed" in t],
+                         ["wren", "toki", "moss"])
+
+
+class TestDelete(MeetingCase):
+    def test_delete_removes_it_and_tells_a_running_meeting(self):
+        m = self.open()
+        meetings.delete(m["id"], "ana", deliver=self.deliver)
+        with self.assertRaises(meetings.MeetingNotFound):
+            meetings.show(m["id"])
+        self.assertEqual(meetings.list_meetings(), [])
+        self.assertEqual([s for s, _ in self.delivered], ["wren", "toki"])
+
+
 class TestRounds(MeetingCase):
     def test_each_participant_once_in_order_then_the_floor(self):
         m = self.open()
         self.post(m["id"], "ideas?")
         self.assertEqual(self.delivered[-1][0], "wren")
-        self.assertIn("round 1, your turn", self.delivered[-1][1])
+        self.assertIn("round 1, your turn: 1 of 2; order 1 wren (now) > 2 toki",
+                      self.delivered[-1][1])
         self.assertIn("ana: ideas?", self.delivered[-1][1])
         self.assertIn("cousin-meeting say %d" % m["id"],
                       self.delivered[-1][1])

@@ -41,6 +41,37 @@ MINUTES_HOWTO = ("Write the minutes: decisions, open questions, actions with "
                  "(or --stdin).")
 
 
+OPEN_NOTICE = ('(Meeting {id} "{topic}" opened by {user}): you are a '
+               'participant, with {others}. Speaking order: {order}; you '
+               'speak {place} in every round. Nothing to do now: wait for '
+               'your turn, a line starting (Meeting {id} ...). Do not '
+               'answer this one.')
+CLOSE_NOTICE = ('(Meeting {id} "{topic}" closed): the meeting is over; '
+                'nothing to answer.')
+
+
+def _order(participants, current=None):
+    """The speaking order with each turn numbered: "1 wren > 2 toki";
+    the current speaker marked."""
+    return " > ".join("%d %s%s" % (i + 1, s, " (now)" if s == current else "")
+                      for i, s in enumerate(participants))
+
+
+def _place(participants, slug):
+    n = participants.index(slug) + 1
+    return "%d of %d" % (n, len(participants))
+
+
+def _notify(slugs, text_for, deliver):
+    """Best-effort one-liners outside any turn (open, close): a failed
+    injection is not retried, the turn line carries everything anyway."""
+    for slug in slugs:
+        try:
+            deliver(slug, text_for(slug))
+        except Exception:
+            pass
+
+
 class MeetingError(ValueError):
     """A refused call: bad participants, not your turn, closed meeting."""
 
@@ -253,7 +284,9 @@ def turn_text(conn, m):
         howto = MINUTES_HOWTO.format(id=m["id"])
     else:
         what = ("a direct question to you" if m["mode"] == "direct"
-                else "round %d, your turn" % m["round"])
+                else "round %d, your turn: %s; order %s" % (
+                    m["round"], _place(m["participants"], slug),
+                    _order(m["participants"], slug)))
         head = '(Meeting %d "%s" %s)' % (m["id"], m["topic"], what)
         howto = HOWTO.format(id=m["id"])
     said = " | ".join("%s: %s" % (e["speaker"], " ".join(e["text"].split()))
@@ -280,7 +313,8 @@ def _try_deliver(conn, m, deliver):
 # -- mutations --------------------------------------------------------
 
 def open_meeting(topic, participants, *, created_by="", facilitator="",
-                 timeout_s=DEFAULT_TIMEOUT_S, is_alive=None, root=None):
+                 timeout_s=DEFAULT_TIMEOUT_S, is_alive=None, deliver=None,
+                 root=None):
     topic = _text(topic)
     slugs = [str(s).strip() for s in participants or () if str(s).strip()]
     if not slugs:
@@ -319,7 +353,15 @@ def open_meeting(topic, participants, *, created_by="", facilitator="",
                    "meeting opened by %s: %s; participants %s"
                    % (created_by or "the user", topic, ", ".join(slugs)))
         return m
-    return _tx(root, run)
+    m = _tx(root, run)
+    # Every participant learns it is in the meeting now: otherwise a
+    # cousin not called in the first round has no way to know.
+    _notify(slugs, lambda s: OPEN_NOTICE.format(
+        id=m["id"], topic=topic, user=created_by or "the user",
+        others=", ".join(x for x in slugs if x != s) or "only you",
+        order=_order(slugs), place=_place(slugs, s)),
+        deliver or default_deliver)
+    return m
 
 
 def post(meeting_id, user, text, *, deliver=None, root=None):
@@ -388,8 +430,16 @@ def pass_turn(meeting_id, slug, *, deliver=None, root=None):
 
 
 def minutes(meeting_id, slug, text, *, deliver=None, root=None):
-    return _speak(meeting_id, slug, _text(text), "minutes",
-                  deliver=deliver, root=root)
+    m = _speak(meeting_id, slug, _text(text), "minutes",
+               deliver=deliver, root=root)
+    _notify_closed(m, deliver)
+    return m
+
+
+def _notify_closed(m, deliver):
+    if m["state"] == "closed":
+        _notify(m["participants"], lambda s: CLOSE_NOTICE.format(
+            id=m["id"], topic=m["topic"]), deliver or default_deliver)
 
 
 def skip(meeting_id, user, *, reason="skipped by the user", deliver=None,
@@ -429,7 +479,26 @@ def close(meeting_id, user, *, deliver=None, root=None):
         else:
             _finish(conn, m)
         return m
-    return _tx(root, run)
+    m = _tx(root, run)
+    _notify_closed(m, deliver)
+    return m
+
+
+def delete(meeting_id, user, *, deliver=None, root=None):
+    """Remove a meeting and its transcript. Participants of a meeting
+    that was still running are told it is over."""
+    def run(conn):
+        m = _fetch(conn, meeting_id)
+        for table, col in (("entries", "meeting_id"), ("seen", "meeting_id"),
+                           ("meetings", "id")):
+            conn.execute("DELETE FROM %s WHERE %s=?" % (table, col),
+                         (meeting_id,))
+        return m
+    m = _tx(root, run)
+    if m["state"] != "closed":
+        _notify(m["participants"], lambda s: CLOSE_NOTICE.format(
+            id=m["id"], topic=m["topic"]), deliver or default_deliver)
+    return m
 
 
 def tick(*, deliver=None, is_alive=None, now=None, root=None):
@@ -630,7 +699,7 @@ def meeting_main(argv=None):
     p = sub.add_parser("teach", help="bring the Meetings section and tool"
                        " to existing cousins (dry run without --apply)")
     p.add_argument("--apply", action="store_true")
-    for name in ("skip", "close"):
+    for name in ("skip", "close", "delete"):
         p = sub.add_parser(name)
         p.add_argument("id", type=int)
         p.add_argument("--user", default="user")
@@ -673,6 +742,10 @@ def meeting_main(argv=None):
             m = pass_turn(args.id, _me())
         elif args.cmd == "minutes":
             m = minutes(args.id, _me(), _body(args))
+        elif args.cmd == "delete":
+            m = delete(args.id, args.user)
+            print("deleted meeting #%d" % m["id"])
+            return 0
         elif args.cmd == "skip":
             m = skip(args.id, args.user)
         else:

@@ -241,6 +241,8 @@ floor is the user's again. You are woken only on your turn, with one line
 that starts `(Meeting <id> "<topic>" round <n>, your turn)` and carries
 everything said since your last turn.
 
+- When a meeting opens you get one line saying you are in it, and one
+  when it closes: neither needs an answer.
 - Answer on your turn only, once: `cousin-meeting say <id> "<text>"`
   (`--stdin` for long text), or the `meeting` MCP tool. With nothing to
   add, `cousin-meeting pass <id>`. Speaking out of turn is refused.

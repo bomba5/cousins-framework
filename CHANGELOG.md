@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.8.0 - 2026-09-19
+
+- Meetings: delete a meeting and its transcript (`DELETE /api/meetings/<id>`,
+  `cousin-meeting delete`, a Delete button in the console); a running
+  meeting's participants are told it is over.
+- Meetings: every turn line says which turn is yours ("2 of 3") and the
+  numbered speaking order with the current speaker marked; the console
+  shows the same order above the thread.
+- Meetings: every participant gets one line when a meeting opens (it is
+  in the meeting, with whom, wait for its turn) and one when it closes.
+  Before, a cousin not called in the first round had no way to know it
+  was in a meeting.
+
 ## 0.7.0 - 2026-09-19
 
 The memory scope `both` is retired.

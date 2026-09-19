@@ -89,6 +89,10 @@ Body `{"text"}`. Only on the user's floor. Text starting `@slug ` asks that part
 
 Skips the current speaker.
 
+### `DELETE /api/meetings/<id>`
+
+Deletes the meeting and its transcript. When it was still running, each participant is told it is over. Answers `{"ok": true, "deleted": <id>}`.
+
 ### `POST /api/meetings/<id>/close`
 
 Closes the meeting, or, with a facilitator, moves it to `closing` and asks the facilitator for the minutes.

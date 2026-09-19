@@ -186,6 +186,15 @@ function MeetingsView({ cousins, sessionUser, initialMeeting }) {
               if (!window.confirm(msg)) return;
               act(`/api/meetings/${current.id}/close`, undefined, "closing");
             }}
+            onDelete={async () => {
+              const running = current.state !== "closed";
+              if (!window.confirm(`Delete meeting #${current.id} and its whole transcript?`
+                  + (running ? " It is still running: the participants are told it is over." : ""))) return;
+              const { r, d } = await apiSend("DELETE", `/api/meetings/${current.id}`);
+              if (!r.ok || d.error) { setStatus({ ok: false, msg: d.error || `HTTP ${r.status}` }); return; }
+              select(null);
+              pullAll();
+            }}
           />
         )}
       </div>
@@ -205,7 +214,7 @@ function MeetingsView({ cousins, sessionUser, initialMeeting }) {
   );
 }
 
-function MeetingThread({ m, now, sessionUser, status, onBack, onPost, onSkip, onClose }) {
+function MeetingThread({ m, now, sessionUser, status, onBack, onPost, onSkip, onClose, onDelete }) {
   const [text, setText] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const scrollRef = React.useRef(null);
@@ -251,11 +260,19 @@ function MeetingThread({ m, now, sessionUser, status, onBack, onPost, onSkip, on
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="mt-thread-topic">{m.topic || "(no topic)"}</div>
           <div className="mt-item-meta">
-            #{m.id} · {(m.participants || []).map(s => "@" + s).join(" ")}
+            #{m.id} · order{" "}
+            {(m.participants || []).map((s, i) => (
+              <span key={s} className={`mt-order${m.turn_slug === s && m.state !== "closed" ? " now" : ""}`}
+                    title={m.turn_slug === s ? "speaking now" : `turn ${i + 1} of every round`}>
+                {i + 1} @{s}
+              </span>
+            ))}
             {m.facilitator ? ` · facilitator @${m.facilitator}` : ""}
           </div>
         </div>
         <Pill tone={MEETING_STATE_TONE[m.state] || "gray"}>{m.state}</Pill>
+        <button className="btn ghost danger" onClick={onDelete}
+                title="delete this meeting and its transcript">delete</button>
       </div>
 
       <div className={`mt-banner ${bannerTone}`}>

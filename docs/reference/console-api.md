@@ -307,7 +307,7 @@ Token use per cousin per day for the last 14 days (UTC), read from the harness t
   "series": [{"day": "2026-09-18", "total": 812345, "output": 20311}]}]}
 ```
 
-It needs `transcripts_dir` in `config/harness.toml` and a session id in the cousin's `[runtime]`. The total adds input, output, cache read and cache creation tokens. Without the config: `{"available": false, "reason": "...", "cousins": []}`. The transcript is read incrementally, so the first call after a console start is the slow one.
+It needs `transcripts_dir` in `config/harness.toml`. Every transcript in the cousin's transcripts directory touched in the window is read, its sessions (a cousin that flips daily has one per day) and their subagents, and each message counts once (the harness writes one line per content block, each repeating the usage). The total adds input, output, cache read and cache creation tokens. Without the config: `{"available": false, "reason": "...", "cousins": []}`. The transcripts are read incrementally, so the first call after a console start is the slow one.
 
 ## Chat (proxied to each cousin)
 

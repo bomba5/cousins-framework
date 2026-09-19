@@ -1,16 +1,22 @@
 """Token usage from the harness transcripts, through the seam
 config/harness.toml defines (docs/reference/console-api.md, "Tokens"). For each
-cousin with a persisted session id the transcript
-<transcripts_dir>/<session_id>.jsonl is scanned incrementally (byte
-offset remembered per server) and each message's usage block summed
-per UTC calendar day. Absent seam: unavailable, with the reason."""
+cousin every transcript under its <transcripts_dir> (its sessions and
+their subagents) touched inside the series window is scanned
+incrementally (a byte offset per file, remembered per server) and each
+message's usage summed per UTC calendar day, once per message id: the
+harness writes one line per content block, each repeating the usage.
+Absent seam: unavailable, with the reason.
+
+Only the session in use was read before 2026-09-19, and a cousin that
+flips daily starts a new session every day: the 14-day series held
+today alone."""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
 
-from cousin_lib import flip, transcript_mine
-from cousin_lib.config import MissingConfigError, harness_config
+from cousin_lib.config import (MissingConfigError, expand_harness_path,
+                               harness_config)
 
 SERIES_DAYS = 14
 
@@ -38,15 +44,12 @@ def _usage_total(usage):
             total += int(value)
             if key == "output_tokens":
                 output += int(value)
-    creation = usage.get("cache_creation")
-    if isinstance(creation, dict):
-        for value in creation.values():
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                total += int(value)
+    # usage["cache_creation"] only splits cache_creation_input_tokens by
+    # TTL; adding it too counted every cache write twice.
     return total, output
 
 
-def _add_line(days, line):
+def _add_line(days, line, seen=None):
     if b'"usage"' not in line:
         return
     try:
@@ -63,47 +66,75 @@ def _add_line(days, line):
     usage = message.get("usage") if isinstance(message, dict) else None
     if not isinstance(usage, dict):
         return
+    if seen is not None:
+        mid = message.get("id") or entry.get("requestId")
+        if mid:
+            if mid in seen:
+                return
+            seen.add(mid)
     total, output = _usage_total(usage)
     bucket = days.setdefault(day, {"total": 0, "output": 0})
     bucket["total"] += total
     bucket["output"] += output
 
 
-def day_totals(server, home):
-    """{day: {"total", "output"}} for one cousin, scanning only the
-    bytes appended since the last call on this server."""
-    state = server.state.setdefault("tokens", {})
-    key = str(home)
-    entry = state.get(key) or {"path": None, "offset": 0, "days": {}}
-    session_id = flip._read_session_id(home)
-    path = (transcript_mine.transcript_path(home, server.root, session_id)
-            if session_id else None)
-    if path is None:
-        return {}
-    if entry["path"] != str(path):
-        entry = {"path": str(path), "offset": 0, "days": {}}
+def _transcripts(root, home, since):
+    cfg = harness_config(root)
+    base = expand_harness_path(cfg["transcripts_dir"], home)
+    try:
+        return [p for p in base.rglob("*.jsonl")
+                if p.stat().st_mtime >= since]
+    except OSError:
+        return []
+
+
+def _scan(entry, path):
     try:
         size = path.stat().st_size
     except OSError:
-        state[key] = entry
-        return entry["days"]
+        return
     if size < entry["offset"]:
-        entry = {"path": str(path), "offset": 0, "days": {}}
-    if size > entry["offset"]:
-        try:
-            with open(path, "rb") as fh:
-                fh.seek(entry["offset"])
-                chunk = fh.read(size - entry["offset"])
-        except OSError:
-            chunk = b""
-        cut = chunk.rfind(b"\n")
-        if cut >= 0:
-            data = chunk[:cut + 1]
-            for line in data.splitlines():
-                _add_line(entry["days"], line)
-            entry["offset"] += len(data)
-    state[key] = entry
-    return entry["days"]
+        entry.update(offset=0, days={}, seen=set())
+    if size <= entry["offset"]:
+        return
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(entry["offset"])
+            chunk = fh.read(size - entry["offset"])
+    except OSError:
+        return
+    cut = chunk.rfind(b"\n")
+    if cut < 0:
+        return
+    data = chunk[:cut + 1]
+    for line in data.splitlines():
+        _add_line(entry["days"], line, entry["seen"])
+    entry["offset"] += len(data)
+
+
+def day_totals(server, home, *, days=SERIES_DAYS):
+    """{day: {"total", "output"}} for one cousin over every transcript
+    touched in the last `days` days, scanning only the bytes appended
+    since the last call on this server."""
+    state = server.state.setdefault("tokens", {})
+    files = state.setdefault(str(home), {})
+    try:
+        ok, _reason = availability(server.root)
+    except Exception:
+        ok = False
+    if not ok:
+        return {}
+    since = (datetime.now(timezone.utc) - timedelta(days=days + 1)).timestamp()
+    out = {}
+    for path in _transcripts(server.root, home, since):
+        entry = files.setdefault(str(path), {"offset": 0, "days": {},
+                                             "seen": set()})
+        _scan(entry, path)
+        for day, bucket in entry["days"].items():
+            agg = out.setdefault(day, {"total": 0, "output": 0})
+            agg["total"] += bucket["total"]
+            agg["output"] += bucket["output"]
+    return out
 
 
 def _today():

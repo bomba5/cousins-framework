@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.0.1 - 2026-09-19
+
+- Tokens page: the 14-day series showed only today. It read only the
+  cousin's current session, and a cousin that flips daily starts a new one
+  every day. Every transcript in the window is read now, subagents
+  included.
+- Tokens: each message counts once. The harness writes one line per
+  content block, each repeating the message's usage (208 lines for 118
+  messages in a real transcript), and cache writes were added twice (the
+  per-TTL split on top of cache_creation_input_tokens). Totals were
+  inflated by roughly 2x.
+
 ## 1.0.0 - 2026-09-19
 
 The framework part of every cousin's CLAUDE.md follows the template.

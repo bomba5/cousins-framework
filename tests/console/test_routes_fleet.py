@@ -478,16 +478,45 @@ class TestTokens(ConsoleCase):
         self.assertTrue(body["available"])
         series = body["cousins"][0]["series"]
         self.assertEqual(len(series), 14)
-        self.assertEqual(series[-1], {"day": today, "total": 116, "output": 5})
+        # cache_creation only splits cache_creation_input_tokens by TTL:
+        # it is not added a second time.
+        self.assertEqual(series[-1], {"day": today, "total": 115, "output": 5})
         self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]
-                         ["tokensSpent"], 116)
+                         ["tokensSpent"], 115)
         # Incremental: an appended line adds to the same day.
         with open(tdir / "s1.jsonl", "a") as fh:
             fh.write(json.dumps({"timestamp": today + "T12:00:00Z",
                                  "message": {"usage": {"output_tokens": 4}}})
                      + "\n")
         _, body = self.get("/api/tokens")
-        self.assertEqual(body["cousins"][0]["series"][-1]["total"], 120)
+        self.assertEqual(body["cousins"][0]["series"][-1]["total"], 119)
+
+    def test_every_session_counts_and_each_message_once(self):
+        # A cousin that flips daily has a new session every day: the
+        # series reads all of them, subagents included, and a message
+        # the harness wrote as several lines counts once.
+        self.cousin("wren", extra='\n[runtime]\nsession_id = "today"\n')
+        tdir = self.root / "transcripts"
+        (tdir / "old" / "subagents").mkdir(parents=True)
+        (self.root / "config" / "harness.toml").write_text(
+            'transcripts_dir = "%s"\n' % tdir)
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone.utc)
+        today = now.strftime("%Y-%m-%d")
+        yday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        def line(day, mid, n):
+            return json.dumps({"timestamp": day + "T09:00:00Z", "message": {
+                "id": mid, "usage": {"input_tokens": n}}}) + "\n"
+        (tdir / "today.jsonl").write_text(
+            line(today, "m1", 10) + line(today, "m1", 10) + line(today, "m2", 1))
+        (tdir / "old.jsonl").write_text(line(yday, "m3", 100))
+        (tdir / "old" / "subagents" / "agent-a.jsonl").write_text(
+            line(yday, "m4", 7))
+        self.serve()
+        series = self.get("/api/tokens")[1]["cousins"][0]["series"]
+        self.assertEqual(series[-1]["total"], 11)
+        self.assertEqual(series[-2]["total"], 107)
 
 
 if __name__ == "__main__":

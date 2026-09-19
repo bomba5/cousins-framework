@@ -54,9 +54,18 @@ cousin-job tail 15 --lines 100
 
 Kinds are `subagent`, `shell`, `build` and `other`; media generation
 records its own `media` rows ([media](media.md)). Statuses are
-`running`, `done`, `failed` and `cancelled`. `cancel` sends SIGTERM to
-the job's process if it has one. `start --json` prints
+`running`, `done`, `failed` and `cancelled`. `start --json` prints
 `{"job_id": ..., "log_path": ...}` for scripts.
+
+A shell job's command runs in its own process group, and so does
+everything it starts, including a child that outlives the wrapper (an
+`ssh host tail -F`, a server started with `&`). Closing the job, with
+`cancel`, `done` or `fail` or from the console, ends that group: SIGTERM,
+then SIGKILL after 3 seconds for anything left. A finished job whose group
+still has processes is a leak: `cousin-job list` marks it `LEAK` and
+`show` lists the pids, and `cousin-job cancel <id>` ends them. Only
+processes in the job's own group that started after the job are ever
+signalled; nothing is killed by name.
 
 `cousin-job` needs `COUSIN_HOME` (to know who's asking) and a framework
 root (`FRAMEWORK_ROOT`, or a home under `<root>/cousins/`).

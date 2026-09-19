@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.1.0 - 2026-09-19
+
+- Jobs: closing a shell job ends its processes. The command runs in its
+  own process group (the group id is stored on the job); `cancel`,
+  `done` and `fail`, and a close from the console, SIGTERM the group and
+  SIGKILL what is left after 3 s. Before, `cancel` signalled only the
+  runner, so a child such as `ssh host tail -F` kept running for good.
+- Jobs: a finished job whose group still has processes is shown as a
+  leak in `cousin-job list` and `show` (with the pids). Only processes in
+  the job's own group that started after the job are counted or
+  signalled; nothing is killed by name.
+
 ## 1.0.3 - 2026-09-19
 
 From install re-test 5 (a clean Ubuntu 24.04, the docs followed literally;

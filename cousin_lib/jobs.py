@@ -46,6 +46,9 @@ def _db():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
     )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if "pgid" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN pgid INTEGER")
     conn.commit()
     return conn
 
@@ -399,6 +402,95 @@ def _default_log_path(job_id):
     return log_dir / ("job-%d.log" % job_id)
 
 
+# -- the job's process group --------------------------------------------
+#
+# A shell job's runner leads its own process group, and every process
+# the command starts inherits it, including children that outlive the
+# wrapper (an `ssh host tail -F` behind a pipe). Closing a job reaps
+# that group; a finished job whose group still has members is shown as
+# a leak. A member counts only if it started at or after the job did,
+# so a reused process-group id never reaches an unrelated process, and
+# nothing is ever killed by name.
+
+def _boot_time():
+    try:
+        with open("/proc/stat") as fh:
+            for line in fh:
+                if line.startswith("btime "):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    return None
+
+
+def _started_epoch(job):
+    try:
+        return datetime.fromisoformat(job["started_at"]).timestamp()
+    except (TypeError, ValueError, KeyError):
+        return None
+
+
+def group_members(pgid, since=None):
+    """Pids whose process group is `pgid` and that started at or after
+    `since` (epoch seconds; None skips that check)."""
+    if not pgid:
+        return []
+    btime = _boot_time()
+    hz = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+    out = []
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return []
+    for name in entries:
+        if not name.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % name) as fh:
+                stat = fh.read()
+        except OSError:
+            continue
+        fields = stat[stat.rfind(")") + 2:].split()
+        try:
+            pgrp = int(fields[2])
+            start_ticks = int(fields[19])
+        except (IndexError, ValueError):
+            continue
+        if pgrp != pgid:
+            continue
+        if since is not None and btime is not None:
+            if btime + start_ticks / hz < since - 2:
+                continue
+        out.append(int(name))
+    return sorted(out)
+
+
+def live_members(job):
+    return group_members(job.get("pgid"), _started_epoch(job))
+
+
+def reap_group(job, *, grace=3.0):
+    """SIGTERM the job's live group members, SIGKILL whatever is left
+    after `grace` seconds. Returns the pids that were alive."""
+    members = live_members(job)
+    if not members:
+        return []
+    for pid in members:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.time() + grace
+    while time.time() < deadline and live_members(job):
+        time.sleep(0.1)
+    for pid in live_members(job):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    return members
+
+
 def _spawn_tracked(cmd, log_path, job_id):
     """Fork the command as a detached background process with its
     output in log_path, and write its exit status back to the store
@@ -420,8 +512,13 @@ def _spawn_tracked(cmd, log_path, job_id):
         os.write(write_fd, ("%d\n" % runner_pid).encode())
         os.close(write_fd)
         os._exit(0)
-    # Runner.
+    # Runner: the leader of the job's own process group, which every
+    # process the command starts inherits.
     os.close(write_fd)
+    try:
+        os.setpgid(0, 0)
+    except OSError:
+        pass
     try:
         fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                      0o644)
@@ -461,8 +558,8 @@ def _cmd_start(args):
         pid = _spawn_tracked(cmd, log_path, job_id)
         conn = _db()
         try:
-            conn.execute("UPDATE jobs SET pid=? WHERE id=?",
-                         (pid, job_id))
+            conn.execute("UPDATE jobs SET pid=?, pgid=? WHERE id=?",
+                         (pid, pid, job_id))
             conn.commit()
         finally:
             conn.close()
@@ -489,8 +586,17 @@ def _close_cmd(args, status):
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)
         return 1
+    # The row is closed first, so a runner whose command dies from the
+    # reap below finds it closed and writes nothing over it. Then the
+    # processes end: a row that says done over a command still running
+    # is exactly the leak this prevents.
     finish_job(args.id, status=status, summary=args.summary or "",
                exit_code=getattr(args, "exit_code", None))
+    reaped = reap_group(job)
+    if reaped:
+        print("job #%d: stopped %d process(es) still running in its"
+              " group: %s" % (args.id, len(reaped),
+                              " ".join(map(str, reaped))))
     if job.get("log_path") and is_minted_log(job["log_path"]):
         try:
             with open(job["log_path"], "a", encoding="utf-8") as fh:
@@ -508,7 +614,9 @@ def _cmd_cancel(args):
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)
         return 1
-    if job["pid"]:
+    if job["pid"] and not job.get("pgid"):
+        # A row from before process groups were recorded: the runner
+        # pid is all there is.
         try:
             os.kill(job["pid"], signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
@@ -529,9 +637,12 @@ def _cmd_list(args):
     print("%4s  %-10s %-9s %-10s %s"
           % ("ID", "STATUS", "KIND", "OWNER", "TITLE"))
     for j in jobs:
-        print("%4d  %-10s %-9s %-10s %s"
+        leak = ""
+        if j["status"] != "running" and j.get("pgid") and live_members(j):
+            leak = "  [LEAK: processes still running; cousin-job cancel %d]" % j["id"]
+        print("%4d  %-10s %-9s %-10s %s%s"
               % (j["id"], j["status"], j["kind"],
-                 j["spawned_by"] or "-", (j["title"] or "")[:60]))
+                 j["spawned_by"] or "-", (j["title"] or "")[:60], leak))
     return 0
 
 
@@ -540,11 +651,16 @@ def _cmd_show(args):
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)
         return 1
+    job["live_processes"] = live_members(job)
     if args.json:
         print(json.dumps(job, indent=2, sort_keys=True, default=str))
     else:
         for key, value in job.items():
             print("  %-14s: %s" % (key, value))
+        if job["status"] != "running" and job["live_processes"]:
+            print("  LEAK: the job is %s but its processes still run;"
+                  " cousin-job cancel %d stops them"
+                  % (job["status"], job["id"]))
     return 0
 
 

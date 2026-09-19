@@ -115,7 +115,8 @@ def register():
             raise HttpError(400, "status must be one of %s"
                             % "|".join(jobs.STATUSES))
         if status == "cancelled" and job["status"] == "running" \
-                and job.get("pid"):
+                and job.get("pid") and not job.get("pgid"):
+            # A row from before process groups were recorded.
             try:
                 os.kill(int(job["pid"]), signal.SIGTERM)
             except (ProcessLookupError, PermissionError, ValueError):
@@ -126,6 +127,9 @@ def register():
             raise HttpError(400, str(err))
         if row is None:
             raise HttpError(404, "unknown job")
+        if status in ("cancelled", "done", "failed"):
+            # Closing a job ends its processes, the same as cousin-job.
+            jobs.reap_group(job)
         req.server.emit("job-update", row)
         return 200, {"ok": True, "job": row}
 

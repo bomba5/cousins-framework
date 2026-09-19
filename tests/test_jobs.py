@@ -197,6 +197,76 @@ class TestBackgroundCommand(JobsCase):
             self.fail("process survived cancel")
 
 
+class TestProcessGroup(TestBackgroundCommand):
+    """A job's command runs in its own process group; closing the job
+    ends the whole group, and a finished job whose group still runs is
+    shown as a leak (tracker #3)."""
+
+    def _alive(self, pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        try:
+            with open("/proc/%d/stat" % pid) as fh:
+                return fh.read().split(")")[-1].split()[0] != "Z"
+        except OSError:
+            return False
+
+    def _gone(self, pid, timeout=6):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not self._alive(pid):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def _pid_from(self, path, timeout=5):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                return int(path.read_text().strip())
+            except (OSError, ValueError):
+                time.sleep(0.05)
+        self.fail("no pid written to %s" % path)
+
+    def test_cancel_ends_a_grandchild_too(self):
+        pidfile = self.root / "bg.pid"
+        _, out, _ = self._main([
+            "start", "shell", "tail-like", "--", "sh", "-c",
+            "sleep 300 & echo $! > %s; wait" % pidfile])
+        job_id = int(out.strip())
+        grandchild = self._pid_from(pidfile)
+        self.assertEqual(get_job(job_id)["pgid"], get_job(job_id)["pid"])
+        rc, text, _ = self._main(["cancel", str(job_id)])
+        self.assertEqual(rc, 0)
+        self.assertIn("stopped", text)
+        self.assertTrue(self._gone(grandchild), "grandchild survived cancel")
+        self.assertEqual(get_job(job_id)["status"], "cancelled")
+
+    def test_a_finished_job_with_a_live_child_is_a_leak_until_reaped(self):
+        pidfile = self.root / "leak.pid"
+        _, out, _ = self._main([
+            "start", "shell", "leaker", "--", "sh", "-c",
+            "sleep 300 > /dev/null 2>&1 & echo $! > %s; exit 0" % pidfile])
+        job_id = int(out.strip())
+        orphan = self._pid_from(pidfile)
+        self._wait_status(job_id, ("done",))
+        _, listing, _ = self._main(["list"])
+        self.assertIn("LEAK", listing)
+        _, shown, _ = self._main(["show", str(job_id)])
+        self.assertIn("LEAK", shown)
+        self._main(["cancel", str(job_id)])
+        self.assertTrue(self._gone(orphan), "leaked child survived cancel")
+        _, listing, _ = self._main(["list"])
+        self.assertNotIn("LEAK", listing)
+
+    def test_other_process_groups_are_never_touched(self):
+        from cousin_lib import jobs
+        self.assertEqual(jobs.group_members(os.getpgrp(), since=time.time() + 60), [])
+        self.assertEqual(jobs.group_members(None), [])
+
+
 class TestTailCommand(JobsCase):
     def test_tail_prints_the_last_lines_of_the_log(self):
         _, out, _ = self._main([

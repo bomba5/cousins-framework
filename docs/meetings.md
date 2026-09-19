@@ -106,11 +106,9 @@ turn says `closing, you facilitate` and carries the whole transcript.
 
 - New cousins get the **Meetings** section of
   `templates/cousin-CLAUDE.template.md` in their CLAUDE.md at spawn.
-- Existing cousins: `cousin-meeting teach` shows, as a diff, the section it
-  would insert into each cousin's CLAUDE.md (above the cousin-specific part)
-  and the `meeting` tool it would add to each MCP registry.
-  `cousin-meeting teach --apply` writes them. A cousin picks up the new MCP
-  tool at its next start; the CLI works at once.
+- Existing cousins get it from the template sync every start and flip runs
+  ([cousins](cousins.md#the-claudemd-template)), the `meeting` MCP tool
+  included; the CLI works at once.
 - Every turn message carries the how-to line itself.
 
 ## Where it lives

@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.0.0 - 2026-09-19
+
+The framework part of every cousin's CLAUDE.md follows the template.
+
+- **Breaking:** `cousin-meeting teach` is removed. It copied one section
+  and one tool into existing cousins; the template sync below does that
+  for every section and every tool, by itself.
+- Every start and flip syncs the part of `CLAUDE.md` above the marker
+  line with `templates/cousin-CLAUDE.template.md` before the agent reads
+  it: each framework section gets the current template text filled in
+  with the cousin's name, slug, port and role; `## Identity` and
+  `## Voice` stay the cousin's own; a section the template doesn't have
+  is kept; below the marker nothing changes except a leftover copy of a
+  framework section that is word for word the template's. The old file
+  goes to `data/claude-md-backups/`. Tools the shipped MCP registry has
+  and the cousin's lacks are appended to its `mcp-registry.toml`.
+  Before, a template change reached only cousins spawned after it.
+- `cousin-spawn <slug> --sync-template` shows the diff; `--apply` writes it.
+
 ## 0.12.1 - 2026-09-19
 
 - Console pane: no more flicker while a cousin works. A full frame was

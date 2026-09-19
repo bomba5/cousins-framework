@@ -245,23 +245,3 @@ class TestCli(MeetingCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestTeach(MeetingCase):
-    def test_inserts_above_the_marker_once_and_dry_run_writes_nothing(self):
-        home = self.root / "cousins" / "wren"
-        (home / "CLAUDE.md").write_text(
-            "# Wren\n\n## Voice\nplain\n\n" + meetings.MARKER
-            + "\n## Mine\nstuff\n")
-        (home / "mcp-registry.toml").write_text("[tools.send]\nkind = 'send'\n")
-        before = (home / "CLAUDE.md").read_text()
-        changes = meetings.teach()
-        self.assertEqual({c[0] for c in changes}, {"wren"})
-        self.assertEqual((home / "CLAUDE.md").read_text(), before)
-        meetings.teach(apply=True)
-        text = (home / "CLAUDE.md").read_text()
-        self.assertLess(text.index("## Meetings"), text.index(meetings.MARKER))
-        self.assertIn("## Mine\nstuff", text)
-        self.assertIn("[tools.meeting]",
-                      (home / "mcp-registry.toml").read_text())
-        self.assertEqual(meetings.teach(apply=True), [])

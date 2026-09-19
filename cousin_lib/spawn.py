@@ -806,6 +806,16 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
         distill.distill(home)
     except Exception:
         pass
+    # The framework part of CLAUDE.md follows the template at every
+    # start and flip, before the agent reads it: otherwise a template
+    # change reaches only cousins spawned after it. The old file is
+    # kept in data/claude-md-backups/. Best-effort: a file that cannot
+    # be synced (no marker line) starts as it is.
+    try:
+        from cousin_lib import template_sync
+        template_sync.sync(home, launch_root, apply=True)
+    except Exception:
+        pass
     # A {session_id} placeholder is rendered HERE, at the single
     # spawn site, so a plain start (console, cousin-spawn --start) and
     # a flip mint identity the same way. flip.py renders its own copy
@@ -1002,6 +1012,39 @@ def _repair_settings(root, slug):
 
 
 @traced_cli("cousin-spawn")
+def _sync_template(root, slug, *, apply):
+    from cousin_lib import template_sync
+
+    home = Path(root) / "cousins" / slug
+    if not (home / "cousin.toml").is_file():
+        print("cousin-spawn: no cousin %r" % slug, file=sys.stderr)
+        return 2
+    try:
+        text, notes = template_sync.diff(home, root)
+        result = template_sync.sync(home, root, apply=apply)
+    except template_sync.SyncError as err:
+        print("cousin-spawn: %s: %s" % (slug, err), file=sys.stderr)
+        return 2
+    if text and not apply:
+        sys.stdout.write(text)
+    for note in notes:
+        print("note: %s" % note)
+    if result["registry_added"]:
+        print("mcp-registry.toml: %s tool(s) %s: %s" % (
+            len(result["registry_added"]),
+            "added" if apply else "would be added",
+            ", ".join(result["registry_added"])))
+    if not result["changed"]:
+        print("%s: CLAUDE.md already follows the template" % slug)
+    elif apply:
+        print("%s: CLAUDE.md synced; the old one is %s"
+              % (slug, result["backup"]))
+    else:
+        print("%s: dry run; --apply writes it (a start or flip does too)"
+              % slug)
+    return 0
+
+
 def spawn_main(argv=None):
     """Console entry point. Exit codes are the interface: 0 created
     (and started, if asked), 1 create succeeded but --start failed
@@ -1054,6 +1097,14 @@ def spawn_main(argv=None):
                              " [agent.resume]) instead of a new one; falls"
                              " back to a new session when that is not"
                              " possible. What the start-at-boot unit uses")
+    parser.add_argument("--sync-template", action="store_true",
+                        help="create nothing: show how an EXISTING"
+                             " cousin's CLAUDE.md framework part differs"
+                             " from the current template (every start"
+                             " and flip syncs it by itself); with"
+                             " --apply, write it")
+    parser.add_argument("--apply", action="store_true",
+                        help="with --sync-template: write the sync")
     parser.add_argument("--repair-settings", action="store_true",
                         help="create nothing: (re)write an EXISTING"
                              " cousin's harness project settings"
@@ -1074,7 +1125,8 @@ def spawn_main(argv=None):
     # with --role or --voice it is still a create, refused below.
     start_existing = (args.start and exists and not args.role
                       and not args.voice)
-    if not args.repair_settings and not start_existing:
+    if not args.repair_settings and not args.sync_template \
+            and not start_existing:
         for flag, value in (("--role", args.role), ("--voice", args.voice)):
             if not value:
                 parser.error("%s is required to create a cousin" % flag)
@@ -1083,6 +1135,8 @@ def spawn_main(argv=None):
         return 2
     if args.repair_settings:
         return _repair_settings(root, args.slug)
+    if args.sync_template:
+        return _sync_template(root, args.slug, apply=args.apply)
     if exists and not start_existing:
         print("cousin-spawn: cousin %r already exists; to start it:"
               " cousin-spawn %s --start" % (args.slug, args.slug),

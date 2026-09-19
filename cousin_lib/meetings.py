@@ -22,7 +22,6 @@ import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
@@ -563,78 +562,6 @@ def default_deliver(slug, text):
     return bool(TmuxInjector(config.tmux_session).inject(text))
 
 
-# -- teaching existing cousins -----------------------------------------
-
-MARKER = "## Append your cousin-specific sections below this line"
-
-
-def _template_section(root):
-    """The "## Meetings" section of the install's CLAUDE.md template,
-    up to the cousin-specific marker."""
-    fw = FrameworkConfig.resolve(root)
-    candidates = [fw.root / "templates" / "cousin-CLAUDE.template.md",
-                  Path(__file__).resolve().parents[1] / "templates"
-                  / "cousin-CLAUDE.template.md"]
-    for path in candidates:
-        if path.is_file():
-            text = path.read_text()
-            start = text.find("## Meetings\n")
-            end = text.find(MARKER, start)
-            if start >= 0 and end > start:
-                return text[start:end]
-    raise MeetingError("no '## Meetings' section in the CLAUDE.md template")
-
-
-def _registry_block():
-    example = (Path(__file__).resolve().parents[1] / "config"
-               / "mcp-registry.toml.example").read_text()
-    start = example.find("[tools.meeting]\n")
-    end = example.find("\n[tools.", start + 1)
-    if start < 0:
-        raise MeetingError("no [tools.meeting] in the shipped registry")
-    return example[start:end + 1 if end > 0 else len(example)]
-
-
-def teach(*, apply=False, root=None):
-    """The template reaches a cousin only at spawn. Bring the Meetings
-    section into every existing local cousin's CLAUDE.md (above its
-    cousin-specific part) and the meeting tool into its MCP registry.
-    Dry run by default: returns (slug, file, diff) for each change."""
-    import difflib
-
-    section = _template_section(root)
-    block = _registry_block()
-    changes = []
-    for config in FrameworkConfig.resolve(root).list_cousins():
-        if config.type == "worker" or config.chat_host:
-            continue
-        home = FrameworkConfig.resolve(root).root / "cousins" / config.slug
-        edits = []
-        claude = home / "CLAUDE.md"
-        if claude.is_file():
-            old = claude.read_text()
-            if "## Meetings\n" not in old:
-                if MARKER in old:
-                    new = old.replace(MARKER, section + MARKER, 1)
-                else:
-                    new = old.rstrip("\n") + "\n\n" + section
-                edits.append((claude, old, new))
-        registry = home / "mcp-registry.toml"
-        if registry.is_file():
-            old = registry.read_text()
-            if "[tools.meeting]" not in old:
-                edits.append((registry, old,
-                              old.rstrip("\n") + "\n\n" + block))
-        for path, old, new in edits:
-            diff = "".join(difflib.unified_diff(
-                old.splitlines(keepends=True), new.splitlines(keepends=True),
-                fromfile=str(path), tofile=str(path)))
-            changes.append((config.slug, str(path), diff))
-            if apply:
-                path.write_text(new)
-    return changes
-
-
 # -- CLI --------------------------------------------------------------
 
 def _me():
@@ -696,9 +623,6 @@ def meeting_main(argv=None):
         p.add_argument("--stdin", action="store_true")
     p = sub.add_parser("pass")
     p.add_argument("id", type=int)
-    p = sub.add_parser("teach", help="bring the Meetings section and tool"
-                       " to existing cousins (dry run without --apply)")
-    p.add_argument("--apply", action="store_true")
     for name in ("skip", "close", "delete"):
         p = sub.add_parser(name)
         p.add_argument("id", type=int)
@@ -715,16 +639,6 @@ def meeting_main(argv=None):
                 print("#%d [%s] %s - %s" % (
                     m["id"], m["state"], m["topic"],
                     m["turn_slug"] or "the user's floor"))
-            return 0
-        if args.cmd == "teach":
-            changes = teach(apply=args.apply)
-            for slug, path, diff in changes:
-                print(diff if not args.apply else "updated %s" % path)
-            if not changes:
-                print("every cousin already knows meetings")
-            elif not args.apply:
-                print("dry run: %d file(s) would change; --apply writes"
-                      % len(changes))
             return 0
         if args.cmd == "show":
             _print_meeting(show(args.id), args.json)

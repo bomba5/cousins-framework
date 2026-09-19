@@ -26,7 +26,9 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one (what the start-at-boot unit
 uses); `--repair-settings` rewrites an
-existing cousin's hooks and `.mcp.json`. See [cousins](cousins.md).
+existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
+CLAUDE.md framework part differs from the template, and `--apply` writes it
+(every start and flip does that by itself). See [cousins](cousins.md).
 
 ```
 cousin-spawn wren --name Wren --role "keeps the house notes" \
@@ -199,8 +201,7 @@ cousins, in rounds ([meetings](meetings.md)). Subcommands: `list`, `show ID`,
 `open TOPIC SLUG... [--facilitator SLUG] [--timeout S]`, `post ID TEXT`,
 `skip ID`, `close ID`, `delete ID` (the user's side, `--user NAME`), `say ID TEXT`,
 `pass ID`, `minutes ID TEXT` (the cousin's side, from `COUSIN_HOME`; `--stdin`
-for long text), and `teach [--apply]` to bring the Meetings section and tool
-to existing cousins.
+for long text).
 
 ```
 cousin-meeting open "name the new sensor" wren kestrel --user ana

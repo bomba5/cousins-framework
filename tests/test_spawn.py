@@ -833,3 +833,58 @@ class PendingBootPacket(unittest.TestCase):
         self.assertEqual(injected[0][0], "wren")
         self.assertIn("closed cleanly", injected[0][1])
         self.assertIn("BOOT PACKET FOR COUSIN: wren", injected[0][1])
+
+
+class TestTemplateSync(unittest.TestCase):
+    """The framework part of CLAUDE.md follows the template; Identity,
+    Voice and everything below the marker stay the cousin's own."""
+
+    TEMPLATE = (
+        "# {{NAME}} - {{ROLE_ONE_LINE}}\n\n## Identity\n\n{{ROLE_PARAGRAPH}}\n\n"
+        "## Chat\n\nport {{PORT}} for {{SLUG}}, new wording\n\n"
+        "## Voice\n\n{{VOICE_GUIDE}}\n\n## Surface\n\nrenders markdown\n\n"
+        "## Append your cousin-specific sections below this line\n")
+
+    def setUp(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "templates").mkdir()
+        (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
+            self.TEMPLATE)
+        self.home = self.root / "cousins" / "wren"
+        (self.home / "data").mkdir(parents=True)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\nrole = "notes"\n'
+            '[chat]\nport = 8123\n')
+        (self.home / "CLAUDE.md").write_text(
+            "# Wren - notes\n\n## Identity\n\nMy own role text.\n\n"
+            "## Chat\n\nold wording\n\n## Voice\n\nDry and short.\n\n"
+            "## Local extra\n\nkeep me\n\n"
+            "## Append your cousin-specific sections below this line\n\n"
+            "## Surface\n\nrenders markdown\n\n## Chat\n\nmy own chat rules\n")
+
+    def test_sync_rebuilds_the_framework_part_only(self):
+        from cousin_lib import template_sync
+        out = template_sync.sync(self.home, self.root, apply=True)
+        text = (self.home / "CLAUDE.md").read_text()
+        self.assertTrue(out["changed"])
+        self.assertIn("My own role text.", text)
+        self.assertIn("Dry and short.", text)
+        self.assertIn("port 8123 for wren, new wording", text)
+        self.assertNotIn("old wording", text)
+        self.assertIn("keep me", text)
+        below = text[text.index("## Append your"):]
+        self.assertNotIn("renders markdown", below)   # identical copy gone
+        self.assertIn("my own chat rules", below)      # different: kept
+        self.assertTrue(out["backup"].startswith(
+            str(self.home / "data" / "claude-md-backups")))
+        again = template_sync.sync(self.home, self.root, apply=True)
+        self.assertFalse(again["changed"])
+
+    def test_no_marker_is_refused(self):
+        from cousin_lib import template_sync
+        (self.home / "CLAUDE.md").write_text("# Wren\n\n## Identity\n\nx\n")
+        with self.assertRaises(template_sync.SyncError):
+            template_sync.sync(self.home, self.root, apply=True)

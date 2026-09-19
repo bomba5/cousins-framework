@@ -136,10 +136,36 @@ bookends, hard rules, the voice, and a note that the console renders Markdown
 and Mermaid. It names no person: it points at `[operator]` in `cousin.toml`.
 The last line is a marker; put anything specific to this cousin below it.
 
-After spawn, `CLAUDE.md` is yours. Edit it in any editor or in the console's
-inspector (which backs up the old version to `data/claude-md-backups/`). A
-running session doesn't reread it: the change lands at the next start or flip.
-`examples/wren/` is a complete rendered cousin you can read.
+Below the marker, `CLAUDE.md` is yours: edit it in any editor or in the
+console's inspector (which backs up the old version to
+`data/claude-md-backups/`). A running session doesn't reread it: the change
+lands at the next start or flip. `examples/wren/` is a complete rendered
+cousin you can read.
+
+Above the marker is the framework part, and it follows the template. Every
+start and flip syncs it before the agent reads the file, so a template change
+reaches every cousin, not only the ones spawned after it:
+
+- `## Identity` and `## Voice` stay the cousin's own (the template renders
+  them from text given at spawn and kept nowhere else).
+- Every other framework section gets the current template text, filled in
+  with the cousin's name, slug, port and role from `cousin.toml`. An edit you
+  make there is replaced at the next start: put your own rules below the
+  marker.
+- A section above the marker that the template doesn't have is kept, at the
+  end of the framework part.
+- Below the marker nothing changes, except a leftover copy of a framework
+  section that is word for word the template's, which is removed.
+- The old file goes to `data/claude-md-backups/` whenever the sync changes
+  it. Tools the shipped MCP registry has and the cousin's `mcp-registry.toml`
+  lacks are appended to it.
+
+To see what the next start would change, or to apply it now:
+
+```
+cousin-spawn wren --sync-template           # the diff, nothing written
+cousin-spawn wren --sync-template --apply
+```
 
 ## Starting, stopping, restarting
 

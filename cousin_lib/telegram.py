@@ -197,6 +197,13 @@ def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
     if sender.get("id") not in cfg.operator_ids:
         log("rejected message from unauthorized Telegram id %r"
             " (not in operators)" % sender.get("id"))
+        try:
+            # Offered to the operator for one-click adding: a bot
+            # cannot look an id up from a @username.
+            from cousin_lib import telegram_admin
+            telegram_admin.note_refused(cfg.home, sender)
+        except Exception:
+            pass
         return  # silent on the wire, logged above
     chat_send = chat_send or (lambda **kw: _default_chat_send(cfg, **kw))
     user = _thread_name(cfg, sender["id"])
@@ -449,3 +456,8 @@ def telegram_main(argv=None):
         print("cousin-telegram: %s" % err, file=sys.stderr)
         return 2
     return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(telegram_main())

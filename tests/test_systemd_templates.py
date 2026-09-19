@@ -22,7 +22,6 @@ REQUIRED_UNITS = {
     "cousin-chat-server@.service",
     "cousin-chat-watchdog.service", "cousin-chat-watchdog.timer",
     "cousin-console.service",
-    "cousin-telegram@.service",
 }
 PLACEHOLDERS = {"ROOT", "USER_BIN", "SYSTEM_PATH"}
 _ABS_PATH = re.compile(r'(?:^|[=:\s"\'])/[A-Za-z0-9_]')

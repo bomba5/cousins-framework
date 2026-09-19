@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.12.0 - 2026-09-19
+
+Telegram provisioning in the console.
+
+- A Telegram panel in each cousin's inspector: status, the bot's @name
+  (getMe check), enable switch, a write-only token (stored at
+  `config/telegram/<slug>.token`, 0600, never answered), the allowed
+  operators by numeric id, and "waiting to be added": the last people
+  who pressed Start and were refused, added with one click, so nobody
+  looks up a Telegram id.
+- The bridge belongs to its cousin: it starts with the cousin when
+  `[telegram]` is enabled and complete, stops with it (pid in
+  `data/telegram.pid`, log in `data/telegram.log`), and restarts on a
+  token or operator change. No per-cousin service unit is needed.
+- Routes `GET /api/cousins/<slug>/telegram` and `POST .../telegram/token`,
+  `.../operators`, `.../enabled`, `.../check`; `cousin_lib.telegram_admin`.
+
 ## 0.11.0 - 2026-09-19
 
 - Chat (tracker #24): `cousin-reply --image` records the picture on the

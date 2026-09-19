@@ -408,8 +408,14 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
                 pass
             time.sleep(0.05)
     pid_file.unlink(missing_ok=True)
+    try:
+        from cousin_lib import telegram_admin
+        bridge_state = telegram_admin.stop_bridge(home)
+    except Exception:
+        bridge_state = "not running"
     stopped = [what for what, state in (("agent", tmux_state),
-                                        ("chat server", chat_state))
+                                        ("chat server", chat_state),
+                                        ("telegram bridge", bridge_state))
                if state == "stopped"]
     if stopped:
         framework_event(home, "session", "%s stopped" % " and ".join(stopped))
@@ -837,6 +843,14 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
             text += "; boot packet from the clean stop injected"
         framework_event(home, "session", text)
     start_chat_server(home)
+    # The Telegram bridge belongs to its cousin like the chat server:
+    # up with it when [telegram] is enabled and complete. Best-effort;
+    # a bridge that cannot start never costs the cousin its start.
+    try:
+        from cousin_lib import telegram_admin
+        telegram_admin.start_bridge(home, launch_root)
+    except Exception:
+        pass
     if pending_boot_path(home).exists():
         _inject_pending_boot(home, config, tmux_bin=tmux_bin,
                              tmux_socket=tmux_socket, settle=boot_settle)

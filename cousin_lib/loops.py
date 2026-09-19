@@ -652,10 +652,12 @@ def _walk_timed_flips(state, deliver, do_flip, now, report):
         con.close()
 
 
-def _fire_daily_flips(state, do_flip, now, report):
+def _fire_daily_flips(state, do_flip, is_alive, now, report):
     """flip_at drivers: late-once per day, and AT MOST ONE flip per
     tick - the tick cadence is the stagger that keeps boot packets
-    from assembling simultaneously."""
+    from assembling simultaneously. A stopped cousin is skipped and
+    its day marked done: a flip starts the agent, so flipping a
+    cousin the operator stopped would undo the stop."""
     if report["flips"]:
         return  # a timed flip already used this tick's slot
     when = datetime.fromtimestamp(now)
@@ -673,6 +675,9 @@ def _fire_daily_flips(state, do_flip, now, report):
                               microsecond=0).timestamp()
         last = state.setdefault("last_flips", {}).get(config.slug)
         if now >= target and last != str(when.date()):
+            if not is_alive(config.slug):
+                state["last_flips"][config.slug] = str(when.date())
+                continue
             result = do_flip(config.slug)
             state["last_flips"][config.slug] = str(when.date())
             report["flips"].append(config.slug)
@@ -887,7 +892,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip):
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
               "ready": [], "guarded": [], "scheduled": 0, "distilled": []}
     _walk_timed_flips(state, deliver, do_flip, now, report)
-    _fire_daily_flips(state, do_flip, now, report)
+    _fire_daily_flips(state, do_flip, is_alive, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
         try:
             slug = config.slug

@@ -392,6 +392,19 @@ class TestFlipDrivers(LoopsCase):
         self._tick_f(now=evening + 60)
         self.assertEqual(self.flips, ["wren"])
 
+    def test_daily_flip_skips_a_stopped_cousin(self):
+        # A flip starts the agent: flipping a stopped cousin would undo
+        # the operator's stop. Skipped, and the day counts as done, so
+        # a start later that day is not followed by a flip.
+        self._flip_cousin("wren")
+        from datetime import datetime
+        evening = datetime.now().replace(hour=23, minute=0,
+                                         second=0).timestamp()
+        self._tick_f(now=evening, is_alive=lambda slug: False)
+        self.assertEqual(self.flips, [])
+        self._tick_f(now=evening + 60)
+        self.assertEqual(self.flips, [])
+
     def test_at_most_one_daily_flip_per_tick_stagger(self):
         # Boot packets must never assemble simultaneously; the tick
         # cadence is the stagger.

@@ -132,3 +132,40 @@ class TestAssemble(BootCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSharedLayer(BootCase):
+    """Operator rules in the shared tier reach every cousin's packet in
+    full; the rest of the tier is an index line each."""
+
+    def _shared(self, name, text):
+        (self.root / "shared").mkdir(exist_ok=True)
+        (self.root / "shared" / name).write_text(text)
+
+    def _section(self, text):
+        start = text.index("## 2. Shared Rules and Fleet Memory")
+        return text[start:text.index("## 3. Cousin Self-Portrait")]
+
+    def test_rules_in_full_references_as_index_lines(self):
+        self._shared("reference_first-principles.md",
+                     "---\nname: fp\ndescription: think first\n"
+                     "kind: rule\n---\nA cousin MUST decompose first.\n")
+        self._shared("reference_lan-map.md",
+                     "---\nname: net\ndescription: the LAN map\n---\n"
+                     "the router, the switches and many details\n")
+        section = self._section(assemble("wren", self.home)["text"])
+        self.assertIn("A cousin MUST decompose first.", section)
+        self.assertIn("- `reference_lan-map.md`: the LAN map", section)
+        self.assertNotIn("many details", section)
+
+    def test_pending_proposals_never_reach_the_packet(self):
+        (self.root / "shared" / "proposed").mkdir(parents=True)
+        (self.root / "shared" / "proposed" / "bart__x.md").write_text(
+            "---\nkind: rule\n---\nUNREVIEWED RULE\n")
+        text = assemble("wren", self.home)["text"]
+        self.assertNotIn("UNREVIEWED RULE", text)
+
+    def test_no_shared_tier_is_empty_and_not_degraded(self):
+        result = assemble("wren", self.home)
+        self.assertNotIn("shared", result["degraded_sections"])
+        self.assertIn("## 2. Shared Rules and Fleet Memory", result["text"])

@@ -41,8 +41,8 @@ class ToolSurfaceCase(unittest.TestCase):
         (self.root / "data" / "tool-surface.md").write_text(text)
 
     def _section(self, text):
-        start = text.index("## 8. Tool Surface")
-        end = text.index("## 9. Required Boot Actions")
+        start = text.index("## 9. Tool Surface")
+        end = text.index("## 10. Required Boot Actions")
         return text[start:end]
 
 
@@ -90,10 +90,10 @@ class TestToolSurfaceLayer(ToolSurfaceCase):
     def test_sits_between_memories_and_boot_actions(self):
         self._manifest("# Tool Surface\n- `cousin-x` - u\n")
         text = assemble("testa", self.home)["text"]
-        self.assertLess(text.index("## 7. Retrieved Memories"),
-                        text.index("## 8. Tool Surface"))
-        self.assertLess(text.index("## 8. Tool Surface"),
-                        text.index("## 9. Required Boot Actions"))
+        self.assertLess(text.index("## 8. Retrieved Memories"),
+                        text.index("## 9. Tool Surface"))
+        self.assertLess(text.index("## 9. Tool Surface"),
+                        text.index("## 10. Required Boot Actions"))
 
 
 if __name__ == "__main__":

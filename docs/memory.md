@@ -496,8 +496,24 @@ a cousin whose `cousin.toml` says:
 scope = "shared"     # or "both"; the default "private" never nominates
 ```
 
-The shared tier is read on demand with `cousin-shared read`; it isn't
-part of the boot packet or of search. In the console, the Memory view
+Every cousin's boot packet carries the canonical shared tier in its
+layer 2, whatever the cousin's own `scope` (scope decides what a cousin
+nominates, not what it reads). An entry whose frontmatter has
+`kind: rule` is quoted in full: it is an operator rule the whole fleet
+follows. Every other entry is one line, its file name and
+`description`, and the cousin reads it with `cousin-shared read` when it
+is relevant. Pending proposals never reach a packet. The shared tier is
+not part of `cousin-memory search`.
+
+```
+---
+name: reference_first-principles
+description: Every cousin reasons from first principles
+shareable: true
+kind: rule
+---
+```
+ In the console, the Memory view
 lists pending proposals with their diffs and has approve and reject
 buttons. With console logins set up, the reviewer is whoever is signed
 in ([console](console.md)).

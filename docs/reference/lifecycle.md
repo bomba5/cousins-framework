@@ -18,10 +18,12 @@ DEGRADED layers: calibration, tool_surface
 
 ## 1. Framework Law
 ...
-## 8. Tool Surface
+## 2. Shared Rules and Fleet Memory
+...
+## 9. Tool Surface
 ...
 
-## 9. Required Boot Actions
+## 10. Required Boot Actions
 ...
 ```
 
@@ -32,18 +34,19 @@ DEGRADED layers: calibration, tool_surface
 | # | layer | built from | when it's empty |
 |---|---|---|---|
 | 1 | Framework Law | `<root>/config/law.md`, the same for every cousin | empty section. Not marked degraded: it's an install problem, not the cousin's |
-| 2 | Cousin Self-Portrait | `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | `(no committed self-portrait yet - ...)`, **degraded** |
-| 3 | Operator Calibration | `memory/distilled/operator-calibration.md`; else the "Operator Calibration" section of the self-portrait (unless it still says TODO). Then the last 15 corrections from `data/corrections.jsonl`, newest first | `(no operator calibration distilled yet - degraded)`, **degraded** (also when there are corrections but no calibration) |
-| 4 | Active State | the `## Open loops` section of STATUS.md (or the first 1500 characters when there's no such section), then the first 1500 characters of `data/handoff.md`. A stale warning goes on top when decisions were logged after STATUS.md was last changed | `(no active state - degraded boot)`, **degraded** |
-| 5 | Current Task Packet | `data/active-threads.md` (first 1500 characters) and the last three reasoning capsules from `memory/distilled/reasoning-capsules.md` | `(no in-flight tasks - check STATUS.md)`. Only **degraded** if Active State is empty too |
-| 6 | Recent Tool Trace Summary | the cousin's traced CLI calls from the last 24 hours, newest first, up to 30 | `(no substantive tool traces in last 24h)`, fine |
-| 7 | Retrieved Memories | the distilled files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration is in layer 3), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/`, and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
-| 8 | Tool Surface | `<root>/data/tool-surface.md`, written by `cousin-tool-surface` (or its timer) | `(no tool-surface manifest ... - degraded; run cousin-tool-surface ...)`, **degraded** |
-| 9 | Required Boot Actions | fixed text | never empty |
+| 2 | Shared Rules and Fleet Memory | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule` in full, every other entry as one line (file and description). Never pending proposals | empty, fine: a fresh install has no shared tier |
+| 3 | Cousin Self-Portrait | `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | `(no committed self-portrait yet - ...)`, **degraded** |
+| 4 | Operator Calibration | `memory/distilled/operator-calibration.md`; else the "Operator Calibration" section of the self-portrait (unless it still says TODO). Then the last 15 corrections from `data/corrections.jsonl`, newest first | `(no operator calibration distilled yet - degraded)`, **degraded** (also when there are corrections but no calibration) |
+| 5 | Active State | the `## Open loops` section of STATUS.md (or the first 1500 characters when there's no such section), then the first 1500 characters of `data/handoff.md`. A stale warning goes on top when decisions were logged after STATUS.md was last changed | `(no active state - degraded boot)`, **degraded** |
+| 6 | Current Task Packet | `data/active-threads.md` (first 1500 characters) and the last three reasoning capsules from `memory/distilled/reasoning-capsules.md` | `(no in-flight tasks - check STATUS.md)`. Only **degraded** if Active State is empty too |
+| 7 | Recent Tool Trace Summary | the cousin's traced CLI calls from the last 24 hours, newest first, up to 30 | `(no substantive tool traces in last 24h)`, fine |
+| 8 | Retrieved Memories | the distilled files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration is in layer 4), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/`, and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
+| 9 | Tool Surface | `<root>/data/tool-surface.md`, written by `cousin-tool-surface` (or its timer) | `(no tool-surface manifest ... - degraded; run cousin-tool-surface ...)`, **degraded** |
+| 10 | Required Boot Actions | fixed text | never empty |
 
-Before it reads layer 7, `assemble` regenerates `memory/distilled/` from `memory/raw/` (the same as `cousin-memory distill`), so the packet always has a fresh view. If that fails, the packet uses whatever distilled files are already there.
+Before it reads layer 8, `assemble` regenerates `memory/distilled/` from `memory/raw/` (the same as `cousin-memory distill`), so the packet always has a fresh view. If that fails, the packet uses whatever distilled files are already there.
 
-The stale warning in layer 4 reads like this and means: don't trust STATUS.md blindly.
+The stale warning in layer 5 reads like this and means: don't trust STATUS.md blindly.
 
 ```
 > STALE WARNING: STATUS.md mtime is 30.5h old; 4 decision(s) logged after. Verify against data/decisions.jsonl before acting on it.

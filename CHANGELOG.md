@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.5.0 - 2026-09-19
+
+The shared tier reaches every cousin.
+
+- New boot-packet layer 2, "Shared Rules and Fleet Memory": canonical
+  shared entries with `kind: rule` in their frontmatter are quoted in
+  full, every other entry is one index line (file and description).
+  Every cousin gets it, whatever its memory scope; pending proposals
+  never do. The later layers move down one (Tool Surface is 9,
+  Required Boot Actions 10).
+
 ## 0.4.0 - 2026-09-19
 
 Console sidebar groups follow the user, not the browser.

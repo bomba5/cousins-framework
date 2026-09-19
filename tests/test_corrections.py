@@ -148,8 +148,8 @@ class TestBootCalibration(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _calibration_section(self, text):
-        start = text.index("## 3. Operator Calibration")
-        end = text.index("## 4. Active State")
+        start = text.index("## 4. Operator Calibration")
+        end = text.index("## 5. Active State")
         return text[start:end]
 
     def test_calibration_carries_the_summary_when_present(self):

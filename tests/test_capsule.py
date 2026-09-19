@@ -206,8 +206,8 @@ class TestBootPacket(CapsuleCase):
         self.addCleanup(patcher.stop)
 
     def _memories_section(self, text):
-        start = text.index("## 7. Retrieved Memories")
-        end = text.index("## 8. Tool Surface")
+        start = text.index("## 8. Retrieved Memories")
+        end = text.index("## 9. Tool Surface")
         return text[start:end]
 
     def test_memories_carry_the_newest_five_conclusions(self):

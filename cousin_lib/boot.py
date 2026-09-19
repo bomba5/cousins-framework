@@ -31,6 +31,9 @@ TOTAL_MAX_CHARS = 8000 * CHARS_PER_TOKEN
 
 LAYER_BUDGETS = {
     "law": (500 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
+    # Operator rules every cousin follows, in full, then a one-line
+    # index of the rest of the shared tier.
+    "shared": (400 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "self_portrait": (800 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     "calibration": (300 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
     "active_state": (500 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
@@ -45,10 +48,10 @@ LAYER_BUDGETS = {
 # Overflow victims first to last; law is never truncated.
 TRUNCATE_ORDER = [
     "tool_surface", "memories", "trace_summary", "calibration",
-    "task_packet", "active_state", "self_portrait",
+    "task_packet", "active_state", "shared", "self_portrait",
 ]
 
-REQUIRED_BOOT_ACTIONS = """## 9. Required Boot Actions
+REQUIRED_BOOT_ACTIONS = """## 10. Required Boot Actions
 
 You must now (INTERNALLY, do not announce):
 1. Reconstruct the current objective in one mental paragraph.
@@ -277,10 +280,53 @@ def _memories(home, max_chars):
     return _truncate(out, max_chars, "memories")
 
 
+_FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
+
+
+def _frontmatter(text):
+    """(fields, body) of a shared entry; flat `key: value` lines only."""
+    m = _FRONTMATTER.match(text)
+    if not m:
+        return {}, text
+    fields = {}
+    for line in m.group(1).splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip()
+    return fields, text[m.end():]
+
+
+def _shared():
+    """The canonical shared tier, every cousin's regardless of its own
+    memory scope (scope governs nominating, not reading). An entry
+    whose frontmatter says `kind: rule` is quoted in full: it is an
+    operator rule the fleet follows, and a rule a cousin never sees is
+    not followed. Every other entry is one index line; the cousin reads
+    it with `cousin-shared read <file>` when it is relevant."""
+    root = FrameworkConfig.from_env().root / "shared"
+    rules, index = [], []
+    for path in sorted(root.glob("*.md")) if root.is_dir() else []:
+        fields, body = _frontmatter(_read(path))
+        if fields.get("kind") == "rule":
+            rules.append("### %s\n%s" % (path.stem, body.strip()))
+        else:
+            index.append("- `%s`: %s" % (
+                path.name, fields.get("description") or path.stem))
+    parts = []
+    if rules:
+        parts.append("Operator rules every cousin follows:")
+        parts.extend(rules)
+    if index:
+        parts.append("### Shared reference (read with `cousin-shared "
+                     "read <file>` when relevant)")
+        parts.append("\n".join(index))
+    return "\n\n".join(parts)
+
+
 def _is_degraded(name, content, sections):
     """Per-layer explicit rules; see the module docstring for why this
     is never a substring scan."""
-    if name in ("law", "trace_summary", "memories"):
+    if name in ("law", "shared", "trace_summary", "memories"):
         # A missing law file is an install problem, not a per-cousin
         # gap; the trace idle marker and empty memories are a new
         # cousin's legitimate starting condition.
@@ -337,6 +383,7 @@ def assemble(slug, home, *, generation=None):
         pass
     sections = {
         "law": law.strip(),
+        "shared": _shared(),
         "self_portrait": self_portrait.for_boot_packet(home).strip(),
         "calibration": _calibration(home),
         "active_state": _active_state(home),
@@ -371,13 +418,14 @@ def assemble(slug, home, *, generation=None):
         body.append("DEGRADED layers: %s" % ", ".join(sorted(degraded)))
     for number, title, key in (
         (1, "Framework Law", "law"),
-        (2, "Cousin Self-Portrait", "self_portrait"),
-        (3, "Operator Calibration", "calibration"),
-        (4, "Active State", "active_state"),
-        (5, "Current Task Packet", "task_packet"),
-        (6, "Recent Tool Trace Summary", "trace_summary"),
-        (7, "Retrieved Memories", "memories"),
-        (8, "Tool Surface", "tool_surface"),
+        (2, "Shared Rules and Fleet Memory", "shared"),
+        (3, "Cousin Self-Portrait", "self_portrait"),
+        (4, "Operator Calibration", "calibration"),
+        (5, "Active State", "active_state"),
+        (6, "Current Task Packet", "task_packet"),
+        (7, "Recent Tool Trace Summary", "trace_summary"),
+        (8, "Retrieved Memories", "memories"),
+        (9, "Tool Surface", "tool_surface"),
     ):
         body.append("")
         body.append("## %d. %s" % (number, title))

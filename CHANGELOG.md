@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.8.2 - 2026-09-19
+
+- Telegram bridge (tracker #18): a failed relay no longer loses the
+  message. The update offset and the reply position moved before the
+  relay ran, so a chat server that was down or a failed Telegram send
+  dropped the message for good. Each now moves only past what was
+  delivered; transient errors are retried, and a permanent 4xx is
+  logged and skipped so it can't wedge the bridge.
+- Telegram bridge: its position is saved in `data/telegram-bridge.json`,
+  so a restart resumes instead of re-sending the reply thread from the
+  start, and a first start begins at the end of each thread.
+- Telegram bridge: each operator's thread is read and its replies go to
+  that operator. Before, only the first operator's thread was read, so
+  a second operator's replies never went out, and every reply went to
+  every operator. An operator with no `name` is now always `operator`,
+  not their Telegram first name.
+
 ## 0.8.1 - 2026-09-19
 
 - Boot packet: Required Boot Action 5 now gives the same pre-exit order

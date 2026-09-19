@@ -14,8 +14,12 @@ from unittest import mock
 from cousin_lib.telegram import (
     TelegramConfigError,
     load_bridge_config,
+    load_cursors,
+    pump_inbound,
+    pump_outbound,
     relay_inbound,
     relay_outbound,
+    save_cursors,
 )
 
 
@@ -163,6 +167,161 @@ class TestOutbound(_BridgeFixture):
         self.assertEqual(len(media), 1)
         self.assertEqual(media[0]["kind"], "image")
         self.assertEqual(media[0]["path"], str(asset))
+
+
+def _http_error(code):
+    import urllib.error
+    return urllib.error.HTTPError("http://x", code, "err", {}, None)
+
+
+class TestCursors(_BridgeFixture):
+    """Tracker #18: a cursor moves only past what was delivered, and it
+    survives a restart."""
+
+    def test_cursors_round_trip_through_the_home(self):
+        cfg = self._bridge()
+        save_cursors(cfg.home, {"tg_offset": 7, "threads": {"Sam": 41}})
+        self.assertEqual(load_cursors(cfg.home),
+                         {"tg_offset": 7, "threads": {"Sam": 41}})
+
+    def test_no_cursor_file_is_a_fresh_start(self):
+        cfg = self._bridge()
+        self.assertEqual(load_cursors(cfg.home),
+                         {"tg_offset": 0, "threads": {}})
+
+    def test_a_corrupt_cursor_file_is_a_fresh_start(self):
+        cfg = self._bridge()
+        (cfg.home / "data" / "telegram-bridge.json").write_text("{nope")
+        self.assertEqual(load_cursors(cfg.home),
+                         {"tg_offset": 0, "threads": {}})
+
+
+class TestPumpInbound(_BridgeFixture):
+    def _update(self, uid, text="hi"):
+        return {"update_id": uid,
+                "message": {"from": {"id": 42}, "text": text}}
+
+    def test_offset_advances_past_each_relayed_update(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {}}
+        sent = []
+        pump_inbound(cfg, state, [self._update(5), self._update(6)],
+                     relay=lambda cfg, update: sent.append(update))
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(state["tg_offset"], 7)
+        self.assertEqual(load_cursors(cfg.home)["tg_offset"], 7)
+
+    def test_a_transient_failure_keeps_the_update_for_the_retry(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {}}
+
+        def relay(cfg, update):
+            if update["update_id"] == 6:
+                raise OSError("chat server down")
+        with self.assertRaises(OSError):
+            pump_inbound(cfg, state, [self._update(5), self._update(6)],
+                         relay=relay)
+        # 5 is done, 6 is not: the next getUpdates starts at 6.
+        self.assertEqual(state["tg_offset"], 6)
+        self.assertEqual(load_cursors(cfg.home)["tg_offset"], 6)
+
+    def test_a_permanent_rejection_is_logged_and_skipped(self):
+        # A 400 from the chat server will be a 400 forever; holding the
+        # offset on it would wedge the bridge behind one bad update.
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {}}
+        logged = []
+
+        def relay(cfg, update):
+            raise _http_error(400)
+        pump_inbound(cfg, state, [self._update(5)], relay=relay,
+                     log=logged.append)
+        self.assertEqual(state["tg_offset"], 6)
+        self.assertTrue(any("5" in line for line in logged))
+
+    def test_a_non_text_message_is_skipped_with_a_log_line(self):
+        cfg = self._bridge()
+        sent, logged = [], []
+        relay_inbound(
+            cfg, update={"message": {"from": {"id": 42}, "photo": [{}]}},
+            chat_send=lambda **kw: sent.append(kw), log=logged.append)
+        self.assertEqual(sent, [])
+        self.assertTrue(logged)
+
+
+class TestPumpOutbound(_BridgeFixture):
+    def _rows(self):
+        return [
+            {"id": 10, "type": "user", "message": "q"},
+            {"id": 11, "type": "wren", "message": "a1",
+             "attachment_kind": None, "attachment_path": None},
+            {"id": 12, "type": "wren", "message": "a2",
+             "attachment_kind": None, "attachment_path": None},
+        ]
+
+    def test_cursor_advances_past_delivered_replies(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {"Sam": 9}}
+        tg = []
+        pump_outbound(cfg, state, "Sam", self._rows(),
+                      tg_send_text=lambda **kw: tg.append(kw))
+        self.assertEqual([m["text"] for m in tg], ["a1", "a2"])
+        self.assertEqual(state["threads"]["Sam"], 12)
+        self.assertEqual(load_cursors(cfg.home)["threads"]["Sam"], 12)
+
+    def test_a_transient_failure_keeps_the_reply_for_the_retry(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {"Sam": 9}}
+
+        def send(**kw):
+            if kw["text"] == "a2":
+                raise OSError("network down")
+        with self.assertRaises(OSError):
+            pump_outbound(cfg, state, "Sam", self._rows(),
+                          tg_send_text=send)
+        # a1 went out, a2 did not: the next poll starts after 11.
+        self.assertEqual(state["threads"]["Sam"], 11)
+
+    def test_a_permanent_rejection_is_logged_and_skipped(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {"Sam": 9}}
+        logged = []
+
+        def send(**kw):
+            if kw["text"] == "a1":
+                raise _http_error(400)
+        pump_outbound(cfg, state, "Sam", self._rows(),
+                      tg_send_text=send, log=logged.append)
+        self.assertEqual(state["threads"]["Sam"], 12)
+        self.assertTrue(logged)
+
+    def test_rate_limit_is_transient(self):
+        cfg = self._bridge()
+        state = {"tg_offset": 0, "threads": {"Sam": 9}}
+
+        def send(**kw):
+            raise _http_error(429)
+        with self.assertRaises(Exception):
+            pump_outbound(cfg, state, "Sam", self._rows(),
+                          tg_send_text=send)
+        self.assertEqual(state["threads"]["Sam"], 10)
+
+
+class TestOperatorThreads(TelegramCase):
+    def test_each_thread_goes_to_its_own_operator(self):
+        self._token("bottok")
+        self._toml('[telegram]\nenabled = true\n'
+                   'token_file = "config/telegram-wren.token"\n'
+                   'operators = [{user_id = 42, name = "Sam"},'
+                   ' {user_id = 43, name = "Ana"}]\n')
+        cfg = load_bridge_config(self.home)
+        self.assertEqual(cfg.threads(), {"Sam": {42}, "Ana": {43}})
+        state = {"tg_offset": 0, "threads": {"Ana": 0}}
+        tg = []
+        pump_outbound(cfg, state, "Ana",
+                      [{"id": 3, "type": "wren", "message": "hi Ana"}],
+                      tg_send_text=lambda **kw: tg.append(kw))
+        self.assertEqual([m["chat_id"] for m in tg], [43])
 
 
 class TestCli(TelegramCase):

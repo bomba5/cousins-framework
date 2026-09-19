@@ -3,6 +3,14 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 0.8.1 - 2026-09-19
+
+- Boot packet: Required Boot Action 5 now gives the same pre-exit order
+  as the flip and the clean stop (STATUS.md, active-threads, durable
+  memories, handoff.md LAST). It still said "three artifacts" with the
+  handoff second, and a cousin following it could end its session
+  before its memories were saved.
+
 ## 0.8.0 - 2026-09-19
 
 - Meetings: delete a meeting and its transcript (`DELETE /api/meetings/<id>`,

@@ -60,11 +60,12 @@ You must now (INTERNALLY, do not announce):
    is missing.
 4. Continue silently. Do NOT post a respawn announcement unless the
    operator explicitly asked for a confirmation.
-5. Before exit write the three pre-exit artifacts: STATUS.md
-   (reconciled), data/handoff.md, and data/active-threads.md (one
-   bullet per in-flight thread). The framework falls back to a
-   STATUS-derived baseline if you skip the last one, but your richer
-   per-thread view is better boot fuel.
+5. Before exit, four writes in this order (the same order the flip
+   and the clean stop ask for): reconcile STATUS.md; write
+   data/active-threads.md, one bullet per in-flight thread; save what
+   the session learned that is not in memory yet (cousin-memory
+   remember / decide); LAST, data/handoff.md. The session ends as soon
+   as handoff.md changes, so anything after it can be lost.
 6. Memory writes default to the cousin-conclusion truth level (L3).
    What the operator told you is operator-stated (L0): record it with
    `cousin-memory remember "<topic>" "<fact>" --level operator --cite

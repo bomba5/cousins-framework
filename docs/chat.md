@@ -3,7 +3,7 @@
 Every cousin runs its own small chat server. This page covers how a
 message gets into a cousin's session, how the cousin answers, how
 cousins talk to each other, what the console does with the history, and
-the Telegram bridge. The HTTP routes themselves are in
+where the Telegram bridge fits ([telegram](telegram.md) has the details). The HTTP routes themselves are in
 [reference/chat-api.md](reference/chat-api.md).
 
 ## One server per cousin
@@ -302,87 +302,6 @@ copy of the history ([console](console.md)).
 
 ## Telegram bridge
 
-The bridge relays one cousin's chat to your Telegram and back. It's the
-one feature in the framework that sends your content to a third party,
-so it stays off until it's fully configured, and refuses to start
-otherwise.
-
-What leaves the machine: HTTPS to `api.telegram.org` only. The bridge
-long-polls for your messages and sends the cousin's replies back. It
-opens no port and needs no public URL. Everything in that Telegram chat
-passes through Telegram's servers.
-
-Set it up:
-
-1. Create a bot with @BotFather and copy its token.
-2. Find your numeric Telegram user id (not your @name).
-3. Put the token in a file under the framework root, readable only by
-   you. `config/` is gitignored:
-
-   ```
-   install -m 600 /dev/null config/telegram-wren.token
-   $EDITOR config/telegram-wren.token
-   ```
-
-4. Add a `[telegram]` table to the cousin's `cousin.toml`:
-
-   ```toml
-   [telegram]
-   enabled = true
-   token_file = "config/telegram-wren.token"    # relative to the framework root
-   operators = [{ user_id = 123456789, name = "ana" }]
-   ```
-
-5. Run it, as a service if you like:
-
-   ```
-   FRAMEWORK_ROOT=$PWD cousin-telegram --home cousins/wren
-   # or: COUSIN_HOME=$PWD/cousins/wren cousin-telegram
-   ```
-
-It finds the framework root through `FRAMEWORK_ROOT`, or from the home
-itself when that lives at `<root>/cousins/<slug>`, so `--home` alone is
-enough for a standard install. No framework root, no `[telegram]` table, `enabled` not true, no token file or an
-empty `operators` list are all refusals with exit 2 and a message
-naming the problem.
-
-How it relays:
-
-- In: a text message from an id in `operators` becomes a normal
-  `/api/send` to the cousin's chat server, under the name you gave in
-  `operators` (`operator` if you gave none). The cousin sees it like any
-  other chat line. A photo goes in as an image attachment with its
-  caption (or `[photo]`), the largest size Telegram offers, up to
-  10 MB; the cousin gets the file path to read.
-- Out: every few seconds the bridge reads each operator's thread and
-  sends each new reply from the cousin there to that operator's
-  Telegram id (every id that shares the name, if several do).
-- A reply with an attachment is uploaded as the file: an image as a
-  photo, a video as a video, a voice reply (mp3) as audio. Telegram's
-  own limits apply (10 MB for a photo, 50 MB otherwise); a file over
-  them is rejected, logged and skipped.
-- A message from anyone else gets no answer at all, so the bot never
-  confirms it exists. The bridge logs the rejected id, so if you got
-  your own id wrong you'll see it in the log instead of wondering
-  whether the bridge is down.
-- Where it is gets saved in the cousin's `data/telegram-bridge.json`:
-  the Telegram update offset and one reply position per operator
-  thread. A restart picks up where the bridge stopped. On the very first
-  start it begins at the end of each thread, so it doesn't re-send your
-  chat history.
-- A position moves only past what was delivered. Network errors, a
-  chat server that's down, Telegram 5xx and rate limits (429) are
-  logged and retried on the next pass, so nothing is lost; the bridge
-  doesn't exit on them. A retry can send a reply twice to an operator
-  who already got it when another operator's send failed.
-- A permanent rejection (any other 4xx, such as a bot the operator
-  blocked) is logged with the message id and skipped, so one bad
-  message can't hold up everything behind it.
-
-Rough edges right now:
-
-- Only text and photos go in. A voice message, video, sticker or
-  document from Telegram isn't relayed; the bridge logs that it skipped
-  it. The chat server takes image attachments only.
-
-Keep the token file private. Whoever has it controls the bot.
+The bridge relays one cousin's chat to your Telegram and back. It is off
+until it is fully configured. What it relays, how to provision a bot,
+the systemd unit and the state file are all in [telegram](telegram.md).

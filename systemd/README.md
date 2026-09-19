@@ -28,6 +28,7 @@ here).
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
 | `cousin-start@.service` | `cousin-spawn <slug> --start --resume` for the slug after the `@`: brings the cousin back after a reboot, resuming its last session when it can | once at boot, one per cousin you enable it for |
 | `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the slug after the `@` | always, one per cousin, only if you want systemd to own chat servers (see below) |
+| `cousin-telegram@.service` | `cousin-telegram --home {{ROOT}}/cousins/<slug>` for the slug after the `@`: the Telegram bridge | always, one per cousin whose `[telegram]` is set up ([chat](../docs/chat.md#telegram-bridge)) |
 
 A `.timer` starts the `.service` with the same name. Enable the timer, not
 the service.
@@ -94,6 +95,22 @@ To change a unit later, use a drop-in (`systemctl --user edit <unit>`)
 rather than editing the rendered file: re-running the loop above overwrites
 the file but leaves drop-ins alone. That's how you put the console on the
 LAN, see [install](../docs/install.md#reaching-the-console-from-the-lan).
+
+## Telegram bridge
+
+`cousin-telegram@<slug>.service` runs one cousin's Telegram bridge. Nothing
+else starts the bridge: not a spawn, a flip or the console. Enable it only
+after the cousin's `[telegram]` table and token file are in place (the steps
+are in [chat](../docs/chat.md#telegram-bridge)):
+
+```
+systemctl --user enable --now cousin-telegram@wren.service
+journalctl --user -u cousin-telegram@wren.service -f
+```
+
+The unit restarts the bridge on a crash. It does not restart it on exit 2,
+because that is a configuration refusal and the journal names the cause.
+Fix the config, then `systemctl --user restart cousin-telegram@wren.service`.
 
 ## Install as system units
 

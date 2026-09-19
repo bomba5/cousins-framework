@@ -1,0 +1,21 @@
+[Unit]
+Description=cousins-framework Telegram bridge for cousin %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ROOT}}
+Environment=FRAMEWORK_ROOT={{ROOT}}
+Environment=PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}
+Environment=PYTHONUNBUFFERED=1
+ExecStart={{USER_BIN}}/cousin-telegram --home {{ROOT}}/cousins/%i
+Restart=on-failure
+RestartSec=10
+# Exit 2 is a configuration refusal (no token file, no operators, ...);
+# restarting cannot fix it, so the unit stays failed with the reason in
+# the journal instead of looping.
+RestartPreventExitStatus=2
+
+[Install]
+WantedBy=default.target

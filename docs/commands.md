@@ -187,7 +187,7 @@ cousin-chat-watchdog --dry-run
 ```
 
 `cousin-telegram` bridges one cousin's chat to Telegram (long polling, off
-until `[telegram]` in its `cousin.toml` is complete). See [chat](chat.md).
+until `[telegram]` in its `cousin.toml` is complete). See [telegram](telegram.md).
 
 ```
 cousin-telegram --home cousins/wren

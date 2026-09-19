@@ -59,6 +59,7 @@ and how to remove it all again, is in [install](docs/install.md).
 - [Memory](docs/memory.md) - what a cousin remembers and how
 - [Chat](docs/chat.md) - talking to cousins, and cousins talking to each
   other
+- [Telegram](docs/telegram.md) - a cousin's chat on your phone: the bridge and its setup
 - [Meetings](docs/meetings.md) - a chat with several cousins at once, in rounds
 - [Jobs and loops](docs/jobs-and-loops.md) - background work and schedules
 - [MCP tools](docs/mcp.md) - the tools a cousin gets

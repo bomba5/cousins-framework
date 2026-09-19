@@ -139,8 +139,8 @@ With media configured:
 - Nothing else. There are no calls to any other service, no telemetry,
   and no automatic posting anywhere.
 - The generated file stays on your machine. It only leaves if you run
-  the Telegram bridge, and even then attachments aren't relayed yet
-  ([chat](chat.md#telegram-bridge)).
+  the Telegram bridge. Outbound image and video relay lands with
+  tracker #24; voice isn't relayed ([telegram](telegram.md#interface)).
 
 To turn a kind off again, remove its section (or its `url`) from
 `config/media.toml`. The next command refuses.

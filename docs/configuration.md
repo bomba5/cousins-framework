@@ -366,8 +366,9 @@ Nothing fires.
 
 The Telegram bridge has no file in `config/` of its own. It's configured per
 cousin in `cousin.toml` (below), and its bot token lives in a file under the
-root that `[telegram] token_file` names, for example
-`config/telegram-wren.token`. Keep it under `config/` so git ignores it.
+root that `[telegram] token_file` names, by convention
+`config/telegram/<slug>.token` (mode 600). Keep it under `config/` so git
+ignores it. Setup steps are in [telegram](telegram.md).
 
 ## Environment variables
 
@@ -486,7 +487,7 @@ Exactly one of `interval_seconds`, `daily_at` and `cron`. See
 | `token_file` | required | the bot token file, relative to the root |
 | `operators` | required | `[{user_id = 123456, name = "ana"}]`. Only these Telegram users are served. |
 
-The bridge refuses to start when any of these is missing. See [chat](chat.md).
+The bridge refuses to start when any of these is missing. See [telegram](telegram.md).
 
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `chat-hooks.json` (patterns the chat

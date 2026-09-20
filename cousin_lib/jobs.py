@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
-from cousin_lib.sqlite_util import add_column
+from cousin_lib.sqlite_util import add_column, wal
 
 _ACTIVE = ("running",)
 
@@ -27,6 +27,7 @@ def _db():
     path = FrameworkConfig.from_env().root / "data" / "jobs.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5)
+    wal(conn)
     conn.row_factory = sqlite3.Row
     conn.execute(
         "CREATE TABLE IF NOT EXISTS jobs ("

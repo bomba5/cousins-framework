@@ -54,6 +54,7 @@ from pathlib import Path
 from cousin_lib import reinforce
 from cousin_lib.config import (FrameworkConfig, MissingConfigError,
                                expand_harness_path, harness_config)
+from cousin_lib.sqlite_util import wal
 
 _EMBED_CAP_CHARS = 6000
 _RRF_K = 60
@@ -155,7 +156,7 @@ def build_index(home=None):
     home = Path(home) if home else _home()
     db_path = _fts_path(home)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = wal(sqlite3.connect(db_path))
     try:
         conn.execute("DROP TABLE IF EXISTS memory_fts")
         conn.execute(
@@ -193,7 +194,7 @@ def _index_stale(home):
     db_path = _fts_path(home)
     if not db_path.exists():
         return True
-    conn = sqlite3.connect(db_path)
+    conn = wal(sqlite3.connect(db_path))
     try:
         row = conn.execute(
             "SELECT source_mtime, files FROM index_meta").fetchone()
@@ -272,7 +273,7 @@ def _keyword_search(query, home, top, collection=None):
         params.append(collection)
     sql += " ORDER BY score LIMIT ?"
     params.append(top)
-    conn = sqlite3.connect(_fts_path(home))
+    conn = wal(sqlite3.connect(_fts_path(home)))
     try:
         rows = conn.execute(sql, params).fetchall()
     except sqlite3.OperationalError:

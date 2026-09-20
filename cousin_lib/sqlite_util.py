@@ -42,3 +42,17 @@ def add_columns(conn, table, columns):
     """add_column for a {name: decl} mapping, in order."""
     for name, decl in columns.items():
         add_column(conn, table, name, decl)
+
+
+def wal(conn):
+    """Put this database in WAL mode, where a writer does not block
+    readers. Persistent per file, so the first writer converts it and
+    later opens are a no-op. Best-effort: WAL is unavailable on a
+    network filesystem, and a database that works in the rollback
+    journal is better than a refusal to open. Never inside a
+    transaction, so call it right after connecting."""
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.Error:
+        pass
+    return conn

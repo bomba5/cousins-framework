@@ -19,6 +19,7 @@ from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
+from cousin_lib.sqlite_util import wal
 
 
 def _db_path():
@@ -29,6 +30,7 @@ def _db():
     path = _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5)
+    wal(conn)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS scheduled_jobs ("
         " id         INTEGER PRIMARY KEY AUTOINCREMENT,"

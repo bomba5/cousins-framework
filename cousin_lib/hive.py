@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from cousin_lib.sqlite_util import add_columns
+from cousin_lib.sqlite_util import add_columns, wal
 from secrets import token_urlsafe
 
 SCOPES = ("own", "shared")
@@ -212,6 +212,7 @@ class HiveStore:
         self.path.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.path / "hive.db",
                                     check_same_thread=False, timeout=10)
+        wal(self.conn)
         self.conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._cond = threading.Condition(self._lock)

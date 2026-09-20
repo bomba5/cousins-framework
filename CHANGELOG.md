@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.5.1 - 2026-09-20
+
+- The databases several processes write are in WAL mode: `jobs.db`,
+  `scheduled.db`, `hive.db` and every cousin's memory index. Six modules
+  already set the pragma and four did not, with no reason for the split,
+  and the four included the most contended file on the host: every cousin's
+  hooks, every backgrounded shell and every subagent write `jobs.db`. In the
+  rollback journal a writer blocks readers too. `journal_mode` is persistent
+  per file, so the first writer converts an existing database and later
+  opens are a no-op; it is best-effort, because WAL is unavailable on a
+  network filesystem and a database that opens in the rollback journal beats
+  one that refuses to open (tracker #38, scope from juno's survey).
+
 ## 1.5.0 - 2026-09-20
 
 - A cousin is told when its own MCP server failed, and why. The harness

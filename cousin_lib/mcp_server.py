@@ -122,9 +122,16 @@ def _validate_tool(name, tool):
                                     % (name, cmd_name, prop))
 
 
-def parse_registry(text, source="<registry>"):
+def parse_registry(text, source="<registry>", *, strict=True):
     """Parse and validate registry text; fill defaults. RegistryError on
-    anything malformed."""
+    anything malformed.
+
+    With strict=False a tool that does not validate is dropped instead of
+    killing the load, and reg["skipped"] carries (name, reason) for each.
+    That is what serving uses: a registry is one file for every tool, so a
+    single bad table used to cost a cousin its whole MCP surface. Anything
+    about the file itself (unparseable TOML, the tool ceiling) stays fatal
+    in both modes, because no subset of it is trustworthy."""
     try:
         reg = tomllib.loads(text)
     except tomllib.TOMLDecodeError as err:
@@ -133,10 +140,18 @@ def parse_registry(text, source="<registry>"):
     reg.setdefault("timeout", DEFAULT_TIMEOUT)
     reg.setdefault("max_output", DEFAULT_MAX_OUTPUT)
     tools = reg.setdefault("tools", {})
-    for name, tool in tools.items():
-        if "command" not in tool and tool.get("kind", "command") == "command":
-            raise RegistryError("%s: no command" % name)
-        _validate_tool(name, tool)
+    skipped = reg.setdefault("skipped", [])
+    for name, tool in list(tools.items()):
+        try:
+            if ("command" not in tool
+                    and tool.get("kind", "command") == "command"):
+                raise RegistryError("%s: no command" % name)
+            _validate_tool(name, tool)
+        except RegistryError as err:
+            if strict:
+                raise
+            skipped.append((name, str(err)))
+            del tools[name]
     enabled = [n for n, t in tools.items() if t["enabled"]]
     if len(enabled) > reg["ceiling"]:
         raise RegistryError(
@@ -166,14 +181,14 @@ def default_registry_path(env):
     return None
 
 
-def load_registry(path):
+def load_registry(path, *, strict=True):
     """Parse and validate a registry file. Raises RegistryError."""
     path = pathlib.Path(path)
     try:
         text = path.read_text()
     except OSError as err:
         raise RegistryError("%s: %s" % (path, err))
-    return parse_registry(text, str(path))
+    return parse_registry(text, str(path), strict=strict)
 
 
 # ---------------------------------------------------------------- schemas
@@ -939,9 +954,17 @@ def _selftest(registry, path):
     else:
         print("mcp sdk: present, protocol versions %s"
               % ", ".join(versions))
+    for name, reason in registry.get("skipped", []):
+        print("  SKIPPED %s: %s" % (name, reason))
     if missing:
         print("selftest FAILED: %d command(s) resolve nowhere: %s"
               % (len(missing), ", ".join(missing)))
+        return 1
+    if registry.get("skipped"):
+        print("selftest FAILED: %d tool(s) did not validate and would be"
+              " skipped when serving: %s"
+              % (len(registry["skipped"]),
+                 ", ".join(n for n, _ in registry["skipped"])))
         return 1
     print("selftest ok: %d schema(s) built" % len(tools))
     return 0
@@ -985,14 +1008,19 @@ def mcp_main(argv=None):
               file=sys.stderr)
         return 2
     try:
-        registry = load_registry(path)
+        registry = load_registry(path, strict=False)
     except RegistryError as err:
         print("cousin-mcp: registry: %s" % err, file=sys.stderr)
         return 2
+    for name, reason in registry["skipped"]:
+        print("cousin-mcp: registry: tool %s skipped, the other tools still"
+              " serve: %s" % (name, reason), file=sys.stderr)
     home = env.get("COUSIN_HOME", "")
     if args.selftest:
         return _selftest(registry, path)
     if args.list_tools:
+        if registry["skipped"]:
+            return 2      # an inspection command answers for the whole file
         print(json.dumps(list_tools(registry), indent=2, sort_keys=True))
         return 0
     if args.versions:

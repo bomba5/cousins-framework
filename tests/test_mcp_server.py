@@ -1157,3 +1157,69 @@ class ParityCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLenientRegistry(unittest.TestCase):
+    """Serving is lenient per tool: one broken tool costs that tool, not
+    the whole MCP surface. On 2026-09-20 a [tools.meeting] left without
+    commands by the old `cousin-meeting teach` made cousin-mcp exit before
+    initialize, and four cousins booted with no tools at all."""
+
+    GOOD = ('[tools.memory]\ncommand = "cousin-memory"\n'
+            '[tools.memory.commands.search]\nargv = ["search"]\n')
+    CRIPPLED = '[tools.meeting]\ncommand = "cousin-meeting"\n'
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = pathlib.Path(tmp.name)
+
+    def test_a_tool_without_commands_is_skipped_not_fatal(self):
+        reg = mcp_server.parse_registry(self.GOOD + self.CRIPPLED,
+                                        strict=False)
+        self.assertEqual(sorted(reg["tools"]), ["memory"])
+        self.assertEqual([n for n, _ in reg["skipped"]], ["meeting"])
+        self.assertIn("no commands", reg["skipped"][0][1])
+
+    def test_strict_still_raises_so_a_check_fails_loudly(self):
+        with self.assertRaises(RegistryError):
+            mcp_server.parse_registry(self.GOOD + self.CRIPPLED)
+
+    def test_broken_toml_is_fatal_either_way(self):
+        for strict in (True, False):
+            with self.assertRaises(RegistryError):
+                mcp_server.parse_registry("[tools.x\n", strict=strict)
+
+    def test_a_sound_registry_reports_nothing_skipped(self):
+        reg = mcp_server.parse_registry(self.GOOD, strict=False)
+        self.assertEqual(reg["skipped"], [])
+
+    def test_selftest_fails_when_a_tool_was_skipped(self):
+        p = _write(self.tmp, self.GOOD + self.CRIPPLED)
+        reg = mcp_server.load_registry(p, strict=False)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = mcp_server._selftest(reg, p)
+        self.assertEqual(rc, 1)
+        self.assertIn("meeting", buf.getvalue())
+
+
+class TestLenientOnlyWhenServing(unittest.TestCase):
+    """Leniency is for the serving path. An inspection command answers for
+    the whole file, so it still fails when a tool did not validate."""
+
+    BAD = ('[tools.memory]\ncommand = "cousin-memory"\n'
+           '[tools.memory.commands.search]\nargv = ["search"]\n'
+           '[tools.meeting]\ncommand = "cousin-meeting"\n')
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = pathlib.Path(tmp.name)
+
+    def test_list_tools_refuses_a_registry_with_a_skipped_tool(self):
+        p = _write(self.tmp, self.BAD, name="bad.toml")
+        rc, out, err = _main(["--registry", str(p), "--list-tools"])
+        self.assertEqual(rc, 2)
+        self.assertIn("meeting", err)
+        self.assertEqual(out, "")

@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.3.0 - 2026-09-20
+
+- MCP: serving is lenient per tool. A tool that does not validate is skipped,
+  with a line on stderr naming it and why, and the rest of the registry still
+  serves. Before, any tool that failed validation killed the process before
+  `initialize`, and since the registry is one file for every tool, one bad
+  table cost the cousin its entire MCP surface. That is not hypothetical: a
+  `[tools.meeting]` left without commands by the old `cousin-meeting teach`
+  made every cousin that started a new session after it boot with no tools at
+  all, four of them in one morning, and the reason was visible only in the
+  harness's own log directory. What is wrong with the file itself,
+  unparseable TOML or the tool ceiling, is still fatal in both modes.
+- MCP: `cousin-mcp --selftest` prints each skipped tool and exits 1 when
+  there are any, so a deliberate check still fails loudly. `--list-tools`
+  refuses a registry with a skipped tool, unchanged: an inspection command
+  answers for the whole file.
+
 ## 1.2.2 - 2026-09-20
 
 - Template sync: a table the registry sync adds now goes in with the tool it

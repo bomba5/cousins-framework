@@ -127,10 +127,19 @@ cousin-mcp --selftest
 #      selftest ok: 4 schema(s) built
 ```
 
-`--selftest` exits 1 if any command can't be found. Without
-`--registry`, `cousin-mcp` uses the cousin's own
+`--selftest` exits 1 if any command can't be found, or if any tool did
+not validate. Without `--registry`, `cousin-mcp` uses the cousin's own
 `mcp-registry.toml`, else `config/mcp-registry.toml`, else
 `config/mcp-registry.toml.example`.
+
+Serving is lenient per tool. A tool that does not validate is skipped,
+with a line on stderr naming it and why, and the rest of the registry
+still serves. One file carries every tool, so a strict load meant one
+bad table cost the cousin its whole MCP surface, with the reason visible
+only in the harness's own log. What is wrong with the file itself,
+unparseable TOML or the tool ceiling, is still fatal: no subset of such
+a file is trustworthy. Use `--selftest` to see skipped tools on purpose;
+it fails when there are any.
 
 Every connect also records the MCP protocol version the client asked
 for in `data/mcp-client.json` in the cousin home. If Claude Code moves

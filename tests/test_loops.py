@@ -41,8 +41,13 @@ class LoopsCase(unittest.TestCase):
     def _cousin(self, slug="wren", loops_toml="", extra=None):
         # Beats are disabled in the plain fixture (interval 0) so loop
         # tests count only their own deliveries; beat tests opt in.
+        # The daily flip is off for the same reason: every cousin now
+        # takes the install default, so a fixture that says nothing
+        # would fire one and colour every unrelated report. Flip tests
+        # opt in through _flip_cousin.
         if extra is None:
-            extra = "[heartbeat]\ncontext_beat_seconds = 0\n"
+            extra = ('[heartbeat]\ncontext_beat_seconds = 0\n'
+                     '[lifecycle]\nflip_at = "never"\n')
         home = self.root / "cousins" / slug
         (home / "data").mkdir(parents=True, exist_ok=True)
         (home / "cousin.toml").write_text(
@@ -418,8 +423,29 @@ class TestFlipDrivers(LoopsCase):
         self._tick_f(now=evening + 30)
         self.assertEqual(len(self.flips), 2)
 
+    def test_a_cousin_with_no_lifecycle_block_still_flips(self):
+        # The defect this closes: flip_at was per cousin and nothing
+        # wrote one, so a cousin spawned or migrated later never
+        # flipped and nothing said so. No [lifecycle] block at all,
+        # which is the shape a migrated cousin actually had.
+        self._cousin("wren",
+                     extra="[heartbeat]\ncontext_beat_seconds = 0\n")
+        from datetime import datetime
+        evening = datetime.now().replace(hour=23, minute=0,
+                                         second=0).timestamp()
+        self._tick_f(now=evening)
+        self.assertEqual(self.flips, ["wren"])
+
+    def test_never_opts_a_cousin_out(self):
+        self._flip_cousin("wren", at="never")
+        from datetime import datetime
+        evening = datetime.now().replace(hour=23, minute=0,
+                                         second=0).timestamp()
+        self._tick_f(now=evening)
+        self.assertEqual(self.flips, [])
+
     def test_timed_flip_warns_then_fires_through_the_request_store(self):
-        self._cousin("wren")
+        self._flip_cousin("wren", at="never")   # isolate the request path
         base = time.time()
         submit_request("flip", cousin="wren",
                        payload={"fire_at": base + 300},

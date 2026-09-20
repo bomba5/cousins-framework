@@ -231,6 +231,59 @@ def _read_harness_toml(root):
         raise MissingConfigError("config/harness.toml is unusable: %s" % err)
 
 
+DEFAULT_FLIP_AT = "04:00"
+_NEVER = ("never", "off", "none", "no", "")
+
+
+def parse_flip_at(value, where):
+    """(hour, minute) from "HH:MM". MissingConfigError on anything else,
+    because a flip time that does not parse silently means no flip."""
+    try:
+        hour, minute = (int(part) for part in str(value).split(":"))
+    except (TypeError, ValueError):
+        raise MissingConfigError(
+            "%s must be a time as HH:MM, got %r" % (where, value))
+    if not (0 <= hour < 24 and 0 <= minute < 60):
+        raise MissingConfigError(
+            "%s must be a time as HH:MM, got %r" % (where, value))
+    return hour, minute
+
+
+def default_flip_at(root):
+    """The install's daily flip time for cousins that do not set one:
+    config/harness.toml `default_flip_at`, else DEFAULT_FLIP_AT. The
+    built-in default is deliberate - a cousin nobody configured still
+    flips, because the failure mode of not flipping is invisible."""
+    data = _read_harness_toml(root) or {}
+    value = data.get("default_flip_at")
+    if value is None:
+        return DEFAULT_FLIP_AT
+    if str(value).strip().lower() in _NEVER:
+        return None
+    parse_flip_at(value, "config/harness.toml default_flip_at")
+    return str(value)
+
+
+def flip_time(config, root=None):
+    """When this cousin flips daily, as "HH:MM", or None when it never
+    does. Its own [lifecycle] flip_at wins, "never" is the explicit
+    opt-out, a worker never flips, and anything else takes the install
+    default. Resolving it here rather than reading config.flip_at is
+    what makes the default reach a cousin whose file predates it."""
+    if config.type == "worker":
+        return None
+    own = config.flip_at
+    if own is not None:
+        if str(own).strip().lower() in _NEVER:
+            return None
+        parse_flip_at(own, "lifecycle.flip_at in %s/cousin.toml"
+                           % config.home)
+        return str(own)
+    if root is None:
+        root = FrameworkConfig.root_from_home(config.home)
+    return default_flip_at(root)
+
+
 def agent_config(root):
     """config/harness.toml [agent]: the install-wide `default_model` and
     `default_effort` an agent command's {model} and {effort}

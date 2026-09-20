@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.4.0 - 2026-09-20
+
+- Every cousin flips daily, whether or not its `cousin.toml` says so.
+  `flip_at` was per cousin and nothing ever wrote one, so a cousin spawned
+  or migrated after the operator's one-off pass never flipped, and nothing
+  reported it: it simply kept one session for as long as nobody looked. One
+  cousin on this install had been running the same session for 19 hours for
+  exactly that reason. The loops daemon now resolves an effective flip time:
+  the cousin's own `[lifecycle] flip_at` wins, `"never"` is an explicit
+  opt-out, a worker never flips, and everything else takes the install
+  default.
+- `default_flip_at` in `config/harness.toml` sets that default; absent, it is
+  `04:00`. One time for the whole fleet is safe because the daemon already
+  fires at most one flip per tick, so they queue rather than collide.
+- `cousin-loops flips` prints each cousin's effective flip time and where it
+  came from (its own file, the install default, or a worker that never
+  flips). The gap this closes was invisible precisely because nothing ever
+  showed the answer.
+
 ## 1.3.1 - 2026-09-20
 
 - Additive column migrations no longer race. All three read

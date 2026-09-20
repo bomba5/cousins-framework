@@ -310,7 +310,7 @@ Ways to trigger one:
 
 - `cousin-flip` by hand, or the flip button in the console (now or in 1, 5 or
   15 minutes; a timed flip warns the cousin at T-5m, T-1m and T-30s).
-- A daily flip: `[lifecycle] flip_at = "04:00"` in `cousin.toml`. The loops
+- A daily flip: every cousin gets one, at the install's `default_flip_at` (04:00 unless `config/harness.toml` says otherwise). Set `[lifecycle] flip_at = "HH:MM"` in `cousin.toml` to move this one, or `"never"` to opt it out; `cousin-loops flips` shows each cousin's time and where it comes from. The loops
   daemon runs it once a day after that time, one cousin per tick.
 - The transcript-size guard: with `flip_when_transcript_mb` in
   `config/harness.toml`, the loops daemon schedules a flip when a cousin's

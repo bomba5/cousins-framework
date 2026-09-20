@@ -98,6 +98,7 @@ Top-level keys:
 |---|---|---|
 | `transcripts_dir` | none | where the harness writes session transcripts for a cousin. A path template, see below. Used by transcript mining at flip, the console's token counts and the size guard. |
 | `auto_memory_dir` | none | the harness's own memory directory for a cousin. When set, it becomes the `harness` collection in `cousin-memory search`. |
+| `default_flip_at` | `04:00` | `"HH:MM"`, the daily flip time for every cousin that does not set its own. `"never"` makes no flip the default. One time for the whole fleet is fine: the daemon fires at most one flip per tick. |
 | `flip_when_transcript_mb` | none (no guard) | a positive number of megabytes. When a live cousin's `<transcripts_dir>/<session_id>.jsonl` grows past it, the loops daemon asks for one flip, five minutes out. Needs `transcripts_dir`. |
 | `settings_file` | none | the harness's settings JSON, the file that records project trust and approved MCP servers. `cousin-mcp approve` edits exactly this file. Without it, `approve` refuses and prints the edit to make by hand. |
 | `attention_patterns` | `[]` | plain strings. When a running cousin's visible pane contains one, the pane is waiting on a person (a login or trust menu). The console shows "needs attention" and every delivery into that pane is skipped with a `tmux delivery SKIPPED` log line. |
@@ -454,7 +455,7 @@ name = "ana"
 
 | key | default | meaning |
 |---|---|---|
-| `flip_at` | none | `"HH:MM"`. The loops daemon flips this cousin once a day at or after that time. Stagger it across cousins. |
+| `flip_at` | the install's `default_flip_at` (`04:00`) | `"HH:MM"`. The loops daemon flips this cousin once a day at or after that time. `"never"` opts this cousin out. Leave it out and the install default applies, so a new cousin flips without being configured. `cousin-loops flips` prints the effective time and where it came from. |
 
 `[[loops]]`, one table per loop:
 

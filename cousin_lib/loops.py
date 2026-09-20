@@ -15,7 +15,8 @@ from datetime import datetime
 from pathlib import Path
 
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
-                               MissingConfigError, harness_config)
+                               MissingConfigError, default_flip_at,
+                               flip_time, harness_config, parse_flip_at)
 
 REQUEST_TTL_SECONDS = 600
 READY_SUFFIX = ".ready"
@@ -661,16 +662,16 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
     if report["flips"]:
         return  # a timed flip already used this tick's slot
     when = datetime.fromtimestamp(now)
-    for config in FrameworkConfig.from_env().list_cousins():
-        if not config.flip_at or config.type == "worker":
-            continue
+    framework = FrameworkConfig.from_env()
+    for config in framework.list_cousins():
         try:
-            hour, minute = map(int, config.flip_at.split(":"))
-        except ValueError:
-            report["errors"].append(
-                "unparsable flip_at %r for %s"
-                % (config.flip_at, config.slug))
+            at = flip_time(config, framework.root)
+        except MissingConfigError as err:
+            report["errors"].append(str(err))
             continue
+        if not at:
+            continue        # a worker, or an explicit flip_at = "never"
+        hour, minute = parse_flip_at(at, "flip_at for %s" % config.slug)
         target = when.replace(hour=hour, minute=minute, second=0,
                               microsecond=0).timestamp()
         last = state.setdefault("last_flips", {}).get(config.slug)
@@ -1086,6 +1087,8 @@ def loops_main(argv=None):
                    help="run N ticks then exit (0 = forever)")
     sub.add_parser("status")
     sub.add_parser("requests")
+    sub.add_parser("flips", help="each cousin's daily flip time and"
+                                 " where it comes from")
     p = sub.add_parser("fire")
     p.add_argument("slug")
     p.add_argument("loop")
@@ -1094,6 +1097,25 @@ def loops_main(argv=None):
         status = daemon_status()
         print(status["message"])
         return 0 if status["ok"] else 1
+    if args.cmd == "flips":
+        framework = FrameworkConfig.from_env()
+        default = default_flip_at(framework.root)
+        print("install default: %s" % (default or "never"))
+        for config in framework.list_cousins():
+            try:
+                at = flip_time(config, framework.root)
+            except MissingConfigError as err:
+                print("  %-12s ERROR  %s" % (config.slug, err))
+                continue
+            if config.type == "worker":
+                source = "worker, never flips"
+            elif config.flip_at is not None:
+                source = "its own cousin.toml"
+            else:
+                source = "install default"
+            print("  %-12s %-6s %s"
+                  % (config.slug, at or "never", source))
+        return 0
     if args.cmd == "requests":
         rows = list_requests()
         if not rows:

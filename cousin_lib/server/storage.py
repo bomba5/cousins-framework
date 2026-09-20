@@ -8,6 +8,7 @@ keeps the WAL from growing unbounded across restarts.
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from cousin_lib.sqlite_util import add_column
 
 
 def normalize_chat_user(name):
@@ -69,12 +70,8 @@ class ChatStore:
         shipped lacks them; add them additively so its first
         attachment insert does not fail. Additive columns are the one
         anticipated migration - no id-space change, no data rewrite."""
-        existing = {r[1] for r in self.conn.execute(
-            "PRAGMA table_info(messages)")}
         for column in ("attachment_kind", "attachment_path"):
-            if column not in existing:
-                self.conn.execute(
-                    "ALTER TABLE messages ADD COLUMN %s TEXT" % column)
+            add_column(self.conn, "messages", column, "TEXT")
 
     def close(self):
         self.conn.close()

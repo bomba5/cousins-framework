@@ -1,6 +1,7 @@
 """The console server: guard first on every method, JSON conventions,
 the route registry shared with later tasks, static serving with a
 traversal check, and the entry point's root rule."""
+import io
 import json
 import os
 import unittest
@@ -289,3 +290,37 @@ class TestCliServePath(ConsoleCase):
         self.assertEqual(snap["cousins"][0]["slug"], "wren")
         self.assertEqual(snap["cousins"][0]["status"], "running",
                          snap["cousins"][0])
+
+
+class TestStopIsHonestAboutItsThread(ConsoleCase):
+    """stop() joins the serving thread with a timeout. A thread that does
+    not die inside it survives into later tests, where tests/_hermetic.py
+    warns it can see a half-restored os.environ. Before, stop() returned
+    silently in that case, so a leaked thread left no trace anywhere."""
+
+    class _Undead:
+        """A serving thread that ignores the join and keeps running."""
+
+        def join(self, timeout=None):
+            pass
+
+        def is_alive(self):
+            return True
+
+    def _stop_and_capture(self):
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.server.stop()
+        return err.getvalue()
+
+    def test_a_thread_that_outlives_the_join_is_reported(self):
+        self.serve()
+        real = self.server._thread
+        self.server._thread = self._Undead()
+        said = self._stop_and_capture()
+        self.server._thread = real
+        real.join(timeout=5)
+        self.assertIn("serving thread is still running", said)
+
+    def test_a_thread_that_dies_is_not_reported(self):
+        self.serve()
+        self.assertNotIn("still running", self._stop_and_capture())

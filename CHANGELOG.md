@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.3.1 - 2026-09-20
+
+- Additive column migrations no longer race. All three read
+  `PRAGMA table_info` and then issued `ALTER TABLE ADD COLUMN` if the column
+  was missing, which is check-then-act across connections: two openers both
+  see it missing, both alter, and the loser raises `duplicate column name`.
+  `cousin_lib/sqlite_util.add_column` attempts the alter and treats the
+  duplicate as success. It affected the hive store (where it surfaced), the
+  jobs database that every cousin's hooks open, and each chat server's
+  message store.
+- Console: `stop()` says so on stderr when the serving thread is still
+  running after the 5 s join instead of returning as if it had stopped. The
+  socket is closed either way, but the thread outlives the call, and
+  `tests/_hermetic.py` warns such a thread can see a half-restored
+  environment (reported by juno).
+- Test: the hive-build assertion now reports the response body, which is
+  what named this bug. It had asserted on the status alone, so three
+  reproductions of tracker #33 said only `500 != 201`.
+
 ## 1.3.0 - 2026-09-20
 
 - MCP: serving is lenient per tool. A tool that does not validate is skipped,

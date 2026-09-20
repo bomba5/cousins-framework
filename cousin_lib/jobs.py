@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
+from cousin_lib.sqlite_util import add_column
 
 _ACTIVE = ("running",)
 
@@ -46,9 +47,7 @@ def _db():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
     )
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
-    if "pgid" not in cols:
-        conn.execute("ALTER TABLE jobs ADD COLUMN pgid INTEGER")
+    add_column(conn, "jobs", "pgid", "INTEGER")
     conn.commit()
     return conn
 

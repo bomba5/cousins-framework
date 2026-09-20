@@ -266,6 +266,13 @@ class ConsoleServer:
         self.httpd.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                # The socket is closed, so no port is held, but the thread
+                # outlives this call and whatever runs next. Silence here
+                # used to make that invisible.
+                print("cousin-console: the serving thread is still running"
+                      " 5s after shutdown; it outlives this stop",
+                      file=sys.stderr)
 
 
 class _Handler(BaseHTTPRequestHandler):

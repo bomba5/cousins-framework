@@ -508,10 +508,12 @@ class TestBuild(HiveConsoleCase):
             .set_password("ana", "correct horse")
         self.enable()
         self.serve()
-        self.assertEqual(self._build()[0], 401)
+        status, body = self._build()
+        self.assertEqual(status, 401, body)
         self.post("/api/auth/login", {"user": "ana",
                                       "password": "correct horse"})
-        self.assertEqual(self._build()[0], 201)
+        status, body = self._build()
+        self.assertEqual(status, 201, body)   # the body carries the 500
 
 
 class TestStoreSharing(HiveConsoleCase):

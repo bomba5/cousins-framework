@@ -28,6 +28,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from cousin_lib.sqlite_util import add_columns
 from secrets import token_urlsafe
 
 SCOPES = ("own", "shared")
@@ -248,12 +249,7 @@ class HiveStore:
             self.conn.close()
 
     def _add_columns(self, table, columns):
-        have = {r["name"] for r in self.conn.execute(
-            "PRAGMA table_info(%s)" % table)}
-        for name, decl in columns.items():
-            if name not in have:
-                self.conn.execute("ALTER TABLE %s ADD COLUMN %s %s"
-                                  % (table, name, decl))
+        add_columns(self.conn, table, columns)
 
     # -- tokens
 

@@ -39,6 +39,14 @@
 # one flip per tick, so they queue rather than collide.
 #default_flip_at = "04:00"
 #
+# Where the harness keeps its own per-session log for each MCP server.
+# The framework reads it to tell a cousin why its MCP server did not
+# come up: the harness itself reports only CONNECTION_CLOSED, and the
+# server's stderr, which carries the actual reason, is only in here.
+# Same templating as transcripts_dir, plus {server}. Absent: Claude
+# Code's default, shown below.
+#mcp_logs_dir = "~/.cache/claude-cli-nodejs/{home_encoded}/mcp-logs-{server}"
+#
 # The harness's own settings JSON: the file that records, per project
 # path, which .mcp.json servers are approved ("enabledMcpjsonServers")
 # and whether the folder is trusted. `cousin-mcp approve <slug>` edits

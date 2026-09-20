@@ -355,6 +355,29 @@ def _is_degraded(name, content, sections):
     return not content
 
 
+def _mcp_warning(home):
+    """One line when the last recorded connection of this cousin's MCP
+    server failed. The packet is assembled before the new session
+    exists, so this is the previous session's outcome - which is the
+    useful one anyway: the causes are in files that outlive a session,
+    so a failure that is not fixed repeats. Silent on success, and
+    silent on its own failure: a diagnostic must not cost a boot."""
+    try:
+        from cousin_lib import mcp_logs
+        last = mcp_logs.last_connection(home)
+    except Exception:
+        return ""
+    if not last or last["ok"]:
+        return ""
+    reason = last["stderr"] or last["detail"] or "no reason recorded"
+    return ("MCP: the last recorded connection of your `cousin` server"
+            " FAILED at %s: %s. Nothing retries it, so your MCP tools are"
+            " probably absent this session too; the CLIs still work."
+            " `cousin-mcp --selftest` says whether it is fixed."
+            % (last["when"] or "an unrecorded time",
+               reason.replace("\n", " ").strip()))
+
+
 def assemble(slug, home, *, generation=None):
     """Compose the boot packet. Returns text, sizes, identity hashes,
     generation, and the named degraded layers."""
@@ -417,6 +440,9 @@ def assemble(slug, home, *, generation=None):
     ]
     if degraded:
         body.append("DEGRADED layers: %s" % ", ".join(sorted(degraded)))
+    warning = _mcp_warning(home)
+    if warning:
+        body.append(warning)
     for number, title, key in (
         (1, "Framework Law", "law"),
         (2, "Shared Rules and Fleet Memory", "shared"),

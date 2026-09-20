@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.5.0 - 2026-09-20
+
+- A cousin is told when its own MCP server failed, and why. The harness
+  reports `CONNECTION_CLOSED` and nothing else; the server's stderr, which
+  carries the actual reason, goes only to a per-session log in the harness's
+  cache directory. On 2026-09-20 four cousins booted with no MCP tools at
+  all, read that one line, fell back to the CLIs and carried on for hours.
+  A degraded surface that still works is the easiest failure to ignore.
+- `cousin-mcp --last-connection` prints the last recorded outcome for this
+  cousin's server, with the stderr and the log path: exit 0 connected,
+  1 failed, 2 nothing recorded.
+- The boot packet carries one line when the last recorded connection failed,
+  and is silent otherwise. The packet is assembled before the new session
+  exists, so it reports the previous session's outcome and says so; that is
+  the useful one, because the causes live in files that outlive a session.
+- `mcp_logs_dir` in `config/harness.toml` says where those logs are; absent,
+  Claude Code's default location.
+
 ## 1.4.0 - 2026-09-20
 
 - Every cousin flips daily, whether or not its `cousin.toml` says so.

@@ -984,6 +984,11 @@ def mcp_main(argv=None):
                              " no SDK needed")
     parser.add_argument("--list-tools", action="store_true",
                         help="print tool schemas as JSON and exit")
+    parser.add_argument("--last-connection", action="store_true",
+                        help="what the harness recorded about this"
+                             " cousin's MCP server last time it tried to"
+                             " connect, stderr included; exit 1 if it"
+                             " failed, 2 if nothing was recorded")
     parser.add_argument("--versions", action="store_true",
                         help="print the SDK's supported protocol versions")
     parser.add_argument("--call", nargs=2, metavar=("TOOL", "JSON"),
@@ -1000,6 +1005,27 @@ def mcp_main(argv=None):
     if args.cmd == "approve":
         return _approve(args)
     env = dict(os.environ)
+    if args.last_connection:
+        from cousin_lib import mcp_logs
+        home = env.get("COUSIN_HOME")
+        if not home:
+            print("cousin-mcp: --last-connection needs COUSIN_HOME",
+                  file=sys.stderr)
+            return 2
+        last = mcp_logs.last_connection(home)
+        if last is None:
+            print("no MCP connection recorded for %s (looked in %s)"
+                  % (home, mcp_logs.logs_dir(home)))
+            return 2
+        print("%s at %s (session %s)"
+              % ("connected" if last["ok"] else "FAILED",
+                 last["when"] or "?", last["session_id"] or "?"))
+        if last["detail"]:
+            print("  %s" % last["detail"])
+        for line in last["stderr"].splitlines():
+            print("  server stderr: %s" % line)
+        print("  %s" % last["path"])
+        return 0 if last["ok"] else 1
     path = args.registry or default_registry_path(env)
     if not path:
         print("cousin-mcp: no registry: pass --registry PATH, or set"

@@ -132,6 +132,14 @@ not validate. Without `--registry`, `cousin-mcp` uses the cousin's own
 `mcp-registry.toml`, else `config/mcp-registry.toml`, else
 `config/mcp-registry.toml.example`.
 
+When the server does not come up at all, the harness reports only
+`CONNECTION_CLOSED`; the reason is the server's stderr, which it writes
+to its own per-session log under `mcp_logs_dir`. `cousin-mcp
+--last-connection` reads that log and prints the outcome, the stderr and
+the file, exiting 0 connected, 1 failed, 2 nothing recorded. The boot
+packet carries the same line when the last recorded connection failed,
+so a cousin is told rather than left to notice its tools are missing.
+
 Serving is lenient per tool. A tool that does not validate is skipped,
 with a line on stderr naming it and why, and the rest of the registry
 still serves. One file carries every tool, so a strict load meant one

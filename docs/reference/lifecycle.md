@@ -52,7 +52,7 @@ The stale warning in layer 5 reads like this and means: don't trust STATUS.md bl
 > STALE WARNING: STATUS.md mtime is 30.5h old; 4 decision(s) logged after. Verify against data/decisions.jsonl before acting on it.
 ```
 
-Layer 9 tells the new session to rebuild its objective, pick the next action from active threads, check whether it booted degraded, and carry on without announcing the restart. It also reminds it to write STATUS.md, `data/handoff.md` and `data/active-threads.md` before the next exit, and how to record things you told it at level L0 with `cousin-memory remember ... --level operator`.
+Layer 10 tells the new session to rebuild its objective, pick the next action from active threads, check whether it booted degraded, and carry on without announcing the restart. It also gives the four pre-exit writes, in the order the flip and the clean stop ask for: reconcile STATUS.md, write `data/active-threads.md`, save what the session learned with `cousin-memory remember` / `decide`, and LAST `data/handoff.md`, whose write ends the session. Finally it says how to record things you told it at level L0, with `cousin-memory remember ... --level operator`.
 
 ### Size
 

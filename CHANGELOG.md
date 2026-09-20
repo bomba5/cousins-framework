@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.2.1 - 2026-09-20
+
+- `cousin-spawn <slug> --sync-template` crashed with a TypeError instead of
+  running. The `@traced_cli("cousin-spawn")` decorator sat on the internal
+  `_sync_template` helper rather than on `spawn_main`, so the call from
+  `spawn_main` hit the tracing wrapper's `(argv=None)` signature. Shipped in
+  1.0.0 and not caught because the tests called `template_sync.sync()`
+  directly; there is now a test on the CLI entry itself. `cousin-spawn` is
+  traced again, this time at its real entry point.
+
 ## 1.2.0 - 2026-09-20
 
 - Template sync: the MCP registry sync is additive at every level, not

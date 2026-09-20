@@ -1011,7 +1011,6 @@ def _repair_settings(root, slug):
     return 0
 
 
-@traced_cli("cousin-spawn")
 def _sync_template(root, slug, *, apply):
     from cousin_lib import template_sync
 
@@ -1045,6 +1044,7 @@ def _sync_template(root, slug, *, apply):
     return 0
 
 
+@traced_cli("cousin-spawn")
 def spawn_main(argv=None):
     """Console entry point. Exit codes are the interface: 0 created
     (and started, if asked), 1 create succeeded but --start failed

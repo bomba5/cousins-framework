@@ -978,3 +978,34 @@ class TestRegistrySync(unittest.TestCase):
         self.assertIn("tools.memory.commands.obsolete", out["added"])
         self.assertIn("tools.memory.properties.why", out["added"])
         self.assertIn("tools.schedule", out["added"])
+
+
+class TestSyncTemplateCLI(unittest.TestCase):
+    """`cousin-spawn <slug> --sync-template` is the entry an operator uses;
+    it has to reach template_sync, not die in argument handling."""
+
+    def setUp(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "templates").mkdir()
+        (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
+            "# {{NAME}} - {{ROLE_ONE_LINE}}\n\n## Identity\n\n"
+            "{{ROLE_PARAGRAPH}}\n\n## Voice\n\n{{VOICE_GUIDE}}\n\n"
+            "## Append your cousin-specific sections below this line\n")
+        home = self.root / "cousins" / "wren"
+        (home / "data").mkdir(parents=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\nrole = "notes"\n'
+            '[chat]\nport = 8123\n')
+        (home / "CLAUDE.md").write_text(
+            "# Wren - notes\n\n## Identity\n\nMine.\n\n## Voice\n\nDry.\n\n"
+            "## Append your cousin-specific sections below this line\n")
+
+    def test_the_cli_runs_a_dry_sync(self):
+        from cousin_lib import spawn
+        env = {"FRAMEWORK_ROOT": str(self.root)}
+        with mock.patch.dict("os.environ", env):
+            rc = spawn.spawn_main(["wren", "--sync-template"])
+        self.assertEqual(rc, 0)

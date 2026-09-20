@@ -210,6 +210,27 @@ def _entries(lines):
     return out
 
 
+def _family(path):
+    """The tool a table belongs to: the first two dotted parts of its path,
+    so tools.memory.commands.obsolete belongs with tools.memory."""
+    return ".".join(path.split(".")[:2])
+
+
+def _place(blocks, path):
+    """Where a new table goes: after the last block of its own tool, so the
+    file keeps one tool's tables together; at the end for a new tool."""
+    family = _family(path)
+    at = len(blocks)
+    for i, (p, _) in enumerate(blocks):
+        if p is not None and (p == family or p.startswith(family + ".")):
+            at = i + 1
+    if at == len(blocks) and blocks:
+        last, body = blocks[-1]
+        if body and not body[-1].endswith("\n"):
+            blocks[-1] = (last, body[:-1] + [body[-1] + "\n"])
+    return at
+
+
 def _registry_sync(home, root, *, apply=False):
     """Bring the cousin's mcp-registry.toml up to the shipped one, additively
     and at every level: a table it lacks is appended whole, and a key the
@@ -221,32 +242,31 @@ def _registry_sync(home, root, *, apply=False):
         return {"path": None, "added": []}
     from cousin_lib.mcp_server import shipped_default_registry
     mine = _blocks(reg.read_text())
-    have = {p: i for i, (p, _) in enumerate(mine) if p is not None}
-    added, appended = [], []
+    added = []
     for path, body in _blocks(shipped_default_registry(root)):
         if path is None:
             continue
-        if path not in have:
+        at = next((i for i, (p, _) in enumerate(mine) if p == path), None)
+        if at is None:
             added.append(path)
-            appended.append("[%s]\n%s\n" % (path, "".join(body).strip("\n")))
+            mine.insert(_place(mine, path),
+                        (path, ["".join(body).strip("\n") + "\n\n"]))
             continue
-        lines = list(mine[have[path]][1])
+        lines = list(mine[at][1])
         known = {k for k, _ in _entries(lines) if k}
         extra = [(k, ls) for k, ls in _entries(body) if k and k not in known]
         if not extra:
             continue
-        at = len(lines)
-        while at and not lines[at - 1].strip():
-            at -= 1
-        lines[at:at] = [one for _, ls in extra for one in ls]
-        mine[have[path]] = (path, lines)
+        end = len(lines)
+        while end and not lines[end - 1].strip():
+            end -= 1
+        lines[end:end] = [one for _, ls in extra for one in ls]
+        mine[at] = (path, lines)
         added.extend("%s.%s" % (path, k) for k, _ in extra)
     if not added:
         return {"path": reg, "added": []}
     text = "".join(("" if p is None else "[%s]\n" % p) + "".join(b)
                    for p, b in mine)
-    if appended:
-        text = text.rstrip("\n") + "\n\n" + "\n".join(appended)
     tomllib.loads(text)
     if apply:
         tmp = reg.with_suffix(".toml.sync-tmp")

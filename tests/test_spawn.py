@@ -1009,3 +1009,48 @@ class TestSyncTemplateCLI(unittest.TestCase):
         with mock.patch.dict("os.environ", env):
             rc = spawn.spawn_main(["wren", "--sync-template"])
         self.assertEqual(rc, 0)
+
+
+class TestRegistrySyncOrder(unittest.TestCase):
+    """An added table joins the tool it belongs to, so the file stays
+    readable for whoever edits it next."""
+
+    SHIPPED = (
+        '[tools.memory]\ncommand = "cousin-memory"\n\n'
+        '[tools.memory.commands.search]\nargv = ["search"]\n\n'
+        '[tools.memory.commands.obsolete]\nargv = ["obsolete"]\n\n'
+        '[tools.meeting]\ncommand = "cousin-meeting"\n\n'
+        '[tools.meeting.commands.say]\nargv = ["say"]\n')
+
+    MINE = (
+        '[tools.memory]\ncommand = "cousin-memory"\n\n'
+        '[tools.memory.commands.search]\nargv = ["search"]\n\n'
+        '[tools.meeting]\ncommand = "cousin-meeting"\n')
+
+    def setUp(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "config").mkdir()
+        (self.root / "config" / "mcp-registry.toml.example").write_text(
+            self.SHIPPED)
+        self.home = self.root / "cousins" / "wren"
+        self.home.mkdir(parents=True)
+        self.reg = self.home / "mcp-registry.toml"
+        self.reg.write_text(self.MINE)
+
+    def test_an_added_table_follows_its_own_tool(self):
+        from cousin_lib import template_sync
+        template_sync._registry_sync(self.home, self.root, apply=True)
+        heads = [l for l in self.reg.read_text().splitlines()
+                 if l.startswith("[")]
+        self.assertEqual(heads, [
+            "[tools.memory]",
+            "[tools.memory.commands.search]",
+            "[tools.memory.commands.obsolete]",
+            "[tools.meeting]",
+            "[tools.meeting.commands.say]"])
+        tools = tomllib.loads(self.reg.read_text())["tools"]
+        self.assertIn("obsolete", tools["memory"]["commands"])
+        self.assertIn("say", tools["meeting"]["commands"])

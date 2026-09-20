@@ -3,6 +3,14 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.2.2 - 2026-09-20
+
+- Template sync: a table the registry sync adds now goes in with the tool it
+  belongs to instead of at the end of the file. Appending at the end was
+  valid TOML and parsed, but it left, say, `[tools.memory.commands.obsolete]`
+  sitting between `[tools.meeting]` and `[tools.meeting.properties]`, which
+  reads as a mistake to anyone editing the file by hand (reported by juno).
+
 ## 1.2.1 - 2026-09-20
 
 - `cousin-spawn <slug> --sync-template` crashed with a TypeError instead of

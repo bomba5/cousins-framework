@@ -13,10 +13,14 @@ A duplicate ALTER fails while the statement is being prepared, before it
 reaches the locking stage, so it takes no write lock: measured against a
 connection holding RESERVED, it returns "duplicate column name" in under
 a millisecond while a new-column ALTER and a plain INSERT both wait out
-the busy timeout and fail "database is locked". Uncontended it costs
-14 us against 53 us for the PRAGMA read it replaces. That matters because
-jobs._db() re-runs its migration on every call: were the failed DDL to
-take the lock, every read of that database would become a writer.
+the busy timeout and fail "database is locked". Uncontended it is also
+the cheaper of the two, by a factor that four runs put anywhere between
+2x and 6x: the duplicate ALTER under 15 us against 35-50 us for the
+PRAGMA read it replaces. Tens of microseconds do not carry a precise
+ratio, and whichever of the two runs first pays the warm-up, so take the
+direction and not the number. That matters because jobs._db() re-runs its
+migration on every call: were the failed DDL to take the lock, every read
+of that database would become a writer.
 """
 import sqlite3
 

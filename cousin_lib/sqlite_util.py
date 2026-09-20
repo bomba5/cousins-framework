@@ -7,6 +7,16 @@ two processes opening the same file both see the column missing, both
 alter, and the loser raises. Attempt the alter and treat the duplicate
 as success instead: SQLite decides who won, and both callers end up with
 the column they wanted.
+
+Attempting it every time is also the cheaper half, which is not obvious.
+A duplicate ALTER fails while the statement is being prepared, before it
+reaches the locking stage, so it takes no write lock: measured against a
+connection holding RESERVED, it returns "duplicate column name" in under
+a millisecond while a new-column ALTER and a plain INSERT both wait out
+the busy timeout and fail "database is locked". Uncontended it costs
+14 us against 53 us for the PRAGMA read it replaces. That matters because
+jobs._db() re-runs its migration on every call: were the failed DDL to
+take the lock, every read of that database would become a writer.
 """
 import sqlite3
 

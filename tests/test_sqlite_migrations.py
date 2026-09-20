@@ -43,6 +43,25 @@ class TestAddColumn(unittest.TestCase):
         other.commit()
         add_column(self.conn, "t", "vec_model", "TEXT")
 
+    def test_a_duplicate_alter_does_not_wait_for_the_write_lock(self):
+        """jobs._db() re-runs its migration on every call, so this decides
+        whether every read of that database becomes a writer. A duplicate
+        ALTER fails while the statement is prepared, before the locking
+        stage: it returns at once even while another connection holds
+        RESERVED, where a real write waits out the busy timeout."""
+        add_column(self.conn, "t", "vec_model", "TEXT")
+        self.conn.commit()
+        holder = sqlite3.connect(self.path, timeout=0.2)
+        self.addCleanup(holder.close)
+        holder.execute("BEGIN IMMEDIATE")   # RESERVED: real writers block
+        self.addCleanup(holder.execute, "ROLLBACK")
+        other = sqlite3.connect(self.path, timeout=0.2)
+        self.addCleanup(other.close)
+        with self.assertRaises(sqlite3.OperationalError) as cm:
+            other.execute("INSERT INTO t (id) VALUES (1)")
+        self.assertIn("locked", str(cm.exception))   # the lock is held
+        add_column(other, "t", "vec_model", "TEXT")  # and this sails past
+
     def test_any_other_error_still_raises(self):
         with self.assertRaises(sqlite3.OperationalError):
             add_column(self.conn, "no_such_table", "c", "TEXT")

@@ -30,11 +30,11 @@ class TestLoopsView(ConsoleCase):
                            "last_fires": {"wren|report": now - 600}})
         self.serve()
         status, body = self.get("/api/loops")
-        self.assertEqual(status, 200)
-        self.assertTrue(body["daemon"]["ok"])
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["daemon"]["ok"], body)
         rows = {(r["cousin"], r["name"]): r for r in body["loops"]}
         report = rows[("wren", "report")]
-        self.assertEqual(report["state"], "healthy")
+        self.assertEqual(report["state"], "healthy", report)
         self.assertEqual(report["interval"], 3600)
         self.assertEqual(report["schedule"]["interval_seconds"], 3600)
         self.assertEqual(report["lastFireTs"], int(now - 600))
@@ -52,7 +52,7 @@ class TestLoopsView(ConsoleCase):
         self.assertEqual(beat["interval"], 3600)
         self.assertNotIn(("toki", "context-heartbeat"), rows)
         self.assertEqual(rows[("toki", "grind")]["state"], "idle")
-        self.assertEqual(len(body["errors"]), 1)
+        self.assertEqual(len(body["errors"]), 1, body["errors"])
         self.assertIn("bad", body["errors"][0])
 
     def test_worker_loop_with_a_failed_last_job_is_failed(self):

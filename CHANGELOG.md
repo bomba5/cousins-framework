@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.2.0 - 2026-09-20
+
+- Template sync: the MCP registry sync is additive at every level, not
+  only at the top. Before, it compared top-level tool names only, so a
+  command or a property added inside a tool block a cousin already had
+  never reached that cousin, and no start or flip could fix it. Two live
+  cases: `cousin-memory obsolete` was missing from 9 of 11 cousins, and
+  `[tools.meeting]` had arrived without its commands, leaving the meeting
+  tool with nothing to call. The sync now appends any table the shipped
+  registry has and the cousin's lacks, and adds a missing key to a table
+  they share. A value the cousin already has is never changed, so an
+  edited description or argv survives (tracker #32, found by juno).
+
 ## 1.1.0 - 2026-09-19
 
 - Jobs: closing a shell job ends its processes. The command runs in its

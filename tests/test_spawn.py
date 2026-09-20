@@ -888,3 +888,93 @@ class TestTemplateSync(unittest.TestCase):
         (self.home / "CLAUDE.md").write_text("# Wren\n\n## Identity\n\nx\n")
         with self.assertRaises(template_sync.SyncError):
             template_sync.sync(self.home, self.root, apply=True)
+
+
+class TestRegistrySync(unittest.TestCase):
+    """The MCP registry sync is additive at every level: a tool block, a
+    command inside a tool the cousin already has, and a key inside a table
+    it already has. Nothing the cousin wrote is changed."""
+
+    SHIPPED = (
+        '[tools.memory]\n'
+        'command = "cousin-memory"\n'
+        'description = "shipped wording, now mentions obsolete"\n\n'
+        '[tools.memory.properties]\n'
+        'topic = { type = "string", description = "the topic" }\n'
+        'why = { type = "string", description = "what superseded it" }\n\n'
+        '[tools.memory.commands.search]\n'
+        'argv = ["search", "{query}"]\n\n'
+        '[tools.memory.commands.obsolete]\n'
+        'argv = ["obsolete", "{topic}"]\n'
+        'options = { why = "--why" }\n\n'
+        '[tools.schedule]\n'
+        'command = "cousin-schedule"\n\n'
+        '[tools.schedule.commands.add]\n'
+        'argv = ["add", "{when}"]\n')
+
+    MINE = (
+        '[tools.memory]\n'
+        'command = "cousin-memory"\n'
+        'description = "my older wording"\n\n'
+        '[tools.memory.properties]\n'
+        'topic = { type = "string", description = "the topic" }\n\n'
+        '[tools.memory.commands.search]\n'
+        'argv = ["search", "{query}"]\n')
+
+    def setUp(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "config").mkdir()
+        (self.root / "config" / "mcp-registry.toml.example").write_text(
+            self.SHIPPED)
+        self.home = self.root / "cousins" / "wren"
+        self.home.mkdir(parents=True)
+        self.reg = self.home / "mcp-registry.toml"
+        self.reg.write_text(self.MINE)
+
+    def _sync(self):
+        from cousin_lib import template_sync
+        return template_sync._registry_sync(self.home, self.root, apply=True)
+
+    def _loaded(self):
+        return tomllib.loads(self.reg.read_text())
+
+    def test_a_command_inside_an_existing_tool_is_added(self):
+        self._sync()
+        cmds = self._loaded()["tools"]["memory"]["commands"]
+        self.assertIn("obsolete", cmds)
+        self.assertEqual(cmds["obsolete"]["argv"], ["obsolete", "{topic}"])
+        self.assertEqual(cmds["obsolete"]["options"], {"why": "--why"})
+
+    def test_a_key_inside_an_existing_table_is_added(self):
+        self._sync()
+        props = self._loaded()["tools"]["memory"]["properties"]
+        self.assertIn("why", props)
+        self.assertEqual(props["why"]["description"], "what superseded it")
+
+    def test_a_whole_missing_tool_is_added(self):
+        self._sync()
+        tools = self._loaded()["tools"]
+        self.assertIn("schedule", tools)
+        self.assertEqual(tools["schedule"]["commands"]["add"]["argv"],
+                         ["add", "{when}"])
+
+    def test_the_cousins_own_value_is_never_overwritten(self):
+        self._sync()
+        memory = self._loaded()["tools"]["memory"]
+        self.assertEqual(memory["description"], "my older wording")
+
+    def test_a_second_sync_changes_nothing(self):
+        self._sync()
+        once = self.reg.read_text()
+        out = self._sync()
+        self.assertEqual(self.reg.read_text(), once)
+        self.assertEqual(out["added"], [])
+
+    def test_it_reports_what_it_added(self):
+        out = self._sync()
+        self.assertIn("tools.memory.commands.obsolete", out["added"])
+        self.assertIn("tools.memory.properties.why", out["added"])
+        self.assertIn("tools.schedule", out["added"])

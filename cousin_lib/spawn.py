@@ -1030,7 +1030,7 @@ def _sync_template(root, slug, *, apply):
     for note in notes:
         print("note: %s" % note)
     if result["registry_added"]:
-        print("mcp-registry.toml: %s tool(s) %s: %s" % (
+        print("mcp-registry.toml: %s addition(s) %s: %s" % (
             len(result["registry_added"]),
             "added" if apply else "would be added",
             ", ".join(result["registry_added"])))

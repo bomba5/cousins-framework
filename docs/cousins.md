@@ -157,8 +157,12 @@ reaches every cousin, not only the ones spawned after it:
 - Below the marker nothing changes, except a leftover copy of a framework
   section that is word for word the template's, which is removed.
 - The old file goes to `data/claude-md-backups/` whenever the sync changes
-  it. Tools the shipped MCP registry has and the cousin's `mcp-registry.toml`
-  lacks are appended to it.
+  it.
+- The cousin's `mcp-registry.toml` is brought up to the shipped registry at
+  the same time, additively: a table the shipped one has and the cousin's
+  lacks is appended, and a key inside a table they share is added to it.
+  A value the cousin already has is never changed, so an edited description
+  or `argv` survives; a shipped edit to an existing value does not arrive.
 
 To see what the next start would change, or to apply it now:
 

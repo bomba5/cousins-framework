@@ -21,8 +21,10 @@ It runs by itself at every start and flip (spawn.start_cousin), so nobody
 has to remember it; `cousin-spawn <slug> --sync-template` shows the diff
 and `--apply` writes it by hand. Every write keeps the old file in
 data/claude-md-backups/, like the console's CLAUDE.md editor.
-The MCP registry gets the same treatment, additively: a tool the shipped
-registry has and the cousin's does not is appended.
+The MCP registry gets the same treatment, additively and at every level:
+a table the shipped registry has and the cousin's lacks is appended whole,
+and a key inside a table they share is added to it. A value the cousin
+already has is never changed, so an edited description or argv survives.
 """
 import difflib
 import re
@@ -158,32 +160,99 @@ def _backup(home, text):
     return path
 
 
-def _registry_additions(home, root):
-    """Tool blocks the shipped registry has and the cousin's lacks."""
+_TABLE = re.compile(r"^\[([^\[\]]+)\]\s*$")
+_KEY = re.compile(r'^\s*([A-Za-z0-9_-]+|"[^"]*")\s*=')
+_STR = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'[^']*'")
+
+
+def _depth(line):
+    """Bracket balance of a line, strings ignored."""
+    bare = _STR.sub("", line.split("#")[0] if not line.lstrip().startswith("#")
+                    else "")
+    return (bare.count("[") - bare.count("]")
+            + bare.count("{") - bare.count("}"))
+
+
+def _blocks(text):
+    """[(table path or None, body lines)] in file order; the first entry
+    with a None path is the preamble. The '[path]' line is not in the body."""
+    out, path, cur = [], None, []
+    for line in text.splitlines(keepends=True):
+        m = _TABLE.match(line)
+        if m:
+            out.append((path, cur))
+            path, cur = m.group(1).strip(), []
+        else:
+            cur.append(line)
+    out.append((path, cur))
+    return out
+
+
+def _entries(lines):
+    """[(key or None, lines)] for a table body. A key's value may span
+    lines (an array or an inline table); a None key is a blank or comment."""
+    out, key, cur, depth = [], None, [], 0
+    for line in lines:
+        if key is None:
+            m = _KEY.match(line)
+            if not m:
+                out.append((None, [line]))
+                continue
+            key, cur, depth = m.group(1).strip('"'), [line], _depth(line)
+        else:
+            cur.append(line)
+            depth += _depth(line)
+        if depth <= 0:
+            out.append((key, cur))
+            key, cur, depth = None, [], 0
+    if key is not None:
+        out.append((key, cur))
+    return out
+
+
+def _registry_sync(home, root, *, apply=False):
+    """Bring the cousin's mcp-registry.toml up to the shipped one, additively
+    and at every level: a table it lacks is appended whole, and a key the
+    shipped table has and its table lacks is added to that table. A value the
+    cousin already has is never touched, so an edited description or argv
+    stays. Returns {"path", "added"} with added as dotted paths."""
     reg = Path(home) / "mcp-registry.toml"
     if not reg.is_file():
-        return None, ""
+        return {"path": None, "added": []}
     from cousin_lib.mcp_server import shipped_default_registry
-    shipped = shipped_default_registry(root)
-    mine = reg.read_text()
-    have = set(tomllib.loads(mine).get("tools", {}))
-    blocks, current, name = [], [], None
-    for line in shipped.splitlines(keepends=True):
-        m = re.match(r"^\[tools\.([A-Za-z0-9_-]+)(\.[^\]]*)?\]", line)
-        if m and m.group(2) is None:
-            if name and name not in have:
-                blocks.append("".join(current))
-            name, current = m.group(1), [line]
-        elif name:
-            if re.match(r"^\[(?!tools\.)", line):
-                if name not in have:
-                    blocks.append("".join(current))
-                name, current = None, []
-            else:
-                current.append(line)
-    if name and name not in have:
-        blocks.append("".join(current))
-    return reg, "".join(b.rstrip("\n") + "\n\n" for b in blocks)
+    mine = _blocks(reg.read_text())
+    have = {p: i for i, (p, _) in enumerate(mine) if p is not None}
+    added, appended = [], []
+    for path, body in _blocks(shipped_default_registry(root)):
+        if path is None:
+            continue
+        if path not in have:
+            added.append(path)
+            appended.append("[%s]\n%s\n" % (path, "".join(body).strip("\n")))
+            continue
+        lines = list(mine[have[path]][1])
+        known = {k for k, _ in _entries(lines) if k}
+        extra = [(k, ls) for k, ls in _entries(body) if k and k not in known]
+        if not extra:
+            continue
+        at = len(lines)
+        while at and not lines[at - 1].strip():
+            at -= 1
+        lines[at:at] = [one for _, ls in extra for one in ls]
+        mine[have[path]] = (path, lines)
+        added.extend("%s.%s" % (path, k) for k, _ in extra)
+    if not added:
+        return {"path": reg, "added": []}
+    text = "".join(("" if p is None else "[%s]\n" % p) + "".join(b)
+                   for p, b in mine)
+    if appended:
+        text = text.rstrip("\n") + "\n\n" + "\n".join(appended)
+    tomllib.loads(text)
+    if apply:
+        tmp = reg.with_suffix(".toml.sync-tmp")
+        tmp.write_text(text)
+        tmp.replace(reg)
+    return {"path": reg, "added": added}
 
 
 def sync(home, root=None, *, apply=False):
@@ -193,22 +262,12 @@ def sync(home, root=None, *, apply=False):
     root = Path(root) if root else FrameworkConfig.root_from_home(home)
     old, new, notes = plan(home, root)
     out = {"changed": new != old, "notes": notes, "backup": None,
-           "registry_added": []}
-    reg, extra = _registry_additions(home, root)
-    if extra:
-        out["registry_added"] = re.findall(r"^\[tools\.([^\].]+)\]", extra,
-                                           re.M)
-    if not apply:
+           "registry_added": _registry_sync(home, root,
+                                            apply=apply)["added"]}
+    if not apply or new == old:
         return out
-    if new != old:
-        out["backup"] = str(_backup(home, old))
-        tmp = home / "CLAUDE.md.sync-tmp"
-        tmp.write_text(new)
-        tmp.replace(home / "CLAUDE.md")
-    if extra:
-        text = reg.read_text().rstrip("\n") + "\n\n" + extra
-        tomllib.loads(text)
-        tmp = reg.with_suffix(".toml.sync-tmp")
-        tmp.write_text(text)
-        tmp.replace(reg)
+    out["backup"] = str(_backup(home, old))
+    tmp = home / "CLAUDE.md.sync-tmp"
+    tmp.write_text(new)
+    tmp.replace(home / "CLAUDE.md")
     return out

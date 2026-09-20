@@ -205,7 +205,7 @@ Workers don't get trigger files, and a manual fire for a worker fails (there's n
 
 A flip isn't a loop. The daemon drives it three ways, all through the same `flip()` call ([lifecycle](lifecycle.md#the-flip)):
 
-**Daily.** `[lifecycle] flip_at = "HH:MM"` in `cousin.toml`. Once a day, as soon as the clock passes that time (late rather than skipped). At most one daily flip per tick, and none on a tick where a timed flip ran, so when several cousins share a time they flip one per tick instead of all building boot packets at once. The date of the last daily flip is kept in the state file, so a failed flip isn't retried that day; it's reported. Workers are skipped. An unparsable `flip_at` is reported every tick.
+**Daily.** Every cousin, at its own `[lifecycle] flip_at = "HH:MM"` in `cousin.toml`, else the install's `default_flip_at`, else 04:00; `flip_at = "never"` opts one out and `cousin-loops flips` prints the effective time and its source. Once a day, as soon as the clock passes that time (late rather than skipped). At most one daily flip per tick, and none on a tick where a timed flip ran, so when several cousins share a time they flip one per tick instead of all building boot packets at once. The date of the last daily flip is kept in the state file, so a failed flip isn't retried that day; it's reported. Workers are skipped. An unparsable `flip_at` is reported every tick.
 
 **Timed.** A `flip` request with a `fire_at`, from the console's "flip in N minutes" or the transcript guard. While it waits, the cousin gets warnings at five minutes, one minute and 30 seconds:
 

@@ -64,7 +64,9 @@ Without it no cousin can start, and those commands say so with the path.
 <your home>/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}
 ```
 
-Use an absolute path for the binary. systemd units and the tmux server don't
+`--dangerously-skip-permissions` is what lets a cousin work unattended, and it
+means the cousin can do anything your account can; see
+[install](install.md#4-claude-code). Use an absolute path for the binary. systemd units and the tmux server don't
 see your login shell's PATH. Before starting anything, the framework checks
 that tmux and the first word of this line resolve.
 

@@ -294,7 +294,31 @@ cousin-version bump minor    # 0.2.0 -> 0.3.0
 version it's running, read once at start, so restart it after a bump
 or a pull.
 
+## Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/): a type, an
+optional scope, and a summary in the imperative.
+
+```
+feat(loops): flip every cousin daily, with an install default
+fix(mcp): skip a tool that does not validate instead of exiting
+docs(changelog): rewrite terse
+```
+
+Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `build`, `chore`.
+A `!` after the type or scope, or a `BREAKING CHANGE:` footer, marks an
+incompatible change. They line up with the version bump: `feat` is a minor,
+`fix` is a patch, a breaking change is a major.
+
+Keep the subject under about 70 characters. Add a body only when a reader
+needs the reason; the code says what changed, the body says why.
+
+## Changelog
+
 Every version gets an entry in [CHANGELOG.md](../CHANGELOG.md) under a
-`## <version> - <date>` heading. `tests/test_version.py` fails if the
+`## <version> - <date>` heading, grouped under `### Added`, `### Changed`,
+`### Fixed` or `### Removed`. One line per change: what a reader needs to
+decide whether the version affects them. Reasoning belongs in the commit or
+the pull request, not here. `tests/test_version.py` fails if the
 current version has no `## <version>` heading there, and if the version
 isn't plain `major.minor.patch`.

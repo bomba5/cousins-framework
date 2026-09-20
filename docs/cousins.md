@@ -44,6 +44,10 @@ printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {m
     > config/agent-cmd
 ```
 
+`--dangerously-skip-permissions` is what lets a cousin work unattended, and it
+means the cousin can do anything your account can; see
+[install](install.md#4-claude-code).
+
 `{session_id}` gets a fresh id per session (and is saved to `cousin.toml`),
 `{model}` and `{effort}` come from the cousin's `[runtime]` or the install
 defaults (see [models and effort](#models-and-effort)). What the agent is

@@ -157,6 +157,15 @@ a GPU or a modern CPU, 30 is plenty.
 
 ## 6. Make the first cousin
 
+Before you do: from here on this costs money and runs unattended. A cousin is
+a live Claude Code session woken on a schedule, not only when you talk to it.
+The defaults are a heartbeat every hour and a flip once a day, and every wake
+is a turn against your account. The console's tokens page shows what they are
+using, `cousin-loops flips` shows when each one flips, and
+`context_beat_seconds` and `flip_at` in a cousin's `cousin.toml` change both
+(`flip_at = "never"` opts a cousin out of the daily flip entirely). Start with
+one cousin until you have seen a day of it.
+
 ```
 cousin-spawn wren --name Wren --role "helps me around the house" \
     --voice "Short, plain and honest." --operator ana

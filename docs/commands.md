@@ -233,8 +233,9 @@ cousin-job start shell "rebuild the index" -- cousin-memory reindex
 ```
 
 `cousin-loops` is the loops daemon and its controls. Subcommands: `run
-[--interval S] [--ticks N]` (the daemon), `status`, `requests`, `fire SLUG
-LOOP`. See [jobs and loops](jobs-and-loops.md).
+[--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each
+cousin's daily flip time and where it comes from), `fire SLUG LOOP`. See
+[jobs and loops](jobs-and-loops.md).
 
 ```
 cousin-loops fire wren context-heartbeat
@@ -293,11 +294,13 @@ cousin-ui --port 8600
 ```
 
 `cousin-mcp` is the MCP server a cousin's harness starts (stdio). By hand you
-use it to check the registry, call one tool, or record the harness's approval
-of a cousin's `.mcp.json` with `approve SLUG`. See [mcp](mcp.md).
+use it to check the registry, call one tool, find out why the server failed,
+or record the harness's approval of a cousin's `.mcp.json` with
+`approve SLUG`. See [mcp](mcp.md).
 
 ```
 cousin-mcp --call memory '{"command": "search", "query": "backup"}'
+cousin-mcp --last-connection      # why it failed, with the server's stderr
 ```
 
 ## Maintenance

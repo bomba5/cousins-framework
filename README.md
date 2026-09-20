@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="cousin_lib/console_static/icon-512.png" alt="cousins-framework" width="96">
+</p>
+
 # cousins-framework
 
 I run a small family of Claude Code agents at home. I call them cousins. Each
@@ -18,9 +22,28 @@ them, watch their terminal, and browse their memory.
 ## What you need
 
 - Linux with Python 3.11 or newer, `tmux`, `git` and systemd
-- [Claude Code](https://claude.com/claude-code), logged in once
+- [Claude Code](https://claude.com/claude-code), installed and logged in
+  before you start. The quick start below does not install it.
 - Optional: [Ollama](https://ollama.com) with `nomic-embed-text` for
   semantic memory search. Without it, search is keyword only.
+
+## What it costs, and what it does unattended
+
+Read this before the quick start, because it starts as soon as you finish it.
+
+A cousin is a live Claude Code session. It is woken on a schedule, not only
+when you talk to it: a heartbeat every hour by default, and a flip once a day
+that ends its session and starts a new one. Every wake is a turn against your
+Claude account, and it keeps happening while you sleep. The console's tokens
+page shows what your cousins are actually using; `cousin-loops flips` shows
+when each one flips. Both are adjustable, and a cousin can be told never to
+flip, but the defaults are on.
+
+The agent also runs with `--dangerously-skip-permissions`, which is what makes
+it able to work unattended and means it can do anything your account can do on
+that machine. That is the trade this framework asks you to make. If you are not
+comfortable with an autonomous agent holding a shell on your box, continuously,
+at your expense, this is not for you.
 
 ## Quick start
 
@@ -32,7 +55,7 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[mcp]"
 
 # tell the framework how to start Claude Code
-printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
+printf '%s\n' "$(command -v claude) --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
 cp config/harness.toml.claude-code.example config/harness.toml
 
 # make your first cousin and start it
@@ -47,8 +70,7 @@ cousin-console adduser ana
 cousin-console --port 8600
 ```
 
-Then go to `http://localhost:8600`, log in, and say hi to Wren. This assumes
-Claude Code is installed and logged in; the full guide covers that.
+Then go to `http://localhost:8600`, log in, and say hi to Wren.
 
 That's the short version. The full one, with systemd units, the LAN setup
 and how to remove it all again, is in [install](docs/install.md).

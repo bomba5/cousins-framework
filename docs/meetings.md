@@ -118,4 +118,4 @@ whose turn, round, timeout), `entries` (the transcript) and `seen` (what each
 participant has been sent). The console is only a view of it: restarting the
 console loses nothing, and `cousin-loops` keeps turns moving.
 
-The design and its decisions: [2026-09-19 meetings design](superpowers/specs/2026-09-19-meetings-design.md).
+The design and its decisions: [meetings design](design/meetings.md).

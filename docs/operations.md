@@ -90,10 +90,14 @@ Never both: see [the units](../systemd/README.md#chat-server-pick-one-owner).
 ## The daily flip
 
 A flip ends a cousin's session and starts a fresh one with a boot packet
-built from its memory. There's no unit for it; the loops daemon does it. Set
-`flip_at = "HH:MM"` under `[lifecycle]` in a cousin's `cousin.toml` and it
-flips once a day at or after that time. The daemon flips at most one cousin
-per tick, but give them times a few minutes apart anyway. If the daemon was
+built from its memory. There's no unit for it; the loops daemon does it.
+
+**Every cousin flips, configured or not.** The time is its own
+`flip_at = "HH:MM"` under `[lifecycle]` in `cousin.toml`, else the install's
+`default_flip_at` in `config/harness.toml`, else 04:00. `flip_at = "never"`
+opts a cousin out, and `cousin-loops flips` prints each cousin's time and
+where it came from. The daemon flips at most one cousin per tick, so a shared
+time queues rather than collides. If the daemon was
 down at flip time, the flip happens once on the next tick after it comes
 back, not once per missed day. Worker cousins are skipped.
 

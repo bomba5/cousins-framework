@@ -96,7 +96,9 @@ class TestSnapshot(BackupCase):
         self.assertEqual((snap / "memory" / "deep" / "more.md").read_text(),
                          "more\n")
         self.assertFalse((snap / "memory" / "fts_index.db").exists())
-        self.assertFalse((snap / "memory" / "embeddings.json").exists())
+        self.assertFalse((snap / "memory" / "vectors.db").exists())
+        self.assertFalse((snap / "memory" / "embeddings.json").exists(),
+                         "a pre-migration home's index is skipped too")
         self.assertEqual((snap / "MEMORY.md").read_text(), "timeline\n")
         self.assertEqual((snap / "CLAUDE.md").read_text(), "bedrock\n")
         self.assertFalse((snap / "STATUS.md").exists())

@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.6.3 - 2026-09-21
+
+### Changed
+- Every producer that reaches a cousin (chat, reactions, chat hooks, loops,
+  schedules, meetings, the flip, a pending boot) goes through
+  `cousin_lib.delivery.deliver()` with a typed, thread-keyed item. The text
+  reaching the pane is byte-identical; this is the seam the agent loop runner
+  plugs into (`docs/design/agent-loop-runner.md`)
+- The memory recall line travels to the cousin as the item's context instead
+  of being glued onto the message text. What the cousin reads is unchanged
+
 ## 1.6.2 - 2026-09-21
 
 ### Fixed

@@ -27,6 +27,7 @@ edit a `.jsx` file and reload.
 | `cousin_lib/console/` | the web console's server: `app.py` (the HTTP server, login, network guard), `router.py`, one `routes_*.py` per area, `hive.py` (the queen routes), `proxy.py` (chat), `pane.py` (the tmux pane), `sse.py` (the live event stream) |
 | `cousin_lib/console_static/` | the console's frontend: `index.html`, one `.jsx` per view, `styles.css` |
 | `cousin_lib/server/` | the per-cousin chat server (`cousin-chat-server`): `app.py`, `storage.py` (the SQLite chat store), `injection.py` (typing into tmux), `netguard.py` (who may connect) |
+| `cousin_lib/delivery.py` | the one way anything reaches a cousin: a typed, thread-keyed `Item` handed to `deliver()`, which picks the backend. Producers never build an injector themselves |
 | `cousin_lib/gate/` | the contamination gate (`cousin-gate`) |
 | `cousin_lib/ui.py`, `ui_static/` | the older single-page UI behind `cousin-ui` |
 | `templates/` | `cousin-CLAUDE.template.md` (every cousin's identity file) and `hive-node/` (the remote node runtime, installer and identity) |

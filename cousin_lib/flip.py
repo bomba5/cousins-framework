@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import agent_auth, audits, boot, transcript_mine
+from cousin_lib.config import read_session_id as config_read_session_id
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, harness_config)
 from cousin_lib.server.injection import TmuxInjector
@@ -122,12 +123,10 @@ def _archive_generation(home, generation, *, transcript_tail):
 
 def _read_session_id(home):
     """The dying generation's runtime.session_id, or "" when none was
-    ever persisted (a hand-made cousin, or a first flip)."""
-    try:
-        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
-    except (OSError, tomllib.TOMLDecodeError):
-        return ""
-    return str((data.get("runtime") or {}).get("session_id") or "")
+    ever persisted (a hand-made cousin, or a first flip). The boot
+    packet reads the same value to scope its MCP warning, so it lives
+    in config."""
+    return config_read_session_id(home)
 
 
 def _mine_transcript(home, root, *, dry_run):

@@ -3,6 +3,31 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.6.0 - 2026-09-21
+
+MINOR rather than PATCH for one reason: `cousin-mcp --last-connection` gains
+a third state on its public interface. Everything else here is a fix.
+
+### Changed
+- `cousin-mcp --last-connection` reports three states instead of two:
+  `connected`, `FAILED`, and `no outcome recorded`. Exit 2 now also covers an
+  attempt whose outcome was never written down, which previously exited 1 as
+  a failure
+- `mcp_logs.last_connection()` returns `state` (`connected` | `failed` |
+  `unrecorded`) in place of `ok`, plus `reason` and `earlier`
+
+### Fixed
+- The boot packet's MCP line no longer predicts the session that is booting.
+  It names the session it is about, reports that session's attempt time, and
+  is scoped to the generation that just died (#54)
+- An attempt whose outcome nobody recorded reads as unrecorded, not as a
+  failure, and a failure in wording the parser has no literal for keeps its
+  reason instead of printing "no reason recorded". Measured over 5908 harness
+  logs: 93 files were reported FAILED with no reason; 80 held the reason and
+  13 held no outcome at all, one of them since April (#54)
+- The warning no longer claims "Nothing retries it": a harness session
+  reconnects inside itself, which 186 of those logs record (#54)
+
 ## 1.5.1 - 2026-09-20
 
 ### Fixed

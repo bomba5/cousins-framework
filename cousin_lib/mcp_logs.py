@@ -46,25 +46,53 @@ def _lines(path):
             yield row
 
 
-def _outcome(rows):
-    """The last connection attempt in one file, as a dict, or None."""
-    start = None
-    for i, row in enumerate(rows):
-        if "Starting connection" in str(row.get("debug", "")):
-            start = i
-    if start is None:
-        return None
-    ok, detail, stderr = None, "", []
-    for row in rows[start:]:
+def _verdict(rows):
+    """What one attempt's rows say: its state, the line that said so,
+    and the server's own stderr."""
+    state, detail, stderr = "unrecorded", "", []
+    for row in rows:
         text = str(row.get("debug") or row.get("error") or "")
         if text.startswith("Server stderr:"):
             stderr.append(text[len("Server stderr:"):].strip())
         elif "Successfully connected" in text:
-            ok, detail = True, text
-        elif "Connection failed" in text and ok is None:
-            ok, detail = False, text
-    return {"ok": bool(ok), "detail": detail,
-            "stderr": "\n".join(s for s in stderr if s),
+            state, detail = "connected", text
+        elif "Connection failed" in text and state == "unrecorded":
+            state, detail = "failed", text
+        elif row.get("error") and state == "unrecorded":
+            # A failure in wording this parser has no literal for. On
+            # 2026-09-21, 80 of 5908 harness logs held one (the
+            # claude.ai proxy transport), and every one was reported
+            # as "no reason recorded" with the reason in the file.
+            state, detail = "failed", text
+    return state, detail, "\n".join(s for s in stderr if s)
+
+
+def _outcome(rows):
+    """The last connection attempt in one file, as a dict, or None.
+
+    Three states, because two is what made this lie: an attempt whose
+    result nobody recorded is `unrecorded`, not a failure. Measured
+    2026-09-21 over 5908 harness logs, 93 were reported FAILED with no
+    reason; 80 held the reason in wording with no literal here and 13
+    held no outcome at all, one of them since April.
+
+    The anchor is deliberately the LAST "Starting connection" in the
+    file. A session reconnects, so answering from an earlier attempt
+    would report a stale success about an attempt nobody wrote down.
+    An earlier outcome is carried as `earlier`: context to print,
+    never the verdict.
+    """
+    starts = [i for i, row in enumerate(rows)
+              if "Starting connection" in str(row.get("debug", ""))]
+    if not starts:
+        return None
+    start = starts[-1]
+    state, detail, stderr = _verdict(rows[start:])
+    earlier = None
+    if len(starts) > 1:
+        earlier = _verdict(rows[starts[-2]:start])[0]
+    return {"state": state, "detail": detail, "stderr": stderr,
+            "reason": stderr or detail, "earlier": earlier,
             "when": rows[start].get("timestamp", ""),
             "session_id": rows[start].get("sessionId", "")}
 
@@ -72,10 +100,20 @@ def _outcome(rows):
 def last_connection(home, root=None, *, session_id=None, server=SERVER_NAME):
     """The most recent recorded connection of this cousin's MCP server,
     or None when nothing was recorded (no log directory, no file, or no
-    file for `session_id`). With session_id, only that session counts,
-    which is what the boot packet wants: another session's failure is
-    not this one's. Never raises on a missing or damaged log; a
-    diagnostic that fails loudly on its own absence is worse than none.
+    file for `session_id`).
+
+    With session_id, only that session counts. The caller that wants
+    this is one running INSIDE the session it asks about, where the id
+    is already known. The boot packet is not such a caller: it is
+    assembled before the new session is minted (`flip.assemble` at
+    :346, `_mint_session_id` at :370), so the most it can name is the
+    generation that just died, which is what it passes. Note that a
+    harness session can live for weeks and reconnect inside itself, so
+    an id scopes a span, not a boot: read `when` before treating an
+    answer as recent.
+
+    Never raises on a missing or damaged log; a diagnostic that fails
+    loudly on its own absence is worse than none.
     """
     try:
         folder = logs_dir(home, root, server)

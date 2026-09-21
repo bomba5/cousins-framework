@@ -988,7 +988,8 @@ def mcp_main(argv=None):
                         help="what the harness recorded about this"
                              " cousin's MCP server last time it tried to"
                              " connect, stderr included; exit 1 if it"
-                             " failed, 2 if nothing was recorded")
+                             " failed, 2 if nothing was recorded or the"
+                             " outcome was never written down")
     parser.add_argument("--versions", action="store_true",
                         help="print the SDK's supported protocol versions")
     parser.add_argument("--call", nargs=2, metavar=("TOOL", "JSON"),
@@ -1017,15 +1018,18 @@ def mcp_main(argv=None):
             print("no MCP connection recorded for %s (looked in %s)"
                   % (home, mcp_logs.logs_dir(home)))
             return 2
+        label = {"connected": "connected", "failed": "FAILED",
+                 "unrecorded": "no outcome recorded"}[last["state"]]
         print("%s at %s (session %s)"
-              % ("connected" if last["ok"] else "FAILED",
-                 last["when"] or "?", last["session_id"] or "?"))
+              % (label, last["when"] or "?", last["session_id"] or "?"))
+        if last["earlier"]:
+            print("  an earlier attempt in this session %s" % last["earlier"])
         if last["detail"]:
             print("  %s" % last["detail"])
         for line in last["stderr"].splitlines():
             print("  server stderr: %s" % line)
         print("  %s" % last["path"])
-        return 0 if last["ok"] else 1
+        return {"connected": 0, "failed": 1, "unrecorded": 2}[last["state"]]
     path = args.registry or default_registry_path(env)
     if not path:
         print("cousin-mcp: no registry: pass --registry PATH, or set"

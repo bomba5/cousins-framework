@@ -356,26 +356,42 @@ def _is_degraded(name, content, sections):
 
 
 def _mcp_warning(home):
-    """One line when the last recorded connection of this cousin's MCP
-    server failed. The packet is assembled before the new session
-    exists, so this is the previous session's outcome - which is the
-    useful one anyway: the causes are in files that outlive a session,
-    so a failure that is not fixed repeats. Silent on success, and
-    silent on its own failure: a diagnostic must not cost a boot."""
+    """One line about the MCP connection of the generation that just
+    died. The packet is assembled before the new session exists
+    (`flip` calls `assemble` at :346 and mints the id at :370), so
+    this can only ever report a PAST session. It names which one and
+    predicts nothing about the one now booting: the causes live in
+    files that outlive a session, so an unfixed one repeats, but a
+    repair between the two makes any forecast wrong.
+
+    Silent on a connection that worked, on a generation that left no
+    record, and on its own failure: a diagnostic must not cost a boot.
+    """
     try:
         from cousin_lib import mcp_logs
-        last = mcp_logs.last_connection(home)
+        from cousin_lib.config import read_session_id
+        last = mcp_logs.last_connection(
+            home, session_id=read_session_id(home) or None)
     except Exception:
         return ""
-    if not last or last["ok"]:
+    if not last or last["state"] == "connected":
         return ""
-    reason = last["stderr"] or last["detail"] or "no reason recorded"
-    return ("MCP: the last recorded connection of your `cousin` server"
-            " FAILED at %s: %s. Nothing retries it, so your MCP tools are"
-            " probably absent this session too; the CLIs still work."
-            " `cousin-mcp --selftest` says whether it is fixed."
-            % (last["when"] or "an unrecorded time",
-               reason.replace("\n", " ").strip()))
+    when = last["when"] or "an unrecorded time"
+    who = last["session_id"] or "an unnamed session"
+    if last["state"] == "unrecorded":
+        line = ("MCP: session %s attempted to connect your `cousin`"
+                " server at %s and no outcome was ever recorded" % (who, when))
+        if last["earlier"]:
+            line += (" (an earlier attempt in that session %s)"
+                     % last["earlier"])
+        return (line + ". That is unknown, not absent."
+                " `cousin-mcp --last-connection` reads the record and"
+                " `cousin-mcp --selftest` starts the server.")
+    reason = (last["reason"] or "no reason recorded").replace("\n", " ").strip()
+    return ("MCP: your `cousin` server FAILED to connect in session %s at"
+            " %s: %s. The causes live in files that outlive a session, so"
+            " one left unfixed repeats. `cousin-mcp --selftest` says"
+            " whether it is." % (who, when, reason))
 
 
 def assemble(slug, home, *, generation=None):

@@ -361,3 +361,16 @@ def expand_harness_path(template, home):
     encoded = str(home).replace("/", "-")
     return Path(template.replace("{home_encoded}", encoded)
                         .replace("{home}", str(home))).expanduser()
+
+
+def read_session_id(home):
+    """The session id persisted in a cousin's `cousin.toml` [runtime],
+    or "" when none was ever written (a hand-made cousin, or a first
+    flip). Written by the flip AFTER the respawn, so a reader inside a
+    just-started session can beat the write and see the previous
+    generation's id."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    return str((data.get("runtime") or {}).get("session_id") or "")

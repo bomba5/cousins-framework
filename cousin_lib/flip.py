@@ -356,6 +356,15 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     # Minted and persisted even when the agent-cmd carries no
     # {session_id} placeholder: the generation record is more useful
     # with it.
+    #
+    # ORDER MATTERS, and one reader depends on it: the packet is
+    # assembled above while cousin.toml still holds the DYING id, and
+    # boot._mcp_warning reads that id to scope its MCP warning to the
+    # generation that just died. Persist earlier and the warning
+    # scopes to a session with no log yet, returns None and goes
+    # silent forever - a diagnostic that dies quietly, which is the
+    # defect #54 existed to remove. Guarded by
+    # tests.test_flip.TestAssembleSeesTheDyingSessionId.
     session_id = _mint_session_id()
     agent_cmd = agent_cmd_template.replace("{session_id}", session_id)
     try:

@@ -459,3 +459,38 @@ class TestCloseSession(FlipCase):
         self.assertFalse(pending.exists())
         self.assertNotIn("the last session closed cleanly",
                          self.log.read_text())
+
+
+class TestAssembleSeesTheDyingSessionId(FlipCase):
+    """The boot packet's MCP warning scopes itself to the generation
+    that just died by reading `runtime.session_id` off cousin.toml, and
+    that is correct only because the flip assembles the packet BEFORE
+    it persists the new id. Move the persist earlier and the warning
+    scopes to a session with no log, returns None and goes silent
+    forever: a diagnostic that dies quietly, which is the whole defect
+    #54 was about. Nothing else asserts this order."""
+
+    def test_the_packet_is_assembled_before_the_new_id_is_persisted(self):
+        from cousin_lib import boot, flip as flip_mod
+        from cousin_lib.config import read_session_id
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text()
+            + '\n[runtime]\nsession_id = "dying-generation"\n')
+        seen = []
+        real = boot.assemble
+
+        def watched(slug, home, **kw):
+            seen.append(read_session_id(home))
+            return real(slug, home, **kw)
+
+        with mock.patch.object(flip_mod.boot, "assemble", watched):
+            def cousin_writes():
+                time.sleep(0.3)
+                (self.home / "data" / "handoff.md").write_text("# H\nok\n")
+            threading.Thread(target=cousin_writes, daemon=True).start()
+            out = self._flip()
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(seen, ["dying-generation"])
+        self.assertNotEqual(
+            read_session_id(self.home), "dying-generation",
+            "the flip should have persisted a new id after assembling")

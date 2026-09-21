@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.6.1 - 2026-09-21
+
+### Fixed
+- The boot packet's MCP warning silently depended on the flip assembling the
+  packet before persisting the new session id. Nothing stated or tested that
+  order, and inverting it would have made the warning scope to a session with
+  no log and go quiet forever. Named at the persist site and guarded by
+  `tests.test_flip.TestAssembleSeesTheDyingSessionId`, which was proven to go
+  red under the inversion (#54)
+
 ## 1.6.0 - 2026-09-21
 
 MINOR rather than PATCH for one reason: `cousin-mcp --last-connection` gains

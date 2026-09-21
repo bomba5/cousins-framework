@@ -332,5 +332,48 @@ class TestChatServerUsesTheFacade(unittest.TestCase):
                          ("reaction", "system"))
 
 
+class TestFlipAndBootUseTheFacade(unittest.TestCase):
+    def test_no_module_but_delivery_builds_an_injector(self):
+        """The exit criterion of the phase, as a test: the pane is
+        typed into from exactly one place."""
+        root = pathlib.Path(delivery.__file__).parent
+        allowed = {"delivery.py", "server/injection.py", "console/pane.py"}
+        offenders = []
+        for path in sorted(root.rglob("*.py")):
+            rel = str(path.relative_to(root))
+            if rel in allowed:
+                continue
+            if "TmuxInjector(" in path.read_text():
+                offenders.append(rel)
+        self.assertEqual(offenders, [])
+
+    def test_a_pending_boot_is_a_boot_item(self):
+        from cousin_lib import spawn
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = pathlib.Path(tmp.name)
+        (home / "data").mkdir()
+        packet = home / "data" / "boot-packet-gen-0002.md"
+        packet.write_text("BOOT PACKET FOR COUSIN: wren")
+        spawn.pending_boot_path(home).write_text(
+            '{"generation": 2, "packet": "%s", "written_at": "x"}' % packet)
+        seen = []
+        with mock.patch("cousin_lib.delivery.deliver",
+                        lambda h, item, **kw: seen.append((item, kw))
+                        or delivery.DELIVERED):
+            ok = spawn._inject_pending_boot(
+                home, SimpleNamespace(tmux_session="wren"), tmux_bin="t",
+                tmux_socket=None, settle=0)
+        self.assertTrue(ok)
+        item, kw = seen[0]
+        self.assertEqual((item.source, item.thread_id), ("boot", "system"))
+        self.assertEqual(
+            item.body,
+            "[cousin-start] the last session closed cleanly; boot packet"
+            " follows. Do not announce the restart.\n"
+            "BOOT PACKET FOR COUSIN: wren")
+        self.assertEqual((kw["tmux_bin"], kw["socket"]), ("t", None))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,7 +25,7 @@ from cousin_lib import agent_auth, audits, boot, transcript_mine
 from cousin_lib.config import read_session_id as config_read_session_id
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, harness_config)
-from cousin_lib.server.injection import TmuxInjector
+from cousin_lib import delivery
 from cousin_lib.spawn import (SpawnError, _mint_session_id,
                               _persist_session_id, framework_event,
                               pending_boot_path, render_agent_cmd,
@@ -151,7 +151,17 @@ def _mine_transcript(home, root, *, dry_run):
     return stage
 
 
-def _hand_off(home, slug, session, *, alive, dry_run, injector, prompt,
+def _sender(home, tmux_bin, tmux_socket):
+    """A `send(text, source)` bound to one cousin and one tmux."""
+    def send(text, source="flip"):
+        item = delivery.Item(thread_id=delivery.thread_id("system"),
+                             source=source, body=text)
+        return delivery.deliver(home, item, tmux_bin=tmux_bin,
+                                socket=tmux_socket)
+    return send
+
+
+def _hand_off(home, slug, session, *, alive, dry_run, send, prompt,
               event, tmux_bin, tmux_socket, deadline_seconds, halfway):
     """The pre-exit half shared by a flip and a clean stop: prompt the
     live session, wait (bounded, one nudge) for data/handoff.md to
@@ -166,7 +176,7 @@ def _hand_off(home, slug, session, *, alive, dry_run, injector, prompt,
             "stage": "prompt_handoff", "sent": False,
             "reason": "dry-run" if dry_run else "no live session"})
         return stages
-    injector.inject(prompt)
+    send(prompt)
     stages.append({"stage": "prompt_handoff", "sent": True})
     deadline = time.time() + deadline_seconds
     halfway_at = time.time() + halfway
@@ -181,8 +191,8 @@ def _hand_off(home, slug, session, *, alive, dry_run, injector, prompt,
             wrote = True
             break
         if not nudged and time.time() >= halfway_at:
-            injector.inject("[%s] still waiting for the handoff; wrap up"
-                            " now." % event)
+            send("[%s] still waiting for the handoff; wrap up now."
+                 % event)
             nudged = True
     stages.append({"stage": "wait_handoff", "wrote_clean": wrote,
                    "nudged": nudged})
@@ -311,11 +321,10 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     result["stages"].append({"stage": "capture", "alive": alive,
                              "transcript_chars": len(tail)})
 
-    injector = TmuxInjector(session, tmux_bin=tmux_bin,
-                            socket=tmux_socket)
+    send = _sender(home, tmux_bin, tmux_socket)
     result["stages"].extend(_hand_off(
         home, slug, session, alive=alive, dry_run=dry_run,
-        injector=injector, prompt=_HANDOFF_PROMPT, event="cousin-flip",
+        send=send, prompt=_HANDOFF_PROMPT, event="cousin-flip",
         tmux_bin=tmux_bin, tmux_socket=tmux_socket,
         deadline_seconds=handoff_deadline, halfway=halfway))
 
@@ -411,7 +420,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
                 "[cousin-flip] boot packet follows. Operator asked for"
                 " confirmation: post one line to your chat surface"
                 " when oriented.")
-    injector.inject(preamble + "\n" + packet["text"])
+    send(preamble + "\n" + packet["text"], "boot")
     result["stages"].append({"stage": "inject_packet",
                              "tokens": packet["approx_tokens"]})
 
@@ -475,11 +484,10 @@ def close_session(slug, *, tmux_bin="tmux", tmux_socket=None,
         tail = _capture_tail(session, tmux_bin, tmux_socket)
         result["stages"].append({"stage": "capture", "alive": True,
                                  "transcript_chars": len(tail)})
-        injector = TmuxInjector(session, tmux_bin=tmux_bin,
-                                socket=tmux_socket)
+        send = _sender(home, tmux_bin, tmux_socket)
         result["stages"].extend(_hand_off(
             home, slug, session, alive=True, dry_run=False,
-            injector=injector,
+            send=send,
             prompt=handoff_prompt("cousin-stop", _STOP_AFTER),
             event="cousin-stop", tmux_bin=tmux_bin,
             tmux_socket=tmux_socket, deadline_seconds=handoff_deadline,

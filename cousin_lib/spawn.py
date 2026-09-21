@@ -752,12 +752,13 @@ def _inject_pending_boot(home, config, *, tmux_bin, tmux_socket, settle):
         return False
     try:
         text = Path(pending["packet"]).read_text()
-        from cousin_lib.server.injection import TmuxInjector
+        from cousin_lib import delivery
         time.sleep(settle)
-        TmuxInjector(config.tmux_session, tmux_bin=tmux_bin,
-                     socket=tmux_socket).inject(
-            "[cousin-start] the last session closed cleanly; boot packet"
-            " follows. Do not announce the restart.\n" + text)
+        item = delivery.Item(
+            thread_id=delivery.thread_id("system"), source="boot",
+            body="[cousin-start] the last session closed cleanly; boot packet"
+                 " follows. Do not announce the restart.\n" + text)
+        delivery.deliver(home, item, tmux_bin=tmux_bin, socket=tmux_socket)
     except Exception:  # noqa: BLE001 - best-effort, see docstring
         return False
     pending_boot_path(home).unlink(missing_ok=True)

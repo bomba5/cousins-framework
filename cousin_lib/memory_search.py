@@ -599,7 +599,16 @@ def _lock_path(home):
     return Path(home) / "memory" / ".embeddings.lock"
 
 
-def ensure_index(home, config, *, force=False, root=None, wait=True):
+# A foreground pass (a search) embeds at most this many chunks and
+# leaves the rest to the loops daemon. A search must never pay for a
+# whole backfill: with the raw store indexed a cousin has thousands of
+# chunks, and on 2026-09-21 a peer's first query after the change sat
+# over three minutes with the embedding service pinned.
+FOREGROUND_BUDGET = 24
+
+
+def ensure_index(home, config, *, force=False, root=None, wait=True,
+                 budget=None):
     """Bring <home>/memory/embeddings.json up to date, embedding only
     what changed, and report what the pass did:
 
@@ -609,7 +618,9 @@ def ensure_index(home, config, *, force=False, root=None, wait=True):
        "failed": chunks the service could not embed,
        "stale_reason": why any work was needed, or None,
        "busy": True when another pass held the index and this one
-               did nothing (only with wait=False)}
+               did nothing (only with wait=False),
+       "incomplete": True when the pass stopped at its budget with
+               work left, so a caller knows the index is still behind}
 
     One pass per home at a time, under an flock on
     memory/.embeddings.lock: concurrent searches each re-embedding the
@@ -634,14 +645,16 @@ def ensure_index(home, config, *, force=False, root=None, wait=True):
                         | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             return {"embedded": 0, "reused": 0, "dropped": 0,
-                    "failed": 0, "stale_reason": None, "busy": True}
+                    "failed": 0, "stale_reason": None, "busy": True,
+                    "incomplete": True}
         try:
-            return _refresh_index(home, config, force=force, root=root)
+            return _refresh_index(home, config, force=force, root=root,
+                                  budget=budget)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def _refresh_index(home, config, *, force, root):
+def _refresh_index(home, config, *, force, root, budget=None):
     chunks = _chunks(home, config, root)
     old = None if force else _load_index(home)
     missing = old is None
@@ -658,7 +671,15 @@ def _refresh_index(home, config, *, force, root):
     index = {}
     embedded = reused = failed = 0
     fresh = 0
+    incomplete = False
     for key, (_collection, path, text) in chunks.items():
+        if budget is not None and embedded >= budget:
+            # Out of budget: carry every key not reached, so a bounded
+            # pass adds what it paid for and never drops the rest.
+            incomplete = True
+            for rest, entry in old.items():
+                index.setdefault(rest, entry)
+            break
         digest = _text_hash(text)
         try:
             mtime = path.stat().st_mtime
@@ -689,13 +710,14 @@ def _refresh_index(home, config, *, force, root):
             partial = dict(old)
             partial.update(index)
             _write_index_atomic(home, partial)
-    dropped = len(set(old) - set(chunks))
+    dropped = 0 if incomplete else len(set(old) - set(chunks))
     if reason is None and (fresh or dropped):
         reason = "%d new or changed chunk(s), %d gone" % (fresh, dropped)
     if missing or fresh or dropped or index != old:
         _write_index_atomic(home, index)
     return {"embedded": embedded, "reused": reused, "dropped": dropped,
-            "failed": failed, "stale_reason": reason, "busy": False}
+            "failed": failed, "stale_reason": reason, "busy": False,
+            "incomplete": incomplete}
 
 
 def _first_line(text):
@@ -715,7 +737,8 @@ def _semantic_search(query, home, top, config, collection=None):
     (hits, failed) where failed counts chunks the pass could not
     embed."""
     query_vector = _embed(query, config)
-    report = ensure_index(home, config, wait=False)
+    report = ensure_index(home, config, wait=False,
+                          budget=FOREGROUND_BUDGET)
     index = _load_index(home) or {}
     chunks = _chunks(home, config)
     best = {}

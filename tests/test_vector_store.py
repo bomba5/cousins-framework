@@ -97,3 +97,52 @@ class TestMigration(VectorStoreCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestForegroundBudget(VectorStoreCase):
+    """A search must never pay for a whole backfill.
+
+    `search()` calls `ensure_index(wait=False)`, which means "do not
+    queue behind another pass", not "do not do the work": with the lock
+    free, that search runs every embedding itself, in the foreground.
+    Before 2026-09-21 a cousin had a few hundred chunks and that cost
+    seconds; indexing the raw store multiplied the chunk count by about
+    ten and a peer's first query sat over three minutes with the
+    embedding service pinned. The daemon finishes the rest.
+    """
+
+    def _sources(self, n):
+        for i in range(n):
+            (self.home / "memory" / ("f%02d.md" % i)).write_text(
+                "# file %d\n\nbody %d\n" % (i, i))
+
+    def test_a_foreground_pass_stops_at_its_budget(self):
+        from tests._fakes import fake_embedder
+        self._sources(20)
+        with fake_embedder() as url:
+            report = memory_search.ensure_index(
+                self.home, {"url": url, "model": "m", "timeout_s": 5},
+                wait=False, budget=5)
+        self.assertEqual(report["embedded"], 5)
+        self.assertTrue(report["incomplete"],
+                        "a bounded pass says it did not finish")
+
+    def test_the_daemon_pass_is_not_bounded(self):
+        from tests._fakes import fake_embedder
+        self._sources(20)
+        with fake_embedder() as url:
+            report = memory_search.ensure_index(
+                self.home, {"url": url, "model": "m", "timeout_s": 5})
+        self.assertEqual(report["embedded"], 20)
+        self.assertFalse(report["incomplete"])
+
+    def test_a_bounded_pass_keeps_what_it_embedded(self):
+        from tests._fakes import fake_embedder
+        self._sources(20)
+        cfg = {"url": None, "model": "m", "timeout_s": 5}
+        with fake_embedder() as url:
+            cfg["url"] = url
+            memory_search.ensure_index(self.home, cfg, wait=False, budget=5)
+            memory_search.ensure_index(self.home, cfg, wait=False, budget=5)
+        self.assertEqual(len(memory_search._load_index(self.home)), 10,
+                         "each pass adds its budget, none redoes the last")

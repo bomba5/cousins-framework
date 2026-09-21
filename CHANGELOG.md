@@ -5,6 +5,15 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## 1.8.0 - 2026-09-21
 
+### Fixed
+- A search no longer pays for a whole backfill. `search()` asks for a bounded
+  embedding pass (24 chunks) and the loops daemon finishes the rest;
+  `ensure_index(wait=False)` meant "do not queue behind another pass", not "do
+  not do the work", so with the lock free a single query ran every embedding
+  itself. Harmless while a cousin had a few hundred chunks; indexing the raw
+  store multiplied that by about ten and a cousin's first query after the
+  change sat over three minutes with the embedding service pinned
+
 ### Changed
 - The vector index is SQLite (`memory/vectors.db`, one row per chunk, the
   vector a float32 blob) instead of one JSON object read and parsed in full on

@@ -278,5 +278,59 @@ class TestProducersUseTheFacade(unittest.TestCase):
                          ("loop", "loop:daemon"))
 
 
+class TestChatServerUsesTheFacade(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.home = self.root / "cousins" / "wren"
+        (self.home / "data").mkdir(parents=True)
+        (self.root / "config").mkdir()
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n[chat]\nport = 0\n'
+            '[operator]\nname = "Sam"\n')
+        self.tmux = self.root / "tmux"
+        self.tmux.write_text(_FAKE_TMUX)
+        self.tmux.chmod(self.tmux.stat().st_mode | stat.S_IEXEC)
+
+    def _server(self):
+        from cousin_lib.server import app
+        return app.build_server(self.home, framework_root=str(self.root),
+                                tmux_bin=str(self.tmux))
+
+    def test_a_send_becomes_a_chat_item_on_the_senders_thread(self):
+        seen = []
+        with mock.patch("cousin_lib.delivery.deliver",
+                        lambda home, item, **kw: seen.append((item, kw))
+                        or delivery.QUEUED):
+            server = self._server()
+            # Never started, so never stop(): shutdown() blocks forever
+            # without a serve_forever loop. Closing the socket is enough.
+            self.addCleanup(server.httpd.server_close)
+            server.deliver(user="Sam", message="hello", message_id=4,
+                           attachments=["/tmp/a.png"], context="[fw-recall] x")
+        item, kw = seen[0]
+        self.assertEqual(
+            (item.thread_id, item.source, item.sender, item.body,
+             item.attachments, item.context, item.message_id),
+            ("operator:Sam", "chat", "Sam", "hello", ("/tmp/a.png",),
+             "[fw-recall] x", 4))
+        self.assertIs(kw["wait"], False)
+
+    def test_a_reaction_notice_is_a_reaction_item(self):
+        seen = []
+        with mock.patch("cousin_lib.delivery.deliver",
+                        lambda home, item, **kw: seen.append(item)
+                        or delivery.QUEUED):
+            server = self._server()
+            # Never started, so never stop(): shutdown() blocks forever
+            # without a serve_forever loop. Closing the socket is enough.
+            self.addCleanup(server.httpd.server_close)
+            server.notify("[fw-reaction] msg-id=4 emoji=x user=Sam"
+                          " tap_count=1 op=added")
+        self.assertEqual((seen[0].source, seen[0].thread_id),
+                         ("reaction", "system"))
+
+
 if __name__ == "__main__":
     unittest.main()

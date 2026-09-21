@@ -22,11 +22,10 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cousin_lib import chat_hooks, corrections, memory_search
+from cousin_lib import chat_hooks, corrections, delivery, memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, expand_harness_path,
                                harness_config)
-from cousin_lib.server.injection import TmuxInjector, make_deliver
 from cousin_lib.server.netguard import NetGuard
 from cousin_lib.server.storage import ChatStore, normalize_chat_user
 
@@ -207,12 +206,13 @@ def _recall_line(config, message):
 RECALL_BUDGET_SECONDS = 4.0
 
 
-def _with_recall(config, user, message):
-    """The text to deliver: the message, plus the recall suffix when one
-    applies. Best-effort by contract - a failing search never costs the
-    delivery, and never reaches the stored message."""
+def _recall_context(config, user, message):
+    """The recall line for an operator's message, or "". It rides the
+    delivered item as context and never reaches the stored message.
+    Best-effort by contract - a failing search never costs the
+    delivery."""
     if not _is_operator(config, user):
-        return message
+        return ""
     # Bounded: the search refreshes its index first, and after a big
     # change that can take longer than the console waits for a send.
     # Past the budget the message goes out without the line; the search
@@ -231,12 +231,11 @@ def _with_recall(config, user, message):
     if worker.is_alive():
         print("recall: skipped: over the %ss budget"
               % RECALL_BUDGET_SECONDS, file=sys.stderr)
-        return message
+        return ""
     if "error" in box:
         print("recall: skipped: %s" % box["error"], file=sys.stderr)
-        return message
-    line = box.get("line")
-    return message + " " + line if line else message
+        return ""
+    return box.get("line") or ""
 
 
 # Chat-pattern hooks: <home>/chat-hooks.json reacts to a message after
@@ -318,11 +317,29 @@ def build_server(home, *, framework_root=None, tmux_bin=None,
                 "tmux binary not found; terminal delivery is enabled and "
                 "cannot work without it"
             )
-        injector = TmuxInjector(config.tmux_session, tmux_bin=tmux_bin,
-                                socket=os.environ.get("COUSIN_TMUX_SOCKET"),
-                                root=Path(root) if root else None)
-        deliver = make_deliver(config.home, injector)
-        notify = injector.inject_async
+        opts = dict(tmux_bin=tmux_bin,
+                    socket=os.environ.get("COUSIN_TMUX_SOCKET"),
+                    root=Path(root) if root else None)
+
+        def deliver(*, user, message, message_id, attachments=(),
+                    context=""):
+            # wait=False: the line is composed here, in the request
+            # thread, because its time prefix reads the presence marker
+            # before _handle_send touches it; only the typing happens on
+            # a background thread.
+            source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"
+            thread = (delivery.thread_id("system") if source == "hook"
+                      else delivery.thread_for_chat(config, user))
+            item = delivery.Item(
+                thread_id=thread, source=source, sender=user, body=message,
+                attachments=tuple(attachments), context=context,
+                message_id=message_id)
+            return delivery.deliver(config.home, item, wait=False, **opts)
+
+        def notify(text):
+            item = delivery.Item(thread_id=delivery.thread_id("system"),
+                                 source="reaction", body=text)
+            return delivery.deliver(config.home, item, wait=False, **opts)
     try:
         return ChatServer(config, deliver=deliver, guard=guard,
                           notify=notify)
@@ -462,11 +479,13 @@ class _ChatHandler(BaseHTTPRequestHandler):
                 server.config.home, row["id"], image
             ))
         if server.deliver is not None:
-            # The recall suffix rides the DELIVERED text only: the row
-            # above already holds the message as the operator wrote it.
-            server.deliver(user=user,
-                           message=_with_recall(server.config, user, message),
-                           message_id=row["id"], attachments=attachments)
+            # The recall line rides as context, in the DELIVERED item
+            # only: the row above already holds the message as the
+            # operator wrote it.
+            server.deliver(user=user, message=message,
+                           message_id=row["id"], attachments=attachments,
+                           context=_recall_context(server.config, user,
+                                                   message))
         # Touched after delivery composed its text: the marker's mtime is
         # the gap baseline for the NEXT message, not this one.
         marker = server.config.home / "data" / ".last-user-msg"

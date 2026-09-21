@@ -86,8 +86,18 @@ class RecallCase(unittest.TestCase):
             return json.loads(resp.read())["messages"]
 
     def _delivered(self):
+        """The text the cousin reads. The recall line rides the delivered
+        item as `context` (cousin_lib.delivery) and the tmux backend
+        renders it as `message + " " + context`, byte-identical to the
+        old suffix (tests.test_delivery proves that). Rebuilding it here
+        keeps every assertion below about what the cousin actually sees."""
         self.assertEqual(len(self.calls), 1)
-        return self.calls[0]["message"]
+        return self._text(self.calls[0])
+
+    @staticmethod
+    def _text(call):
+        context = call.get("context") or ""
+        return call["message"] + (" " + context if context else "")
 
     def _configure_embedding(self, url, extra=""):
         os.environ["FRAMEWORK_ROOT"] = str(self.root)
@@ -277,7 +287,7 @@ class TestThresholds(RecallCase):
         self.assertEqual(kw["top"], 3)
         self.assertEqual(pathlib.Path(kw["home"]), self.home)
         self.assertEqual(
-            self.calls[1]["message"],
+            self._text(self.calls[1]),
             "y" * 24 + " [fw-recall] possibly relevant from your memory:"
             " a (memory:a.md); b (memory:b.md) - cousin-memory search"
             " for details; ignore if not.")
@@ -296,7 +306,7 @@ class TestThresholds(RecallCase):
             self._send(server, "z" * 40)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0][1]["top"], 1)
-        delivered = self.calls[1]["message"]
+        delivered = self._text(self.calls[1])
         self.assertIn("a (memory:a.md)", delivered)
         self.assertNotIn("b (memory:b.md)", delivered)
 

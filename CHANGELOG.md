@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.6.2 - 2026-09-21
+
+### Fixed
+- The boot packet's MCP line claimed a scope it did not always have. A cousin
+  with no persisted `runtime.session_id` (hand-made, or on its first flip) fell
+  back to the newest log file, which is the pre-1.6.0 reading and may belong to
+  an older generation. The line now says it could not be scoped instead of
+  claiming the generation that just died (#54)
+
+### Documentation
+- The 1.5.1 WAL entry stated a property the build only permits; it now names the
+  conditions under which WAL does not apply
+
 ## 1.6.1 - 2026-09-21
 
 ### Fixed
@@ -29,7 +42,8 @@ a third state on its public interface. Everything else here is a fix.
 ### Fixed
 - The boot packet's MCP line no longer predicts the session that is booting.
   It names the session it is about, reports that session's attempt time, and
-  is scoped to the generation that just died (#54)
+  is scoped to the generation that just died whenever a `runtime.session_id`
+  is on file; see 1.6.2 for what it says when none is (#54)
 - An attempt whose outcome nobody recorded reads as unrecorded, not as a
   failure, and a failure in wording the parser has no literal for keeps its
   reason instead of printing "no reason recorded". Measured over 5908 harness
@@ -41,7 +55,12 @@ a third state on its public interface. Everything else here is a fix.
 ## 1.5.1 - 2026-09-20
 
 ### Fixed
-- WAL mode on `jobs.db`, `scheduled.db`, `hive.db` and the memory indexes (#38)
+- WAL mode on `jobs.db`, `scheduled.db`, `hive.db` and the memory indexes,
+  best-effort: `sqlite_util.wal` swallows a `sqlite3.Error` and SQLite converts
+  the journal on the first WRITE, so a database on a network filesystem, or one
+  nobody has written since, stays in the rollback journal (#38)
+  <!-- wording corrected in 1.6.2: the original entry stated the property
+       without the condition the build merely permits -->
 
 ## 1.5.0 - 2026-09-20
 

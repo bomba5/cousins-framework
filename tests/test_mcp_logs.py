@@ -303,3 +303,25 @@ class TestLastConnectionCLI(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("no outcome recorded", text)
         self.assertNotIn("FAILED", text)
+
+
+class TestWarningWithNothingToScopeBy(TestWarningSaysWhatItKnows):
+    """A cousin with no persisted `runtime.session_id` - hand-made, or
+    being flipped for the first time - gives the warning nothing to
+    scope by, and the lookup falls back to the newest file. That is
+    the pre-1.6.0 reading, which can answer with an older generation's
+    record, so the line has to say it could not scope rather than
+    claim the generation that just died."""
+
+    def test_with_no_session_id_on_file_the_line_says_it_could_not_scope(self):
+        from cousin_lib.boot import _mcp_warning
+        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
+        line = _mcp_warning(self.home)          # no cousin.toml at all
+        self.assertIn("s1", line)
+        self.assertIn("could not be scoped", line)
+
+    def test_a_scoped_line_makes_no_such_caveat(self):
+        from cousin_lib.boot import _mcp_warning
+        self._write("2026-09-20T02-00-54-732Z.jsonl", _FAIL)
+        self._toml("s1")
+        self.assertNotIn("could not be scoped", _mcp_warning(self.home))

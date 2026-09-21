@@ -370,14 +370,22 @@ def _mcp_warning(home):
     try:
         from cousin_lib import mcp_logs
         from cousin_lib.config import read_session_id
-        last = mcp_logs.last_connection(
-            home, session_id=read_session_id(home) or None)
+        dying = read_session_id(home)
+        last = mcp_logs.last_connection(home, session_id=dying or None)
     except Exception:
         return ""
     if not last or last["state"] == "connected":
         return ""
     when = last["when"] or "an unrecorded time"
     who = last["session_id"] or "an unnamed session"
+    # No persisted id (a hand-made cousin, or a first flip) means the
+    # lookup fell back to the newest file, which is the pre-1.6.0
+    # reading and may belong to an older generation. Say so rather
+    # than claim a scope we did not have.
+    caveat = ("" if dying else
+              " This could not be scoped to the generation that just died,"
+              " because no `runtime.session_id` is on file, so it may belong"
+              " to an older one.")
     if last["state"] == "unrecorded":
         line = ("MCP: session %s attempted to connect your `cousin`"
                 " server at %s and no outcome was ever recorded" % (who, when))
@@ -386,12 +394,12 @@ def _mcp_warning(home):
                      % last["earlier"])
         return (line + ". That is unknown, not absent."
                 " `cousin-mcp --last-connection` reads the record and"
-                " `cousin-mcp --selftest` starts the server.")
+                " `cousin-mcp --selftest` starts the server." + caveat)
     reason = (last["reason"] or "no reason recorded").replace("\n", " ").strip()
     return ("MCP: your `cousin` server FAILED to connect in session %s at"
             " %s: %s. The causes live in files that outlive a session, so"
             " one left unfixed repeats. `cousin-mcp --selftest` says"
-            " whether it is." % (who, when, reason))
+            " whether it is.%s" % (who, when, reason, caveat))
 
 
 def assemble(slug, home, *, generation=None):

@@ -555,11 +555,12 @@ def default_is_alive(slug):
 
 
 def default_deliver(slug, text):
-    from cousin_lib.server.injection import TmuxInjector
+    from cousin_lib import delivery
 
-    config = CousinConfig.load(
-        FrameworkConfig.from_env().root / "cousins" / slug)
-    return bool(TmuxInjector(config.tmux_session).inject(text))
+    home = FrameworkConfig.from_env().root / "cousins" / slug
+    item = delivery.Item(thread_id=delivery.thread_id("meeting", "turn"),
+                         source="meeting", body=text)
+    return delivery.deliver(home, item) == delivery.DELIVERED
 
 
 # -- CLI --------------------------------------------------------------

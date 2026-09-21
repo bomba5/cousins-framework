@@ -1062,14 +1062,14 @@ def _default_is_alive(slug):
 
 
 def _default_deliver(slug, text):
-    from cousin_lib.server.injection import TmuxInjector
+    from cousin_lib import delivery
 
-    config = CousinConfig.load(
-        FrameworkConfig.from_env().root / "cousins" / slug)
-    injector = TmuxInjector(config.tmux_session)
-    # False (skipped at a menu, or failed) is not a delivery: the caller
-    # keeps the beat or prompt due instead of recording it as sent.
-    return injector.inject(text)
+    home = FrameworkConfig.from_env().root / "cousins" / slug
+    item = delivery.Item(thread_id=delivery.thread_id("loop", "daemon"),
+                         source="loop", body=text)
+    # Anything but DELIVERED (skipped at a menu, or failed) is not a
+    # delivery: the caller keeps the beat or prompt due.
+    return delivery.deliver(home, item) == delivery.DELIVERED
 
 
 def loops_main(argv=None):

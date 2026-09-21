@@ -222,5 +222,61 @@ class TestThreadForChat(unittest.TestCase):
                          "person:Testa")
 
 
+class TestProducersUseTheFacade(unittest.TestCase):
+    """Each default-deliver hands a typed item to delivery.deliver and
+    turns the outcome back into the bool its tick keys on."""
+
+    def _run(self, call, outcome):
+        seen = []
+
+        def fake(home, item, **kw):
+            seen.append((pathlib.Path(home).name, item))
+            return outcome
+
+        root = SimpleNamespace(
+            root=pathlib.Path("/r"),
+            list_cousins=lambda: [SimpleNamespace(
+                slug="wren", home=pathlib.Path("/r/cousins/wren"))])
+        with mock.patch("cousin_lib.delivery.deliver", fake), \
+                mock.patch("cousin_lib.config.FrameworkConfig.from_env",
+                           return_value=root):
+            return call(), seen
+
+    def test_schedule(self):
+        from cousin_lib import schedule
+        ok, seen = self._run(
+            lambda: schedule._default_deliver("wren", "check CI"),
+            delivery.DELIVERED)
+        self.assertIs(ok, True)
+        home, item = seen[0]
+        self.assertEqual((home, item.thread_id, item.source, item.body),
+                         ("wren", "schedule", "schedule", "check CI"))
+
+    def test_schedule_failure_keeps_the_job_pending(self):
+        from cousin_lib import schedule
+        ok, _ = self._run(
+            lambda: schedule._default_deliver("wren", "check CI"),
+            delivery.FAILED)
+        self.assertIs(ok, False)
+
+    def test_meetings(self):
+        from cousin_lib import meetings
+        ok, seen = self._run(
+            lambda: meetings.default_deliver("wren", "(Meeting 7) your turn"),
+            delivery.DELIVERED)
+        self.assertIs(ok, True)
+        self.assertEqual((seen[0][1].source, seen[0][1].body),
+                         ("meeting", "(Meeting 7) your turn"))
+
+    def test_loops(self):
+        from cousin_lib import loops
+        ok, seen = self._run(
+            lambda: loops._default_deliver("wren", "Context heartbeat."),
+            delivery.FAILED)
+        self.assertIs(ok, False)
+        self.assertEqual((seen[0][1].source, seen[0][1].thread_id),
+                         ("loop", "loop:daemon"))
+
+
 if __name__ == "__main__":
     unittest.main()

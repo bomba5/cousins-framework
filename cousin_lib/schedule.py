@@ -222,16 +222,16 @@ def _cmd_cancel(args):
 
 
 def _default_deliver(slug, prompt):
-    """Fire a prompt into the cousin's terminal as an OOC framework
-    line via the injection module."""
-    from cousin_lib.server.injection import TmuxInjector
+    """Hand a due prompt to the cousin through the delivery facade.
+    False (skipped at a menu, or failed) keeps the job pending."""
+    from cousin_lib import delivery
 
     root = FrameworkConfig.from_env()
     for cfg in root.list_cousins():
         if cfg.slug == slug:
-            injector = TmuxInjector(cfg.tmux_session)
-            # False (skipped at a menu, or failed) keeps the job pending.
-            return injector.inject("[cousin-schedule] %s" % prompt)
+            item = delivery.Item(thread_id=delivery.thread_id("schedule"),
+                                 source="schedule", body=prompt)
+            return delivery.deliver(cfg.home, item) == delivery.DELIVERED
     raise RuntimeError("no cousin %r under %s" % (slug, root.root))
 
 

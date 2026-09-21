@@ -8,6 +8,9 @@ import pathlib
 import tempfile
 from datetime import datetime, timezone
 from cousin_lib.server.injection import compose_delivery
+import stat
+from unittest import mock
+from tests.server.test_injection import _FAKE_TMUX
 
 
 class TestThreadIds(unittest.TestCase):
@@ -106,6 +109,75 @@ class TestTmuxRender(unittest.TestCase):
             body = "[x] line one\nline two"
             item = Item(thread_id=thread, source=source, body=body)
             self.assertEqual(self.backend.render(self.home, item), body)
+
+
+class TestDeliver(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name)
+        self.home = root / "cousins" / "wren"
+        (self.home / "data").mkdir(parents=True)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n[chat]\nport = 8099\n')
+        self.tmux = root / "tmux"
+        self.tmux.write_text(_FAKE_TMUX)
+        self.tmux.chmod(self.tmux.stat().st_mode | stat.S_IEXEC)
+        self.log = root / "calls.log"
+        patcher = mock.patch.dict(os.environ, {
+            "FAKE_TMUX_LOG": str(self.log),
+            "FAKE_TMUX_PANE": str(root / "pane.txt")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.opts = dict(tmux_bin=str(self.tmux), settle=lambda n: 0,
+                         verify_delay=0)
+
+    def _calls(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_a_typed_line_is_delivered(self):
+        item = Item(thread_id="schedule", source="schedule", body="check CI")
+        self.assertEqual(delivery.deliver(self.home, item, **self.opts),
+                         delivery.DELIVERED)
+        self.assertTrue(any("[cousin-schedule] check CI" in c
+                            for c in self._calls()))
+
+    def test_a_failed_paste_is_failed_not_delivered(self):
+        item = Item(thread_id="loop:digest", source="loop", body="beat")
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):
+            self.assertEqual(delivery.deliver(self.home, item, **self.opts),
+                             delivery.FAILED)
+
+    def test_not_waiting_is_queued_and_still_types(self):
+        item = Item(thread_id="meeting:7", source="meeting", body="your turn")
+        outcome = delivery.deliver(self.home, item, wait=False, **self.opts)
+        self.assertEqual(outcome, delivery.QUEUED)
+        for thread in list(__import__("threading").enumerate()):
+            if thread.daemon and thread is not __import__(
+                    "threading").current_thread():
+                thread.join(2)
+        self.assertTrue(any("your turn" in c for c in self._calls()))
+
+    def test_an_explicit_backend_is_used_instead(self):
+        seen = []
+
+        class Recorder:
+            def send(self, home, item, *, wait=True, **opts):
+                seen.append((item.thread_id, wait))
+                return delivery.QUEUED
+
+        item = Item(thread_id="peer:testa", source="chat", sender="Testa",
+                    body="hi")
+        self.assertEqual(
+            delivery.deliver(self.home, item, backend=Recorder()),
+            delivery.QUEUED)
+        self.assertEqual(seen, [("peer:testa", True)])
+
+    def test_a_missing_home_is_failed_not_an_exception(self):
+        item = Item(thread_id="system", source="boot", body="x")
+        self.assertEqual(
+            delivery.deliver(self.home / "nope", item, **self.opts),
+            delivery.FAILED)
 
 
 if __name__ == "__main__":

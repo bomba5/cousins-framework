@@ -88,3 +88,33 @@ class TmuxBackend:
         if item.source == "schedule":
             return "[cousin-schedule] %s" % item.body
         return item.body
+
+    def send(self, home, item, *, wait=True, **opts):
+        """Render and type. `opts` are TmuxInjector's keyword arguments
+        (tmux_bin, socket, settle, verify_delay, log, root, ...)."""
+        from cousin_lib.config import CousinConfig, MissingConfigError
+        from cousin_lib.server.injection import TmuxInjector
+        try:
+            session = CousinConfig.load(home).tmux_session
+        except (MissingConfigError, OSError):
+            return FAILED
+        text = self.render(home, item)
+        injector = TmuxInjector(session, **opts)
+        if not wait:
+            injector.inject_async(text)
+            return QUEUED
+        return DELIVERED if injector.inject(text) else FAILED
+
+
+def backend_for(home):
+    """The delivery backend for a cousin. tmux is the only one yet; the
+    runner's inbox arrives with `[agent] runner` in cousin.toml."""
+    return TmuxBackend()
+
+
+def deliver(home, item, *, wait=True, backend=None, **backend_opts):
+    """Hand one item to a cousin. Returns DELIVERED, QUEUED or FAILED
+    and never raises for a delivery problem: the caller's work (a
+    stored message, a due schedule) must not be lost to a transport."""
+    backend = backend if backend is not None else backend_for(home)
+    return backend.send(home, item, wait=wait, **backend_opts)

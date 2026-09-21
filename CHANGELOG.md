@@ -15,6 +15,15 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   904 entries over 789 topics survived as 139 lines, so 82% of topics could
   not be found
 
+### Changed
+- One result slot is reserved for a curated topic file (`memory/**/*.md`, or
+  the harness auto-memory) when the ranking would drop every one of them.
+  Indexing the raw store took curated files from 13 of 45 top-three slots to
+  2 on a real corpus, because BM25's length normalisation puts a short entry
+  above a long file that names the term once. The reserved slot is the last,
+  so the best match is never displaced; an explicit `--collection` is never
+  overridden
+
 ### Fixed
 - The same entry is indexed once however many files hold it. `raw_fold` keeps
   a month in both `<YYYY-MM>-digest.jsonl` and `archive/<YYYY-MM>.jsonl.gz`,

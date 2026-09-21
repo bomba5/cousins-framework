@@ -680,6 +680,39 @@ def _fuse(keyword_hits, semantic_hits, top, bonuses=None):
     return out
 
 
+# The collections a cousin writes ON PURPOSE as durable topic files,
+# best first. Raw entries are short and dense, so BM25's length
+# normalisation ranks them above a long curated file that mentions the
+# term once: measured 2026-09-21, indexing the raw store took curated
+# files from 13 of 45 top-three slots to 2. One slot is reserved so the
+# summary a cousin wrote cannot be crowded out of its own search.
+_CURATED = ("memory", "harness")
+
+
+def _curated_floor(ranked, top, query, home):
+    """Keep one curated hit in the result when the ranking would drop
+    every one of them.
+
+    The curated hit is FETCHED, not hoped for: widening the pool does
+    not reach it, because a flood of short entries can fill any pool
+    (measured: a long topic file that names the term once ranked below
+    ten entries that are almost entirely the term). One extra keyword
+    query per collection, and only when the floor actually applies.
+
+    The reserved slot is the LAST, so the best match is never
+    displaced, and nothing is reserved when there is only one slot or
+    when no curated file matches at all.
+    """
+    if top < 2 or any(h["collection"] in _CURATED for h in ranked):
+        return ranked
+    have = {h["path"] for h in ranked}
+    for collection in _CURATED:
+        for hit in _keyword_search(query, home, 1, collection):
+            if hit["path"] not in have:
+                return ranked[:top - 1] + [hit]
+    return ranked
+
+
 def _bonuses(home, *legs):
     """{path: usage bonus} for every path any leg surfaced. Fail-open:
     a broken reinforcement store means no bonus, never no search."""
@@ -738,8 +771,12 @@ def search(query, *, top=5, home=None, collection=None):
                 notice = ("embedding service failed for %d chunk(s);"
                           " prior vectors kept where available, new"
                           " text unranked by meaning" % failed)
+    # An explicit collection filter is never overridden: the caller
+    # asked for one collection and gets one.
     hits = _fuse(keyword_hits, semantic_hits, top,
                  _bonuses(home, keyword_hits, semantic_hits))
+    if collection is None:
+        hits = _curated_floor(hits, top, query, home)
     _record(home, query, hits)
     return hits, notice
 

@@ -318,3 +318,74 @@ class TestRawEntriesAreIndexed(SearchCase):
         raw_only, _ = search("avocet", home=self.home, top=5, collection="raw")
         self.assertTrue(raw_only)
         self.assertEqual({h["collection"] for h in raw_only}, {"raw"})
+
+
+class TestCuratedFloor(SearchCase):
+    """Indexing the raw store put entries in 36 of 45 top-three slots on
+    a real corpus and pushed curated topic files from 13 to 2: BM25
+    rewards a short document, so a 900-character entry outranks a 10 KB
+    note that carries the same term. One slot is reserved so the thing a
+    cousin wrote on purpose cannot be crowded out entirely. Operator's
+    choice, 2026-09-21."""
+
+    def _raw(self, *entries):
+        raw = self.home / "memory" / "raw"
+        raw.mkdir(parents=True, exist_ok=True)
+        (raw / "2026-09-20.jsonl").write_text(
+            "".join(json.dumps(e) + "\n" for e in entries))
+
+    def _flood(self, term, count):
+        # The real shape: entries are short and almost entirely the
+        # term, so BM25's length normalisation puts them above a long
+        # curated file that mentions it once.
+        self._raw(*[{"timestamp": "2026-09-20T10:%02d:00+02:00" % i,
+                     "topic": "%s %d" % (term, i),
+                     "content": "%s %s %s occurrence %d."
+                                % (term, term, term, i)}
+                    for i in range(count)])
+
+    def _curated(self, name, term):
+        (self.home / "memory" / ("%s.md" % name)).write_text(
+            "# %s\n\nThe %s protocol is the durable summary.\n\n"
+            % (term.capitalize(), term)
+            + "Unrelated background prose about other matters. " * 400)
+
+    def test_a_curated_file_keeps_a_slot_when_entries_would_take_them_all(self):
+        self._curated("teal", "teal")
+        self._flood("teal", 10)
+        hits, _ = search("teal", home=self.home, top=3)
+        self.assertEqual(len(hits), 3)
+        self.assertIn("memory", [h["collection"] for h in hits],
+                      "a matching curated file must keep one slot")
+
+    def test_the_best_hit_is_never_displaced(self):
+        self._curated("teal", "teal")
+        self._flood("teal", 10)
+        hits, _ = search("teal", home=self.home, top=3)
+        top_by_score = max(hits, key=lambda h: h["score"])
+        self.assertEqual(hits[0]["path"], top_by_score["path"],
+                         "the floor fills the last slot, never the first")
+
+    def test_nothing_changes_when_a_curated_file_already_ranks(self):
+        (self.home / "memory" / "widgeon.md").write_text(
+            "# Widgeon\n\nwidgeon\n")
+        self._raw({"timestamp": "2026-09-20T10:00:00+02:00",
+                   "topic": "widgeon entry", "content": "widgeon once."})
+        hits, _ = search("widgeon", home=self.home, top=3)
+        self.assertEqual(len([h for h in hits
+                              if h["collection"] == "memory"]), 1)
+
+    def test_a_collection_filter_is_never_overridden(self):
+        self._curated("gadwall", "gadwall")
+        self._flood("gadwall", 5)
+        hits, _ = search("gadwall", home=self.home, top=3,
+                         collection="raw")
+        self.assertTrue(hits)
+        self.assertEqual({h["collection"] for h in hits}, {"raw"},
+                         "an explicit collection filter wins over the floor")
+
+    def test_a_single_result_is_left_alone(self):
+        self._curated("smew", "smew")
+        self._flood("smew", 5)
+        hits, _ = search("smew", home=self.home, top=1)
+        self.assertEqual(len(hits), 1)

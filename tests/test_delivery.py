@@ -11,6 +11,7 @@ from cousin_lib.server.injection import compose_delivery
 import stat
 from unittest import mock
 from tests.server.test_injection import _FAKE_TMUX
+from types import SimpleNamespace
 
 
 class TestThreadIds(unittest.TestCase):
@@ -178,6 +179,47 @@ class TestDeliver(unittest.TestCase):
         self.assertEqual(
             delivery.deliver(self.home / "nope", item, **self.opts),
             delivery.FAILED)
+
+
+class TestThreadForChat(unittest.TestCase):
+    def setUp(self):
+        self.config = SimpleNamespace(operator_name="Sam", slug="wren",
+                                      home=pathlib.Path("/nonexistent"))
+        self.cousins = [SimpleNamespace(slug="wren", name="Wren"),
+                        SimpleNamespace(slug="testa", name="Testa")]
+
+    def test_the_operator_in_any_case_like_is_operator(self):
+        # The same normalisation server/app.py _is_operator uses: case
+        # and inner spaces, no stripping. The two MUST agree, or a sender
+        # could be the operator for recall and a person for threading.
+        self.assertEqual(
+            delivery.thread_for_chat(self.config, "SAM",
+                                     cousins=self.cousins),
+            "operator:Sam")
+
+    def test_a_peer_by_name_or_slug_maps_to_its_slug(self):
+        for user in ("Testa", "testa"):
+            self.assertEqual(
+                delivery.thread_for_chat(self.config, user,
+                                         cousins=self.cousins),
+                "peer:testa")
+
+    def test_anyone_else_is_a_person(self):
+        self.assertEqual(
+            delivery.thread_for_chat(self.config, "Priya",
+                                     cousins=self.cousins),
+            "person:Priya")
+
+    def test_no_operator_configured_means_nobody_is(self):
+        config = SimpleNamespace(operator_name=None, slug="wren",
+                                 home=pathlib.Path("/nonexistent"))
+        self.assertEqual(
+            delivery.thread_for_chat(config, "Sam", cousins=self.cousins),
+            "person:Sam")
+
+    def test_an_unreadable_registry_never_costs_the_thread(self):
+        self.assertEqual(delivery.thread_for_chat(self.config, "Testa"),
+                         "person:Testa")
 
 
 if __name__ == "__main__":

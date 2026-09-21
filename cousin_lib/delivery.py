@@ -118,3 +118,26 @@ def deliver(home, item, *, wait=True, backend=None, **backend_opts):
     stored message, a due schedule) must not be lost to a transport."""
     backend = backend if backend is not None else backend_for(home)
     return backend.send(home, item, wait=wait, **backend_opts)
+
+
+def thread_for_chat(config, user, *, cousins=None):
+    """The thread a chat sender belongs to. `cousins` is the registry
+    (objects with .slug and .name); read from the install when None,
+    and an unreadable registry degrades to `person:`, never raises."""
+    from cousin_lib.server.storage import normalize_chat_user
+    who = normalize_chat_user(user)
+    operator = getattr(config, "operator_name", None)
+    if operator and who == normalize_chat_user(operator):
+        return thread_id("operator", operator)
+    if cousins is None:
+        try:
+            from cousin_lib.config import FrameworkConfig
+            root = FrameworkConfig.root_from_home(config.home)
+            cousins = FrameworkConfig(root).list_cousins()
+        except Exception:  # noqa: BLE001 - a thread id must never fail a send
+            cousins = []
+    for cousin in cousins:
+        if who in (normalize_chat_user(cousin.slug),
+                   normalize_chat_user(cousin.name)):
+            return thread_id("peer", cousin.slug)
+    return thread_id("person", str(user).strip())

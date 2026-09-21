@@ -41,6 +41,7 @@ than an error.
 """
 import fcntl
 import gzip
+import array
 import hashlib
 import json
 import math
@@ -100,7 +101,32 @@ def _fts_path(home):
 
 
 def _index_path(home):
+    """The vector store: SQLite, one row per chunk, the vector a
+    float32 blob.
+
+    It was a single JSON object, read and parsed in full on every
+    search. Measured 2026-09-21 on a real cousin: 31.6 MB and 1283 ms
+    per query, against the 938 ms embedding call the index exists to
+    serve, and growing with the memory. Same data, same access pattern
+    (every vector is scored), but unpacking binary beats parsing text
+    by an order of magnitude, and a row can be written without
+    rewriting the file.
+    """
+    return home / "memory" / "vectors.db"
+
+
+def _legacy_index_path(home):
     return home / "memory" / "embeddings.json"
+
+
+def _pack(vector):
+    return array.array("f", vector).tobytes()
+
+
+def _unpack(blob):
+    out = array.array("f")
+    out.frombytes(blob)
+    return out.tolist()
 
 
 # ---------------------------------------------------------------- sources
@@ -480,22 +506,93 @@ def _chunks(home, config, root=None):
     return out
 
 
-def _load_index(home):
+def _migrate_legacy_index(home):
+    """Import a JSON index written before the store was SQLite, then
+    remove it, so the migration happens once and nothing reads two
+    stores. A JSON file that will not parse is left where it is: it is
+    evidence, and the caller rebuilds from the sources anyway."""
+    legacy = _legacy_index_path(home)
     try:
-        data = json.loads(_index_path(home).read_text())
-    except (OSError, ValueError):
+        data = json.loads(legacy.read_text())
+    except OSError:
         return None
-    return data if isinstance(data, dict) else None
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    _write_index_atomic(home, data)
+    legacy.unlink(missing_ok=True)
+    return _load_index(home)
+
+
+def _load_index(home):
+    """Every stored chunk as {key: {mtime, text_hash, vector}}, or None
+    when there is no readable store. A vector that was never embedded
+    (the embed failed and there was no prior one) comes back without a
+    `vector` key, which is how the next pass tells known-but-unembedded
+    from new."""
+    path = _index_path(home)
+    if not path.exists():
+        return _migrate_legacy_index(home)
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            rows = conn.execute(
+                "SELECT key, mtime, text_hash, vector FROM vectors"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    out = {}
+    for key, mtime, text_hash, blob in rows:
+        entry = {"mtime": mtime, "text_hash": text_hash}
+        if blob:
+            entry["vector"] = _unpack(blob)
+        out[key] = entry
+    return out
+
+
+_VECTORS_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS vectors ("
+    " key TEXT PRIMARY KEY, mtime REAL, text_hash TEXT, vector BLOB)"
+)
 
 
 def _write_index_atomic(home, index):
-    """Write then rename: a reader never sees a half-written index and
-    a crash mid-write leaves the previous one intact."""
+    """Replace the store's contents with `index`, in one transaction:
+    a reader never sees a half-written index and a crash mid-write
+    leaves the previous contents intact. Keys absent from `index` are
+    gone, which is what the JSON write did by rewriting the file."""
     path = _index_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(index))
-    os.replace(tmp, path)
+    try:
+        conn = wal(sqlite3.connect(path))
+        conn.execute(_VECTORS_SCHEMA)
+    except sqlite3.DatabaseError:
+        # Not a database, or one too damaged to open: the index is a
+        # cache of what the sources say, so replace it rather than
+        # refuse. Nothing is lost that a refresh cannot recompute.
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - never fail on the way out
+            pass
+        path.unlink(missing_ok=True)
+        conn = wal(sqlite3.connect(path))
+    try:
+        with conn:
+            conn.execute(_VECTORS_SCHEMA)
+            conn.execute("DELETE FROM vectors WHERE key NOT IN (%s)"
+                         % ",".join("?" * len(index)) if index
+                         else "DELETE FROM vectors", tuple(index))
+            conn.executemany(
+                "INSERT OR REPLACE INTO vectors"
+                " (key, mtime, text_hash, vector) VALUES (?, ?, ?, ?)",
+                [(key, entry.get("mtime"), entry.get("text_hash"),
+                  _pack(entry["vector"]) if entry.get("vector") else None)
+                 for key, entry in index.items()])
+    finally:
+        conn.close()
 
 
 def _lock_path(home):

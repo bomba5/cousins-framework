@@ -50,7 +50,7 @@ Everything below is relative to the cousin home.
 | Corrections | `data/corrections.jsonl` | the chat server, from your messages | boot packet (calibration layer) |
 | Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search** |
 | Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself | search, explorer |
-| Search indexes | `memory/fts_index.db`, `memory/embeddings.json` | search, `reindex` | search |
+| Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
 | Trash | `memory/.trash/` | removals from the console explorer | `cousin-memory trash restore` |
 | Legacy | `legacy/` | a migration (the old home, archived whole) | the explorer only |
@@ -384,7 +384,7 @@ is plenty with a GPU. Files are embedded in chunks of `chunk_chars`
 (default 2000) overlapping by `chunk_overlap` (default 200), and a hit
 says which chunk matched.
 
-The vectors live in `memory/embeddings.json`. Each search embeds only
+The vectors live in `memory/vectors.db`. Each search embeds only
 new or changed chunks and drops deleted files, so the first search
 after a lot of writing is slow and the rest are quick. `reindex`
 rebuilds the keyword index and, with a service configured, re-embeds

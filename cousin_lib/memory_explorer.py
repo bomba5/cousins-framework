@@ -55,7 +55,7 @@ ACTIVE_FILES = ("STATUS.md", "data/active-threads.md", "data/handoff.md",
 INDEX_FILES = ("MEMORY.md",)
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
 _DIGEST_RE = re.compile(r"^\d{4}-\d{2}-digest\.jsonl$")
-_ARTIFACTS = {"fts_index.db", "embeddings.json", ".recall-log.jsonl",
+_ARTIFACTS = {"fts_index.db", "vectors.db", "embeddings.json", ".recall-log.jsonl",
               ".recall-counts.json", ".recall-log-archive.jsonl",
               ".reindexed"}
 LAYER_IDS = ("active", "index", "raw", "digest", "archive", "distilled",
@@ -466,7 +466,7 @@ def dangling_index_links(home):
 def _search_layer(home, root):
     mem = Path(home) / "memory"
     fts = mem / "fts_index.db"
-    emb = mem / "embeddings.json"
+    emb = mem / "vectors.db"
     layer = {"id": "search", "title": "search indexes",
              "fts": {"exists": fts.is_file()},
              "embeddings": {"exists": emb.is_file()},

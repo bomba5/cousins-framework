@@ -25,7 +25,7 @@ from cousin_lib.trace import traced_cli
 CORE_FILES = ("MEMORY.md", "STATUS.md", "CLAUDE.md")
 # Index artifacts memory search rebuilds on demand; never memory.
 MEMORY_SKIP = ("fts_index.db", "fts_index.db-wal", "fts_index.db-shm",
-               "embeddings.json")
+               "vectors.db")
 
 
 class BackupError(Exception):

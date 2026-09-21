@@ -53,7 +53,7 @@ from cousin_lib.home_files import PathRefused, resolve_in
 TRASH_NAME = ".trash"
 _RAW_LINE_RE = re.compile(r"^memory/raw/[^/]+\.jsonl$")
 _LINE_FILES = ("data/decisions.jsonl",)
-_NOT_REMOVABLE_FILES = {"fts_index.db", "embeddings.json",
+_NOT_REMOVABLE_FILES = {"fts_index.db", "vectors.db", "embeddings.json",
                         ".recall-log.jsonl", ".recall-counts.json",
                         ".recall-log-archive.jsonl", ".reindexed"}
 _ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}-[0-9]{6}(-[0-9]+)?$")

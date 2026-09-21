@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.8.0 - 2026-09-21
+
+### Changed
+- The vector index is SQLite (`memory/vectors.db`, one row per chunk, the
+  vector a float32 blob) instead of one JSON object read and parsed in full on
+  every search. Measured on a real cousin: loading the index went from 1283 ms
+  to 69 ms and the file from 16.4 MB to 4.3 MB, against the 938 ms embedding
+  call the index exists to serve. An existing `embeddings.json` is imported
+  once on first read and removed
+- A vector store too damaged to open is replaced rather than fatal: the index
+  is a cache of what the sources say
+
 ## 1.7.0 - 2026-09-21
 
 ### Added

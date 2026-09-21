@@ -40,6 +40,7 @@ reads nothing teaches its caller that memory is empty, which is worse
 than an error.
 """
 import fcntl
+import gzip
 import hashlib
 import json
 import math
@@ -141,6 +142,84 @@ def _sources(home, root=None):
     return out
 
 
+# The raw store is JSONL, one entry per line, and it is where
+# `cousin-memory decide` and `remember`, the flip's transcript miner,
+# the jobs ledger and framework events all write. It was not indexed
+# at all: `_sources` collects `*.md`, so an entry reached recall only
+# through `distill`, which keeps one truncated line per topic and caps
+# each file. Measured 2026-09-21 on a real cousin: 904 entries over
+# 789 topics survived as 139 lines, so 82% of topics could not be
+# found. Entries are indexed one per entry, not one per day file: a
+# day file mixes unrelated topics, which is a bad unit for BM25 and a
+# worse one for an embedding.
+_RAW_FIELDS = ("topic", "content", "cite", "source", "truth_level")
+
+
+def _raw_files(home):
+    """The raw store's files, hot days first then the monthly
+    archives raw_fold leaves behind."""
+    base = Path(home) / "memory" / "raw"
+    if not base.is_dir():
+        return []
+    return (sorted(base.glob("*.jsonl"))
+            + sorted((base / "archive").glob("*.jsonl.gz")))
+
+
+def _raw_entries(home):
+    """(collection, key, body, mtime) per raw entry.
+
+    `key` is the real file path with the entry's line appended, so
+    every entry is a distinct hit (hits merge by path) while still
+    naming the file it lives in. A line that is not JSON is skipped,
+    never fatal: one bad write must not cost the entries around it.
+
+    The same entry is indexed once however many files hold it:
+    raw_fold keeps a month in both `<YYYY-MM>-digest.jsonl` and
+    `archive/<YYYY-MM>.jsonl.gz` (measured on a real cousin: 149 of
+    149 entries identical), and indexing both returns one memory as
+    two hits. Files are walked hot-first, so the copy that survives is
+    the readable one.
+    """
+    out = []
+    seen = set()
+    for path in _raw_files(home):
+        try:
+            mtime = path.stat().st_mtime
+            opener = gzip.open if path.suffix == ".gz" else open
+            with opener(path, "rt", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        for number, line in enumerate(lines, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            body = "\n".join(
+                str(entry[f]) for f in _RAW_FIELDS if entry.get(f))
+            if not body:
+                continue
+            when = str(entry.get("timestamp", ""))[:19]
+            text = "%s\n%s" % (when, body) if when else body
+            # Dedupe on the memory, not on its metadata: a digest twin
+            # carries the same topic and content under a different
+            # source, id, entry count and first/last timestamps.
+            same = "%s\n%s" % (entry.get("topic", ""),
+                               entry.get("content", ""))
+            fingerprint = hashlib.sha256(
+                same.encode("utf-8", "replace")).digest()
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            out.append(("raw", "%s#%d" % (path, number), text, mtime))
+    return out
+
+
 def _read(path):
     try:
         return path.read_text(errors="replace")
@@ -176,6 +255,14 @@ def build_index(home=None):
             )
             latest = max(latest, path.stat().st_mtime)
             count += 1
+        for collection, key, body, mtime in _raw_entries(home):
+            conn.execute(
+                "INSERT INTO memory_fts (collection, path, body)"
+                " VALUES (?, ?, ?)",
+                (collection, key, body),
+            )
+            latest = max(latest, mtime)
+            count += 1
         conn.execute("DROP TABLE IF EXISTS index_meta")
         conn.execute("CREATE TABLE index_meta (built_at REAL,"
                      " source_mtime REAL, files INTEGER)")
@@ -206,9 +293,12 @@ def _index_stale(home):
         return True
     built_mtime, built_files = row
     sources = _sources(home)
-    if len(sources) != built_files:
+    raw = _raw_entries(home)
+    if len(sources) + len(raw) != built_files:
         return True
-    return any(p.stat().st_mtime > built_mtime for _, p, _r in sources)
+    if any(p.stat().st_mtime > built_mtime for _, p, _r in sources):
+        return True
+    return any(m > built_mtime for _c, _k, _b, m in raw)
 
 
 def index_stale(home):
@@ -379,6 +469,14 @@ def _chunks(home, config, root=None):
                                              overlap=overlap)):
             out["%s:%s#%d" % (collection, rel, i)] = (collection, path,
                                                        text)
+    for collection, key, body, _mtime in _raw_entries(home):
+        # An entry is its own chunk when it fits, which is the usual
+        # case (median 881 chars against a 2000-char window); a long
+        # one still splits rather than being truncated.
+        for i, text in enumerate(_chunk_text(body, size=size,
+                                             overlap=overlap)):
+            out["%s:%s#%d" % (collection, key, i)] = (collection,
+                                                      Path(key), text)
     return out
 
 

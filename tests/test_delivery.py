@@ -3,6 +3,11 @@ import unittest
 
 from cousin_lib import delivery
 from cousin_lib.delivery import DeliveryError, Item
+import os
+import pathlib
+import tempfile
+from datetime import datetime, timezone
+from cousin_lib.server.injection import compose_delivery
 
 
 class TestThreadIds(unittest.TestCase):
@@ -47,6 +52,60 @@ class TestItem(unittest.TestCase):
         self.assertEqual((delivery.DELIVERED, delivery.QUEUED,
                           delivery.FAILED),
                          ("delivered", "queued", "failed"))
+
+
+class TestTmuxRender(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = pathlib.Path(tmp.name)
+        (self.home / "data").mkdir()
+        self.marker = self.home / "data" / ".last-user-msg"
+        self.now = datetime(2026, 8, 6, 5, 30, tzinfo=timezone.utc)
+        self.backend = delivery.TmuxBackend()
+
+    def test_chat_is_byte_identical_to_compose_delivery(self):
+        self.marker.touch()
+        ago = self.now.timestamp() - 12 * 60
+        os.utime(self.marker, (ago, ago))
+        item = Item(thread_id="operator:Sam", source="chat", sender="Sam",
+                    body="two\nlines  here", attachments=("/tmp/a.png",))
+        expected = compose_delivery("Sam", "two\nlines  here",
+                                    marker_path=self.marker,
+                                    attachments=("/tmp/a.png",), now=self.now)
+        self.assertEqual(self.backend.render(self.home, item, now=self.now),
+                         expected)
+
+    def test_chat_context_rides_as_the_old_recall_suffix_did(self):
+        item = Item(thread_id="operator:Sam", source="chat", sender="Sam",
+                    body="where is the plan", context="[fw-recall] plan.md")
+        expected = compose_delivery(
+            "Sam", "where is the plan" + " " + "[fw-recall] plan.md",
+            marker_path=self.marker, now=self.now)
+        self.assertEqual(self.backend.render(self.home, item, now=self.now),
+                         expected)
+
+    def test_a_chat_hook_line_is_composed_like_chat(self):
+        item = Item(thread_id="system", source="hook", sender="fw-hook",
+                    body="rotated")
+        expected = compose_delivery("fw-hook", "rotated",
+                                    marker_path=self.marker, now=self.now)
+        self.assertEqual(self.backend.render(self.home, item, now=self.now),
+                         expected)
+
+    def test_a_schedule_gets_its_prefix(self):
+        item = Item(thread_id="schedule", source="schedule", body="check CI")
+        self.assertEqual(self.backend.render(self.home, item),
+                         "[cousin-schedule] check CI")
+
+    def test_every_other_source_is_typed_exactly_as_given(self):
+        for source, thread in (("reaction", "operator:Sam"),
+                               ("loop", "loop:digest"),
+                               ("meeting", "meeting:7"),
+                               ("flip", "system"), ("boot", "system")):
+            body = "[x] line one\nline two"
+            item = Item(thread_id=thread, source=source, body=body)
+            self.assertEqual(self.backend.render(self.home, item), body)
 
 
 if __name__ == "__main__":

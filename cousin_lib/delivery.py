@@ -16,6 +16,7 @@ whether a cousin received something it says `queued` or `failed`,
 never `delivered`: unknown is a result, fine is a claim.
 """
 from dataclasses import dataclass
+from pathlib import Path
 
 THREAD_KINDS = ("operator", "person", "peer", "meeting", "loop",
                 "schedule", "system")
@@ -67,3 +68,23 @@ class Item:
             raise DeliveryError("unknown source %r (one of %s)"
                                 % (self.source, ", ".join(SOURCES)))
         object.__setattr__(self, "attachments", tuple(self.attachments))
+
+
+class TmuxBackend:
+    """Types an item into the cousin's tmux session as the line that
+    producer typed before this module existed. Rendering is pure;
+    `send` owns the injector."""
+
+    def render(self, home, item, *, now=None):
+        if item.source in ("chat", "hook"):
+            from cousin_lib.server.injection import compose_delivery
+            message = item.body
+            if item.context:
+                message = message + " " + item.context
+            return compose_delivery(
+                item.sender, message,
+                marker_path=Path(home) / "data" / ".last-user-msg",
+                attachments=item.attachments, now=now)
+        if item.source == "schedule":
+            return "[cousin-schedule] %s" % item.body
+        return item.body

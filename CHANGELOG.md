@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.7.0 - 2026-09-21
+
+### Added
+- Memory search indexes the raw store (`memory/raw/*.jsonl` and its monthly
+  archives), one unit per entry, as the `raw` collection. It holds what
+  `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs
+  ledger and framework events write, and nothing indexed it: `*.md` only. An
+  entry reached recall solely through `distill`, which keeps one truncated
+  line per topic and caps each file at 40 lines. Measured on a real cousin:
+  904 entries over 789 topics survived as 139 lines, so 82% of topics could
+  not be found
+
+### Fixed
+- The same entry is indexed once however many files hold it. `raw_fold` keeps
+  a month in both `<YYYY-MM>-digest.jsonl` and `archive/<YYYY-MM>.jsonl.gz`,
+  and the twins carry the same topic and content under different metadata, so
+  one memory returned as two hits (344 duplicates on the benchmark corpus)
+
 ## 1.6.2 - 2026-09-21
 
 ### Fixed

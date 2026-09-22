@@ -40,6 +40,8 @@ reads nothing teaches its caller that memory is empty, which is worse
 than an error.
 """
 import fcntl
+import gzip
+import array
 import hashlib
 import json
 import math
@@ -99,7 +101,32 @@ def _fts_path(home):
 
 
 def _index_path(home):
+    """The vector store: SQLite, one row per chunk, the vector a
+    float32 blob.
+
+    It was a single JSON object, read and parsed in full on every
+    search. Measured 2026-09-21 on a real cousin: 31.6 MB and 1283 ms
+    per query, against the 938 ms embedding call the index exists to
+    serve, and growing with the memory. Same data, same access pattern
+    (every vector is scored), but unpacking binary beats parsing text
+    by an order of magnitude, and a row can be written without
+    rewriting the file.
+    """
+    return home / "memory" / "vectors.db"
+
+
+def _legacy_index_path(home):
     return home / "memory" / "embeddings.json"
+
+
+def _pack(vector):
+    return array.array("f", vector).tobytes()
+
+
+def _unpack(blob):
+    out = array.array("f")
+    out.frombytes(blob)
+    return out.tolist()
 
 
 # ---------------------------------------------------------------- sources
@@ -141,6 +168,84 @@ def _sources(home, root=None):
     return out
 
 
+# The raw store is JSONL, one entry per line, and it is where
+# `cousin-memory decide` and `remember`, the flip's transcript miner,
+# the jobs ledger and framework events all write. It was not indexed
+# at all: `_sources` collects `*.md`, so an entry reached recall only
+# through `distill`, which keeps one truncated line per topic and caps
+# each file. Measured 2026-09-21 on a real cousin: 904 entries over
+# 789 topics survived as 139 lines, so 82% of topics could not be
+# found. Entries are indexed one per entry, not one per day file: a
+# day file mixes unrelated topics, which is a bad unit for BM25 and a
+# worse one for an embedding.
+_RAW_FIELDS = ("topic", "content", "cite", "source", "truth_level")
+
+
+def _raw_files(home):
+    """The raw store's files, hot days first then the monthly
+    archives raw_fold leaves behind."""
+    base = Path(home) / "memory" / "raw"
+    if not base.is_dir():
+        return []
+    return (sorted(base.glob("*.jsonl"))
+            + sorted((base / "archive").glob("*.jsonl.gz")))
+
+
+def _raw_entries(home):
+    """(collection, key, body, mtime) per raw entry.
+
+    `key` is the real file path with the entry's line appended, so
+    every entry is a distinct hit (hits merge by path) while still
+    naming the file it lives in. A line that is not JSON is skipped,
+    never fatal: one bad write must not cost the entries around it.
+
+    The same entry is indexed once however many files hold it:
+    raw_fold keeps a month in both `<YYYY-MM>-digest.jsonl` and
+    `archive/<YYYY-MM>.jsonl.gz` (measured on a real cousin: 149 of
+    149 entries identical), and indexing both returns one memory as
+    two hits. Files are walked hot-first, so the copy that survives is
+    the readable one.
+    """
+    out = []
+    seen = set()
+    for path in _raw_files(home):
+        try:
+            mtime = path.stat().st_mtime
+            opener = gzip.open if path.suffix == ".gz" else open
+            with opener(path, "rt", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        for number, line in enumerate(lines, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict):
+                continue
+            body = "\n".join(
+                str(entry[f]) for f in _RAW_FIELDS if entry.get(f))
+            if not body:
+                continue
+            when = str(entry.get("timestamp", ""))[:19]
+            text = "%s\n%s" % (when, body) if when else body
+            # Dedupe on the memory, not on its metadata: a digest twin
+            # carries the same topic and content under a different
+            # source, id, entry count and first/last timestamps.
+            same = "%s\n%s" % (entry.get("topic", ""),
+                               entry.get("content", ""))
+            fingerprint = hashlib.sha256(
+                same.encode("utf-8", "replace")).digest()
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            out.append(("raw", "%s#%d" % (path, number), text, mtime))
+    return out
+
+
 def _read(path):
     try:
         return path.read_text(errors="replace")
@@ -176,6 +281,14 @@ def build_index(home=None):
             )
             latest = max(latest, path.stat().st_mtime)
             count += 1
+        for collection, key, body, mtime in _raw_entries(home):
+            conn.execute(
+                "INSERT INTO memory_fts (collection, path, body)"
+                " VALUES (?, ?, ?)",
+                (collection, key, body),
+            )
+            latest = max(latest, mtime)
+            count += 1
         conn.execute("DROP TABLE IF EXISTS index_meta")
         conn.execute("CREATE TABLE index_meta (built_at REAL,"
                      " source_mtime REAL, files INTEGER)")
@@ -206,9 +319,12 @@ def _index_stale(home):
         return True
     built_mtime, built_files = row
     sources = _sources(home)
-    if len(sources) != built_files:
+    raw = _raw_entries(home)
+    if len(sources) + len(raw) != built_files:
         return True
-    return any(p.stat().st_mtime > built_mtime for _, p, _r in sources)
+    if any(p.stat().st_mtime > built_mtime for _, p, _r in sources):
+        return True
+    return any(m > built_mtime for _c, _k, _b, m in raw)
 
 
 def index_stale(home):
@@ -379,32 +495,120 @@ def _chunks(home, config, root=None):
                                              overlap=overlap)):
             out["%s:%s#%d" % (collection, rel, i)] = (collection, path,
                                                        text)
+    for collection, key, body, _mtime in _raw_entries(home):
+        # An entry is its own chunk when it fits, which is the usual
+        # case (median 881 chars against a 2000-char window); a long
+        # one still splits rather than being truncated.
+        for i, text in enumerate(_chunk_text(body, size=size,
+                                             overlap=overlap)):
+            out["%s:%s#%d" % (collection, key, i)] = (collection,
+                                                      Path(key), text)
     return out
 
 
-def _load_index(home):
+def _migrate_legacy_index(home):
+    """Import a JSON index written before the store was SQLite, then
+    remove it, so the migration happens once and nothing reads two
+    stores. A JSON file that will not parse is left where it is: it is
+    evidence, and the caller rebuilds from the sources anyway."""
+    legacy = _legacy_index_path(home)
     try:
-        data = json.loads(_index_path(home).read_text())
-    except (OSError, ValueError):
+        data = json.loads(legacy.read_text())
+    except OSError:
         return None
-    return data if isinstance(data, dict) else None
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    _write_index_atomic(home, data)
+    legacy.unlink(missing_ok=True)
+    return _load_index(home)
+
+
+def _load_index(home):
+    """Every stored chunk as {key: {mtime, text_hash, vector}}, or None
+    when there is no readable store. A vector that was never embedded
+    (the embed failed and there was no prior one) comes back without a
+    `vector` key, which is how the next pass tells known-but-unembedded
+    from new."""
+    path = _index_path(home)
+    if not path.exists():
+        return _migrate_legacy_index(home)
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            rows = conn.execute(
+                "SELECT key, mtime, text_hash, vector FROM vectors"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    out = {}
+    for key, mtime, text_hash, blob in rows:
+        entry = {"mtime": mtime, "text_hash": text_hash}
+        if blob:
+            entry["vector"] = _unpack(blob)
+        out[key] = entry
+    return out
+
+
+_VECTORS_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS vectors ("
+    " key TEXT PRIMARY KEY, mtime REAL, text_hash TEXT, vector BLOB)"
+)
 
 
 def _write_index_atomic(home, index):
-    """Write then rename: a reader never sees a half-written index and
-    a crash mid-write leaves the previous one intact."""
+    """Replace the store's contents with `index`, in one transaction:
+    a reader never sees a half-written index and a crash mid-write
+    leaves the previous contents intact. Keys absent from `index` are
+    gone, which is what the JSON write did by rewriting the file."""
     path = _index_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(index))
-    os.replace(tmp, path)
+    try:
+        conn = wal(sqlite3.connect(path))
+        conn.execute(_VECTORS_SCHEMA)
+    except sqlite3.DatabaseError:
+        # Not a database, or one too damaged to open: the index is a
+        # cache of what the sources say, so replace it rather than
+        # refuse. Nothing is lost that a refresh cannot recompute.
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001 - never fail on the way out
+            pass
+        path.unlink(missing_ok=True)
+        conn = wal(sqlite3.connect(path))
+    try:
+        with conn:
+            conn.execute(_VECTORS_SCHEMA)
+            conn.execute("DELETE FROM vectors WHERE key NOT IN (%s)"
+                         % ",".join("?" * len(index)) if index
+                         else "DELETE FROM vectors", tuple(index))
+            conn.executemany(
+                "INSERT OR REPLACE INTO vectors"
+                " (key, mtime, text_hash, vector) VALUES (?, ?, ?, ?)",
+                [(key, entry.get("mtime"), entry.get("text_hash"),
+                  _pack(entry["vector"]) if entry.get("vector") else None)
+                 for key, entry in index.items()])
+    finally:
+        conn.close()
 
 
 def _lock_path(home):
     return Path(home) / "memory" / ".embeddings.lock"
 
 
-def ensure_index(home, config, *, force=False, root=None, wait=True):
+# A foreground pass (a search) embeds at most this many chunks and
+# leaves the rest to the loops daemon. A search must never pay for a
+# whole backfill: with the raw store indexed a cousin has thousands of
+# chunks, and on 2026-09-21 a peer's first query after the change sat
+# over three minutes with the embedding service pinned.
+FOREGROUND_BUDGET = 24
+
+
+def ensure_index(home, config, *, force=False, root=None, wait=True,
+                 budget=None):
     """Bring <home>/memory/embeddings.json up to date, embedding only
     what changed, and report what the pass did:
 
@@ -414,7 +618,15 @@ def ensure_index(home, config, *, force=False, root=None, wait=True):
        "failed": chunks the service could not embed,
        "stale_reason": why any work was needed, or None,
        "busy": True when another pass held the index and this one
-               did nothing (only with wait=False)}
+               did nothing (only with wait=False),
+       "incomplete": True when the pass stopped at its budget with
+               work left, so a caller knows the index is still behind,
+       "ranked": current chunks the store holds a vector for whose
+               stored text_hash still matches, i.e. what the semantic
+               leg ranks on current text; a carried-over or failed
+               chunk keeps its old vector and does NOT count
+               (None when busy),
+       "total": current chunks in the corpus (None when busy)}
 
     One pass per home at a time, under an flock on
     memory/.embeddings.lock: concurrent searches each re-embedding the
@@ -439,14 +651,16 @@ def ensure_index(home, config, *, force=False, root=None, wait=True):
                         | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             return {"embedded": 0, "reused": 0, "dropped": 0,
-                    "failed": 0, "stale_reason": None, "busy": True}
+                    "failed": 0, "stale_reason": None, "busy": True,
+                    "incomplete": True, "ranked": None, "total": None}
         try:
-            return _refresh_index(home, config, force=force, root=root)
+            return _refresh_index(home, config, force=force, root=root,
+                                  budget=budget)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def _refresh_index(home, config, *, force, root):
+def _refresh_index(home, config, *, force, root, budget=None):
     chunks = _chunks(home, config, root)
     old = None if force else _load_index(home)
     missing = old is None
@@ -463,7 +677,15 @@ def _refresh_index(home, config, *, force, root):
     index = {}
     embedded = reused = failed = 0
     fresh = 0
+    incomplete = False
     for key, (_collection, path, text) in chunks.items():
+        if budget is not None and embedded >= budget:
+            # Out of budget: carry every key not reached, so a bounded
+            # pass adds what it paid for and never drops the rest.
+            incomplete = True
+            for rest, entry in old.items():
+                index.setdefault(rest, entry)
+            break
         digest = _text_hash(text)
         try:
             mtime = path.stat().st_mtime
@@ -494,13 +716,25 @@ def _refresh_index(home, config, *, force, root):
             partial = dict(old)
             partial.update(index)
             _write_index_atomic(home, partial)
-    dropped = len(set(old) - set(chunks))
+    dropped = 0 if incomplete else len(set(old) - set(chunks))
     if reason is None and (fresh or dropped):
         reason = "%d new or changed chunk(s), %d gone" % (fresh, dropped)
     if missing or fresh or dropped or index != old:
         _write_index_atomic(home, index)
+    # What the semantic leg can rank against ON CURRENT TEXT. A vector
+    # alone is not enough: the budget break carries old entries over
+    # untouched, and a failed embed keeps the prior vector, so a chunk
+    # whose text changed still holds a vector for text that is gone.
+    # Counting those would report 30 of 30 while 6 were stale. Same
+    # predicate `reused` uses above.
+    ranked = sum(1 for key, (_c, _p, text) in chunks.items()
+                 if (index.get(key) or {}).get("vector")
+                 and (index.get(key) or {}).get("text_hash")
+                 == _text_hash(text))
     return {"embedded": embedded, "reused": reused, "dropped": dropped,
-            "failed": failed, "stale_reason": reason, "busy": False}
+            "failed": failed, "stale_reason": reason, "busy": False,
+            "incomplete": incomplete, "ranked": ranked,
+            "total": len(chunks)}
 
 
 def _first_line(text):
@@ -520,7 +754,8 @@ def _semantic_search(query, home, top, config, collection=None):
     (hits, failed) where failed counts chunks the pass could not
     embed."""
     query_vector = _embed(query, config)
-    report = ensure_index(home, config, wait=False)
+    report = ensure_index(home, config, wait=False,
+                          budget=FOREGROUND_BUDGET)
     index = _load_index(home) or {}
     chunks = _chunks(home, config)
     best = {}
@@ -582,6 +817,39 @@ def _fuse(keyword_hits, semantic_hits, top, bonuses=None):
     return out
 
 
+# The collections a cousin writes ON PURPOSE as durable topic files,
+# best first. Raw entries are short and dense, so BM25's length
+# normalisation ranks them above a long curated file that mentions the
+# term once: measured 2026-09-21, indexing the raw store took curated
+# files from 13 of 45 top-three slots to 2. One slot is reserved so the
+# summary a cousin wrote cannot be crowded out of its own search.
+_CURATED = ("memory", "harness")
+
+
+def _curated_floor(ranked, top, query, home):
+    """Keep one curated hit in the result when the ranking would drop
+    every one of them.
+
+    The curated hit is FETCHED, not hoped for: widening the pool does
+    not reach it, because a flood of short entries can fill any pool
+    (measured: a long topic file that names the term once ranked below
+    ten entries that are almost entirely the term). One extra keyword
+    query per collection, and only when the floor actually applies.
+
+    The reserved slot is the LAST, so the best match is never
+    displaced, and nothing is reserved when there is only one slot or
+    when no curated file matches at all.
+    """
+    if top < 2 or any(h["collection"] in _CURATED for h in ranked):
+        return ranked
+    have = {h["path"] for h in ranked}
+    for collection in _CURATED:
+        for hit in _keyword_search(query, home, 1, collection):
+            if hit["path"] not in have:
+                return ranked[:top - 1] + [hit]
+    return ranked
+
+
 def _bonuses(home, *legs):
     """{path: usage bonus} for every path any leg surfaced. Fail-open:
     a broken reinforcement store means no bonus, never no search."""
@@ -636,12 +904,29 @@ def search(query, *, top=5, home=None, collection=None):
             if report.get("busy"):
                 notice = ("another search is refreshing the index; ranked"
                           " by meaning against the index as it stands")
+            elif report.get("incomplete"):
+                # A bounded foreground pass leaves the rest to the
+                # daemon. Without this the hits come back looking like
+                # a complete result over the whole corpus.
+                notice = ("the index is still catching up; %s of %s"
+                          " chunk(s) ranked by meaning on current text,"
+                          " the rest keyword-only or ranked on text that"
+                          " has since changed, until the refresh"
+                          " finishes"
+                          % (report.get("ranked"), report.get("total")))
+                if failed:
+                    notice += (" (embedding service also failed for %d"
+                               " chunk(s))" % failed)
             elif failed:
                 notice = ("embedding service failed for %d chunk(s);"
                           " prior vectors kept where available, new"
                           " text unranked by meaning" % failed)
+    # An explicit collection filter is never overridden: the caller
+    # asked for one collection and gets one.
     hits = _fuse(keyword_hits, semantic_hits, top,
                  _bonuses(home, keyword_hits, semantic_hits))
+    if collection is None:
+        hits = _curated_floor(hits, top, query, home)
     _record(home, query, hits)
     return hits, notice
 

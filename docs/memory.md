@@ -48,8 +48,9 @@ Everything below is relative to the cousin home.
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
 | Corrections | `data/corrections.jsonl` | the chat server, from your messages | boot packet (calibration layer) |
+| Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search** |
 | Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself | search, explorer |
-| Search indexes | `memory/fts_index.db`, `memory/embeddings.json` | search, `reindex` | search |
+| Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
 | Trash | `memory/.trash/` | removals from the console explorer | `cousin-memory trash restore` |
 | Legacy | `legacy/` | a migration (the old home, archived whole) | the explorer only |
@@ -329,9 +330,22 @@ cousin-memory search "descaling" --json
 cousin-memory reindex
 ```
 
-Search covers three collections: `memory` (`memory/**/*.md`), `notes`
-(`notes/**/*.md`) and `harness` (the harness auto-memory directory,
-when configured). `--collection` limits it to one. `--json` prints the
+Search covers four collections: `memory` (`memory/**/*.md`), `notes`
+(`notes/**/*.md`), `raw` (the raw store, one unit per entry: every
+`memory/raw/*.jsonl` line and every entry in the monthly archives) and
+`harness` (the harness auto-memory directory, when configured).
+
+A raw entry is indexed on its own rather than as part of its day file,
+because a day mixes unrelated topics, which ranks badly and embeds
+worse. A `raw` hit's `path` is the file with the entry's line number
+appended, `memory/raw/2026-09-21.jsonl#43`, so two entries in one file
+are two hits. The same memory is indexed once however many files hold
+it: `raw_fold` keeps a month in both `<YYYY-MM>-digest.jsonl` and
+`archive/<YYYY-MM>.jsonl.gz`, and the twins differ only in metadata.
+
+This is what makes `distill` a convenience rather than the only door.
+Before it, an entry reached recall solely as one truncated line per
+topic, capped at 40 lines per distilled file. `--collection` limits it to one. `--json` prints the
 hits as a list with `path`, `collection`, `score`, `similarity`,
 `snippet` and `chunk`; any warning goes to stderr so the JSON stays
 clean. The trash is never searched.
@@ -370,7 +384,7 @@ is plenty with a GPU. Files are embedded in chunks of `chunk_chars`
 (default 2000) overlapping by `chunk_overlap` (default 200), and a hit
 says which chunk matched.
 
-The vectors live in `memory/embeddings.json`. Each search embeds only
+The vectors live in `memory/vectors.db`. Each search embeds only
 new or changed chunks and drops deleted files, so the first search
 after a lot of writing is slow and the rest are quick. `reindex`
 rebuilds the keyword index and, with a service configured, re-embeds

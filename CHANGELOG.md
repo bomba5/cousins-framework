@@ -3,6 +3,74 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.9.0 - 2026-09-22
+
+### Fixed
+- A bounded foreground embedding pass is no longer silent. `ensure_index`
+  reported `incomplete`, but `search()` branched on `busy` and `failed` only,
+  so the flag was produced and never displayed: a semantic leg that had ranked
+  against 24 of 416 chunks returned `notice=None` and its hits came back
+  looking like a complete result over the whole corpus. Measured on a cold
+  home 2026-09-22, 5.8% of the corpus, by the peer that hit it. Hits from 6%
+  of a corpus presented as complete are how a confident wrong file gets cited
+
+### Added
+- `ensure_index`'s report carries `ranked` (current chunks whose stored vector
+  still matches their text) and `total` (current chunks in the corpus), so the
+  notice can say how much of the corpus the semantic leg actually saw instead
+  of only that it saw some. A carried-over or failed chunk keeps its old
+  vector and is NOT counted: it is ranked against text that no longer exists,
+  which is a worse failure than being unranked, not a better one. Both are
+  None on the busy path, where the pass did no work and the coverage is
+  unknown
+
+## 1.8.0 - 2026-09-21
+
+### Fixed
+- A search no longer pays for a whole backfill. `search()` asks for a bounded
+  embedding pass (24 chunks) and the loops daemon finishes the rest;
+  `ensure_index(wait=False)` meant "do not queue behind another pass", not "do
+  not do the work", so with the lock free a single query ran every embedding
+  itself. Harmless while a cousin had a few hundred chunks; indexing the raw
+  store multiplied that by about ten and a cousin's first query after the
+  change sat over three minutes with the embedding service pinned
+
+### Changed
+- The vector index is SQLite (`memory/vectors.db`, one row per chunk, the
+  vector a float32 blob) instead of one JSON object read and parsed in full on
+  every search. Measured on a real cousin: loading the index went from 1283 ms
+  to 69 ms and the file from 16.4 MB to 4.3 MB, against the 938 ms embedding
+  call the index exists to serve. An existing `embeddings.json` is imported
+  once on first read and removed
+- A vector store too damaged to open is replaced rather than fatal: the index
+  is a cache of what the sources say
+
+## 1.7.0 - 2026-09-21
+
+### Added
+- Memory search indexes the raw store (`memory/raw/*.jsonl` and its monthly
+  archives), one unit per entry, as the `raw` collection. It holds what
+  `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs
+  ledger and framework events write, and nothing indexed it: `*.md` only. An
+  entry reached recall solely through `distill`, which keeps one truncated
+  line per topic and caps each file at 40 lines. Measured on a real cousin:
+  904 entries over 789 topics survived as 139 lines, so 82% of topics could
+  not be found
+
+### Changed
+- One result slot is reserved for a curated topic file (`memory/**/*.md`, or
+  the harness auto-memory) when the ranking would drop every one of them.
+  Indexing the raw store took curated files from 13 of 45 top-three slots to
+  2 on a real corpus, because BM25's length normalisation puts a short entry
+  above a long file that names the term once. The reserved slot is the last,
+  so the best match is never displaced; an explicit `--collection` is never
+  overridden
+
+### Fixed
+- The same entry is indexed once however many files hold it. `raw_fold` keeps
+  a month in both `<YYYY-MM>-digest.jsonl` and `archive/<YYYY-MM>.jsonl.gz`,
+  and the twins carry the same topic and content under different metadata, so
+  one memory returned as two hits (344 duplicates on the benchmark corpus)
 ## 1.6.3 - 2026-09-21
 
 ### Changed

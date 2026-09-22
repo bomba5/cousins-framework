@@ -25,6 +25,10 @@ from cousin_lib.trace import traced_cli
 CORE_FILES = ("MEMORY.md", "STATUS.md", "CLAUDE.md")
 # Index artifacts memory search rebuilds on demand; never memory.
 MEMORY_SKIP = ("fts_index.db", "fts_index.db-wal", "fts_index.db-shm",
+               "vectors.db",
+               # A home that has not migrated yet still has the
+               # JSON index; an index of either shape is a rebuildable
+               # cache and never belongs in a snapshot.
                "embeddings.json")
 
 

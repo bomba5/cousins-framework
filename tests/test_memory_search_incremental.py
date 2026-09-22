@@ -11,6 +11,7 @@ fake embedder is real HTTP on loopback; only the vectors are scripted.
 import json
 import os
 import pathlib
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
@@ -36,7 +37,9 @@ def _cfg(url):
 
 
 def _index(home):
-    return json.loads((home / "memory" / "embeddings.json").read_text())
+    """The stored index, whatever the storage is. It became SQLite on
+    2026-09-21; every behavioural assertion below is unchanged."""
+    return memory_search._load_index(home) or {}
 
 
 class TestChunkText(unittest.TestCase):
@@ -136,7 +139,7 @@ class TestEnsureIndex(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
             home = _home_with(root, {"memory/a.md": "alpha"})
             memory_search.ensure_index(home, _cfg(url))
-            index_path = home / "memory" / "embeddings.json"
+            index_path = home / "memory" / "vectors.db"
             before = index_path.stat().st_mtime_ns
             rep = memory_search.ensure_index(home, _cfg(url))
             self.assertIsNone(rep["stale_reason"])
@@ -157,7 +160,7 @@ class TestEnsureIndex(unittest.TestCase):
     def test_empty_index_over_sources_is_stale(self):
         with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
             home = _home_with(root, {"memory/a.md": "alpha"})
-            (home / "memory" / "embeddings.json").write_text("{}")
+            memory_search._write_index_atomic(home, {})
             rep = memory_search.ensure_index(home, _cfg(url))
             self.assertIn("empty index", rep["stale_reason"])
             self.assertIn("memory:a.md#0", _index(home))
@@ -165,7 +168,7 @@ class TestEnsureIndex(unittest.TestCase):
     def test_unreadable_index_is_rebuilt(self):
         with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
             home = _home_with(root, {"memory/a.md": "alpha"})
-            (home / "memory" / "embeddings.json").write_text("{ broken")
+            (home / "memory" / "vectors.db").write_text("not a database")
             rep = memory_search.ensure_index(home, _cfg(url))
             self.assertEqual(rep["embedded"], 1)
             self.assertIn("memory:a.md#0", _index(home))
@@ -203,24 +206,59 @@ class TestEnsureIndex(unittest.TestCase):
             self.assertEqual(rep["failed"], 1)
             self.assertNotIn("memory:a.md#0", _index(home))
 
-    def test_index_write_is_atomic(self):
-        seen = []
-        real_replace = os.replace
-
-        def spy(src, dst):
-            seen.append((str(src), str(dst)))
-            return real_replace(src, dst)
-
+    def test_a_write_that_dies_leaves_the_previous_index_intact(self):
+        """The store changed from a JSON file written then renamed to
+        SQLite written in a transaction, so the mechanism is different
+        and the property is the same: a reader never sees a partial
+        index, and a write that dies half way leaves what was there."""
         with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
             home = _home_with(root, {"memory/a.md": "alpha"})
-            with mock.patch.object(memory_search.os, "replace",
-                                            spy):
-                memory_search.ensure_index(home, _cfg(url))
-            self.assertEqual(len(seen), 1)
-            src, dst = seen[0]
-            self.assertTrue(src.endswith(".tmp"))
-            self.assertTrue(dst.endswith("embeddings.json"))
-            self.assertFalse(pathlib.Path(src).exists())
+            memory_search.ensure_index(home, _cfg(url))
+            before = _index(home)
+            self.assertIn("memory:a.md#0", before)
+
+            real = memory_search._pack
+            calls = []
+
+            def die(vector):
+                calls.append(vector)
+                if len(calls) > 1:
+                    raise RuntimeError("the write dies half way")
+                return real(vector)
+
+            with mock.patch.object(memory_search, "_pack", die):
+                with self.assertRaises(RuntimeError):
+                    memory_search._write_index_atomic(home, {
+                        "memory:a.md#0": before["memory:a.md#0"],
+                        "memory:b.md#0": {"mtime": 1.0, "text_hash": "h",
+                                          "vector": [1.0, 2.0]},
+                    })
+            self.assertEqual(_index(home).keys(), before.keys(),
+                             "a dead write changes nothing")
+
+    def test_a_reader_never_sees_a_partial_index(self):
+        """_pack runs inside the write's transaction, after the delete
+        that would empty a non-transactional store, so it is where a
+        concurrent reader would catch a partial index. It must see the
+        previous contents whole."""
+        with tempfile.TemporaryDirectory() as root, fake_embedder() as url:
+            home = _home_with(root, {"memory/a.md": "alpha"})
+            memory_search.ensure_index(home, _cfg(url))
+            seen = []
+            real = memory_search._pack
+
+            def observe(vector):
+                seen.append(memory_search._load_index(home) or {})
+                return real(vector)
+
+            with mock.patch.object(memory_search, "_pack", observe):
+                memory_search._write_index_atomic(home, {
+                    "memory:z.md#0": {"mtime": 1.0, "text_hash": "h",
+                                      "vector": [3.0]}})
+            self.assertTrue(seen)
+            self.assertIn("memory:a.md#0", seen[0],
+                          "mid-transaction, a reader still sees the old one")
+            self.assertEqual(set(_index(home)), {"memory:z.md#0"})
 
 
 class TestSingleFlight(unittest.TestCase):
@@ -245,7 +283,7 @@ class TestSingleFlight(unittest.TestCase):
             rep = memory_search.ensure_index(home, _cfg(url), wait=False)
             self.assertTrue(rep["busy"])
             self.assertEqual(calls, [])
-            self.assertFalse((home / "memory" / "embeddings.json").exists())
+            self.assertFalse((home / "memory" / "vectors.db").exists())
 
     def test_free_lock_runs_the_pass(self):
         with tempfile.TemporaryDirectory() as root, fake_embedder() as url:

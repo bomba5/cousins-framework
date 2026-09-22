@@ -620,7 +620,10 @@ def ensure_index(home, config, *, force=False, root=None, wait=True,
        "busy": True when another pass held the index and this one
                did nothing (only with wait=False),
        "incomplete": True when the pass stopped at its budget with
-               work left, so a caller knows the index is still behind}
+               work left, so a caller knows the index is still behind,
+       "ranked": current chunks the store holds a vector for, i.e. what
+               the semantic leg can rank against (None when busy),
+       "total": current chunks in the corpus (None when busy)}
 
     One pass per home at a time, under an flock on
     memory/.embeddings.lock: concurrent searches each re-embedding the
@@ -646,7 +649,7 @@ def ensure_index(home, config, *, force=False, root=None, wait=True,
         except BlockingIOError:
             return {"embedded": 0, "reused": 0, "dropped": 0,
                     "failed": 0, "stale_reason": None, "busy": True,
-                    "incomplete": True}
+                    "incomplete": True, "ranked": None, "total": None}
         try:
             return _refresh_index(home, config, force=force, root=root,
                                   budget=budget)
@@ -715,9 +718,15 @@ def _refresh_index(home, config, *, force, root, budget=None):
         reason = "%d new or changed chunk(s), %d gone" % (fresh, dropped)
     if missing or fresh or dropped or index != old:
         _write_index_atomic(home, index)
+    # What the semantic leg can actually rank against: a current chunk
+    # counts only where the store holds a vector for it, the entries
+    # carried over by a bounded pass included.
+    ranked = sum(1 for key in chunks
+                 if (index.get(key) or {}).get("vector"))
     return {"embedded": embedded, "reused": reused, "dropped": dropped,
             "failed": failed, "stale_reason": reason, "busy": False,
-            "incomplete": incomplete}
+            "incomplete": incomplete, "ranked": ranked,
+            "total": len(chunks)}
 
 
 def _first_line(text):
@@ -887,6 +896,17 @@ def search(query, *, top=5, home=None, collection=None):
             if report.get("busy"):
                 notice = ("another search is refreshing the index; ranked"
                           " by meaning against the index as it stands")
+            elif report.get("incomplete"):
+                # A bounded foreground pass leaves the rest to the
+                # daemon. Without this the hits come back looking like
+                # a complete result over the whole corpus.
+                notice = ("the index is still catching up; ranked by"
+                          " meaning against %s of %s chunk(s), the rest"
+                          " keyword-only until the refresh finishes"
+                          % (report.get("ranked"), report.get("total")))
+                if failed:
+                    notice += (" (embedding service also failed for %d"
+                               " chunk(s))" % failed)
             elif failed:
                 notice = ("embedding service failed for %d chunk(s);"
                           " prior vectors kept where available, new"

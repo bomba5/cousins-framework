@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.9.0 - 2026-09-22
+
+### Fixed
+- A bounded foreground embedding pass is no longer silent. `ensure_index`
+  reported `incomplete`, but `search()` branched on `busy` and `failed` only,
+  so the flag was produced and never displayed: a semantic leg that had ranked
+  against 24 of 416 chunks returned `notice=None` and its hits came back
+  looking like a complete result over the whole corpus. Measured on a cold
+  home 2026-09-22, 5.8% of the corpus, by the peer that hit it. Hits from 6%
+  of a corpus presented as complete are how a confident wrong file gets cited
+
+### Added
+- `ensure_index`'s report carries `ranked` (current chunks the store holds a
+  vector for) and `total` (current chunks in the corpus), so the notice can
+  say how much of the corpus the semantic leg actually saw instead of only
+  that it saw some. Both are None on the busy path, where the pass did no
+  work and the coverage is unknown
+
 ## 1.8.0 - 2026-09-21
 
 ### Fixed

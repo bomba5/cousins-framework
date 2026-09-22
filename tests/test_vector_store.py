@@ -8,10 +8,12 @@ module; the tests below are about the properties that must survive the
 change of storage.
 """
 import json
+import os
 import pathlib
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 from cousin_lib import memory_search
 from tests._hermetic import HermeticCase
@@ -146,3 +148,68 @@ class TestForegroundBudget(VectorStoreCase):
             memory_search.ensure_index(self.home, cfg, wait=False, budget=5)
         self.assertEqual(len(memory_search._load_index(self.home)), 10,
                          "each pass adds its budget, none redoes the last")
+
+
+class TestTheBudgetIsNotSilent(HermeticCase):
+    """A bounded foreground pass must say so in the notice.
+
+    `ensure_index` has always reported `incomplete`, but `search()`
+    read only `busy` and `failed`, so the flag was produced and never
+    displayed. Measured by a peer on a cold home 2026-09-22: the
+    semantic leg ranked against 24 of 416 chunks, 5.8% of the corpus,
+    and the call returned notice=None. Hits from 6% of a corpus that
+    look like a complete result are how a librarian cites a confident
+    wrong file. The tests below assert the flag where it is DISPLAYED;
+    TestForegroundBudget asserts it where it is produced.
+    """
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name) / "live"
+        self.home = self.root / "cousins" / "wren"
+        (self.home / "memory").mkdir(parents=True)
+        (self.root / "config").mkdir(parents=True)
+
+    def _sources(self, n):
+        for i in range(n):
+            (self.home / "memory" / ("f%02d.md" % i)).write_text(
+                "# file %d\n\nbody %d about zebracorn\n" % (i, i))
+
+    def _search(self, url, budget):
+        (self.root / "config" / "embedding.toml").write_text(
+            'url = "%s"\nmodel = "m"\ntimeout_s = 5\n' % url)
+        os.environ["FRAMEWORK_ROOT"] = str(self.root)
+        with mock.patch.object(memory_search, "FOREGROUND_BUDGET", budget):
+            return memory_search.search("zebracorn", home=self.home)
+
+    def test_a_partial_semantic_leg_is_announced(self):
+        from tests._fakes import fake_embedder
+        self._sources(20)
+        with fake_embedder() as url:
+            hits, notice = self._search(url, 5)
+        self.assertTrue(hits, "the keyword leg still serves")
+        self.assertIsNotNone(
+            notice, "a semantic leg over part of the corpus must not"
+                    " come back looking complete")
+        self.assertIn("5 of 20", notice,
+                      "the notice quotes the coverage: how much of the"
+                      " corpus was ranked by meaning")
+
+    def test_a_finished_pass_stays_quiet(self):
+        from tests._fakes import fake_embedder
+        self._sources(20)
+        with fake_embedder() as url:
+            hits, notice = self._search(url, 50)
+        self.assertIsNone(
+            notice, "nothing was degraded, so nothing is announced")
+
+    def test_the_report_carries_the_coverage(self):
+        from tests._fakes import fake_embedder
+        self._sources(20)
+        with fake_embedder() as url:
+            report = memory_search.ensure_index(
+                self.home, {"url": url, "model": "m", "timeout_s": 5},
+                wait=False, budget=5)
+        self.assertEqual((report["ranked"], report["total"]), (5, 20))

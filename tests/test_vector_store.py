@@ -184,6 +184,33 @@ class TestTheBudgetIsNotSilent(HermeticCase):
         with mock.patch.object(memory_search, "FOREGROUND_BUDGET", budget):
             return memory_search.search("zebracorn", home=self.home)
 
+    def test_a_changed_corpus_is_not_reported_as_full_coverage(self):
+        """The carry-over case, which a cold index cannot produce.
+
+        At the budget break `_refresh_index` carries every key it did
+        not reach over untouched, vector and all, so a chunk whose text
+        changed still HOLDS a vector - for text that no longer exists.
+        Counting those as ranked reported "30 of 30 ... the rest
+        keyword-only", self-contradictory on its face, and overstated
+        in the dangerous direction: a confident hit on a file whose
+        content moved. Found in review 2026-09-22, measured at 6 stale
+        of 30. The ordinary case is a heartbeat rewriting one big file.
+        """
+        from tests._fakes import fake_embedder
+        self._sources(30)
+        with fake_embedder() as url:
+            self._search(url, 50)          # index the corpus in full
+            for i in range(30):            # then move every chunk
+                (self.home / "memory" / ("f%02d.md" % i)).write_text(
+                    "# file %d\n\nrewritten %d about zebracorn\n" % (i, i))
+            hits, notice = self._search(url, 24)
+        self.assertIsNotNone(notice)
+        self.assertNotIn(
+            "30 of 30", notice,
+            "a carried-over vector is for text that is gone; counting"
+            " it as ranked claims coverage the leg does not have")
+        self.assertIn("24 of 30", notice)
+
     def test_a_partial_semantic_leg_is_announced(self):
         from tests._fakes import fake_embedder
         self._sources(20)

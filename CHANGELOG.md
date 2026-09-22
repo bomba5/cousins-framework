@@ -15,11 +15,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   of a corpus presented as complete are how a confident wrong file gets cited
 
 ### Added
-- `ensure_index`'s report carries `ranked` (current chunks the store holds a
-  vector for) and `total` (current chunks in the corpus), so the notice can
-  say how much of the corpus the semantic leg actually saw instead of only
-  that it saw some. Both are None on the busy path, where the pass did no
-  work and the coverage is unknown
+- `ensure_index`'s report carries `ranked` (current chunks whose stored vector
+  still matches their text) and `total` (current chunks in the corpus), so the
+  notice can say how much of the corpus the semantic leg actually saw instead
+  of only that it saw some. A carried-over or failed chunk keeps its old
+  vector and is NOT counted: it is ranked against text that no longer exists,
+  which is a worse failure than being unranked, not a better one. Both are
+  None on the busy path, where the pass did no work and the coverage is
+  unknown
 
 ## 1.8.0 - 2026-09-21
 

@@ -34,6 +34,15 @@ _OLD_RECALL_ALPHA_OUTPUT = (
     "\n"
 )
 
+# What `cousin-memory decide "  padded topic  " " padded decision " " padded
+# why "` returned before this file existed (commit 8aa4ec4, the
+# pre-refactor `cousin_lib/memory.py`, non---stdin path): no stripping,
+# so the padding survives into the printed line, decisions.jsonl and the
+# raw bridge. Captured the same way as the recall fixture above (the old
+# module run against the same input, stdout and the written files read
+# back).
+_OLD_DECIDE_PADDED_LINE = "Decision logged: [  padded topic  ]  padded decision "
+
 
 class TestDecide(HermeticCase):
     def test_decide_writes_decisions_and_raw_and_returns_the_line(self):
@@ -48,6 +57,15 @@ class TestDecide(HermeticCase):
     def test_decide_refuses_a_missing_part(self):
         with self.assertRaises(ValueError):
             memory.decide(_home(self), "t", "", "why")
+
+    def test_decide_does_not_strip_padding_like_the_old_cli(self):
+        home = _home(self)
+        out = memory.decide(home, "  padded topic  ", " padded decision ", " padded why ")
+        self.assertEqual(out, _OLD_DECIDE_PADDED_LINE)
+        rows = [json.loads(l) for l in (home / "data" / "decisions.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[-1]["topic"], "  padded topic  ")
+        self.assertEqual(rows[-1]["decision"], " padded decision ")
+        self.assertEqual(rows[-1]["reasoning"], " padded why ")
 
     def test_operator_level_needs_a_cite(self):
         with self.assertRaises(ValueError):

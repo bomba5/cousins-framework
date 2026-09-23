@@ -337,10 +337,13 @@ _DECIDE_USAGE = (
 
 def decide(home, topic, decision, reasoning, *, level=None, cite=None):
     """Log a decision with its reasoning. Raises ValueError for a missing
-    part or a level error. Returns the line the CLI prints."""
+    part or a level error. Returns the line the CLI prints. Mirrors the
+    old CLI's non-`--stdin` path exactly: no stripping here - padding
+    in topic/decision/reasoning is kept verbatim in stdout,
+    decisions.jsonl and the raw bridge. A caller that wants trimmed
+    text strips it itself before calling (the `--stdin` parser already
+    strips its own chunks, before this function ever sees them)."""
     home = Path(home)
-    topic, decision, reasoning = (str(topic or "").strip(), str(decision or "").strip(),
-                                  str(reasoning or "").strip())
     if not (topic and decision and reasoning):
         raise ValueError("decide needs topic, decision and reasoning")
     resolved, err = resolve_level(level, cite)

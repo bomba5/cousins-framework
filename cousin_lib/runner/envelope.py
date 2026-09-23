@@ -1,0 +1,57 @@
+"""The envelope: an inbox item as the model reads it.
+
+Header, then the body verbatim, then any context in a block that says
+it is not the sender's words. The header names the thread so the
+model knows whom it answers (spec, "Threads"); with side sessions off
+every thread shares one session, so the name is the only routing cue.
+"""
+import base64
+from datetime import datetime, timezone
+from pathlib import Path
+
+_IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".gif": "image/gif", ".webp": "image/webp"}
+CONTEXT_MARK = "--- context (not the sender's words) ---"
+
+
+def _header(item, now):
+    now = now or datetime.now(timezone.utc)
+    return "[%s] %s from %s at %s" % (
+        item.thread_id, item.source, item.sender or "unknown",
+        now.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+
+
+def _text(item, now):
+    parts = [_header(item, now), "", item.body]
+    if item.context:
+        parts += ["", CONTEXT_MARK, item.context]
+    return "\n".join(parts)
+
+
+def _attachment_blocks(item):
+    blocks = []
+    for raw in item.attachments:
+        path = Path(str(raw))
+        media = _IMAGE_TYPES.get(path.suffix.lower())
+        if media and path.is_file():
+            data = base64.b64encode(path.read_bytes()).decode("ascii")
+            blocks.append({"type": "image",
+                           "source": {"type": "base64", "media_type": media,
+                                      "data": data}})
+        else:
+            blocks.append({"type": "text", "text": "[attachment: %s]" % path.name})
+    return blocks
+
+
+def render(item, *, now=None):
+    text = _text(item, now)
+    names = ["[image: %s]" % Path(str(a)).name if _IMAGE_TYPES.get(Path(str(a)).suffix.lower())
+             else "[attachment: %s]" % Path(str(a)).name for a in item.attachments]
+    return text + ("\n" + "\n".join(names) if names else "")
+
+
+def render_message(item, *, now=None):
+    return {"type": "user",
+            "message": {"role": "user",
+                        "content": [{"type": "text", "text": _text(item, now)},
+                                    *_attachment_blocks(item)]}}

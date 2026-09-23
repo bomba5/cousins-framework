@@ -53,6 +53,35 @@ class TestHandoff(HermeticCase):
         self.assertNotIn("old loop", text)
         self.assertIn("March open", text)
 
+    def test_a_deeper_heading_holding_the_words_is_not_the_section(self):
+        ctx = _ctx(self)
+        (ctx.home / "STATUS.md").write_text(
+            "# Wren - STATUS\n\n### Open loops archive\n\nold notes stay\n\n"
+            "## Open loops\n\n- old loop\n")
+        tools.call(ctx, "handoff", dict(ARGS))
+        text = (ctx.home / "STATUS.md").read_text()
+        self.assertIn("### Open loops archive\n\nold notes stay", text)
+        self.assertNotIn("old loop", text)
+        self.assertIn("March open", text)
+
+    def test_the_words_in_prose_are_not_the_section(self):
+        ctx = _ctx(self)
+        (ctx.home / "STATUS.md").write_text(
+            "# Wren - STATUS\n\nSee ## Open loops below.\n\n## Open loops\n\n- old loop\n")
+        tools.call(ctx, "handoff", dict(ARGS))
+        text = (ctx.home / "STATUS.md").read_text()
+        self.assertIn("See ## Open loops below.", text)
+        self.assertNotIn("old loop", text)
+
+    def test_a_top_level_heading_after_the_section_is_kept(self):
+        ctx = _ctx(self)
+        (ctx.home / "STATUS.md").write_text(
+            "# Wren - STATUS\n\n## Open loops\n\n- old loop\n\n# Appendix\n\nkept\n")
+        tools.call(ctx, "handoff", dict(ARGS))
+        text = (ctx.home / "STATUS.md").read_text()
+        self.assertIn("# Appendix\n\nkept", text)
+        self.assertNotIn("old loop", text)
+
     def test_a_status_without_the_section_gains_it_where_the_digest_reads_it(self):
         ctx = _ctx(self)
         (ctx.home / "STATUS.md").write_text("# Wren - STATUS\n\nfree text\n")

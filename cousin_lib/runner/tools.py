@@ -18,6 +18,7 @@ live Turn: one thread, implicit; two, the destination must be named.
 import asyncio
 import json
 import pathlib
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -578,6 +579,12 @@ HANDOFF_SCHEMA = {
 }
 
 OPEN_LOOPS = "## Open loops"
+# The section is the heading on a line of its own: a substring search would
+# take "### Open loops archive" or prose that quotes the heading, and
+# overwrite the cousin's own text there (STATUS.md is the cousin's file).
+_OPEN_LOOPS_LINE = re.compile(r"^## Open loops[ \t]*$", re.M)
+# It ends at the next heading of level 1 or 2; a "###" inside it is its own.
+_NEXT_SECTION = re.compile(r"^#{1,2} ", re.M)
 
 
 def _with_open_loops(text, name, status):
@@ -587,13 +594,13 @@ def _with_open_loops(text, name, status):
     block = "%s\n\n%s\n" % (OPEN_LOOPS, status.strip())
     if not text.strip():
         return "# Status - %s\n\n%s" % (name, block)
-    start = text.find(OPEN_LOOPS)
-    if start < 0:
+    found = _OPEN_LOOPS_LINE.search(text)
+    if found is None:
         title, nl, rest = text.partition("\n")
         return title + "\n\n" + block + ("\n" + rest.lstrip("\n") if rest.strip() else "")
-    end = text.find("\n## ", start + len(OPEN_LOOPS))
-    tail = text[end + 1:] if end >= 0 else ""
-    return text[:start] + block + ("\n" + tail if tail else "")
+    after = _NEXT_SECTION.search(text, found.end())
+    tail = text[after.start():] if after else ""
+    return text[:found.start()] + block + ("\n" + tail if tail else "")
 
 
 def handoff(ctx, args):

@@ -1,0 +1,137 @@
+"""The composed system prompt: complete, never truncated, byte-stable, root explicit."""
+import os
+import pathlib
+import tempfile
+import unittest
+from unittest import mock
+
+from cousin_lib import boot, mcp_server, template_sync
+from cousin_lib.runner import prompt
+from tests._hermetic import HermeticCase
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+NOWHERE = {"FRAMEWORK_ROOT": "/nonexistent/framework-root"}
+LAW = "".join("%d. Clause %d of the law, which is never cut.\n" % (i, i) for i in range(1, 400))
+TEMPLATE = template_sync._template_text(REPO)
+DOCTRINE = next(p for p in TEMPLATE.split("\n\n") if p.startswith("You are part of"))
+INVARIANT = next(p for p in TEMPLATE.split("\n\n") if p.startswith("Invariant for every cousin"))
+
+
+class PromptCase(HermeticCase):
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.home = self.root / "cousins" / "wren"
+        (self.home / "data").mkdir(parents=True)
+        (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+        (self.root / "config").mkdir()
+        (self.root / "config" / "law.md").write_text(LAW)
+        (self.root / "shared").mkdir()
+        (self.root / "shared" / "rule_short.md").write_text("---\nkind: rule\n---\nBe brief.\n")
+        (self.root / "shared" / "ref_map.md").write_text("---\ndescription: a map\n---\nx\n")
+        (self.home / "self-portrait.md").write_text("# Portrait\n## Voice\nDry and exact.\n")
+        (self.home / "CLAUDE.md").write_text(
+            "# Wren - keeps the ledgers\n\n## Identity\n\nWren keeps the ledgers.\n\n" + DOCTRINE +
+            "\n\n## Memory\n\nframework doctrine\n\n"
+            "## Voice\n\n<!-- a template comment -->\n\nPlain.\n\n" + INVARIANT + "\n\n"
+            "## Meetings\n\nmore doctrine\n\n"
+            "## Append your cousin-specific sections below this line\n\n## Wren's rules\n\nNo guessing.\n")
+        p = mock.patch.dict(os.environ, NOWHERE); p.start(); self.addCleanup(p.stop)
+        self.registry = mcp_server.parse_registry(mcp_server.shipped_default_registry(REPO), "t")
+
+    def compose(self, **kw):
+        return prompt.compose_system_prompt(self.home, root=self.root, registry=self.registry,
+                                            version="1.12.0", **kw)
+
+
+class TestCompose(PromptCase):
+    def test_sections_in_order_law_first(self):
+        text = self.compose()
+        order = [text.index(s) for s in ("1. Clause 1", "# Framework contract",
+                                          "Wren keeps the ledgers", "Be brief.")]
+        self.assertEqual(order, sorted(order))
+
+    def test_the_root_is_the_one_given_never_the_environment(self):
+        self.assertIn("Clause 1 of the law", self.compose())   # FRAMEWORK_ROOT points nowhere
+
+    def test_the_law_appears_whole_however_long(self):
+        self.assertGreater(len(LAW), boot.LAYER_BUDGETS["law"][1])  # longer than the packet allows
+        self.assertIn(LAW.strip(), self.compose())
+        self.assertNotIn("truncated", self.compose())
+
+    def test_identity_keeps_the_authored_parts_and_the_title(self):
+        text = self.compose()
+        for kept in ("# Wren - keeps the ledgers", "Wren keeps the ledgers.", "Plain.",
+                     "No guessing.", "Dry and exact."):
+            self.assertIn(kept, text)
+
+    def test_identity_drops_the_doctrine_the_template_and_comments(self):
+        text = self.compose()
+        for dropped in ("framework doctrine", "more doctrine", "a template comment",
+                        " ".join(DOCTRINE.split())[:60], " ".join(INVARIANT.split())[:60]):
+            self.assertNotIn(dropped, " ".join(text.split()))
+
+    def test_a_reincarnated_role_reaches_the_prompt(self):
+        from cousin_lib import lifecycle
+        claude = self.home / "CLAUDE.md"
+        claude.write_text(lifecycle.rewrite_role(claude.read_text(), name="Wren",
+                                                 new_role="audits the audits"))
+        self.assertIn("# Wren - audits the audits", self.compose())
+
+    def test_rules_in_the_prompt_the_reference_index_not(self):
+        text = self.compose()
+        self.assertIn("Be brief.", text)
+        self.assertNotIn("ref_map.md", text)
+
+    def test_byte_identical_across_a_rollover_and_a_clock_jump(self):
+        first = self.compose()
+        boot.bump_generation(self.home)                                  # a rollover happened
+        (self.home / "STATUS.md").write_text("## Open loops\n- new\n")  # state moved
+        (self.home / "data" / "handoff.md").write_text("handoff\n")
+        with mock.patch("time.time", return_value=4_102_444_800.0):     # years later
+            second = self.compose()
+        self.assertEqual(first.encode(), second.encode())
+
+    def test_no_volatile_markers(self):
+        text = self.compose()
+        for needle in ("Generation:", "identity_hash", "memory_snapshot", "STALE WARNING",
+                       "Open loops", str(self.home)):
+            self.assertNotIn(needle, text)
+
+
+class TestIdentity(PromptCase):
+    def test_missing_identity_is_the_named_degraded_state(self):
+        (self.home / "self-portrait.md").unlink(); (self.home / "CLAUDE.md").unlink()
+        text, degraded = prompt.authored_identity(self.home, root=self.root)
+        self.assertTrue(degraded)
+        self.assertEqual(text, prompt.IDENTITY_ABSENT)
+        self.assertIn(prompt.IDENTITY_ABSENT, self.compose())
+
+    def test_a_claude_md_that_is_only_template_is_not_authored(self):
+        (self.home / "self-portrait.md").unlink()
+        (self.home / "CLAUDE.md").write_text("## Identity\n\n" + DOCTRINE + "\n")
+        self.assertTrue(prompt.authored_identity(self.home, root=self.root)[1])
+
+    def test_either_source_alone_is_not_degraded(self):
+        (self.home / "CLAUDE.md").unlink()
+        self.assertFalse(prompt.authored_identity(self.home, root=self.root)[1])
+
+    def test_the_degraded_text_invents_no_persona(self):
+        low = prompt.IDENTITY_ABSENT.lower()
+        self.assertIn("plain professional register", low)
+        self.assertIn("degraded", low)
+
+
+class TestOption(PromptCase):
+    def test_the_preset_carries_both_switches(self):
+        opt = prompt.system_prompt_option(self.home, root=self.root, registry=self.registry,
+                                          version="1.12.0")
+        self.assertEqual(opt["type"], "preset"); self.assertEqual(opt["preset"], "claude_code")
+        self.assertIs(opt["exclude_dynamic_sections"], True)
+        self.assertIs(opt["snapshot"], True)
+        self.assertEqual(opt["append"], self.compose())
+
+
+if __name__ == "__main__":
+    unittest.main()

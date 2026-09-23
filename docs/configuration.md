@@ -536,7 +536,34 @@ gone silent fails the turn) and puts no limit on a whole turn. These are
 constructor defaults of the SDK runner (`idle_timeout_s`, `turn_timeout_s`),
 not cousin.toml keys in this phase.
 
+The runner records `usage` on every `result` event in its stream (the SDK's
+own `ResultMessage.usage` dict: at least `input_tokens`, `output_tokens`,
+`cache_creation_input_tokens` and `cache_read_input_tokens`; `None` when the
+result carried none, as a failed turn's synthetic result does), so cache
+behaviour (a second turn of the same session reading the prompt cache rather
+than rebuilding it) is visible per turn, not only in aggregate.
+
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `chat-hooks.json` (patterns the chat
-server reacts to, see [chat](chat.md)) and `.secrets/api-key.env` (the key for
-`api_key` mode, written by `cousin-auth`).
+server reacts to, see [chat](chat.md)), `policy.toml` (below) and
+`.secrets/api-key.env` (the key for `api_key` mode, written by `cousin-auth`).
+
+### policy.toml
+
+`<home>/policy.toml`, read once when the runner starts and enforced as the
+first `PreToolUse` hook (the CLI never consults `can_use_tool` under
+`bypassPermissions`, so this is where a runner cousin's deny rules live
+instead of a settings file's). Four keys, all optional:
+
+| key | default | meaning |
+|---|---|---|
+| `deny_tools` | `[]` | tool names the model may never call; exact name or a `prefix*` |
+| `deny_bash_patterns` | `[]` | regexes checked against `Bash`'s `command` only (never a subagent's or another tool's own shell-out) |
+| `ask` | `[]` | tools that need operator approval; enforced as `deny` until phase 5 gives the console an ask surface, the reason says so |
+| `outbound_filter` | `true` | whether `reply` and `send` cross `config/outbound-filter.json` |
+
+Two failure modes: the file absent means every tool is allowed, said once in
+the event stream at start (`no policy.toml: every tool allowed`); the file
+present but malformed (bad TOML, an unknown key, a non-list value, an
+uncompilable regex) stops the runner at start, exit 2, naming the key. See
+`templates/policy.toml.example` for a documented starting point.

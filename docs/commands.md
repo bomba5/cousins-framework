@@ -93,13 +93,13 @@ SIGTERM or SIGINT, then stops the runner with a 30 second timeout. `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or
 SIGINT, or when the runner gives up. `--runner sdk|fake` overrides the
 cousin's `[agent] runner`. One runner per cousin: it holds a lock on
-`<home>/run/runner.lock` for its life. See
-[agent-loop-runner](design/agent-loop-runner.md).
+`<home>/run/runner.lock` for its life. It reads `policy.toml` at start; a
+malformed policy is rc 2. See [agent-loop-runner](design/agent-loop-runner.md).
 
 | exit | meaning |
 |---|---|
 | 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox |
-| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml or key file; or another runner holds the lock |
+| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml or key file, a malformed `policy.toml`; or another runner holds the lock |
 | 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds |
 
 ```

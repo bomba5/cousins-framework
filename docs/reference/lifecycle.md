@@ -145,6 +145,18 @@ The console runs a clean stop in the background (HTTP 202, the row turns `stoppe
 
 Nothing recovers a crashed flip automatically. A flip that fails after step 3 (say the respawn failed) leaves the marker behind. The console shows that cousin's flip as `stale_marker`. Look at what's there: if the tmux session is gone, `cousin-flip` it again (after 480 seconds the old marker no longer blocks), or start it from the console. The packet the flip built is in `data/boot-packet-gen-NNNN.md` if you want to paste it by hand.
 
+### Runner lane
+
+A cousin with `[agent] runner` set (`sdk` or `fake`) is not flipped through tmux: its flip is a rollover. `cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's inbox (the same row `Runner.rollover` puts; a pending one is joined, not doubled) and wait for its answer, up to the handoff deadline plus a minute. None of the steps above run: no marker, no pane, no pending boot, no transcript mining (the runner mines every turn).
+
+The row's body is the reason, and the model reads it in its handoff request: `cousin-flip` by hand, `max_age` from the daily `flip_at` cadence, `timed flip` from a timed flip, the bequest text from reincarnate. The result has `"lane": "runner"` and one `rollover` stage carrying the runner's answer.
+
+A runner that is not running is handled two ways on purpose. `cousin-flip` and the daily cadence refuse (`runner not running; start it before flipping`) and queue nothing, so a flip never undoes an operator's stop by leaving a rollover to fire at the next start. `cousin-reincarnate` and `cousin-transplant` queue the row anyway: the new role or the moved memory must take effect at the next start.
+
+The daily cadence keeps its stagger: the loops daemon flips at most one cousin per tick, runner or tmux.
+
+`--dry-run` on a runner cousin is ok with the rollover stage skipped.
+
 ## Reincarnate
 
 Give a cousin a new role and keep its memory.
@@ -158,6 +170,8 @@ cousin-reincarnate wren --new-role "keeps the house paperwork in order" [--timeo
 3. **Rewrite.** In CLAUDE.md, the title line `# <Name> - <role>` gets the new role, and so does the body of a `## Role` section if there is one. Everything else in the file stays as it was. `[cousin] role` in cousin.toml is replaced.
 4. **Flip.** The next generation boots with the new role and the old memory.
 
+On the runner lane there is no chat prompt: the bequest (the same request, pointed at the `handoff` tool's `position` field) is carried as the rollover's reason, so the model reads it in its handoff request and answers it through `handoff`. The step records `"carried": true`. The row is queued even when the runner is stopped (see [Runner lane](#runner-lane)).
+
 ## Transplant
 
 Move memory or identity between two cousins.
@@ -166,7 +180,7 @@ Move memory or identity between two cousins.
 cousin-transplant --donor wren --recipient kestrel --mode soul-donation [--root R]
 ```
 
-Both are snapshotted as above, the mode is applied, then both are flipped, donor first.
+Both are snapshotted as above, the mode is applied, then both are flipped, donor first. There is no bequest step; a runner cousin is rolled over, and queued if its runner is stopped.
 
 | mode | Kestrel ends up with | Wren afterwards |
 |---|---|---|

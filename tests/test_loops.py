@@ -16,6 +16,8 @@ import time
 import unittest
 from unittest import mock
 
+from tests._hermetic import HermeticCase
+
 from cousin_lib.loops import (
     daemon_status,
     expire_stale_requests,
@@ -714,3 +716,59 @@ class TestDefaultIsAliveForARunnerCousin(unittest.TestCase):
                     self.assertTrue(loops._default_is_alive("wren"))
                 with mock.patch.object(runner_main, "is_running", return_value=False):
                     self.assertFalse(loops._default_is_alive("wren"))
+
+
+class TestMaxAgeOnTheRunnerLane(HermeticCase):
+    """Master plan phase 4 task 6: max_age fires at the configured cadence
+    with the stagger intact, for runner cousins."""
+    def test_two_due_runner_cousins_roll_over_one_per_tick_with_reason_max_age(self):
+        import contextlib
+        import datetime as dt
+        import pathlib
+        import tempfile
+        from cousin_lib import boot, loops
+        from cousin_lib.runner.fake import FakeRunner
+        from cousin_lib.runner.main import hold_lock
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name); (root / "config").mkdir()
+        homes = []
+        for slug in ("wren", "testa"):     # one root, so FrameworkConfig lists both
+            home = root / "cousins" / slug
+            for sub in ("data", "run", "memory"):
+                (home / sub).mkdir(parents=True)
+            (home / "cousin.toml").write_text(
+                '[cousin]\nslug = "%s"\nname = "%s"\n\n[agent]\nrunner = "fake"\n\n'
+                '[lifecycle]\nflip_at = "11:00"\n' % (slug, slug.capitalize()))
+            homes.append(home)
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}); p.start(); self.addCleanup(p.stop)
+        with contextlib.ExitStack() as stack:
+            runners = []
+            for home in homes:
+                stack.enter_context(hold_lock(home))
+                r = FakeRunner(home); r.start(); stack.callback(r.stop, timeout=5)
+                runners.append(r)
+            # midday, whole minute: +60 s and +120 s stay on the same day (a 23:59 tick
+            # would cross midnight and flip the first cousin twice)
+            state = {}
+            now = dt.datetime.now().replace(hour=12, minute=0, second=0, microsecond=0).timestamp()
+            daily = loops.daily_flip(loops._default_do_flip)
+            first = {"flips": [], "errors": []}
+            loops._fire_daily_flips(state, daily, lambda slug: True, now, first)
+            second = {"flips": [], "errors": []}
+            loops._fire_daily_flips(state, daily, lambda slug: True, now + 60, second)
+            third = {"flips": [], "errors": []}
+            loops._fire_daily_flips(state, daily, lambda slug: True, now + 120, third)
+        self.assertEqual(len(first["flips"]), 1)                 # the stagger: one per tick
+        self.assertEqual(len(second["flips"]), 1)
+        self.assertEqual(third["flips"], [])                     # each once a day
+        self.assertEqual(sorted(first["flips"] + second["flips"]), ["testa", "wren"])
+        self.assertEqual([boot.read_generation(h) for h in homes], [1, 1])
+        for r in runners:
+            reasons = [e["payload"]["reason"] for e in r.events() if e["kind"] == "rollover"]
+            self.assertEqual(reasons, ["max_age"])
+
+    def test_an_injected_do_flip_is_passed_through_unchanged(self):
+        from cousin_lib import loops
+        calls = []
+        loops.daily_flip(lambda slug: calls.append(slug) or {"ok": True})("wren")
+        self.assertEqual(calls, ["wren"])

@@ -920,9 +920,23 @@ def schedule_index_refresh(now, report, *, homes, refresh=_refresh_one,
         state["thread"].start()
 
 
-def _default_do_flip(slug):
+def _default_do_flip(slug, reason="flip"):
     from cousin_lib.flip import flip
-    return flip(slug)
+    return flip(slug, reason=reason)
+
+
+def daily_flip(do_flip):
+    """The daily cadence's flip: the default one says `max_age` (the model
+    reads it in its handoff request); an injected one is used as given."""
+    if do_flip is _default_do_flip:
+        return lambda slug: _default_do_flip(slug, reason="max_age")
+    return do_flip
+
+
+def timed_flip(do_flip):
+    if do_flip is _default_do_flip:
+        return lambda slug: _default_do_flip(slug, reason="timed flip")
+    return do_flip
 
 
 def _keep_distilled(slug, home, report):
@@ -949,8 +963,8 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
               "ready": [], "guarded": [], "scheduled": 0, "distilled": []}
-    _walk_timed_flips(state, deliver, do_flip, now, report)
-    _fire_daily_flips(state, do_flip, is_alive, now, report)
+    _walk_timed_flips(state, deliver, timed_flip(do_flip), now, report)
+    _fire_daily_flips(state, daily_flip(do_flip), is_alive, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
         try:
             slug = config.slug

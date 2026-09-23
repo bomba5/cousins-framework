@@ -626,6 +626,29 @@ class TestDefaultDeliverReportsTheInjection(unittest.TestCase):
                 inj.return_value.inject.assert_called_once_with("beat")
 
 
+class TestDefaultDeliverWait(unittest.TestCase):
+    def test_a_runner_cousin_is_not_waited_on_and_a_tmux_cousin_is(self):
+        import os
+        import pathlib
+        import tempfile
+        from unittest import mock
+        from cousin_lib import delivery, loops
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name); (root / "config").mkdir()
+        for slug, extra in (("wren", ""), ("finch", '\n[agent]\nrunner = "fake"\n')):
+            (root / "cousins" / slug).mkdir(parents=True)
+            (root / "cousins" / slug / "cousin.toml").write_text(
+                '[cousin]\nslug = "%s"\n[chat]\nport = 8100\n%s' % (slug, extra))
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+            with mock.patch.object(delivery, "deliver", return_value=delivery.QUEUED) as deliver:
+                self.assertTrue(loops._default_deliver("finch", "beat"))
+            self.assertIs(deliver.call_args.kwargs["wait"], False)
+            with mock.patch.object(delivery, "deliver",
+                                   return_value=delivery.DELIVERED) as deliver:
+                self.assertTrue(loops._default_deliver("wren", "beat"))
+            self.assertIs(deliver.call_args.kwargs["wait"], True)
+
+
 class TestIndexRefresh(unittest.TestCase):
     """Every cousin's index is refreshed by the daemon, by default: each
     home at most once per window, one worker, results on the report."""

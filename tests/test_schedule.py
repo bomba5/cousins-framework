@@ -162,5 +162,52 @@ class TestTick(ScheduleCase):
         self.assertEqual(schedule.list_entries(include_fired=True)[0]["status"], "fired")
 
 
+class TestDefaultDeliver(ScheduleCase):
+    """`_default_deliver` raises on an outcome the producer does not
+    accept, so `tick` keeps the job pending (the loops adapter's
+    convention); a runner cousin is handed the item without waiting."""
+
+    def _runner_cousin(self):
+        (self.root / "cousins" / "wren" / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n\n[agent]\nrunner = "fake"\n')
+
+    def _tick(self, outcome):
+        from cousin_lib import delivery, schedule
+        self._main(["add", "in 1s", "due job"])
+        past = int(datetime.now().timestamp()) + 5
+        errors = []
+        with mock.patch.object(delivery, "deliver", return_value=outcome) as deliver:
+            n = tick(now_ts=past, deliver=schedule._default_deliver,
+                     on_error=lambda job_id, err: errors.append(str(err)))
+        status = schedule.list_entries(include_fired=True)[0]["status"]
+        return n, status, errors, deliver
+
+    def test_a_refused_delivery_keeps_the_job_pending(self):
+        from cousin_lib import delivery
+        n, status, errors, _ = self._tick(delivery.FAILED)
+        self.assertEqual((n, status), (0, "pending"))
+        self.assertEqual(errors, ["delivery not accepted: failed"])
+
+    def test_a_queued_delivery_to_a_tmux_cousin_is_not_accepted(self):
+        from cousin_lib import delivery
+        n, status, errors, _ = self._tick(delivery.QUEUED)
+        self.assertEqual((n, status), (0, "pending"))
+        self.assertEqual(errors, ["delivery not accepted: queued"])
+
+    def test_an_accepted_queued_marks_the_job_fired(self):
+        from cousin_lib import delivery
+        self._runner_cousin()
+        n, status, errors, _ = self._tick(delivery.QUEUED)
+        self.assertEqual((n, status, errors), (1, "fired", []))
+
+    def test_a_runner_cousin_is_not_waited_on_and_a_tmux_cousin_is(self):
+        from cousin_lib import delivery
+        _, _, _, deliver = self._tick(delivery.DELIVERED)
+        self.assertIs(deliver.call_args.kwargs["wait"], True)
+        self._runner_cousin()
+        _, _, _, deliver = self._tick(delivery.QUEUED)
+        self.assertIs(deliver.call_args.kwargs["wait"], False)
+
+
 if __name__ == "__main__":
     unittest.main()

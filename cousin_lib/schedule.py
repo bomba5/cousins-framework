@@ -109,7 +109,10 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
     provenance prefix is the deliverer's job (`_default_deliver` here,
     the loops daemon's adapter there). Any exception it raises keeps
     that job pending and is reported through `on_error(job_id, err)`;
-    one failing job never stops the rest of the walk."""
+    one failing job never stops the rest of the walk. For a runner
+    cousin the at-least-once contract ends at the durable inbox put: a
+    turn that fails after it is the runner's to handle, not a reason to
+    fire the job again."""
     now_ts = now_ts or int(datetime.now().timestamp())
     conn = _db()
     try:
@@ -258,8 +261,11 @@ def _cmd_cancel(args):
 
 
 def _default_deliver(slug, prompt):
-    """Hand a due prompt to the cousin through the delivery facade.
-    False (skipped at a menu, or failed) keeps the job pending."""
+    """Hand a due prompt to the cousin through the delivery facade. An
+    outcome the producer does not accept (skipped at a menu, failed, a
+    tmux cousin's `queued`) raises, and `tick` keeps the job pending,
+    the loops adapter's convention. A runner cousin is not waited on:
+    the inbox put is the acceptance."""
     from cousin_lib import delivery
 
     root = FrameworkConfig.from_env()
@@ -267,7 +273,12 @@ def _default_deliver(slug, prompt):
         if cfg.slug == slug:
             item = delivery.Item(thread_id=delivery.thread_id("schedule"),
                                  source="schedule", body=prompt)
-            return delivery.accepted(delivery.deliver(cfg.home, item), cfg.home)
+            wait = not isinstance(delivery.backend_for(cfg.home),
+                                  delivery.InboxBackend)
+            outcome = delivery.deliver(cfg.home, item, wait=wait)
+            if not delivery.accepted(outcome, cfg.home):
+                raise RuntimeError("delivery not accepted: %s" % outcome)
+            return True
     raise RuntimeError("no cousin %r under %s" % (slug, root.root))
 
 

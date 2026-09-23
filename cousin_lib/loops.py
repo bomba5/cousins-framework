@@ -1077,8 +1077,11 @@ def _default_deliver(slug, text):
                          source="loop", body=text)
     # Anything the deliverer does not accept (skipped at a menu, failed,
     # or a queued row for a tmux cousin) is not a delivery: the caller
-    # keeps the beat or prompt due.
-    return delivery.accepted(delivery.deliver(home, item), home)
+    # keeps the beat or prompt due. A runner cousin is not waited on: the
+    # durable inbox put is the acceptance, and a tick must not block on
+    # a turn.
+    wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
+    return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
 
 
 def loops_main(argv=None):

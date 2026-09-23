@@ -568,7 +568,10 @@ def default_deliver(slug, text):
     home = FrameworkConfig.from_env().root / "cousins" / slug
     item = delivery.Item(thread_id=delivery.thread_id("meeting", "turn"),
                          source="meeting", body=text)
-    return delivery.accepted(delivery.deliver(home, item), home)
+    # A runner cousin is not waited on: the durable inbox put is the
+    # acceptance. A tmux cousin's line is typed and confirmed.
+    wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)
+    return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
 
 
 # -- CLI --------------------------------------------------------------

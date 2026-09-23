@@ -254,5 +254,17 @@ class TestDefaultIsAliveForARunnerCousin(MeetingCase):
                 self.assertFalse(meetings.default_is_alive("finch"))
 
 
+class TestDefaultDeliverWait(MeetingCase):
+    def test_a_runner_cousin_is_not_waited_on_and_a_tmux_cousin_is(self):
+        from cousin_lib import delivery
+        self._cousin("finch", extra="\n[agent]\nrunner = \"fake\"\n")
+        with mock.patch.object(delivery, "deliver", return_value=delivery.QUEUED) as deliver:
+            self.assertTrue(meetings.default_deliver("finch", "your turn"))
+        self.assertIs(deliver.call_args.kwargs["wait"], False)
+        with mock.patch.object(delivery, "deliver", return_value=delivery.DELIVERED) as deliver:
+            self.assertTrue(meetings.default_deliver("wren", "your turn"))
+        self.assertIs(deliver.call_args.kwargs["wait"], True)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,10 +4,13 @@ import asyncio
 import os
 import pathlib
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 from cousin_lib import activity
 from cousin_lib.runner import hooks
+from cousin_lib.runner.envelope import CONTEXT_MARK
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
 from tests._hermetic import HermeticCase
@@ -19,7 +22,9 @@ def _home(case):
     home = root / "cousins" / "wren"
     for sub in ("data", "memory", "notes"):
         (home / sub).mkdir(parents=True)
-    (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+    # No embedding seam here: recall qualifies keyword hits only when opted in.
+    (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n'
+                                      '[memory]\nrecall_keyword_only = true\n')
     os.environ["FRAMEWORK_ROOT"] = str(root); os.environ["COUSIN_HOME"] = str(home)
     return root, home
 
@@ -79,15 +84,69 @@ class TestRecall(HooksCase):
         out = _run(self.cbs["UserPromptSubmit"](self._base(
             "UserPromptSubmit", prompt="when does the router reboot?"), None, {}))
         ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "")
-        self.assertIn("[fw-recall]", ctx); self.assertIn("reference_router", ctx)
-        self.assertTrue(any(e["kind"] == "recall" for e in self.stream.tail()))
+        self.assertTrue(ctx.startswith("[fw-recall] "))
+        self.assertIn("Router (memory:reference_router.md)", ctx)
+        recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
+        self.assertEqual(recalls, [{"hits": 1}])
 
     def test_no_hits_means_no_context_and_no_error(self):
-        out = _run(self.cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="zzzq"), None, {}))
+        out = _run(self.cbs["UserPromptSubmit"](self._base(
+            "UserPromptSubmit", prompt="zzzq qqqz xxyzzy wobbling frobnicator"), None, {}))
         self.assertNotIn("additionalContext", out.get("hookSpecificOutput", {}))
         recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
         self.assertEqual(recalls, [{"hits": 0}])
         self.assertFalse(any(e["kind"] == "hook" for e in self.stream.tail()))
+
+
+    def test_the_chat_servers_gates_apply(self):
+        (self.home / "memory" / "reference_router.md").write_text("# Router\nreboots on Sundays\n")
+        (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+        out = _run(self.cbs["UserPromptSubmit"](self._base(
+            "UserPromptSubmit", prompt="when does the router reboot on Sundays?"), None, {}))
+        self.assertEqual(out, {})   # keyword-only without the opt-in: silent
+        (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n'
+                                               '[memory]\nrecall_keyword_only = true\n')
+        out = _run(self.cbs["UserPromptSubmit"](self._base(
+            "UserPromptSubmit", prompt="router Sundays"), None, {}))
+        self.assertEqual(out, {})   # under min_chars
+        self.assertFalse(any(e["kind"] == "hook" for e in self.stream.tail()))
+
+    def test_recall_searches_the_body_not_the_envelope(self):
+        seen = []
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream,
+                              recall=lambda body: (seen.append(body), (None, 0))[1],
+                              body_for_prompt=lambda prompt: "the newest row body")
+        _run(cbs["UserPromptSubmit"](self._base(
+            "UserPromptSubmit", prompt="[operator:priya] 2026-09-23 Priya: hi"), None, {}))
+        self.assertEqual(seen, ["the newest row body"])
+
+    def test_a_prompt_that_carries_context_is_not_recalled_twice(self):
+        seen = []
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream,
+                              recall=lambda body: (seen.append(body), ("[fw-recall] x", 1))[1])
+        out = _run(cbs["UserPromptSubmit"](self._base(
+            "UserPromptSubmit", prompt="hi\n\n%s\n[fw-recall] y" % CONTEXT_MARK), None, {}))
+        self.assertEqual(out, {}); self.assertEqual(seen, [])
+        recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
+        self.assertEqual(recalls, [{"hits": 0, "skipped": "context present"}])
+
+    def test_a_slow_recall_is_cut_off_at_the_budget_off_the_loop(self):
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream,
+                              recall=lambda body: (time.sleep(1.0), ("[fw-recall] late", 1))[1])
+
+        async def timed():
+            t = time.monotonic()
+            out = await cbs["UserPromptSubmit"](self._base(
+                "UserPromptSubmit", prompt="anything at all here"), None, {})
+            return out, time.monotonic() - t
+        with mock.patch.object(hooks, "RECALL_BUDGET_S", 0.1):
+            out, took = _run(timed())
+        self.assertEqual(out, {}); self.assertLess(took, 0.5)
+        recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
+        self.assertEqual(recalls, [{"hits": 0, "timed_out": True}])
 
 
 class TestCheckpointsAndState(HooksCase):
@@ -123,7 +182,7 @@ class TestCheckpointsAndState(HooksCase):
 
     def test_notification_when_idle_only_records(self):
         _run(self.cbs["Notification"](self._base(
-            "Notification", message="needs input", notification_type="idle"), None, {}))
+            "Notification", message="needs input", notification_type="permission_prompt"), None, {}))
         self.assertEqual(self.machine.state, "idle")
         self.assertTrue(any(e["kind"] == "permission" for e in self.stream.tail()))
 

@@ -944,3 +944,108 @@ def format_results(hits):
 
 def print_results(hits):
     print(format_results(hits))
+
+
+# ------------------------------------------------------- proactive recall
+# One implementation for both lanes: the chat server's delivered line
+# (server/app.py) and the SDK runner's UserPromptSubmit hook.
+
+RECALL_PREFIX = "[fw-recall] possibly relevant from your memory: "
+RECALL_SUFFIX = " - cousin-memory search for details; ignore if not."
+
+
+def recall_thresholds():
+    """The [recall] table of config/embedding.toml, defaults when the
+    seam is absent or unusable. Returns (thresholds, configured):
+    configured says whether a semantic leg was promised, which decides
+    how a hit qualifies."""
+    config = _embedding_config()
+    if isinstance(config, dict):
+        return config["recall"], True
+    return dict(_RECALL_DEFAULTS), config is not None
+
+
+def _hit_title(path):
+    """The file's first markdown heading, else its stem."""
+    try:
+        for line in path.read_text(errors="replace").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                title = stripped.lstrip("#").strip()
+                if title:
+                    return title
+    except OSError:
+        pass
+    return path.stem
+
+
+def _hit_relpath(home, hit):
+    """<relpath> inside the hit's collection: memory/ and notes/ live
+    under the home; the harness collection is wherever config/harness.toml
+    put it. A path outside every known base falls back to its name."""
+    path = Path(hit["path"])
+    collection = hit.get("collection") or ""
+    bases = [home / collection] if collection in ("memory", "notes") else []
+    if collection == "harness":
+        try:
+            template = (harness_config(FrameworkConfig.resolve().root)
+                        or {}).get("auto_memory_dir")
+            if template:
+                bases.append(expand_harness_path(template, home))
+        except MissingConfigError:
+            pass
+    for base in bases:
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return path.name
+
+
+def recall_entries(home, text, *, config=None):
+    """The hits that qualify for proactive recall, each rendered as
+    'Title (collection:relpath)'; [] when a gate says no. The gates:
+    `[memory] proactive_recall` (config, the cousin's CousinConfig,
+    loaded from `home` when not given), `[recall] min_chars` and `top`,
+    and how a hit qualifies: with the embedding seam configured by its
+    semantic similarity against `[recall] min_score`; without it nothing
+    qualifies unless the cousin opted in with `[memory]
+    recall_keyword_only = true`, in which case every keyword hit does."""
+    if config is None:
+        from cousin_lib.config import CousinConfig
+        config = CousinConfig.load(home)
+    home = Path(home)
+    if not config.proactive_recall:
+        return []
+    thresholds, configured = recall_thresholds()
+    if not configured and not config.recall_keyword_only:
+        # no semantic leg: a keyword match on an OR-joined query is too
+        # loose to interrupt with; the cousin opts in per install
+        return []
+    if len(text.strip()) < int(thresholds["min_chars"]):
+        return []
+    hits, _notice = search(text, top=int(thresholds["top"]), home=home)
+    kept = []
+    for hit in hits:
+        if configured:
+            similarity = hit.get("similarity")
+            if similarity is None or similarity < float(thresholds["min_score"]):
+                continue
+        kept.append("%s (%s:%s)" % (_hit_title(Path(hit["path"])),
+                                    hit.get("collection"), _hit_relpath(home, hit)))
+    return kept
+
+
+def recall_line(entries):
+    """The one-line '[fw-recall] ...' text for `entries`, or None when
+    there are none. Single-line by construction (the delivery paste
+    cannot carry a newline)."""
+    if not entries:
+        return None
+    return " ".join((RECALL_PREFIX + "; ".join(entries) + RECALL_SUFFIX).split())
+
+
+def recall_context(home, text, *, config=None):
+    """The '[fw-recall] ...' line for `text`, or None: recall_entries'
+    gates, rendered by recall_line."""
+    return recall_line(recall_entries(home, text, config=config))

@@ -24,6 +24,15 @@ class TestTurn(HermeticCase):
         t.end()
         self.assertFalse(t.active); self.assertEqual(t.threads, ()); self.assertIsNone(t.origin)
 
+    def test_bodies_are_the_live_rows_bodies_oldest_first(self):
+        t = Turn()
+        self.assertEqual(t.bodies, ())
+        t.begin(dict(_row(1, "operator:priya", "Priya"), body="first"))
+        t.add(dict(_row(2, "peer:testa", "Testa"), body="second"))
+        self.assertEqual(t.bodies, ("first", "second"))
+        t.end()
+        self.assertEqual(t.bodies, ())
+
     def test_add_outside_a_turn_is_refused(self):
         with self.assertRaises(RuntimeError):
             Turn().add(_row(1, "operator:priya"))

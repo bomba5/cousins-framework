@@ -12,46 +12,58 @@ A hook never raises into the SDK: the failure becomes a `hook` event.
 | PreCompact                      | pre-compact checkpoint, `checkpoint`      |
 | Notification, PermissionRequest | `permission`; running -> waiting_permission |
 
-The runner moves `waiting_permission` back to `running` when the next
-SDK message arrives (sdk.py, the turn's message loop)."""
-import functools
+Callbacks run on the SDK's event loop, which is also the runner's turn
+loop: nothing slow runs on it. Recall runs on a worker thread, bounded
+by RECALL_BUDGET_S. The runner moves `waiting_permission` back to
+`running` when the next SDK message arrives (sdk.py, the turn's message
+loop)."""
+import asyncio
+import inspect
 
 from cousin_lib import recording
+from cousin_lib.runner.envelope import CONTEXT_MARK
 
 RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop")
 PRE_MATCHER = "Agent|Task|Bash"
-RECALL_TOP = 3
+# The chat server's RECALL_BUDGET_SECONDS: past it the prompt goes on
+# without recall and the search finishes on its thread, index warm.
+RECALL_BUDGET_S = 4.0
 
 
 def default_recall(home):
-    """`recall(prompt) -> (context text or None, hit count)` over the
-    cousin's own memory (memory_search.search, keyword leg at least)."""
-    def recall(prompt):
+    """`recall(body) -> (context text or None, hit count)`: the chat
+    server's gates and line (memory_search.recall_context's parts)."""
+    def recall(body):
         from cousin_lib import memory_search
-        hits, _notice = memory_search.search(prompt, top=RECALL_TOP, home=home)
-        if not hits:
-            return None, 0
-        names = "; ".join(str(h.get("path", "")).rsplit("/", 1)[-1] for h in hits)
-        return ("[fw-recall] possibly relevant from your memory: %s - cousin-memory search"
-                " for details; ignore if not." % names), len(hits)
+        entries = memory_search.recall_entries(home, body)
+        return memory_search.recall_line(entries), len(entries)
     return recall
 
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
-              checkpoints=None):
+              checkpoints=None, body_for_prompt=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
-    directly. `build_hooks` wraps them in HookMatchers."""
+    directly. `build_hooks` wraps them in HookMatchers.
+
+    recall: `recall(body) -> (text or None, hits)`, a blocking callable
+    run on a worker thread; text becomes the prompt's additionalContext,
+    hits goes on the `recall` event. Default: default_recall(home).
+    body_for_prompt: `f(prompt) -> str`, the text to search for a
+    submitted prompt (the runner passes the live turn's newest row body,
+    not the whole envelope). Default: the prompt itself."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home)
     recorder = recorder or (lambda payload: recording.handle(payload, home, root, slug=slug))
+    body_for_prompt = body_for_prompt or (lambda prompt: prompt)
 
     def guarded(name, fn):
-        @functools.wraps(fn)
+        is_async = inspect.iscoroutinefunction(fn)
+
         async def cb(hook_input, tool_use_id, context):
             try:
-                out = fn(hook_input)
+                out = await fn(hook_input) if is_async else fn(hook_input)
                 return out if out else {}
             except Exception as err:  # noqa: BLE001 - never into the SDK
                 try:
@@ -60,13 +72,24 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                 except Exception:  # noqa: BLE001 - the stream itself failed
                     pass
                 return {}
+        cb.__name__ = name
         return cb
 
     def record(payload):
         return recorder(dict(payload))
 
-    def on_prompt(payload):
-        text, n = recall(payload.get("prompt") or "")
+    async def on_prompt(payload):
+        prompt = payload.get("prompt") or ""
+        if CONTEXT_MARK in prompt:
+            # the chat server already recalled for this item
+            stream.append("recall", {"hits": 0, "skipped": "context present"})
+            return {}
+        body = body_for_prompt(prompt) or ""
+        try:
+            text, n = await asyncio.wait_for(asyncio.to_thread(recall, body), RECALL_BUDGET_S)
+        except asyncio.TimeoutError:
+            stream.append("recall", {"hits": 0, "timed_out": True})
+            return {}
         stream.append("recall", {"hits": n})
         if not text:
             return {}

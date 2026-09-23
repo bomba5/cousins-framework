@@ -60,6 +60,13 @@ class Turn:
             return tuple(r["id"] for r in self._rows)
 
     @property
+    def bodies(self):
+        """The live rows' bodies, oldest first: the newest is what the
+        model was just handed (the prompt hook searches it)."""
+        with self._lock:
+            return tuple(r.get("body") or "" for r in self._rows)
+
+    @property
     def origin(self):
         with self._lock:
             return self._rows[0]["thread_id"] if self._rows else None

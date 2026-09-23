@@ -247,17 +247,28 @@ def _staleness_header(home):
     )
 
 
-def _active_state(home):
+def _open_loops_section(status):
+    """The boot packet's reading of STATUS.md's open loops, unchanged: from
+    the first "## Open loops" anywhere in the text (a substring, so also
+    inside "### Open loops ..." or prose) to the next "## " heading that
+    starts a line. The runner's digest passes its own, whole-heading reader
+    instead; this one stays because the tmux lane's behaviour does not
+    change in this phase."""
+    m = re.search(r"## Open loops.*?(?=\n## |\Z)", status, re.DOTALL)
+    return m.group(0) if m else None
+
+
+def _active_state(home, *, open_loops=_open_loops_section):
     parts = []
     stale = _staleness_header(home)
     if stale:
         parts.append(stale.rstrip())
     status = _read(Path(home) / "STATUS.md")
     if status:
-        m = re.search(r"## Open loops.*?(?=\n## |\Z)", status, re.DOTALL)
-        if m and m.group(0).strip() != "## Open loops":
+        section = open_loops(status)
+        if section and section.strip() != "## Open loops":
             parts.append("### STATUS.md (open loops)")
-            parts.append(m.group(0).strip())
+            parts.append(section.strip())
         else:
             parts.append("### STATUS.md")
             parts.append(status[:1500])

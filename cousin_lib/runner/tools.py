@@ -583,9 +583,13 @@ OPEN_LOOPS = "## Open loops"
 # take "### Open loops archive" or prose that quotes the heading, and
 # overwrite the cousin's own text there (STATUS.md is the cousin's file).
 # A CRLF file ends the heading with "\r", which "$" alone does not consume.
-_OPEN_LOOPS_LINE = re.compile(r"^## Open loops[ \t]*\r?$", re.M)
+OPEN_LOOPS_LINE = re.compile(r"^## Open loops[ \t]*\r?$", re.M)
 # It ends at the next heading of level 1 or 2; a "###" inside it is its own.
-_NEXT_SECTION = re.compile(r"^#{1,2} ", re.M)
+NEXT_SECTION = re.compile(r"^#{1,2} ", re.M)
+# Public: the digest (prompt.py) reads the section with these same two
+# patterns, so writer and reader cannot drift. The underscore names stay as
+# the aliases the rest of this module uses.
+_OPEN_LOOPS_LINE, _NEXT_SECTION = OPEN_LOOPS_LINE, NEXT_SECTION
 
 
 def _with_open_loops(text, name, status):

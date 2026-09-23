@@ -115,7 +115,7 @@ class TestRunnerWiring(HermeticCase):
         if attach:
             r.session_store = store
         else:
-            r.__dict__.pop("session_store", None)   # a construction path that set none
+            r.session_store = None   # a construction path that set none (options() still builds)
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         rec = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))

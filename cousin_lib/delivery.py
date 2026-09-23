@@ -9,7 +9,7 @@ it arrives mid-turn.
 
 This phase has one backend, tmux, which renders an item to exactly the
 line that producer typed before this module existed. The runner's
-inbox becomes the second one.
+inbox is the second backend, selected by `[agent] runner`.
 
 Outcomes are three and only three. When the framework cannot tell
 whether a cousin received something it says `queued` or `failed`,
@@ -106,9 +106,43 @@ class TmuxBackend:
         return DELIVERED if injector.inject(text) else FAILED
 
 
+class InboxBackend:
+    """The runner's inbox: put a row, poke the socket, report `queued`.
+    `delivered` is claimed only when `wait=True` and the runner marks
+    the row done inside the timeout; a silent runner is `queued`,
+    never `delivered` and never `failed`, because nothing is known."""
+
+    def send(self, home, item, *, wait=True, timeout=30.0, **opts):
+        import time
+        from cousin_lib.runner import wake
+        from cousin_lib.runner.inbox import Inbox
+        inbox = Inbox(home)
+        inbox_id = inbox.put(item)
+        wake.poke(home)
+        if not wait:
+            return QUEUED
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            row = inbox.get(inbox_id)
+            if row and row["state"] == "done":
+                return DELIVERED if row["outcome"] == DELIVERED else FAILED
+            time.sleep(0.05)
+        return QUEUED
+
+
+def _runner_kind(home):
+    import tomllib
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return (data.get("agent") or {}).get("runner")
+
+
 def backend_for(home):
-    """The delivery backend for a cousin. tmux is the only one yet; the
-    runner's inbox arrives with `[agent] runner` in cousin.toml."""
+    """tmux unless cousin.toml [agent] runner names a runner."""
+    if _runner_kind(home) in ("sdk", "fake"):
+        return InboxBackend()
     return TmuxBackend()
 
 

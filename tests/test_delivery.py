@@ -11,6 +11,7 @@ from cousin_lib.server.injection import compose_delivery
 import stat
 from unittest import mock
 from tests.server.test_injection import _FAKE_TMUX
+from tests._hermetic import HermeticCase
 from types import SimpleNamespace
 
 
@@ -373,6 +374,38 @@ class TestFlipAndBootUseTheFacade(unittest.TestCase):
             " follows. Do not announce the restart.\n"
             "BOOT PACKET FOR COUSIN: wren")
         self.assertEqual((kw["tmux_bin"], kw["socket"]), ("t", None))
+
+
+class TestInboxBackend(HermeticCase):
+    def setUp(self):
+        super().setUp()
+        from tests.runner._home import temp_home
+        self.home = temp_home(self, runner="fake")
+
+    def test_backend_for_picks_the_inbox_for_a_runner_cousin(self):
+        self.assertEqual(type(delivery.backend_for(self.home)).__name__, "InboxBackend")
+
+    def test_backend_for_keeps_tmux_when_no_runner_is_set(self):
+        (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+        self.assertEqual(type(delivery.backend_for(self.home)).__name__, "TmuxBackend")
+
+    def test_send_without_wait_puts_pokes_and_says_queued(self):
+        from cousin_lib.runner.inbox import Inbox
+        out = delivery.deliver(self.home, Item("operator:priya", "chat", "hi", sender="Priya"), wait=False)
+        self.assertEqual(out, delivery.QUEUED)
+        self.assertEqual(Inbox(self.home).pending(), 1)
+
+    def test_send_with_wait_reports_delivered_when_a_runner_finishes_the_row(self):
+        from cousin_lib.runner.fake import FakeRunner
+        r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5)); r.start()
+        out = delivery.deliver(self.home, Item("operator:priya", "chat", "hi", sender="Priya"),
+                               wait=True, timeout=5.0)
+        self.assertEqual(out, delivery.DELIVERED)
+
+    def test_send_with_wait_and_no_runner_times_out_to_queued_not_failed(self):
+        out = delivery.deliver(self.home, Item("operator:priya", "chat", "hi", sender="Priya"),
+                               wait=True, timeout=0.3)
+        self.assertEqual(out, delivery.QUEUED)
 
 
 if __name__ == "__main__":

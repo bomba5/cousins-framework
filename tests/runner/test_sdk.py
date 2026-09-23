@@ -36,15 +36,26 @@ def result(num_turns=1, cost=0.01, is_error=False, session="s-1"):
 
 
 class ScriptedClient:
-    """One `script` per query: a list of messages receive_response yields.
-    `delay` seconds between messages lets a test poke mid-turn."""
+    """Models the real client: ONE message stream for the client's life (the
+    scripts concatenated in order), and `receive_response()` yields from it
+    up to and including the next ResultMessage, then stops; the next call
+    continues where the last one left off. A cancelled read consumes nothing
+    (the pop happens after the delay). Markers:
+      "HANG"               blocks until interrupt() is called, then the stream
+                           continues (a turn gone silent)
+      "WAIT_FOR_INTERRUPT" blocks until interrupted, then yields a result
+      "END"                the CLI died: this and every later read ends with
+                           no ResultMessage
+    An empty stream answers an unscripted query with one result().
+    `delay` seconds before every element lets a test poke mid-turn."""
     def __init__(self, options, scripts, delay=0.0):
         self.options = options
-        self.scripts = list(scripts)
+        self.stream = [msg for script in scripts for msg in script]
         self.delay = delay
         self.queries = []
         self.interrupts = 0
         self.connected = False
+        self.ended = False
 
     async def connect(self, prompt=None):
         self.connected = True
@@ -65,16 +76,25 @@ class ScriptedClient:
         self.interrupts += 1
 
     async def receive_response(self):
-        script = self.scripts.pop(0) if self.scripts else [result()]
-        for msg in script:
+        while not self.ended:
+            if not self.stream:
+                self.stream.append(result())
             if self.delay:
-                await __import__("asyncio").sleep(self.delay)
-            if msg == "WAIT_FOR_INTERRUPT":
-                while self.interrupts == 0:
-                    await __import__("asyncio").sleep(0.02)
-                yield result(is_error=False)
-                return
+                await asyncio.sleep(self.delay)
+            msg = self.stream.pop(0)
+            if isinstance(msg, str):
+                if msg == "END":
+                    self.ended = True
+                    return
+                baseline = self.interrupts if msg == "HANG" else 0
+                while self.interrupts <= baseline:
+                    await asyncio.sleep(0.02)
+                if msg == "HANG":
+                    continue
+                msg = result(is_error=False)  # WAIT_FOR_INTERRUPT
             yield msg
+            if isinstance(msg, ResultMessage):
+                return
 
 
 def _wait(pred, timeout=5.0):
@@ -194,11 +214,9 @@ class TestSdkRunner(HermeticCase):
             self.assertTrue(aiter, "query() takes a str or an async iterable")
 
     def test_a_hung_stream_times_out_and_fails_the_row(self):
-        class Hung(ScriptedClient):
-            async def receive_response(self):
-                yield init_msg()
-                await asyncio.sleep(3600)
-        r = SdkRunner(self.home, client_factory=lambda o: Hung(o, []), turn_timeout_s=0.3)
+        # "HANG": silent until interrupted, as a real CLI is (the drain's interrupt)
+        r = SdkRunner(self.home, client_factory=lambda o: ScriptedClient(o, [[init_msg(), "HANG"]]),
+                      turn_timeout_s=0.3)
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         receipt = r.enqueue(Item("operator:priya", "chat", "x", sender="Priya"))
@@ -207,6 +225,100 @@ class TestSdkRunner(HermeticCase):
                               timeout=2.0))
         self.assertTrue(_wait(lambda: r.state() == "idle", timeout=2.0))
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
+
+    def test_a_stream_that_ends_without_a_result_fails_the_turn(self):
+        r, made = self._runner([[init_msg(), assistant(text="partial"), "END"]])
+        r.start()
+        receipt = r.enqueue(Item("operator:priya", "chat", "x", sender="Priya"))
+        self.assertTrue(_wait(lambda: any("without a result" in e["payload"].get("error", "")
+                                          for e in r.events() if e["kind"] == "error")))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertIn("errored", [e["payload"]["to"] for e in r.events() if e["kind"] == "state"])
+        self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
+        res = [e for e in r.events() if e["kind"] == "result"]
+        self.assertEqual(len(res), 1)
+        self.assertTrue(res[0]["payload"]["is_error"])
+
+    def test_a_timed_out_turn_is_drained_so_the_next_turn_is_in_sync(self):
+        clients = []
+
+        def factory(options):
+            clients.append(ScriptedClient(options, [
+                [init_msg(), assistant(tool="Bash"), "HANG", result(num_turns=1, cost=0.01)],
+                [assistant(text="second"), result(num_turns=7, cost=0.07)]]))
+            return clients[-1]
+        r = SdkRunner(self.home, client_factory=factory, turn_timeout_s=0.3)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: any("exceeded" in e["payload"].get("error", "")
+                                          for e in r.events() if e["kind"] == "error"), timeout=2.0))
+        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=2.0))
+        b = r.enqueue(Item("operator:priya", "chat", "second", sender="Priya"))
+        self.assertTrue(_wait(lambda: sum(e["kind"] == "result" for e in r.events()) == 2))
+        second = [e for e in r.events() if e["kind"] == "result"][1]["payload"]
+        self.assertEqual(second["inbox_ids"], [b.inbox_id])
+        self.assertEqual((second["is_error"], second["num_turns"], second["total_cost_usd"]),
+                         (False, 7, 0.07))
+        self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
+        self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
+        self.assertEqual(len(clients), 1, "a drained stream needs no reconnect")
+        self.assertEqual(clients[0].interrupts, 1)
+
+    def test_a_failed_drain_reconnects_and_resumes(self):
+        clients = []
+
+        def factory(options):
+            if not clients:
+                scripts = [[init_msg(session="s-orig"), "HANG", "HANG"]]
+            else:
+                scripts = [[init_msg(session="s-orig"), assistant(text="back"),
+                            result(num_turns=3, session="s-orig")]]
+            clients.append(ScriptedClient(options, scripts))
+            return clients[-1]
+        r = SdkRunner(self.home, client_factory=factory, turn_timeout_s=0.3,
+                      drain_timeout_s=0.3)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: any(e["payload"].get("error", "").startswith("reconnected:")
+                                          for e in r.events() if e["kind"] == "error"), timeout=3.0))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertEqual(len(clients), 2)
+        self.assertIsNone(clients[0].options.resume)
+        self.assertEqual(clients[1].options.resume, "s-orig")
+        self.assertFalse(clients[0].connected)
+        reconnect = next(e for e in r.events() if e["kind"] == "error"
+                         and e["payload"]["error"].startswith("reconnected:"))
+        self.assertEqual(reconnect["payload"]["resumed"], "s-orig")
+        self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
+        b = r.enqueue(Item("operator:priya", "chat", "again", sender="Priya"))
+        self.assertTrue(_wait(lambda: sum(e["kind"] == "result" for e in r.events()) == 2))
+        second = [e for e in r.events() if e["kind"] == "result"][1]["payload"]
+        self.assertEqual((second["inbox_ids"], second["is_error"], second["num_turns"]),
+                         ([b.inbox_id], False, 3))
+        self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
+
+    def test_a_stale_interrupt_does_not_kill_the_next_turn(self):
+        r, made = self._runner([[init_msg(), result()],
+                                [assistant(text="slow"), assistant(text="more"), result()]],
+                               delay=0.15)
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "one", sender="Priya"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
+        stale = r._turn_seq
+        b = r.enqueue(Item("operator:priya", "chat", "two", sender="Priya"))
+        self.assertTrue(_wait(lambda: r._turn_seq == stale + 1 and r.state() == "running"))
+        # what a late interrupt() queued during turn 1 does when it finally runs
+        asyncio.run_coroutine_threadsafe(r._interrupt_turn(stale), r._loop).result(timeout=2)
+        self.assertTrue(_wait(lambda: sum(e["kind"] == "result" for e in r.events()) == 2))
+        self.assertEqual(made["client"].interrupts, 0)
+        last = [e for e in r.events() if e["kind"] == "result"][-1]["payload"]
+        self.assertEqual(last["inbox_ids"], [b.inbox_id])
+        self.assertFalse(last["interrupted"])
+        self.assertTrue(any(e["kind"] == "system"
+                            and e["payload"].get("subtype") == "interrupt_dropped"
+                            for e in r.events()))
 
     def test_module_imports_without_the_sdk_installed(self):
         import importlib, sys

@@ -3,6 +3,13 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.9.1 - 2026-09-23
+
+### Changed
+- `claude-opus-5-5` heads the built-in model catalogue (`DEFAULT_MODELS`),
+  probed live on five running cousins the day it was released. The spawn
+  dialog's default follows the catalogue head when `default_model` is unset.
+
 ## 1.9.0 - 2026-09-22
 
 ### Fixed

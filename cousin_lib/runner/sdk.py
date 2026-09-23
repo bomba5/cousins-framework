@@ -168,6 +168,8 @@ class SdkRunner:
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
                                               registry=registry)
+        from cousin_lib.runner.session_store import SqliteSessionStore
+        self.session_store = SqliteSessionStore(self.home)
 
     def _identity(self):
         """(slug, name) from cousin.toml; the directory name when it lacks them."""
@@ -191,11 +193,19 @@ class SdkRunner:
                                        machine=self.machine, stream=self.stream,
                                        policy=self.policy, lock=self._lock,
                                        body_for_prompt=self._body_for_prompt)
+        # The composed prompt (prompt.py): byte-stable across generations,
+        # so a rollover and a restart keep the cache (phase 0 finding 3).
+        # With snapshot=True a resumed session keeps the prompt it first
+        # recorded, so an edit to identity files lands at the next rollover.
+        from cousin_lib.runner import prompt
+        system_prompt = prompt.system_prompt_option(self.home, root=self.root,
+                                                    registry=self.tool_context.registry)
         # replay-user-messages: the echo is how a turn knows which rows the
         # model actually took in (see the module docstring).
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=resume,
+                                      system_prompt=system_prompt, session_store=self.session_store,
                                       mcp_servers={"cousin": server}, hooks=hook_table,
                                       extra_args={"replay-user-messages": None})
 

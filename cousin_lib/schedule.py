@@ -211,6 +211,9 @@ def format_entries(entries):
     joined result reproduces the old per-row `print()` loop
     byte-for-byte."""
     if not entries:
+        # _cmd_list never reaches this: its own "no jobs for..." message
+        # runs first. This branch is for a tool-transport caller that
+        # has no CLI-side empty-case wording of its own.
         return "no scheduled prompts"
     lines = []
     for e in entries:

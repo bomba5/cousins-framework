@@ -184,6 +184,15 @@ class TestTokenFlow(LoginCase):
         self.assertFalse(out["ok"])
         self.assertIn("Invalid code", out["reason"])
 
+    def test_a_stall_after_the_token_showed_never_reports_the_token(self):
+        fake = FakePty([TOKEN_SCREENS[0],
+                        "\nYour OAuth token (valid for 1 year):\nsk-ant-oat01-FAKETOKEN"])
+        out = accounts.token_flow(self.acc["nightly"], self.root, relay=self.relayed.append,
+                                  await_code=lambda t: CODE, spawn=fake)
+        self.assertFalse(out["ok"])
+        self.assertNotIn("FAKETOKEN", json.dumps(out))
+        self.assertFalse((self.root / ".secrets" / "accounts" / "nightly").exists())
+
 
 class TestCapture(LoginCase):
     def test_arm_store_take_is_one_shot_private_and_outside_every_home(self):

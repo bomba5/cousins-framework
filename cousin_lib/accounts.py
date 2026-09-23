@@ -372,9 +372,18 @@ def _pty(spawn):
     return PtySession
 
 
+_ANY_TOKEN = re.compile(r"sk-ant-\S*")
+
+
 def _last_words(session, code=None, n=300):
-    words = " ".join(session.text()[-n:].split())
-    return words.replace(code, "[code]") if code else words
+    """The screen's tail for a failure line: the pasted code masked (the
+    pty echoes it) and anything token-shaped masked, so a flow that stalls
+    after the token showed never carries it into a reason."""
+    words = " ".join(session.text()[-(n + 512):].split())   # masked BEFORE the cut, so a
+    words = _ANY_TOKEN.sub("[token]", words)                  # cut cannot split a token
+    if code:
+        words = words.replace(code, "[code]")
+    return words[-n:]
 
 
 def _run_code_flow(argv, env, *, relay, await_code, spawn, timeout, until):

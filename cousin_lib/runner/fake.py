@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 
-from cousin_lib.delivery import DELIVERED, QUEUED, Item
+from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import wake
 from cousin_lib.runner.base import Receipt
 from cousin_lib.runner.inbox import Inbox
@@ -83,11 +83,19 @@ class FakeRunner:
     def _loop(self):
         with wake.Listener(self.home) as listener:
             while not self._stop.is_set():
-                rows = self.inbox.claim(limit=1, claimant=self.session_id)
+                try:
+                    rows = self.inbox.claim(limit=1, claimant=self.session_id)
+                except Exception as exc:  # noqa: BLE001 - a store failure is never silence
+                    self._fail_turn([], exc)
+                    time.sleep(0.2)  # a wedged store must not spin the loop
+                    continue
                 if not rows:
                     listener.wait(timeout=0.2)
                     continue
-                self._turn(rows[0])
+                try:
+                    self._turn(rows[0])
+                except Exception as exc:  # noqa: BLE001 - last-resort net around _turn itself
+                    self._fail_turn([rows[0]], exc)
 
     def _fold_midturn(self, consumed):
         """Claim operator/person chat rows that arrived during the turn
@@ -99,34 +107,59 @@ class FakeRunner:
             else:
                 self.inbox.requeue(row["id"])
 
+    def _fail_turn(self, consumed, exc):
+        """A turn's failure path: never silence (global constraint). Used
+        both by `_turn`'s own try/except (the normal case, with whatever
+        the turn had folded into `consumed`) and by `_loop`'s outer guards
+        (a store failure with nothing claimed, or an exception that
+        escaped `_turn` before it entered its own try) - shared so the
+        error/state/result bookkeeping is written once, not per catch
+        site."""
+        message = "%s: %s" % (type(exc).__name__, exc)
+        self.stream.append("error", {"error": message})
+        with self._lock:
+            if self.machine.state != "errored":
+                self.machine.to("errored", message)
+        for row in consumed:
+            self.inbox.done(row["id"], FAILED, message)
+        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                      "interrupted": False,
+                                      "is_error": True})
+        with self._lock:
+            if self.machine.state == "errored":
+                self.machine.to("idle", "recovered")
+
     def _turn(self, first):
         consumed = [first]
         self._interrupt.clear()
-        with self._lock:
-            self.machine.to("running", "turn")
-        self.stream.append("turn_start", {"inbox_ids": [first["id"]],
-                                          "bodies": [first["body"]],
-                                          "thread_id": first["thread_id"]})
-        deadline = time.monotonic() + self.turn_seconds
-        interrupted = False
-        for step in self.script:
-            self.stream.append("tool", {"name": "Bash" if step == "tool" else step,
-                                        "input": {"command": "true"}})
-            while time.monotonic() < deadline:
-                if self._interrupt.is_set():
-                    interrupted = True
+        try:
+            with self._lock:
+                self.machine.to("running", "turn")
+            self.stream.append("turn_start", {"inbox_ids": [first["id"]],
+                                              "bodies": [first["body"]],
+                                              "thread_id": first["thread_id"]})
+            deadline = time.monotonic() + self.turn_seconds
+            interrupted = False
+            for step in self.script:
+                self.stream.append("tool", {"name": "Bash" if step == "tool" else step,
+                                            "input": {"command": "true"}})
+                while time.monotonic() < deadline:
+                    if self._interrupt.is_set():
+                        interrupted = True
+                        break
+                    self._fold_midturn(consumed)
+                    time.sleep(0.02)
+                if interrupted:
                     break
-                self._fold_midturn(consumed)
-                time.sleep(0.02)
-            if interrupted:
-                break
-        self._fold_midturn(consumed)
-        outcome = DELIVERED
-        for row in consumed:
-            self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)
-        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                      "interrupted": interrupted,
-                                      "is_error": False})
-        with self._lock:
-            if self.machine.state == "running":
-                self.machine.to("idle", "turn done")
+            self._fold_midturn(consumed)
+            outcome = DELIVERED
+            for row in consumed:
+                self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)
+            self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                          "interrupted": interrupted,
+                                          "is_error": False})
+            with self._lock:
+                if self.machine.state == "running":
+                    self.machine.to("idle", "turn done")
+        except Exception as exc:  # noqa: BLE001 - a raising turn is recorded, not lost
+            self._fail_turn(consumed, exc)

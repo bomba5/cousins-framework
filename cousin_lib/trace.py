@@ -19,12 +19,14 @@ import sqlite3
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 from cousin_lib.config import CousinConfig, FrameworkConfig
 
 
-def _connect():
-    path = FrameworkConfig.from_env().root / "data" / "trace-ledger.db"
+def _connect(root=None):
+    base = Path(root) if root is not None else FrameworkConfig.from_env().root
+    path = base / "data" / "trace-ledger.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=2.0)
     con.execute("PRAGMA journal_mode=WAL")
@@ -67,10 +69,10 @@ def log_call(cousin, tool, *, args_summary=None, result_summary=None):
         return None
 
 
-def recent_calls(cousin, *, n=30, since_hours=24):
+def recent_calls(cousin, *, n=30, since_hours=24, root=None):
     cutoff = int(time.time()) - since_hours * 3600
     try:
-        con = _connect()
+        con = _connect(root)
     except Exception:
         return []
     try:
@@ -89,10 +91,10 @@ def recent_calls(cousin, *, n=30, since_hours=24):
     ]
 
 
-def summary_for_boot(cousin, *, n=30, since_hours=24):
+def summary_for_boot(cousin, *, n=30, since_hours=24, root=None):
     """The boot layer's view: newest first, one line per call, or the
     idle marker the degraded rules already know is legitimate."""
-    rows = recent_calls(cousin, n=n, since_hours=since_hours)
+    rows = recent_calls(cousin, n=n, since_hours=since_hours, root=root)
     if not rows:
         return "(no substantive tool traces in last %dh)" % since_hours
     lines = []

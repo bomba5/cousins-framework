@@ -107,8 +107,60 @@ def bump_generation(home):
     return generation
 
 
-def _law_path():
-    return FrameworkConfig.from_env().root / "config" / "law.md"
+def fit(sections, budgets, order, total_max):
+    """The budget engine. Every layer `budgets` names is cut to its
+    maximum; then victims in `order`, first to last, are cut to their
+    minimum, one per pass, until the total fits or every victim is at
+    its minimum. Pure: returns a new dict and never mutates `sections`;
+    a layer `budgets` does not name is never touched (the runner's law).
+    The module docstring's three rules hold here, and both the boot
+    packet and the runner's state digest call this, so they cannot drift."""
+    out = dict(sections)
+    for name, (_min, max_chars) in budgets.items():
+        if name in out and len(out[name]) > max_chars:
+            out[name] = _truncate(out[name], max_chars, name)
+    while sum(len(v) for v in out.values()) > total_max:
+        for victim in order:
+            if victim not in out or victim not in budgets:
+                continue
+            if len(out[victim]) > budgets[victim][0]:
+                out[victim] = _truncate(out[victim], budgets[victim][0],
+                                        victim + " (overflow)")
+                break
+        else:
+            break  # everything at minimum; cannot shrink further
+    return out
+
+
+def _root(root=None):
+    return Path(root) if root is not None else FrameworkConfig.from_env().root
+
+
+def _law_path(root=None):
+    return _root(root) / "config" / "law.md"
+
+
+def law_text(root=None):
+    """The law as written; "" when the install has none."""
+    return _read(_law_path(root))
+
+
+def shared_parts(root=None):
+    """(rules, index) of the canonical shared tier, every cousin's
+    regardless of its own memory scope. A `kind: rule` entry is quoted
+    in full (an operator rule a cousin never sees is not followed);
+    every other entry is one index line. The runner puts the rules in
+    its byte-stable system prompt and the index in the digest: they
+    change at different rates. `root=None` reads the environment's root."""
+    base = _root(root) / "shared"
+    rules, index = [], []
+    for path in sorted(base.glob("*.md")) if base.is_dir() else []:
+        fields, body = _frontmatter(_read(path))
+        if fields.get("kind") == "rule":
+            rules.append("### %s\n%s" % (path.stem, body.strip()))
+        else:
+            index.append("- `%s`: %s" % (path.name, fields.get("description") or path.stem))
+    return rules, index
 
 
 TOOL_SURFACE_ABSENT = (
@@ -298,21 +350,8 @@ def _frontmatter(text):
 
 
 def _shared():
-    """The canonical shared tier, every cousin's regardless of its own
-    memory scope (scope governs nominating, not reading). An entry
-    whose frontmatter says `kind: rule` is quoted in full: it is an
-    operator rule the fleet follows, and a rule a cousin never sees is
-    not followed. Every other entry is one index line; the cousin reads
-    it with `cousin-shared read <file>` when it is relevant."""
-    root = FrameworkConfig.from_env().root / "shared"
-    rules, index = [], []
-    for path in sorted(root.glob("*.md")) if root.is_dir() else []:
-        fields, body = _frontmatter(_read(path))
-        if fields.get("kind") == "rule":
-            rules.append("### %s\n%s" % (path.stem, body.strip()))
-        else:
-            index.append("- `%s`: %s" % (
-                path.name, fields.get("description") or path.stem))
+    """The boot packet's shared layer: the rules, then the index."""
+    rules, index = shared_parts()
     parts = []
     if rules:
         parts.append("Operator rules every cousin follows:")
@@ -442,19 +481,8 @@ def assemble(slug, home, *, generation=None):
     }
     degraded = [k for k, v in sections.items()
                 if _is_degraded(k, v, sections)]
-    for name, (_min, max_chars) in LAYER_BUDGETS.items():
-        if len(sections[name]) > max_chars:
-            sections[name] = _truncate(sections[name], max_chars, name)
     total_max = TOTAL_MAX_CHARS - len(REQUIRED_BOOT_ACTIONS) - 600
-    while sum(len(v) for v in sections.values()) > total_max:
-        for victim in TRUNCATE_ORDER:
-            min_chars = LAYER_BUDGETS[victim][0]
-            if len(sections[victim]) > min_chars:
-                sections[victim] = _truncate(
-                    sections[victim], min_chars, victim + " (overflow)")
-                break
-        else:
-            break  # everything at minimum; cannot shrink further
+    sections = fit(sections, LAYER_BUDGETS, TRUNCATE_ORDER, total_max)
     body = [
         "BOOT PACKET FOR COUSIN: %s" % slug,
         "Generation: %d" % generation,

@@ -123,17 +123,22 @@ that names the key, never a secret:
 
 The secret files default to `.secrets/accounts/<name>` because the checkout's
 `.gitignore` covers `.secrets/`: a secret is never visible to git and never
-reaches a published tree. Only the runner reads a secret file, when it
-connects, and as strictly as `cousin-auth` reads its key file: the directory
-must be a 0700 directory of yours, the file a regular 0600 file of yours, and
-a symlink is refused. A file open to group or others refuses the start (exit
-2, the message names the file and the `chmod`). A missing secret file is a
-login still to do, not a broken configuration.
+reaches a published tree. A secret file is read (by the runner when it
+starts and connects, and by `cousin-account status`) as strictly as
+`cousin-auth` reads its key file: the directory must be a 0700 directory of
+yours, the file a regular 0600 file of yours, and a symlink is refused. A file
+open to group or others refuses the start (exit 2, the message names the file
+and the `chmod`). A missing secret file is exit 2 as well, until the login
+flow lands.
 
-The environment each kind gives the session (`cousin-runner` first removes
+The environment each kind gives the session. `cousin-runner` first removes
+every variable that can pick the credentials or the provider from its own
+environment, so nothing is inherited from the shell that started it:
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
-`CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CONFIG_DIR` from its own environment, so
-nothing is inherited from the shell that started it):
+`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `AWS_BEARER_TOKEN_BEDROCK`,
+`ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`,
+`ANTHROPIC_AWS_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`
+and `CLAUDE_CODE_USE_FOUNDRY`.
 
 | kind | sets | why |
 |---|---|---|
@@ -155,9 +160,7 @@ that way either.
 Resume per kind: a `claude-login` account refreshes its own token, so a
 restarted runner resumes its session through the CLI's own `--resume`; a
 `claude-token` or `anthropic-key` account never refreshes, so it resumes from
-the runner's session store. The `apiKeySource` a session reports at start is
-the check that the account took effect (`none` for the two login kinds,
-`ANTHROPIC_API_KEY` for the key kind), not what picks the resume path.
+the runner's session store.
 
 `cousin-account list` shows every account (name, kind, where its credentials
 live, never a secret); `cousin-account status <name>` says whether it is
@@ -611,10 +614,9 @@ item, not that it answered it: the rows of an interrupted turn are delivered.
 cousin runs on, one of `config/accounts.toml`'s (see
 [accounts.toml](#accountstoml)); with none, the cousin runs on `host`, the
 host's default login. The account is the only source of credentials:
-`cousin-runner` removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-`ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CONFIG_DIR` from
-its own environment before the session starts, so nothing is inherited from
-the shell, and checks the account before it takes the cousin's lock (an
+`cousin-runner` removes every auth and provider variable (the list is under
+[accounts.toml](#accountstoml)) from its own environment before the session
+starts, so nothing is inherited from the shell, and checks the account before it takes the cousin's lock (an
 unknown account, or a secret file that is missing, open to others or
 malformed, is exit 2). The terms risk of running a cousin on a login is the
 user's.

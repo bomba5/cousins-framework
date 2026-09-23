@@ -174,6 +174,17 @@ class TestEnvironment(AccountsCase):
             accounts.preflight(accounts.load(self.root)["metered"], self.root)
         self.assertIn("bill the login", str(cm.exception))
 
+    def test_the_missing_secret_hint_is_worded_per_kind(self):
+        self.write()
+        acc = accounts.load(self.root)
+        with self.assertRaises(accounts.SecretMissing) as cm:
+            accounts.account_env(acc["nightly"], self.root)
+        self.assertIn("cousin-account token nightly", str(cm.exception))
+        with self.assertRaises(accounts.SecretMissing) as cm:
+            accounts.account_env(acc["metered"], self.root)
+        self.assertNotIn("cousin-account token", str(cm.exception))
+        self.assertIn("mode 0600", str(cm.exception))
+
     def test_repr_never_shows_a_secret(self):
         acc = accounts.Account("x", "anthropic-key", None, None, True, secret_value="key-inline")
         self.assertNotIn("key-inline", repr(acc))
@@ -232,6 +243,42 @@ class TestStatusAndCheck(AccountsCase):
         rc, line = accounts.check(self.home, self.root,
                                   run=self.run_with({"loggedIn": True, "authMethod": "claude.ai"}))
         self.assertEqual(rc, 4); self.assertIn("cousin-account token nightly", line)
+
+
+class TestWritePrivate(AccountsCase):
+    def test_a_stale_readable_tmp_ends_0600(self):
+        path = self.root / "data" / "accounts" / "fleet" / "login.json"
+        path.parent.mkdir(parents=True)
+        tmp = path.with_name(".%s.tmp" % path.name)
+        tmp.write_text("stale"); os.chmod(tmp, 0o644)
+        accounts._write_private(path, {"t": "fake"})
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(path.read_text()), {"t": "fake"})
+        self.assertFalse(tmp.exists())
+
+    def test_a_symlink_at_the_tmp_path_is_refused(self):
+        path = self.root / "data" / "accounts" / "fleet" / "login.json"
+        path.parent.mkdir(parents=True)
+        target = self.root / "elsewhere"
+        target.write_text("untouched")
+        tmp = path.with_name(".%s.tmp" % path.name)
+        tmp.symlink_to(target)
+        orig_unlink = os.unlink
+
+        def keep_the_link(p, *a, **kw):   # a racer re-plants it after the stale unlink
+            orig_unlink(p, *a, **kw)
+            if pathlib.Path(p) == tmp and not os.path.lexists(tmp):
+                tmp.symlink_to(target)
+        with mock.patch("os.unlink", keep_the_link):
+            with self.assertRaises(OSError):
+                accounts._write_private(path, {"t": "fake"})
+        self.assertEqual(target.read_text(), "untouched")
+        self.assertFalse(path.exists())
+
+    def test_the_parent_is_created_0700(self):
+        path = self.root / "data" / "accounts" / "newone" / "login.json"
+        accounts._write_private(path, {"t": "fake"})
+        self.assertEqual(os.stat(path.parent).st_mode & 0o777, 0o700)
 
 
 class TestCli(AccountsCase):

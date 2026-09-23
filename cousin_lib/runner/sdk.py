@@ -151,7 +151,6 @@ class SdkRunner:
                        if api_key else accounts.Account(accounts.HOST, "claude-login", None, None,
                                                         implicit=True))
         self.account = account
-        self.api_key = account.secret_value if account.kind == "anthropic-key" else None
         self.model = model
         self.cwd = Path(cwd) if cwd else self.home
         self.idle_timeout_s = float(idle_timeout_s)

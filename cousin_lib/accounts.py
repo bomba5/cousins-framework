@@ -21,8 +21,15 @@ from cousin_lib.trace import traced_cli
 KINDS = ("claude-login", "claude-token", "anthropic-key")
 RESERVED_KINDS = ("opencode",)
 HOST = "host"
+# Every variable that can pick the credentials or the provider the CLI
+# uses: the CLI's own list of auth variables, the base URL, the config dir
+# and the provider switches. cousin-runner removes them all from its own
+# environment, so the account is the only source.
 AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
-             "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR")
+             "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR",
+             "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_FOUNDRY_API_KEY",
+             "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_AWS_API_KEY",
+             "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
 # Set for the two secret kinds: the bundled CLI then strips ANTHROPIC_API_KEY,
 # CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_AUTH_TOKEN and the cloud credential
 # variables (AWS, Google, Azure) from every subprocess it starts, the
@@ -153,18 +160,18 @@ def for_cousin(home, root):
     return known[name]
 
 
-def _read_secret(path):
-    """One line from a secret file, read as strictly as agent_auth.read_key
+def _read_secret(account):
+    """One line from the account's secret file, read as strictly as agent_auth.read_key
     reads a key, by the same code: the directory a 0700 directory of ours,
     the file a regular 0600 file of ours, no symlink. A missing file is
     SecretMissing (a login to do); anything else is AccountsError (exit 2
     at the runner's start). The message never holds the content."""
     from cousin_lib import agent_auth
+    path = account.secret_file
     try:
         raw = agent_auth.read_private_file(
             path, what="secret file",
-            missing_hint=" (mint it with `cousin-account token`, or write it: mode 0600,"
-                         " directory 0700)")
+            missing_hint=" (%s)" % _missing_hint(account))
     except agent_auth.MissingFile as err:
         raise SecretMissing(str(err))
     except agent_auth.AuthError as err:
@@ -202,14 +209,14 @@ def preflight(account, root):
         return
     _login_free_dir(root, account)
     if account.secret_value is None:
-        _read_secret(account.secret_file)
+        _read_secret(account)
 
 
 def account_env(account, root):
     """The variables to SET for this account (after scrub)."""
     if account.kind == "claude-login":
         return {} if account.config_dir is None else {"CLAUDE_CONFIG_DIR": str(account.config_dir)}
-    secret = account.secret_value or _read_secret(account.secret_file)
+    secret = account.secret_value or _read_secret(account)
     var = "CLAUDE_CODE_OAUTH_TOKEN" if account.kind == "claude-token" else "ANTHROPIC_API_KEY"
     return {var: secret, "CLAUDE_CONFIG_DIR": str(_login_free_dir(root, account)),
             **SUBPROCESS_SCRUB}
@@ -259,6 +266,14 @@ def status(account, root, *, run=subprocess.run):
         return {"error": "%s: %s" % (type(err).__name__, err)}
 
 
+def _missing_hint(account):
+    """How a missing secret gets written, per kind (login_action's wording)."""
+    if account.kind == "claude-token":
+        return "mint it with `cousin-account token %s`, or write it: mode 0600, directory 0700" \
+            % account.name
+    return "write the key to it: mode 0600, directory 0700"
+
+
 def login_action(account, via=None):
     """What the operator runs to fix this account's login. `cousin-account
     login` and `token` are Task 15's: until that task lands the line names
@@ -293,13 +308,33 @@ def _check_account(account, root, *, run=subprocess.run, via=None):
 
 
 def _write_private(path, data):
-    """Atomic JSON, 0600 from the first byte."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Atomic JSON, 0600 from the first byte, in a parent created 0700. A
+    stale tmp is removed first and the tmp is created with O_EXCL and
+    O_NOFOLLOW, so neither a leftover readable tmp nor a symlink planted at
+    the tmp path can carry the secret anywhere; the mode is set on the
+    descriptor whatever the umask. A failed write leaves no tmp behind."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_name(".%s.tmp" % path.name)
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        json.dump(data, fh)
-    os.replace(tmp, path)
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fd = None
+            json.dump(data, fh)
+        os.replace(tmp, path)
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 @traced_cli("cousin-account")

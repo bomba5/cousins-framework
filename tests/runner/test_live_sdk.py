@@ -1,7 +1,6 @@
 """The continuity proof, against the real SDK. Opt in: COUSIN_LIVE_SDK=1.
 Costs one small model call pair on whatever lane the machine has."""
 import os
-import time
 import unittest
 
 from cousin_lib import delivery
@@ -21,10 +20,15 @@ class TestLiveContinuity(HermeticCase):
         self.assertEqual(delivery.deliver(home, Item(
             "operator:priya", "chat", "Remember this code word and reply only OK: zebracorn",
             sender="Priya"), wait=True, timeout=120), delivery.DELIVERED)
+        first_result_seq = max(e["seq"] for e in r.events() if e["kind"] == "result")
         self.assertEqual(delivery.deliver(home, Item(
             "operator:priya", "chat", "What was the code word? Reply with the word only.",
             sender="Priya"), wait=True, timeout=120), delivery.DELIVERED)
-        texts = " ".join(e["payload"]["text"] for e in r.events() if e["kind"] == "text")
+        first_texts = [e for e in r.events()
+                       if e["kind"] == "text" and e["seq"] <= first_result_seq]
+        self.assertTrue(first_texts)
+        texts = " ".join(e["payload"]["text"] for e in r.events()
+                         if e["kind"] == "text" and e["seq"] > first_result_seq)
         self.assertIn("zebracorn", texts.lower())
         inits = [e for e in r.events() if e["kind"] == "session_init"]
         self.assertTrue(inits and inits[0]["payload"]["apiKeySource"] in ("none", "ANTHROPIC_API_KEY"))

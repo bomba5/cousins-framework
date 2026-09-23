@@ -3,6 +3,40 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.10.0 - 2026-09-23
+
+### Added
+- The runner: a cousin can run with no terminal. `cousin-runner --home <home>`
+  claims items from a durable thread-keyed inbox (`data/inbox.db`) in source
+  priority order, drives one long-lived Claude Agent SDK client, appends
+  every SDK message and state change to `data/stream/<session>.jsonl`, and
+  marks each item done by the turn that consumed it. A message that arrives
+  mid-turn from the operator is folded into the running turn and closed by
+  its one result, and only once the CLI has echoed it (`replay-user-messages`):
+  a row the CLI did not echo before the result belongs to the next turn and
+  is closed by that turn's result. `FakeRunner` is the reference
+  implementation; one contract suite (18 items: receipts, priority, folding,
+  interrupt, outcomes, failure recovery, stop, the event stream) tests both.
+  `cousin.toml [agent] runner = "sdk"` switches a cousin over and routes
+  `deliver()` to the inbox; every tmux cousin is untouched and the key is
+  experimental until phase 3 moves the producers. The auth lane is the
+  presence of the key in the session environment and nothing else (the
+  login lane scrubs `ANTHROPIC_*` from the runner's environment), and
+  `apiKeySource` from every session init is recorded so a cousin on the
+  wrong lane is visible. One runner per cousin, held by `run/runner.lock`.
+  A failed turn is drained to its result so the next turn starts in sync,
+  reconnecting with `resume` as the fallback; a runner that cannot connect
+  exits 3 for a supervisor to restart. Optional extra `sdk`.
+- Live proofs, opt in with `COUSIN_LIVE_SDK=1`: two related messages through
+  `deliver()` answered in one session, and a message sent during the final
+  answer neither lost nor misattributed.
+
+### Changed
+- `Inbox` grew `requeue`, `unfinished` and `get`; the master plan's locked
+  interfaces say so, and it takes the operator-accepted review: the twelve
+  unplaced parity rows placed, `max_age` as the flip cadence, phase 7 tasks
+  1-2 ticked, and the order 2, 3, 4, 7(3-6), 5, 6, 7(7-8), 8, 9, 10.
+
 ## 1.9.0 - 2026-09-22
 
 ### Fixed

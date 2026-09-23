@@ -55,6 +55,8 @@ cousin-mcp = "cousin_lib.mcp_server:mcp_main"
 # Serving MCP needs the reference SDK; everything else in the adapter
 # (registry, schemas, argv assembly, provisioning, approval) is stdlib.
 mcp = ["mcp>=1.2,<2"]
+# The runner's SDK lane. Imported lazily in cousin_lib/runner/sdk.py only.
+sdk = ["claude-agent-sdk>=0.2.157,<0.3"]
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

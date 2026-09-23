@@ -128,8 +128,8 @@ starts and connects, and by `cousin-account status`) as strictly as
 `cousin-auth` reads its key file: the directory must be a 0700 directory of
 yours, the file a regular 0600 file of yours, and a symlink is refused. A file
 open to group or others refuses the start (exit 2, the message names the file
-and the `chmod`). A missing secret file is exit 2 as well, until the login
-flow lands.
+and the `chmod`). A missing secret file is exit 2 as well: mint it with
+`cousin-account token <name>`, or write the key.
 
 The environment each kind gives the session. `cousin-runner` first removes
 every variable that can pick the credentials or the provider from its own
@@ -164,7 +164,19 @@ the runner's session store.
 
 `cousin-account list` shows every account (name, kind, where its credentials
 live, never a secret); `cousin-account status <name>` says whether it is
-logged in, with no model call. See [commands](commands.md).
+logged in, with no model call; `cousin-account login|token <name> --via
+<slug>` puts credentials into an account. See [commands](commands.md).
+
+The login code capture: while `cousin-account login|token <name> --via <slug>`
+waits for a code, it keeps `<root>/run/login-capture-<name>.json` (mode 0600
+in a 0700 directory, outside every cousin home, so no home's backup, git or
+chat history can hold a code; `.gitignore` covers `/run/`). The via cousin's
+operator's next chat message is written there and taken by the flow within
+half a second, then the file is gone: one code, once. When the window closes
+without a code, the file stays for an hour as a tombstone with no code in it,
+so a code that arrives late is still kept out of the chat and discarded.
+
+Until the phase 6 container every cousin runs as your Unix user, so the model's own commands can read the account secrets, the account login directories and a pending login capture. The refusal inside a cousin and the policy's deny pattern are guardrails against a cousin RUNNING `cousin-account`, not a boundary around those files.
 
 ## harness.toml
 

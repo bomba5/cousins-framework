@@ -22,7 +22,7 @@ from pathlib import Path
 from cousin_lib import chat_hooks, delivery, memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError)
-from cousin_lib.server.inbound import after_inbound_stored
+from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
 from cousin_lib.server.netguard import NetGuard
 from cousin_lib.server.storage import (ChatStore, is_operator,
                                        normalize_chat_user, save_data_uri)
@@ -327,6 +327,16 @@ class _ChatHandler(BaseHTTPRequestHandler):
         message = body.get("message")
         if not user or not message:
             raise _BadRequest("user and a non-empty message are required")
+        # R18: a login code is stored redacted and delivered to nobody;
+        # no recall, no marker, no hook ever sees it.
+        diverted = divert_login_code(self.chat_server.config, user, message)
+        if diverted is not None:
+            row = self._with_store(lambda store: store.add_message(
+                chat_user=normalize_chat_user(user), user=user, message=diverted,
+                msg_type="user"))
+            self._send_json(200, {"ok": True, "id": row["id"], "timestamp": row["timestamp"],
+                                  "diverted": True})
+            return
         reply_to = body.get("reply_to")
         row = self._with_store(lambda store: store.add_message(
             chat_user=normalize_chat_user(user),

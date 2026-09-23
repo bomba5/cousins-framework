@@ -33,7 +33,7 @@ from pathlib import Path
 
 from cousin_lib import chat_hooks, delivery
 from cousin_lib.config import CousinConfig, FrameworkConfig
-from cousin_lib.server.inbound import after_inbound_stored
+from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
 from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
                                        save_data_uri)
 
@@ -203,6 +203,17 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
     is a data: URI (as relay_inbound built it); it is decoded to
     <home>/chat/images/ and the row carries its path, the one
     convention the console and the outbound relay both read."""
+    config = CousinConfig.load(cfg.home)
+    # R18: a login code is stored redacted and delivered to nobody.
+    diverted = divert_login_code(config, user, message)
+    if diverted is not None:
+        store = ChatStore(cfg.home / "data" / "chat.db")
+        try:
+            store.add_message(chat_user=normalize_chat_user(user), user=user, message=diverted,
+                              msg_type="user")
+        finally:
+            store.close()
+        return
     path = save_data_uri(cfg.home, attachment, folder="images") \
         if attachment else None
     store = ChatStore(cfg.home / "data" / "chat.db")
@@ -215,7 +226,6 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
         )
     finally:
         store.close()
-    config = CousinConfig.load(cfg.home)
 
     def deliver(*, user, message, message_id, attachments=()):
         source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"

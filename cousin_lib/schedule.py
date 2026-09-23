@@ -141,84 +141,98 @@ def _slug():
     return CousinConfig.from_env().slug
 
 
-def _cmd_add(args):
-    try:
-        ts = parse_when(args.when)
-    except ValueError as err:
-        print("error: %s" % err, file=sys.stderr)
-        return 2
-    if ts <= datetime.now().timestamp():
-        print("error: target %s is in the past"
-              % datetime.fromtimestamp(ts).isoformat(), file=sys.stderr)
-        return 2
-    if not args.prompt.strip():
-        print("error: empty prompt", file=sys.stderr)
-        return 2
-    slug = _slug()
+# ------------------------------------------------ library (the one implementation)
+
+def add(slug, when, prompt, *, now=None):
+    """Schedule one prompt for a cousin. ValueError for a bad or past
+    time or an empty prompt. Returns the row as a dict."""
+    now_dt = now or datetime.now()
+    ts = parse_when(when, now=now_dt)           # raises ValueError itself
+    if ts <= now_dt.timestamp():
+        raise ValueError("target %s is in the past"
+                         % datetime.fromtimestamp(ts).isoformat())
+    if not (prompt or "").strip():
+        raise ValueError("empty prompt")
     conn = _db()
     try:
         cur = conn.execute(
-            "INSERT INTO scheduled_jobs (cousin, target_ts, prompt,"
-            " created_at) VALUES (?, ?, ?, ?)",
-            (slug, ts, args.prompt, int(datetime.now().timestamp())),
-        )
+            "INSERT INTO scheduled_jobs (cousin, target_ts, prompt, created_at)"
+            " VALUES (?, ?, ?, ?)", (slug, ts, prompt, int(now_dt.timestamp())))
         conn.commit()
-        print("scheduled #%d for %s at %s"
-              % (cur.lastrowid, slug,
-                 datetime.fromtimestamp(ts).isoformat(timespec="seconds")))
+        return {"id": cur.lastrowid, "cousin": slug, "target_ts": ts, "prompt": prompt}
     finally:
         conn.close()
+
+
+def list_entries(slug=None, *, include_fired=False):
+    conn = _db()
+    try:
+        sql = "SELECT id, cousin, target_ts, prompt, status FROM scheduled_jobs"
+        where, params = [], []
+        if slug:
+            where.append("cousin=?"); params.append(slug)
+        if not include_fired:
+            where.append("status='pending'")
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY target_ts"
+        return [dict(zip(("id", "cousin", "target_ts", "prompt", "status"), r))
+                for r in conn.execute(sql, params)]
+    finally:
+        conn.close()
+
+
+def cancel(job_id, *, slug=None):
+    conn = _db()
+    try:
+        sql = "UPDATE scheduled_jobs SET status='cancelled' WHERE id=? AND status='pending'"
+        params = [job_id]
+        if slug:
+            sql += " AND cousin=?"; params.append(slug)
+        cur = conn.execute(sql, params); conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def format_entries(entries):
+    if not entries:
+        return "no scheduled prompts"
+    return "\n".join("#%d %s %s: %s" % (
+        e["id"], e["status"], datetime.fromtimestamp(e["target_ts"]).isoformat(timespec="minutes"),
+        e["prompt"]) for e in entries)
+
+
+def _cmd_add(args):
+    try:
+        row = add(_slug(), args.when, args.prompt)
+    except ValueError as err:
+        print("error: %s" % err, file=sys.stderr)
+        return 2
+    print("scheduled #%d for %s at %s"
+          % (row["id"], row["cousin"],
+             datetime.fromtimestamp(row["target_ts"]).isoformat(timespec="seconds")))
     return 0
 
 
 def _cmd_list(args):
     slug = _slug()
-    conn = _db()
-    try:
-        if args.all:
-            rows = conn.execute(
-                "SELECT id, target_ts, status, prompt FROM scheduled_jobs"
-                " WHERE cousin=? ORDER BY target_ts DESC LIMIT 50",
-                (slug,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, target_ts, status, prompt FROM scheduled_jobs"
-                " WHERE cousin=? AND status='pending' ORDER BY target_ts",
-                (slug,),
-            ).fetchall()
-    finally:
-        conn.close()
-    if not rows:
+    entries = list_entries(slug, include_fired=args.all)
+    if not entries:
         print("no jobs for %s%s"
               % (slug, " (incl history)" if args.all else " pending"))
         return 0
-    for job_id, ts, status, prompt in rows:
-        eta = datetime.fromtimestamp(ts).isoformat(timespec="seconds")
-        snip = prompt[:60] + "..." if len(prompt) > 60 else prompt
-        print("#%-4d  %-9s  %s   %s" % (job_id, status, eta, snip))
+    print(format_entries(entries))
     return 0
 
 
 def _cmd_cancel(args):
     slug = _slug()
-    conn = _db()
-    try:
-        cur = conn.execute(
-            "UPDATE scheduled_jobs SET status='cancelled'"
-            " WHERE id=? AND cousin=? AND status='pending'",
-            (args.id, slug),
-        )
-        conn.commit()
-        affected = cur.rowcount
-    finally:
-        conn.close()
-    if affected == 0:
-        print("no pending job #%d for %s" % (args.id, slug),
-              file=sys.stderr)
-        return 1
-    print("cancelled #%d" % args.id)
-    return 0
+    if cancel(args.id, slug=slug):
+        print("cancelled #%d" % args.id)
+        return 0
+    print("no pending job #%d for %s" % (args.id, slug), file=sys.stderr)
+    return 1
 
 
 def _default_deliver(slug, prompt):

@@ -3,10 +3,10 @@
 The only module in the framework that imports claude_agent_sdk, and it
 does so lazily so the core stays importable without the extra. The
 client lives for the runner's life (phase 0 finding 4: it survives a
-ten-minute idle on both auth lanes). The auth lane is the presence of
-ANTHROPIC_API_KEY in `options.env` and nothing else; `apiKeySource`
-from every init message goes to the event stream so a cousin on the
-wrong lane is visible.
+ten-minute idle on both auth lanes). The credentials are the cousin's
+account (accounts.py), rendered into `options.env` and nothing else;
+`apiKeySource` from every init message goes to the event stream so a
+cousin whose account did not take effect is visible.
 
 One thread owns one asyncio loop, and that loop owns the client. The
 loop's shape is FakeRunner's (the reference runner): claim one row, run
@@ -130,7 +130,7 @@ class SdkRunner:
     # how long an idle loop sleeps when the doorbell is a Poller.
     poll_s = 0.2
 
-    def __init__(self, home, *, client_factory=None, api_key=None, model=None,
+    def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
                  cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None):
         self.home = Path(home)
@@ -139,7 +139,19 @@ class SdkRunner:
         # built directly sets whichever is unset
         from cousin_lib.runner.main import export_environment
         export_environment(self.home, overwrite=False)
-        self.api_key = api_key
+        # The account (accounts.py) is the only source of credentials:
+        # cousin-runner passes the cousin's; `api_key` builds the implicit
+        # key account (kept for callers and tests); neither is the host's
+        # default login. Whether one was given decides who picks the resume
+        # path (_resume_via_cli).
+        from cousin_lib import accounts
+        self._account_given = account is not None or bool(api_key)
+        if account is None:
+            account = (accounts.Account(self.home.name, "anthropic-key", None, None,
+                                        implicit=True, secret_value=api_key)
+                       if api_key else accounts.Account(accounts.HOST, "claude-login", None, None,
+                                                        implicit=True))
+        self.account = account
         self.model = model
         self.cwd = Path(cwd) if cwd else self.home
         self.idle_timeout_s = float(idle_timeout_s)
@@ -223,7 +235,13 @@ class SdkRunner:
     # -- options -----------------------------------------------------------
     def options(self, *, resume=None):
         sdk = _sdk()
-        env = {"ANTHROPIC_API_KEY": self.api_key} if self.api_key else {}
+        # The account's variables to SET (cousin-runner scrubbed every auth
+        # variable from its own environment). account_for refused everything
+        # but a missing secret before the lock, so what can raise here is
+        # SecretMissing, or a secret broken after the start: a connect
+        # failure with its message, never the secret.
+        from cousin_lib import accounts
+        env = accounts.account_env(self.account, self.root)
         # The tools and hooks are in-process: no settings file is read
         # (setting_sources=[]) and none is written; the policy is a
         # PreToolUse hook, since bypassPermissions skips can_use_tool.
@@ -245,8 +263,8 @@ class SdkRunner:
         # model actually took in (see the module docstring).
         extra = {"replay-user-messages": None}
         store_resume = resume
-        if resume and self.resume_lane() != "key":
-            # LOGIN lane, or a lane never recorded (R12): the CLI's own --resume.
+        if resume and self._resume_via_cli():
+            # A login account, or a lane never recorded (R12): the CLI's own --resume.
             # The SDK's store-backed resume would run the CLI under a temporary
             # config dir with the OAuth refresh token stripped. options.resume
             # stays unset so nothing is materialized; session_store stays set,
@@ -281,10 +299,22 @@ class SdkRunner:
         return self._read_session_file().get("lane") or "unknown"
 
     def resume_lane(self):
-        """ONE source (R12): the init's apiKeySource, as seen this process
+        """The lane on record: the init's apiKeySource, as seen this process
         or as persisted with the session (cached when the loop read the file
-        at start). Never whether a key was passed."""
+        at start). A record, and the resume path's fallback only for a
+        runner built with no account (_resume_via_cli)."""
         return self._lane if self._lane != "unknown" else self._saved_lane
+
+    def _resume_via_cli(self):
+        """Resume per KIND (R12 folded into accounts): a claude-login account
+        refreshes its own token, so it resumes through the CLI's --resume;
+        a token or key account never refreshes, so it resumes store-backed.
+        A runner built with neither an account nor a key (a direct caller,
+        a test) has no kind to go by: the lane on record decides, as before."""
+        if self._account_given:
+            from cousin_lib import accounts
+            return accounts.resume_via_cli(self.account)
+        return self.resume_lane() != "key"
 
     def _save_session(self, session_id):
         path = self._session_path()

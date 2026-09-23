@@ -37,6 +37,7 @@ Then add these when you want what they do:
 | `law.md` | a block of rules every cousin boots with |
 | `worker-cmd` | loops for worker cousins |
 | `mcp-registry.toml` | your own default MCP tool list for new cousins |
+| `accounts.toml` | runner cousins on their own login, token or API key |
 
 ## The framework root
 
@@ -80,6 +81,90 @@ Three placeholders are filled per start:
 
 A placeholder with no value in either place is a start error naming both
 files. There's no built-in vendor default.
+
+## accounts.toml
+
+`config/accounts.toml` names the accounts a runner cousin (`[agent] runner =
+"sdk"`) can run on. A cousin picks one with `[agent] account` in its
+`cousin.toml`. A cousin that names none runs on `host`, the host's default
+login in `~/.claude`, shared by every such cousin, exactly as before this file
+existed. A cousin never obtains credentials itself: it runs on what it is
+given, and `cousin-account` is operator-run.
+
+```toml
+[accounts.fleet]
+kind = "claude-login"            # its own login, in data/accounts/fleet/
+# config_dir = "data/accounts/fleet"   (the default)
+
+[accounts.nightly]
+kind = "claude-token"            # a long-lived token from `claude setup-token`
+# secret_file = ".secrets/accounts/nightly"   (the default: git-ignored)
+
+[accounts.metered]
+kind = "anthropic-key"           # an API key: metered billing, no login
+# secret_file = ".secrets/accounts/metered"   (the default: git-ignored)
+```
+
+| kind | credentials live in | keys |
+|---|---|---|
+| `claude-login` | its own `.credentials.json` in `config_dir` (default `data/accounts/<name>`), refreshed by the CLI | `config_dir` |
+| `claude-token` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
+| `anthropic-key` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
+
+The rules, all checked when the file is read, and a broken entry is an error
+that names the key, never a secret:
+
+- A name matches `^[a-z0-9][a-z0-9_-]{0,31}$` and is not `host`.
+- `kind` is one of the three above. `opencode` is reserved and refused.
+- `claude-login` takes `config_dir` and nothing else; the two secret kinds
+  take `secret_file` and nothing else. An unknown key is refused.
+- Both paths are relative to the framework root. An absolute path, or one
+  that leaves the root, is refused.
+
+The secret files default to `.secrets/accounts/<name>` because the checkout's
+`.gitignore` covers `.secrets/`: a secret is never visible to git and never
+reaches a published tree. A secret file is read (by the runner when it
+starts and connects, and by `cousin-account status`) as strictly as
+`cousin-auth` reads its key file: the directory must be a 0700 directory of
+yours, the file a regular 0600 file of yours, and a symlink is refused. A file
+open to group or others refuses the start (exit 2, the message names the file
+and the `chmod`). A missing secret file is exit 2 as well, until the login
+flow lands.
+
+The environment each kind gives the session. `cousin-runner` first removes
+every variable that can pick the credentials or the provider from its own
+environment, so nothing is inherited from the shell that started it:
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
+`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `AWS_BEARER_TOKEN_BEDROCK`,
+`ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`,
+`ANTHROPIC_AWS_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`
+and `CLAUDE_CODE_USE_FOUNDRY`.
+
+| kind | sets | why |
+|---|---|---|
+| `claude-login` (named) | `CLAUDE_CONFIG_DIR=<root>/<config_dir>` | its own `.credentials.json`, its own refresh |
+| `claude-login` (`host`) | nothing | the host's `~/.claude` |
+| `claude-token` | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` | the token, a config dir that holds no login (so a login cannot win over the token), and the token kept out of every command the CLI starts |
+| `anthropic-key` | `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` | the key, the same no-login dir (a CLI that finds a login and a key may bill the login), and the key kept out of every command |
+
+A no-login directory that holds a login (a `.credentials.json` carrying one)
+refuses the start: remove the file.
+
+The subprocess scrub: for a token or key account the CLI strips
+`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN` and the
+AWS, Google and Azure credential variables from every command it starts, so
+those cannot reach a cousin's own commands through the environment. A cousin
+on a token or key account cannot hand cloud credentials to its own commands
+that way either.
+
+Resume per kind: a `claude-login` account refreshes its own token, so a
+restarted runner resumes its session through the CLI's own `--resume`; a
+`claude-token` or `anthropic-key` account never refreshes, so it resumes from
+the runner's session store.
+
+`cousin-account list` shows every account (name, kind, where its credentials
+live, never a secret); `cousin-account status <name>` says whether it is
+logged in, with no model call. See [commands](commands.md).
 
 ## harness.toml
 
@@ -525,13 +610,21 @@ failed or the row could not be stored, and `queued` when the wait ran out (the
 row is kept; do not send it again). `delivered` means the model RECEIVED the
 item, not that it answered it: the rows of an interrupted turn are delivered.
 
-`model` names the model the runner asks for. `api_key_file` is a path relative
-to the framework root whose contents become `ANTHROPIC_API_KEY` in the
-session's environment, and nothing else selects the auth lane: `cousin-runner`
-removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`
-from its own environment before the session starts, so nothing is inherited
-from the shell. With no `api_key_file` the session uses the harness login; the
-terms risk of running a cousin on the login lane is the user's.
+`model` names the model the runner asks for. `account` names the account the
+cousin runs on, one of `config/accounts.toml`'s (see
+[accounts.toml](#accountstoml)); with none, the cousin runs on `host`, the
+host's default login. The account is the only source of credentials:
+`cousin-runner` removes every auth and provider variable (the list is under
+[accounts.toml](#accountstoml)) from its own environment before the session
+starts, so nothing is inherited from the shell, and checks the account before it takes the cousin's lock (an
+unknown account, or a secret file that is missing, open to others or
+malformed, is exit 2). The terms risk of running a cousin on a login is the
+user's.
+
+`api_key_file` is deprecated: an implicit `anthropic-key` account named after
+the cousin, whose secret file is this path (relative to the framework root),
+read as strictly as any account secret (0600, in a 0700 directory). Move the
+key to an account. `account` and `api_key_file` together is refused.
 
 The runner waits at most 10 minutes for the next message of a turn (a stream
 gone silent fails the turn) and puts no limit on a whole turn. These are

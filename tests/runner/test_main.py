@@ -214,16 +214,71 @@ class TestAuthLane(HermeticCase):
         self.assertEqual(seen["options_env"], {})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
 
+    def test_no_auth_or_provider_variable_from_the_shell_reaches_the_child(self):
+        # the CLI's own list of auth variables and the provider switches
+        shell = {"ANTHROPIC_API_KEY": "sk-shell", "ANTHROPIC_AUTH_TOKEN": "tok-shell",
+                 "ANTHROPIC_BASE_URL": "http://shell.invalid",
+                 "CLAUDE_CODE_OAUTH_TOKEN": "oauth-shell", "CLAUDE_CONFIG_DIR": "/shell/dir",
+                 "AWS_BEARER_TOKEN_BEDROCK": "bedrock-shell",
+                 "ANTHROPIC_FOUNDRY_API_KEY": "foundry-key-shell",
+                 "ANTHROPIC_FOUNDRY_AUTH_TOKEN": "foundry-tok-shell",
+                 "ANTHROPIC_AWS_API_KEY": "aws-key-shell",
+                 "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_VERTEX": "1",
+                 "CLAUDE_CODE_USE_FOUNDRY": "1"}
+        seen = {}
+
+        class _Client:
+            def __init__(self, options):
+                # the SDK starts the CLI with {**os.environ, **options.env}
+                child = {**os.environ, **options.env}
+                seen["child"] = {k: child.get(k) for k in shell}
+
+            async def connect(self, prompt=None):
+                pass
+
+            async def disconnect(self):
+                pass
+
+            async def interrupt(self):
+                pass
+        os.environ.update(shell)
+        home = temp_home(self, runner="sdk")
+        with mock.patch("cousin_lib.runner.sdk._default_factory", _Client):
+            rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(seen["child"], {k: None for k in shell})
+
     def test_the_key_lane_carries_only_its_file_key(self):
         home = temp_home(self, runner="sdk")
         root = home.parent.parent
         (root / "config").mkdir()
-        (root / "keys").mkdir()
-        (root / "keys" / "token").write_text("sk-from-file\n")
+        (root / "keys").mkdir(); os.chmod(root / "keys", 0o700)
+        (root / "keys" / "token").write_text("sk-from-file\n"); os.chmod(root / "keys" / "token", 0o600)
         _append_agent_key(home, "keys/token")
         seen = self._capture(home)
-        self.assertEqual(seen["options_env"], {"ANTHROPIC_API_KEY": "sk-from-file"})
+        self.assertEqual(seen["options_env"], {
+            "ANTHROPIC_API_KEY": "sk-from-file",
+            "CLAUDE_CONFIG_DIR": str(root / "data" / "accounts" / "wren"),
+            "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
+
+
+class TestAccountBeforeTheLock(HermeticCase):
+    def test_a_secret_open_to_others_is_exit_2_before_the_lock(self):
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "keys").mkdir(); os.chmod(root / "keys", 0o700)
+        (root / "keys" / "token").write_text("sk-from-file\n"); os.chmod(root / "keys" / "token", 0o644)
+        _append_agent_key(home, "keys/token")
+        # a lock taken would raise at once (runner_main catches only RunnerError),
+        # so a regression fails here instead of serving forever
+        with mock.patch.object(runner_main, "hold_lock",
+                               side_effect=AssertionError("lock taken before the account check")) as lock:
+            rc, err = _run(["--home", str(home)])
+        self.assertEqual(rc, 2)
+        lock.assert_not_called()                          # refused before the lock is taken
+        self.assertIn("chmod 600", err); self.assertNotIn("sk-from-file", err)
 
 
 class TestWorkerDeath(HermeticCase):

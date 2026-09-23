@@ -42,6 +42,20 @@ harness's own login, the default) or `api_key` (a per-cousin key).
 cousin-auth wren --key-stdin < wren.key && cousin-auth wren api_key
 ```
 
+`cousin-account` (operator-run) shows the accounts runner cousins run on,
+from `config/accounts.toml` (see [configuration](configuration.md)). `list`
+prints every account's name, kind and where its credentials live, never a
+secret; `status <name>` asks the agent CLI whether that account is logged in,
+with no model call, and exits 0 when it is, 4 when it is not (the line names
+what to run). `host` is the host's default login. `--root R` picks the
+install; without it the root comes from `FRAMEWORK_ROOT`, then the checkout
+you are in.
+
+```
+cousin-account list
+cousin-account status fleet
+```
+
 `cousin-flip` ends the cousin's current generation and starts the next one on
 a fresh session with a boot packet. `--dry-run` runs the checks only;
 `--confirm` asks the new generation to post one line when it is oriented.

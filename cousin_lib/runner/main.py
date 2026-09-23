@@ -9,10 +9,11 @@ model's own `cousin-*` commands locate the cousin and the install that way.
 
 Exit codes: 0 after SIGTERM/SIGINT, or when `--once` has drained the
 inbox; 2 for a configuration problem (no or a bad `[agent] runner`, an
-unreadable key file, a malformed policy.toml, an MCP registry that does
-not parse or names a command with no in-process handler) or when another
-runner holds the home's lock; 3
-when the runner gave up (its worker ended, e.g. it could not connect,
+unknown account, or a secret file that is missing, open to others or
+malformed, all checked before the lock; a malformed policy.toml, an MCP
+registry that does not parse or names a command with no in-process
+handler) or when another runner holds the home's lock; 3 when the
+runner gave up (its worker ended, e.g. it could not connect,
 or `--once` found it `errored` for longer than ERRORED_GIVE_UP_S), so a
 supervisor restarts it.
 """
@@ -27,15 +28,17 @@ import time
 import tomllib
 from pathlib import Path
 
+from cousin_lib import accounts
 from cousin_lib.runner.base import RunnerError
 
 KINDS = ("sdk", "fake")
 
 # The credentials a runner must never inherit from the shell that started
 # it: the SDK builds the CLI's environment as {**os.environ, **options.env},
-# so an overlay cannot unset them and only removing them here can. The auth
-# lane is `[agent] api_key_file` (options.env) and nothing else.
-AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+# so an overlay cannot unset them and only removing them here can. The
+# cousin's account (accounts.account_env, in options.env) is the only
+# source of credentials: the key, the token and the config dir.
+AUTH_ENV = accounts.AUTH_VARS
 
 # `--once` gives up on a runner that stays `errored` this long.
 ERRORED_GIVE_UP_S = 10.0
@@ -51,25 +54,27 @@ def _agent_table(home):
     return data.get("agent") or {}
 
 
-def _read_key(home, agent):
-    """The key lane: `[agent] api_key_file`, a path relative to the
-    framework root, read here and handed to the runner's options.env
-    and nowhere else."""
-    name = agent.get("api_key_file")
-    if not name:
-        return None
+def account_for(home):
+    """The account this cousin runs on, checked before anything starts: an
+    unknown account, a secret file that is open to group or others, not
+    ours, a symlink or malformed, or a login inside a secret kind's config
+    dir is a RunnerError (exit 2). runner_main calls it BEFORE the lock;
+    runner_for calls it again to build the runner. Until the login flow
+    lands, a missing secret file is exit 2 as well (SecretMissing is an
+    AccountsError)."""
     from cousin_lib.config import FrameworkConfig
-    root = FrameworkConfig.root_from_home(Path(home))
-    if root is None:
+    if _agent_table(home).get("api_key_file") \
+            and FrameworkConfig.root_from_home(Path(home)) is None:
         raise RunnerError(
             "[agent] api_key_file needs a framework root above %s"
             " (cousins/<slug> under an install with config/)" % home)
-    path = Path(root) / name
+    root = root_for(home)
     try:
-        return path.read_text().strip()
-    except OSError as err:
-        raise RunnerError("cannot read [agent] api_key_file %s: %s"
-                          % (path, err))
+        account = accounts.for_cousin(home, root)
+        accounts.preflight(account, root)
+    except accounts.AccountsError as err:
+        raise RunnerError(str(err))
+    return account
 
 
 def root_for(home):
@@ -120,7 +125,7 @@ def runner_for(home, *, kind=None):
         from cousin_lib.runner import tools
         from cousin_lib.runner.sdk import SdkRunner
         tools.validate_registry(Path(home), root_for(home))
-        return SdkRunner(home, api_key=_read_key(home, agent),
+        return SdkRunner(home, account=account_for(home),
                          model=agent.get("model"), policy=policy)
 
 
@@ -220,6 +225,13 @@ def runner_main(argv=None):
                         help="drain the inbox, then exit")
     args = parser.parse_args(argv)
     args.home = os.path.abspath(args.home)
+    try:
+        # the account first, BEFORE the lock: a secret open to others or a
+        # wrong account is refused without touching the home's lock
+        account_for(args.home)
+    except RunnerError as err:
+        print("cousin-runner: %s" % err, file=sys.stderr)
+        return 2
     try:
         with hold_lock(args.home):
             export_environment(args.home)

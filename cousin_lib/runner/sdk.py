@@ -33,7 +33,7 @@ from pathlib import Path
 
 from cousin_lib import usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import envelope, hooks, tools, wake
+from cousin_lib.runner import envelope, extract, hooks, tools, wake
 from cousin_lib.runner.base import FOLDED_KINDS, Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.policy import Policy
@@ -712,11 +712,13 @@ class SdkRunner:
 
     async def _after_turn(self, msg):
         """The single hook for a ResultMessage's post-close work, called
-        from `_turn` once per result, right after `_close`. Task 7 extends
-        this with rollover and extraction; for now it only records usage.
-        Off the loop (the write is a blocking sqlite call) and never
-        raises into the loop: a failure here is a `usage` event carrying
-        `error`, not a broken turn."""
+        from `_turn` once per result, right after `_close`: the usage
+        record, then extraction of the session's new transcript entries
+        (the SDK flushed the store before it yielded the result, so the
+        whole turn is there). Each step runs off the loop (blocking sqlite
+        and file work) and never raises into it: a failure is a `usage`
+        or `extract` event, never a broken turn, and a failed usage record
+        does not stop the extraction."""
         try:
             row = await asyncio.to_thread(
                 usage.record, self.home, client_id=self._client_id, session_id=msg.session_id,
@@ -724,9 +726,20 @@ class SdkRunner:
                         "session_id": msg.session_id}, lane=self._lane)
         except Exception as exc:  # noqa: BLE001 - usage must never fail a turn
             self.stream.append("usage", {"error": "%s: %s" % (type(exc).__name__, exc)})
-            return
-        self.stream.append("usage", {k: row[k] for k in ("cost_usd", "estimate", "total", "error")
-                                     if k in row})
+        else:
+            self.stream.append("usage", {k: row[k] for k in ("cost_usd", "estimate", "total",
+                                                             "error") if k in row})
+        sid = self._resume_id
+        store = getattr(self, "session_store", None)
+        if not sid or store is None:
+            return      # no session named yet, or no store to mine
+        payload = {"session_id": sid, "turn": self._turn_seq}
+        try:
+            payload["written"] = await asyncio.to_thread(
+                extract.mine_turn, self.home, sid, self._turn_seq, store=store)
+        except Exception as exc:  # noqa: BLE001 - extraction must never fail a turn
+            payload.update(written=-1, error="%s: %s" % (type(exc).__name__, exc))
+        self.stream.append("extract", payload)
 
     def _record(self, sdk, msg, *, echo_of=None):
         """Every SDK message leaves at least one event (a ResultMessage's
@@ -741,6 +754,11 @@ class SdkRunner:
                                                     "session_id": d.get("session_id"),
                                                     "tools": list(d.get("tools") or []),
                                                     "mcp_servers": list(d.get("mcp_servers") or [])})
+            elif msg.subtype == "mirror_error":
+                # the SDK retried and dropped this batch: the store is missing entries
+                self.stream.append("error", {"error": "session store append failed: %s"
+                                             % (getattr(msg, "error", "") or msg.data),
+                                             "mirror_error": True})
             else:
                 self.stream.append("system", {"subtype": msg.subtype})
         elif isinstance(msg, sdk.AssistantMessage):

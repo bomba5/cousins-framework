@@ -56,27 +56,40 @@ _HEDGE = re.compile(
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|\n+")
 
 
+def texts_from_entries(entries):
+    """The main-thread assistant text turns of parsed transcript entries
+    (the harness's file format, and our session store's entries: the
+    same JSON), tolerating anything that is not an assistant turn."""
+    for record in entries:
+        if not isinstance(record, dict) or record.get("isSidechain"):
+            continue
+        if record.get("type") != "assistant":
+            continue
+        content = (record.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        texts = [block.get("text") for block in content
+                 if isinstance(block, dict)
+                 and block.get("type") == "text" and block.get("text")]
+        if texts:
+            yield "\n".join(texts)
+
+
 def _assistant_texts(path):
-    """Yield the main-thread assistant text turns of one transcript,
-    tolerating any line that is not what the harness writes."""
-    with open(path) as fh:
-        for line in fh:
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(record, dict) or record.get("isSidechain"):
-                continue
-            if record.get("type") != "assistant":
-                continue
-            content = (record.get("message") or {}).get("content")
-            if not isinstance(content, list):
-                continue
-            texts = [block.get("text") for block in content
-                     if isinstance(block, dict)
-                     and block.get("type") == "text" and block.get("text")]
-            if texts:
-                yield "\n".join(texts)
+    """texts_from_entries over one transcript file, skipping bad lines."""
+    def lines():
+        with open(path) as fh:
+            for line in fh:
+                try:
+                    yield json.loads(line)
+                except ValueError:
+                    continue
+    yield from texts_from_entries(lines())
+
+
+def normalize(sentence):
+    """The dedupe key: case and whitespace do not make a sentence new."""
+    return " ".join(str(sentence).lower().split())
 
 
 def _keep(sentence):

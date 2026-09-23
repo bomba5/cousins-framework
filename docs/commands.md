@@ -141,15 +141,32 @@ and `FRAMEWORK_ROOT` (the install above it, else the home's grandparent) into
 its own environment, for the in-process tools and for the model's own
 `cousin-*` commands. See [agent-loop-runner](design/agent-loop-runner.md).
 
+An account that needs a login (or whose billing stopped it) never makes the
+runner exit: it waits, says so in `data/login-required.json` (see
+[configuration](configuration.md#datalogin-requiredjson)) and picks up the fix
+without a restart. A missing secret file is such a login, not exit 2.
+
+`--check-auth` answers whether the cousin's account is logged in, with
+`claude auth status` under the account (no model call; presence, not
+validity), and prints one line. `--validate` (only with `--check-auth`) then
+runs ONE smallest model turn on a bare throwaway client under the account: no
+tools, no MCP server, no hooks, no session store, one turn, a temporary
+directory, a timeout. Both run before the lock, the runner and the
+environment export, so they work beside a live runner and take nothing from
+it. An install script can gate on `cousin-runner --home H --check-auth`.
+
 | exit | meaning |
 |---|---|
-| 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox |
-| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml or key file, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler; or another runner holds the lock |
+| 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox, or `--check-auth` found the account logged in (and `--validate`'s turn answered) |
+| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler; or another runner holds the lock |
 | 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds |
+| 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner waiting for a login. A supervisor must not restart on it |
 
 ```
 cousin-runner --home cousins/wren
 cousin-runner --home cousins/wren --once
+cousin-runner --home cousins/wren --check-auth
+cousin-runner --home cousins/wren --check-auth --validate
 ```
 
 ## Memory

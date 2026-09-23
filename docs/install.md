@@ -115,6 +115,17 @@ kind, always started from a shell on the host:
 - a key account: write the key to its secret file yourself, mode 0600, in a
   0700 directory.
 
+`cousin-runner --home cousins/<slug> --check-auth` says whether a cousin's
+account is logged in (exit 0, or 4 when it is not), with no model call; an
+install script can gate on it. Add `--validate` for one smallest model turn.
+
+Re-login: when a login expires or is revoked, a key or token stops working, or
+an account's billing stops it, the runner says so in the console,
+`cousin-chat list` and Telegram, and waits. Run the action it names. It
+resumes on its own once the credentials change, or delete
+`cousins/<slug>/data/login-required.json` to make it try now (the way out of a
+billing stop, where no credential changes).
+
 Now tell the framework how to start the agent. Use the absolute path, so it
 resolves under systemd's PATH as well as yours:
 

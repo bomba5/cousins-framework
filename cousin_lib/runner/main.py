@@ -8,14 +8,26 @@ FRAMEWORK_ROOT, before the runner is built: the in-process tools and the
 model's own `cousin-*` commands locate the cousin and the install that way.
 
 Exit codes: 0 after SIGTERM/SIGINT, or when `--once` has drained the
-inbox; 2 for a configuration problem (no or a bad `[agent] runner`, an
-unknown account, or a secret file that is missing, open to others or
-malformed, all checked before the lock; a malformed policy.toml, an MCP
-registry that does not parse or names a command with no in-process
-handler) or when another runner holds the home's lock; 3 when the
-runner gave up (its worker ended, e.g. it could not connect,
-or `--once` found it `errored` for longer than ERRORED_GIVE_UP_S), so a
-supervisor restarts it.
+inbox, or when `--check-auth` found the account logged in; 2 for a
+configuration problem (no or a bad `[agent] runner`, an unknown account,
+or a secret file that is open to others or malformed, all checked before
+the lock; a malformed policy.toml, an MCP registry that does not parse or
+names a command with no in-process handler) or when another runner holds
+the home's lock; 3 when the runner gave up (its worker ended, e.g. it
+could not connect, or `--once` found it `errored` for longer than
+ERRORED_GIVE_UP_S), so a supervisor restarts it; 4 when `--check-auth`
+found the account not logged in (or `--validate`'s one turn did not
+answer), or `--once` found the runner waiting for a login (R15): a
+supervisor must NOT restart on 4, a person must log in.
+
+A missing secret file is not a configuration problem: it is a login to
+do. The runner starts, says so (data/login-required.json, an `auth`
+event) and waits for the file; the long-running mode never exits for a
+login (an exit would restart-loop a cousin nobody can log in).
+
+`--check-auth [--validate]` runs before the lock, the runner and the
+environment export: a check works beside a live cousin and never
+becomes one.
 """
 import argparse
 import contextlib
@@ -59,9 +71,9 @@ def account_for(home):
     unknown account, a secret file that is open to group or others, not
     ours, a symlink or malformed, or a login inside a secret kind's config
     dir is a RunnerError (exit 2). runner_main calls it BEFORE the lock;
-    runner_for calls it again to build the runner. Until the login flow
-    lands, a missing secret file is exit 2 as well (SecretMissing is an
-    AccountsError)."""
+    runner_for calls it again to build the runner. A missing secret file
+    is let through: a login to do, which the runner waits for in
+    `login_required` (Task 16), never a configuration error."""
     from cousin_lib.config import FrameworkConfig
     if _agent_table(home).get("api_key_file") \
             and FrameworkConfig.root_from_home(Path(home)) is None:
@@ -71,7 +83,10 @@ def account_for(home):
     root = root_for(home)
     try:
         account = accounts.for_cousin(home, root)
-        accounts.preflight(account, root)
+        try:
+            accounts.preflight(account, root)
+        except accounts.SecretMissing:
+            pass    # a secret not written yet is a login to do: the runner waits (Task 16)
     except accounts.AccountsError as err:
         raise RunnerError(str(err))
     return account
@@ -185,7 +200,8 @@ def _gone(runner):
 
 def _once(runner, stop):
     """Until the inbox is drained (0), a signal (0), or the runner gives
-    up (3): its worker ended, or it stayed `errored` too long."""
+    up (3): its worker ended, or it stayed `errored` too long; 4 when it
+    stayed `errored` waiting for a login (R15: a restart cannot log in)."""
     errored_since = None
     while not stop.is_set():
         why = _gone(runner)
@@ -198,6 +214,10 @@ def _once(runner, stop):
         if state == "errored":
             errored_since = errored_since or time.monotonic()
             if time.monotonic() - errored_since > ERRORED_GIVE_UP_S:
+                if getattr(runner, "login_required", lambda: False)():
+                    print("cousin-runner: the account needs a login (see"
+                          " data/login-required.json)", file=sys.stderr)
+                    return 4                     # R15: never 3, a restart cannot log in
                 print("cousin-runner: the runner stayed errored for %.0fs"
                       % ERRORED_GIVE_UP_S, file=sys.stderr)
                 return 3
@@ -223,8 +243,18 @@ def runner_main(argv=None):
     parser.add_argument("--runner", choices=KINDS)
     parser.add_argument("--once", action="store_true",
                         help="drain the inbox, then exit")
+    parser.add_argument("--check-auth", action="store_true",
+                        help="is this cousin's account logged in (no model call); exit 0 or 4")
+    parser.add_argument("--validate", action="store_true",
+                        help="with --check-auth: one smallest model turn on a throwaway client")
     args = parser.parse_args(argv)
     args.home = os.path.abspath(args.home)
+    if args.validate and not args.check_auth:
+        parser.error("--validate goes with --check-auth")
+    if args.check_auth:
+        # Before the lock, the runner and export_environment: a check runs
+        # beside a live cousin and never becomes one.
+        return _check_auth(args.home, validate=args.validate)
     try:
         # the account first, BEFORE the lock: a secret open to others or a
         # wrong account is refused without touching the home's lock
@@ -246,6 +276,35 @@ def runner_main(argv=None):
     except RunnerError as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
+
+
+def _check_auth(home, *, validate=False):
+    """`--check-auth [--validate]`: exit 0 logged in, 4 not (or the
+    validating turn did not answer), 2 a configuration error. The check
+    is `claude auth status` under the account (presence, no model call);
+    --validate adds ONE turn on a bare throwaway client (sdk.validate_account),
+    never this cousin's runner."""
+    root = root_for(home)
+    rc, line = accounts.check(home, root)
+    print(line)
+    if rc != 0 or not validate:
+        return rc
+    for name in AUTH_ENV:         # the SDK merges os.environ under options.env
+        os.environ.pop(name, None)
+    try:
+        account = accounts.for_cousin(home, root)
+        model = _agent_table(home).get("model")
+    except (accounts.AccountsError, RunnerError) as err:
+        print("cousin-runner: %s" % err, file=sys.stderr)
+        return 2
+    from cousin_lib.runner import sdk
+    try:
+        rc, line = sdk.validate_account(account, root, model=model)
+    except RunnerError as err:        # the sdk extra is not installed
+        print("cousin-runner: %s" % err, file=sys.stderr)
+        return 2
+    print(line)
+    return rc
 
 
 def _serve(runner, once):

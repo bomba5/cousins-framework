@@ -693,5 +693,26 @@ class TestInboundReachesTheInbox(HermeticCase):
                                        text="actually, no")
 
 
+class TestLoginNotice(HermeticCase):
+    def test_the_action_line_is_relayed_once_per_since(self):
+        from cousin_lib import telegram
+        from cousin_lib.runner import auth
+        from tests.runner._home import temp_home
+        home = temp_home(self)
+        cfg = mock.Mock(home=home, operator_ids={4242}, slug="wren")
+        state, sent = {}, []
+        send = lambda **kw: sent.append(kw)
+        self.assertFalse(telegram.relay_login_notice(cfg, state, tg_send_text=send))   # no file
+        auth.write_login_required(home, host="h1", account="fleet", kind="claude-login",
+                                  reason=auth.LOGIN, detail="Not logged in",
+                                  action="run `cousin-account login fleet --via wren`")
+        self.assertTrue(telegram.relay_login_notice(cfg, state, tg_send_text=send))
+        self.assertFalse(telegram.relay_login_notice(cfg, state, tg_send_text=send))  # same since
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["chat_id"], 4242)
+        self.assertIn("needs a login", sent[0]["text"])
+        self.assertIn("cousin-account login fleet", sent[0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()

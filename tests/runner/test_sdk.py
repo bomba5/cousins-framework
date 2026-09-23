@@ -419,14 +419,18 @@ class TestSdkRunner(HermeticCase):
 
     # -- folding (A1) ------------------------------------------------------------
     def test_a_midturn_operator_message_is_queried_into_the_live_turn(self):
-        r, made = self._runner([[init_msg(), assistant(tool="Bash"), assistant(text="x"), result()]],
-                               delay=0.15)
+        # PAUSE holds the stream open until the second row is in: a timed
+        # delay left the fold to the scheduler and flaked under load
+        r, made = self._runner([[init_msg(), assistant(tool="Bash"), "PAUSE",
+                                 assistant(text="x"), result()]])
         r.start()
         a = r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
         b = r.enqueue(self._op("second"))
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5),
+                        "the second was query()'d mid-turn")
+        made["client"].resume()
         self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events()), timeout=5))
-        self.assertEqual(len(made["client"].queries), 2, "the second was query()'d mid-turn")
         res = _results(r)
         self.assertEqual(len(res), 1)
         self.assertEqual(sorted(res[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))

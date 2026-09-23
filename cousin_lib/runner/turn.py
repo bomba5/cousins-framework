@@ -30,6 +30,16 @@ class Turn:
             self._rows = []
             self._active = False
 
+    def snapshot(self):
+        """(active, threads) read under one lock: two property reads can
+        straddle a begin or an end and disagree."""
+        with self._lock:
+            out = []
+            for r in self._rows:
+                if r["thread_id"] not in out:
+                    out.append(r["thread_id"])
+            return self._active, tuple(out)
+
     @property
     def active(self):
         with self._lock:

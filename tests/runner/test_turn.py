@@ -41,5 +41,15 @@ class TestTurn(HermeticCase):
         self.assertEqual(len(t.threads), 200)
 
 
+    def test_snapshot_reads_active_and_threads_together(self):
+        t = Turn()
+        self.assertEqual(t.snapshot(), (False, ()))
+        t.begin(_row(1, "operator:priya", "Priya"))
+        t.add(_row(2, "person:sam", "Sam"))
+        self.assertEqual(t.snapshot(), (True, ("operator:priya", "person:sam")))
+        t.end()
+        self.assertEqual(t.snapshot(), (False, ()))
+
+
 if __name__ == "__main__":
     unittest.main()

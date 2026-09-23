@@ -397,18 +397,30 @@ def _same_thread(a, b):
 
 
 def _pick_thread(ctx, thread):
+    """The thread a reply goes to. A named operator: or person: thread is
+    always accepted, live or not: a schedule, loop or peer turn must be
+    able to reach its operator, as `cousin-reply --user` can (ruling
+    P12); the live thread's spelling is used when one matches. The live
+    turn decides only the implicit default: one live thread, that one;
+    two, refused with the list; none, refused."""
     turn = ctx.turn
-    active = bool(turn is not None and getattr(turn, "active", False))
-    live = tuple(turn.threads) if active else ()
+    if turn is None:
+        active, live = False, ()
+    elif hasattr(turn, "snapshot"):
+        active, live = turn.snapshot()
+    else:
+        active, live = bool(turn.active), tuple(turn.threads)
+    if not active:
+        live = ()
     if thread:
-        parse_thread(thread)              # a malformed id is refused here
-        if active:
-            match = next((t for t in live if _same_thread(t, thread)), None)
-            if match is None:
-                raise ValueError("thread %s is not live in this turn; live: %s"
-                                 % (thread, ", ".join(live) or "-"))
-            return match
-        return thread
+        kind, key = parse_thread(thread)      # a malformed id is refused here
+        if kind == "peer":
+            raise ValueError("%s is a peer thread, not the chat surface; answer a"
+                             " peer with send (to=%s)" % (thread, key))
+        if kind not in ("operator", "person"):
+            raise ValueError("%s is not a chat-surface thread; name operator:<name>"
+                             " or person:<name>" % thread)
+        return next((t for t in live if _same_thread(t, thread)), thread)
     if not live:
         raise ValueError("no turn is live; name the thread (thread=operator:<name>"
                          " or person:<name>)")
@@ -449,8 +461,8 @@ def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
         raise ValueError("%s is a peer thread, not the chat surface; answer a peer"
                          " with send (to=%s)" % (target, key))
     if kind not in ("operator", "person"):
-        raise ValueError("%s is not a chat-surface thread; only operator: and person:"
-                         " threads take a reply" % target)
+        raise ValueError("%s is not a chat-surface thread; name the destination with"
+                         " thread=operator:<name> or person:<name>" % target)
     if getattr(ctx.policy, "outbound_filter", True):
         from cousin_lib.outbound_filter import OutboundPolicy
         OutboundPolicy.load(ctx.root).check(text, from_slug=ctx.slug, dest_slug="",
@@ -461,8 +473,9 @@ def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
         attachment_kind = attachment[0]
         attachment_path = str(stage_attachment(ctx.home, attachment[0], attachment[1]))
     from cousin_lib.server.storage import ChatStore, normalize_chat_user
-    store = ChatStore(Path(ctx.home) / "data" / "chat.db")
+    store = None
     try:
+        store = ChatStore(Path(ctx.home) / "data" / "chat.db")
         row = store.add_message(
             chat_user=normalize_chat_user(key), user=ctx.name, message=text,
             msg_type=ctx.slug,
@@ -474,7 +487,8 @@ def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
             Path(attachment_path).unlink(missing_ok=True)
         raise
     finally:
-        store.close()
+        if store is not None:
+            store.close()
     return "replied to %s (#%d)" % (key, row["id"])
 
 
@@ -532,7 +546,8 @@ def _send(ctx, a):
     if a.get("image") or a.get("video"):
         raise ValueError("send: image and video go to an operator reply only, not to a peer")
     from cousin_lib.outbound_filter import OutboundPolicy
-    policy = OutboundPolicy.load(fw.root) if getattr(ctx.policy, "outbound_filter", True) else None
+    # One root for the filter on both routes: reply loads it from ctx.root too.
+    policy = OutboundPolicy.load(ctx.root) if getattr(ctx.policy, "outbound_filter", True) else None
     result = chat.send_message(fw, cfg, to, text, policy=policy, display_name=ctx.name)
     return json.dumps({"ok": True, "to": to, "id": (result or {}).get("id")}, sort_keys=True)
 

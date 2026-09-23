@@ -199,6 +199,112 @@ class TestReply(HermeticCase):
         self.assertTrue(err); self.assertIn("testa", text); self.assertIn("Priya", text)
 
 
+class TestNamedThread(HermeticCase):
+    """An explicitly named operator: or person: thread is always accepted;
+    the live-thread rule binds only the implicit default (ruling P12)."""
+
+    _rows = TestReply._rows
+
+    def test_a_schedule_turn_reaches_the_operator_by_name(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "schedule", "sender": ""})
+        ctx = _ctx(self, turn)
+        out = tools.reply(ctx, "the timer fired", thread="operator:priya")
+        self.assertIn("replied to priya", out)
+        text, err = tools.call(ctx, "send", {"to": "Priya", "text": "via send"})
+        self.assertFalse(err, text)
+        rows = self._rows(ctx.home)
+        self.assertEqual([(r[0], r[2]) for r in rows],
+                         [("priya", "the timer fired"), ("priya", "via send")])
+
+    def test_a_peer_turn_reaches_a_person_by_name(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "peer:testa", "sender": "Testa"})
+        ctx = _ctx(self, turn)
+        text, err = tools.call(ctx, "reply", {"text": "hi sam", "thread": "person:sam"})
+        self.assertFalse(err, text)
+        self.assertEqual(self._rows(ctx.home)[0][0], "sam")
+
+    def test_a_named_peer_thread_stays_refused(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
+        ctx = _ctx(self, turn)
+        text, err = tools.call(ctx, "reply", {"text": "hi", "thread": "peer:testa"})
+        self.assertTrue(err); self.assertIn("send", text)
+        self.assertEqual(self._rows(ctx.home), [])
+
+    def test_an_unopenable_store_leaves_no_staged_attachment(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
+        ctx = _ctx(self, turn)
+        picture = ctx.root / "render.png"; picture.write_bytes(b"\x89PNG\r\n")
+        data = ctx.home / "data"
+        data.chmod(0o500)
+        self.addCleanup(data.chmod, 0o700)
+        text, err = tools.call(ctx, "reply", {"text": "look", "image": str(picture)})
+        self.assertTrue(err, text)
+        images = ctx.home / "chat" / "images"
+        self.assertEqual(sorted(images.iterdir()) if images.exists() else [], [])
+
+
+class TestRegistryGatedDispatch(HermeticCase):
+    """What production runs: build_tool_server always sets ctx.registry."""
+
+    def _gated(self, turn=None):
+        ctx = _ctx(self, turn)
+        ctx.registry = _registry_with_tracker(ctx.root)
+        return ctx
+
+    def test_a_disabled_tool_is_refused(self):
+        ctx = self._gated()
+        ctx.registry["tools"]["tracker"]["enabled"] = False
+        text, err = tools.call(ctx, "tracker", {"command": "list"})
+        self.assertTrue(err); self.assertIn("unknown tool", text)
+
+    def test_an_unknown_command_lists_the_registrys_commands(self):
+        ctx = self._gated()
+        del ctx.registry["tools"]["memory"]["commands"]["obsolete"]
+        text, err = tools.call(ctx, "memory", {"command": "obsolete", "topic": "t", "why": "w"})
+        self.assertTrue(err); self.assertIn("unknown command", text)
+        self.assertIn("activity, decide, recall, remember, search", text)
+
+    def test_check_enums_rejects_a_bad_value_on_a_command_and_on_send(self):
+        ctx = self._gated()
+        text, err = tools.call(ctx, "job", {"command": "start", "kind": "shell", "title": "x"})
+        self.assertTrue(err); self.assertIn("ToolError", text); self.assertIn("not one of", text)
+        ctx.registry["tools"]["send"]["properties"]["to"]["enum"] = ["testa", "Priya"]
+        text, err = tools.call(ctx, "send", {"to": "nobody", "text": "x"})
+        self.assertTrue(err); self.assertIn("ToolError", text); self.assertIn("not one of", text)
+
+    def test_a_call_appends_a_tool_call_event(self):
+        from cousin_lib.runner.stream import EventStream
+        ctx = self._gated()
+        ctx.stream = EventStream(ctx.home, "sess-tools")
+        text, err = tools.call(ctx, "memory", {"command": "activity", "text": "x"})
+        self.assertFalse(err, text)
+        event = list(ctx.stream.tail())[-1]
+        self.assertEqual(event["kind"], "tool_call")
+        self.assertEqual({k: event["payload"][k] for k in ("tool", "command", "is_error")},
+                         {"tool": "memory", "command": "activity", "is_error": False})
+        self.assertIsInstance(event["payload"]["ms"], int)
+
+    def test_the_sdk_handler_runs_the_call_in_process(self):
+        try:
+            import claude_agent_sdk
+        except ImportError:
+            self.skipTest("claude-agent-sdk not installed")
+        import asyncio
+        ctx = _ctx(self)
+        with mock.patch("claude_agent_sdk.create_sdk_mcp_server",
+                        wraps=claude_agent_sdk.create_sdk_mcp_server) as create:
+            tools.build_tool_server(ctx, _registry(ctx.root))
+        memory = next(t for t in create.call_args.kwargs["tools"] if t.name == "memory")
+        with mock.patch.object(subprocess, "run") as run, mock.patch.object(subprocess, "Popen") as popen:
+            result = asyncio.run(memory.handler({"command": "activity", "text": "x"}))
+        self.assertEqual(run.call_count + popen.call_count, 0)
+        self.assertEqual(set(result), {"content", "is_error"})
+        self.assertIs(result["is_error"], False)
+        self.assertEqual(len(result["content"]), 1)
+        self.assertEqual(result["content"][0]["type"], "text")
+        self.assertIn("Activity saved: x", result["content"][0]["text"])
+
+
 class TestHandoffAndMeeting(HermeticCase):
     def test_handoff_writes_the_manual_file(self):
         ctx = _ctx(self)

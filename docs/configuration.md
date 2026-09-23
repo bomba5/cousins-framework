@@ -219,6 +219,14 @@ credentials changed, the status went from logged out to logged in, or you
 deleted the file. A revoked login still reads logged in, so for it only new
 credentials (or deleting the file) move the runner. Deleting the file is the
 manual retry, and the way out of a billing stop, where no credential changes.
+A retry that fails for another reason (a secret file half written, a session
+that is gone) puts that error into the file's `detail` and is tried again at
+the next look; after three such failures in a row the runner gives up the
+session on file and starts a fresh one, with the state digest.
+
+A key or a token cannot refresh, so the first 401 of a turn ends it at once.
+A `claude-login` account refreshes its own token at the CLI's next attempt, so
+the runner lets the CLI finish; a refresh that fails still ends in a 401.
 
 The file clears on the next good result after the retry, never at the
 reconnect: a session's start cannot tell a live login from a revoked one.

@@ -592,6 +592,23 @@ class TestCheckAuthAndLogin(HermeticCase):
         data = json.loads((home / "data" / "login-required.json").read_text())
         self.assertIn("keys/token", data["action"])
 
+    def test_check_auth_on_a_secret_open_to_others_is_2_not_4(self):
+        from cousin_lib import accounts
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "keys").mkdir(); os.chmod(root / "keys", 0o700)
+        (root / "keys" / "token").write_text("sk-from-file\n"); os.chmod(root / "keys" / "token", 0o644)
+        _append_agent_key(home, "keys/token")
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(accounts, "check") as check, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = runner_main.runner_main(["--home", str(home), "--check-auth"])
+        self.assertEqual(rc, 2)
+        check.assert_not_called()                          # configuration, before any status
+        self.assertIn("chmod 600", err.getvalue())
+        self.assertNotIn("sk-from-file", out.getvalue() + err.getvalue())
+
     def test_once_exits_4_not_3_while_a_login_is_required(self):
         runner = mock.Mock()
         runner.worker_alive.return_value = True

@@ -5,6 +5,7 @@ up again without a restart and without a turn spent per retry. The
 credentials are the account's (Task 14); the runner never obtains any."""
 import hashlib
 import json
+import re
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,10 +14,17 @@ from pathlib import Path
 # 2.1.277): the fallback when no typed signal says it (a connect that
 # raises; an error result with neither AssistantMessage.error nor
 # api_error_status).
+# The credential wordings are the ones the CLI's own error classifier
+# matches; "API key is invalid" is kept from the API's side.
 AUTH_PATTERNS = ("Not logged in", "Please run /login", "Invalid API key",
                  "API key is invalid", "OAuth access token is invalid",
                  "OAuth token revoked", "Session expired", "Invalid bearer token",
-                 "authentication_failed")
+                 "OAuth token application has been deactivated", "Credential is invalid",
+                 "invalid x-api-key", "Organization access has been revoked",
+                 "Workspace access has been revoked", "authentication_failed")
+# the classifier's `OAuth (access )?token has expired|been revoked`, which no
+# substring above covers ("OAuth token revoked" is not "has been revoked")
+AUTH_RX = re.compile(r"OAuth (?:access )?token has (?:expired|been revoked)")
 AUTH_ERROR = "authentication_failed"
 BILLING_ERROR = "billing_error"
 LOGIN = "login_required"
@@ -27,7 +35,8 @@ LOGIN_FILE = "data/login-required.json"
 
 
 def is_auth_text(text):
-    return any(p in str(text or "") for p in AUTH_PATTERNS)
+    text = str(text or "")
+    return any(p in text for p in AUTH_PATTERNS) or AUTH_RX.search(text) is not None
 
 
 def assistant_signal(error, text=""):

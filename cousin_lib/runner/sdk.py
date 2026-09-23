@@ -126,6 +126,9 @@ class SdkRunner:
     backoff_after = 3
     backoff_base_s = 1.0
     backoff_cap_s = 30.0
+    # A login retry failing this many times in a row for another reason
+    # gives up the session on file and starts fresh (_login_retry_failed).
+    RETRY_FAILURES_TO_FRESH = 3
     # How often a live turn looks for operator/person rows to fold in, and
     # how long an idle loop sleeps when the doorbell is a Poller.
     poll_s = 0.2
@@ -186,6 +189,10 @@ class SdkRunner:
         self._login_mark = None       # auth.credential_mark at the failure
         self._login_was_in = False    # `claude auth status` loggedIn at the failure, then at each look
         self._login_refusals = 0      # _login_required calls: a retry refused again moves it
+        self._login_reason = auth.LOGIN
+        self._login_file_seen = False # the file was written (a manual retry is its deletion)
+        self._retry_failures = 0      # login retries that failed for another reason, in a row
+        self._last_connect_error = None
         self._restore_pending = False # R19: the file clears on the next GOOD result
         self._auth_turn = None        # the signal seen inside the running turn
         self._fresh_pending = None    # a start the login held: _start_fresh's with_digest
@@ -585,18 +592,67 @@ class SdkRunner:
             self._login_was_in = bool(accounts.status(self.account, self.root).get("loggedIn"))
         except Exception:  # noqa: BLE001 - no reading is "logged out": a later "in" retries
             self._login_was_in = False
+        self._login_reason = reason
+        self._retry_failures = 0
+        data = self._write_login_file(reason, detail)
+        self.stream.append("auth", {k: data[k] for k in ("account", "kind", "reason", "detail",
+                                                          "action", "since", "host")})
+
+    def _write_login_file(self, reason, detail):
+        """data/login-required.json (keeps `since`); the dict it holds. A
+        failed write is an `error` event, and no file means no manual retry
+        (_await_login counts a deletion only of a file it saw)."""
         fields = dict(host=auth.host_label(self.root), account=self.account.name,
                       kind=self.account.kind, reason=reason, detail=detail,
                       action=self._login_action(reason))
         try:
             data = auth.write_login_required(self.home, **fields)
+            self._login_file_seen = True
         except Exception as exc:  # noqa: BLE001 - the event and the wait still happen
             data = dict(fields, detail=str(detail)[:300],
                         since=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+            self._login_file_seen = False
             self.stream.append("error", {"error": "%s: %s: %s" % (
                 auth.LOGIN_FILE, type(exc).__name__, exc)})
-        self.stream.append("auth", {k: data[k] for k in ("account", "kind", "reason", "detail",
-                                                          "action", "since", "host")})
+        return data
+
+    def _login_retry_failed(self):
+        """A login retry that failed for a reason other than the login: the
+        file says why (its detail), and after RETRY_FAILURES_TO_FRESH in a
+        row _main's rule applies: the session on file is dropped and the
+        next retry starts fresh, the digest carrying the state."""
+        self._retry_failures += 1
+        if self._retry_failures >= self.RETRY_FAILURES_TO_FRESH and self._resume_id:
+            self.stream.append("system", {"subtype": "resume_failed",
+                                          "session_id": self._resume_id,
+                                          "error": "%d login retries failed: %s" % (
+                                              self._retry_failures, self._last_connect_error)})
+            self._resume_id = self._expect_session = None
+            self._fresh_pending = True
+            self._retry_failures = 0
+        self._write_login_file(self._login_reason, "the retry could not connect: %s"
+                               % self._last_connect_error)
+
+    def _login_turn_lost(self, rows, cause, signal):
+        """A turn with an auth signal whose stream ended or raised before a
+        result: its rows go back (as _close's auth branch does), the runner
+        waits for the login, and the client is replaced by the retry."""
+        self.turn.end()
+        try:
+            for row in rows:
+                self.inbox.requeue(row["id"])
+            self.stream.append("result", {"inbox_ids": [], "requeued": [r["id"] for r in rows],
+                                          "interrupted": self._interrupt_requested,
+                                          "is_error": True, "num_turns": 0,
+                                          "total_cost_usd": None, "session_id": None,
+                                          "usage": None, "repeat_in_transcript": True,
+                                          "auth": signal["reason"],
+                                          "error": "%s: %s" % (type(cause).__name__, cause)})
+        except Exception as exc:  # noqa: BLE001 - recorded; the wait still starts
+            self.stream.append("error", {"error": "requeueing a turn the login failed: %s: %s"
+                                         % (type(exc).__name__, exc)})
+        self._interrupt_requested = False
+        self._login_required(signal["detail"], reason=signal["reason"])
 
     def _note_good_result(self):
         """R19: the first SUCCESSFUL result after a login failure proves the
@@ -629,7 +685,7 @@ class SdkRunner:
         moves it. Back to idle on a connect; the next good result clears
         the file (R19). The mark and the status it compares against were
         read at the failure (_login_required), each look moves the status."""
-        again = None
+        again, seen = None, self._login_file_seen
         while not self._stop.is_set() and self._login_blocked:
             deadline = time.monotonic() + auth.backoff_s(self._login_attempt)
             while not self._stop.is_set() and time.monotonic() < deadline:
@@ -640,17 +696,19 @@ class SdkRunner:
             mark = await asyncio.to_thread(auth.credential_mark, self.account, self.root)
             st = await asyncio.to_thread(accounts.status, self.account, self.root)
             now_in = bool(st.get("loggedIn"))
+            present = auth.read_login_required(self.home) is not None
             why = ("credentials changed" if mark != self._login_mark
                    else "logged in" if (now_in and not self._login_was_in)
-                   else "manual retry" if auth.read_login_required(self.home) is None
+                   else "manual retry" if (seen and not present)
                    else again)
-            self._login_was_in = now_in
+            self._login_was_in, seen = now_in, present
             if why is None:
                 continue                    # nothing the operator did yet: no connect, no turn
             refusals = self._login_refusals
+            # the backoff keeps growing until a GOOD result (_note_good_result):
+            # a login that connects and fails every turn must not retry every second
             if await self._login_retry():
                 self._login_blocked = False
-                self._login_attempt = 0
                 with self._lock:
                     if self.machine.state == "errored":
                         self.machine.to("idle", "login retry: %s" % why)
@@ -661,8 +719,14 @@ class SdkRunner:
                 return
             # refused for the login again: _login_required took a fresh mark and
             # only the next change moves the runner; any other failure (a secret
-            # file half written, a CLI that did not start): the next look retries
-            again = None if self._login_refusals != refusals else why
+            # file half written, a CLI that did not start, a session gone): the
+            # next look retries, and the file says why
+            if self._login_refusals != refusals:
+                again = None
+            else:
+                again = why
+                self._login_retry_failed()
+            seen = self._login_file_seen
 
     async def _login_retry(self):
         """One reconnect after the operator's fix; True when a client
@@ -819,6 +883,7 @@ class SdkRunner:
             return True
         except Exception as exc:  # noqa: BLE001 - a runner that cannot connect says so
             message = "%s: %s" % (type(exc).__name__, exc)
+            self._last_connect_error = message
             if isinstance(exc, accounts.SecretMissing) or auth.is_auth_text(message):
                 # the fallback signal (a logged-out connect usually SUCCEEDS and
                 # says it in the turn): a login to do, never self.fatal (R15)
@@ -1117,6 +1182,13 @@ class SdkRunner:
             requeued = [exc.row] if isinstance(exc, _NotWritten) else []
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
             unclosed = [row for row, _ in open_rows] + closing
+            signal, self._auth_turn = self._auth_turn, None
+            if signal is not None:
+                # the login failed the turn, and then the stream ended (or broke)
+                # without a result: still a login, never a failed row
+                self._live = False
+                self._login_turn_lost(unclosed + requeued, cause, signal)
+                return True
             try:
                 self._fail_turn(unclosed, cause, recover=False, requeued=requeued)
             finally:
@@ -1548,7 +1620,12 @@ class SdkRunner:
                     payload.update(error_status=d.get("error_status"), error=d.get("error"),
                                    attempt=d.get("attempt"))
                     signal = auth.retry_signal(d)
-                    if signal and self._auth_turn is None:
+                    # W11-1: a key or a token cannot refresh, so its first 401 is
+                    # final; a claude-login account refreshes at the CLI's next
+                    # attempt, so it is left to finish (a refresh that fails ends
+                    # in a 401 result, the second signal)
+                    if signal and self._auth_turn is None \
+                            and not accounts.resume_via_cli(self.account):
                         self._auth_turn = signal
                         if self.machine.state in LIVE_STATES:
                             self._interrupt_soon()      # a bad key fails in seconds
@@ -1615,8 +1692,10 @@ def validate_account(account, root, *, model=None, timeout=90.0, client_factory=
     except accounts.AccountsError as err:
         return 2, "validate: %s" % err
     cwd = tempfile.mkdtemp(prefix="cousin-validate-")
+    # no-session-persistence: no transcript under the account's config dir
     options = sdk.ClaudeAgentOptions(cwd=cwd, model=model, env=env, setting_sources=[],
-                                     tools=[], mcp_servers={}, max_turns=1)
+                                     tools=[], mcp_servers={}, max_turns=1,
+                                     extra_args={"no-session-persistence": None})
     factory = client_factory or (lambda o: sdk.ClaudeSDKClient(options=o))
 
     async def one_turn():
@@ -1630,7 +1709,9 @@ def validate_account(account, root, *, model=None, timeout=90.0, client_factory=
                     signal = signal or auth.assistant_signal(getattr(msg, "error", None))
                 elif isinstance(msg, sdk.SystemMessage) and msg.subtype == "api_retry":
                     retry = auth.retry_signal(msg.data)
-                    if retry:                       # a 401 now is a 401 in 3 minutes
+                    # a key or token's 401 now is a 401 in 3 minutes; a login
+                    # refreshes at the next attempt (W11-1): read on to the result
+                    if retry and not accounts.resume_via_cli(account):
                         return 4, "validate: %s" % retry["detail"]
                 elif isinstance(msg, sdk.ResultMessage):
                     signal = signal or auth.result_signal(

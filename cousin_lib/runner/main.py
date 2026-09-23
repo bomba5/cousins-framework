@@ -285,6 +285,16 @@ def _check_auth(home, *, validate=False):
     --validate adds ONE turn on a bare throwaway client (sdk.validate_account),
     never this cousin's runner."""
     root = root_for(home)
+    try:
+        # a secret open to others, a symlink or a malformed one is
+        # configuration (2), as at the runner's start; a missing one is a
+        # login to do, which the status check reports (4)
+        accounts.preflight(accounts.for_cousin(home, root), root)
+    except accounts.SecretMissing:
+        pass
+    except accounts.AccountsError as err:
+        print("cousin-runner: %s" % err, file=sys.stderr)
+        return 2
     rc, line = accounts.check(home, root)
     print(line)
     if rc != 0 or not validate:

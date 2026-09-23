@@ -46,6 +46,16 @@ class TestSignals(HermeticCase):
                      "OAuth token revoked", "Invalid bearer token"):
             self.assertTrue(auth.is_auth_text(text), text)
 
+    def test_the_bundled_clis_classifier_wordings_are_auth(self):
+        for text in ("OAuth token has expired", "OAuth access token has expired",
+                     "OAuth token has been revoked", "OAuth access token has been revoked",
+                     "OAuth access token is invalid", "Invalid bearer token",
+                     "OAuth token application has been deactivated", "Credential is invalid",
+                     "invalid x-api-key", "Organization access has been revoked",
+                     "Workspace access has been revoked", "API key is invalid"):
+            self.assertTrue(auth.is_auth_text("API Error: 401 " + text), text)
+        self.assertFalse(auth.is_auth_text("OAuth token has a long life"))
+
     def test_a_401_or_the_wording_in_a_result_is_auth_a_429_never(self):
         self.assertEqual(auth.result_signal(True, 401, "", None)["reason"], auth.LOGIN)
         self.assertEqual(auth.result_signal(True, None, None, ["Please run /login"])["reason"],
@@ -255,6 +265,80 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertIn("resumed", subtypes)
         self.assertNotIn("fresh", subtypes)               # never replaced by a fresh start
 
+    def test_an_auth_signal_then_a_stream_that_ends_without_a_result_is_a_login(self):
+        from tests.runner.test_sdk import init_msg
+        r = self.build(first_turn=[init_msg(), _said("authentication_failed", LOGGED_OUT), "END"])
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")   # never failed
+        self.assertEqual(self.events(r, "auth")[0]["reason"], auth.LOGIN)
+        self.assertTrue(r.login_required()); self.assertIsNone(r.fatal)
+        self.logged_in = True
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
+
+    def test_a_login_accounts_401_retry_is_left_to_the_clis_own_refresh(self):
+        # W11-1: a claude-login account refreshes its token at the next attempt;
+        # an interrupt at the first 401 would cancel a refresh that works
+        from tests.runner.test_sdk import assistant, init_msg, result
+        r = self.build(first_turn=[init_msg(), _retry_401(), assistant(text="refreshed"),
+                                   result()])
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
+        self.assertEqual(self.clients[0].interrupts, 0)
+        self.assertEqual(self.events(r, "auth"), [])
+        self.assertIsNone(auth.read_login_required(self.home))
+        self.assertFalse(r.login_required())
+
+    def test_a_retry_that_keeps_failing_for_another_reason_drops_the_resume_after_three(self):
+        from tests.runner.test_sdk import asked_resume, init_msg, result
+        r = self.build(first_turn=[init_msg(), _said("authentication_failed", LOGGED_OUT),
+                                   result(is_error=True)])
+        inner = r.client_factory
+
+        def factory(options):
+            client = inner(options)
+            if len(self.clients) > 1 and asked_resume(options):
+                async def gone(prompt=None):
+                    raise RuntimeError("no such session")
+                client.connect = gone          # the session is gone, the login is fine
+            return client
+        r.client_factory = factory
+        details = []
+        real_write = auth.write_login_required
+
+        def write(home, **kw):
+            details.append(kw["detail"])
+            return real_write(home, **kw)
+        patch = mock.patch.object(auth, "write_login_required", side_effect=write)
+        patch.start(); self.addCleanup(patch.stop)
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        self.logged_in = True
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
+        asked = [asked_resume(c.options) for c in self.clients]
+        self.assertEqual(asked[1:], ["s-1", "s-1", "s-1", None])   # three tries, then fresh
+        self.assertTrue(any("no such session" in d for d in details))   # the file said why
+        fresh = [e for e in self.events(r, "system") if e.get("subtype") == "fresh"]
+        self.assertEqual(fresh, [{"subtype": "fresh", "digest": False},    # the first start
+                                 {"subtype": "fresh", "digest": True}])    # after the fix
+
+    def test_a_login_file_that_could_not_be_written_is_no_manual_retry(self):
+        from tests.runner.test_sdk import init_msg, result
+        r = self.build(first_turn=[init_msg(), _said("authentication_failed", LOGGED_OUT),
+                                   result(is_error=True)])
+        patch = mock.patch.object(auth, "write_login_required", side_effect=OSError("read-only"))
+        patch.start(); self.addCleanup(patch.stop)
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: r.login_required()))
+        time.sleep(0.4)                                   # many looks at these patches
+        self.assertEqual(len(self.clients), 1)            # no file is not a deleted file
+        self.logged_in = True
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
+
     def test_a_missing_secret_is_a_login_to_do_not_a_fatal_connect(self):
         r = self.build(watch_mark=False,                  # the REAL mark: the file appears
                        account=lambda root: accounts.Account(
@@ -355,19 +439,34 @@ class TestValidate(HermeticCase):
         self.assertEqual((o.setting_sources, o.max_turns, o.tools, o.mcp_servers), ([], 1, [], {}))
         self.assertIsNone(getattr(o, "session_store", None))
         self.assertIsNone(o.resume); self.assertFalse(o.hooks)
+        self.assertIn("no-session-persistence", o.extra_args)    # no transcript left behind
+        self.assertIsNone(o.extra_args["no-session-persistence"])
         self.assertNotEqual(o.cwd, str(home)); self.assertFalse(os.path.exists(o.cwd))
         self.assertEqual(list((home / "data").iterdir()), [])     # the cousin's runner never ran
 
-    def test_a_logged_out_turn_or_a_401_retry_is_4(self):
+    def test_a_logged_out_turn_or_a_keys_401_retry_is_4(self):
         from cousin_lib.runner.sdk import validate_account
         from tests.runner.test_sdk import ScriptedClient, init_msg, result
         home = temp_home(self)
         host = accounts.Account("host", "claude-login", None, None, implicit=True)
-        for turn in ([init_msg(), _said("authentication_failed", LOGGED_OUT), result(is_error=True)],
-                     [init_msg(), _retry_401(), "WAIT_FOR_INTERRUPT"]):
-            rc, line = validate_account(host, home.parent.parent, timeout=5,
+        key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
+        for acc, turn in ((host, [init_msg(), _said("authentication_failed", LOGGED_OUT),
+                                  result(is_error=True)]),
+                          (key, [init_msg(), _retry_401(), "WAIT_FOR_INTERRUPT"])):
+            rc, line = validate_account(acc, home.parent.parent, timeout=5,
                                         client_factory=lambda o: ScriptedClient(o, [turn]))
             self.assertEqual(rc, 4, line)
+
+    def test_a_login_accounts_401_retry_waits_for_the_refresh(self):
+        # W11-1: the CLI refreshes a login's token at its next attempt
+        from cousin_lib.runner.sdk import validate_account
+        from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
+        home = temp_home(self)
+        host = accounts.Account("host", "claude-login", None, None, implicit=True)
+        turn = [init_msg(), _retry_401(), assistant(text="OK"), result()]
+        rc, line = validate_account(host, home.parent.parent, timeout=5,
+                                    client_factory=lambda o: ScriptedClient(o, [turn]))
+        self.assertEqual(rc, 0, line)
 
 
 class TestPolicyGuardrail(HermeticCase):

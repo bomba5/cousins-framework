@@ -10,7 +10,8 @@
 # To deny subagents, list both "Task" and "Agent".
 # The patterns skip the cousin's own mcp__cousin__* tools: their `command`
 # is a verb such as "add" or "pass", not a command line.
-deny_tools = ["WebFetch", "mcp__cousin__handoff"]   # exact names or prefix*
+# Never deny mcp__cousin__handoff: every generation ends through it.
+deny_tools = ["WebFetch", "WebSearch"]              # exact names or prefix*
 deny_bash_patterns = [                                # regexes on any tool's string `command` (Bash, PowerShell, Monitor, ...)
     '\brm\s+-rf\s+/',
     '\bgit\s+push\s+--force',

@@ -3,6 +3,12 @@
 It exists so the contract suite has a known-good implementation and so
 every producer, the console and the supervisor can be tested against
 a runner that behaves exactly as the spec says, deterministically.
+
+`script` is the steps every turn records: "tool" (a Bash tool event),
+"fail_once" (the first time any turn reaches it, the turn body raises;
+afterwards it is a tool step), or any other name, recorded as that
+tool. `turn_seconds` holds the first step open that long, folding
+operator/person chat in while it waits.
 """
 import threading
 import time
@@ -10,12 +16,10 @@ import uuid
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import wake
-from cousin_lib.runner.base import Receipt
+from cousin_lib.runner.base import Receipt, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
-
-FOLDED_KINDS = ("operator", "person")
 
 
 class FakeRunner:
@@ -31,6 +35,7 @@ class FakeRunner:
         self._interrupt = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
+        self._failed_once = False
 
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})
@@ -46,7 +51,8 @@ class FakeRunner:
         if self.machine.state == "stopped":
             return
         self._stop.set()
-        self._interrupt.set()
+        with self._lock:
+            self._interrupt.set()
         wake.poke(self.home)
         if self._thread is not None:
             self._thread.join(timeout)
@@ -65,9 +71,12 @@ class FakeRunner:
         return Receipt(inbox_id=inbox_id, outcome=QUEUED)
 
     def interrupt(self):
-        if self.machine.state != "running":
-            return False
-        self._interrupt.set()
+        # Under the lock that `_fold_midturn` checks it under: a fold that
+        # starts after this returns never claims a row.
+        with self._lock:
+            if self.machine.state != "running":
+                return False
+            self._interrupt.set()
         return True
 
     def rollover(self, reason):
@@ -79,9 +88,17 @@ class FakeRunner:
     def unsupported(self):
         return []
 
+    # -- phase-2 CLI conveniences, NOT in the Runner protocol --------------
+    def worker_alive(self):
+        """True while the worker thread runs (SdkRunner.worker_alive)."""
+        return self._thread is not None and self._thread.is_alive()
+
     # -- the loop ---------------------------------------------------------
+    def _wake_error(self, message):
+        self.stream.append("error", {"error": message})
+
     def _loop(self):
-        with wake.Listener(self.home) as listener:
+        with wake.listen(self.home, self._wake_error) as listener:
             while not self._stop.is_set():
                 try:
                     rows = self.inbox.claim(limit=1, claimant=self.session_id)
@@ -101,10 +118,15 @@ class FakeRunner:
 
     def _fold_midturn(self, consumed):
         """Claim operator/person chat rows that arrived during the turn
-        (finding 1: they are folded into it and closed by its result)."""
-        for row in self.inbox.claim(limit=10, claimant=self.session_id):
-            kind = row["thread_id"].partition(":")[0]
-            if row["source"] == "chat" and kind in FOLDED_KINDS:
+        (finding 1: they are folded into it and closed by its result).
+        The caller folds only while the turn is live: never once an
+        interrupt is asked (`base.folds_into_turn`)."""
+        with self._lock:
+            if self._interrupt.is_set():
+                return
+            rows = self.inbox.claim(limit=10, claimant=self.session_id)
+        for row in rows:
+            if folds_into_turn(row["source"], row["thread_id"]):
                 consumed.append(row)
             else:
                 self.inbox.requeue(row["id"])
@@ -128,10 +150,11 @@ class FakeRunner:
         empty), and raising IllegalTransition from inside this handler
         would be exactly the silent death this exists to close."""
         message = "%s: %s" % (type(exc).__name__, exc)
-        self.stream.append("error", {"error": message})
+        # The state first: whoever sees the `error` event also sees `errored`.
         with self._lock:
             if self.machine.state in ("idle", "running"):
                 self.machine.to("errored", message)
+        self.stream.append("error", {"error": message})
         for row in consumed:
             self.inbox.done(row["id"], FAILED, message)
         self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
@@ -153,8 +176,11 @@ class FakeRunner:
             deadline = time.monotonic() + self.turn_seconds
             interrupted = False
             for step in self.script:
-                self.stream.append("tool", {"name": "Bash" if step == "tool" else step,
-                                            "input": {"command": "true"}})
+                if step == "fail_once" and not self._failed_once:
+                    self._failed_once = True
+                    raise RuntimeError("scripted failure")
+                name = "Bash" if step in ("tool", "fail_once") else step
+                self.stream.append("tool", {"name": name, "input": {"command": "true"}})
                 while time.monotonic() < deadline:
                     if self._interrupt.is_set():
                         interrupted = True
@@ -163,7 +189,8 @@ class FakeRunner:
                     time.sleep(0.02)
                 if interrupted:
                     break
-            self._fold_midturn(consumed)
+            if not interrupted:
+                self._fold_midturn(consumed)
         except Exception as exc:  # noqa: BLE001 - a raising turn body is recorded, not lost
             self._fail_turn(consumed, exc)
             return

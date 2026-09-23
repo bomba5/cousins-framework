@@ -1,8 +1,10 @@
 """FakeRunner beyond the contract: state transitions and stop."""
+import os
 import time
 import unittest
 
 from cousin_lib.delivery import Item
+from cousin_lib.runner import wake
 from cousin_lib.runner.fake import FakeRunner
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
@@ -77,6 +79,29 @@ class _RaisesOnFirstResultRunner(FakeRunner):
         return self._real_append(kind, payload)
 
 
+class _RecordsFoldsRunner(FakeRunner):
+    """Counts the claims a fold makes after an interrupt was asked."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.folds_after_interrupt = 0
+        self._in_fold = False
+        real_claim = self.inbox.claim
+
+        def claim(**kw):
+            if self._in_fold and self._interrupt.is_set():
+                self.folds_after_interrupt += 1
+            return real_claim(**kw)
+        self.inbox.claim = claim
+
+    def _fold_midturn(self, consumed):
+        self._in_fold = True
+        try:
+            return super()._fold_midturn(consumed)
+        finally:
+            self._in_fold = False
+
+
 class TestFakeRunner(HermeticCase):
     def setUp(self):
         super().setUp()
@@ -107,7 +132,11 @@ class TestFakeRunner(HermeticCase):
         r.start()
         first = r.enqueue(Item("operator:priya", "chat", "boom", sender="Priya"))
         self.assertTrue(_wait(lambda: any(e["kind"] == "error" for e in r.events())))
-        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        # the machine's state flips before its `state` event is appended:
+        # wait for the event, not the attribute
+        self.assertTrue(_wait(lambda: any(e["kind"] == "state" and e["payload"]["to"] == "idle"
+                                          and e["payload"]["from"] == "errored"
+                                          for e in r.events())))
 
         states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
         self.assertIn("errored", states)
@@ -158,6 +187,52 @@ class TestFakeRunner(HermeticCase):
             e["kind"] == "result" and e["payload"].get("is_error") is False
             for e in r.events())))
         self.assertEqual(r.state(), "idle")
+
+    def test_errored_is_in_the_stream_before_the_error_event(self):
+        r = _RaisesOnceRunner(self.home)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "boom", sender="Priya"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "error" for e in r.events())))
+        events = list(r.events())
+        errored = next(e["seq"] for e in events
+                       if e["kind"] == "state" and e["payload"]["to"] == "errored")
+        error = next(e["seq"] for e in events if e["kind"] == "error")
+        self.assertLess(errored, error)
+
+    def test_nothing_is_folded_once_an_interrupt_is_asked(self):
+        r = _RecordsFoldsRunner(self.home, turn_seconds=5.0)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "slow", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.assertTrue(r.interrupt())
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertEqual(r.folds_after_interrupt, 0)
+
+    def test_a_scripted_failure_fails_once_then_the_runner_works(self):
+        r = FakeRunner(self.home, script=["fail_once"])
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "a", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(a.inbox_id)["state"] == "done"))
+        b = r.enqueue(Item("operator:priya", "chat", "b", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
+        self.assertEqual([r.inbox.get(i.inbox_id)["outcome"] for i in (a, b)],
+                         ["failed", "delivered"])
+
+    def test_a_wake_socket_that_cannot_bind_falls_back_to_polling(self):
+        run = self.home / "run"
+        os.rmdir(run)
+        run.write_text("not a directory")
+        r = FakeRunner(self.home)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "x", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(a.inbox_id)["state"] == "done"))
+        errors = [e["payload"]["error"] for e in r.events() if e["kind"] == "error"]
+        self.assertTrue(any(str(wake.socket_path(self.home)) in e for e in errors))
+        self.assertTrue(r.worker_alive())
 
 
 if __name__ == "__main__":

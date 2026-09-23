@@ -525,7 +525,8 @@ class SdkRunner:
                                           "requeued": [r["id"] for r in requeued],
                                           "interrupted": self._interrupt_requested,
                                           "is_error": True, "num_turns": 0,
-                                          "total_cost_usd": None, "session_id": None})
+                                          "total_cost_usd": None, "session_id": None,
+                                          "usage": None})
         except Exception as close_exc:  # noqa: BLE001 - recorded; the resync still runs
             self.stream.append("error", {"error": "closing a failed turn: %s: %s"
                                          % (type(close_exc).__name__, close_exc)})
@@ -592,7 +593,8 @@ class SdkRunner:
                                                   "is_error": bool(msg.is_error),
                                                   "num_turns": msg.num_turns,
                                                   "total_cost_usd": msg.total_cost_usd,
-                                                  "session_id": msg.session_id})
+                                                  "session_id": msg.session_id,
+                                                  "usage": msg.usage})
                     return count
         finally:
             await _aclose(responses)
@@ -694,7 +696,7 @@ class SdkRunner:
         self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted,
                                       "is_error": is_error, "num_turns": msg.num_turns,
                                       "total_cost_usd": msg.total_cost_usd,
-                                      "session_id": msg.session_id})
+                                      "session_id": msg.session_id, "usage": msg.usage})
         self._interrupt_requested = False
         return not (is_error and not interrupted)
 

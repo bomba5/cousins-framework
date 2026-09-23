@@ -37,10 +37,10 @@ def assistant(text=None, tool=None):
     return AssistantMessage(content=content, model="m")
 
 
-def result(num_turns=1, cost=0.01, is_error=False, session="s-1"):
+def result(num_turns=1, cost=0.01, is_error=False, session="s-1", usage=None):
     return ResultMessage(subtype="success", duration_ms=10, duration_api_ms=5,
                          is_error=is_error, num_turns=num_turns, session_id=session,
-                         total_cost_usd=cost)
+                         total_cost_usd=cost, usage=usage)
 
 
 def echo(message):
@@ -357,6 +357,23 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(init["payload"]["tools"], [])
         self.assertEqual(init["payload"]["mcp_servers"], [])
 
+    # -- usage (A1) ----------------------------------------------------------
+    def test_a_successful_results_usage_dict_lands_in_the_event(self):
+        usage = {"input_tokens": 10, "output_tokens": 3,
+                 "cache_creation_input_tokens": 0, "cache_read_input_tokens": 128}
+        r, _ = self._runner([[init_msg(), assistant(text="ok"), result(usage=usage)]])
+        r.start()
+        r.enqueue(self._op("hello"))
+        self.assertTrue(_wait(lambda: _results(r)))
+        self.assertEqual(_results(r)[0]["usage"], usage)
+
+    def test_a_result_with_no_usage_carries_none(self):
+        r, _ = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        r.start()
+        r.enqueue(self._op("hello"))
+        self.assertTrue(_wait(lambda: _results(r)))
+        self.assertIsNone(_results(r)[0]["usage"])
+
     def test_the_echo_of_the_row_is_recorded_as_a_user_event_naming_it(self):
         r, _ = self._runner([[init_msg(), assistant(text="done"), result()]])
         r.start()
@@ -589,6 +606,9 @@ class TestSdkRunner(HermeticCase):
         self.assertIn("errored", states)
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
+        self.assertTrue(_wait(lambda: _results(r)))
+        self.assertIn("usage", _results(r)[0])
+        self.assertIsNone(_results(r)[0]["usage"])
 
     def test_query_is_sent_as_an_async_iterable_not_a_dict(self):
         seen = []
@@ -679,6 +699,16 @@ class TestSdkRunner(HermeticCase):
         drained = _results(r, drained=True)[0]
         self.assertEqual((drained["inbox_ids"], drained["num_turns"], drained["total_cost_usd"]),
                          ([], 4, 0.04))
+
+    def test_the_drained_results_usage_is_recorded_too(self):
+        usage = {"input_tokens": 5, "output_tokens": 1,
+                 "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+        r, _ = self._runner([[init_msg(), "HANG", result(num_turns=4, cost=0.04, usage=usage)]],
+                            idle_timeout_s=1.0)
+        r.start()
+        r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: _results(r, drained=True), timeout=6))
+        self.assertEqual(_results(r, drained=True)[0]["usage"], usage)
 
     def test_a_failed_drain_reconnects_and_resumes(self):
         clients = []

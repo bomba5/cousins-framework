@@ -76,6 +76,42 @@ class TestWiring(HermeticCase):
         self.assertEqual(opts.permission_mode, "bypassPermissions")
         self.assertIn("replay-user-messages", opts.extra_args)
 
+    # -- cache-bust guards (A2, A3) --------------------------------------------
+    def test_tool_definitions_are_byte_stable_across_connects(self):
+        import json
+
+        from cousin_lib.runner import tools
+        r1 = self._runner()
+        r1.options()
+        defs_a = json.dumps(tools.tool_definitions(r1.tool_context.registry), sort_keys=True)
+        r1.options()   # a reconnect rebuilds the server from scratch
+        defs_b = json.dumps(tools.tool_definitions(r1.tool_context.registry), sort_keys=True)
+        r2 = self._runner()
+        r2.options()
+        defs_c = json.dumps(tools.tool_definitions(r2.tool_context.registry), sort_keys=True)
+        self.assertEqual(defs_a, defs_b)
+        self.assertEqual(defs_a, defs_c)
+
+    def test_options_system_prompt_is_unchanged_across_calls(self):
+        r = self._runner()
+        o1, o2 = r.options(), r.options()
+        self.assertIsNone(o1.system_prompt)
+        self.assertEqual(o1.system_prompt, o2.system_prompt)
+
+    def test_additional_context_comes_only_from_the_prompt_hook_not_options(self):
+        patch = mock.patch.object(hooks, "default_recall",
+                                  lambda home: lambda body: ("a recalled line", 1))
+        patch.start()
+        self.addCleanup(patch.stop)
+        r = self._runner()
+        opts = r.options()
+        cb = opts.hooks["UserPromptSubmit"][0].hooks[0]
+        out = asyncio.run(cb({"hook_event_name": "UserPromptSubmit", "prompt": "hi",
+                             "session_id": "s", "transcript_path": "/dev/null",
+                             "cwd": str(self.home)}, None, {}))
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "a recalled line")
+        self.assertNotIn("a recalled line", repr(vars(opts)))
+
     def test_the_policy_hook_runs_first_on_pre_tool_use(self):
         (self.home / "policy.toml").write_text('deny_tools = ["WebFetch"]\n')
         r = self._runner()

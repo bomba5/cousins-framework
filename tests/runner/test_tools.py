@@ -231,6 +231,7 @@ class TestNamedThread(HermeticCase):
         self.assertTrue(err); self.assertIn("send", text)
         self.assertEqual(self._rows(ctx.home), [])
 
+    @unittest.skipIf(os.geteuid() == 0, "root ignores directory modes")
     def test_an_unopenable_store_leaves_no_staged_attachment(self):
         turn = Turn(); turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
         ctx = _ctx(self, turn)

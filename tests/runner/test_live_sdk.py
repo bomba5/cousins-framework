@@ -114,5 +114,40 @@ class TestLiveContinuity(HermeticCase):
         self._one_session(r)
 
 
+@unittest.skipUnless(os.environ.get("COUSIN_LIVE_SDK") == "1", "set COUSIN_LIVE_SDK=1")
+class TestLiveCache(HermeticCase):
+    """Cache-bust guard (ruling P23, tracker #69): the second turn of one
+    session must read the prompt cache, not rebuild it. If it doesn't,
+    something per-turn is landing in the cached prefix (A3 guards the
+    two places that could: system_prompt and the hooks table)."""
+
+    def _runner(self):
+        home = temp_home(self, runner="sdk")
+        r = SdkRunner(home, model=MODEL, idle_timeout_s=120)
+        self.addCleanup(lambda: r.stop(timeout=30))
+        r.start()
+        return home, r
+
+    def _last_usage(self, r):
+        results = [e["payload"] for e in r.events()
+                  if e["kind"] == "result" and not e["payload"].get("drained")]
+        self.assertTrue(results)
+        return results[-1]["usage"]
+
+    def test_the_second_turn_reads_the_prompt_cache(self):
+        home, r = self._runner()
+        self.assertEqual(delivery.deliver(home, _op("Reply only with the word OK"),
+                                          wait=True, timeout=120), delivery.DELIVERED)
+        first_usage = self._last_usage(r)
+        self.assertEqual(delivery.deliver(home, _op("Reply only with the word OK again"),
+                                          wait=True, timeout=120), delivery.DELIVERED)
+        second_usage = self._last_usage(r)
+        print("\nUSAGE turn 1:", first_usage, file=sys.stderr)
+        print("USAGE turn 2:", second_usage, file=sys.stderr)
+        cache_read = (second_usage or {}).get("cache_read_input_tokens") or 0
+        self.assertGreater(cache_read, 0,
+                           "turn 1 usage: %r; turn 2 usage: %r" % (first_usage, second_usage))
+
+
 if __name__ == "__main__":
     unittest.main()

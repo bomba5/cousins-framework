@@ -164,18 +164,28 @@ def add(slug, when, prompt, *, now=None):
         conn.close()
 
 
-def list_entries(slug=None, *, include_fired=False):
+def list_entries(slug=None, *, include_fired=False, limit=None):
+    """The old CLI's two queries, unchanged: `include_fired` (the old
+    `--all`) drops the status filter, orders newest-first and takes
+    `limit` (the old CLI passed 50); pending-only keeps the status
+    filter, orders oldest-first, and is never limited - exactly what
+    `_cmd_list` did before this became a library call."""
     conn = _db()
     try:
-        sql = "SELECT id, cousin, target_ts, prompt, status FROM scheduled_jobs"
         where, params = [], []
         if slug:
             where.append("cousin=?"); params.append(slug)
-        if not include_fired:
+        if include_fired:
+            sql = "SELECT id, cousin, target_ts, prompt, status FROM scheduled_jobs"
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            sql += " ORDER BY target_ts DESC"
+            if limit:
+                sql += " LIMIT ?"; params.append(limit)
+        else:
             where.append("status='pending'")
-        if where:
-            sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY target_ts"
+            sql = ("SELECT id, cousin, target_ts, prompt, status FROM scheduled_jobs"
+                   " WHERE " + " AND ".join(where) + " ORDER BY target_ts")
         return [dict(zip(("id", "cousin", "target_ts", "prompt", "status"), r))
                 for r in conn.execute(sql, params)]
     finally:
@@ -196,11 +206,19 @@ def cancel(job_id, *, slug=None):
 
 
 def format_entries(entries):
+    """Exactly the old CLI's per-row line: same field order, same
+    padding, same 60-char prompt truncation. A single `print()` of the
+    joined result reproduces the old per-row `print()` loop
+    byte-for-byte."""
     if not entries:
         return "no scheduled prompts"
-    return "\n".join("#%d %s %s: %s" % (
-        e["id"], e["status"], datetime.fromtimestamp(e["target_ts"]).isoformat(timespec="minutes"),
-        e["prompt"]) for e in entries)
+    lines = []
+    for e in entries:
+        eta = datetime.fromtimestamp(e["target_ts"]).isoformat(timespec="seconds")
+        prompt = e["prompt"]
+        snip = prompt[:60] + "..." if len(prompt) > 60 else prompt
+        lines.append("#%-4d  %-9s  %s   %s" % (e["id"], e["status"], eta, snip))
+    return "\n".join(lines)
 
 
 def _cmd_add(args):
@@ -217,7 +235,8 @@ def _cmd_add(args):
 
 def _cmd_list(args):
     slug = _slug()
-    entries = list_entries(slug, include_fired=args.all)
+    entries = list_entries(slug, include_fired=args.all,
+                           limit=50 if args.all else None)
     if not entries:
         print("no jobs for %s%s"
               % (slug, " (incl history)" if args.all else " pending"))

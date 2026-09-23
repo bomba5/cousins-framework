@@ -1,4 +1,6 @@
 """memory's library functions: what the CLI and the tools both call."""
+import contextlib
+import io
 import json
 import pathlib
 import tempfile
@@ -14,6 +16,23 @@ def _home(case):
     (home / "data").mkdir(parents=True); (home / "memory").mkdir()
     (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
     return home
+
+
+# The exact bytes `cousin-memory recall alpha` printed before this file
+# existed (commit 8aa4ec4, the pre-refactor `cousin_lib/memory.py`), for
+# the fixed three-decision fixture below (fixed timestamps: written
+# straight into decisions.jsonl, not produced by `decide`, so the
+# expected text has nothing wall-clock-dependent in it). Captured by
+# running the old `_cmd_recall` against that fixture and reading its
+# stdout back; see task-0-2-report.md's fix note for how.
+_OLD_RECALL_ALPHA_OUTPUT = (
+    "[2030-01-01T10:00] alpha thing: one\n"
+    "  Why: because alpha\n"
+    "\n"
+    "[2030-01-01T11:00] alpha other: two\n"
+    "  Why: because also\n"
+    "\n"
+)
 
 
 class TestDecide(HermeticCase):
@@ -73,6 +92,25 @@ class TestCliStillWorks(HermeticCase):
         rc = memory.memory_main(["--home", str(home), "decide", "t", "d", "w"])
         self.assertEqual(rc, 0)
         self.assertTrue((home / "data" / "decisions.jsonl").exists())
+
+    def test_recall_is_byte_identical_to_the_old_cli(self):
+        home = _home(self)
+        rows = [
+            {"timestamp": "2030-01-01T10:00:00+01:00", "topic": "alpha thing",
+             "decision": "one", "reasoning": "because alpha"},
+            {"timestamp": "2030-01-01T11:00:00+01:00", "topic": "alpha other",
+             "decision": "two", "reasoning": "because also"},
+            {"timestamp": "2030-01-01T12:00:00+01:00", "topic": "beta",
+             "decision": "three", "reasoning": "unrelated"},
+        ]
+        with open(home / "data" / "decisions.jsonl", "w") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = memory.memory_main(["--home", str(home), "recall", "alpha"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), _OLD_RECALL_ALPHA_OUTPUT)
 
 
 if __name__ == "__main__":

@@ -403,6 +403,10 @@ def recall_entries(home, keyword="", last=10):
 
 
 def format_recall(entries, keyword=""):
+    """Exactly the old CLI's printed wording: each entry as two lines
+    plus a blank line AFTER IT (including the last), never trimmed - a
+    single `print()` of this string reproduces byte-for-byte what the
+    old per-line `print()` loop wrote."""
     if not entries:
         return "No decisions found matching '%s'" % (keyword or "(all)")
     out = []
@@ -411,7 +415,7 @@ def format_recall(entries, keyword=""):
                                     entry.get("topic", "?"), entry.get("decision", "")))
         out.append("  Why: %s" % entry.get("reasoning", ""))
         out.append("")
-    return "\n".join(out).rstrip("\n")
+    return "\n".join(out)
 
 
 def note_activity(home, text):

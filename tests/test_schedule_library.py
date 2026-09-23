@@ -1,4 +1,6 @@
 """schedule's library functions."""
+import contextlib
+import io
 import os
 import pathlib
 import tempfile
@@ -7,6 +9,18 @@ from datetime import datetime, timedelta
 
 from cousin_lib import schedule
 from tests._hermetic import HermeticCase
+
+# The exact bytes `cousin-schedule list --all` printed before this file
+# existed (commit 8aa4ec4, the pre-refactor `cousin_lib/schedule.py`),
+# for the same three-row fixture the test below builds. Captured by
+# running the old `_cmd_list` against that fixture and reading its
+# stdout back; see task-0-2-report.md's fix note for how.
+_OLD_LIST_ALL_OUTPUT = (
+    "#3     pending    2030-01-01T12:00:00   short\n"
+    "#2     pending    2030-01-01T11:00:00   check the build and make sure"
+    " everything still compiles clea...\n"
+    "#1     pending    2030-01-01T10:00:00   water the plant\n"
+)
 
 
 class TestScheduleLibrary(HermeticCase):
@@ -40,6 +54,20 @@ class TestScheduleLibrary(HermeticCase):
         rc = schedule.schedule_main(["add", "in 10m", "water the plant"])
         self.assertEqual(rc, 0)
         self.assertEqual(len(schedule.list_entries("wren")), 1)
+
+    def test_list_all_is_byte_identical_to_the_old_cli(self):
+        # Fixed future ISO timestamps: deterministic regardless of when
+        # this test runs (no "in Nm" wall-clock dependency).
+        schedule.schedule_main(["add", "2030-01-01T10:00:00", "water the plant"])
+        schedule.schedule_main(["add", "2030-01-01T11:00:00",
+                                "check the build and make sure everything"
+                                " still compiles cleanly on CI"])
+        schedule.schedule_main(["add", "2030-01-01T12:00:00", "short"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = schedule.schedule_main(["list", "--all"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), _OLD_LIST_ALL_OUTPUT)
 
 
 if __name__ == "__main__":

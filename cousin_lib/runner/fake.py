@@ -94,8 +94,10 @@ class FakeRunner:
                     continue
                 try:
                     self._turn(rows[0])
-                except Exception as exc:  # noqa: BLE001 - last-resort net around _turn itself
-                    self._fail_turn([rows[0]], exc)
+                except Exception as exc:  # noqa: BLE001 - the success tail can still raise
+                    # after its rows are already closed; `[]` because nothing here is
+                    # safe to re-close (see `_fail_turn`'s docstring)
+                    self._fail_turn([], exc)
 
     def _fold_midturn(self, consumed):
         """Claim operator/person chat rows that arrived during the turn
@@ -108,17 +110,27 @@ class FakeRunner:
                 self.inbox.requeue(row["id"])
 
     def _fail_turn(self, consumed, exc):
-        """A turn's failure path: never silence (global constraint). Used
-        both by `_turn`'s own try/except (the normal case, with whatever
-        the turn had folded into `consumed`) and by `_loop`'s outer guards
-        (a store failure with nothing claimed, or an exception that
-        escaped `_turn` before it entered its own try) - shared so the
-        error/state/result bookkeeping is written once, not per catch
-        site."""
+        """A turn's failure path: never silence (global constraint).
+        `consumed` is only ever rows this call may safely close: `_turn`'s
+        own try/except passes what the turn had folded in when its BODY
+        raised (those rows are certainly still open); `_loop`'s outer
+        guards pass `[]`, because a store failure claimed nothing and a
+        `_turn()` call that raised past its own try may already have
+        closed its rows in the success tail - `Inbox.done` has no
+        re-close guard, so guessing wrong here would silently overwrite a
+        correct outcome.
+
+        The state transition to `errored` only fires from `idle` or
+        `running`, never from `stopped`, which `stop()` may have forced
+        onto the machine while this turn was still failing; `errored ->
+        idle` only fires from `errored`, for the same reason. Both are
+        illegal transitions out of `stopped` (`TRANSITIONS["stopped"]` is
+        empty), and raising IllegalTransition from inside this handler
+        would be exactly the silent death this exists to close."""
         message = "%s: %s" % (type(exc).__name__, exc)
         self.stream.append("error", {"error": message})
         with self._lock:
-            if self.machine.state != "errored":
+            if self.machine.state in ("idle", "running"):
                 self.machine.to("errored", message)
         for row in consumed:
             self.inbox.done(row["id"], FAILED, message)
@@ -152,14 +164,21 @@ class FakeRunner:
                 if interrupted:
                     break
             self._fold_midturn(consumed)
-            outcome = DELIVERED
-            for row in consumed:
-                self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)
-            self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                          "interrupted": interrupted,
-                                          "is_error": False})
-            with self._lock:
-                if self.machine.state == "running":
-                    self.machine.to("idle", "turn done")
-        except Exception as exc:  # noqa: BLE001 - a raising turn is recorded, not lost
+        except Exception as exc:  # noqa: BLE001 - a raising turn body is recorded, not lost
             self._fail_turn(consumed, exc)
+            return
+
+        # Success tail: reached only when the body above did not raise, so
+        # a failure here (finding: it can still raise) must NOT route back
+        # through `_fail_turn(consumed, ...)` - these rows may already be
+        # closed by the loop just below. It propagates to `_loop`'s outer
+        # guard instead, which calls `_fail_turn([], exc)`.
+        outcome = DELIVERED
+        for row in consumed:
+            self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)
+        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                      "interrupted": interrupted,
+                                      "is_error": False})
+        with self._lock:
+            if self.machine.state == "running":
+                self.machine.to("idle", "turn done")

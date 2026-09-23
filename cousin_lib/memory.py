@@ -333,6 +333,111 @@ _DECIDE_USAGE = (
     "       reasoning\n       EOF")
 
 
+# ------------------------------------------------ library (the one implementation)
+
+def decide(home, topic, decision, reasoning, *, level=None, cite=None):
+    """Log a decision with its reasoning. Raises ValueError for a missing
+    part or a level error. Returns the line the CLI prints."""
+    home = Path(home)
+    topic, decision, reasoning = (str(topic or "").strip(), str(decision or "").strip(),
+                                  str(reasoning or "").strip())
+    if not (topic and decision and reasoning):
+        raise ValueError("decide needs topic, decision and reasoning")
+    resolved, err = resolve_level(level, cite)
+    if err:
+        raise ValueError(err)
+    entry = {"timestamp": datetime.now().astimezone().isoformat(),
+             "topic": topic, "decision": decision, "reasoning": reasoning}
+    decisions = home / "data" / "decisions.jsonl"
+    decisions.parent.mkdir(parents=True, exist_ok=True)
+    with open(decisions, "a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+    lines = ["Decision logged: [%s] %s" % (topic, decision)]
+    archive = _rotate_decisions_if_needed(decisions)
+    if archive:
+        lines.append("(decisions.jsonl rotated: older entries -> %s)" % archive.name)
+    try:
+        _append_raw(home, {"topic": topic,
+                           "content": "%s - why: %s" % (decision, reasoning),
+                           "truth_level": resolved, "source": "decision",
+                           **({"cite": cite} if cite else {})})
+    except OSError as err:
+        lines.append("warning: raw-memory bridge failed (%s); decision logged anyway" % err)
+    return "\n".join(lines)
+
+
+def remember(home, topic, fact, *, level=None, cite=None):
+    """One durable fact into raw memory. Raises ValueError. Returns the line."""
+    topic, fact = str(topic or "").strip(), str(fact or "").strip()
+    if not (topic and fact):
+        raise ValueError("remember needs a topic and a fact")
+    resolved, err = resolve_level(level, cite)
+    if err:
+        raise ValueError(err)
+    entry = {"topic": topic, "content": fact, "truth_level": resolved, "source": "remember"}
+    if cite:
+        entry["cite"] = cite
+    _append_raw(Path(home), entry)
+    return "Remembered [%s] (%s): %s" % (topic, resolved, fact)
+
+
+def recall_entries(home, keyword="", last=10):
+    keyword = (keyword or "").lower()
+    entries = []
+    try:
+        with open(Path(home) / "data" / "decisions.jsonl") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not keyword or any(keyword in str(entry.get(k, "")).lower()
+                                      for k in ("topic", "decision", "reasoning")):
+                    entries.append(entry)
+    except FileNotFoundError:
+        pass
+    return entries[-int(last):] if last else entries
+
+
+def format_recall(entries, keyword=""):
+    if not entries:
+        return "No decisions found matching '%s'" % (keyword or "(all)")
+    out = []
+    for entry in entries:
+        out.append("[%s] %s: %s" % (entry.get("timestamp", "?")[:16],
+                                    entry.get("topic", "?"), entry.get("decision", "")))
+        out.append("  Why: %s" % entry.get("reasoning", ""))
+        out.append("")
+    return "\n".join(out).rstrip("\n")
+
+
+def note_activity(home, text):
+    text = text or "Idle"
+    path = Path(home) / "data" / "last-activity.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("%s: %s\n" % (datetime.now().isoformat(), text))
+    return "Activity saved: %s" % text[:80]
+
+
+def search_text(home, query, *, top=5, collection=None):
+    from cousin_lib import memory_search
+    hits, notice = memory_search.search(query, top=top, home=Path(home),
+                                        collection=collection)
+    fmt = getattr(memory_search, "format_results", None)
+    if fmt is not None:
+        text = fmt(hits)
+    else:
+        text = "\n".join("%d. [%.3f] [%s] %s\n   %s" % (
+            i + 1, h.get("score", 0.0), h.get("collection", ""), h.get("path", ""),
+            (h.get("snippet") or "").strip()) for i, h in enumerate(hits)) or "no hits"
+    if notice:
+        text += "\nnotice: %s" % notice
+    return text
+
+
 def _cmd_decide(args):
     home = _home(args)
     topic, decision, reasoning = args.topic, args.decision, args.reasoning
@@ -345,42 +450,12 @@ def _cmd_decide(args):
     if not (topic and decision and reasoning):
         print(_DECIDE_USAGE, file=sys.stderr)
         return 2
-    level, err = resolve_level(getattr(args, "level", None),
-                               getattr(args, "cite", None))
-    if err:
+    try:
+        print(decide(home, topic, decision, reasoning,
+                     level=getattr(args, "level", None), cite=getattr(args, "cite", None)))
+    except ValueError as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
-    # The resolved values replace the originals so the rest of decide
-    # (the raw bridge included) never reads an unresolved argument.
-    args.topic, args.decision, args.reasoning = topic, decision, reasoning
-    entry = {
-        # Aware local time: raw-memory entries are UTC-aware and boot
-        # staleness math compares the two.
-        "timestamp": datetime.now().astimezone().isoformat(),
-        "topic": args.topic,
-        "decision": args.decision,
-        "reasoning": args.reasoning,
-    }
-    decisions = home / "data" / "decisions.jsonl"
-    decisions.parent.mkdir(parents=True, exist_ok=True)
-    with open(decisions, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
-    print("Decision logged: [%s] %s" % (args.topic, args.decision))
-    archive = _rotate_decisions_if_needed(decisions)
-    if archive:
-        print("(decisions.jsonl rotated: older entries -> %s)"
-              % archive.name)
-    try:
-        _append_raw(home, {
-            "topic": args.topic,
-            "content": "%s - why: %s" % (args.decision, args.reasoning),
-            "truth_level": level,
-            "source": "decision",
-            **({"cite": args.cite} if getattr(args, "cite", None) else {}),
-        })
-    except OSError as err:
-        print("warning: raw-memory bridge failed (%s); decision logged"
-              " anyway" % err, file=sys.stderr)
     return 0
 
 
@@ -388,21 +463,15 @@ def _cmd_remember(args):
     """One durable fact straight into raw memory (no decision record):
     what the operator told you, what a tool measured, a hypothesis."""
     home = _home(args)
-    topic, fact = (args.topic or "").strip(), (args.fact or "").strip()
-    if not (topic and fact):
+    if not (str(args.topic or "").strip() and str(args.fact or "").strip()):
         print("Usage: cousin-memory remember TOPIC FACT [--level operator"
               " --cite SOURCE]", file=sys.stderr)
         return 2
-    level, err = resolve_level(args.level, args.cite)
-    if err:
+    try:
+        print(remember(home, args.topic, args.fact, level=args.level, cite=args.cite))
+    except ValueError as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
-    entry = {"topic": topic, "content": fact, "truth_level": level,
-             "source": "remember"}
-    if args.cite:
-        entry["cite"] = args.cite
-    _append_raw(home, entry)
-    print("Remembered [%s] (%s): %s" % (topic, level, fact))
     return 0
 
 
@@ -424,42 +493,15 @@ def _cmd_obsolete(args):
 def _cmd_recall(args):
     home = _home(args)
     keyword = (args.keyword or "").lower()
-    entries = []
-    try:
-        with open(home / "data" / "decisions.jsonl") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not keyword or any(
-                    keyword in str(entry.get(k, "")).lower()
-                    for k in ("topic", "decision", "reasoning")
-                ):
-                    entries.append(entry)
-    except FileNotFoundError:
-        pass
-    for entry in entries[-args.last:]:
-        print("[%s] %s: %s" % (entry.get("timestamp", "?")[:16],
-                               entry.get("topic", "?"),
-                               entry.get("decision", "")))
-        print("  Why: %s" % entry.get("reasoning", ""))
-        print()
-    if not entries:
-        print("No decisions found matching '%s'" % (keyword or "(all)"))
+    entries = recall_entries(home, args.keyword, args.last)
+    print(format_recall(entries, keyword))
     return 0
 
 
 def _cmd_activity(args):
     home = _home(args)
     text = " ".join(args.text) if args.text else "Idle"
-    activity = home / "data" / "last-activity.txt"
-    activity.parent.mkdir(parents=True, exist_ok=True)
-    activity.write_text("%s: %s\n" % (datetime.now().isoformat(), text))
-    print("Activity saved: %s" % text[:80])
+    print(note_activity(home, text))
     return 0
 
 

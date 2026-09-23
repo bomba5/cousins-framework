@@ -931,11 +931,16 @@ def search(query, *, top=5, home=None, collection=None):
     return hits, notice
 
 
-def print_results(hits):
+def format_results(hits):
     if not hits:
-        print("no matches")
-        return
+        return "no matches"
+    lines = []
     for i, hit in enumerate(hits, 1):
-        print("%d. [%.3f] [%s] %s" % (i, hit["score"],
-                                      hit["collection"], hit["path"]))
-        print("   %s" % hit["snippet"].replace("\n", " "))
+        lines.append("%d. [%.3f] [%s] %s" % (i, hit["score"],
+                                              hit["collection"], hit["path"]))
+        lines.append("   %s" % hit["snippet"].replace("\n", " "))
+    return "\n".join(lines)
+
+
+def print_results(hits):
+    print(format_results(hits))

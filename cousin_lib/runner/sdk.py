@@ -30,6 +30,7 @@ import json
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import boot, session, usage
@@ -164,6 +165,9 @@ class SdkRunner:
         self._failures = 0       # consecutive failed turns
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
+        # A rejected rate limit (epoch seconds): nothing is claimed before it
+        # (_wait_rate_limit); None when no limit holds.
+        self._limited_until = None
         self.fatal = None        # why the worker gave up (a connect failure), else None
         self._fallback_said = False   # the registry-fallback notice, once per runner
         # Restart with resume (data/runner-session.json): the id on file
@@ -355,6 +359,7 @@ class SdkRunner:
             self.stream.append("error", {"error": "the digest row could not be stored: %s: %s"
                                          % (type(exc).__name__, exc)})
             return
+        await self._wait_rate_limit()   # a claim by id skips the loop's wait
         if self._stop.is_set():
             return      # the row stays queued (durable): the next start runs it
         # the loop's own guard: this runs outside the loop's per-row try, and a
@@ -530,6 +535,7 @@ class SdkRunner:
             with wake.listen(self.home, self._wake_error) as listener:
                 while not self._stop.is_set() and self.fatal is None:
                     await self._backoff()
+                    await self._wait_rate_limit()
                     if self._stop.is_set():
                         break
                     try:
@@ -580,6 +586,38 @@ class SdkRunner:
         deadline = time.monotonic() + seconds
         while not self._stop.is_set() and time.monotonic() < deadline:
             await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    def _on_rate_limit(self, info):
+        """Every RateLimitEvent is a `rate_limit` event (a warning too: the
+        operator sees it coming). A rejection sets the window; a running
+        turn becomes `rate_limited`. A rejection the overage absorbs does
+        not block (R9): the request goes through, and the event says so."""
+        overage = info.status == "rejected" and info.overage_status == "allowed"
+        self.stream.append("rate_limit", {"status": info.status, "resets_at": info.resets_at,
+                                          "type": info.rate_limit_type,
+                                          "utilization": info.utilization, "overage": overage})
+        if info.status != "rejected" or overage:
+            return          # a warning, or a rejection the overage absorbs (R9)
+        self._limited_until = float(info.resets_at or (time.time() + 60))
+        with self._lock:
+            if self.machine.state == "running":
+                self.machine.to("rate_limited", "resets at %s" % datetime.fromtimestamp(
+                    self._limited_until, timezone.utc).strftime("%H:%M:%S UTC"))
+
+    async def _wait_rate_limit(self):
+        """Claim nothing until the window reopens. Every claim waits here:
+        the loop's, and the two claims by id (a fresh start's digest, the
+        rollover's). A stop ends the wait and leaves the state to stop()."""
+        if self._limited_until is None:
+            return
+        while not self._stop.is_set() and time.time() < self._limited_until:
+            await asyncio.sleep(min(1.0, max(0.05, self._limited_until - time.time())))
+        if self._stop.is_set():
+            return
+        self._limited_until = None
+        with self._lock:
+            if self.machine.state == "rate_limited":
+                self.machine.to("idle", "window reopened")
 
     async def _connect(self, *, resume=None, why=None, fatal=True, event="connect_failed"):
         """A new client, connected. On failure the runner gives up: the
@@ -812,6 +850,7 @@ class SdkRunner:
                                                   "total_cost_usd": msg.total_cost_usd,
                                                   "session_id": msg.session_id,
                                                   "usage": msg.usage})
+                    await self._record_usage(msg)   # a failed turn's cost is still a cost
                     return count
         finally:
             await _aclose(responses)
@@ -841,7 +880,9 @@ class SdkRunner:
             results = 0
 
             async def fold():
-                if self._live and not self._interrupt_requested and results == 0:
+                # a limited turn folds nothing: no claim while the limit holds
+                if self._live and not self._interrupt_requested and results == 0 \
+                        and self._limited_until is None:
                     await self._fold(sdk, open_rows)
 
             while open_rows:
@@ -905,6 +946,23 @@ class SdkRunner:
         is_error = bool(msg.is_error)
         closing[:] = [row for row, _ in open_rows if row["id"] in echoed]
         open_rows[:] = [(row, text) for row, text in open_rows if row["id"] not in echoed]
+        if is_error and self._limited_until is not None:
+            # A rejected request is not the item's fault (R9): back to the queue,
+            # claimed again when the window reopens. The result closing it
+            # returns True: the failure counter must not back off on top.
+            for row in closing:
+                self.inbox.requeue(row["id"])
+            ids, closing[:] = [row["id"] for row in closing], []
+            # R9: the row's text is in the transcript once already; its rerun
+            # writes it a second time. Said here, so the repeat surprises nobody.
+            self.stream.append("result", {"inbox_ids": [], "requeued": ids,
+                                          "interrupted": interrupted, "is_error": True,
+                                          "num_turns": msg.num_turns,
+                                          "total_cost_usd": msg.total_cost_usd,
+                                          "session_id": msg.session_id, "usage": msg.usage,
+                                          "repeat_in_transcript": True})
+            self._interrupt_requested = False
+            return True
         outcome = FAILED if (is_error and not interrupted) else DELIVERED
         ids = [row["id"] for row in closing]
         while closing:
@@ -1016,7 +1074,8 @@ class SdkRunner:
     async def _ask_handoff(self, reason):
         """'clean' when the handoff tool answered in time; 'emergency' when
         it did not (the file is then written from the store's tail);
-        'stopped' when the runner was stopped while waiting."""
+        'stopped' when the runner was stopped while waiting; 'rate_limited'
+        when a rejected limit held the handoff turn and no summary came."""
         sdk = _sdk()
         self.handoff_box.arm(asyncio.get_running_loop())
         exchange = asyncio.ensure_future(self._handoff_exchange(sdk, reason))
@@ -1036,6 +1095,8 @@ class SdkRunner:
         failure = None
         if exchange in done and not exchange.cancelled():
             failure = exchange.exception()   # read on every path: never "never retrieved"
+        if self._limited_until is not None and self.handoff_box.summary is None:
+            return "rate_limited"      # a limit is not a refusal: postpone, never an emergency
         if self._stop.is_set():
             return "stopped"
         if self.handoff_box.summary is not None:
@@ -1101,6 +1162,16 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])          # the next start finishes this rollover
                 self.stream.append("rollover", {"phase": "requeued", "reason": reason})
                 return False
+            if handoff == "rate_limited":
+                # the row waits with everything else; the loop's _wait_rate_limit
+                # holds it, then claims it again ahead of chat (priority 0)
+                self.inbox.requeue(row["id"])
+                with self._lock:
+                    if self.machine.state == "rolling_over":
+                        self.machine.to("idle", "rollover postponed: rate limited")
+                self.stream.append("rollover", {"phase": "postponed", "reason": reason,
+                                                "until": self._limited_until})
+                return True
             # the handoff turn's init may have named another session (a lost
             # resume): that one is the session being ended and restored
             old_sid = self._resume_id or old_sid
@@ -1173,6 +1244,8 @@ class SdkRunner:
         self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
         self._close_duplicates(row, DELIVERED, detail)
         self.stream.append("rollover", dict(detail, phase="done"))
+        if digest_id is not None:
+            await self._wait_rate_limit()   # a claim by id skips the loop's wait
         if self._stop.is_set() or digest_id is None:
             return True     # a stored digest row stays queued (durable): the next start runs it
         # The digest is the new session's FIRST message: claimed by id and run
@@ -1254,5 +1327,7 @@ class SdkRunner:
         elif isinstance(msg, sdk.ResultMessage):
             # the caller closes the turn from it and appends its `result`
             self._note_session(msg.session_id)
+        elif isinstance(msg, getattr(sdk, "RateLimitEvent", ())):
+            self._on_rate_limit(msg.rate_limit_info)
         else:
             self.stream.append("other", {"type": type(msg).__name__})

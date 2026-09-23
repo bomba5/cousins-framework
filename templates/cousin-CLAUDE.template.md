@@ -187,6 +187,7 @@ exit code; a job registered by hand without `--log` has nothing to show.
 | `cousin-chat-watchdog` | ensure every running cousin's chat server answers: spawn a missing one, alert on a sick one, never kill (operator-run, normally from its 10-minute timer) | `cousin-chat-watchdog --dry-run` to see the decision per cousin |
 | `cousin-mcp` | the same CLIs as tools over MCP, started by your harness from `.mcp.json` in your home; arguments travel as JSON, never through a shell | `cousin-mcp --selftest` lists your tools and where each command resolves; your registry is `mcp-registry.toml` in your home; `cousin-mcp approve` is operator-run |
 | `cousin-runner` | run a cousin on the runner instead of a terminal (experimental this phase): the inbox is the bus, the wake socket the doorbell | `cousin-runner --home <home>` runs until SIGTERM; `--once` drains the inbox and exits; `--runner sdk|fake` overrides `[agent] runner`; operator-run |
+| `cousin-account` | the credentials a cousin runs on: `config/accounts.toml` names `claude-login`, `claude-token` and `anthropic-key` accounts, `[agent] account` picks one; the operator logs in through the framework from a host shell | `cousin-account list` · `cousin-account status <name>`; `login`/`token` are operator-run from a host shell, never from inside a cousin: a cousin uses the credentials it is given and never obtains any |
 
 ## Session bookends
 

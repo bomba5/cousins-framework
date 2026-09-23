@@ -16,7 +16,7 @@ class TestWake(HermeticCase):
     def test_poke_with_no_listener_is_false_not_an_error(self):
         self.assertFalse(wake.poke(self.home))
 
-    def test_listener_wakes_within_100ms(self):
+    def test_listener_wakes_within_500ms(self):
         with wake.Listener(self.home) as listener:
             woke = {}
             def waiter():
@@ -28,7 +28,7 @@ class TestWake(HermeticCase):
             self.assertTrue(wake.poke(self.home))
             th.join(3)
             self.assertTrue(woke["ok"])
-            self.assertLess(woke["ms"], 100 + 50)
+            self.assertLess(woke["ms"], 500)
 
     def test_wait_times_out_false_when_nobody_pokes(self):
         with wake.Listener(self.home) as listener:

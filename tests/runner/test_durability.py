@@ -27,14 +27,18 @@ class TestKillNine(HermeticCase):
         # Read state before requeue_stale mutates it: a fake turn can finish
         # in well under the 0.5s kill delay, so `first` may already be done.
         not_done = [i for i in (first, second) if inbox.get(i)["state"] != "done"]
+        claimed = [i for i in not_done if inbox.get(i)["state"] == "claimed"]
+        pending_before = inbox.pending()
         # The claimed-then-died window itself is proven deterministically by
         # tests/runner/test_main.py::TestOnce::test_once_recovers_a_claim_left_by_a_dead_runner;
         # this test only needs every not-done row accounted for here.
         recovered = inbox.requeue_stale(older_than_s=0.0)
-        self.assertEqual(recovered + inbox.pending(), len(not_done))
+        self.assertEqual(recovered, len(claimed))
+        self.assertEqual(pending_before + recovered, len(not_done))
         self.assertEqual(inbox.unfinished(), len(not_done))
         rc = subprocess.call([sys.executable, "-m", "cousin_lib.runner.main", "--home", str(home), "--once"],
-                             cwd=os.getcwd(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                             cwd=os.getcwd(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             timeout=60)
         self.assertEqual(rc, 0)
         self.assertEqual(inbox.get(first)["state"], "done")
         self.assertEqual(inbox.get(second)["state"], "done")

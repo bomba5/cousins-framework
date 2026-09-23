@@ -235,6 +235,24 @@ Then send a message and check that the cousin answers on Telegram.
 - To re-send from a given point, stop the bridge, edit the thread's
   number, and start it again. Deleting the file only resets the bridge to
   "from now on".
+- `login_notified_since` is the `since` of the last `data/login-required.json`
+  the bridge relayed (below); absent until the first one.
+
+## Login and billing notices
+
+For a runner cousin, when its account needs a login or its billing stopped
+it (`data/login-required.json`, see
+[configuration](configuration.md#datalogin-requiredjson)), the bridge sends
+one line to every id in `[telegram] operators` (not just the thread that
+happened to be open): `<slug>: account <account> needs a login (on <host>).
+<action>.`, or `... has a billing problem ...` for a billing stop. It sends
+this once per `since`: a login that is fixed and fails again later (a new
+`since`) is notified again, but the same stop is not repeated every poll.
+This rides the bridge's own send path (`tg_send_text`), separately from chat
+relay; a notice a cousin's own `relay_notice` (`cousin-account login|token
+--via <slug>`, the sign-in URL) posts as a chat row from `cousin-account`
+reaches Telegram through the ordinary outbound pump instead, like any other
+row in the cousin's chat.
 
 ## Errors and delivery
 

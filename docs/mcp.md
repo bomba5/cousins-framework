@@ -111,8 +111,21 @@ Each registry command maps to a library function in `HANDLERS`; a
 command the registry enables but `HANDLERS` has no function for stops
 the runner at start, with the list of what's missing. Two tools exist
 only in-process and never over stdio: `reply`, the sole writer of
-`chat.db` on this lane, and `handoff`, which writes the next
-generation's `data/handoff-manual.md`.
+`chat.db` on this lane, and `handoff`.
+
+`handoff` ends the generation: the runner asks for it at a rollover (see
+[agent-loop-runner](design/agent-loop-runner.md#continuous-extraction-and-rollover)),
+and it is called exactly once, with five fields: `position` (a paragraph,
+where the work stands), `next_action` (the first thing the next generation
+should do) and `status` (markdown; replaces `STATUS.md`'s `## Open loops`
+section, the rest of the file kept) are required, `active_threads` (one
+string per in-flight thread, written to `data/active-threads.md`) and
+`learned` (facts not yet in memory, each `{topic, fact, level, cite}`,
+remembered through the same path `cousin-memory remember` uses) are taken
+when the model has them. It writes `STATUS.md`'s open loops, then
+`data/active-threads.md` when given, then the memories, then
+`data/handoff.md` last (the write order the module docstring calls the
+ritual), and returns one line naming what it wrote and how many memories.
 
 A `kind = "job"` registry tool (its `gen`, `status` and `result`
 commands, wrapping a slow shelled-out command as a tracked background

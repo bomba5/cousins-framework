@@ -91,6 +91,12 @@ login in `~/.claude`, shared by every such cousin, exactly as before this file
 existed. A cousin never obtains credentials itself: it runs on what it is
 given, and `cousin-account` is operator-run.
 
+The login lane is every `claude-login` account (the host's `~/.claude` and
+each named one) and every `claude-token` account (a long-lived subscription
+token from `claude setup-token`): putting a subscription's credentials into
+the framework with `cousin-account login|token` carries the same terms risk
+as any other use of the login lane, and it is the user's.
+
 ```toml
 [accounts.fleet]
 kind = "claude-login"            # its own login, in data/accounts/fleet/
@@ -722,6 +728,18 @@ own `ResultMessage.usage` dict: at least `input_tokens`, `output_tokens`,
 result carried none, as a failed turn's synthetic result does), so cache
 behaviour (a second turn of the same session reading the prompt cache rather
 than rebuilding it) is visible per turn, not only in aggregate.
+
+A runner cousin's home also holds its own state, none of it hand-edited:
+`data/sessions.db` is the transcript (the SDK's `SessionStore` protocol over
+SQLite): the framework owns it on the key lane and mirrors it on the login
+lane (which resumes through the CLI's own `--resume` instead), and there is
+no retention on it yet. `data/usage.db` is the per-turn usage and cost table
+`usage.record` writes. `data/runner-session.json` is the session id (and
+lane) to resume at the next start. `data/extract-cursor.json` is continuous
+extraction's per-session cursor into the transcript. `data/generations/` is
+one directory per past generation (`gen-0001`, ...), each a copy of
+`STATUS.md`, `data/handoff.md` and `data/active-threads.md` as they stood at
+that rollover.
 
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `chat-hooks.json` (patterns the chat

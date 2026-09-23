@@ -220,6 +220,14 @@ See [remote cousins](remote-cousins.md).
 
 Existing cousins keep working with no change: a cousin that names no account runs on `host`, the host's default login in `~/.claude`, shared by every such cousin, exactly as before; a cousin with `api_key_file` runs on an implicit key account. One change is not silent: an `api_key_file` is now read as strictly as `cousin-auth`'s key file, so a key file at mode 0644, or in a directory open to group or others, now REFUSES to start (exit 2, the message names the file and the `chmod`): `chmod 600` the file and `chmod 700` its directory. Move a cousin to its own login with an `[accounts.<name>]` entry, the login command, and `account = "<name>"` in its `cousin.toml`; a token or key account keeps its secret in `.secrets/accounts/<name>` unless `secret_file` says otherwise.
 
+Moving a cousin from `host` to a named login account moves where the CLI
+keeps its local transcripts (they live under the account's config dir), so
+the first resume after the move is `resume_failed`, then a fresh session
+with the digest: expected, and it costs a conversation, never state. In a
+phase 6 container, `host` (the host's `~/.claude`) lives outside the volume;
+a containerised cousin runs on a named account whose config dir is inside
+it.
+
 See [configuration](configuration.md) for the accounts file.
 
 ## Checking it

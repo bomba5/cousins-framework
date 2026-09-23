@@ -17,6 +17,7 @@ import unittest
 from unittest import mock
 
 from cousin_lib import backup
+from tests._hermetic import HermeticCase
 from cousin_lib.backup import backup_main
 
 
@@ -153,3 +154,33 @@ class TestCli(BackupCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBackupCoversTheRunnerStores(HermeticCase):
+    def test_sessions_and_usage_databases_are_snapshotted_with_their_rows(self):
+        import asyncio
+        import sqlite3
+        import tempfile
+        try:
+            import claude_agent_sdk  # noqa: F401 - the store's append folds a summary with it
+        except ImportError:
+            self.skipTest("claude-agent-sdk not installed")
+        from cousin_lib import backup, usage
+        from cousin_lib.runner.session_store import SqliteSessionStore
+        from tests.runner._home import temp_home
+        home = temp_home(self)
+        asyncio.run(SqliteSessionStore(home).append(
+            {"project_key": "p", "session_id": "s"},
+            [{"type": "assistant", "uuid": "u1", "message": {"role": "assistant", "content": []}}]))
+        usage.record(home, client_id="c", session_id="s",
+                     result={"usage": {"input_tokens": 3}, "total_cost_usd": 0.0}, lane="key")
+        dest = tempfile.TemporaryDirectory(); self.addCleanup(dest.cleanup)
+        snap = backup.snapshot(home, dest.name)
+        for name, table in (("sessions.db", "entries"), ("usage.db", "usage")):
+            path = snap / "data" / name
+            self.assertTrue(path.is_file(), name)
+            con = sqlite3.connect(path)
+            try:
+                self.assertEqual(con.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0], 1)
+            finally:
+                con.close()

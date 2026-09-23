@@ -788,6 +788,25 @@ class TestSdkRunner(HermeticCase):
                 sys.modules[k] = v
             importlib.reload(m)
 
+    # -- Turn (task 3) -------------------------------------------------------
+    def test_the_turn_carries_both_threads_of_a_fold(self):
+        r, made = self._runner([[init_msg(), assistant(tool="Bash"), assistant(text="x"), result()]],
+                               delay=0.15)
+        seen = {}
+        orig_close = r._close
+        def spy_close(*a, **kw):
+            seen["threads"] = r.turn.threads
+            return orig_close(*a, **kw)
+        r._close = spy_close
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.enqueue(Item("person:sam", "chat", "second", sender="Sam"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events()), timeout=6))
+        self.assertEqual(set(seen["threads"]), {"operator:priya", "person:sam"})
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertFalse(r.turn.active)
+
 
 if __name__ == "__main__":
     unittest.main()

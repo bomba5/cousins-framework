@@ -37,6 +37,7 @@ from cousin_lib.runner.base import Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
+from cousin_lib.runner.turn import Turn
 
 
 def _sdk():
@@ -128,6 +129,7 @@ class SdkRunner:
         self.inbox = Inbox(self.home)
         self.stream = EventStream(self.home, self.session_id)
         self.machine = StateMachine(on_change=self._on_state)
+        self.turn = Turn()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -173,6 +175,7 @@ class SdkRunner:
         wake.poke(self.home)
         if self._thread is not None:
             self._thread.join(timeout)
+        self.turn.end()
         with self._lock:
             if self.machine.state != "stopped":
                 self.machine.to("stopped")
@@ -441,6 +444,7 @@ class SdkRunner:
         with self._lock:
             if self.machine.state in ("idle", "running"):
                 self.machine.to("errored", message)
+        self.turn.end()
         self.stream.append("error", {"error": message})
         try:
             for row in consumed:
@@ -537,6 +541,7 @@ class SdkRunner:
                 self._turn_seq += 1
                 self._live = True
                 self.machine.to("running", "turn")
+            self.turn.begin(first)
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})
@@ -566,6 +571,8 @@ class SdkRunner:
                                 echo_of = row["id"]
                                 echoed.add(echo_of)
                                 self._live = True   # the CLI took up a carried row
+                                if row["id"] != first["id"]:
+                                    self.turn.add(row)
                         self._record(sdk, msg, echo_of=echo_of)
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1
@@ -588,6 +595,7 @@ class SdkRunner:
                 self._recover()
             return False
 
+        self.turn.end()
         with self._lock:
             if self.machine.state == "running":
                 self.machine.to("idle", "turn done")

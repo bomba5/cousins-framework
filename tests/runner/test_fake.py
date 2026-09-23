@@ -234,6 +234,26 @@ class TestFakeRunner(HermeticCase):
         self.assertTrue(any(str(wake.socket_path(self.home)) in e for e in errors))
         self.assertTrue(r.worker_alive())
 
+    # -- Turn (task 3) -------------------------------------------------------
+    def test_the_turn_carries_both_threads_of_a_fold(self):
+        r = FakeRunner(self.home, turn_seconds=1.0)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        seen = {}
+        real_append = r.stream.append
+        def spy_append(kind, payload):
+            if kind == "result":
+                seen["threads"] = r.turn.threads
+            return real_append(kind, payload)
+        r.stream.append = spy_append
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.enqueue(Item("person:sam", "chat", "second", sender="Sam"))
+        self.assertTrue(_wait(lambda: "threads" in seen, timeout=6))
+        self.assertEqual(set(seen["threads"]), {"operator:priya", "person:sam"})
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertFalse(r.turn.active)
+
 
 if __name__ == "__main__":
     unittest.main()

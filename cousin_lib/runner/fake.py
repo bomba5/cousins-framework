@@ -20,6 +20,7 @@ from cousin_lib.runner.base import Receipt, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
+from cousin_lib.runner.turn import Turn
 
 
 class FakeRunner:
@@ -31,6 +32,7 @@ class FakeRunner:
         self.inbox = Inbox(home)
         self.stream = EventStream(home, self.session_id)
         self.machine = StateMachine(on_change=self._on_state)
+        self.turn = Turn()
         self._stop = threading.Event()
         self._interrupt = threading.Event()
         self._thread = None
@@ -56,6 +58,7 @@ class FakeRunner:
         wake.poke(self.home)
         if self._thread is not None:
             self._thread.join(timeout)
+        self.turn.end()
         with self._lock:
             if self.machine.state != "stopped":
                 self.machine.to("stopped")
@@ -128,6 +131,7 @@ class FakeRunner:
         for row in rows:
             if folds_into_turn(row["source"], row["thread_id"]):
                 consumed.append(row)
+                self.turn.add(row)
             else:
                 self.inbox.requeue(row["id"])
 
@@ -154,6 +158,7 @@ class FakeRunner:
         with self._lock:
             if self.machine.state in ("idle", "running"):
                 self.machine.to("errored", message)
+        self.turn.end()
         self.stream.append("error", {"error": message})
         for row in consumed:
             self.inbox.done(row["id"], FAILED, message)
@@ -170,6 +175,7 @@ class FakeRunner:
         try:
             with self._lock:
                 self.machine.to("running", "turn")
+            self.turn.begin(first)
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})
@@ -206,6 +212,7 @@ class FakeRunner:
         self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
                                       "interrupted": interrupted,
                                       "is_error": False})
+        self.turn.end()
         with self._lock:
             if self.machine.state == "running":
                 self.machine.to("idle", "turn done")

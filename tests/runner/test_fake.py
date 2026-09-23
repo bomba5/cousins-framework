@@ -187,7 +187,7 @@ class TestFakeRunner(HermeticCase):
         r.stop(timeout=0.01)  # returns long before the 0.4s fold-and-raise finishes
         self.assertEqual(r.state(), "stopped")
 
-        r._thread.join(3)
+        r._thread.join(10)   # 3 s was not always enough with two suites on the machine
         self.assertFalse(r._thread.is_alive(), "the worker thread must not die uncaught")
         self.assertEqual(r.state(), "stopped")
 

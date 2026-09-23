@@ -39,6 +39,13 @@ def _sdk():
     return claude_agent_sdk
 
 
+async def _one(message):
+    """One envelope as the one-item async iterable `ClaudeSDKClient.query`
+    takes: its prompt is `str | AsyncIterable[dict]`, and a bare dict would
+    reach its `async for` and raise TypeError."""
+    yield message
+
+
 def _default_factory(options):
     return _sdk().ClaudeSDKClient(options=options)
 
@@ -202,6 +209,12 @@ class SdkRunner:
                     sender=row["sender"], attachments=tuple(row["attachments"]),
                     context=row["context"], message_id=row["message_id"])
 
+    async def _query(self, row):
+        message = envelope.render_message(self._row_item(row))
+        # The SDK's str path sets this key and its iterable path does not.
+        message.setdefault("parent_tool_use_id", None)
+        await self._client.query(_one(message))
+
     def _fold_midturn(self, consumed):
         """Operator/person chat that arrived during the turn is query()'d
         into it (finding 1); anything else goes back to the queue."""
@@ -246,11 +259,22 @@ class SdkRunner:
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})
-            await self._client.query(envelope.render_message(self._row_item(first)))
+            await self._query(first)
             deadline = time.monotonic() + self.turn_timeout_s
             responses = self._client.receive_response()
+            it = responses.__aiter__()
             try:
-                async for msg in responses:
+                while True:
+                    # The deadline bounds every wait for the next message,
+                    # so a stream that goes silent cannot hang the turn.
+                    remaining = deadline - time.monotonic()
+                    try:
+                        msg = await asyncio.wait_for(it.__anext__(), timeout=remaining)
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        raise RunnerError("turn exceeded %.0fs"
+                                          % self.turn_timeout_s) from None
                     self._record(sdk, msg)
                     if isinstance(msg, sdk.ResultMessage):
                         is_error = bool(msg.is_error)
@@ -259,9 +283,7 @@ class SdkRunner:
                         result_session = msg.session_id
                         break
                     for row in self._fold_midturn(consumed):
-                        await self._client.query(envelope.render_message(self._row_item(row)))
-                    if time.monotonic() > deadline:
-                        raise RunnerError("turn exceeded %.0fs" % self.turn_timeout_s)
+                        await self._query(row)
             finally:
                 # `break` leaves the generator suspended; close it here, on
                 # this loop, rather than leave it to the garbage collector.

@@ -1,4 +1,5 @@
 """SdkRunner against a scripted client: the whole loop, no model."""
+import asyncio
 import time
 import unittest
 
@@ -52,7 +53,13 @@ class ScriptedClient:
         self.connected = False
 
     async def query(self, prompt, session_id="default"):
-        self.queries.append(prompt)
+        # The real client's contract: a str, or an async iterable of message
+        # dicts (a bare dict would reach `async for` there and raise).
+        if isinstance(prompt, str):
+            self.queries.append(prompt)
+            return
+        async for message in prompt:
+            self.queries.append(message)
 
     async def interrupt(self):
         self.interrupts += 1
@@ -166,6 +173,39 @@ class TestSdkRunner(HermeticCase):
         states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
         self.assertIn("errored", states)
         self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
+
+    def test_query_is_sent_as_an_async_iterable_not_a_dict(self):
+        seen = []
+
+        class Recording(ScriptedClient):
+            async def query(self, prompt, session_id="default"):
+                seen.append((type(prompt).__name__, hasattr(prompt, "__aiter__")))
+                await super().query(prompt, session_id)
+        r = SdkRunner(self.home, client_factory=lambda o: Recording(
+            o, [[init_msg(), assistant(text="ok"), result()]]))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "hello", sender="Priya"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
+        self.assertTrue(seen)
+        for name, aiter in seen:
+            self.assertNotEqual(name, "dict", "a bare dict breaks the real client")
+            self.assertTrue(aiter, "query() takes a str or an async iterable")
+
+    def test_a_hung_stream_times_out_and_fails_the_row(self):
+        class Hung(ScriptedClient):
+            async def receive_response(self):
+                yield init_msg()
+                await asyncio.sleep(3600)
+        r = SdkRunner(self.home, client_factory=lambda o: Hung(o, []), turn_timeout_s=0.3)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        receipt = r.enqueue(Item("operator:priya", "chat", "x", sender="Priya"))
+        self.assertTrue(_wait(lambda: any("exceeded" in e["payload"].get("error", "")
+                                          for e in r.events() if e["kind"] == "error"),
+                              timeout=2.0))
+        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=2.0))
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
 
     def test_module_imports_without_the_sdk_installed(self):

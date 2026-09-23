@@ -4,6 +4,7 @@ A hook never raises into the SDK: the failure becomes a `hook` event.
 
 | event                           | callback                                  |
 |---------------------------------|-------------------------------------------|
+| PreToolUse:policy (no matcher)  | policy.toml deny/ask, `policy`; ask -> deny |
 | PreToolUse (Agent|Task|Bash)    | recorder; its updatedInput output or {}   |
 | PostToolUse, PostToolUseFailure | recorder (job close, activity line)       |
 | SubagentStop                    | recorder (background agent close)         |
@@ -43,7 +44,7 @@ def default_recall(home):
 
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
-              checkpoints=None, body_for_prompt=None, lock=None):
+              checkpoints=None, body_for_prompt=None, lock=None, policy=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -55,7 +56,11 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     submitted prompt (the runner passes the live turn's newest row body,
     not the whole envelope). Default: the prompt itself.
     lock: the runner's state lock (a threading.Lock); the permission
-    move checks and transitions under it. Never held across an await."""
+    move checks and transitions under it. Never held across an await.
+    policy: a `policy.Policy` (Task 7); when given, the table gains
+    `"PreToolUse:policy"`, a no-matcher PreToolUse callback that runs
+    before the recorder. `build_hooks` splits that key on `":"` and
+    prepends it to the event's matcher list."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home)
@@ -112,6 +117,22 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         return {"systemMessage": "Context compaction imminent - checkpoint written to %s"
                                  % path.relative_to(home)}
 
+    def on_policy(payload):
+        decision, reason = policy.decide(payload.get("tool_name"), payload.get("tool_input"))
+        if decision == "allow":
+            return {}
+        stream.append("policy", {"tool": payload.get("tool_name"), "decision": decision,
+                                 "reason": reason})
+        if decision == "ask":
+            reason += " (operator approval arrives with the console in phase 5)"
+            with lock:
+                if machine.state == "running":
+                    machine.to("waiting_permission", reason)
+                    machine.to("running", "ask enforced as deny")
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                       "permissionDecision": "deny",
+                                       "permissionDecisionReason": reason}}
+
     def waiting(payload):
         event = {"event": payload.get("hook_event_name")}
         for key in ("tool_name", "message"):
@@ -133,16 +154,27 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     table["PreCompact"] = guarded("PreCompact", on_precompact)
     table["Notification"] = guarded("Notification", waiting)
     table["PermissionRequest"] = guarded("PermissionRequest", waiting)
+    if policy is not None:
+        table["PreToolUse:policy"] = guarded("PreToolUse:policy", on_policy)
     return table
 
 
 def build_hooks(home, **kw):
     """The SDK `hooks` option: HookEvent -> [HookMatcher]. The matcher
     `Agent|Task|Bash` is on PreToolUse only; every other event matches
-    all. Imports the SDK here only."""
+    all. A key with a `:` (only `"PreToolUse:policy"` today) is split
+    on the colon, and its no-matcher HookMatcher is PREPENDED to that
+    event's list, so the policy hook always runs first; the split key
+    itself never appears in the returned table. Imports the SDK here
+    only."""
     from claude_agent_sdk import HookMatcher
     out = {}
-    for event, cb in callbacks(home, **kw).items():
-        matcher = PRE_MATCHER if event == "PreToolUse" else None
-        out[event] = [HookMatcher(matcher=matcher, hooks=[cb])]
+    for key, cb in callbacks(home, **kw).items():
+        event, _, _tag = key.partition(":")
+        matcher = PRE_MATCHER if event == "PreToolUse" and not _tag else None
+        entry = HookMatcher(matcher=matcher, hooks=[cb])
+        if _tag:
+            out.setdefault(event, []).insert(0, entry)
+        else:
+            out.setdefault(event, []).append(entry)
     return out

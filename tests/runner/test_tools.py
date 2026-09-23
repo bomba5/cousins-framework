@@ -6,12 +6,12 @@ import pathlib
 import sqlite3
 import subprocess
 import tempfile
-import types
 import unittest
 from unittest import mock
 
 from cousin_lib import mcp_server
 from cousin_lib.runner import tools
+from cousin_lib.runner.policy import Policy
 from cousin_lib.runner.turn import Turn
 from tests._hermetic import HermeticCase
 
@@ -71,10 +71,11 @@ def _install(case):
 
 def _ctx(case, turn=None, policy=None):
     root, home = _install(case)
-    # Task 7 replaces the stand-in with Policy.load(home).
+    # No policy.toml is written in _install: Policy.load(home) is then
+    # the permissive default, same as the old stand-in.
     return tools.ToolContext(home=home, slug="wren", name="Wren", root=root,
                              turn=turn or Turn(),
-                             policy=policy or types.SimpleNamespace(outbound_filter=True),
+                             policy=policy or Policy.load(home),
                              stream=None)
 
 

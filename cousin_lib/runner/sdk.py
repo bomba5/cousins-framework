@@ -31,6 +31,7 @@ import time
 import uuid
 from pathlib import Path
 
+from cousin_lib import usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import envelope, hooks, tools, wake
 from cousin_lib.runner.base import FOLDED_KINDS, Receipt, RunnerError, folds_into_turn
@@ -148,6 +149,8 @@ class SdkRunner:
         self._live = False       # the CLI is generating for this turn (see _interrupt_turn)
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
+        self._client_id = None   # a fresh uuid per connect (usage.record's client key)
+        self._lane = "unknown"   # from the last session_init's apiKeySource
         self._failures = 0       # consecutive failed turns
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
@@ -385,6 +388,7 @@ class SdkRunner:
         try:
             self._client = self.client_factory(self.options(resume=resume))
             await self._client.connect()
+            self._client_id = uuid.uuid4().hex
             return True
         except Exception as exc:  # noqa: BLE001 - a runner that cannot connect says so
             message = "%s: %s" % (type(exc).__name__, exc)
@@ -662,6 +666,7 @@ class SdkRunner:
                             results += 1
                             self._live = False
                             ok = self._close(msg, open_rows, echoed, closing) and ok
+                            await self._after_turn(msg)
                             break
                 finally:
                     await _aclose(responses)
@@ -705,6 +710,24 @@ class SdkRunner:
         self._interrupt_requested = False
         return not (is_error and not interrupted)
 
+    async def _after_turn(self, msg):
+        """The single hook for a ResultMessage's post-close work, called
+        from `_turn` once per result, right after `_close`. Task 7 extends
+        this with rollover and extraction; for now it only records usage.
+        Off the loop (the write is a blocking sqlite call) and never
+        raises into the loop: a failure here is a `usage` event carrying
+        `error`, not a broken turn."""
+        try:
+            row = await asyncio.to_thread(
+                usage.record, self.home, client_id=self._client_id, session_id=msg.session_id,
+                result={"usage": msg.usage, "total_cost_usd": msg.total_cost_usd,
+                        "session_id": msg.session_id}, lane=self._lane)
+        except Exception as exc:  # noqa: BLE001 - usage must never fail a turn
+            self.stream.append("usage", {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+        self.stream.append("usage", {k: row[k] for k in ("cost_usd", "estimate", "total", "error")
+                                     if k in row})
+
     def _record(self, sdk, msg, *, echo_of=None):
         """Every SDK message leaves at least one event (a ResultMessage's
         is its caller's `result`)."""
@@ -712,6 +735,7 @@ class SdkRunner:
             if msg.subtype == "init":
                 d = msg.data or {}
                 self._resume_id = d.get("session_id") or self._resume_id
+                self._lane = usage.lane_for(d.get("apiKeySource"))
                 self.stream.append("session_init", {"apiKeySource": d.get("apiKeySource"),
                                                     "model": d.get("model"),
                                                     "session_id": d.get("session_id"),

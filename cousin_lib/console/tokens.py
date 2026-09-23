@@ -21,8 +21,8 @@ from cousin_lib.config import (MissingConfigError, expand_harness_path,
 SERIES_DAYS = 14
 
 
-def availability(root):
-    """(available, reason)."""
+def _seam(root):
+    """(available, reason): the harness seam only."""
     try:
         cfg = harness_config(root)
     except MissingConfigError as err:
@@ -32,6 +32,24 @@ def availability(root):
     if not cfg.get("transcripts_dir"):
         return False, "config/harness.toml has no transcripts_dir"
     return True, ""
+
+
+def _any_sdk(root):
+    from cousin_lib.config import FrameworkConfig
+    from cousin_lib.delivery import _runner_kind
+    try:
+        return any(_runner_kind(c.home) == "sdk" for c in FrameworkConfig(root).list_cousins())
+    except Exception:  # noqa: BLE001 - an unreadable fleet is "no sdk cousin"
+        return False
+
+
+def availability(root):
+    """(available, reason): the harness seam, or any cousin on the SDK
+    lane (its usage is in its own usage.db, no seam needed)."""
+    ok, reason = _seam(root)
+    if ok or _any_sdk(root):
+        return True, ""
+    return False, reason
 
 
 def _usage_total(usage):
@@ -113,13 +131,21 @@ def _scan(entry, path):
 
 
 def day_totals(server, home, *, days=SERIES_DAYS):
-    """{day: {"total", "output"}} for one cousin over every transcript
-    touched in the last `days` days, scanning only the bytes appended
-    since the last call on this server."""
+    """{day: {"total", "output"}} for one cousin. A cousin on runner =
+    "sdk" is read from its usage.db ONLY: the SDK also writes the
+    harness's local transcript for it (phase 0 finding 2), and scanning
+    that too would count its turns twice. Every other cousin: every
+    transcript touched in the last `days` days, scanning only the bytes
+    appended since the last call on this server."""
+    from cousin_lib import usage
+    from cousin_lib.delivery import _runner_kind
+    if _runner_kind(home) == "sdk":
+        return {day: {"total": b["total"], "output": b["output"]}
+                for day, b in usage.day_totals(home, days=days).items()}
     state = server.state.setdefault("tokens", {})
     files = state.setdefault(str(home), {})
     try:
-        ok, _reason = availability(server.root)
+        ok, _reason = _seam(server.root)
     except Exception:
         ok = False
     if not ok:

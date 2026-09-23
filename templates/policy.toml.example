@@ -1,7 +1,14 @@
 # <home>/policy.toml - what this cousin's model may not do, as code.
 # Absent: everything allowed, said once in the event stream at start.
 # Malformed: the runner refuses to start (rc 2) and says which key.
+# Enforced for every tool call, a subagent's own calls included.
+# A guardrail, not a sandbox: a pattern stops the command line it names,
+# not every way to get the same effect.
+# This file lives in the home it governs, so the model can rewrite it; a
+# rewrite takes effect at the next start. To make it immutable, make it
+# read-only to the cousin's user, or own it.
+# To deny subagents, list both "Task" and "Agent".
 deny_tools = ["WebFetch", "mcp__cousin__handoff"]   # exact names or prefix*
-deny_bash_patterns = ['\brm\s+-rf\s+/', '\bgit\s+push\s+--force']  # regexes on Bash.command only, not a subagent's or another tool's shell-out
+deny_bash_patterns = ['\brm\s+-rf\s+/', '\bgit\s+push\s+--force']  # regexes on any tool's string `command` (Bash, PowerShell, Monitor, ...)
 ask = []                                              # operator approval; enforced as deny until phase 5
 outbound_filter = true                                # reply and send cross config/outbound-filter.json

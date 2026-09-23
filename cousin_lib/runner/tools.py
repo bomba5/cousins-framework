@@ -35,7 +35,7 @@ class ToolContext:
     name: str
     root: Path
     turn: object
-    policy: object            # has .outbound_filter (Task 7's Policy)
+    policy: object            # a policy.Policy: .outbound_filter
     stream: object = None     # EventStream or None
     registry: object = None   # set by build_tool_server
 
@@ -75,7 +75,8 @@ def _m_search(ctx, a):
 
 def _m_decide(ctx, a):
     # The registry sends decide through --stdin, whose parser strips each
-    # chunk; the in-process path strips the same way (ruling P7).
+    # chunk; the in-process path strips the same way, so both transports
+    # store the same text.
     from cousin_lib import memory
     return memory.decide(ctx.home, _str(a, "topic").strip(), _str(a, "decision").strip(),
                          _str(a, "reasoning").strip(), level=a.get("level"),
@@ -399,8 +400,8 @@ def _same_thread(a, b):
 def _pick_thread(ctx, thread):
     """The thread a reply goes to. A named operator: or person: thread is
     always accepted, live or not: a schedule, loop or peer turn must be
-    able to reach its operator, as `cousin-reply --user` can (ruling
-    P12); the live thread's spelling is used when one matches. The live
+    able to reach its operator, as `cousin-reply --user` can; the live
+    thread's spelling is used when one matches. The live
     turn decides only the implicit default: one live thread, that one;
     two, refused with the list; none, refused."""
     turn = ctx.turn

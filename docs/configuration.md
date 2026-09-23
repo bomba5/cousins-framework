@@ -500,7 +500,10 @@ The bridge refuses to start when any of these is missing. See [telegram](telegra
 loops and meetings all reach it the same way now: each producer hands its item
 to the delivery facade and reads back `delivery.accepted(outcome, home)` (a
 durable inbox put is acceptance, `delivered` or a runner's `queued` row, never
-a bare `failed`) and, where it needs to know whether the cousin is up,
+a bare `failed`; a producer hands a runner cousin its item without waiting,
+since the put is the acceptance, and waits on a tmux cousin's typed line as
+before; a scheduled prompt whose delivery is not accepted stays pending for the
+next tick) and, where it needs to know whether the cousin is up,
 `delivery.is_alive(home)` (a runner cousin's answer is whether a runner holds
 its lock; a tmux cousin's is unchanged, tmux `has-session` or the chat port).
 This is no longer experimental for those four producers. It stays ahead of
@@ -509,9 +512,9 @@ cousin's prompt is not yet composed the way a tmux cousin's is, and the
 console has no view of a runner's inbox or stream. The runner starts its
 session with no settings files and `bypassPermissions`; `policy.toml`
 (`deny_tools`, `deny_bash_patterns`, `ask`, `outbound_filter`) is what stands
-in for a settings file's deny rules, read once at start and enforced as the
-first `PreToolUse` hook, and a malformed one is a config error, exit 2, naming
-the key. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
+in for a settings file's deny rules, read once at start and enforced by a
+`PreToolUse` hook, and a malformed one is a config error, exit 2, naming the
+key. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
 (and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
 cousin.toml that does not parse is also the tmux path, and `cousin-runner`
 refuses it the same way).
@@ -550,15 +553,18 @@ server reacts to, see [chat](chat.md)), `policy.toml` (below) and
 
 ### policy.toml
 
-`<home>/policy.toml`, read once when the runner starts and enforced as the
-first `PreToolUse` hook (the CLI never consults `can_use_tool` under
+`<home>/policy.toml`, read once when the runner starts and enforced by a
+`PreToolUse` hook with no matcher (the CLI never consults `can_use_tool` under
 `bypassPermissions`, so this is where a runner cousin's deny rules live
-instead of a settings file's). Four keys, all optional:
+instead of a settings file's). The hook fires for every tool call of the
+session, including the calls a subagent makes inside its own turn (the hook
+input then carries `agent_id`), so a deny reaches a subagent too. Four keys,
+all optional:
 
 | key | default | meaning |
 |---|---|---|
-| `deny_tools` | `[]` | tool names the model may never call; exact name or a `prefix*` |
-| `deny_bash_patterns` | `[]` | regexes checked against `Bash`'s `command` only (never a subagent's or another tool's own shell-out) |
+| `deny_tools` | `[]` | tool names the model may never call; exact name or a `prefix*`. To deny subagents, list both `Task` and `Agent` (the tool's older and newer names) |
+| `deny_bash_patterns` | `[]` | regexes checked against the `command` string of any tool whose input carries one (`Bash`, `PowerShell`, `Monitor`, any other); never against a command a tool builds on the far side (an MCP server that shells out) |
 | `ask` | `[]` | tools that need operator approval; enforced as `deny` until phase 5 gives the console an ask surface, the reason says so |
 | `outbound_filter` | `true` | whether `reply` and `send` cross `config/outbound-filter.json` |
 
@@ -567,3 +573,21 @@ the event stream at start (`no policy.toml: every tool allowed`); the file
 present but malformed (bad TOML, an unknown key, a non-list value, an
 uncompilable regex) stops the runner at start, exit 2, naming the key. See
 `templates/policy.toml.example` for a documented starting point.
+
+What it is and is not:
+
+- The patterns are a guardrail, not a sandbox. They stop a command line you
+  can name; the same effect can be spelled another way (a script, another
+  interpreter, an editor tool). When the risk is the tool, deny the tool.
+- The file lives in the home it governs, so the model can rewrite it. A
+  rewrite takes effect at the next start, never mid-session. An operator who
+  needs it immutable makes it read-only to the cousin's user, or owns it.
+- The CLI runs every `PreToolUse` callback that matches a call concurrently,
+  and a deny from any of them wins; the order of the callbacks sequences
+  nothing. The recorder (a subagent's or a background shell's job row) checks
+  the policy itself and records nothing for a call the policy denies or asks
+  about.
+- Beside policy.toml, one rule is built in: a subagent's `reply` that names no
+  `thread` is denied ("a subagent must name the thread it answers"), because
+  the turn's implicit thread belongs to the turn the subagent runs in, not to
+  the subagent.

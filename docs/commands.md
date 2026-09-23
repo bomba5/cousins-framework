@@ -94,12 +94,17 @@ exits instead when the inbox is drained and no turn is running, on SIGTERM or
 SIGINT, or when the runner gives up. `--runner sdk|fake` overrides the
 cousin's `[agent] runner`. One runner per cousin: it holds a lock on
 `<home>/run/runner.lock` for its life. It reads `policy.toml` at start; a
-malformed policy is rc 2. See [agent-loop-runner](design/agent-loop-runner.md).
+malformed policy is rc 2, and so is an MCP registry that does not parse or
+names a command the runner has no in-process handler for. `--home` may be
+relative: the runner makes it absolute and exports `COUSIN_HOME` (the home)
+and `FRAMEWORK_ROOT` (the install above it, else the home's grandparent) into
+its own environment, for the in-process tools and for the model's own
+`cousin-*` commands. See [agent-loop-runner](design/agent-loop-runner.md).
 
 | exit | meaning |
 |---|---|
 | 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox |
-| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml or key file, a malformed `policy.toml`; or another runner holds the lock |
+| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml or key file, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler; or another runner holds the lock |
 | 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds |
 
 ```

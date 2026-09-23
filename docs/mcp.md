@@ -118,7 +118,7 @@ A `kind = "job"` registry tool (its `gen`, `status` and `result`
 commands, wrapping a slow shelled-out command as a tracked background
 job) has no in-process handler in this phase: a cousin whose registry
 enables one refuses to start on the runner, named in the same missing-
-handlers list (ruling P10). And a registry command's `argv` with a flag
+handlers list, exit 2. And a registry command's `argv` with a flag
 baked in (`argv = ["list", "--json"]`, say) is not honoured in-process:
 the in-process handler only sees the arguments the model actually
 passed, so it returns the CLI's default (non-flagged) text unless the

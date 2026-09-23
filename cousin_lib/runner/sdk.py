@@ -1479,7 +1479,10 @@ class SdkRunner:
                 return False
             if handoff == "rate_limited":
                 # the row waits with everything else; the loop's _wait_rate_limit
-                # holds it, then claims it again ahead of chat (priority 0)
+                # holds it, then claims it again ahead of chat (priority 0). A resume
+                # the handoff turn lost needs no fresh start: the rerun rollover
+                # starts the new session itself (as in the login branch below).
+                self._resume_lost = False
                 self.inbox.requeue(row["id"])
                 with self._lock:
                     if self.machine.state == "rolling_over":

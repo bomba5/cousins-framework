@@ -20,6 +20,8 @@ MODEL = "claude-haiku-4-5-20251001"
 RUN_NONCE = uuid.uuid4().hex
 LAW = "Run %s.\n" % RUN_NONCE + "".join(
     "%d. A clause of the law, long enough to be cached on its own.\n" % i for i in range(1, 700))
+# Under the law's real token count: a conservative 6 characters per token.
+LAW_TOKENS_LOWER_BOUND = len(LAW) // 6
 
 
 def _op(body):
@@ -63,14 +65,17 @@ class TestLivePrompt(HermeticCase):
         switch working, the cwd is in the first user message instead and
         the second session reads the block from cache.
 
-        The bar (ruling W9-4). A result's `usage` is the session's total over
+        The bar (ruling W9-5). A result's `usage` is the session's total over
         every model call of the turn (`num_turns`). A creates the appended
-        block cold (the per-run nonce first in LAW makes sure of it, W9-3);
-        B re-creating it would create about as much as A again, and B reading
-        it from cache creates only the tail after it (the first user message,
-        where the cwd is re-injected, and the turn's own messages). So B's
-        cumulative cache_creation must be under half of A's. `read > 8000`
-        says the block was read at all.
+        block cold (the per-run nonce first in LAW makes sure of it, W9-3):
+        the law plus the tail after it (the first user message, where the
+        cwd is re-injected, and the turn's own messages). B reading the block
+        from cache creates only its own tail; B re-creating it creates the
+        law again. So the bar tests the mechanism, whether the law block was
+        re-created: B's cumulative cache_creation must be under A's minus a
+        lower bound on the law's tokens. Its margin scales with the law, not
+        with the tail, so a turn with more tool calls does not eat it the way
+        it would eat a halving. `read > 8000` says the block was read at all.
 
         `usage["iterations"]` is NOT a per-call breakdown: the CLI documents
         it as "per-iteration usage when the request ran several sampling
@@ -92,8 +97,9 @@ class TestLivePrompt(HermeticCase):
               " B usage.iterations[-1] created=%s (informational)"
               % (created_a, created, read, second.get("num_turns"), last_iteration))
         self.assertGreater(read, 8000, "the appended block was not read from cache: %r" % second)
-        self.assertLess(created, created_a / 2, "B re-created the block A created cold: %r vs %r"
-                        % (second, first))
+        self.assertLess(created, created_a - LAW_TOKENS_LOWER_BOUND,
+                        "B re-created the law block A created cold (bound %d): %r vs %r"
+                        % (LAW_TOKENS_LOWER_BOUND, second, first))
 
     def test_snapshot_keeps_the_recorded_prompt_across_a_resume(self):
         """Resume the SAME session after the identity file changed: with

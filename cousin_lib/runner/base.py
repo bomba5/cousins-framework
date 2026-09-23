@@ -35,9 +35,21 @@ SOURCE_PRIORITY = {
 }
 
 
-def priority(source, thread_id):
+FOLDED_KINDS = ("operator", "person")
+
+
+def folds_into_turn(source, thread_id):
+    """True for an item a runner writes into the turn already running
+    (operator or person chat), False for one that waits for the next
+    turn. Every runner folds by this one rule, and only while the turn
+    is live: never once an interrupt is requested, never after the
+    turn's result was read (spec, "The store is the bus")."""
     kind, _ = parse_thread(thread_id)
-    if source == "chat" and kind in ("operator", "person"):
+    return source == "chat" and kind in FOLDED_KINDS
+
+
+def priority(source, thread_id):
+    if folds_into_turn(source, thread_id):
         return 1
     return SOURCE_PRIORITY.get(source, 3)
 

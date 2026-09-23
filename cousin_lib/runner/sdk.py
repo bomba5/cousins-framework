@@ -9,10 +9,21 @@ from every init message goes to the event stream so a cousin on the
 wrong lane is visible.
 
 One thread owns one asyncio loop, and that loop owns the client. The
-loop's shape is FakeRunner's (the reference runner): claim one row,
-run one turn, fold operator/person chat that lands mid-turn into it,
-close every consumed row with the turn's one result, and route every
-failure through `_fail_turn` so nothing dies silently.
+loop's shape is FakeRunner's (the reference runner): claim one row, run
+one turn, fold operator/person chat that lands mid-turn into it, close
+every consumed row with a result, and route every failure through
+`_fail_turn` so nothing dies silently.
+
+A turn is not 1:1 with a CLI turn (phase 0 finding 1). The CLI is
+started with `--replay-user-messages`, so it echoes every user message
+it CONSUMES as a UserMessage in the stream, and the echo is the only
+proof a row reached the model: a row is closed by the first
+ResultMessage after its echo, never by one before it. A row folded in
+while the model was finishing its answer is not echoed before that
+answer's result; the CLI takes it up as a turn of its own, and the
+runner reads on to that turn's result and closes the row with it. So a
+runner turn can emit more than one `result` event, and none is left in
+the stream for the next turn to misread.
 """
 import asyncio
 import threading
@@ -22,12 +33,10 @@ from pathlib import Path
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import envelope, wake
-from cousin_lib.runner.base import Receipt, RunnerError
+from cousin_lib.runner.base import Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
-
-FOLDED_KINDS = ("operator", "person")
 
 
 def _sdk():
@@ -39,20 +48,32 @@ def _sdk():
     return claude_agent_sdk
 
 
-async def _one(message):
-    """One envelope as the one-item async iterable `ClaudeSDKClient.query`
-    takes: its prompt is `str | AsyncIterable[dict]`, and a bare dict would
-    reach its `async for` and raise TypeError."""
-    yield message
-
-
 _END = object()
 
 
-async def _next(it, deadline, overrun):
-    """The next message of a response, or `_END` when the stream stops.
-    The deadline bounds the wait for THIS message, so a stream that goes
-    silent cannot hang the loop; `overrun` is the RunnerError text."""
+class _NotWritten(Exception):
+    """query() raised before the row reached the transport: the row is
+    requeued, never failed, because the model never saw it."""
+
+    def __init__(self, row, cause):
+        super().__init__(str(cause))
+        self.row, self.cause = row, cause
+
+
+def _nothing_written(sdk, exc):
+    """True when the SDK raised before its transport wrote a byte: every
+    check in `SubprocessCLITransport.write` (not ready, process ended,
+    earlier exit error) raises CLIConnectionError with no cause, or
+    caused by another CLIConnectionError; only a failed send carries the
+    OS error that interrupted it, and that one may have written part."""
+    if not isinstance(exc, sdk.CLIConnectionError):
+        return False
+    return exc.__cause__ is None or isinstance(exc.__cause__, sdk.CLIConnectionError)
+
+
+async def _next_by(it, deadline, overrun):
+    """The next message of a response, or `_END`, bounded by one deadline
+    (the drain's)."""
     try:
         return await asyncio.wait_for(it.__anext__(), timeout=deadline - time.monotonic())
     except StopAsyncIteration:
@@ -73,14 +94,34 @@ def _default_factory(options):
     return _sdk().ClaudeSDKClient(options=options)
 
 
+def _tool_result_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(part.get("text", "") for part in content
+                         if isinstance(part, dict) and part.get("type") == "text")
+    return ""
+
+
 class SdkRunner:
+    # After this many consecutive failed turns the loop waits before its
+    # next claim: backoff_base_s, doubling, capped; a good turn resets it.
+    backoff_after = 3
+    backoff_base_s = 1.0
+    backoff_cap_s = 30.0
+    # How often a live turn looks for operator/person rows to fold in, and
+    # how long an idle loop sleeps when the doorbell is a Poller.
+    poll_s = 0.2
+
     def __init__(self, home, *, client_factory=None, api_key=None, model=None,
-                 cwd=None, turn_timeout_s=600.0, drain_timeout_s=30.0):
+                 cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
+                 drain_timeout_s=30.0):
         self.home = Path(home)
         self.api_key = api_key
         self.model = model
         self.cwd = Path(cwd) if cwd else self.home
-        self.turn_timeout_s = float(turn_timeout_s)
+        self.idle_timeout_s = float(idle_timeout_s)
+        self.turn_timeout_s = None if turn_timeout_s is None else float(turn_timeout_s)
         self.drain_timeout_s = float(drain_timeout_s)
         self.client_factory = client_factory or _default_factory
         self.session_id = "sdk-" + uuid.uuid4().hex[:8]
@@ -93,16 +134,24 @@ class SdkRunner:
         self._loop = None
         self._client = None
         self._interrupt_requested = False
+        self._live = False       # the CLI is generating for this turn (see _interrupt_turn)
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
+        self._failures = 0       # consecutive failed turns
+        self._backed_off = 0     # the failure count the last backoff was for
+        self._last_fold = 0.0    # when the live turn last looked for rows to fold
+        self.fatal = None        # why the worker gave up (a connect failure), else None
 
     # -- options -----------------------------------------------------------
     def options(self, *, resume=None):
         sdk = _sdk()
         env = {"ANTHROPIC_API_KEY": self.api_key} if self.api_key else {}
+        # replay-user-messages: the echo is how a turn knows which rows the
+        # model actually took in (see the module docstring).
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
                                       permission_mode="bypassPermissions",
-                                      setting_sources=[], resume=resume)
+                                      setting_sources=[], resume=resume,
+                                      extra_args={"replay-user-messages": None})
 
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})
@@ -162,8 +211,11 @@ class SdkRunner:
 
     async def _interrupt_turn(self, seq):
         """Runs on the loop thread, where turns start and end, so the check
-        below and the interrupt cannot be split by a turn boundary."""
-        if seq != self._turn_seq or self.machine.state != "running":
+        below and the interrupt cannot be split by a turn boundary. `_live`
+        is cleared at every ResultMessage: an interrupt that arrives after
+        the result, while the CLI is between turns, is dropped too, so it
+        never marks a finished turn interrupted or reaches an idle CLI."""
+        if seq != self._turn_seq or self.machine.state != "running" or not self._live:
             self.stream.append("system", {"subtype": "interrupt_dropped",
                                           "turn": seq, "current": self._turn_seq})
             return
@@ -187,6 +239,12 @@ class SdkRunner:
     def unsupported(self):
         return []
 
+    # -- phase-2 CLI conveniences, NOT in the Runner protocol ------------------
+    def worker_alive(self):
+        """True while the worker thread runs. `cousin-runner` uses it to
+        exit 3 when the worker gave up (a fatal connect failure)."""
+        return self._thread is not None and self._thread.is_alive()
+
     # -- the loop ------------------------------------------------------------
     def _run_loop(self):
         # asyncio.Runner's close cancels leftover tasks, finalizes async
@@ -197,15 +255,13 @@ class SdkRunner:
 
     async def _main(self):
         try:
-            self._client = self.client_factory(self.options())
-            await self._client.connect()
-        except Exception as exc:  # noqa: BLE001 - a runner that cannot connect says so
-            self._fail_connect(exc)
-            await self._disconnect()
-            return
-        try:
-            with wake.Listener(self.home) as listener:
-                while not self._stop.is_set():
+            if not await self._connect():
+                return
+            with wake.listen(self.home, self._wake_error) as listener:
+                while not self._stop.is_set() and self.fatal is None:
+                    await self._backoff()
+                    if self._stop.is_set():
+                        break
                     try:
                         rows = self.inbox.claim(limit=1, claimant=self.session_id)
                     except Exception as exc:  # noqa: BLE001 - a store failure is never silence
@@ -214,15 +270,51 @@ class SdkRunner:
                         continue
                     if not rows:
                         await asyncio.get_running_loop().run_in_executor(
-                            None, listener.wait, 0.2)
+                            None, listener.wait, self.poll_s)
                         continue
                     try:
-                        await self._turn(rows[0])
-                    except Exception as exc:  # noqa: BLE001 - the success tail can still raise
-                        # `[]`: its rows may already be closed (FakeRunner._fail_turn)
+                        ok = await self._turn(rows[0])
+                    except Exception as exc:  # noqa: BLE001 - the idle transition can still raise
+                        # `[]`: its rows are already closed (FakeRunner._fail_turn)
                         self._fail_turn([], exc)
+                        ok = False
+                    self._failures = 0 if ok else self._failures + 1
         finally:
             await self._disconnect()
+
+    def _wake_error(self, message):
+        self.stream.append("error", {"error": message})
+
+    async def _backoff(self):
+        """After `backoff_after` consecutive failed turns, wait before the
+        next claim, once per failure: a broken lane must not burn the
+        inbox one row at a time."""
+        if self._failures < self.backoff_after or self._backed_off == self._failures:
+            return
+        self._backed_off = self._failures
+        seconds = min(self.backoff_base_s * 2 ** (self._failures - self.backoff_after),
+                      self.backoff_cap_s)
+        self.stream.append("system", {"subtype": "backoff", "seconds": seconds,
+                                      "failures": self._failures})
+        deadline = time.monotonic() + seconds
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    async def _connect(self, *, resume=None, why=None):
+        """A new client, connected. On failure the runner gives up: the
+        machine goes `errored`, the reason is `self.fatal` and an `error`
+        event, and the worker ends so a supervisor can restart it
+        (`cousin-runner` exits 3). `why` is set on a reconnect."""
+        try:
+            self._client = self.client_factory(self.options(resume=resume))
+            await self._client.connect()
+            return True
+        except Exception as exc:  # noqa: BLE001 - a runner that cannot connect says so
+            message = "%s: %s" % (type(exc).__name__, exc)
+            if why is not None:
+                message = "reconnect failed: %s (after %s)" % (message, why)
+            self._fail_connect(message, resume)
+            return False
 
     async def _disconnect(self):
         if self._client is None:
@@ -232,62 +324,143 @@ class SdkRunner:
         except Exception:  # noqa: BLE001 - a dying client must not mask the stop
             pass
 
-    def _fail_connect(self, exc):
-        """The client never came up: the error goes to the stream and the
-        machine stays `errored` (nothing will run a turn; `stop()` moves
-        it on)."""
-        message = "%s: %s" % (type(exc).__name__, exc)
+    def _fail_connect(self, message, resume=None):
         # The state first: whoever sees the `error` event also sees `errored`.
+        self.fatal = message
         with self._lock:
             if self.machine.state in ("idle", "running"):
                 self.machine.to("errored", message)
-        self.stream.append("error", {"error": message})
+        self.stream.append("error", {"error": message, "fatal": True, "resumed": resume})
 
     def _row_item(self, row):
         return Item(thread_id=row["thread_id"], source=row["source"], body=row["body"],
                     sender=row["sender"], attachments=tuple(row["attachments"]),
                     context=row["context"], message_id=row["message_id"])
 
-    async def _query(self, row):
+    async def _send(self, sdk, row, open_rows):
+        """Write one row into the client. On success the row joins
+        `open_rows` with the exact text its echo will carry. A query()
+        that raised before anything was written raises `_NotWritten`."""
         message = envelope.render_message(self._row_item(row))
         # The SDK's str path sets this key and its iterable path does not.
         message.setdefault("parent_tool_use_id", None)
-        await self._client.query(_one(message))
+        text = message["message"]["content"][0]["text"]
+        yielded = []
 
-    def _fold_midturn(self, consumed):
-        """Operator/person chat that arrived during the turn is query()'d
-        into it (finding 1); anything else goes back to the queue."""
-        folded = []
-        for row in self.inbox.claim(limit=10, claimant=self.session_id):
-            kind = row["thread_id"].partition(":")[0]
-            if row["source"] == "chat" and kind in FOLDED_KINDS:
-                consumed.append(row)
-                folded.append(row)
-            else:
+        async def one():
+            # `query` takes `str | AsyncIterable[dict]`; a bare dict would
+            # reach its `async for` and raise TypeError.
+            yielded.append(True)
+            yield message
+
+        gen = one()
+        try:
+            await self._client.query(gen)
+        except Exception as exc:
+            if not yielded or _nothing_written(sdk, exc):
+                raise _NotWritten(row, exc) from exc
+            open_rows.append((row, text))   # it may have reached the CLI
+            raise
+        finally:
+            await gen.aclose()
+        open_rows.append((row, text))
+
+    async def _fold(self, sdk, open_rows):
+        """Operator/person chat that arrived during the live turn is
+        written into it (finding 1); anything else goes back to the queue."""
+        rows = self.inbox.claim(limit=10, claimant=self.session_id)
+        for i, row in enumerate(rows):
+            if not folds_into_turn(row["source"], row["thread_id"]):
                 self.inbox.requeue(row["id"])
-        return folded
+                continue
+            try:
+                await self._send(sdk, row, open_rows)
+            except Exception:
+                for rest in rows[i + 1:]:   # claimed here, never offered: back to the queue
+                    self.inbox.requeue(rest["id"])
+                raise
 
-    def _fail_turn(self, consumed, exc, *, recover=True):
+    async def _next(self, it, started, fold):
+        """The next message, or `_END` when the stream stops. The idle
+        timeout bounds the wait for THIS message (a stream gone silent);
+        the optional turn timeout bounds the whole turn. While waiting,
+        `fold` (None once folding is over) runs every `poll_s`, so a row
+        that lands during a long generation is written when it lands, not
+        when the next message happens to arrive."""
+        task = asyncio.ensure_future(it.__anext__())
+        idle_deadline = time.monotonic() + self.idle_timeout_s
+        try:
+            while True:
+                if fold is not None and time.monotonic() - self._last_fold >= self.poll_s:
+                    self._last_fold = time.monotonic()
+                    await fold()
+                now = time.monotonic()
+                wait, overrun = idle_deadline - now, "no message for %.1fs" % self.idle_timeout_s
+                if self.turn_timeout_s is not None:
+                    left = started + self.turn_timeout_s - now
+                    if left < wait:
+                        wait, overrun = left, "turn exceeded %.1fs" % self.turn_timeout_s
+                if wait <= 0:
+                    raise RunnerError(overrun)
+                if fold is not None:
+                    wait = min(wait, self.poll_s)
+                done, _ = await asyncio.wait({task}, timeout=wait)
+                if done:
+                    try:
+                        return task.result()
+                    except StopAsyncIteration:
+                        return _END
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001 - the read we abandoned, not ours to raise
+                    pass
+
+    def _match_echo(self, sdk, msg, open_rows, echoed):
+        """The open row this UserMessage echoes, or None."""
+        if isinstance(msg.content, str):
+            texts = [msg.content]
+        else:
+            texts = [b.text for b in msg.content if isinstance(b, sdk.TextBlock)]
+        for row, text in open_rows:
+            if row["id"] not in echoed and text in texts:
+                return row
+        return None
+
+    def _fail_turn(self, consumed, exc, *, recover=True, requeued=()):
         """FakeRunner._fail_turn's rules: `consumed` is only rows this call
         may safely close; `errored` only from idle/running and `errored ->
         idle` only from errored, so a machine `stop()` forced to `stopped`
-        is never touched."""
+        is never touched. `requeued` rows never reached the model and go
+        back to the queue. A failure while closing rows is recorded and
+        does not escape: the caller's resync must still run."""
         message = "%s: %s" % (type(exc).__name__, exc)
         # The state first: whoever sees the `error` event also sees `errored`.
         with self._lock:
             if self.machine.state in ("idle", "running"):
                 self.machine.to("errored", message)
         self.stream.append("error", {"error": message})
-        for row in consumed:
-            self.inbox.done(row["id"], FAILED, message)
-        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                      "interrupted": self._interrupt_requested,
-                                      "is_error": True, "num_turns": 0,
-                                      "total_cost_usd": None, "session_id": None})
+        try:
+            for row in consumed:
+                self.inbox.done(row["id"], FAILED, message)
+            for row in requeued:
+                self.inbox.requeue(row["id"])
+            self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                          "requeued": [r["id"] for r in requeued],
+                                          "interrupted": self._interrupt_requested,
+                                          "is_error": True, "num_turns": 0,
+                                          "total_cost_usd": None, "session_id": None})
+        except Exception as close_exc:  # noqa: BLE001 - recorded; the resync still runs
+            self.stream.append("error", {"error": "closing a failed turn: %s: %s"
+                                         % (type(close_exc).__name__, close_exc)})
         if recover:
             self._recover()
 
     def _recover(self):
+        if self._stop.is_set() or self.fatal is not None:
+            return
         with self._lock:
             if self.machine.state == "errored":
                 self.machine.to("idle", "recovered")
@@ -297,7 +470,12 @@ class SdkRunner:
         still holds the rest of that turn; left there, the next
         `receive_response()` stops at the OLD result and every later turn
         is off by one. Drain first (session continuity is the point);
-        reconnect, resuming the last session seen, only if that fails."""
+        reconnect, resuming the last session seen, only if that fails. A
+        runner being stopped does neither: the loop is about to close the
+        client, and a new one would outlive the stop."""
+        if self._stop.is_set():
+            self.stream.append("system", {"subtype": "resync_skipped", "why": "stopping"})
+            return
         try:
             drained = await self._drain()
         except Exception as exc:  # noqa: BLE001 - any drain failure means reconnect
@@ -305,24 +483,20 @@ class SdkRunner:
         else:
             self.stream.append("system", {"subtype": "drained", "messages": drained})
             return
+        if self._stop.is_set():
+            return
         resume = self._resume_id
         await self._disconnect()
-        try:
-            self._client = self.client_factory(self.options(resume=resume))
-            await self._client.connect()
-        except Exception as exc:  # noqa: BLE001 - the next turn fails and retries
-            self.stream.append("error", {"error": "reconnect failed: %s: %s (after %s)"
-                                         % (type(exc).__name__, exc, why),
-                                         "resumed": resume})
-            return
-        self.stream.append("error", {"error": "reconnected: %s" % why, "resumed": resume})
+        if await self._connect(resume=resume, why=why):
+            self.stream.append("error", {"error": "reconnected: %s" % why, "resumed": resume})
 
     async def _drain(self):
         """Interrupt, then read the stream up to the failed turn's result,
-        every wait bounded by `drain_timeout_s`."""
+        every wait bounded by `drain_timeout_s`. The result is recorded
+        (`drained: True`): the failed turn's cost is not lost."""
         sdk = _sdk()
         deadline = time.monotonic() + self.drain_timeout_s
-        overrun = "drain exceeded %.0fs" % self.drain_timeout_s
+        overrun = "drain exceeded %.1fs" % self.drain_timeout_s
         try:
             await asyncio.wait_for(self._client.interrupt(),
                                    timeout=deadline - time.monotonic())
@@ -333,79 +507,115 @@ class SdkRunner:
         count = 0
         try:
             while True:
-                msg = await _next(it, deadline, overrun)
+                msg = await _next_by(it, deadline, overrun)
                 if msg is _END:
                     raise RunnerError("stream ended without a result")
                 count += 1
                 self._record(sdk, msg)
                 if isinstance(msg, sdk.ResultMessage):
+                    self.stream.append("result", {"inbox_ids": [], "drained": True,
+                                                  "interrupted": True,
+                                                  "is_error": bool(msg.is_error),
+                                                  "num_turns": msg.num_turns,
+                                                  "total_cost_usd": msg.total_cost_usd,
+                                                  "session_id": msg.session_id})
                     return count
         finally:
             await _aclose(responses)
 
     async def _turn(self, first):
-        consumed = [first]
+        """One runner turn: write `first`, fold operator/person chat while
+        the turn is live, and read until every written row is closed.
+        Returns False when the turn failed or a result was an error."""
         self._interrupt_requested = False
-        is_error, num_turns, cost, result_session = False, 0, None, None
-        sent = saw_result = False
+        open_rows = []    # (row, envelope text): written, not yet closed
+        closing = []      # rows a result is closing right now
+        ok = True
         try:
             sdk = _sdk()
             with self._lock:
                 self._turn_seq += 1
+                self._live = True
                 self.machine.to("running", "turn")
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})
-            sent = True   # from here on the stream may hold this turn's messages
-            await self._query(first)
-            deadline = time.monotonic() + self.turn_timeout_s
-            overrun = "turn exceeded %.0fs" % self.turn_timeout_s
-            responses = self._client.receive_response()
-            it = responses.__aiter__()
-            try:
-                while True:
-                    msg = await _next(it, deadline, overrun)
-                    if msg is _END:
-                        break
-                    self._record(sdk, msg)
-                    if isinstance(msg, sdk.ResultMessage):
-                        saw_result = True
-                        is_error = bool(msg.is_error)
-                        num_turns = msg.num_turns
-                        cost = msg.total_cost_usd
-                        result_session = msg.session_id
-                        break
-                    for row in self._fold_midturn(consumed):
-                        await self._query(row)
-            finally:
-                await _aclose(responses)
-            # No fold after the result: a row that landed after it was
-            # never query()'d, so it stays queued and starts the next turn.
-            if not saw_result:
-                # the CLI died: the SDK ends the stream on {"type": "end"}
-                raise RunnerError("stream ended without a result")
-        except Exception as exc:  # noqa: BLE001 - a raising turn body is recorded, not lost
-            self._fail_turn(consumed, exc, recover=False)
-            if sent and not saw_result:
-                await self._resync()
-            self._recover()
-            return
+            await self._send(sdk, first, open_rows)
+            started = time.monotonic()
+            self._last_fold = 0.0
+            results = 0
 
-        # Success tail: a failure here propagates to `_main`'s outer guard,
-        # which calls `_fail_turn([], exc)` (these rows may already be closed).
-        interrupted = self._interrupt_requested
-        outcome = FAILED if (is_error and not interrupted) else DELIVERED
-        for row in consumed:
-            self.inbox.done(row["id"], outcome, "turn %s" % (result_session or self.session_id))
-        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                      "interrupted": interrupted,
-                                      "is_error": is_error, "num_turns": num_turns,
-                                      "total_cost_usd": cost, "session_id": result_session})
+            async def fold():
+                if self._live and not self._interrupt_requested and results == 0:
+                    await self._fold(sdk, open_rows)
+
+            while open_rows:
+                echoed = set()
+                responses = self._client.receive_response()
+                it = responses.__aiter__()
+                try:
+                    while True:
+                        msg = await self._next(it, started, fold if results == 0 else None)
+                        if msg is _END:
+                            # the CLI died: the SDK ends the stream on {"type": "end"}
+                            raise RunnerError("stream ended without a result")
+                        echo_of = None
+                        if isinstance(msg, sdk.UserMessage):
+                            row = self._match_echo(sdk, msg, open_rows, echoed)
+                            if row is not None:
+                                echo_of = row["id"]
+                                echoed.add(echo_of)
+                                self._live = True   # the CLI took up a carried row
+                        self._record(sdk, msg, echo_of=echo_of)
+                        if isinstance(msg, sdk.ResultMessage):
+                            results += 1
+                            self._live = False
+                            ok = self._close(msg, open_rows, echoed, closing) and ok
+                            break
+                finally:
+                    await _aclose(responses)
+        except Exception as exc:  # noqa: BLE001 - a raising turn body is recorded, not lost
+            requeued = [exc.row] if isinstance(exc, _NotWritten) else []
+            cause = exc.cause if isinstance(exc, _NotWritten) else exc
+            unclosed = [row for row, _ in open_rows] + closing
+            try:
+                self._fail_turn(unclosed, cause, recover=False, requeued=requeued)
+            finally:
+                self._live = False
+                if open_rows or requeued:
+                    # the stream may hold this turn's messages, or the client is broken
+                    await self._resync()
+                self._recover()
+            return False
+
         with self._lock:
             if self.machine.state == "running":
                 self.machine.to("idle", "turn done")
+        return ok
 
-    def _record(self, sdk, msg):
+    def _close(self, msg, open_rows, echoed, closing):
+        """Close every row echoed since the last result with this one;
+        rows written but not echoed stay open for the next CLI turn."""
+        interrupted = self._interrupt_requested
+        is_error = bool(msg.is_error)
+        closing[:] = [row for row, _ in open_rows if row["id"] in echoed]
+        open_rows[:] = [(row, text) for row, text in open_rows if row["id"] not in echoed]
+        outcome = FAILED if (is_error and not interrupted) else DELIVERED
+        ids = [row["id"] for row in closing]
+        while closing:
+            self.inbox.done(closing[0]["id"], outcome,
+                            "turn %s" % (msg.session_id or self.session_id))
+            closing.pop(0)
+        self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted,
+                                      "is_error": is_error, "num_turns": msg.num_turns,
+                                      "total_cost_usd": msg.total_cost_usd,
+                                      "session_id": msg.session_id})
+        self._interrupt_requested = False
+        return not (is_error and not interrupted)
+
+    def _record(self, sdk, msg, *, echo_of=None):
+        """Every SDK message leaves at least one event (a ResultMessage's
+        is its caller's `result`)."""
         if isinstance(msg, sdk.SystemMessage):
             if msg.subtype == "init":
                 d = msg.data or {}
@@ -416,22 +626,38 @@ class SdkRunner:
             else:
                 self.stream.append("system", {"subtype": msg.subtype})
         elif isinstance(msg, sdk.AssistantMessage):
+            recorded = 0
             for block in msg.content:
                 if isinstance(block, sdk.TextBlock):
                     self.stream.append("text", {"text": block.text})
                 elif isinstance(block, sdk.ToolUseBlock):
                     self.stream.append("tool", {"id": block.id, "name": block.name,
                                                 "input": block.input})
+                elif isinstance(block, sdk.ThinkingBlock):
+                    self.stream.append("thinking", {"length": len(block.thinking or "")})
+                else:
+                    continue
+                recorded += 1
+            if not recorded:
+                self.stream.append("text", {"text": ""})
         elif isinstance(msg, sdk.UserMessage):
-            content = msg.content if isinstance(msg.content, list) else []
-            for block in content:
+            if isinstance(msg.content, str):
+                self.stream.append("user", {"text": msg.content[:2000], "echo_of": echo_of})
+                return
+            texts, recorded = [], 0
+            for block in msg.content:
                 if isinstance(block, sdk.ToolResultBlock):
-                    text = block.content if isinstance(block.content, str) else ""
-                    self.stream.append("tool_result", {"tool_use_id": block.tool_use_id,
-                                                       "is_error": bool(block.is_error),
-                                                       "text": text[:2000]})
+                    self.stream.append("tool_result", {
+                        "tool_use_id": block.tool_use_id, "is_error": bool(block.is_error),
+                        "text": _tool_result_text(block.content)[:2000]})
+                    recorded += 1
+                elif isinstance(block, sdk.TextBlock):
+                    texts.append(block.text)
+            if texts or not recorded:
+                self.stream.append("user", {"text": "\n".join(texts)[:2000],
+                                            "echo_of": echo_of})
         elif isinstance(msg, sdk.ResultMessage):
-            # the caller closes the turn from it
+            # the caller closes the turn from it and appends its `result`
             self._resume_id = msg.session_id or self._resume_id
         else:
             self.stream.append("other", {"type": type(msg).__name__})

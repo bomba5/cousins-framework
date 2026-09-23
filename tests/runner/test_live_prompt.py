@@ -5,6 +5,7 @@ import os
 import pathlib
 import time
 import unittest
+import uuid
 from unittest import mock
 
 from cousin_lib import delivery
@@ -15,8 +16,11 @@ from tests.runner._home import temp_home
 
 MODEL = "claude-haiku-4-5-20251001"
 # Long enough to be cached on its own (well past the minimum cacheable prefix).
-LAW = "".join("%d. A clause of the law, long enough to be cached on its own.\n" % i
-              for i in range(1, 700))
+# One nonce per test run, first in the law and shared by every home of the run
+# (ruling W9-3): session A creates the block cold whatever an earlier run cached.
+RUN_NONCE = uuid.uuid4().hex
+LAW = "Run %s.\n" % RUN_NONCE + "".join(
+    "%d. A clause of the law, long enough to be cached on its own.\n" % i for i in range(1, 700))
 
 
 def _op(body):

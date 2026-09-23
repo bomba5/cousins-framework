@@ -662,7 +662,7 @@ def relay_notice(home, *, operator, account_name, url, timeout=CAPTURE_TTL_S):
     slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
     text = ("Login for account %s: open %s , sign in, and reply HERE with the whole code the"
             " page shows. It looks like `code#state`: paste all of it, the part after # included."
-            " Your next message in this chat within %s is taken as that code; it is never"
+            " Within %s, paste the code as the next message; only the code is taken, never"
             " delivered to %s and never kept in this history. If you did not start this login"
             " from a host shell yourself, do not answer this."
             % (account_name, url, _span(timeout), slug))

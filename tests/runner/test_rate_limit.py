@@ -121,6 +121,45 @@ class TestRateLimited(HermeticCase):
         self.assertIn("postponed", phases)
         self.assertNotIn("degraded_state: true", (r.home / "data" / "handoff.md").read_text())
 
+    def test_a_lost_resume_in_a_limited_handoff_leaves_the_start_to_the_rollover(self):
+        # a restart whose handoff turn names another session (a lost resume) AND is
+        # rate limited: the rollover is postponed and the lost resume goes with
+        # it, so the start hooks and the digest run once, from the rollover
+        from cousin_lib.runner import rollover, tools
+        args = {"position": "p", "next_action": "n", "status": "- s"}
+        holder = {}
+        r = self.build([init_msg(), assistant(text="ok"), result()])
+        (r.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-saved", "lane": "login", "generation": 0, "updated": 0}))
+        (r.home / "STATUS.md").write_text("## Open loops\n- carry this\n")
+        with open(r.home / "cousin.toml", "a") as fh:
+            fh.write('\n[session]\nstart_hooks = ["echo start >> %s/hooks.log"]\n' % r.home)
+        # client 0 (the resume, answered as another session): the handoff turn,
+        # limited, then the handoff answered; client 1: the new session
+        r.client_factory = self._factory_with([
+            [init_msg(session="s-new"), _limit("rejected", resets_in=1.0),
+             result(is_error=True, session="s-new")],
+            [init_msg(session="s-new"),
+             ("CALL", lambda: tools.call(holder["r"].tool_context, "handoff", args)),
+             assistant(text="handed off"), result(session="s-new")]])
+        holder["r"] = r
+        rollover.put_once(r.inbox, r.home, "max_age")
+        r.start()
+        self.assertTrue(_wait(lambda: any(e["payload"].get("phase") == "done"
+                                          for e in r.events() if e["kind"] == "rollover"), 15))
+        phases = [e["payload"].get("phase") for e in r.events() if e["kind"] == "rollover"]
+        self.assertIn("postponed", phases)
+        rows = [row for row in (r.inbox.get(i) for i in range(1, 40)) if row]
+        digests = [row for row in rows if "STATE DIGEST" in (row["body"] or "")]
+        self.assertEqual(len(digests), 1)
+        self.assertTrue(_wait(lambda: r.inbox.get(digests[0]["id"])["outcome"] == "delivered"))
+        self.assertEqual([row for row in rows if row["state"] == "claimed"
+                          and row["id"] != digests[0]["id"]], [])
+        self.assertEqual((r.home / "hooks.log").read_text().split(), ["start"])
+        done = [e["payload"] for e in r.events()
+                if e["kind"] == "rollover" and e["payload"].get("phase") == "done"][0]
+        self.assertEqual(done["handoff"], "clean")
+
     def _factory_with(self, gen1):
         made = []
 

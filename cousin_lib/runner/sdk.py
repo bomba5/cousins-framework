@@ -811,9 +811,14 @@ class SdkRunner:
                         # The resume came back as a new session (R12). Known only
                         # from the first init, inside that turn, so the fresh
                         # start runs here, at the boundary after it: that turn's
-                        # row ran on the new session and is not lost.
+                        # row ran on the new session and is not lost. A login the
+                        # same turn failed holds it (the retry starts it, as any
+                        # start the login held); a worker that gave up starts none.
                         self._resume_lost = False
-                        await self._start_fresh(with_digest=True)
+                        if self._login_blocked:
+                            self._fresh_pending = True
+                        elif self.fatal is None:
+                            await self._start_fresh(with_digest=True)
         finally:
             await self._flush_session()     # a stop never loses the last id
             await self._disconnect()
@@ -1122,6 +1127,7 @@ class SdkRunner:
         open_rows = []    # (row, envelope text): written, not yet closed
         closing = []      # rows a result is closing right now
         ok = True
+        sending = False   # `first` reached _send: its own except says where it went
         try:
             sdk = _sdk()
             with self._lock:
@@ -1132,6 +1138,7 @@ class SdkRunner:
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})
+            sending = True
             await self._send(sdk, first, open_rows)
             started = time.monotonic()
             self._last_fold = 0.0
@@ -1181,6 +1188,9 @@ class SdkRunner:
         except Exception as exc:  # noqa: BLE001 - a raising turn body is recorded, not lost
             requeued = [exc.row] if isinstance(exc, _NotWritten) else []
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
+            # A raise before the send (the move to `running` refused, say) leaves
+            # `first` claimed and in no list: back to the queue, the client untouched.
+            unsent = [] if sending else [first]
             unclosed = [row for row, _ in open_rows] + closing
             signal, self._auth_turn = self._auth_turn, None
             if signal is not None:
@@ -1190,7 +1200,7 @@ class SdkRunner:
                 self._login_turn_lost(unclosed + requeued, cause, signal)
                 return True
             try:
-                self._fail_turn(unclosed, cause, recover=False, requeued=requeued)
+                self._fail_turn(unclosed, cause, recover=False, requeued=requeued + unsent)
             finally:
                 self._live = False
                 if open_rows or requeued:
@@ -1469,7 +1479,10 @@ class SdkRunner:
                 return False
             if handoff == "rate_limited":
                 # the row waits with everything else; the loop's _wait_rate_limit
-                # holds it, then claims it again ahead of chat (priority 0)
+                # holds it, then claims it again ahead of chat (priority 0). A resume
+                # the handoff turn lost needs no fresh start: the rerun rollover
+                # starts the new session itself (as in the login branch below).
+                self._resume_lost = False
                 self.inbox.requeue(row["id"])
                 with self._lock:
                     if self.machine.state == "rolling_over":
@@ -1479,8 +1492,11 @@ class SdkRunner:
                 return True
             if handoff == "login_required":
                 # the same shape: the row waits (priority 0, first after the fix),
-                # never an emergency handoff; rolling_over -> errored
+                # never an emergency handoff; rolling_over -> errored. A resume the
+                # handoff turn lost needs no fresh start: the rollover, rerun after
+                # the fix, starts the new session itself.
                 signal, self._auth_turn = self._auth_turn, None
+                self._resume_lost = False
                 self.inbox.requeue(row["id"])
                 self.stream.append("rollover", {"phase": "postponed", "reason": reason,
                                                 "why": signal["reason"]})

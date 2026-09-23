@@ -262,6 +262,9 @@ class TestCapture(LoginCase):
         self.assertEqual(row[0], "cousin-account")
         self.assertIn(URL, row[1]); self.assertIn("code#state", row[1])
         self.assertIn("5 minutes", row[1]); self.assertNotIn("10 minutes", row[1])
+        # only a code-shaped message is taken, never "your next message" whatever it says
+        self.assertIn("paste the code as the next message; only the code is taken", row[1])
+        self.assertNotIn("is taken as that code", row[1])
         self.assertIn("If you did not start this login from a host shell yourself, do not"
                       " answer this.", row[1])
         self.assertEqual(row[2], "Priya")

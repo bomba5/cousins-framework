@@ -254,6 +254,12 @@ relay; a notice a cousin's own `relay_notice` (`cousin-account login|token
 reaches Telegram through the ordinary outbound pump instead, like any other
 row in the cousin's chat.
 
+A login code pasted back through Telegram is diverted by the bridge like one
+pasted in the chat page: never delivered to the cousin and never kept in its
+chat history. It does stay in Telegram's own message history, which the
+framework cannot reach; the code is single-use and tied to that login flow,
+but you may delete the message.
+
 ## Errors and delivery
 
 - **Transient** (network errors, a chat server that is down, Telegram

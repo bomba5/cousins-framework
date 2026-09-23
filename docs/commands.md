@@ -65,10 +65,13 @@ inside a cousin (or under one), and they want a terminal (a usability check,
 not a safeguard). With `--via` the sign-in URL arrives in
 that cousin's chat (and on Telegram when the cousin has a bridge); sign in on
 any device and reply in the same chat with the whole code the page shows
-(`code#state`). Your next message there is taken as the code: it is never
-delivered to the cousin and never kept in the chat history, which holds a
-`[login code received ...]` line instead; for an hour after, a second or late
-code there is discarded the same way. Do not answer a login notice you did not
+(`code#state`). Paste the code as your next message there; only a message
+shaped like the code is taken, and it is never delivered to the cousin and
+never kept in the chat history, which holds a `[login code received ...]` line
+instead; for an hour after, a second or late code there is discarded the same
+way. A code pasted through Telegram stays in Telegram's own message history:
+it is single-use and tied to that login flow, but you may delete the message.
+Do not answer a login notice you did not
 start yourself. Without `--via` the URL is printed and the code is asked for
 at the terminal. `--timeout` is the window for the code in seconds (600; it
 must be positive). Exit 0 done, 4 the flow failed (the line says why, in

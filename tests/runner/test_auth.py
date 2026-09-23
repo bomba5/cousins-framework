@@ -422,6 +422,95 @@ class TestRunnerWaitsForALogin(HermeticCase):
         done = [e for e in self.events(r, "rollover") if e.get("phase") == "done"][0]
         self.assertEqual(done["handoff"], "clean")
 
+    def lost_resume_home(self):
+        """A restart: a saved session, state to carry, a start hook that
+        logs every run."""
+        import json
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-saved", "lane": "login", "generation": 0, "updated": 0}))
+        (self.home / "STATUS.md").write_text("## Open loops\n- carry this\n")
+        with open(self.home / "cousin.toml", "a") as fh:
+            fh.write('\n[session]\nstart_hooks = ["echo start >> %s/hooks.log"]\n' % self.home)
+
+    def rows(self, r):
+        return [row for row in (r.inbox.get(i) for i in range(1, 40)) if row]
+
+    def digests(self, r):
+        return [row for row in self.rows(r) if "STATE DIGEST" in (row["body"] or "")]
+
+    def test_a_lost_resume_and_a_failed_login_in_one_chat_turn_hold_the_fresh_start(self):
+        # the first turn after a restart names another session (the transcript
+        # is gone) AND fails the login: the fresh start waits for the fix, it
+        # never claims its digest into a machine that is `errored`
+        from tests.runner.test_sdk import init_msg, result
+        r = self.build(first_turn=[init_msg(session="s-new"),
+                                   _said("authentication_failed", LOGGED_OUT),
+                                   result(is_error=True, session="s-new")])
+        self.lost_resume_home()
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        time.sleep(0.3)                                   # many looks at these patches
+        self.assertEqual([row for row in self.rows(r) if row["state"] == "claimed"], [])
+        self.assertFalse((self.home / "hooks.log").exists())   # no start before the fix
+        self.mark = ("m", 2)                              # the operator fixed the login
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
+        self.assertTrue(_wait(lambda: [d["outcome"] for d in self.digests(r)] == ["delivered"]))
+        self.assertEqual([row for row in self.rows(r) if row["state"] == "claimed"], [])
+        self.assertEqual((self.home / "hooks.log").read_text().split(), ["start"])
+        fresh = [e for e in self.events(r, "system") if e.get("subtype") == "fresh"]
+        self.assertEqual(fresh, [{"subtype": "fresh", "digest": True}])
+        self.assertIsNone(r.fatal)
+
+    def test_a_lost_resume_and_a_failed_login_in_the_handoff_turn_leave_no_row_claimed(self):
+        # the same pair in a rollover's handoff turn: the rollover is postponed
+        # and the lost resume goes with it (the rollover starts the new
+        # session); no start for a generation that never rolled over
+        from cousin_lib.runner import rollover, tools
+        from tests.runner.test_sdk import assistant, init_msg, result
+        args = {"position": "p", "next_action": "n", "status": "- s"}
+        holder = {}
+        # client 0 (the resume, answered as another session): the handoff turn,
+        # logged out; client 1 (after the fix): the handoff answered; client 2:
+        # the new session
+        r = self.build(per_client={
+            0: [[init_msg(session="s-new"), _said("authentication_failed", LOGGED_OUT),
+                 result(is_error=True, session="s-new")]],
+            1: [[init_msg(session="s-new"),
+                 ("CALL", lambda: tools.call(holder["r"].tool_context, "handoff", args)),
+                 assistant(text="handed off"), result(session="s-new")]]})
+        holder["r"] = r
+        self.lost_resume_home()
+        rollover.put_once(r.inbox, self.home, "max_age")
+        r.start()
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        time.sleep(0.3)
+        self.assertEqual([row for row in self.rows(r) if row["state"] == "claimed"], [])
+        self.assertEqual([row["state"] for row in r.inbox.open_rows("flip")], ["queued"])
+        self.assertFalse((self.home / "hooks.log").exists())   # nothing rolled over yet
+        self.mark = ("m", 2)                              # the operator fixed the login
+        self.assertTrue(_wait(lambda: any(e.get("phase") == "done"
+                                          for e in self.events(r, "rollover")), 15))
+        self.assertTrue(_wait(lambda: [d["outcome"] for d in self.digests(r)] == ["delivered"]))
+        self.assertEqual([row for row in self.rows(r) if row["state"] == "claimed"], [])
+        self.assertEqual((self.home / "hooks.log").read_text().split(), ["start"])
+        done = [e for e in self.events(r, "rollover") if e.get("phase") == "done"][0]
+        self.assertEqual(done["handoff"], "clean")
+        self.assertIsNone(r.fatal)
+
+    def test_a_turn_refused_before_its_send_requeues_its_row(self):
+        # defensive: a turn whose move to `running` raises never wrote its row,
+        # so the row goes back to the queue instead of staying `claimed`
+        import asyncio
+        from cousin_lib.delivery import Item
+        r = self.build()
+        rid = r.inbox.put(Item("operator:priya", "chat", "hi", sender="Priya"))
+        row = r.inbox.claim_id(rid, claimant=r.session_id)
+        r.machine.to("errored", "held")
+        self.assertFalse(asyncio.run(r._turn(row)))
+        self.assertEqual(r.inbox.get(rid)["state"], "queued")
+        self.assertEqual([e["requeued"] for e in self.events(r, "result")], [[rid]])
+        self.assertEqual(self.clients, [])                # no client was touched
 
 @unittest.skipIf(AssistantMessage is None, "claude-agent-sdk not installed")
 class TestValidate(HermeticCase):

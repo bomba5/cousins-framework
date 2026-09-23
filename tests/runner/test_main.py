@@ -7,13 +7,23 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest import mock
 
 from cousin_lib.delivery import Item
 from cousin_lib.runner import main as runner_main
+from cousin_lib.runner.fake import FakeRunner
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.stream import EventStream
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
+
+
+def _append_agent_key(home, name):
+    """Add `api_key_file = "<name>"` under the `[agent]` table `temp_home`
+    already wrote (it's the last line in the file, so a bare append stays
+    inside that table)."""
+    (home / "cousin.toml").write_text(
+        (home / "cousin.toml").read_text() + 'api_key_file = "%s"\n' % name)
 
 
 class TestRunnerFor(HermeticCase):
@@ -29,6 +39,41 @@ class TestRunnerFor(HermeticCase):
             rc = runner_main.runner_main(["--home", str(home)])
         self.assertEqual(rc, 2)
         self.assertIn("runner", stderr.getvalue())
+
+
+class TestReadKey(HermeticCase):
+    def test_a_key_file_outside_any_framework_root_is_a_config_error(self):
+        home = temp_home(self, runner="sdk")
+        _append_agent_key(home, "keys/token")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = runner_main.runner_main(["--home", str(home)])
+        self.assertEqual(rc, 2)
+        self.assertIn("api_key_file", stderr.getvalue())
+
+    def test_a_missing_key_file_under_a_real_root_is_a_config_error(self):
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        _append_agent_key(home, "keys/token")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = runner_main.runner_main(["--home", str(home)])
+        self.assertEqual(rc, 2)
+        self.assertIn("keys/token", stderr.getvalue())
+
+
+class TestSignalHandlers(HermeticCase):
+    def test_signal_handlers_are_restored_when_start_fails(self):
+        home = temp_home(self, runner="fake")
+        previous_term = signal.getsignal(signal.SIGTERM)
+        previous_int = signal.getsignal(signal.SIGINT)
+        with mock.patch.object(FakeRunner, "start",
+                               side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                runner_main.runner_main(["--home", str(home), "--once"])
+        self.assertEqual(signal.getsignal(signal.SIGTERM), previous_term)
+        self.assertEqual(signal.getsignal(signal.SIGINT), previous_int)
 
 
 class TestOnce(HermeticCase):

@@ -33,7 +33,16 @@ def _read_key(home, agent):
         return None
     from cousin_lib.config import FrameworkConfig
     root = FrameworkConfig.root_from_home(Path(home))
-    return (Path(root) / name).read_text().strip()
+    if root is None:
+        raise RunnerError(
+            "[agent] api_key_file needs a framework root above %s"
+            " (cousins/<slug> under an install with config/)" % home)
+    path = Path(root) / name
+    try:
+        return path.read_text().strip()
+    except OSError as err:
+        raise RunnerError("cannot read [agent] api_key_file %s: %s"
+                          % (path, err))
 
 
 def runner_for(home, *, kind=None):
@@ -69,10 +78,10 @@ def runner_main(argv=None):
 
     previous_term = signal.signal(signal.SIGTERM, _signal)
     previous_int = signal.signal(signal.SIGINT, _signal)
-    # a claim from a runner that died is ours now
-    runner.inbox.requeue_stale(older_than_s=0.0)
-    runner.start()
     try:
+        # a claim from a runner that died is ours now
+        runner.inbox.requeue_stale(older_than_s=0.0)
+        runner.start()
         if args.once:
             while runner.inbox.unfinished() > 0 or runner.state() == "running":
                 time.sleep(0.05)

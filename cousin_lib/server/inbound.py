@@ -40,9 +40,10 @@ def divert_login_code(config, user, message):
     """R18: while `cousin-account login|token --via <this cousin>` waits,
     the operator's next message here is the code: stored under
     <root>/run/ for the flow (taken within one poll), never in chat.db,
-    never delivered to the cousin. After the window, a code-shaped
-    message from that operator is still diverted (a late code) and
-    discarded. Returns the text to store in chat.db instead, or None.
+    never delivered to the cousin. After the window (a take, a timeout,
+    a dead flow), every code-shaped message from that operator is still
+    diverted and discarded until the tombstone's hour is over. Returns
+    the text to store in chat.db instead, or None.
     Every send path calls this FIRST."""
     import time
     from cousin_lib import accounts
@@ -54,6 +55,10 @@ def divert_login_code(config, user, message):
         if normalize_chat_user(user) != normalize_chat_user(cap.get("operator") or ""):
             continue
         name, window = cap.get("account"), accounts.capture_window(cap, now)
+        if cap.get("state") == "armed" and window not in ("armed", "taken"):
+            # its flow died or its clock ran out without the flow's cleanup:
+            # a stored code is dropped from disk, the capture is a tombstone
+            accounts.retire_capture(root, name)
         if window == "armed":
             if accounts.store_code(root, name, message):
                 return "[login code received for account %s]" % name
@@ -61,9 +66,12 @@ def divert_login_code(config, user, message):
             # or a tombstone won the lock): judge the message by the new one
             window = accounts.capture_window(accounts.read_capture(root, name), time.time())
         shaped = accounts.CODE_SHAPE.match(str(message).strip())
-        if window == "taken" and shaped:        # a second paste: not the model's either
+        if not shaped:
+            continue
+        if window == "taken" or (window == "late" and cap.get("state") == "done"
+                                 and accounts.discard_late_code(root, name)):
             return "[a second login code for account %s was discarded]" % name
-        if window == "late" and shaped and accounts.discard_late_code(root, name):
+        if window == "late" and accounts.discard_late_code(root, name):
             return ("[a late login code for account %s was discarded: its window had closed]"
                     % name)
     return None

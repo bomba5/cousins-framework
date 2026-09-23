@@ -4,10 +4,13 @@ import io
 import json
 import os
 import pathlib
+import signal
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 from unittest import mock
@@ -146,6 +149,11 @@ class TestLoginFlow(LoginCase):
         self.assertFalse(out["ok"])
         self.assertIn("something the plan never saw", out["reason"])
 
+    def test_the_last_words_never_keep_a_piece_of_the_code(self):
+        tail = CODE[10:] + " " * 700 + "stuck at " + CODE + " end"   # the tail began inside it
+        words = accounts._last_words(mock.Mock(text=lambda: tail), CODE)
+        self.assertNotIn(CODE[10:], words); self.assertIn("stuck at [code] end", words)
+
     def test_the_wrong_kind_is_refused(self):
         with self.assertRaises(accounts.AccountsError):
             accounts.login_flow(self.acc["nightly"], self.root, relay=print,
@@ -193,6 +201,19 @@ class TestTokenFlow(LoginCase):
         self.assertNotIn("FAKETOKEN", json.dumps(out))
         self.assertFalse((self.root / ".secrets" / "accounts" / "nightly").exists())
 
+    def test_a_token_cut_by_the_tail_leaves_none_of_its_characters_in_the_reason(self):
+        body = "oat01-" + "B" * 95                   # the tail began INSIDE the token
+        for tail in (body + " " * 700 + "Store this",
+                     "sk-ant-" + body + " " * 700 + "Store this"):
+            fake = FakePty([TOKEN_SCREENS[0], "\n" + tail])
+            out = accounts.token_flow(self.acc["nightly"], self.root,
+                                      relay=self.relayed.append,
+                                      await_code=lambda t: CODE, spawn=fake)
+            self.assertFalse(out["ok"])
+            reason = json.dumps(out)
+            self.assertNotIn("BBBB", reason); self.assertNotIn("oat01", reason)
+            self.assertIn("not shown", reason)
+
 
 class TestCapture(LoginCase):
     def test_arm_store_take_is_one_shot_private_and_outside_every_home(self):
@@ -203,9 +224,11 @@ class TestCapture(LoginCase):
         self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
         threading.Timer(0.1, accounts.store_code, args=(self.root, "fleet", CODE)).start()
         self.assertEqual(accounts.take_code(self.root, "fleet", timeout=5, poll=0.02), CODE)
-        self.assertFalse(path.exists())
-        self.assertFalse(accounts.store_code(self.root, "fleet", "again"))   # never recreated
-        self.assertFalse(path.exists())
+        left = accounts.read_capture(self.root, "fleet")
+        self.assertEqual(left["state"], "done"); self.assertNotIn("code", left)
+        self.assertFalse(accounts.store_code(self.root, "fleet", "again"))   # one code, once
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_a_timeout_leaves_a_tombstone_that_stores_nothing(self):
         self.arm()
@@ -228,7 +251,8 @@ class TestCapture(LoginCase):
 
     def test_the_relay_notice_is_a_chat_row_for_the_operator_that_names_the_shape(self):
         from cousin_lib.server.storage import ChatStore
-        rid = accounts.relay_notice(self.home, operator="Priya", account_name="fleet", url=URL)
+        rid = accounts.relay_notice(self.home, operator="Priya", account_name="fleet", url=URL,
+                                    timeout=300)
         store = ChatStore(self.home / "data" / "chat.db")
         try:
             row = store.conn.execute("SELECT user, message, reply_to_user FROM messages WHERE id=?",
@@ -237,6 +261,9 @@ class TestCapture(LoginCase):
             store.close()
         self.assertEqual(row[0], "cousin-account")
         self.assertIn(URL, row[1]); self.assertIn("code#state", row[1])
+        self.assertIn("5 minutes", row[1]); self.assertNotIn("10 minutes", row[1])
+        self.assertIn("If you did not start this login from a host shell yourself, do not"
+                      " answer this.", row[1])
         self.assertEqual(row[2], "Priya")
 
 
@@ -254,10 +281,48 @@ class TestDivert(LoginCase):
         from cousin_lib.server.inbound import divert_login_code
         self.arm(ttl=-1)                             # the window already closed
         self.assertIsNone(divert_login_code(self.config(), "Priya", "hello, how is it going"))
-        late = divert_login_code(self.config(), "Priya", CODE)
-        self.assertIn("late login code for account fleet was discarded", late)
-        self.assertIsNone(accounts.read_capture(self.root, "fleet"))
-        self.assertIsNone(divert_login_code(self.config(), "Priya", CODE))  # one late code only
+        for _ in range(2):                           # every late code, not only the first
+            late = divert_login_code(self.config(), "Priya", CODE)
+            self.assertIn("late login code for account fleet was discarded", late)
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
+
+    def test_a_duplicate_paste_after_a_take_is_diverted(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm()
+        self.assertIsNotNone(divert_login_code(self.config(), "Priya", CODE))
+        self.assertEqual(accounts.take_code(self.root, "fleet", timeout=1, poll=0.01), CODE)
+        again = divert_login_code(self.config(), "Priya", CODE)     # "did it work?" + a re-paste
+        self.assertIn("second login code for account fleet was discarded", again)
+        self.assertIsNone(divert_login_code(self.config(), "Priya", "did it work?"))
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
+
+    def dead_pid(self):
+        proc = subprocess.Popen([sys.executable, "-c", "pass"]); proc.wait()
+        return proc.pid
+
+    def test_a_capture_whose_flow_died_is_a_tombstone_and_drops_its_code(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm()
+        self.assertIsNotNone(divert_login_code(self.config(), "Priya", CODE))  # stored
+        cap = accounts.read_capture(self.root, "fleet")
+        cap["pid"] = self.dead_pid()                 # the flow was killed with the code waiting
+        accounts._write_private(accounts.capture_path(self.root, "fleet"), cap)
+        self.assertEqual(accounts.capture_window(cap, time.time()), "late")
+        self.assertIsNone(divert_login_code(self.config(), "Priya", "hello again"))  # not swallowed
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
+        self.assertIsNotNone(divert_login_code(self.config(), "Priya", CODE))  # still diverted
+
+    def test_a_stored_code_expires_with_its_window(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm(ttl=60)
+        self.assertIsNotNone(divert_login_code(self.config(), "Priya", CODE))
+        cap = accounts.read_capture(self.root, "fleet")
+        self.assertEqual(accounts.capture_window(cap, time.time()), "taken")
+        later = time.time() + 61
+        self.assertEqual(accounts.capture_window(cap, later), "late")
+        with mock.patch.object(accounts.time, "time", return_value=later):
+            self.assertIsNone(divert_login_code(self.config(), "Priya", "hello again"))
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
 
     def test_api_send_answers_ok_stores_the_redaction_and_delivers_nothing(self):
         from cousin_lib.config import CousinConfig
@@ -286,12 +351,71 @@ class TestDivert(LoginCase):
 
 
 class TestOperatorOnly(LoginCase):
-    def main(self, *argv, tty=True):
+    def main(self, *argv, tty=True, ancestry=False):
         err = io.StringIO()
         stdin = mock.Mock(isatty=lambda: tty)
-        with mock.patch.object(sys, "stdin", stdin), contextlib.redirect_stderr(err):
+        with mock.patch.object(sys, "stdin", stdin), contextlib.redirect_stderr(err), \
+                mock.patch.object(accounts, "_inside_cousin_ancestry", return_value=ancestry):
             rc = accounts.account_main([*argv, "--root", str(self.root)])
         return rc, err.getvalue()
+
+    def test_login_refuses_under_a_cousin_ancestor(self):
+        rc, err = self.main("login", "fleet", "--via", "wren", ancestry=True)
+        self.assertEqual(rc, 2); self.assertIn("operator-run", err)
+
+    def test_the_ancestry_walk_reads_each_ancestors_environment(self):
+        parents = {400: 300, 300: 200, 200: 1}
+        envs = {400: [b"PATH=/bin"], 300: OSError("denied"),
+                200: [b"PATH=/bin", b"COUSIN_HOME=/somewhere/cousins/wren"]}
+
+        def environ_of(pid):
+            if isinstance(envs[pid], Exception):
+                raise envs[pid]
+            return envs[pid]
+        with mock.patch.object(os, "getppid", return_value=400):
+            self.assertTrue(accounts._inside_cousin_ancestry(
+                parent_of=parents.__getitem__, environ_of=environ_of))
+            envs[200] = [b"PATH=/bin"]
+            self.assertFalse(accounts._inside_cousin_ancestry(
+                parent_of=parents.__getitem__, environ_of=environ_of))
+
+            def no_proc(pid):
+                raise FileNotFoundError("/proc")
+            self.assertFalse(accounts._inside_cousin_ancestry(parent_of=no_proc,
+                                                              environ_of=no_proc))
+
+    def test_a_timeout_that_is_not_positive_is_refused(self):
+        for t in ("0", "-5"):
+            rc, err = self.main("login", "fleet", "--timeout", t)
+            self.assertEqual(rc, 2); self.assertIn("timeout", err)
+
+    def test_a_relay_that_raises_is_exit_4_with_the_reason(self):
+        def flow(account, root, *, relay, await_code, timeout):
+            relay(URL)
+        with mock.patch.object(accounts, "login_flow", side_effect=flow), \
+                mock.patch.object(accounts, "relay_notice", side_effect=OSError("disk full")):
+            rc, err = self.main("login", "fleet", "--via", "wren")
+        self.assertEqual(rc, 4); self.assertIn("disk full", err)
+        self.assertIsNone(accounts.read_capture(self.root, "fleet"))
+
+    def test_a_sigterm_while_waiting_leaves_a_tombstone(self):
+        class NotInstalled(Exception):
+            pass
+
+        def not_installed(signum, frame):
+            raise NotInstalled()
+        old = signal.signal(signal.SIGTERM, not_installed)   # never the default: never a kill
+        self.addCleanup(signal.signal, signal.SIGTERM, old)
+
+        def flow(account, root, *, relay, await_code, timeout):
+            relay(URL)
+            threading.Timer(0.2, os.kill, args=(os.getpid(), signal.SIGTERM)).start()
+            return {"ok": bool(await_code(5))}
+        with mock.patch.object(accounts, "login_flow", side_effect=flow):
+            with self.assertRaises(SystemExit):
+                self.main("login", "fleet", "--via", "wren")
+        self.assertEqual(accounts.read_capture(self.root, "fleet")["state"], "tombstone")
+        self.assertIs(signal.getsignal(signal.SIGTERM), not_installed)   # restored
 
     def test_login_refuses_inside_a_cousin(self):
         with mock.patch.dict(os.environ, {"COUSIN_HOME": str(self.home)}):
@@ -330,7 +454,7 @@ class TestOperatorOnly(LoginCase):
             rc, err = self.main("login", "fleet", "--via", "wren")
         self.assertEqual(rc, 0, err)
         self.assertEqual(got["code"], CODE)
-        self.assertIsNone(accounts.read_capture(self.root, "fleet"))   # taken: gone
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))   # taken
         texts = self.chat_texts()
         self.assertEqual(len(texts), 1); self.assertIn(URL, texts[0])
         self.assertNotIn(CODE, "".join(texts) + err)

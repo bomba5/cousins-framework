@@ -372,27 +372,31 @@ def _pty(spawn):
     return PtySession
 
 
-_ANY_TOKEN = re.compile(r"sk-ant-\S*")
-
-
 def _last_words(session, code=None, n=300):
-    """The screen's tail for a failure line: the pasted code masked (the
-    pty echoes it) and anything token-shaped masked, so a flow that stalls
-    after the token showed never carries it into a reason."""
-    words = " ".join(session.text()[-(n + 512):].split())   # masked BEFORE the cut, so a
-    words = _ANY_TOKEN.sub("[token]", words)                  # cut cannot split a token
+    """The screen's tail for a failure line, the pasted code masked (the
+    pty echoes it). The code is masked over the whole bounded tail BEFORE
+    the cut, and a code the tail itself began inside is dropped, so no cut
+    can leave a piece of it. Never used on a screen that may hold a token."""
+    words = " ".join(session.text().split())
     if code:
         words = words.replace(code, "[code]")
+        for k in range(len(code) - 1, 3, -1):    # the tail began inside the code
+            if words.startswith(code[-k:]):
+                words = words[k:]
+                break
     return words[-n:]
 
 
-def _run_code_flow(argv, env, *, relay, await_code, spawn, timeout, until):
+def _run_code_flow(argv, env, *, relay, await_code, spawn, timeout, until,
+                   screen_after_paste=True):
     """The shared middle: URL -> prompt -> relay -> code -> paste -> `until`.
     A stall carries the CLI's own last words, the pasted code masked (the
-    pty echoes what is typed)."""
+    pty echoes what is typed); with `screen_after_paste` False (the token
+    flow: the screen after the paste may hold the token) a stall after
+    the paste shows NO child output at all: a mask is not a fix."""
     from cousin_lib.pty_driver import PtyTimeout
     session = _pty(spawn)(argv, env)
-    code = None
+    code, pasted = None, False
     try:
         url = session.read_until(URL_RX, 60).group(1)
         session.read_until(PROMPT_RX, 30)
@@ -401,8 +405,12 @@ def _run_code_flow(argv, env, *, relay, await_code, spawn, timeout, until):
         if not code:
             return {"ok": False, "reason": "no code within %ds" % timeout}
         session.write(code + "\r")
+        pasted = True
         return {"ok": True, "match": session.read_until(until, 120)}
     except PtyTimeout as err:
+        if pasted and not screen_after_paste:
+            return {"ok": False, "reason": "the CLI flow stalled after the code was pasted;"
+                    " the screen is not shown because it may hold the token"}
         return {"ok": False, "reason": "the CLI flow stalled (%s); the CLI's last words: %s"
                 % (err, _last_words(session, code))}
     finally:
@@ -458,7 +466,7 @@ def token_flow(account, root, *, relay, await_code, spawn=None, timeout=CAPTURE_
         out = _run_code_flow([_cli(), "setup-token"],
                              _flow_env({"CLAUDE_CONFIG_DIR": str(scratch)}), relay=relay,
                              await_code=await_code, spawn=spawn, timeout=timeout,
-                             until=TOKEN_UNTIL)
+                             until=TOKEN_UNTIL, screen_after_paste=False)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     if not out["ok"]:
@@ -499,9 +507,12 @@ def _capture_lock(root, name):
         os.close(fd)
 
 
-def arm_capture(root, *, via, operator, account_name, ttl=CAPTURE_TTL_S):
+def arm_capture(root, *, via, operator, account_name, ttl=CAPTURE_TTL_S, pid=None):
+    """Arm the one-shot capture. `pid` is the flow waiting for the code
+    (this process by default): a capture whose flow is gone is a
+    tombstone, whatever its clock says."""
     data = {"account": account_name, "via": via, "operator": operator, "state": "armed",
-            "expires": time.time() + ttl}
+            "expires": time.time() + ttl, "pid": os.getpid() if pid is None else pid}
     with _capture_lock(root, account_name):
         _write_private(capture_path(root, account_name), data)
     return data
@@ -527,24 +538,47 @@ def captures_for(root, via):
     return out
 
 
+def _flow_alive(data):
+    """Is the flow that armed this capture still running? A capture with
+    no pid is judged by its clock alone."""
+    pid = data.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:                              # EPERM: alive, not ours
+        return True
+    return True
+
+
 def capture_window(data, now):
     """"armed" while a code is awaited, "taken" while a stored code waits
     for the flow's next poll, "late" for TOMBSTONE_S after the window
     closed (only a code-shaped message is diverted then), None after that
-    or for no capture."""
+    or for no capture. The window is open only while the capture is
+    armed, unexpired AND its flow is alive: a flow killed without running
+    its cleanup (SIGKILL, a crash) leaves a tombstone, never a capture
+    that swallows the operator's messages or keeps a code forever."""
     if not data:
         return None
-    if data.get("code"):
-        return "taken"
-    if data.get("state") == "armed" and now <= data["expires"]:
-        return "armed"
+    if data.get("state") == "armed" and now <= data["expires"] and _flow_alive(data):
+        return "taken" if data.get("code") else "armed"
     until = data.get("until") or data["expires"] + TOMBSTONE_S
     return "late" if now <= until else None
 
 
+def _tombstone(data, state, until):
+    data.pop("code", None)
+    data.update(state=state, until=until)
+    return data
+
+
 def store_code(root, name, code):
-    """The diverted code, into an ARMED, unexpired, codeless capture only.
-    Never creates the file: a taken capture or a tombstone stores nothing."""
+    """The diverted code, into an ARMED, unexpired, codeless capture of a
+    live flow only. Never creates the file: a taken capture or a tombstone
+    stores nothing."""
     with _capture_lock(root, name):
         data = read_capture(root, name)
         if capture_window(data, time.time()) != "armed":
@@ -555,10 +589,12 @@ def store_code(root, name, code):
 
 
 def take_code(root, name, *, timeout, poll=0.5):
-    """Wait for the diverted code and take it: read and delete under the
-    lock, so a code sits on disk for at most one poll. Without a code (a
-    timeout, an interrupt, any exit) the capture becomes a tombstone, so a
-    LATE code is still diverted and never delivered or kept."""
+    """Wait for the diverted code and take it under the lock, so a code
+    sits on disk for at most one poll. A take rewrites the capture as a
+    codeless tombstone (state "done"), so a second paste is still diverted;
+    without a code (a timeout, an interrupt, any exit) it becomes a
+    tombstone too, so a LATE code is still diverted. Neither is ever
+    delivered or kept."""
     deadline = time.monotonic() + timeout
     taken = False
     try:
@@ -567,10 +603,12 @@ def take_code(root, name, *, timeout, poll=0.5):
                 data = read_capture(root, name)
                 if data is None or data.get("state") != "armed":
                     return None
-                if data.get("code"):
-                    capture_path(root, name).unlink()
+                code = data.get("code")
+                if code:
+                    _write_private(capture_path(root, name),
+                                   _tombstone(data, "done", time.time() + TOMBSTONE_S))
                     taken = True
-                    return data["code"]
+                    return code
             if time.monotonic() >= deadline:
                 return None
             time.sleep(poll)
@@ -579,29 +617,55 @@ def take_code(root, name, *, timeout, poll=0.5):
             with _capture_lock(root, name):
                 data = read_capture(root, name)
                 if data is not None and data.get("state") == "armed":
-                    data.pop("code", None)   # one that came as we gave up: dropped, never used
-                    data.update(state="tombstone", until=time.time() + TOMBSTONE_S)
-                    _write_private(capture_path(root, name), data)
+                    # one that came as we gave up: dropped, never used
+                    _write_private(capture_path(root, name),
+                                   _tombstone(data, "tombstone", time.time() + TOMBSTONE_S))
+
+
+def retire_capture(root, name):
+    """An armed capture whose window closed without its flow's cleanup (the
+    flow died, or the clock ran out first): rewritten as a codeless
+    tombstone, or removed once the tombstone's hour is over too."""
+    with _capture_lock(root, name):
+        data = read_capture(root, name)
+        if data is None or data.get("state") != "armed":
+            return
+        window = capture_window(data, time.time())
+        if window in ("armed", "taken"):
+            return
+        if window is None:
+            capture_path(root, name).unlink(missing_ok=True)
+            return
+        _write_private(capture_path(root, name), _tombstone(
+            data, "tombstone", data.get("until") or data["expires"] + TOMBSTONE_S))
 
 
 def discard_late_code(root, name):
-    """A late code arrived: the tombstone is spent (one late code only)."""
+    """A code-shaped message arrived after the window closed: True while
+    the tombstone lasts. The tombstone is not spent: every late or second
+    code is diverted until its `until`."""
     with _capture_lock(root, name):
-        if capture_window(read_capture(root, name), time.time()) != "late":
-            return False
-        capture_path(root, name).unlink()
-    return True
+        return capture_window(read_capture(root, name), time.time()) == "late"
 
 
-def relay_notice(home, *, operator, account_name, url):
+def _span(seconds):
+    if seconds % 60 == 0:
+        minutes = seconds // 60
+        return "%d minute%s" % (minutes, "" if minutes == 1 else "s")
+    return "%d seconds" % seconds
+
+
+def relay_notice(home, *, operator, account_name, url, timeout=CAPTURE_TTL_S):
     """One framework-authored row to the operator on this cousin's chat
     surface (R18); Telegram's outbound pump relays it like any cousin row."""
     from cousin_lib.server.storage import ChatStore, normalize_chat_user
     slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
     text = ("Login for account %s: open %s , sign in, and reply HERE with the whole code the"
             " page shows. It looks like `code#state`: paste all of it, the part after # included."
-            " Your next message in this chat is taken as that code (10 minutes); it is never"
-            " delivered to %s and never kept in this history." % (account_name, url, slug))
+            " Your next message in this chat within %s is taken as that code; it is never"
+            " delivered to %s and never kept in this history. If you did not start this login"
+            " from a host shell yourself, do not answer this."
+            % (account_name, url, _span(timeout), slug))
     store = ChatStore(Path(home) / "data" / "chat.db")
     try:
         row = store.add_message(chat_user=normalize_chat_user(operator), user="cousin-account",
@@ -609,6 +673,63 @@ def relay_notice(home, *, operator, account_name, url):
     finally:
         store.close()
     return row["id"]
+
+
+def _proc_parent(pid):
+    with open("/proc/%d/status" % pid) as fh:
+        for line in fh:
+            if line.startswith("PPid:"):
+                return int(line.split()[1])
+    return 0
+
+
+def _proc_environ(pid):
+    with open("/proc/%d/environ" % pid, "rb") as fh:
+        return fh.read().split(b"\0")
+
+
+def _inside_cousin_ancestry(*, parent_of=_proc_parent, environ_of=_proc_environ):
+    """Does any ancestor process carry COUSIN_HOME or COUSIN_SLUG in the
+    environment it was started with? Catches `env -u COUSIN_HOME` run by a
+    cousin's own shell. Best effort, a guardrail like the rest: an
+    ancestor whose environment cannot be read is skipped, and no /proc
+    means no check."""
+    pid, seen = os.getppid(), set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        try:
+            env = environ_of(pid)
+        except (OSError, ValueError):
+            env = ()
+        if any(e.startswith((b"COUSIN_HOME=", b"COUSIN_SLUG=")) for e in env):
+            return True
+        try:
+            pid = parent_of(pid)
+        except (OSError, ValueError):
+            return False
+    return False
+
+
+def _exit_on_hangup():
+    """SIGHUP (a closed terminal, a dropped ssh) and SIGTERM raise
+    SystemExit while a flow runs, so every `finally` runs: the pty child
+    is reaped and the capture becomes a tombstone. Python runs no
+    `finally` on a signal left at its default. Returns the undo."""
+    import signal
+
+    def _exit(signum, frame):
+        raise SystemExit(128 + signum)
+    saved = {}
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        try:
+            saved[sig] = signal.signal(sig, _exit)
+        except ValueError:                   # not the main thread: nothing to install
+            pass
+
+    def restore():
+        for sig, old in saved.items():
+            signal.signal(sig, old)
+    return restore
 
 
 def _login_cmd(args, account, root):
@@ -638,7 +759,8 @@ def _login_cmd(args, account, root):
             arm_capture(root, via=args.via, operator=operator, account_name=account.name,
                         ttl=args.timeout)
             try:
-                relay_notice(via, operator=operator, account_name=account.name, url=url)
+                relay_notice(via, operator=operator, account_name=account.name, url=url,
+                             timeout=args.timeout)
             except BaseException:
                 # no notice, no code will come: nothing stays armed
                 with _capture_lock(root, account.name):
@@ -656,11 +778,18 @@ def _login_cmd(args, account, root):
 
         def await_code(timeout):
             return input("code> ").strip() or None
+    restore = _exit_on_hangup()
     try:
         out = flow(account, root, relay=relay, await_code=await_code, timeout=args.timeout)
     except AccountsError as err:
         print("cousin-account: %s" % err, file=sys.stderr)
         return 2
+    except Exception as err:                 # noqa: BLE001 - a failed flow is exit 4, not a trace
+        print("cousin-account: %s %s failed: %s: %s"
+              % (args.cmd, account.name, type(err).__name__, err), file=sys.stderr)
+        return 4
+    finally:
+        restore()
     print("%s %s: %s" % (args.cmd, account.name,
                          "ok" if out["ok"] else out.get("reason", "failed")))
     return 0 if out["ok"] else 4
@@ -691,17 +820,24 @@ def account_main(argv=None):
         c.add_argument("--timeout", type=int, default=CAPTURE_TTL_S)
     args = p.parse_args(argv)
     if args.cmd in ("login", "token"):
-        # A GUARDRAIL, not a boundary: the runner exports COUSIN_HOME to
-        # every command a cousin runs, so the model's own Bash stops here.
-        # The account files stay readable by the same Unix user until the
-        # phase 6 container.
-        if os.environ.get("COUSIN_HOME") or os.environ.get("COUSIN_SLUG"):
+        # GUARDRAILS, not a boundary: the runner exports COUSIN_HOME to
+        # every command a cousin runs, so the model's own Bash stops here,
+        # and `env -u` is caught by the ancestor check. A determined
+        # process can still get past both; the account files stay
+        # readable by the same Unix user until the phase 6 container.
+        if (os.environ.get("COUSIN_HOME") or os.environ.get("COUSIN_SLUG")
+                or _inside_cousin_ancestry()):
             print("cousin-account: operator-run only; a cousin never obtains credentials",
                   file=sys.stderr)
             return 2
+        # A usability check, not a safeguard: anything can fake a terminal.
         if not sys.stdin.isatty():
             print("cousin-account: %s wants a terminal: run it from a shell on the host (R20)"
                   % args.cmd, file=sys.stderr)
+            return 2
+        if args.timeout <= 0:
+            print("cousin-account: --timeout must be a positive number of seconds",
+                  file=sys.stderr)
             return 2
     try:
         root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root

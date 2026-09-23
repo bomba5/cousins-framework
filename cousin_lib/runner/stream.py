@@ -22,6 +22,11 @@ class EventStream:
             line = json.dumps({"seq": self._seq, "ts": time.time(),
                                "kind": kind, "payload": payload},
                               ensure_ascii=False)
+            with open(self.path, "a+b") as f:
+                if f.seek(0, 2) > 0:  # file is non-empty
+                    f.seek(-1, 2)
+                    if f.read(1) != b"\n":
+                        f.write(b"\n")
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")
                 f.flush()

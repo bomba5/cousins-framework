@@ -31,6 +31,8 @@ class TestEventStream(HermeticCase):
             f.write('{"seq": 3, "kind": "c", "pay')   # the writer died mid-line
         self.assertEqual([e["kind"] for e in s.tail()], ["a", "b"])
         self.assertEqual(EventStream(self.home, "sess-1").append("d", {}), 3)
+        self.assertEqual([e["kind"] for e in EventStream(self.home, "sess-1").tail()], ["a", "b", "d"])
+        self.assertEqual([e["seq"] for e in EventStream(self.home, "sess-1").tail()], [1, 2, 3])
 
     def test_two_readers_do_not_disturb_the_writer(self):
         s = EventStream(self.home, "sess-1")

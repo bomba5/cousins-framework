@@ -114,7 +114,8 @@ class TestWiring(HermeticCase):
     def test_options_system_prompt_is_unchanged_across_calls(self):
         r = self._runner()
         o1, o2 = r.options(), r.options()
-        self.assertIsNone(o1.system_prompt)
+        # phase 4: the composed preset replaces None; the guard is that
+        # two calls compose the same bytes (the cache depends on it)
         self.assertEqual(o1.system_prompt, o2.system_prompt)
 
     def test_additional_context_comes_only_from_the_prompt_hook_not_options(self):
@@ -278,3 +279,32 @@ class TestBodyForPrompt(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPromptAndStoreWiring(HermeticCase):
+    def _runner(self):
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "law.md").write_text("1. The law.\n")
+        # the runner's own root, never the environment's (review C2)
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"})
+        p.start(); self.addCleanup(p.stop)
+        r = SdkRunner(home, client_factory=lambda o: ScriptedClient(o, []))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r
+
+    def test_options_carry_the_preset_and_the_store(self):
+        from cousin_lib.runner.session_store import SqliteSessionStore
+        opts = self._runner().options()
+        self.assertEqual(opts.system_prompt["preset"], "claude_code")
+        self.assertIs(opts.system_prompt["exclude_dynamic_sections"], True)
+        self.assertIs(opts.system_prompt["snapshot"], True)
+        self.assertIn("1. The law.", opts.system_prompt["append"])
+        self.assertIsInstance(opts.session_store, SqliteSessionStore)
+        self.assertEqual(opts.setting_sources, [])
+
+    def test_a_reconnect_composes_the_same_bytes(self):
+        r = self._runner()
+        self.assertEqual(r.options().system_prompt["append"].encode(),
+                         r.options(resume="s-1").system_prompt["append"].encode())

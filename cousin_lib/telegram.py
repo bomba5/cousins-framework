@@ -6,10 +6,12 @@ fully configured: a missing token, a disabled flag, or an empty
 operator allowlist is an error naming the cause, never a silent
 no-send that looks like a working bot dropping messages.
 
-The bridge is a pure relay: inbound Telegram messages become
-`POST /api/send` to the cousin's own chat server, and the cousin's
-replies are relayed back to the operator's Telegram chat. It touches
-no terminal and holds no chat state; the chat server owns all of it.
+The bridge is a pure relay: an inbound Telegram message becomes
+`POST /api/send` to a tmux cousin's own chat server, or, for a runner
+cousin, a stored chat row delivered to its inbox (the steps /api/send
+takes, done here); the cousin's replies are relayed back to the
+operator's Telegram chat. It never types into a terminal and holds no
+chat state of its own; chat.db owns it.
 The only thing it keeps is where it is: the Telegram update offset and
 one reply cursor per operator thread, in data/telegram-bridge.json. A
 cursor moves only past what was delivered, so a failed relay is retried
@@ -171,8 +173,33 @@ def load_bridge_config(home):
 
 
 def _default_chat_send(cfg, *, user, message, attachment=None):
-    """Store the row and ride `deliver()`, same as the chat server's own
-    /api/send: the chat server is no longer in this path. `attachment`
+    """One inbound message into the cousin's chat, by the cousin's lane.
+    A runner cousin (cousin.toml `[agent] runner`): the bridge stores the
+    row and delivers it itself (_store_and_deliver). A tmux cousin: the
+    chat server's own `POST /api/send` (_post_to_chat_server), because
+    that is where recall, the tmux socket options and the inject lock
+    live; the bridge never types into the terminal itself."""
+    if isinstance(delivery.backend_for(cfg.home), delivery.InboxBackend):
+        return _store_and_deliver(cfg, user=user, message=message,
+                                  attachment=attachment)
+    return _post_to_chat_server(cfg, user=user, message=message,
+                                attachment=attachment)
+
+
+def _post_to_chat_server(cfg, *, user, message, attachment=None):
+    body = {"user": user, "message": message}
+    if attachment:
+        body["image"] = attachment  # a data: URI, decoded by the server
+    request = urllib.request.Request(
+        "http://127.0.0.1:%d/api/send" % cfg.port,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(request, timeout=10)
+
+
+def _store_and_deliver(cfg, *, user, message, attachment=None):
+    """The runner lane: store the row and ride `deliver()`, the steps the
+    chat server's /api/send takes, without the chat server. `attachment`
     is a data: URI (as relay_inbound built it); it is decoded to
     <home>/chat/images/ and the row carries its path, the one
     convention the console and the outbound relay both read."""
@@ -219,8 +246,8 @@ def _default_log(line):
 
 def relay_inbound(cfg, *, update, chat_send=None, tg_send=None,
                   tg_fetch=None, log=None):
-    """One Telegram update -> the cousin's chat server, if the sender
-    is authorized. An unauthorized sender is dropped SILENTLY ON THE
+    """One Telegram update -> the cousin's chat (_default_chat_send
+    picks the lane), if the sender is authorized. An unauthorized sender is dropped SILENTLY ON THE
     WIRE - nothing forwarded, nothing sent back, so the bot never
     confirms its existence to a stranger - but LOUDLY IN THE LOG with
     the rejected id, so an operator who typoed their own chat id can

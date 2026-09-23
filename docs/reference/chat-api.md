@@ -9,7 +9,7 @@ cousin-chat-server --home cousins/wren
 cousin-chat-server --home cousins/wren --no-terminal-delivery   # store only, never type into tmux
 ```
 
-It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge are all plain HTTP clients of this server.
+It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge are all plain HTTP clients of this server; for a runner cousin (`[agent] runner`) the bridge stores and delivers an inbound message itself instead of calling `/api/send`, and still reads replies through `/api/history`.
 
 ## Who can call it
 

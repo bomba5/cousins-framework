@@ -558,6 +558,49 @@ class TestCli(TelegramCase):
             self.assertEqual(telegram_main([]), 2)
 
 
+class TestInboundLanes(_BridgeFixture):
+    """The bridge's default send has two lanes: a tmux cousin's message
+    goes to its chat server's /api/send (which recalls, types it into the
+    pane under the inject lock, touches the marker, captures corrections
+    and fires hooks); a runner cousin's is stored and delivered by the
+    bridge itself."""
+
+    def test_a_tmux_cousin_gets_the_chat_servers_api_send(self):
+        import json
+        from cousin_lib import telegram
+        cfg = self._bridge()
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            telegram._default_chat_send(cfg, user="Sam", message="hello cousin",
+                                        attachment="data:image/png;base64,AAAA")
+        self.assertEqual(urlopen.call_count, 1)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(urlopen.call_args.kwargs, {"timeout": 10})
+        self.assertEqual(request.full_url, "http://127.0.0.1:8100/api/send")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.headers, {"Content-type": "application/json"})
+        self.assertEqual(request.data, json.dumps(
+            {"user": "Sam", "message": "hello cousin",
+             "image": "data:image/png;base64,AAAA"}).encode())
+        # The bridge itself stores nothing and puts nothing: the chat
+        # server owns the row and the delivery on this lane.
+        self.assertFalse((self.home / "data" / "chat.db").exists())
+        self.assertFalse((self.home / "data" / "inbox.db").exists())
+        self.assertFalse((self.home / "chat").exists())
+
+    def test_a_runner_cousin_is_stored_and_delivered_without_the_chat_server(self):
+        from cousin_lib import telegram
+        from cousin_lib.runner.inbox import Inbox
+        cfg = self._bridge()
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + '\n[agent]\nrunner = "fake"\n')
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            telegram._default_chat_send(cfg, user="Sam", message="hello cousin")
+        urlopen.assert_not_called()
+        rows = Inbox(self.home).claim(limit=5)
+        self.assertEqual([(r["source"], r["sender"], r["body"]) for r in rows],
+                         [("chat", "Sam", "hello cousin")])
+
+
 class TestInboundReachesTheInbox(HermeticCase):
     def test_a_telegram_message_is_stored_and_delivered_as_chat(self):
         from cousin_lib import telegram

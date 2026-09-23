@@ -52,17 +52,6 @@ class TestReadKey(HermeticCase):
         self.assertEqual(rc, 2)
         self.assertIn("api_key_file", stderr.getvalue())
 
-    def test_a_missing_key_file_under_a_real_root_is_a_config_error(self):
-        home = temp_home(self, runner="sdk")
-        root = home.parent.parent
-        (root / "config").mkdir()
-        _append_agent_key(home, "keys/token")
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            rc = runner_main.runner_main(["--home", str(home)])
-        self.assertEqual(rc, 2)
-        self.assertIn("keys/token", stderr.getvalue())
-
 
 class TestSignalHandlers(HermeticCase):
     def test_signal_handlers_are_restored_when_start_fails(self):
@@ -549,6 +538,87 @@ class TestHoldLock(HermeticCase):
             rc, err = _run(["--home", str(home), "--once"])
         self.assertEqual(rc, 2)
         self.assertIn("runner.lock", err)
+
+
+@unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "claude-agent-sdk not installed")
+class TestCheckAuthAndLogin(HermeticCase):
+    def test_check_auth_runs_before_the_lock_the_runner_and_the_environment(self):
+        from cousin_lib import accounts
+        home = temp_home(self)
+        for rc in (0, 4):
+            out = io.StringIO()
+            with mock.patch.object(accounts, "check", return_value=(rc, "account=host line")), \
+                    mock.patch.object(runner_main, "runner_for") as built, \
+                    mock.patch.object(runner_main, "hold_lock") as lock, \
+                    mock.patch.dict(os.environ, {}), contextlib.redirect_stdout(out):
+                os.environ.pop("COUSIN_HOME", None)
+                self.assertEqual(runner_main.runner_main(["--home", str(home), "--check-auth"]), rc)
+                self.assertNotIn("COUSIN_HOME", os.environ)          # nothing exported
+            built.assert_not_called(); lock.assert_not_called()
+            self.assertIn("account=host", out.getvalue())
+        self.assertFalse((home / "run" / "runner.lock").exists())
+
+    def test_validate_runs_one_bare_turn_only_after_a_good_check(self):
+        from cousin_lib import accounts
+        from cousin_lib.runner import sdk
+        home = temp_home(self)
+        with mock.patch.object(accounts, "check", return_value=(4, "account=host no")), \
+                mock.patch.object(sdk, "validate_account") as val, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner_main.runner_main(["--home", str(home), "--check-auth",
+                                                      "--validate"]), 4)
+        val.assert_not_called()
+        with mock.patch.object(accounts, "check", return_value=(0, "account=host ok")), \
+                mock.patch.object(sdk, "validate_account", return_value=(0, "validate: ok")) as val, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner_main.runner_main(["--home", str(home), "--check-auth",
+                                                      "--validate"]), 0)
+        self.assertEqual(val.call_args[0][0].name, "host")
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            runner_main.runner_main(["--home", str(home), "--validate"])   # --validate alone
+
+    def test_a_missing_key_file_is_a_login_to_do_not_a_config_error(self):
+        """Replaces test_a_missing_key_file_under_a_real_root_is_a_config_error."""
+        import json
+        from cousin_lib import accounts
+        home = temp_home(self, runner="sdk")
+        (home.parent.parent / "config").mkdir()
+        _append_agent_key(home, "keys/token")
+        Inbox(home).put(Item("operator:priya", "chat", "a", sender="Priya"))
+        with mock.patch.object(runner_main, "ERRORED_GIVE_UP_S", 0.2), \
+                mock.patch.object(accounts, "status", return_value={"loggedIn": False}):
+            rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 4, err)                                 # R15: never 3
+        data = json.loads((home / "data" / "login-required.json").read_text())
+        self.assertIn("keys/token", data["action"])
+
+    def test_check_auth_on_a_secret_open_to_others_is_2_not_4(self):
+        from cousin_lib import accounts
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "keys").mkdir(); os.chmod(root / "keys", 0o700)
+        (root / "keys" / "token").write_text("sk-from-file\n"); os.chmod(root / "keys" / "token", 0o644)
+        _append_agent_key(home, "keys/token")
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(accounts, "check") as check, \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = runner_main.runner_main(["--home", str(home), "--check-auth"])
+        self.assertEqual(rc, 2)
+        check.assert_not_called()                          # configuration, before any status
+        self.assertIn("chmod 600", err.getvalue())
+        self.assertNotIn("sk-from-file", out.getvalue() + err.getvalue())
+
+    def test_once_exits_4_not_3_while_a_login_is_required(self):
+        runner = mock.Mock()
+        runner.worker_alive.return_value = True
+        runner.state.return_value = "errored"
+        runner.login_required.return_value = True
+        runner.inbox.unfinished.return_value = 1
+        stop = mock.Mock(); stop.is_set.return_value = False
+        with mock.patch.object(runner_main, "ERRORED_GIVE_UP_S", 0.05), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(runner_main._once(runner, stop), 4)
 
 
 if __name__ == "__main__":

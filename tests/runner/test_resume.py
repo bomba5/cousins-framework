@@ -151,16 +151,19 @@ class TestResume(HermeticCase):
         self.assertIn(fresh[0], system[at + 1:])                           # after the failure
 
     def test_a_lane_change_on_the_same_session_rewrites_the_file(self):
-        # the file says key, the CLI's init says login: a stale "key" would
-        # take the store-backed path at the next start (R12)
+        # the file says key, the CLI's init says login: the lane on file is a
+        # record, rewritten to what the init said; the account's KIND picks the
+        # resume path (a login resumes through the CLI's flag), never the file
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "key", "generation": 0, "updated": 0}))
-        r = self.runner(); r.start(); self.one_turn(r)
-        self.assertEqual(self.options[0].resume, "s-live")          # the file's lane, this once
+        host = accounts.Account(accounts.HOST, "claude-login", None, None, implicit=True)
+        r = self.runner(account=host); r.start(); self.one_turn(r)
+        self.assertIsNone(self.options[0].resume)                   # the kind, not the file's "key"
+        self.assertEqual(self.options[0].extra_args["resume"], "s-live")
         self.assertTrue(_wait(lambda: self.session_file()["lane"] == "login"))
         self.assertEqual(self.session_file()["session_id"], "s-live")
         r.stop(timeout=5)
-        r2 = self.runner(); r2.start()
+        r2 = self.runner(account=host); r2.start()
         self.assertTrue(_wait(lambda: len(self.options) == 2))
         self.assertIsNone(self.options[1].resume)
         self.assertEqual(self.options[1].extra_args["resume"], "s-live")

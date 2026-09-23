@@ -44,8 +44,9 @@ class HarnessSeam(unittest.TestCase):
             self.assertEqual(set(cfg), {"transcripts_dir", "auto_memory_dir",
                                         "flip_when_transcript_mb",
                                         "settings_file",
-                                        "attention_patterns"})
+                                        "attention_patterns", "host_label"})
             self.assertEqual(cfg["attention_patterns"], [])
+            self.assertIsNone(cfg["host_label"])
             self.assertIsNone(cfg["auto_memory_dir"])
             self.assertIsNone(cfg["settings_file"])
 
@@ -98,6 +99,17 @@ class HarnessSeam(unittest.TestCase):
             (Path(root) / "config" / "harness.toml").write_text("not = [toml")
             with self.assertRaises(config.MissingConfigError):
                 config.harness_config(Path(root))
+
+    def test_host_label_is_a_non_empty_string_or_loud(self):
+        with tempfile.TemporaryDirectory() as root:
+            (Path(root) / "config").mkdir()
+            path = Path(root) / "config" / "harness.toml"
+            path.write_text('host_label = "rack-2"\n')
+            self.assertEqual(config.harness_config(Path(root))["host_label"], "rack-2")
+            for bad in ("host_label = 7\n", 'host_label = "  "\n'):
+                path.write_text(bad)
+                with self.assertRaises(config.MissingConfigError):
+                    config.harness_config(Path(root))
 
 
 if __name__ == "__main__":

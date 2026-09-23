@@ -327,7 +327,8 @@ def harness_config(root):
     because it was promised. Path values are templates; expand them
     per cousin with expand_harness_path. attention_patterns: pane text
     that means the agent is waiting on a human (a login menu), which
-    the console flags on a running cousin's row; absent, []."""
+    the console flags on a running cousin's row; absent, []. host_label:
+    the name the login message gives this host; absent, the hostname."""
     data = _read_harness_toml(root)
     if data is None:
         return None
@@ -345,11 +346,16 @@ def harness_config(root):
         raise MissingConfigError(
             "config/harness.toml attention_patterns must be a list of"
             " non-empty strings, got %r" % (patterns,))
+    label = data.get("host_label")
+    if label is not None and (not isinstance(label, str) or not label.strip()):
+        raise MissingConfigError(
+            "config/harness.toml host_label must be a non-empty string, got %r" % (label,))
     return {"transcripts_dir": data.get("transcripts_dir"),
             "auto_memory_dir": data.get("auto_memory_dir"),
             "flip_when_transcript_mb": threshold,
             "settings_file": data.get("settings_file"),
-            "attention_patterns": list(patterns)}
+            "attention_patterns": list(patterns),
+            "host_label": label}
 
 
 def expand_harness_path(template, home):

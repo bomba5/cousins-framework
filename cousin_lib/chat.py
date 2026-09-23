@@ -149,6 +149,17 @@ def _post_external(peer, payload, guard):
         return {}
 
 
+def login_marker(home):
+    """" LOGIN REQUIRED (account <name> on <host>)" or " BILLING (...)"
+    while the cousin's runner waits on data/login-required.json, else ""."""
+    from cousin_lib.runner import auth
+    data = auth.read_login_required(home)
+    if not data:
+        return ""
+    label = "BILLING" if data.get("reason") == auth.BILLING else "LOGIN REQUIRED"
+    return " %s (account %s on %s)" % (label, data.get("account"), data.get("host"))
+
+
 def list_peers(fw, self_slug):
     rows = [c for c in fw.list_cousins() if c.peer_visible]
     me = next((c for c in fw.list_cousins() if c.slug == self_slug), None)
@@ -242,7 +253,8 @@ def chat_main(argv=None):
             return 2
         for c in list_peers(fw, sender.slug):
             marker = " (self)" if c.slug == sender.slug else ""
-            print("%-12s port=%-6s%s" % (c.slug, c.chat_port or "?", marker))
+            print("%-12s port=%-6s%s%s" % (c.slug, c.chat_port or "?", marker,
+                                           login_marker(c.home)))
         for p in external:
             print("%-12s url=%s (external)" % (p.slug, p.url))
         return 0

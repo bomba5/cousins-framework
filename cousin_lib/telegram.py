@@ -85,11 +85,15 @@ def load_cursors(home):
     path = Path(home) / "data" / _CURSOR_FILE
     try:
         data = json.loads(path.read_text())
-        return {"tg_offset": int(data["tg_offset"]),
-                "threads": {str(k): int(v)
-                            for k, v in data["threads"].items()}}
+        state = {"tg_offset": int(data["tg_offset"]),
+                 "threads": {str(k): int(v)
+                             for k, v in data["threads"].items()}}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {"tg_offset": 0, "threads": {}}
+    if data.get("login_notified_since"):
+        # the login notice already sent (relay_login_notice): once per `since`
+        state["login_notified_since"] = str(data["login_notified_since"])
+    return state
 
 
 def save_cursors(home, state):
@@ -458,6 +462,23 @@ def _history(cfg, thread, since=None):
         return json.loads(resp.read()).get("messages", [])
 
 
+def relay_login_notice(cfg, state, *, tg_send_text):
+    """Once per data/login-required.json `since`: the action line to every
+    operator, through the bridge's own send path. True when it sent, so
+    the caller saves the cursors (`login_notified_since`)."""
+    from cousin_lib.runner import auth
+    data = auth.read_login_required(cfg.home)
+    if not data or state.get("login_notified_since") == data.get("since"):
+        return False
+    what = "has a billing problem" if data.get("reason") == auth.BILLING else "needs a login"
+    text = "%s: account %s %s (on %s). %s." % (
+        cfg.slug, data.get("account"), what, data.get("host"), data.get("action"))
+    for chat_id in sorted(cfg.operator_ids):
+        tg_send_text(chat_id=chat_id, text=text)
+    state["login_notified_since"] = data.get("since")
+    return True
+
+
 def run_bridge(home, *, poll_interval=5):
     """The daemon: long-poll Telegram for operator messages, relay the
     cousin's replies back. No inbound port; outbound HTTPS only. A
@@ -505,6 +526,12 @@ def run_bridge(home, *, poll_interval=5):
             except Exception as err:
                 print("cousin-telegram: outbound error, retrying: %s"
                       % _describe(err), file=sys.stderr)
+        try:
+            if relay_login_notice(cfg, state, tg_send_text=tg_send_text):
+                save_cursors(cfg.home, state)
+        except Exception as err:
+            print("cousin-telegram: login notice error, retrying: %s"
+                  % _describe(err), file=sys.stderr)
         time.sleep(poll_interval)
 
 

@@ -15,6 +15,7 @@ import unittest
 from cousin_lib.chat import NoContextError, list_peers, send_message
 from cousin_lib.config import CousinConfig, FrameworkConfig
 from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
+from tests._hermetic import HermeticCase
 
 
 class _Capture(http.server.BaseHTTPRequestHandler):
@@ -101,6 +102,21 @@ class TestListPeers(_ChatCase):
     def test_non_visible_cousin_sees_no_peers(self):
         fw = self._fw({"wren": "", "quiet": "peer_visible = false\n"})
         self.assertEqual(list_peers(fw, "quiet"), [])
+
+
+class TestLoginMarker(HermeticCase):
+    def test_list_marks_a_cousin_whose_account_needs_a_login_or_billing(self):
+        from cousin_lib import chat
+        from cousin_lib.runner import auth
+        from tests.runner._home import temp_home
+        home = temp_home(self)
+        self.assertEqual(chat.login_marker(home), "")
+        kw = dict(host="h1", account="fleet", kind="claude-login", detail="x", action="y")
+        auth.write_login_required(home, reason=auth.LOGIN, **kw)
+        self.assertEqual(chat.login_marker(home), " LOGIN REQUIRED (account fleet on h1)")
+        auth.clear_login_required(home)
+        auth.write_login_required(home, reason=auth.BILLING, **kw)
+        self.assertEqual(chat.login_marker(home), " BILLING (account fleet on h1)")
 
 
 if __name__ == "__main__":

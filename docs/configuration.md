@@ -128,8 +128,10 @@ starts and connects, and by `cousin-account status`) as strictly as
 `cousin-auth` reads its key file: the directory must be a 0700 directory of
 yours, the file a regular 0600 file of yours, and a symlink is refused. A file
 open to group or others refuses the start (exit 2, the message names the file
-and the `chmod`). A missing secret file is exit 2 as well: mint it with
-`cousin-account token <name>`, or write the key.
+and the `chmod`). A missing secret file is not a configuration error but a
+login to do: the runner starts, writes `data/login-required.json` (below) and
+waits for the file to appear. Mint it with `cousin-account token <name>`, or
+write the key.
 
 The environment each kind gives the session. `cousin-runner` first removes
 every variable that can pick the credentials or the provider from its own
@@ -187,6 +189,52 @@ can be read). The terminal it wants is a usability check, not a safeguard: a
 program can fake a terminal. The relay notice therefore ends with "If you did
 not start this login from a host shell yourself, do not answer this."
 
+### data/login-required.json
+
+A runner whose account cannot answer (never logged in, a login that expired
+or was revoked, a bad key or token, a missing secret file) or whose billing
+stopped it does not exit and does not retry one turn at a time. It goes
+`errored` with the detail `login_required` (or `billing`), puts the turn's
+rows back in the queue, emits an `auth` event and writes
+`<home>/data/login-required.json`:
+
+| field | meaning |
+|---|---|
+| `host` | the host to log in on: `host_label` in harness.toml, else the hostname |
+| `account` | the account's name (`host` for the host's own login) |
+| `kind` | the account's kind |
+| `reason` | `login_required` or `billing` |
+| `detail` | what the CLI said, cut to 300 characters, never a secret |
+| `since` | when this stop began (UTC); a new stop gets a new one |
+| `action` | what to run: `cousin-account login <name> --via <slug>`, `cousin-account token <name> --via <slug>`, "write the key to <file>", `claude auth login` as the host user on the host, or for billing a check of the plan or credits |
+
+`cousin-chat list` marks the cousin `LOGIN REQUIRED (account <name> on
+<host>)` or `BILLING (account <name> on <host>)` while the file exists, and a
+Telegram bridge on the home relays the action line once per `since`.
+
+While it waits the runner spends no turn: every 1, 2, 4 ... 300 seconds it
+looks at the account's credential file (its mtime and a hash, held in memory)
+and at `claude auth status` (no model call), and reconnects only when the
+credentials changed, the status went from logged out to logged in, or you
+deleted the file. A revoked login still reads logged in, so for it only new
+credentials (or deleting the file) move the runner. Deleting the file is the
+manual retry, and the way out of a billing stop, where no credential changes.
+A retry that fails for another reason (a secret file half written, a session
+that is gone) puts that error into the file's `detail` and is tried again at
+the next look; after three such failures in a row the runner gives up the
+session on file and starts a fresh one, with the state digest.
+
+A key or a token cannot refresh, so the first 401 of a turn ends it at once.
+A `claude-login` account refreshes its own token at the CLI's next attempt, so
+the runner lets the CLI finish; a refresh that fails still ends in a 401.
+
+The file clears on the next good result after the retry, never at the
+reconnect: a session's start cannot tell a live login from a revoked one.
+When the stop came from the connect (a missing secret, a connect the login
+refused) no row was put back, so the file stays until the next row the
+cousin runs; `cousin-chat list` keeps saying LOGIN REQUIRED meanwhile, which
+is accurate: nothing has proven the login yet.
+
 ## harness.toml
 
 Where the agent harness keeps its own files, and a few things about how it
@@ -211,6 +259,7 @@ Top-level keys:
 | `flip_when_transcript_mb` | none (no guard) | a positive number of megabytes. When a live cousin's `<transcripts_dir>/<session_id>.jsonl` grows past it, the loops daemon asks for one flip, five minutes out. Needs `transcripts_dir`. |
 | `settings_file` | none | the harness's settings JSON, the file that records project trust and approved MCP servers. `cousin-mcp approve` edits exactly this file. Without it, `approve` refuses and prints the edit to make by hand. |
 | `attention_patterns` | `[]` | plain strings. When a running cousin's visible pane contains one, the pane is waiting on a person (a login or trust menu). The console shows "needs attention" and every delivery into that pane is skipped with a `tmux delivery SKIPPED` log line. |
+| `host_label` | the hostname | a non-empty string: the host a login message names ("log in on <host>"), in `data/login-required.json`, `cousin-chat list` and the Telegram notice. Anything else is an error. |
 | `busy_patterns` | `[]` | regular expressions. A match on the visible pane means the agent is mid-turn; `cousin-auth` and the console refuse to restart it unless forced. |
 
 Path templates take `{home}` (the cousin home as is) and `{home_encoded}`

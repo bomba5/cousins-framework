@@ -164,21 +164,9 @@ def _recall_context(config, user, message):
 # triggering message's id. Best-effort by contract: nothing here may
 # turn into a failed send.
 def _fire_hooks(server, user, message, message_id):
-    try:
-        hooks = chat_hooks.load_hooks(server.config.home)
-        matched = chat_hooks.evaluate(hooks, user, message)
-        if not matched:
-            return
-        inject = None
-        if server.deliver is not None:
-            def inject(text):
-                server.deliver(user=chat_hooks.HOOK_SENDER, message=text,
-                               message_id=message_id, attachments=[])
-        chat_hooks.fire(matched, user=user, message=message,
-                        slug=server.config.slug, home=server.config.home,
-                        inject=inject)
-    except Exception as err:  # noqa: BLE001 - never fails the send
-        print("chat-hooks: skipped: %s" % err, file=sys.stderr)
+    chat_hooks.on_message(server.config.home, user=user, message=message,
+                          message_id=message_id, slug=server.config.slug,
+                          deliver=server.deliver)
 
 
 class ChatServer:

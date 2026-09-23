@@ -130,6 +130,30 @@ def fire(matched, *, user, message, slug, home, inject=None):
                 _report("inject handler failed: %s" % err)
 
 
+def on_message(home, *, user, message, message_id, slug, deliver):
+    """Evaluate the home's hooks against one stored message and fire
+    them. `deliver(user=, message=, message_id=, attachments=)` is the
+    send path's own delivery seam (the chat server today, the console in
+    phase 5): an inject: handler rides it and lands as a `hook` row.
+    Never raises: a failure is reported and nothing else fires."""
+    try:
+        hooks = load_hooks(home)
+        matched = evaluate(hooks, user, message)
+        if not matched:
+            return []
+        inject = None
+        if deliver is not None:
+            def inject(text):
+                deliver(user=HOOK_SENDER, message=text, message_id=message_id,
+                        attachments=[])
+        fire(matched, user=user, message=message, slug=slug, home=home,
+             inject=inject)
+        return matched
+    except Exception as err:  # noqa: BLE001 - never fails the send
+        _report("skipped: %s" % err)
+        return []
+
+
 def _allowed_roots(home):
     """Where a shell: script may live: the home, and the framework root
     when one is configured. Nothing else, however the path is spelled."""

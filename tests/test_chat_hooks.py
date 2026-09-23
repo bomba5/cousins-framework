@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from cousin_lib import chat_hooks
+from tests._hermetic import HermeticCase
 
 
 def _wait_for(path, seconds=5.0):
@@ -239,6 +240,38 @@ class TestFireShell(HooksCase):
         with mock.patch("subprocess.Popen", side_effect=OSError("no fork")):
             chat_hooks.fire(matched, user="u", message="m", slug="testa",
                             home=self.home, inject=None)
+
+
+class TestOnMessageToTheInbox(HermeticCase):
+    def test_an_inject_hook_puts_exactly_one_row_with_source_hook(self):
+        from cousin_lib import chat_hooks, delivery
+        from cousin_lib.runner.inbox import Inbox
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        (home / "chat-hooks.json").write_text(json.dumps([
+            {"pattern": "(?i)price check", "user": "*", "handler": "inject:[fw-hook] quote the tariff"}]))
+        sent = []
+        def deliver(*, user, message, message_id, attachments=()):
+            item = delivery.Item(thread_id=delivery.thread_id("system"), source="hook",
+                                 sender=user, body=message, message_id=message_id)
+            sent.append(delivery.deliver(home, item, wait=False))
+        matched = chat_hooks.on_message(home, user="Priya", message="price check please",
+                                        message_id=7, slug="wren", deliver=deliver)
+        self.assertEqual(len(matched), 1)
+        rows = Inbox(home).claim(limit=5)
+        self.assertEqual([(r["source"], r["message_id"]) for r in rows], [("hook", 7)])
+        self.assertIn("quote the tariff", rows[0]["body"])
+
+    def test_no_match_puts_nothing(self):
+        from cousin_lib import chat_hooks
+        from cousin_lib.runner.inbox import Inbox
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        (home / "chat-hooks.json").write_text(json.dumps([
+            {"pattern": "never", "user": "*", "handler": "inject:x"}]))
+        self.assertEqual(chat_hooks.on_message(home, user="Priya", message="hi", message_id=1,
+                                               slug="wren", deliver=lambda **k: None), [])
+        self.assertEqual(Inbox(home).pending(), 0)
 
 
 if __name__ == "__main__":

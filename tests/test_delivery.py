@@ -408,5 +408,56 @@ class TestInboxBackend(HermeticCase):
         self.assertEqual(out, delivery.QUEUED)
 
 
+class TestInboxBackendNeverRaises(HermeticCase):
+    """deliver() promises never to raise for a delivery problem."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.runner._home import temp_home
+        self.home = temp_home(self, runner="fake")
+
+    def _item(self):
+        return Item("operator:priya", "chat", "hi", sender="Priya")
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root writes anywhere")
+    def test_an_unwritable_data_dir_is_failed_not_an_exception(self):
+        data = self.home / "data"
+        data.chmod(0o500)
+        self.addCleanup(data.chmod, 0o700)
+        for wait in (False, True):
+            self.assertEqual(delivery.deliver(self.home, self._item(), wait=wait, timeout=0.2),
+                             delivery.FAILED)
+
+    def test_a_poke_that_raises_after_a_durable_put_is_queued(self):
+        from cousin_lib.runner.inbox import Inbox
+        with mock.patch("cousin_lib.runner.wake.poke", side_effect=OSError("no fds")):
+            out = delivery.deliver(self.home, self._item(), wait=False)
+        self.assertEqual(out, delivery.QUEUED)
+        self.assertEqual(Inbox(self.home).pending(), 1)
+
+    def test_a_store_error_while_waiting_is_queued_the_row_is_durable(self):
+        import sqlite3
+        from cousin_lib.runner.inbox import Inbox
+        with mock.patch.object(Inbox, "get", side_effect=sqlite3.OperationalError("locked")):
+            out = delivery.deliver(self.home, self._item(), wait=True, timeout=0.2)
+        self.assertEqual(out, delivery.QUEUED)
+
+
+class TestMalformedCousinToml(HermeticCase):
+    def test_a_malformed_cousin_toml_means_tmux_and_cousin_runner_refuses(self):
+        import contextlib
+        import io
+        from tests.runner._home import temp_home
+        from cousin_lib.runner import main as runner_main
+        home = temp_home(self, runner="sdk")
+        (home / "cousin.toml").write_text('[agent\nrunner = "sdk"\n')
+        self.assertEqual(type(delivery.backend_for(home)).__name__, "TmuxBackend")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = runner_main.runner_main(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("cousin.toml", stderr.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -110,27 +110,44 @@ class InboxBackend:
     """The runner's inbox: put a row, poke the socket, report `queued`.
     `delivered` is claimed only when `wait=True` and the runner marks
     the row done inside the timeout; a silent runner is `queued`,
-    never `delivered` and never `failed`, because nothing is known."""
+    never `delivered` and never `failed`, because nothing is known.
+
+    A put that fails (the store cannot be opened or written) is
+    `failed`: nothing was kept. Once the put succeeded the row is
+    durable, so anything that goes wrong after it (the poke, reading the
+    outcome back) is `queued`, the row waiting for the runner, never
+    `failed`: a producer that retried on it would deliver twice."""
 
     def send(self, home, item, *, wait=True, timeout=30.0, **opts):
+        import sqlite3
         import time
         from cousin_lib.runner import wake
         from cousin_lib.runner.inbox import Inbox
-        inbox = Inbox(home)
-        inbox_id = inbox.put(item)
-        wake.poke(home)
-        if not wait:
-            return QUEUED
-        deadline = time.monotonic() + float(timeout)
-        while time.monotonic() < deadline:
-            row = inbox.get(inbox_id)
-            if row and row["state"] == "done":
-                return DELIVERED if row["outcome"] == DELIVERED else FAILED
-            time.sleep(0.05)
+        try:
+            inbox = Inbox(home)
+            inbox_id = inbox.put(item)
+        except (OSError, sqlite3.Error):
+            return FAILED
+        try:
+            wake.poke(home)
+            if not wait:
+                return QUEUED
+            deadline = time.monotonic() + float(timeout)
+            while time.monotonic() < deadline:
+                row = inbox.get(inbox_id)
+                if row and row["state"] == "done":
+                    return DELIVERED if row["outcome"] == DELIVERED else FAILED
+                time.sleep(0.05)
+        except (OSError, sqlite3.Error):
+            pass
         return QUEUED
 
 
 def _runner_kind(home):
+    """`[agent] runner`, or None. A cousin.toml that is missing or does
+    not parse is None, so delivery stays on tmux: the conservative
+    reading, and not a silent one, because cousin-runner refuses the
+    same file with rc 2 and says why."""
     import tomllib
     try:
         data = tomllib.loads((Path(home) / "cousin.toml").read_text())

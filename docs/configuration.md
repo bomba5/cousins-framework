@@ -502,8 +502,7 @@ to the delivery facade and reads back `delivery.accepted(outcome, home)` (a
 durable inbox put is acceptance, `delivered` or a runner's `queued` row, never
 a bare `failed`; a producer hands a runner cousin its item without waiting,
 since the put is the acceptance, and waits on a tmux cousin's typed line as
-before; a scheduled prompt whose delivery is not accepted stays pending for the
-next tick) and, where it needs to know whether the cousin is up,
+before) and, where it needs to know whether the cousin is up,
 `delivery.is_alive(home)` (a runner cousin's answer is whether a runner holds
 its lock; a tmux cousin's is unchanged, tmux `has-session` or the chat port).
 This is no longer experimental for those four producers. It stays ahead of

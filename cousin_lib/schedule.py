@@ -261,11 +261,10 @@ def _cmd_cancel(args):
 
 
 def _default_deliver(slug, prompt):
-    """Hand a due prompt to the cousin through the delivery facade. An
-    outcome the producer does not accept (skipped at a menu, failed, a
-    tmux cousin's `queued`) raises, and `tick` keeps the job pending,
-    the loops adapter's convention. A runner cousin is not waited on:
-    the inbox put is the acceptance."""
+    """Hand a due prompt to the cousin through the delivery facade.
+    False (skipped at a menu, failed, a tmux cousin's `queued`) is an
+    outcome the producer does not accept. A runner cousin is not waited
+    on: the inbox put is the acceptance."""
     from cousin_lib import delivery
 
     root = FrameworkConfig.from_env()
@@ -275,10 +274,8 @@ def _default_deliver(slug, prompt):
                                  source="schedule", body=prompt)
             wait = not isinstance(delivery.backend_for(cfg.home),
                                   delivery.InboxBackend)
-            outcome = delivery.deliver(cfg.home, item, wait=wait)
-            if not delivery.accepted(outcome, cfg.home):
-                raise RuntimeError("delivery not accepted: %s" % outcome)
-            return True
+            return delivery.accepted(delivery.deliver(cfg.home, item, wait=wait),
+                                     cfg.home)
     raise RuntimeError("no cousin %r under %s" % (slug, root.root))
 
 

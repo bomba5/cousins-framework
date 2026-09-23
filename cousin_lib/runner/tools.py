@@ -582,25 +582,32 @@ OPEN_LOOPS = "## Open loops"
 # The section is the heading on a line of its own: a substring search would
 # take "### Open loops archive" or prose that quotes the heading, and
 # overwrite the cousin's own text there (STATUS.md is the cousin's file).
-_OPEN_LOOPS_LINE = re.compile(r"^## Open loops[ \t]*$", re.M)
+# A CRLF file ends the heading with "\r", which "$" alone does not consume.
+_OPEN_LOOPS_LINE = re.compile(r"^## Open loops[ \t]*\r?$", re.M)
 # It ends at the next heading of level 1 or 2; a "###" inside it is its own.
 _NEXT_SECTION = re.compile(r"^#{1,2} ", re.M)
 
 
 def _with_open_loops(text, name, status):
     """STATUS.md with its `## Open loops` section replaced by `status`;
-    everything else byte for byte. Absent section: inserted after the
-    title line, where boot._active_state and the digest read it."""
-    block = "%s\n\n%s\n" % (OPEN_LOOPS, status.strip())
+    everything else byte for byte, line endings included (the new block is
+    written in the file's own: CRLF when the file uses CRLF). Absent
+    section: inserted after the title line, where boot._active_state and
+    the digest read it."""
+    eol = "\r\n" if "\r\n" in text else "\n"
+    block = OPEN_LOOPS + eol + eol + eol.join(status.strip().splitlines()) + eol
     if not text.strip():
-        return "# Status - %s\n\n%s" % (name, block)
+        return "# Status - %s%s%s%s" % (name, eol, eol, block)
     found = _OPEN_LOOPS_LINE.search(text)
     if found is None:
-        title, nl, rest = text.partition("\n")
-        return title + "\n\n" + block + ("\n" + rest.lstrip("\n") if rest.strip() else "")
+        cut = text.find("\n")
+        if cut < 0:
+            return text + eol + eol + block
+        head, rest = text[:cut + 1], text[cut + 1:]
+        return head + eol + block + (eol + rest.lstrip("\r\n") if rest.strip() else "")
     after = _NEXT_SECTION.search(text, found.end())
     tail = text[after.start():] if after else ""
-    return text[:found.start()] + block + ("\n" + tail if tail else "")
+    return text[:found.start()] + block + (eol + tail if tail else "")
 
 
 def handoff(ctx, args):
@@ -615,8 +622,12 @@ def handoff(ctx, args):
     (home / "data").mkdir(parents=True, exist_ok=True)
     written, errors, learned = [], [], 0
     status_path = home / "STATUS.md"
-    old = status_path.read_text() if status_path.exists() else ""
-    status_path.write_text(_with_open_loops(old, ctx.name, str(args["status"])))
+    # newline="" both ways: the cousin's line endings are its own bytes too
+    old = ""
+    if status_path.exists():
+        with open(status_path, newline="") as fh:
+            old = fh.read()
+    status_path.write_text(_with_open_loops(old, ctx.name, str(args["status"])), newline="")
     written.append("STATUS.md (open loops)")
     try:
         sync_state.write_state(home)

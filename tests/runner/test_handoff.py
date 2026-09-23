@@ -82,6 +82,33 @@ class TestHandoff(HermeticCase):
         self.assertIn("# Appendix\n\nkept", text)
         self.assertNotIn("old loop", text)
 
+    def test_a_crlf_heading_is_the_section_not_a_second_one(self):
+        from cousin_lib.runner.tools import _with_open_loops
+        crlf = ("# Wren - STATUS\r\n\r\nOperator notes stay.\r\n\r\n## Open loops\r\n\r\n"
+                "- old loop\r\n\r\n## Done\r\n\r\n- shipped the thing\r\n")
+        out = _with_open_loops(crlf, "Wren", "- new loop")
+        self.assertEqual(out.count("## Open loops"), 1)
+        self.assertNotIn("old loop", out)
+        self.assertTrue(out.startswith("# Wren - STATUS\r\n\r\nOperator notes stay.\r\n\r\n"))
+        self.assertTrue(out.endswith("## Done\r\n\r\n- shipped the thing\r\n"))
+        self.assertIn("## Open loops\r\n\r\n- new loop\r\n", out)      # the file's own EOL
+
+    def test_a_crlf_status_keeps_every_other_byte_through_the_tool(self):
+        ctx = _ctx(self)
+        path = ctx.home / "STATUS.md"
+        head = b"# Wren - STATUS\r\n\r\nOperator notes stay.\r\n\r\n"
+        tail = b"## Done\r\n\r\n- shipped the thing\r\n"
+        path.write_bytes(head + b"## Open loops\r\n\r\n- old loop\r\n\r\n" + tail)
+        text, err = tools.call(ctx, "handoff", dict(ARGS))
+        self.assertFalse(err, text)
+        data = path.read_bytes()
+        self.assertEqual(data.count(b"## Open loops"), 1)
+        self.assertNotIn(b"old loop", data)
+        self.assertTrue(data.startswith(head))
+        self.assertTrue(data.endswith(tail))
+        self.assertIn(b"- ledger audit: March open\r\n- invoice run: waiting on Sam\r\n", data)
+        self.assertNotIn(b"\n", data.replace(b"\r\n", b""))                # no bare LF anywhere
+
     def test_a_status_without_the_section_gains_it_where_the_digest_reads_it(self):
         ctx = _ctx(self)
         (ctx.home / "STATUS.md").write_text("# Wren - STATUS\n\nfree text\n")

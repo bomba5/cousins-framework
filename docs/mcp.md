@@ -101,6 +101,19 @@ the Claude Code preset), and touches nothing else:
 cousin-mcp approve wren --root "$PWD"
 ```
 
+### The in-process transport
+
+On the SDK lane, the runner does not spawn `cousin-mcp` over stdio: the
+same registry builds the tools inside the runner's own process
+(`cousin_lib/runner/tools.py`). Schemas come from `mcp_server.build_schema`
+either way, so a tool cannot exist on one transport and not the other.
+Each registry command maps to a library function in `HANDLERS`; a
+command the registry enables but `HANDLERS` has no function for stops
+the runner at start, with the list of what's missing. Two tools exist
+only in-process and never over stdio: `reply`, the sole writer of
+`chat.db` on this lane, and `handoff`, which writes the next
+generation's `data/handoff-manual.md`.
+
 ## Checking it
 
 ```

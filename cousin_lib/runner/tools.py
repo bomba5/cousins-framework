@@ -372,7 +372,7 @@ HANDLERS = {
     "memory": {"search": _m_search, "decide": _m_decide, "remember": _m_remember,
                "obsolete": _m_obsolete, "recall": _m_recall, "activity": _m_activity},
     "job": {"start": _j_start, "done": _j_done, "fail": _j_fail, "list": _j_list,
-            "show": _j_show, "status": _j_show, "result": _j_show},
+            "show": _j_show},
     "schedule": {"add": _s_add, "list": _s_list, "cancel": _s_cancel},
     "meeting": {"say": _mt_say, "pass": _mt_pass, "minutes": _mt_minutes, "show": _mt_show},
     "tracker": {"add": _t_add, "update": _t_update, "state": _t_state, "list": _t_list,

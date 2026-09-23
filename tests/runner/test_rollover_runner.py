@@ -1,5 +1,6 @@
 """SdkRunner.rollover end to end on the scripted client."""
 import asyncio
+import json
 import os
 import threading
 import time
@@ -228,6 +229,136 @@ class TestRollover(RolloverCase):
         self.assertEqual(len(self.clients), 2)                         # one new client, not two
         self.assertTrue(all(a["ok"] for a in answers))
         self.assertEqual(boot.read_generation(self.home), 1)
+
+
+class TestRolloverFailureModes(RolloverCase):
+    """Fix round 1: what a rollover does when a step fails on either side
+    of the point of no return (the new session existing)."""
+
+    def failing_connects(self, r, fail_calls):
+        """Every client the runner asks for, in order, is recorded in
+        self.asked (its options); the calls numbered in fail_calls raise."""
+        real, self.asked = r.client_factory, []
+
+        def factory(options):
+            self.asked.append(options)
+            if len(self.asked) in fail_calls:
+                raise ConnectionError("no CLI (call %d)" % len(self.asked))
+            return real(options)
+        r.client_factory = factory
+
+    def test_a_failed_new_session_falls_back_to_the_old_one(self):
+        r = self.build(); self.failing_connects(r, {2}); r.start(); self.work(r)
+        out = r.rollover("max_age")
+        self.assertFalse(out["ok"]); self.assertIn("could not start the new session", out["reason"])
+        self.assertEqual((out["generation"], out["new_session"]), (0, None))
+        self.assertEqual([o.resume for o in self.asked], [None, None, "s-1"])
+        self.assertEqual(r._resume_id, "s-1")     # the old session, not None, until the next init
+        self.assertTrue(any(e["kind"] == "system" and e["payload"].get("subtype") == "connect_failed"
+                            for e in r.events()))
+        rec = self.work(r, "still alive")
+        self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
+        self.assertEqual(boot.read_generation(self.home), 0)
+
+    def test_when_the_fallback_fails_too_the_next_reconnect_resumes_the_old_session(self):
+        r = self.build(); self.failing_connects(r, {2, 3}); r.start(); self.work(r)
+        out = r.rollover("max_age")
+        self.assertFalse(out["ok"])
+        rec = self.work(r, "still alive")                 # no client: _NotWritten, then _resync
+        self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
+        self.assertEqual(len(self.asked), 4)
+        self.assertEqual(self.asked[3].resume, "s-1")     # never a fresh, unbumped, digest-less one
+        self.assertEqual(boot.read_generation(self.home), 0)
+        texts = [q["message"]["content"][0]["text"] for c in self.clients for q in c.queries]
+        self.assertFalse(any("STATE DIGEST" in t for t in texts))
+
+    def test_a_failing_start_hook_after_the_new_session_degrades_never_fails(self):
+        from cousin_lib import session as session_mod
+        real = session_mod.run_phase
+
+        def run_phase(home, phase, *a, **kw):
+            if phase == "start":
+                raise RuntimeError("start hook runner broke")
+            return real(home, phase, *a, **kw)
+        r = self.build(); r.start(); self.work(r)
+        with mock.patch.object(session_mod, "run_phase", side_effect=run_phase):
+            out = r.rollover("max_age")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["generation"], 1)
+        self.assertIn("start hook runner broke", out["problems"][0])
+        self.assertTrue(_wait(lambda: self.clients[1].queries))
+        self.assertIn("STATE DIGEST", self.clients[1].queries[0]["message"]["content"][0]["text"])
+        self.assertNotIn("errored", [e["payload"]["to"] for e in r.events() if e["kind"] == "state"])
+
+    def test_no_digest_at_all_still_closes_the_row_delivered(self):
+        from cousin_lib.runner import rollover as rollover_mod
+        r = self.build(); r.start(); self.work(r)
+        bad = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        with mock.patch.object(prompt, "state_digest", side_effect=RuntimeError("layer broke")), \
+                mock.patch.object(rollover_mod, "degraded_digest", side_effect=bad):
+            out = r.rollover("max_age")
+        self.assertTrue(out["ok"], out)
+        self.assertTrue(out["digest"].startswith("none:"), out["digest"])
+        self.assertEqual(out["generation"], 1)
+        self.assertEqual(r.inbox.get(out["inbox_id"])["outcome"], "delivered")
+        self.assertNotIn("errored", [e["payload"]["to"] for e in r.events() if e["kind"] == "state"])
+        rec = self.work(r, "after")
+        self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
+        self.assertEqual(len(self.clients), 2)
+
+    def test_a_stop_that_times_out_in_the_tail_still_closes_the_row_delivered_once(self):
+        r = self.build()
+        with open(self.home / "cousin.toml", "a") as fh:
+            fh.write('\n[session]\nstart_hooks = ["sleep 1"]\n')
+        r.start(); self.work(r)
+        t = threading.Thread(target=r.rollover, args=("max_age",)); t.start()
+        self.assertTrue(_wait(lambda: boot.read_generation(self.home) == 1))   # in the start hook
+        [flip] = r.inbox.open_rows("flip")
+        r.stop(timeout=0.2)                        # the join times out: `stopped` is forced
+        self.assertEqual(r.state(), "stopped")
+        t.join(10)
+        self.assertTrue(_wait(lambda: r.inbox.get(flip["id"])["state"] == "done"))
+        self.assertEqual(r.inbox.get(flip["id"])["outcome"], "delivered")
+        self.assertEqual(r.inbox.open_rows("flip"), [])   # nothing for the next start to re-run
+        self.assertEqual(boot.read_generation(self.home), 1)
+
+
+class TestDuplicateRows(RolloverCase):
+    """Two plain `flip` rows put directly (two processes past put_once's check)."""
+
+    def two_plain_rows(self, r):
+        a = r.inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        b = r.inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        return a, b
+
+    def test_a_plain_duplicate_is_closed_with_the_first_ones_answer(self):
+        r = self.build(); r.start(); self.work(r)
+        a, b = self.two_plain_rows(r)
+        self.assertTrue(_wait(lambda: r.inbox.get(b)["state"] == "done"))
+        self.assertEqual(r.inbox.get(b)["outcome"], "delivered")
+        self.assertEqual(json.loads(r.inbox.get(b)["detail"])["coalesced_into"], a)
+        self.assertEqual((len(self.clients), boot.read_generation(self.home)), (2, 1))
+
+    def test_a_bequest_written_over_a_duplicate_mid_close_is_not_closed(self):
+        bequest = "You are about to be reincarnated.\nPut a bequest in the handoff's position."
+        r = self.build(handoff_delay=0.3)
+        real_open_rows, fired = r.inbox.open_rows, []
+
+        def open_rows(source):
+            rows = real_open_rows(source)       # the snapshot _close_duplicates decides on
+            if not fired and rows:              # (the first row is closed already: b only)
+                fired.append(True)              # then put_once's bequest lands in between
+                self.assertTrue(r.inbox.replace_body(rows[0]["id"], bequest))
+            return rows
+        r.inbox.open_rows = open_rows
+        r.start(); self.work(r)
+        a, b = self.two_plain_rows(r)
+        self.assertTrue(_wait(lambda: r.inbox.get(b)["state"] == "done", timeout=15))
+        self.assertTrue(fired)
+        row_b = r.inbox.get(b)
+        self.assertEqual(row_b["body"], bequest)
+        self.assertNotIn("coalesced_into", json.loads(row_b["detail"]))   # its own rollover
+        self.assertEqual((len(self.clients), boot.read_generation(self.home)), (3, 2))
 
 
 class TestPressureTrigger(RolloverCase):

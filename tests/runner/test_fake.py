@@ -127,6 +127,27 @@ class TestFakeRunner(HermeticCase):
         self.assertIn("not running", out["reason"])
         self.assertEqual(r.inbox.get(out["inbox_id"])["state"], "queued")
 
+    def test_a_plain_duplicate_flip_row_is_closed_with_the_first_ones_answer(self):
+        import json
+        from cousin_lib import boot
+        r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5))
+        a = r.inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        b = r.inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        r.start()
+        self.assertTrue(_wait(lambda: r.inbox.get(b)["state"] == "done"))
+        self.assertEqual(json.loads(r.inbox.get(b)["detail"])["coalesced_into"], a)
+        self.assertEqual(r.inbox.get(a)["outcome"], "delivered")
+        self.assertEqual(boot.read_generation(self.home), 1)
+
+    def test_a_flip_row_claimed_while_not_idle_goes_back_to_the_queue(self):
+        r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5))
+        rid = r.inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        [row] = r.inbox.claim(limit=1)
+        r.machine.to("running")                   # a live turn: the row must not start
+        r._rollover_row(row)
+        self.assertEqual(r.inbox.get(rid)["state"], "queued")
+        self.assertEqual(r.state(), "running")
+
     def test_a_turn_that_raises_is_recorded_and_the_runner_keeps_going(self):
         r = _RaisesOnceRunner(self.home)
         self.addCleanup(lambda: r.stop(timeout=5))

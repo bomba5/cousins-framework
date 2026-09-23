@@ -909,27 +909,34 @@ class SdkRunner:
         """A PLAIN duplicate `flip` row that slipped past put_once (two
         processes between check and put) gets this rollover's answer, not a
         second rollover. A bequest row is never closed here (R10): it is an
-        operator act and runs as its own rollover."""
+        operator act and runs as its own rollover. The close is guarded on
+        the body read here: a bequest that replaced it since is left open."""
         for other in self.inbox.open_rows("flip"):
             if other["id"] != row["id"] and other["state"] == "queued" \
-                    and not rollover.is_bequest(other["body"]):
-                self.inbox.done(other["id"], outcome,
-                                json.dumps(dict(detail, coalesced_into=row["id"])))
+                    and not rollover.is_bequest(other["body"]) \
+                    and self.inbox.done_if_queued(other["id"], outcome,
+                                                  json.dumps(dict(detail, coalesced_into=row["id"])),
+                                                  body=other["body"]):
                 self.stream.append("rollover", {"phase": "coalesced", "inbox_id": other["id"],
                                                 "into": row["id"]})
 
     async def _rollover_row(self, row):
         """The rollover, at a turn boundary: handoff, end hooks, archive,
         a final mine, a new client with no resume, THEN the generation,
-        start hooks, the digest as the first message. Any failure after
-        rolling_over is errored -> idle with the row failed and its detail
-        saying where it stopped, never a wedged machine (C1)."""
-        from cousin_lib.runner import prompt
+        start hooks, the digest as the first message.
+
+        Before the new session exists, any failure is errored -> idle with
+        the row failed, the old session kept (a client resumed on it, or at
+        least `_resume_id` naming it for the next reconnect), and the detail
+        saying where it stopped: never a wedged machine (C1). Once the new
+        session exists (the point of no return) nothing fails the rollover:
+        a failed step degrades it, is named in the row's detail, and the row
+        still closes delivered, because running it again would move the
+        generation twice for one request."""
         reason = row["body"] or "rollover"
         old_sid = self._resume_id
         disconnected = False
         generation = boot.read_generation(self.home)
-        digest_state = "built"
         with self._lock:
             if self.machine.state != "idle":     # stop() won the race: the row waits
                 self.inbox.requeue(row["id"])
@@ -952,23 +959,14 @@ class SdkRunner:
             if not await self._connect(resume=None, why="rollover", fatal=False):
                 raise RunnerError("could not start the new session")
             disconnected = False
-            # the point of no return: a new session exists, so the generation moves
-            generation = boot.bump_generation(self.home)
-            self.hysteresis.rolled_over()
-            await asyncio.to_thread(session.run_phase, self.home, "start")
-            try:
-                digest = (await asyncio.to_thread(prompt.state_digest, self.home, root=self.root,
-                                                  slug=self.tool_context.slug,
-                                                  generation=generation))["text"]
-            except Exception as exc:  # noqa: BLE001 - a degraded digest, never none
-                digest_state = "degraded: %s: %s" % (type(exc).__name__, exc)
-                digest = rollover.degraded_digest(self.home, slug=self.tool_context.slug,
-                                                  generation=generation, error=digest_state)
-            digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
-                                            sender="runner"))
         except Exception as exc:  # noqa: BLE001 - a failed rollover must not wedge the runner
             message = "%s: %s" % (type(exc).__name__, exc)
             self.hysteresis.rolled_over()      # no re-request every turn over the threshold
+            # No new session was established: the old one is still the session,
+            # so a later reconnect (this fallback, or _resync) resumes it and
+            # never starts an unbumped, digest-less fresh one.
+            if self._resume_id is None:
+                self._resume_id = old_sid
             with self._lock:
                 if self.machine.state == "rolling_over":
                     self.machine.to("errored", "rollover failed: " + message)
@@ -976,22 +974,45 @@ class SdkRunner:
                 await self._connect(resume=old_sid, why="rollover failed", fatal=False)
             detail = {"reason": reason, "error": message,
                       "generation": boot.read_generation(self.home),
-                      "old_session": old_sid,
-                      "new_session": self._resume_id if self._resume_id != old_sid else None}
+                      "old_session": old_sid, "new_session": None}
             self.inbox.done(row["id"], FAILED, json.dumps(detail))
             self._close_duplicates(row, FAILED, detail)
             self.stream.append("rollover", dict(detail, phase="failed"))
             self._recover()
             return False
+        # The point of no return: a new session exists, so the generation moves.
+        problems = []
+        try:
+            generation = boot.bump_generation(self.home)
+        except Exception as exc:  # noqa: BLE001 - degraded, named in the detail
+            problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        self.hysteresis.rolled_over()
+        try:
+            await asyncio.to_thread(session.run_phase, self.home, "start")
+        except Exception as exc:  # noqa: BLE001 - degraded, named in the detail
+            problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
+        digest, digest_state = await self._digest(generation)
+        digest_id = None
+        if digest is not None:
+            try:
+                digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
+                                                sender="runner"))
+            except Exception as exc:  # noqa: BLE001 - the session runs on without it
+                digest_state = "none: the digest row could not be stored: %s: %s" \
+                               % (type(exc).__name__, exc)
         detail = {"reason": reason, "handoff": handoff, "generation": generation,
                   "old_session": old_sid, "digest": digest_state}
+        if problems:
+            detail["problems"] = problems
         with self._lock:
-            self.machine.to("idle", "rolled over")
+            # stop() may have forced `stopped` meanwhile: the row closes all the same
+            if self.machine.state == "rolling_over":
+                self.machine.to("idle", "rolled over")
         self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
         self._close_duplicates(row, DELIVERED, detail)
         self.stream.append("rollover", dict(detail, phase="done"))
-        if self._stop.is_set():
-            return True     # the digest row stays queued (durable): the next start runs it
+        if self._stop.is_set() or digest_id is None:
+            return True     # a stored digest row stays queued (durable): the next start runs it
         # The digest is the new session's FIRST message: claimed by id and run
         # now, ahead of chat that queued up during the rollover (same priority,
         # older). The row is durable, so a crash here replays it at the next start.
@@ -999,6 +1020,23 @@ class SdkRunner:
         if first is not None:
             return await self._turn(first)
         return True
+
+    async def _digest(self, generation):
+        """(text or None, state): the state digest ("built"); the last
+        handoff marked degraded when it cannot be built ("degraded: ...");
+        None only when even that failed ("none: ..."). Never raises."""
+        from cousin_lib.runner import prompt
+        try:
+            return ((await asyncio.to_thread(prompt.state_digest, self.home, root=self.root,
+                                             slug=self.tool_context.slug,
+                                             generation=generation))["text"], "built")
+        except Exception as exc:  # noqa: BLE001 - a degraded digest, never none
+            state = "degraded: %s: %s" % (type(exc).__name__, exc)
+        try:
+            return rollover.degraded_digest(self.home, slug=self.tool_context.slug,
+                                            generation=generation, error=state), state
+        except Exception as exc:  # noqa: BLE001 - the new session runs on without one
+            return None, "none: %s; then %s: %s" % (state, type(exc).__name__, exc)
 
     def _record(self, sdk, msg, *, echo_of=None):
         """Every SDK message leaves at least one event (a ResultMessage's

@@ -229,27 +229,21 @@ class FakeRunner:
         """The reference rollover: no model, so the handoff is simulated
         clean; everything else is the SDK runner's sequence, including the
         generation moving only once the new session exists, the degraded
-        digest, the failure path (C1) and the bequest rule (R10)."""
+        digest, the failure path before that point (C1), the degrade-never-
+        fail tail after it, and the bequest rule (R10)."""
         import json
         from cousin_lib import boot, session
         from cousin_lib.runner import prompt
         from cousin_lib.runner import rollover as _rollover
         with self._lock:
+            if self.machine.state != "idle":     # stop() won the race: the row waits
+                self.inbox.requeue(row["id"])
+                return
             self.machine.to("rolling_over", row["body"].splitlines()[0][:120])
         try:
             session.run_phase(self.home, "end")
             _rollover.archive_generation(self.home, boot.read_generation(self.home))
             self.session_id = "fake-" + uuid.uuid4().hex[:8]       # the new session
-            generation = boot.bump_generation(self.home)
-            session.run_phase(self.home, "start")
-            try:
-                digest = prompt.state_digest(self.home, root=self.root, slug=Path(self.home).name,
-                                             generation=generation)["text"]
-            except Exception as exc:  # noqa: BLE001 - degraded, never none
-                digest = _rollover.degraded_digest(self.home, slug=Path(self.home).name,
-                                                   generation=generation, error=exc)
-            digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
-                                            sender="runner"))
         except Exception as exc:  # noqa: BLE001 - never a wedged machine
             message = "%s: %s" % (type(exc).__name__, exc)
             with self._lock:
@@ -261,22 +255,50 @@ class FakeRunner:
                 "generation": boot.read_generation(self.home)}))
             self._close_plain_duplicates(row, FAILED, {"error": message})
             return
+        # the point of no return: degrade, never fail (SdkRunner._rollover_row)
+        problems, generation, digest_id = [], boot.read_generation(self.home), None
+        try:
+            generation = boot.bump_generation(self.home)
+        except Exception as exc:  # noqa: BLE001 - named in the detail
+            problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        try:
+            session.run_phase(self.home, "start")
+        except Exception as exc:  # noqa: BLE001 - named in the detail
+            problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
+        try:
+            try:
+                digest = prompt.state_digest(self.home, root=self.root, slug=Path(self.home).name,
+                                             generation=generation)["text"]
+            except Exception as exc:  # noqa: BLE001 - degraded, never none
+                digest = _rollover.degraded_digest(self.home, slug=Path(self.home).name,
+                                                   generation=generation, error=exc)
+            digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
+                                            sender="runner"))
+        except Exception as exc:  # noqa: BLE001 - the session runs on without one
+            problems.append("digest: %s: %s" % (type(exc).__name__, exc))
         detail = {"reason": row["body"], "handoff": "simulated", "generation": generation}
+        if problems:
+            detail["problems"] = problems
         with self._lock:
-            self.machine.to("idle", "rolled over")
+            if self.machine.state == "rolling_over":
+                self.machine.to("idle", "rolled over")
         self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
         self._close_plain_duplicates(row, DELIVERED, detail)
         self.stream.append("rollover", dict(detail, phase="done"))
+        if digest_id is None or self._stop.is_set():
+            return
         first = self.inbox.claim_id(digest_id, claimant=self.session_id)
         if first is not None:
             self._turn(first)
 
     def _close_plain_duplicates(self, row, outcome, detail):
-        """SdkRunner._close_duplicates' rule: plain duplicates only, never a bequest."""
+        """SdkRunner._close_duplicates' rule: plain duplicates only, never a
+        bequest, and the close guarded on the body read here."""
         import json
         from cousin_lib.runner import rollover as _rollover
         for other in self.inbox.open_rows("flip"):
             if other["id"] != row["id"] and other["state"] == "queued" \
                     and not _rollover.is_bequest(other["body"]):
-                self.inbox.done(other["id"], outcome, json.dumps(dict(detail,
-                                                                        coalesced_into=row["id"])))
+                self.inbox.done_if_queued(other["id"], outcome,
+                                          json.dumps(dict(detail, coalesced_into=row["id"])),
+                                          body=other["body"])

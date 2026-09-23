@@ -168,5 +168,19 @@ class TestClaimIdAndOpenRows(HermeticCase):
         self.assertEqual([r["id"] for r in inbox.open_rows("flip")], [f1])
 
 
+    def test_done_if_queued_closes_only_a_queued_row_with_that_body(self):
+        inbox = Inbox(temp_home(self))
+        a = inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        self.assertFalse(inbox.done_if_queued(a, "delivered", "d", body="another body"))
+        self.assertTrue(inbox.replace_body(a, "a bequest"))
+        self.assertFalse(inbox.done_if_queued(a, "delivered", "d", body="max_age"))   # rewritten
+        self.assertEqual(inbox.get(a)["state"], "queued")
+        inbox.claim_id(a, claimant="x")
+        self.assertFalse(inbox.done_if_queued(a, "delivered", "d", body="a bequest"))  # claimed
+        b = inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        self.assertTrue(inbox.done_if_queued(b, "delivered", "d", body="max_age"))
+        self.assertEqual((inbox.get(b)["state"], inbox.get(b)["outcome"]), ("done", "delivered"))
+
+
 if __name__ == "__main__":
     unittest.main()

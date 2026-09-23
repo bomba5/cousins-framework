@@ -129,6 +129,13 @@ class TestFiles(HermeticCase):
         self.assertIn("handoff timeout (300s)", text)
         self.assertIn("last words", text)
 
+    def test_a_degraded_digest_survives_a_handoff_that_is_not_utf8(self):
+        home = temp_home(self)
+        (home / "data" / "handoff.md").write_bytes(b"\xff\xfe not text")
+        text = rollover.degraded_digest(home, slug="wren", generation=2, error="x")
+        self.assertIn("DEGRADED", text)
+        self.assertIn("UnicodeDecodeError", text)
+
     def test_archive_copies_the_three_files(self):
         home = temp_home(self)
         (home / "STATUS.md").write_text("s"); (home / "data" / "handoff.md").write_text("h")

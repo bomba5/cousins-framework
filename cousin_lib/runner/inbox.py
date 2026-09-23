@@ -152,6 +152,17 @@ class Inbox:
                 "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
                 " WHERE id=?", (DONE, outcome, detail, time.time(), inbox_id))
 
+    def done_if_queued(self, inbox_id, outcome, detail="", *, body):
+        """Close a row only while it is still queued with exactly `body`;
+        False otherwise. A close decided on a snapshot (a duplicate
+        rollover row) must not land on a row claimed or rewritten since."""
+        with self._db() as conn:
+            cur = conn.execute(
+                "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
+                " WHERE id=? AND state=? AND body=?",
+                (DONE, outcome, detail, time.time(), inbox_id, QUEUED, body))
+            return cur.rowcount == 1
+
     def requeue(self, inbox_id):
         """Return one row to queued, clearing claim and outcome. Idempotent:
         a missing id is a no-op. Used to undo a claim without going through

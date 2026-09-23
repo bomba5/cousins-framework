@@ -195,8 +195,8 @@ def degraded_digest(home, *, slug, generation, error):
     start blind because a layer builder raised."""
     try:
         handoff = (Path(home) / "data" / "handoff.md").read_text()
-    except OSError:
-        handoff = "(no handoff on disk)"
+    except Exception as exc:  # noqa: BLE001 - OSError, or bytes that are not UTF-8
+        handoff = "(no readable handoff on disk: %s: %s)" % (type(exc).__name__, exc)
     return ("STATE DIGEST FOR COUSIN: %s\nGeneration: %d\nDEGRADED: the digest could not be"
             " built (%s); the last handoff follows verbatim.\n\n%s\n"
             % (slug, generation, error, handoff[:8000]))

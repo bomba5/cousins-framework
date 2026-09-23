@@ -2,6 +2,6 @@
 # Absent: everything allowed, said once in the event stream at start.
 # Malformed: the runner refuses to start (rc 2) and says which key.
 deny_tools = ["WebFetch", "mcp__cousin__handoff"]   # exact names or prefix*
-deny_bash_patterns = ['\brm\s+-rf\s+/', '\bgit\s+push\s+--force']  # regexes on Bash.command
+deny_bash_patterns = ['\brm\s+-rf\s+/', '\bgit\s+push\s+--force']  # regexes on Bash.command only, not a subagent's or another tool's shell-out
 ask = []                                              # operator approval; enforced as deny until phase 5
 outbound_filter = true                                # reply and send cross config/outbound-filter.json

@@ -68,7 +68,13 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     body_for_prompt = body_for_prompt or (lambda prompt: prompt)
     lock = lock if lock is not None else contextlib.nullcontext()
 
-    def guarded(name, fn):
+    def guarded(name, fn, fail_closed=False):
+        """Every hook fails open (P19 is the one named exception): an
+        exception becomes a `hook` error event and `{}`. `fail_closed`
+        is for a gate, not a side effect - the policy callback is the
+        only caller today: on top of the `hook` event it also appends
+        a `policy` deny event and returns a deny `hookSpecificOutput`,
+        so a bug in the policy check cannot silently allow the tool."""
         is_async = inspect.iscoroutinefunction(fn)
 
         async def cb(hook_input, tool_use_id, context):
@@ -81,7 +87,17 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                                            "error": "%s: %s" % (type(err).__name__, err)})
                 except Exception:  # noqa: BLE001 - the stream itself failed
                     pass
-                return {}
+                if not fail_closed:
+                    return {}
+                reason = "policy check failed: %s: %s" % (type(err).__name__, err)
+                try:
+                    stream.append("policy", {"tool": hook_input.get("tool_name"),
+                                             "decision": "deny", "reason": reason})
+                except Exception:  # noqa: BLE001 - the stream itself failed
+                    pass
+                return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                               "permissionDecision": "deny",
+                                               "permissionDecisionReason": reason}}
         cb.__name__ = name
         return cb
 
@@ -155,7 +171,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     table["Notification"] = guarded("Notification", waiting)
     table["PermissionRequest"] = guarded("PermissionRequest", waiting)
     if policy is not None:
-        table["PreToolUse:policy"] = guarded("PreToolUse:policy", on_policy)
+        table["PreToolUse:policy"] = guarded("PreToolUse:policy", on_policy, fail_closed=True)
     return table
 
 

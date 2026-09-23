@@ -88,6 +88,45 @@ class TestHookEnforcement(HermeticCase):
         self.assertEqual(out, {})
 
 
+class _RaisingPolicy:
+    """A policy stub whose decide() always raises, to prove the hook
+    fails closed rather than swallowing the error into an allow."""
+    def decide(self, tool_name, tool_input):
+        raise RuntimeError("boom")
+
+
+class TestFailClosed(HermeticCase):
+    def test_decide_with_none_tool_name_does_not_raise(self):
+        # P19: a prefix* deny_tools entry used to crash _named on
+        # tool_name=None (None.startswith), which the generic guard()
+        # turned into an ALLOW. Must not raise, must not allow blindly.
+        p = policy.Policy(deny_tools=("Foo*",))
+        self.assertEqual(p.decide(None, {}), ("allow", ""))
+        self.assertEqual(policy.Policy().decide(None, {}), ("allow", ""))
+
+    def test_policy_callback_fails_closed_on_exception(self):
+        home = _home(self)
+        stream = EventStream(home, "fc")
+        machine = StateMachine()
+        cbs = hooks.callbacks(home, slug="wren", root=home.parent.parent, machine=machine,
+                              stream=stream, policy=_RaisingPolicy())
+        base = {"session_id": "s", "transcript_path": "/dev/null", "cwd": str(home)}
+        out = asyncio.run(cbs["PreToolUse:policy"]({**base, "hook_event_name": "PreToolUse",
+                                             "tool_name": "WebFetch", "tool_input": {},
+                                             "tool_use_id": "t"}, "t", {}))
+        spec = out["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny")
+        self.assertIn("policy check failed", spec["permissionDecisionReason"])
+        self.assertIn("RuntimeError", spec["permissionDecisionReason"])
+        hook_errs = [e for e in stream.tail() if e["kind"] == "hook"]
+        self.assertEqual(len(hook_errs), 1)
+        self.assertIn("RuntimeError", hook_errs[0]["payload"]["error"])
+        policy_events = [e for e in stream.tail() if e["kind"] == "policy"]
+        self.assertEqual(len(policy_events), 1)
+        self.assertEqual(policy_events[0]["payload"]["decision"], "deny")
+        self.assertEqual(policy_events[0]["payload"]["tool"], "WebFetch")
+
+
 class TestBuildHooks(HermeticCase):
     def test_policy_matcher_is_first_and_no_split_key_leaks(self):
         try:

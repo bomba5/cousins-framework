@@ -61,7 +61,7 @@ def runner_main(argv=None):
         runner = runner_for(args.home, kind=args.runner)
     except RunnerError as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
-        raise SystemExit(2)
+        return 2
     stop = threading.Event()
 
     def _signal(signum, frame):

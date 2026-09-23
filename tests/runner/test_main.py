@@ -1,4 +1,6 @@
 """cousin-runner: the process a cousin lives in."""
+import contextlib
+import io
 import os
 import signal
 import subprocess
@@ -22,9 +24,11 @@ class TestRunnerFor(HermeticCase):
 
     def test_an_unknown_runner_is_an_error_that_names_the_key(self):
         home = temp_home(self, runner="carrier-pigeon")
-        with self.assertRaises(SystemExit) as cm:
-            runner_main.runner_main(["--home", str(home)])
-        self.assertEqual(cm.exception.code, 2)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = runner_main.runner_main(["--home", str(home)])
+        self.assertEqual(rc, 2)
+        self.assertIn("runner", stderr.getvalue())
 
 
 class TestOnce(HermeticCase):

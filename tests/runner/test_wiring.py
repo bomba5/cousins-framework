@@ -308,3 +308,34 @@ class TestPromptAndStoreWiring(HermeticCase):
         r = self._runner()
         self.assertEqual(r.options().system_prompt["append"].encode(),
                          r.options(resume="s-1").system_prompt["append"].encode())
+
+
+class TestAccountWiring(HermeticCase):
+    def test_options_carry_the_accounts_env_and_resume_by_kind(self):
+        import os
+        from cousin_lib import accounts
+        from cousin_lib.runner.sdk import SdkRunner
+        from tests.runner.test_sdk import ScriptedClient
+        home = temp_home(self); root = home.parent.parent
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "accounts.toml").write_text('[accounts.nightly]\nkind = "claude-token"\n')
+        secrets = root / ".secrets" / "accounts"
+        secrets.mkdir(parents=True); os.chmod(secrets, 0o700)
+        (secrets / "nightly").write_text("tok-n\n"); os.chmod(secrets / "nightly", 0o600)
+        acc = accounts.load(root)["nightly"]
+        r = SdkRunner(home, account=acc, client_factory=lambda o: ScriptedClient(o, []))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        opts = r.options(resume="s-1")
+        self.assertEqual(opts.env["CLAUDE_CODE_OAUTH_TOKEN"], "tok-n")
+        self.assertEqual(opts.env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"], "1")
+        self.assertNotIn("COUSIN_HOME", opts.env)       # the runner's process env carries it already
+        self.assertEqual(opts.resume, "s-1")                      # a token never refreshes: the store
+        self.assertNotIn("resume", opts.extra_args)
+
+    def test_api_key_still_works_as_an_implicit_key_account(self):
+        from cousin_lib.runner.sdk import SdkRunner
+        from tests.runner.test_sdk import ScriptedClient
+        r = SdkRunner(temp_home(self), api_key="k-inline", client_factory=lambda o: ScriptedClient(o, []))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        self.assertEqual(r.account.kind, "anthropic-key")
+        self.assertEqual(r.options().env["ANTHROPIC_API_KEY"], "k-inline")

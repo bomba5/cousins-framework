@@ -10,7 +10,7 @@ try:
 except ImportError:
     raise unittest.SkipTest("claude-agent-sdk not installed")
 
-from cousin_lib import boot
+from cousin_lib import accounts, boot
 from cousin_lib.delivery import Item
 from cousin_lib.runner.sdk import SdkRunner
 from tests._hermetic import HermeticCase
@@ -38,7 +38,7 @@ class TestResume(HermeticCase):
         p.start(); self.addCleanup(p.stop)
         self.options = []
 
-    def runner(self, *, source="none", refuse_resume=False, resume_as=None):
+    def runner(self, *, source="none", refuse_resume=False, resume_as=None, account=None):
         def factory(options):
             self.options.append(options)
             asked = options.resume or (options.extra_args or {}).get("resume")
@@ -51,7 +51,7 @@ class TestResume(HermeticCase):
                     raise RuntimeError("no such session")
                 client.connect = boom
             return client
-        r = SdkRunner(self.home, client_factory=factory)
+        r = SdkRunner(self.home, client_factory=factory, account=account)
         self.addCleanup(lambda: r.stop(timeout=5))
         return r
 
@@ -82,21 +82,27 @@ class TestResume(HermeticCase):
         self.assertEqual(boot.read_generation(self.home), g0)   # a deploy costs no generation
 
     def test_the_key_lane_resumes_from_the_store(self):
-        # the lane comes from the init's apiKeySource, never from being given a key (R12)
-        r1 = self.runner(source="ANTHROPIC_API_KEY"); r1.start(); self.one_turn(r1); r1.stop(timeout=5)
+        # the account's kind decides the resume path (R12 folded into accounts)
+        key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
+        r1 = self.runner(source="ANTHROPIC_API_KEY", account=key)
+        r1.start(); self.one_turn(r1); r1.stop(timeout=5)
         self.assertEqual(json.loads((self.home / "data" / "runner-session.json").read_text())["lane"],
                          "key")
-        r2 = self.runner(source="ANTHROPIC_API_KEY"); r2.start()
+        r2 = self.runner(source="ANTHROPIC_API_KEY", account=key); r2.start()
         self.assertTrue(_wait(lambda: len(self.options) == 2))
         self.assertEqual(self.options[1].resume, "s-live")
         self.assertNotIn("resume", self.options[1].extra_args or {})
 
-    def test_a_key_given_to_the_runner_does_not_decide_the_lane(self):
-        r1 = self.runner(); r1.api_key = "k-ignored"            # the init still says "none"
-        r1.start(); self.one_turn(r1); r1.stop(timeout=5)
-        r2 = self.runner(); r2.start()
+    def test_the_account_kind_decides_the_resume_path_whatever_the_init_says(self):
+        # a key account whose init reports "none" still resumes store-backed;
+        # the init's source is the CHECK that the account took effect (Task 16)
+        key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
+        r1 = self.runner(account=key); r1.start(); self.one_turn(r1); r1.stop(timeout=5)
+        self.assertEqual(self.session_file()["lane"], "login")     # the record, not the decider
+        r2 = self.runner(account=key); r2.start()
         self.assertTrue(_wait(lambda: len(self.options) == 2))
-        self.assertEqual(self.options[1].extra_args["resume"], "s-live")
+        self.assertEqual(self.options[1].resume, "s-live")
+        self.assertNotIn("resume", self.options[1].extra_args or {})
 
     def test_the_login_lane_resumes_through_the_clis_own_flag(self):
         r1 = self.runner(); r1.start(); self.one_turn(r1); r1.stop(timeout=5)

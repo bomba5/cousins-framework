@@ -216,6 +216,12 @@ so `FRAMEWORK_ROOT` has to point at this install. Turn the hive on in
 `config/hive.toml` if it isn't, then point each node at the new queen URL.
 See [remote cousins](remote-cousins.md).
 
+## Accounts for runner cousins
+
+Existing cousins keep working with no change: a cousin that names no account runs on `host`, the host's default login in `~/.claude`, shared by every such cousin, exactly as before; a cousin with `api_key_file` runs on an implicit key account. One change is not silent: an `api_key_file` is now read as strictly as `cousin-auth`'s key file, so a key file at mode 0644, or in a directory open to group or others, now REFUSES to start (exit 2, the message names the file and the `chmod`): `chmod 600` the file and `chmod 700` its directory. Move a cousin to its own login with an `[accounts.<name>]` entry, `cousin-account login <name>` (Task 15), and `account = "<name>"` in its `cousin.toml`; a token or key account keeps its secret in `.secrets/accounts/<name>` unless `secret_file` says otherwise.
+
+See [configuration](configuration.md) for the accounts file.
+
 ## Checking it
 
 Start it, then go down this list:

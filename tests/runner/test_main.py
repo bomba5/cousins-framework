@@ -218,12 +218,30 @@ class TestAuthLane(HermeticCase):
         home = temp_home(self, runner="sdk")
         root = home.parent.parent
         (root / "config").mkdir()
-        (root / "keys").mkdir()
-        (root / "keys" / "token").write_text("sk-from-file\n")
+        (root / "keys").mkdir(); os.chmod(root / "keys", 0o700)
+        (root / "keys" / "token").write_text("sk-from-file\n"); os.chmod(root / "keys" / "token", 0o600)
         _append_agent_key(home, "keys/token")
         seen = self._capture(home)
-        self.assertEqual(seen["options_env"], {"ANTHROPIC_API_KEY": "sk-from-file"})
+        self.assertEqual(seen["options_env"], {
+            "ANTHROPIC_API_KEY": "sk-from-file",
+            "CLAUDE_CONFIG_DIR": str(root / "data" / "accounts" / "wren"),
+            "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
+
+
+class TestAccountBeforeTheLock(HermeticCase):
+    def test_a_secret_open_to_others_is_exit_2_before_the_lock(self):
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "keys").mkdir(); os.chmod(root / "keys", 0o700)
+        (root / "keys" / "token").write_text("sk-from-file\n"); os.chmod(root / "keys" / "token", 0o644)
+        _append_agent_key(home, "keys/token")
+        with mock.patch.object(runner_main, "hold_lock") as lock:
+            rc, err = _run(["--home", str(home)])
+        self.assertEqual(rc, 2)
+        lock.assert_not_called()                          # refused before the lock is taken
+        self.assertIn("chmod 600", err); self.assertNotIn("sk-from-file", err)
 
 
 class TestWorkerDeath(HermeticCase):

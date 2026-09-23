@@ -202,18 +202,23 @@ def _mode_bits(st):
     return stat.S_IMODE(st.st_mode)
 
 
-def read_key(home, key_env):
-    """The key from <home>/.secrets/api-key.env, after every check: the
-    directory 0700 and ours, the file a regular 0600 file of ours (no
-    symlink), one `<key_env>=<key>` line. Errors name the file and the
-    problem, never the content."""
-    path = key_file(home)
+class MissingFile(AuthError):
+    """A private file, or its directory, does not exist: not written yet."""
+
+
+def read_private_file(path, *, what="key file", missing_hint=""):
+    """The bytes of a private file after every check read_key has always
+    made: its directory a directory of ours with no group or other bits,
+    the file a regular file of ours with none either, opened with
+    O_NOFOLLOW (a symlink is refused). Errors name the file and the
+    problem, never the content; an absent file or directory is
+    MissingFile, so a caller can tell "not written yet" from "wrong"."""
+    path = Path(path)
     secrets = path.parent
     try:
         dst = os.lstat(secrets)
     except FileNotFoundError:
-        raise AuthError("no key file: %s does not exist (write it with"
-                        " cousin-auth <slug> --key-stdin)" % path)
+        raise MissingFile("no %s: %s does not exist%s" % (what, path, missing_hint))
     if not stat.S_ISDIR(dst.st_mode):
         raise AuthError("%s is not a directory" % secrets)
     if dst.st_uid != os.getuid():
@@ -224,8 +229,7 @@ def read_key(home, key_env):
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
-        raise AuthError("no key file: %s does not exist (write it with"
-                        " cousin-auth <slug> --key-stdin)" % path)
+        raise MissingFile("no %s: %s does not exist%s" % (what, path, missing_hint))
     except OSError as err:
         raise AuthError("cannot open %s: %s" % (path, err.strerror))
     try:
@@ -237,9 +241,18 @@ def read_key(home, key_env):
         if _mode_bits(fst) & 0o077:
             raise AuthError("%s is readable by group or others (mode %o);"
                             " chmod 600 it" % (path, _mode_bits(fst)))
-        raw = os.read(fd, 8192)
+        return os.read(fd, 8192)
     finally:
         os.close(fd)
+
+
+def read_key(home, key_env):
+    """The key from <home>/.secrets/api-key.env, after every check
+    (read_private_file), one `<key_env>=<key>` line. Errors name the file
+    and the problem, never the content."""
+    path = key_file(home)
+    raw = read_private_file(path, what="key file",
+                            missing_hint=" (write it with cousin-auth <slug> --key-stdin)")
     lines = [ln.strip() for ln in raw.decode("utf-8", "replace").splitlines()
              if ln.strip() and not ln.strip().startswith("#")]
     if not lines:

@@ -36,6 +36,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   interfaces say so, and it takes the operator-accepted review: the twelve
   unplaced parity rows placed, `max_age` as the flip cadence, phase 7 tasks
   1-2 ticked, and the order 2, 3, 4, 7(3-6), 5, 6, 7(7-8), 8, 9, 10.
+## 1.9.1 - 2026-09-23
+
+### Changed
+- `claude-opus-5-5` heads the built-in model catalogue (`DEFAULT_MODELS`),
+  probed live on five running cousins the day it was released. The spawn
+  dialog's default follows the catalogue head when `default_model` is unset.
 
 ## 1.9.0 - 2026-09-22
 

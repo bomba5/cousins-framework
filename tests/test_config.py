@@ -201,10 +201,11 @@ class TestRuntimeModelAndEffort(unittest.TestCase):
         # against the CLI; a fable [1m] id is absent on purpose because
         # the CLI silently served plain fable for it.
         from cousin_lib.config import DEFAULT_MODELS
-        for model in ("claude-fable-5-1", "claude-opus-5",
+        # claude-opus-5-5 probed live on five running cousins (2026-09-23).
+        for model in ("claude-opus-5-5", "claude-fable-5-1", "claude-opus-5",
                       "claude-opus-5[1m]", "claude-sonnet-5",
                       "claude-sonnet-5[1m]", "claude-haiku-4-5-20251001"):
             self.assertIn(model, DEFAULT_MODELS)
         self.assertNotIn("claude-fable-5-1[1m]", DEFAULT_MODELS)
-        self.assertEqual(DEFAULT_MODELS[0], "claude-opus-5")
+        self.assertEqual(DEFAULT_MODELS[0], "claude-opus-5-5")
         self.assertEqual(len(set(DEFAULT_MODELS)), len(DEFAULT_MODELS))

@@ -37,7 +37,7 @@ def normalize_scope(value):
 # The spawn dialog's catalogue when config/harness.toml [agent] sets no
 # `models`. Each id was accepted by the agent CLI; the [1m] ids are the
 # 1M-context variants. The first entry is the fallback default.
-DEFAULT_MODELS = ("claude-opus-5", "claude-opus-5[1m]", "claude-fable-5-1",
+DEFAULT_MODELS = ("claude-opus-5-5", "claude-opus-5", "claude-opus-5[1m]", "claude-fable-5-1",
                   "claude-sonnet-5", "claude-sonnet-5[1m]",
                   "claude-haiku-4-5-20251001")
 

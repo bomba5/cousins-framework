@@ -495,13 +495,36 @@ The bridge refuses to start when any of these is missing. See [telegram](telegra
 
 ### [agent] runner
 
-`runner = "sdk"` puts the cousin on `cousin-runner` (docs/design/agent-loop-runner.md)
-instead of a tmux session. Delivery then goes to the cousin's inbox
-(`data/inbox.db`) and reports `queued`. `runner = "fake"` is for tests.
-Absent: the tmux path, unchanged. `model` names the model the runner asks
-for; `api_key_file` is a path relative to the framework root whose contents
-become `ANTHROPIC_API_KEY` in the session's environment, and nothing else
-selects the auth lane.
+EXPERIMENTAL in this phase. `runner = "sdk"` puts the cousin on `cousin-runner`
+(docs/design/agent-loop-runner.md) instead of a tmux session. Use it only for a
+cousin with no loops, schedules or meetings and no deny rules in its settings
+file: the loops, schedules and meetings still deliver tmux-shaped items until
+phase 3, and the runner starts its session with no settings files and
+`bypassPermissions`, so a deny rule there is not applied until phase 3's
+`policy.toml`. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
+(and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
+cousin.toml that does not parse is also the tmux path, and `cousin-runner`
+refuses it the same way).
+
+With a runner, delivery puts a row in the cousin's inbox (`data/inbox.db`) and
+pokes it. Without waiting it reports `queued`. Waiting, it reports `delivered`
+when the runner closes the row inside the wait, `failed` when the row's turn
+failed or the row could not be stored, and `queued` when the wait ran out (the
+row is kept; do not send it again). `delivered` means the model RECEIVED the
+item, not that it answered it: the rows of an interrupted turn are delivered.
+
+`model` names the model the runner asks for. `api_key_file` is a path relative
+to the framework root whose contents become `ANTHROPIC_API_KEY` in the
+session's environment, and nothing else selects the auth lane: `cousin-runner`
+removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`
+from its own environment before the session starts, so nothing is inherited
+from the shell. With no `api_key_file` the session uses the harness login; the
+terms risk of running a cousin on the login lane is the user's.
+
+The runner waits at most 10 minutes for the next message of a turn (a stream
+gone silent fails the turn) and puts no limit on a whole turn. These are
+constructor defaults of the SDK runner (`idle_timeout_s`, `turn_timeout_s`),
+not cousin.toml keys in this phase.
 
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `chat-hooks.json` (patterns the chat

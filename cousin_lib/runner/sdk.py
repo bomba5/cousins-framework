@@ -573,6 +573,9 @@ class SdkRunner:
                                 self._live = True   # the CLI took up a carried row
                                 if row["id"] != first["id"]:
                                     self.turn.add(row)
+                        with self._lock:   # a message means the permission was settled
+                            if self.machine.state == "waiting_permission":
+                                self.machine.to("running", "message")
                         self._record(sdk, msg, echo_of=echo_of)
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1

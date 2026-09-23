@@ -453,6 +453,19 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(made["client"].interrupts, 1)
         self.assertTrue(_results(r)[-1]["interrupted"])
 
+    def test_a_message_while_waiting_permission_moves_the_machine_back_to_running(self):
+        r, made = self._runner([[init_msg(), "PAUSE", assistant(text="granted"), result()]])
+        r.start()
+        r.enqueue(self._op("needs a tool"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        with r._lock:   # what the PermissionRequest hook does mid-turn
+            r.machine.to("waiting_permission", "Bash")
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: _results(r) and r.state() == "idle"))
+        moves = [(e["payload"]["from"], e["payload"]["to"]) for e in r.events() if e["kind"] == "state"]
+        self.assertIn(("waiting_permission", "running"), moves)
+        self.assertEqual(moves[-1], ("running", "idle"))
+
     def test_a_stale_interrupt_does_not_kill_the_next_turn(self):
         r, made = self._runner([[init_msg(), result()],
                                 [assistant(text="slow"), assistant(text="more"), result()]],

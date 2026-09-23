@@ -23,6 +23,7 @@ from cousin_lib.telegram import (
     relay_outbound,
     save_cursors,
 )
+from tests._hermetic import HermeticCase
 
 
 class TelegramCase(unittest.TestCase):
@@ -555,6 +556,70 @@ class TestCli(TelegramCase):
         from cousin_lib.telegram import telegram_main
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(telegram_main([]), 2)
+
+
+class TestInboundReachesTheInbox(HermeticCase):
+    def test_a_telegram_message_is_stored_and_delivered_as_chat(self):
+        from cousin_lib import telegram
+        from cousin_lib.runner.inbox import Inbox
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n\n[operator]\nname = "Priya"\n'
+            '\n[agent]\nrunner = "fake"\n\n[telegram]\noperators = [42]\n')
+        # load_bridge_config refuses this toml (no [telegram] enabled/
+        # token_file, no [chat] port): none of those are used by the
+        # send path any more, so the dataclass is built directly rather
+        # than padding the toml with fields this test does not exercise.
+        cfg = telegram.BridgeConfig(slug="wren", token="unused",
+                                    operator_ids={42},
+                                    operator_name={42: "Priya"}, port=0,
+                                    home=home)
+        telegram._default_chat_send(cfg, user="Priya", message="from telegram")
+        rows = Inbox(home).claim(limit=5)
+        self.assertEqual([(r["source"], r["sender"], r["body"]) for r in rows],
+                         [("chat", "Priya", "from telegram")])
+        import sqlite3
+        conn = sqlite3.connect(home / "data" / "chat.db")
+        try:
+            stored = conn.execute("SELECT user, message FROM messages").fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(stored, [("Priya", "from telegram")])
+        self.assertEqual(rows[0]["message_id"], 1)
+
+    def test_a_telegram_photo_is_stored_with_an_attachment_under_chat_images(self):
+        from cousin_lib import telegram
+        from cousin_lib.runner.inbox import Inbox
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n\n[operator]\nname = "Priya"\n'
+            '\n[agent]\nrunner = "fake"\n\n[telegram]\noperators = [42]\n')
+        cfg = telegram.BridgeConfig(slug="wren", token="unused",
+                                    operator_ids={42},
+                                    operator_name={42: "Priya"}, port=0,
+                                    home=home)
+        png = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAf"
+              "FcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+        telegram._default_chat_send(cfg, user="Priya", message="[photo]",
+                                    attachment=png)
+        rows = Inbox(home).claim(limit=5)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows[0]["attachments"]), 1)
+        staged = pathlib.Path(rows[0]["attachments"][0])
+        self.assertTrue(staged.is_file())
+        self.assertEqual(staged.parent, home / "chat" / "images")
+        import sqlite3
+        conn = sqlite3.connect(home / "data" / "chat.db")
+        try:
+            kind, path = conn.execute(
+                "SELECT attachment_kind, attachment_path FROM messages"
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(kind, "image")
+        self.assertEqual(path, str(staged))
 
 
 if __name__ == "__main__":

@@ -29,7 +29,10 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from cousin_lib.config import FrameworkConfig
+from cousin_lib import chat_hooks, delivery
+from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
+                                       save_data_uri)
 
 _API = "https://api.telegram.org/bot%s/%s"
 _FILE_API = "https://api.telegram.org/file/bot%s/%s"
@@ -167,14 +170,39 @@ def load_bridge_config(home):
 
 
 def _default_chat_send(cfg, *, user, message, attachment=None):
-    body = {"user": user, "message": message}
-    if attachment:
-        body["image"] = attachment  # a data: URI, decoded by the server
-    request = urllib.request.Request(
-        "http://127.0.0.1:%d/api/send" % cfg.port,
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(request, timeout=10)
+    """Store the row and ride `deliver()`, same as the chat server's own
+    /api/send: the chat server is no longer in this path. `attachment`
+    is a data: URI (as relay_inbound built it); it is decoded to
+    <home>/chat/images/ and the row carries its path, the one
+    convention the console and the outbound relay both read."""
+    path = save_data_uri(cfg.home, attachment, folder="images") \
+        if attachment else None
+    store = ChatStore(cfg.home / "data" / "chat.db")
+    try:
+        row = store.add_message(
+            chat_user=normalize_chat_user(user), user=user, message=message,
+            msg_type="user",
+            attachment_kind="image" if path else None,
+            attachment_path=str(path) if path else None,
+        )
+    finally:
+        store.close()
+    config = CousinConfig.load(cfg.home)
+
+    def deliver(*, user, message, message_id, attachments=()):
+        source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"
+        thread = (delivery.thread_id("system") if source == "hook"
+                 else delivery.thread_for_chat(config, user))
+        item = delivery.Item(thread_id=thread, source=source, sender=user,
+                             body=message, attachments=tuple(attachments),
+                             message_id=message_id)
+        return delivery.deliver(cfg.home, item, wait=False)
+
+    deliver(user=user, message=message, message_id=row["id"],
+           attachments=(str(path),) if path else ())
+    chat_hooks.on_message(cfg.home, user=user, message=message,
+                          message_id=row["id"], slug=cfg.slug,
+                          deliver=deliver)
 
 
 def _default_log(line):

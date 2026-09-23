@@ -10,11 +10,8 @@ the tmux injector in production) and `guard` (the network allowlist).
 allows everything, which only test harnesses should do.
 """
 import argparse
-import base64
-import binascii
 import json
 import os
-import re
 import shutil
 import sys
 import threading
@@ -26,7 +23,8 @@ from cousin_lib import chat_hooks, corrections, delivery, memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError)
 from cousin_lib.server.netguard import NetGuard
-from cousin_lib.server.storage import ChatStore, normalize_chat_user
+from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
+                                       save_data_uri)
 
 
 class _BadRequest(Exception):
@@ -38,10 +36,6 @@ class StartupError(Exception):
     port, or an absent tmux binary are startup errors, not per-message
     log lines."""
 
-
-# Extensions the inbox writes as-is; anything else is normalized to .bin
-# so a crafted subtype cannot choose an arbitrary filename suffix.
-_INBOX_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 # What <home>/www may serve, with the content type each maps to. An
 # allowlist rather than a denylist: a file type nobody thought about is a
@@ -64,24 +58,10 @@ def persist_inbound_file(home, message_id, data_uri):
     """Decode an inbound data: image to <home>/chat/inbound/<id>.<ext> and
     return the delivery marker for it. The terminal line cannot carry
     megabytes of base64; the file is the handoff."""
-    m = re.match(r"data:image/([a-zA-Z0-9.+-]+);base64,(.*)$",
-                 data_uri, re.S)
-    if m:
-        try:
-            payload = base64.b64decode(m.group(2), validate=True)
-        except (ValueError, binascii.Error):
-            payload = None
-    else:
-        payload = None
-    if payload is None:
+    path = save_data_uri(home, data_uri, folder="inbound",
+                         name=str(message_id))
+    if path is None:
         return "[image attached, decode failed]"
-    ext = m.group(1).lower()
-    if ext not in _INBOX_EXTENSIONS:
-        ext = "bin"
-    inbox = home / "chat" / "inbound"
-    inbox.mkdir(parents=True, exist_ok=True)
-    path = inbox / ("%d.%s" % (message_id, ext))
-    path.write_bytes(payload)
     return "[image attached -> Read %s]" % path
 
 

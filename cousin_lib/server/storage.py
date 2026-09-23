@@ -5,7 +5,11 @@ declared at creation - there is no migration dance and no dual id space.
 WAL mode keeps readers unblocked during writes; the small autocheckpoint
 keeps the WAL from growing unbounded across restarts.
 """
+import base64
+import binascii
+import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from cousin_lib.sqlite_util import add_column
@@ -18,6 +22,47 @@ def normalize_chat_user(name):
     if not name:
         return "unknown"
     return name.lower().replace(" ", "_")
+
+
+# Extensions written as-is; anything else normalizes to .bin so a
+# crafted subtype cannot choose an arbitrary filename suffix.
+_DATA_URI_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+_DATA_URI_RE = re.compile(r"data:image/([a-zA-Z0-9.+-]+);base64,(.*)$",
+                          re.S)
+
+
+def decode_data_uri(data_uri):
+    """(bytes, ext) for a `data:image/<ext>;base64,<payload>` URI, or
+    (None, None) when it does not parse or decode. `ext` is normalized
+    to one of the known image kinds, else `bin`."""
+    m = _DATA_URI_RE.match(data_uri or "")
+    if not m:
+        return None, None
+    try:
+        payload = base64.b64decode(m.group(2), validate=True)
+    except (ValueError, binascii.Error):
+        return None, None
+    ext = m.group(1).lower()
+    if ext not in _DATA_URI_EXTENSIONS:
+        ext = "bin"
+    return payload, ext
+
+
+def save_data_uri(home, data_uri, *, folder="images", name=None):
+    """Decode a data: image URI to <home>/chat/<folder>/<name>.<ext> and
+    return the Path, or None when it does not decode. `name` defaults to
+    a fresh id; a caller with a natural one (a message row) passes it,
+    so the file can be found again from the row alone."""
+    payload, ext = decode_data_uri(data_uri)
+    if payload is None:
+        return None
+    stem = name if name is not None else uuid.uuid4().hex[:12]
+    target_dir = Path(home) / "chat" / folder
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = target_dir / ("%s.%s" % (stem, ext))
+    path.write_bytes(payload)
+    return path
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (

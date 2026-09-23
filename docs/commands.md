@@ -75,7 +75,11 @@ must be positive). Exit 0 done, 4 the flow failed (the line says why, in
 the CLI's own words when it gave any), 2 refused (inside a cousin, no
 terminal, an unknown account, a `--via` cousin that is missing or has no
 operator). `login host` re-logs the host's own login in `~/.claude` and says
-so first.
+so first. The login lane is every `claude-login` account (`host` and each
+named one) and every `claude-token` account (a long-lived subscription token
+from `claude setup-token`): putting a subscription's credentials into the
+framework with `login` or `token` carries the same terms risk as running a
+cousin on the login lane at all, and it is the user's.
 
 ```
 cousin-account login fleet --via wren
@@ -84,7 +88,12 @@ cousin-account token nightly --via wren
 
 `cousin-flip` ends the cousin's current generation and starts the next one on
 a fresh session with a boot packet. `--dry-run` runs the checks only;
-`--confirm` asks the new generation to post one line when it is oriented.
+`--confirm` asks the new generation to post one line when it is oriented. On
+a runner cousin (`[agent] runner`), `cousin-flip` is a rollover: it puts (or
+joins) the pending `flip` row on the running `cousin-runner` and waits for
+the handoff, the same path context pressure or the daily cadence uses. It
+refuses a stopped runner cousin (start it first): a rollover needs a runner
+to carry it out.
 
 ```
 cousin-flip wren --dry-run
@@ -128,7 +137,11 @@ cousin-cycle inc --action "shipped the weekly report"
 ```
 
 `cousin-runner` runs a cousin on the runner instead of a tmux session: the
-inbox is the bus and the wake socket is the doorbell, no port. It runs until
+inbox is the bus and the wake socket is the doorbell, no port. At start it
+resumes the session saved in `data/runner-session.json`, falling back to a
+fresh session carrying the state digest as its first message when it cannot
+(no saved session, or the CLI does not recognise the saved one: a
+`resume_failed` event either way, never a crash). It runs until
 SIGTERM or SIGINT, then stops the runner with a 30 second timeout. `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or
 SIGINT, or when the runner gives up. `--runner sdk|fake` overrides the

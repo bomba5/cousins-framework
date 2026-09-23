@@ -65,7 +65,16 @@ curl -s localhost:8611/api/send -H 'Content-Type: application/json' \
 
 Body: `user` and a non-empty `message` (both required), plus optional `reply_to` (any JSON) and `image` (a `data:image/<type>;base64,...` URI). Answers `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored. It doesn't wait for the terminal.
 
-What happens, in order:
+Before any of that, every send path checks whether the message is a login
+code a running `cousin-account login|token --via <this cousin>` is waiting
+on (R18). When it is, `/api/send` answers `200 {"ok": true, "id", "timestamp",
+"diverted": true}` and delivers nothing: no recall, no presence marker, no
+chat hook ever sees it. The row stored in `chat.db` is a redaction line
+(`[login code received for account <name>]`, or, for a second or late code,
+`[a late login code for account <name> was discarded: ...]`), never the code
+itself.
+
+What happens on an ordinary (non-diverted) send, in order:
 
 1. The row is stored (`type: "user"`, thread = `user`).
 2. If `user` is you (`[operator] name`), the message is checked for corrections ("stop", "don't", "instead", ...) and any hit goes to `data/corrections.jsonl`. Failures here never fail the send.

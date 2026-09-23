@@ -14,6 +14,13 @@ _IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"
 CONTEXT_MARK = "--- context (not the sender's words) ---"
 
 
+def _image_type(path):
+    """Return the media type if path has an image suffix and is a file, else None."""
+    path = Path(str(path))
+    media = _IMAGE_TYPES.get(path.suffix.lower())
+    return media if media and path.is_file() else None
+
+
 def _header(item, now):
     now = now or datetime.now(timezone.utc)
     return "[%s] %s from %s at %s" % (
@@ -32,8 +39,8 @@ def _attachment_blocks(item):
     blocks = []
     for raw in item.attachments:
         path = Path(str(raw))
-        media = _IMAGE_TYPES.get(path.suffix.lower())
-        if media and path.is_file():
+        media = _image_type(path)
+        if media:
             data = base64.b64encode(path.read_bytes()).decode("ascii")
             blocks.append({"type": "image",
                            "source": {"type": "base64", "media_type": media,
@@ -45,7 +52,7 @@ def _attachment_blocks(item):
 
 def render(item, *, now=None):
     text = _text(item, now)
-    names = ["[image: %s]" % Path(str(a)).name if _IMAGE_TYPES.get(Path(str(a)).suffix.lower())
+    names = ["[image: %s]" % Path(str(a)).name if _image_type(a)
              else "[attachment: %s]" % Path(str(a)).name for a in item.attachments]
     return text + ("\n" + "\n".join(names) if names else "")
 

@@ -64,6 +64,16 @@ class TestRenderMessage(HermeticCase):
         self.assertEqual([b["type"] for b in blocks], ["text", "text"])
         self.assertIn("report.pdf", blocks[1]["text"])
 
+    def test_an_image_suffix_without_a_file_is_an_attachment_not_an_image(self):
+        item = Item("operator:priya", "chat", "see", attachments=("/tmp/missing.png",))
+        text = envelope.render(item, now=NOW)
+        self.assertIn("[attachment: missing.png]", text)
+        self.assertNotIn("[image:", text)
+        msg = envelope.render_message(item, now=NOW)
+        blocks = msg["message"]["content"]
+        self.assertEqual([b["type"] for b in blocks], ["text", "text"])
+        self.assertIn("missing.png", blocks[1]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

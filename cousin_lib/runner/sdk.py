@@ -730,10 +730,14 @@ class SdkRunner:
             self.stream.append("usage", {k: row[k] for k in ("cost_usd", "estimate", "total",
                                                              "error") if k in row})
         sid = self._resume_id
-        store = getattr(self, "session_store", None)
-        if not sid or store is None:
-            return      # no session named yet, or no store to mine
+        if not sid:
+            return      # no session named yet: nothing to mine
         payload = {"session_id": sid, "turn": self._turn_seq}
+        store = getattr(self, "session_store", None)
+        if store is None:
+            # visible in the stream, never a silent stop of extraction
+            self.stream.append("extract", dict(payload, written=0, skipped="no session store"))
+            return
         try:
             payload["written"] = await asyncio.to_thread(
                 extract.mine_turn, self.home, sid, self._turn_seq, store=store)

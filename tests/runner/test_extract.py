@@ -105,14 +105,17 @@ class TestRunnerWiring(HermeticCase):
     """The runner mines after each result, off the loop, and a failing
     extraction is an `extract` event, never a failed turn."""
 
-    def _run(self, store):
+    def _run(self, store, attach=True):
         from cousin_lib.delivery import Item
         from cousin_lib.runner.sdk import SdkRunner
         from tests.runner.test_sdk import ScriptedClient, _wait, assistant, init_msg, result
         home = self.home
         r = SdkRunner(home, client_factory=lambda o: ScriptedClient(
             o, [[init_msg(session="sess-0009"), assistant(text="ok"), result(session="sess-0009")]]))
-        r.session_store = store
+        if attach:
+            r.session_store = store
+        else:
+            r.__dict__.pop("session_store", None)   # a construction path that set none
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         rec = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
@@ -136,6 +139,11 @@ class TestRunnerWiring(HermeticCase):
             def entries_after(self, *a, **k):
                 raise OSError("disk gone")
         self.assertEqual(self._run(Broken())[0]["written"], -1)
+
+    def test_a_runner_without_a_store_says_it_skipped(self):
+        events = self._run(None, attach=False)
+        self.assertEqual(events, [{"session_id": "sess-0009", "turn": 1, "written": 0,
+                                   "skipped": "no session store"}])
 
 
 class TestTranscriptMineSplit(HermeticCase):

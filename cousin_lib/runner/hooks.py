@@ -11,7 +11,8 @@ A hook never raises into the SDK: the failure becomes a `hook` event.
 | SubagentStop                    | recorder (background agent close)         |
 | UserPromptSubmit                | recall -> additionalContext, `recall`     |
 | Stop                            | session checkpoint, `checkpoint`          |
-| PreCompact                      | pre-compact checkpoint, `checkpoint`      |
+| PreCompact                      | pre-compact checkpoint, `checkpoint`;     |
+|                                 | then a rollover request (request_rollover) |
 | Notification, PermissionRequest | `permission`; running -> waiting_permission |
 
 The CLI runs every PreToolUse callback that matches a call
@@ -73,7 +74,8 @@ def default_recall(home):
 
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
-              checkpoints=None, body_for_prompt=None, lock=None, policy=None):
+              checkpoints=None, body_for_prompt=None, lock=None, policy=None,
+              request_rollover=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -92,7 +94,10 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     `gate`, and the recorder's PreToolUse step records only a call
     `gate` allows (the CLI runs both callbacks concurrently, so neither
     can count on the other having run). `build_hooks` splits that key
-    on `":"` and puts it at the head of the event's matcher list."""
+    on `":"` and puts it at the head of the event's matcher list.
+    request_rollover: a callable(reason); PreCompact calls it once, after
+    its checkpoint, so a compaction the CLI is about to do becomes a
+    rollover at the next turn boundary. Run on a worker thread."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home)
@@ -172,6 +177,8 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     async def on_precompact(payload):
         path = await asyncio.to_thread(cp.write_pre_compact_checkpoint, home, slug=slug)
         stream.append("checkpoint", {"kind": "pre_compact", "path": str(path)})
+        if request_rollover is not None:
+            await asyncio.to_thread(request_rollover, "pre-compact")
         return {"systemMessage": "Context compaction imminent - checkpoint written to %s"
                                  % path.relative_to(home)}
 

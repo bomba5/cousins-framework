@@ -120,11 +120,12 @@ class TestFakeRunner(HermeticCase):
         r.start(); r.stop(timeout=5); r.stop(timeout=5)
         self.assertEqual(r.state(), "stopped")
 
-    def test_rollover_declares_itself_not_implemented_in_this_phase(self):
+    def test_rollover_on_a_runner_not_started_is_an_honest_no_and_a_durable_row(self):
         r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5))
         out = r.rollover("test")
         self.assertEqual(out["ok"], False)
-        self.assertIn("phase 4", out["reason"])
+        self.assertIn("not running", out["reason"])
+        self.assertEqual(r.inbox.get(out["inbox_id"])["state"], "queued")
 
     def test_a_turn_that_raises_is_recorded_and_the_runner_keeps_going(self):
         r = _RaisesOnceRunner(self.home)

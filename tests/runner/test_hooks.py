@@ -14,6 +14,7 @@ from cousin_lib.runner.envelope import CONTEXT_MARK
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
 from tests._hermetic import HermeticCase
+from tests.runner._home import temp_home
 
 
 def _home(case):
@@ -334,6 +335,23 @@ class TestBuildHooks(HooksCase):
             self.assertIn(ev, table); self.assertTrue(table[ev][0].hooks)
         self.assertEqual(table["PreToolUse"][0].matcher, "Agent|Task|Bash")
         self.assertIsNone(table["PostToolUse"][0].matcher)
+
+
+class TestPreCompactRequestsARollover(HermeticCase):
+    def test_precompact_writes_its_checkpoint_and_requests_once(self):
+        import asyncio
+        from cousin_lib.runner import hooks
+        from cousin_lib.runner.state import StateMachine
+        from cousin_lib.runner.stream import EventStream
+        home = temp_home(self); asked = []
+        table = hooks.callbacks(home, slug="wren", root=home.parent.parent, machine=StateMachine(),
+                                stream=EventStream(home, "t"), recall=lambda body: (None, 0),
+                                request_rollover=asked.append)
+        out = asyncio.run(table["PreCompact"]({"hook_event_name": "PreCompact", "trigger": "auto",
+                                               "session_id": "s", "transcript_path": "/dev/null",
+                                               "cwd": str(home)}, None, {}))
+        self.assertEqual(asked, ["pre-compact"])
+        self.assertIn("checkpoint written", out["systemMessage"])
 
 
 if __name__ == "__main__":

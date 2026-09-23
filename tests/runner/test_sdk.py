@@ -76,6 +76,9 @@ def _compile(turn):
             out.append(_Marker(el))
         elif isinstance(el, tuple) and el and el[0] == "SLOW":
             out.append(_Marker("SLOW", float(el[1])))
+        elif isinstance(el, tuple) and el and el[0] == "CALL":
+            marker = _Marker("CALL"); marker.fn = el[1]   # the model calling an in-process tool
+            out.append(marker)
         else:
             out.append(el)
     return out
@@ -111,6 +114,8 @@ class ScriptedClient:
                            a result follows
       "END"                the CLI died: this and every later read ends with
                            no ResultMessage
+      ("CALL", fn)         calls fn() when the reader reaches it (a tool the
+                           model calls), then the stream continues
     Anything inserted ahead of a marker being waited on is yielded first.
     `delay` seconds before every element lets a test poke mid-turn."""
 
@@ -193,6 +198,10 @@ class ScriptedClient:
                 await asyncio.sleep(self.delay)
             head = self.stream[0]
             if isinstance(head, _Marker):
+                if head.kind == "CALL":
+                    self._remove(head)
+                    head.fn()
+                    continue
                 if head.kind == "END":
                     self.ended = True
                     return

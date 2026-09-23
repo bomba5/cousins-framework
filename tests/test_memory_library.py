@@ -107,8 +107,11 @@ class TestRecallAndActivity(HermeticCase):
 class TestCliStillWorks(HermeticCase):
     def test_the_cli_decide_calls_the_library(self):
         home = _home(self)
-        rc = memory.memory_main(["--home", str(home), "decide", "t", "d", "w"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = memory.memory_main(["--home", str(home), "decide", "t", "d", "w"])
         self.assertEqual(rc, 0)
+        self.assertIn("Decision logged", out.getvalue())
         self.assertTrue((home / "data" / "decisions.jsonl").exists())
 
     def test_recall_is_byte_identical_to_the_old_cli(self):

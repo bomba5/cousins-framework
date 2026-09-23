@@ -51,18 +51,22 @@ class TestScheduleLibrary(HermeticCase):
             schedule.add("wren", "in 5m", "   ")
 
     def test_the_cli_add_still_works(self):
-        rc = schedule.schedule_main(["add", "in 10m", "water the plant"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = schedule.schedule_main(["add", "in 10m", "water the plant"])
         self.assertEqual(rc, 0)
+        self.assertIn("scheduled #1 for wren", out.getvalue())
         self.assertEqual(len(schedule.list_entries("wren")), 1)
 
     def test_list_all_is_byte_identical_to_the_old_cli(self):
         # Fixed future ISO timestamps: deterministic regardless of when
         # this test runs (no "in Nm" wall-clock dependency).
-        schedule.schedule_main(["add", "2030-01-01T10:00:00", "water the plant"])
-        schedule.schedule_main(["add", "2030-01-01T11:00:00",
-                                "check the build and make sure everything"
-                                " still compiles cleanly on CI"])
-        schedule.schedule_main(["add", "2030-01-01T12:00:00", "short"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            schedule.schedule_main(["add", "2030-01-01T10:00:00", "water the plant"])
+            schedule.schedule_main(["add", "2030-01-01T11:00:00",
+                                    "check the build and make sure everything"
+                                    " still compiles cleanly on CI"])
+            schedule.schedule_main(["add", "2030-01-01T12:00:00", "short"])
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             rc = schedule.schedule_main(["list", "--all"])

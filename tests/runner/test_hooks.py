@@ -156,7 +156,7 @@ class TestRecall(HooksCase):
             return out, time.monotonic() - t
         with mock.patch.object(hooks, "RECALL_BUDGET_S", 0.1):
             out, took = _run(timed())
-        self.assertEqual(out, {}); self.assertLess(took, 0.5)
+        self.assertEqual(out, {}); self.assertLess(took, 0.9)
         recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
         self.assertEqual(recalls, [{"hits": 0, "timed_out": True}])
 

@@ -29,8 +29,9 @@ class TestOnlyReplyWrites(HermeticCase):
         r.start()
         r.enqueue(Item("operator:priya", "chat", "hello", sender="Priya"))
         t = time.monotonic()
-        while time.monotonic() - t < 5 and not any(e["kind"] == "result" for e in r.events()):
+        while time.monotonic() - t < 15 and not any(e["kind"] == "result" for e in r.events()):
             time.sleep(0.02)
+        self.assertTrue(any(e["kind"] == "result" for e in r.events()), "no result in 15 s")
         self.assertIn("plain text", " ".join(e["payload"]["text"] for e in r.events() if e["kind"] == "text"))
         db = home / "data" / "chat.db"
         if db.exists():

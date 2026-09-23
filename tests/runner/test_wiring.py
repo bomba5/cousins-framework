@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
 from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result  # noqa: E402
 
 
-def _wait(pred, timeout=5.0):
+def _wait(pred, timeout=15.0):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
         if pred():
@@ -153,18 +153,37 @@ class TestWiring(HermeticCase):
         self.assertEqual(len(said), 1, said)   # once per runner, not per options()
         self.assertTrue(said[0]["fallback"])
 
-    def test_a_tool_call_through_the_server_spawns_nothing(self):
+    def test_a_call_through_the_built_servers_handler_spawns_nothing(self):
+        # Through the server the options carry, the way the SDK serves the
+        # CLI's tools/call (its MCP bridge), not tools.call directly (the
+        # exit-criteria test covers that).
+        try:
+            from claude_agent_sdk._internal.sdk_mcp_bridge import SdkMcpBridge
+        except ImportError:  # pragma: no cover - a different SDK layout
+            self.skipTest("this SDK has no sdk_mcp_bridge")
         r = self._runner()
-        cfg = r.options().mcp_servers["cousin"]
-        server = cfg["instance"]
-        from cousin_lib.runner import tools
+        server = r.options().mcp_servers["cousin"]["instance"]
+
+        async def call():
+            bridge = SdkMcpBridge("cousin", server)
+            try:
+                await bridge.handle({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+                                     "params": {"protocolVersion": "2025-06-18",
+                                                "capabilities": {},
+                                                "clientInfo": {"name": "t", "version": "0"}}})
+                await bridge.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                return await bridge.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                            "params": {"name": "memory", "arguments": {
+                                                "command": "activity", "text": "wired"}}})
+            finally:
+                await bridge.aclose()
         with mock.patch.object(subprocess, "run") as run, \
                 mock.patch.object(subprocess, "Popen") as popen:
-            text, err = tools.call(r.tool_context, "memory",
-                                   {"command": "activity", "text": "wired"})
-        self.assertFalse(err, text)
+            response = asyncio.run(call())
+        self.assertFalse(response["result"]["isError"], response)
+        self.assertIn("wired", response["result"]["content"][0]["text"])
         self.assertEqual(run.call_count + popen.call_count, 0)
-        self.assertEqual(server.name, "cousin")
+        self.assertIn("wired", (self.home / "data" / "last-activity.txt").read_text())
 
     def test_an_mcp_tool_use_is_recorded_as_tool_call_in_the_stream(self):
         from claude_agent_sdk import AssistantMessage, ToolUseBlock

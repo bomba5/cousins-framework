@@ -243,24 +243,29 @@ class TestFireShell(HooksCase):
 
 
 class TestOnMessageToTheInbox(HermeticCase):
-    def test_an_inject_hook_puts_exactly_one_row_with_source_hook(self):
-        from cousin_lib import chat_hooks, delivery
+    def test_an_inject_hook_rides_the_send_paths_own_delivery_after_the_message(self):
+        # The production closure, not a stand-in: the Telegram bridge's
+        # runner lane stores the message, delivers it, then fires the
+        # home's hooks through the same deliver seam.
+        from cousin_lib import telegram
         from cousin_lib.runner.inbox import Inbox
         from tests.runner._home import temp_home
         home = temp_home(self, runner="fake")
         (home / "chat-hooks.json").write_text(json.dumps([
-            {"pattern": "(?i)price check", "user": "*", "handler": "inject:[fw-hook] quote the tariff"}]))
-        sent = []
-        def deliver(*, user, message, message_id, attachments=()):
-            item = delivery.Item(thread_id=delivery.thread_id("system"), source="hook",
-                                 sender=user, body=message, message_id=message_id)
-            sent.append(delivery.deliver(home, item, wait=False))
-        matched = chat_hooks.on_message(home, user="Priya", message="price check please",
-                                        message_id=7, slug="wren", deliver=deliver)
-        self.assertEqual(len(matched), 1)
+            {"pattern": "(?i)price check", "user": "*",
+             "handler": "inject:[fw-hook] quote the tariff"}]))
+        cfg = telegram.BridgeConfig(slug="wren", token="unused", operator_ids={42},
+                                    operator_name={42: "Sam"}, port=0, home=home)
+        telegram._default_chat_send(cfg, user="Sam", message="price check please")
         rows = Inbox(home).claim(limit=5)
-        self.assertEqual([(r["source"], r["message_id"]) for r in rows], [("hook", 7)])
-        self.assertIn("quote the tariff", rows[0]["body"])
+        self.assertEqual([(r["source"], r["sender"]) for r in rows],
+                         [("chat", "Sam"), ("hook", chat_hooks.HOOK_SENDER)])
+        chat_row, hook_row = rows
+        self.assertEqual(chat_row["body"], "price check please")
+        self.assertEqual(hook_row["thread_id"], "system")
+        self.assertEqual(hook_row["message_id"], chat_row["message_id"])
+        self.assertIsNotNone(chat_row["message_id"])
+        self.assertIn("quote the tariff", hook_row["body"])
 
     def test_no_match_puts_nothing(self):
         from cousin_lib import chat_hooks

@@ -493,6 +493,16 @@ Exactly one of `interval_seconds`, `daily_at` and `cron`. See
 
 The bridge refuses to start when any of these is missing. See [telegram](telegram.md).
 
+### [agent] runner
+
+`runner = "sdk"` puts the cousin on `cousin-runner` (docs/design/agent-loop-runner.md)
+instead of a tmux session. Delivery then goes to the cousin's inbox
+(`data/inbox.db`) and reports `queued`. `runner = "fake"` is for tests.
+Absent: the tmux path, unchanged. `model` names the model the runner asks
+for; `api_key_file` is a path relative to the framework root whose contents
+become `ANTHROPIC_API_KEY` in the session's environment, and nothing else
+selects the auth lane.
+
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `chat-hooks.json` (patterns the chat
 server reacts to, see [chat](chat.md)) and `.secrets/api-key.env` (the key for

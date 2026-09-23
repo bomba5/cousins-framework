@@ -87,6 +87,18 @@ packet reads. Subcommands: `state [--json]`, `inc --start|--end|--action X`,
 cousin-cycle inc --action "shipped the weekly report"
 ```
 
+`cousin-runner` runs a cousin on the runner instead of a tmux session: the
+inbox is the bus and the wake socket is the doorbell, no port. It runs until
+SIGTERM or SIGINT, then stops the runner with a 30 second timeout; `--once`
+drains the inbox and exits instead of running forever; `--runner sdk|fake`
+overrides the cousin's `[agent] runner`. See
+[agent-loop-runner](design/agent-loop-runner.md).
+
+```
+cousin-runner --home cousins/wren
+cousin-runner --home cousins/wren --once
+```
+
 ## Memory
 
 `cousin-memory` is the cousin's memory tool. Subcommands:

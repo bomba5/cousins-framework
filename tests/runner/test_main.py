@@ -359,5 +359,52 @@ class TestPolicyAtStart(HermeticCase):
         apply.assert_not_called()
 
 
+class TestIsRunning(HermeticCase):
+    def test_is_running_is_false_with_no_lock_file(self):
+        home = temp_home(self, runner="fake")
+        self.assertFalse(runner_main.is_running(home))
+
+    def test_is_running_is_true_while_a_runner_holds_the_lock(self):
+        home = temp_home(self, runner="fake")
+        lock = home / "run" / "runner.lock"
+        holder = ("import fcntl, os, sys, time\n"
+                  "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"
+                  "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+                  "print('locked', flush=True)\n"
+                  "time.sleep(30)\n")
+        with subprocess.Popen([sys.executable, "-c", holder, str(lock)],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
+            try:
+                self.assertEqual(proc.stdout.readline(), b"locked\n")
+                self.assertTrue(runner_main.is_running(home))
+            finally:
+                proc.kill()
+                proc.wait(5)
+        self.assertFalse(runner_main.is_running(home))
+
+    def test_is_running_releases_the_lock_it_takes(self):
+        home = temp_home(self, runner="fake")
+        # a probe that leaked its own lock would make the real runner
+        # below refuse, exactly like a second runner would
+        self.assertFalse(runner_main.is_running(home))
+        rc, _ = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0)
+
+
+class TestHoldLock(HermeticCase):
+    def test_hold_lock_is_visible_to_is_running(self):
+        home = temp_home(self, runner="fake")
+        with runner_main.hold_lock(home):
+            self.assertTrue(runner_main.is_running(home))
+        self.assertFalse(runner_main.is_running(home))
+
+    def test_a_second_runner_is_still_refused_while_hold_lock_is_held(self):
+        home = temp_home(self, runner="fake")
+        with runner_main.hold_lock(home):
+            rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("runner.lock", err)
+
+
 if __name__ == "__main__":
     unittest.main()

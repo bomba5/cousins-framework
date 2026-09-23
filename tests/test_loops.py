@@ -669,3 +669,25 @@ class TestIndexRefresh(unittest.TestCase):
         self.assertEqual(self.seen, ["/h/toki"])
         self.assertEqual(report["indexed"][0][0], "wren")
         self.assertIn("error", report["indexed"][0][1])
+
+
+class TestDefaultIsAliveForARunnerCousin(unittest.TestCase):
+    def test_default_is_alive_for_a_runner_cousin_reads_the_lock(self):
+        import pathlib
+        import tempfile
+
+        from cousin_lib import loops
+        from cousin_lib.runner import main as runner_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            home = root / "cousins" / "wren"
+            home.mkdir(parents=True)
+            (home / "cousin.toml").write_text(
+                '[cousin]\nslug = "wren"\nname = "Wren"\n[chat]\nport = 8100\n'
+                '\n[agent]\nrunner = "fake"\n')
+            with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+                with mock.patch.object(runner_main, "is_running", return_value=True):
+                    self.assertTrue(loops._default_is_alive("wren"))
+                with mock.patch.object(runner_main, "is_running", return_value=False):
+                    self.assertFalse(loops._default_is_alive("wren"))

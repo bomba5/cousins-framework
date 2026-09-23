@@ -495,13 +495,23 @@ The bridge refuses to start when any of these is missing. See [telegram](telegra
 
 ### [agent] runner
 
-EXPERIMENTAL in this phase. `runner = "sdk"` puts the cousin on `cousin-runner`
-(docs/design/agent-loop-runner.md) instead of a tmux session. Use it only for a
-cousin with no loops, schedules or meetings and no deny rules in its settings
-file: the loops, schedules and meetings still deliver tmux-shaped items until
-phase 3, and the runner starts its session with no settings files and
-`bypassPermissions`, so a deny rule there is not applied until phase 3's
-`policy.toml`. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
+`runner = "sdk"` puts the cousin on `cousin-runner`
+(docs/design/agent-loop-runner.md) instead of a tmux session. Chat, schedules,
+loops and meetings all reach it the same way now: each producer hands its item
+to the delivery facade and reads back `delivery.accepted(outcome, home)` (a
+durable inbox put is acceptance, `delivered` or a runner's `queued` row, never
+a bare `failed`) and, where it needs to know whether the cousin is up,
+`delivery.is_alive(home)` (a runner cousin's answer is whether a runner holds
+its lock; a tmux cousin's is unchanged, tmux `has-session` or the chat port).
+This is no longer experimental for those four producers. It stays ahead of
+phase 4 (the composed prompt) and phase 5 (the console's views): a runner
+cousin's prompt is not yet composed the way a tmux cousin's is, and the
+console has no view of a runner's inbox or stream. The runner starts its
+session with no settings files and `bypassPermissions`; `policy.toml`
+(`deny_tools`, `deny_bash_patterns`, `ask`, `outbound_filter`) is what stands
+in for a settings file's deny rules, read once at start and enforced as the
+first `PreToolUse` hook, and a malformed one is a config error, exit 2, naming
+the key. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
 (and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
 cousin.toml that does not parse is also the tmux path, and `cousin-runner`
 refuses it the same way).

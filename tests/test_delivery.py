@@ -459,5 +459,26 @@ class TestMalformedCousinToml(HermeticCase):
         self.assertIn("cousin.toml", stderr.getvalue())
 
 
+class TestProducerContracts(HermeticCase):
+    def test_a_queued_outcome_is_accepted_once_for_a_runner_cousin(self):
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        self.assertTrue(delivery.accepted(delivery.QUEUED, home))
+        self.assertTrue(delivery.accepted(delivery.DELIVERED, home))
+        self.assertFalse(delivery.accepted(delivery.FAILED, home))
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+        self.assertFalse(delivery.accepted(delivery.QUEUED, home))   # tmux: queued is a menu, retry
+
+    def test_is_alive_reads_the_runner_lock_for_a_runner_cousin(self):
+        from tests.runner._home import temp_home
+        from cousin_lib.runner import main as runner_main
+        home = temp_home(self, runner="fake")
+        self.assertFalse(delivery.is_alive(home, fallback=lambda: True))
+        with runner_main.hold_lock(home):           # a context manager main.py exposes for tests
+            self.assertTrue(delivery.is_alive(home, fallback=lambda: False))
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+        self.assertTrue(delivery.is_alive(home, fallback=lambda: True))
+
+
 if __name__ == "__main__":
     unittest.main()

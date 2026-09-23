@@ -1046,19 +1046,27 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
 
 
 def _default_is_alive(slug):
-    """Liveness = the cousin's chat server answers on its port; a
-    lingering pane with a dead server must not receive fires."""
+    """Liveness for a tmux cousin = its chat server answers on its port
+    (a lingering pane with a dead server must not receive fires); for a
+    runner cousin, delivery.is_alive reads the runner's lock instead and
+    never opens the port."""
     import socket
 
-    try:
-        config = CousinConfig.load(
-            FrameworkConfig.from_env().root / "cousins" / slug)
-        with socket.create_connection(
-                ("127.0.0.1", config.require_chat_port()),
-                timeout=1.5):
-            return True
-    except Exception:
-        return False
+    from cousin_lib import delivery
+
+    def _chat_port_open():
+        try:
+            config = CousinConfig.load(
+                FrameworkConfig.from_env().root / "cousins" / slug)
+            with socket.create_connection(
+                    ("127.0.0.1", config.require_chat_port()),
+                    timeout=1.5):
+                return True
+        except Exception:
+            return False
+
+    home = FrameworkConfig.from_env().root / "cousins" / slug
+    return delivery.is_alive(home, fallback=_chat_port_open)
 
 
 def _default_deliver(slug, text):
@@ -1067,9 +1075,10 @@ def _default_deliver(slug, text):
     home = FrameworkConfig.from_env().root / "cousins" / slug
     item = delivery.Item(thread_id=delivery.thread_id("loop", "daemon"),
                          source="loop", body=text)
-    # Anything but DELIVERED (skipped at a menu, or failed) is not a
-    # delivery: the caller keeps the beat or prompt due.
-    return delivery.deliver(home, item) == delivery.DELIVERED
+    # Anything the deliverer does not accept (skipped at a menu, failed,
+    # or a queued row for a tmux cousin) is not a delivery: the caller
+    # keeps the beat or prompt due.
+    return delivery.accepted(delivery.deliver(home, item), home)
 
 
 def loops_main(argv=None):

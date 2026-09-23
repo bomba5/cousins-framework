@@ -11,6 +11,7 @@ or `--once` found it `errored` for longer than ERRORED_GIVE_UP_S), so a
 supervisor restarts it.
 """
 import argparse
+import contextlib
 import fcntl
 import os
 import signal
@@ -92,11 +93,13 @@ def runner_for(home, *, kind=None):
                          model=agent.get("model"), policy=policy)
 
 
-def _lock(home):
+@contextlib.contextmanager
+def hold_lock(home):
     """One runner per cousin: an exclusive flock on <home>/run/runner.lock,
-    held for the process's life (the kernel drops it when the process
-    dies, even on SIGKILL). Taken before anything else, because a second
-    runner's `requeue_stale` would steal the first one's live claims."""
+    held for the life of this context (the kernel drops it when the
+    process dies, even on SIGKILL). Taken before anything else, because a
+    second runner's `requeue_stale` would steal the first one's live
+    claims."""
     path = Path(home) / "run" / "runner.lock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,7 +111,32 @@ def _lock(home):
     except OSError:
         os.close(fd)
         raise RunnerError("another cousin-runner holds %s" % path)
-    return fd
+    try:
+        yield
+    finally:
+        os.close(fd)
+
+
+def is_running(home):
+    """True when a runner holds `<home>/run/runner.lock`. A fresh, non-
+    blocking flock on its own descriptor: `BlockingIOError` means a
+    runner holds it; taking the lock cleanly means nobody does, so the
+    probe releases it and answers False; a missing lock file is False,
+    nothing to hold."""
+    path = Path(home) / "run" / "runner.lock"
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
 
 
 def _gone(runner):
@@ -161,21 +189,18 @@ def runner_main(argv=None):
                         help="drain the inbox, then exit")
     args = parser.parse_args(argv)
     try:
-        lock = _lock(args.home)
+        with hold_lock(args.home):
+            try:
+                runner = runner_for(args.home, kind=args.runner)
+            except RunnerError as err:
+                print("cousin-runner: %s" % err, file=sys.stderr)
+                return 2
+            for name in AUTH_ENV:
+                os.environ.pop(name, None)
+            return _serve(runner, args.once)
     except RunnerError as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
-    try:
-        try:
-            runner = runner_for(args.home, kind=args.runner)
-        except RunnerError as err:
-            print("cousin-runner: %s" % err, file=sys.stderr)
-            return 2
-        for name in AUTH_ENV:
-            os.environ.pop(name, None)
-        return _serve(runner, args.once)
-    finally:
-        os.close(lock)
 
 
 def _serve(runner, once):

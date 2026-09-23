@@ -171,6 +171,27 @@ def deliver(home, item, *, wait=True, backend=None, **backend_opts):
     return backend.send(home, item, wait=wait, **backend_opts)
 
 
+def accepted(outcome, home):
+    """A producer's acceptance test. `delivered` always; `queued` when the
+    cousin is on the runner (the row is durable: retrying would deliver
+    twice); never `failed`."""
+    if outcome == DELIVERED:
+        return True
+    if outcome == QUEUED:
+        return isinstance(backend_for(home), InboxBackend)
+    return False
+
+
+def is_alive(home, *, fallback=None):
+    """Liveness for producers. A runner cousin is alive when a runner
+    holds its lock; a tmux cousin answers through the caller's own
+    check (`fallback`), because this module never touches tmux."""
+    if isinstance(backend_for(home), InboxBackend):
+        from cousin_lib.runner.main import is_running
+        return is_running(home)
+    return bool(fallback()) if fallback is not None else False
+
+
 def thread_for_chat(config, user, *, cousins=None):
     """The thread a chat sender belongs to. `cousins` is the registry
     (objects with .slug and .name); read from the install when None,

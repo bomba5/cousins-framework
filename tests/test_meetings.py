@@ -243,5 +243,16 @@ class TestCli(MeetingCase):
                 meetings.meeting_main(["say", str(m["id"]), "x"]), 1)
 
 
+class TestDefaultIsAliveForARunnerCousin(MeetingCase):
+    def test_default_is_alive_does_not_call_tmux_for_a_runner_cousin(self):
+        self._cousin("finch", extra="\n[agent]\nrunner = \"fake\"\n")
+        with mock.patch("subprocess.run", side_effect=AssertionError("tmux called")):
+            from cousin_lib.runner import main as runner_main
+            with mock.patch.object(runner_main, "is_running", return_value=True):
+                self.assertTrue(meetings.default_is_alive("finch"))
+            with mock.patch.object(runner_main, "is_running", return_value=False):
+                self.assertFalse(meetings.default_is_alive("finch"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -267,7 +267,7 @@ def _default_deliver(slug, prompt):
         if cfg.slug == slug:
             item = delivery.Item(thread_id=delivery.thread_id("schedule"),
                                  source="schedule", body=prompt)
-            return delivery.deliver(cfg.home, item) == delivery.DELIVERED
+            return delivery.accepted(delivery.deliver(cfg.home, item), cfg.home)
     raise RuntimeError("no cousin %r under %s" % (slug, root.root))
 
 

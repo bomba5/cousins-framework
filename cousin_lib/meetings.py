@@ -541,17 +541,25 @@ def tick(*, deliver=None, is_alive=None, now=None, root=None):
 
 def default_is_alive(slug):
     """A meeting speaker is alive when its tmux session exists: the
-    turn is typed into that session."""
+    turn is typed into that session. A runner cousin's liveness is its
+    runner's lock instead (delivery.is_alive), and tmux is never called
+    for one."""
     import subprocess
 
-    try:
-        config = CousinConfig.load(
-            FrameworkConfig.from_env().root / "cousins" / slug)
-        return subprocess.run(
-            ["tmux", "has-session", "-t", "=" + config.tmux_session],
-            capture_output=True, timeout=5, check=False).returncode == 0
-    except Exception:
-        return False
+    from cousin_lib import delivery
+
+    def _tmux_has_session():
+        try:
+            config = CousinConfig.load(
+                FrameworkConfig.from_env().root / "cousins" / slug)
+            return subprocess.run(
+                ["tmux", "has-session", "-t", "=" + config.tmux_session],
+                capture_output=True, timeout=5, check=False).returncode == 0
+        except Exception:
+            return False
+
+    home = FrameworkConfig.from_env().root / "cousins" / slug
+    return delivery.is_alive(home, fallback=_tmux_has_session)
 
 
 def default_deliver(slug, text):
@@ -560,7 +568,7 @@ def default_deliver(slug, text):
     home = FrameworkConfig.from_env().root / "cousins" / slug
     item = delivery.Item(thread_id=delivery.thread_id("meeting", "turn"),
                          source="meeting", body=text)
-    return delivery.deliver(home, item) == delivery.DELIVERED
+    return delivery.accepted(delivery.deliver(home, item), home)
 
 
 # -- CLI --------------------------------------------------------------

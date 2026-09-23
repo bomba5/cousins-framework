@@ -138,6 +138,29 @@ class TestTick(ScheduleCase):
         rc, out, _ = self._main(["list"])
         self.assertIn("fragile job", out)
 
+    def test_a_queued_delivery_marks_the_job_fired_for_a_runner_cousin(self):
+        # A runner cousin's inbox put is durable: `_default_deliver` must
+        # treat `queued` as fired, not keep retrying a row already kept.
+        from cousin_lib import delivery, schedule
+        home = self.root / "cousins" / "wren"
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
+            '\n[agent]\nrunner = "fake"\n')
+        self._main(["add", "in 1s", "due job"])
+        past = int(datetime.now().timestamp()) + 5
+        calls = []
+
+        def wrapped_deliver(slug, prompt):
+            accepted = schedule._default_deliver(slug, prompt)
+            calls.append(accepted)
+            return accepted
+
+        with mock.patch.object(delivery, "deliver", return_value=delivery.QUEUED):
+            n = tick(now_ts=past, deliver=wrapped_deliver)
+        self.assertEqual(n, 1)
+        self.assertEqual(calls, [True])
+        self.assertEqual(schedule.list_entries(include_fired=True)[0]["status"], "fired")
+
 
 if __name__ == "__main__":
     unittest.main()

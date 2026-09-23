@@ -922,5 +922,21 @@ class TestSdkRunner(HermeticCase):
         self.assertFalse(r.turn.active)
 
 
+class TestMirrorError(HermeticCase):
+    def test_a_mirror_error_is_an_error_event_and_the_turn_still_lands(self):
+        from claude_agent_sdk.types import MirrorErrorMessage
+        home = temp_home(self)
+        err = MirrorErrorMessage(subtype="mirror_error", data={}, key=None, error="disk full")
+        r = SdkRunner(home, client_factory=lambda o: ScriptedClient(
+            o, [[init_msg(), err, assistant(text="ok"), result()]]))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        rec = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
+        errors = [e["payload"] for e in r.events() if e["kind"] == "error"]
+        self.assertTrue(any(e.get("mirror_error") and "disk full" in e["error"] for e in errors))
+
+
 if __name__ == "__main__":
     unittest.main()

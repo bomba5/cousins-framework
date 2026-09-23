@@ -707,7 +707,9 @@ class SdkRunner:
                 self._resume_id = d.get("session_id") or self._resume_id
                 self.stream.append("session_init", {"apiKeySource": d.get("apiKeySource"),
                                                     "model": d.get("model"),
-                                                    "session_id": d.get("session_id")})
+                                                    "session_id": d.get("session_id"),
+                                                    "tools": list(d.get("tools") or []),
+                                                    "mcp_servers": list(d.get("mcp_servers") or [])})
             else:
                 self.stream.append("system", {"subtype": msg.subtype})
         elif isinstance(msg, sdk.AssistantMessage):

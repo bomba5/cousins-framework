@@ -18,9 +18,14 @@ from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
 
 
-def init_msg(source="none", model="claude-haiku-4-5-20251001", session="s-1"):
-    return SystemMessage(subtype="init", data={"apiKeySource": source, "model": model,
-                                               "session_id": session})
+def init_msg(source="none", model="claude-haiku-4-5-20251001", session="s-1",
+             tools=None, mcp_servers=None):
+    data = {"apiKeySource": source, "model": model, "session_id": session}
+    if tools is not None:
+        data["tools"] = tools
+    if mcp_servers is not None:
+        data["mcp_servers"] = mcp_servers
+    return SystemMessage(subtype="init", data=data)
 
 
 def assistant(text=None, tool=None):
@@ -331,6 +336,26 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "delivered")
         prompt = made["client"].queries[0]
         self.assertEqual(prompt["message"]["content"][0]["text"].splitlines()[0][:16], "[operator:priya]")
+
+    def test_session_init_records_the_tools_and_mcp_servers_the_cli_offers(self):
+        r, _ = self._runner([[init_msg(tools=["mcp__cousin__memory", "mcp__cousin__reply"],
+                                       mcp_servers=[{"name": "cousin", "status": "connected"}]),
+                              assistant(text="ok"), result()]])
+        r.start()
+        r.enqueue(self._op("hello"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
+        init = next(e for e in r.events() if e["kind"] == "session_init")
+        self.assertEqual(init["payload"]["tools"], ["mcp__cousin__memory", "mcp__cousin__reply"])
+        self.assertEqual(init["payload"]["mcp_servers"], [{"name": "cousin", "status": "connected"}])
+
+    def test_session_init_defaults_tools_and_mcp_servers_to_empty_lists(self):
+        r, _ = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        r.start()
+        r.enqueue(self._op("hello"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
+        init = next(e for e in r.events() if e["kind"] == "session_init")
+        self.assertEqual(init["payload"]["tools"], [])
+        self.assertEqual(init["payload"]["mcp_servers"], [])
 
     def test_the_echo_of_the_row_is_recorded_as_a_user_event_naming_it(self):
         r, _ = self._runner([[init_msg(), assistant(text="done"), result()]])

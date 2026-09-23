@@ -693,8 +693,9 @@ host's default login. The account is the only source of credentials:
 `cousin-runner` removes every auth and provider variable (the list is under
 [accounts.toml](#accountstoml)) from its own environment before the session
 starts, so nothing is inherited from the shell, and checks the account before it takes the cousin's lock (an
-unknown account, or a secret file that is missing, open to others or
-malformed, is exit 2). The terms risk of running a cousin on a login is the
+unknown account, or a secret file that is open to others or malformed, is
+exit 2; a missing secret file is let through as a login to do, see
+[accounts.toml](#accountstoml)). The terms risk of running a cousin on a login is the
 user's.
 
 `api_key_file` is deprecated: an implicit `anthropic-key` account named after
@@ -731,9 +732,10 @@ than rebuilding it) is visible per turn, not only in aggregate.
 
 A runner cousin's home also holds its own state, none of it hand-edited:
 `data/sessions.db` is the transcript (the SDK's `SessionStore` protocol over
-SQLite): the framework owns it on the key lane and mirrors it on the login
-lane (which resumes through the CLI's own `--resume` instead), and there is
-no retention on it yet. `data/usage.db` is the per-turn usage and cost table
+SQLite). Who owns it goes by the account's kind: an `anthropic-key` or
+`claude-token` account resumes through the store, which the framework owns; a
+`claude-login` account resumes through the CLI's own `--resume`, and the store
+only mirrors its transcript. There is no retention on it yet. `data/usage.db` is the per-turn usage and cost table
 `usage.record` writes. `data/runner-session.json` is the session id (and
 lane) to resume at the next start. `data/extract-cursor.json` is continuous
 extraction's per-session cursor into the transcript. `data/generations/` is

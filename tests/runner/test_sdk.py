@@ -521,10 +521,14 @@ class TestSdkRunner(HermeticCase):
                               and made["client"].paused))
         self.assertEqual(r.state(), "waiting_permission")   # a hook's own event settles nothing
         made["client"].resume()
-        self.assertTrue(_wait(lambda: _results(r) and r.state() == "idle"))
-        moves = [(e["payload"]["from"], e["payload"]["to"]) for e in r.events() if e["kind"] == "state"]
-        self.assertIn(("waiting_permission", "running"), moves)
-        self.assertEqual(moves[-1], ("running", "idle"))
+        # The machine's state is set before its `state` event is appended, so
+        # wait for the idle EVENT, not for state() == "idle" (seen flaky under load).
+        def moves():
+            return [(e["payload"]["from"], e["payload"]["to"])
+                    for e in r.events() if e["kind"] == "state"]
+        self.assertTrue(_wait(lambda: _results(r) and ("running", "idle") in moves()))
+        self.assertIn(("waiting_permission", "running"), moves())
+        self.assertEqual(moves()[-1], ("running", "idle"))
 
     def test_a_turn_that_times_out_while_waiting_permission_fails_and_recovers(self):
         r, _ = self._runner([[init_msg(), "HANG", result()]], idle_timeout_s=1.0)

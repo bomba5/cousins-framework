@@ -80,7 +80,7 @@ class TestRecording(HooksCase):
 class TestRecall(HooksCase):
     def test_prompt_submit_adds_recall_context_when_memory_has_hits(self):
         (self.home / "memory" / "reference_router.md").write_text(
-            "# Router\nThe router lives at 10.0.0.1 and reboots on Sundays.\n")
+            "# Router\nThe router lives in the hall cupboard and reboots on Sundays.\n")
         out = _run(self.cbs["UserPromptSubmit"](self._base(
             "UserPromptSubmit", prompt="when does the router reboot?"), None, {}))
         ctx = out.get("hookSpecificOutput", {}).get("additionalContext", "")

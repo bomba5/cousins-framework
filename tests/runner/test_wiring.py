@@ -133,7 +133,7 @@ class TestWiring(HermeticCase):
         self.assertEqual(out["hookSpecificOutput"]["additionalContext"], "a recalled line")
         self.assertNotIn("a recalled line", repr(vars(opts)))
 
-    def test_the_policy_hook_runs_first_on_pre_tool_use(self):
+    def test_the_policy_matcher_is_registered_first_and_denies(self):
         (self.home / "policy.toml").write_text('deny_tools = ["WebFetch"]\n')
         r = self._runner()
         pre = r.options().hooks["PreToolUse"]

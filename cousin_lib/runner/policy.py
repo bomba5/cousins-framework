@@ -8,7 +8,9 @@ calls included (the hook input then carries `agent_id`), so a deny
 reaches inside a subagent's turn as well.
 
 `deny_bash_patterns` is matched against the `command` string of any
-tool whose input carries one (Bash, PowerShell, Monitor, any other); it
+tool whose input carries one (Bash, PowerShell, Monitor, any other),
+except the cousin's own `mcp__cousin__*` tools, whose `command` is a
+registry verb (`add`, `pass`), not a command line; it
 never sees a command a tool builds on the far side (an MCP server that
 shells out, an editor tool's own file writes). The patterns are a
 guardrail against a known command line, not a sandbox: the same effect
@@ -27,6 +29,9 @@ from pathlib import Path
 from cousin_lib.runner.base import RunnerError
 
 FILE = "policy.toml"
+# The cousin's own tools take a registry verb in `command` ("add", "pass"),
+# not a command line, so the command patterns never look at them.
+OWN_TOOL_PREFIX = "mcp__cousin__"
 KEYS = ("deny_tools", "deny_bash_patterns", "ask", "outbound_filter")
 
 
@@ -83,7 +88,8 @@ class Policy:
     def decide(self, tool_name, tool_input):
         """`("allow", "")`, `("deny", reason)` or `("ask", reason)`:
         deny_tools first, then a string `command` in the tool's input
-        (whatever the tool) against deny_bash_patterns, then ask.
+        (any tool but the cousin's own `mcp__cousin__*`, whose `command`
+        is a registry verb) against deny_bash_patterns, then ask.
         Anything not named is allowed. `tool_name` is normalised to a
         string first: a hook payload missing `tool_name` must not raise
         out of a gate and so turn into an allow."""
@@ -92,7 +98,7 @@ class Policy:
         if hit:
             return "deny", "%s: deny_tools lists %s" % (FILE, hit)
         command = tool_input.get("command") if isinstance(tool_input, dict) else None
-        if isinstance(command, str):
+        if isinstance(command, str) and not tool_name.startswith(OWN_TOOL_PREFIX):
             for rx in self.deny_bash_patterns:
                 if rx.search(command):
                     return "deny", "%s: deny_bash_patterns %r matches" % (FILE, rx.pattern)

@@ -8,6 +8,8 @@
 # rewrite takes effect at the next start. To make it immutable, make it
 # read-only to the cousin's user, or own it.
 # To deny subagents, list both "Task" and "Agent".
+# The patterns skip the cousin's own mcp__cousin__* tools: their `command`
+# is a verb such as "add" or "pass", not a command line.
 deny_tools = ["WebFetch", "mcp__cousin__handoff"]   # exact names or prefix*
 deny_bash_patterns = ['\brm\s+-rf\s+/', '\bgit\s+push\s+--force']  # regexes on any tool's string `command` (Bash, PowerShell, Monitor, ...)
 ask = []                                              # operator approval; enforced as deny until phase 5

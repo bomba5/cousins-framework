@@ -71,6 +71,14 @@ class TestCommandPatternsOnAnyTool(HermeticCase):
         self.assertEqual(p.decide("Read", {"file_path": "rm -rf /"})[0], "allow")
 
 
+class TestTheCousinsOwnToolsAreNotCommandLines(HermeticCase):
+    def test_a_cousin_tool_verb_is_not_matched_but_a_shell_command_is(self):
+        p = policy.Policy(deny_bash_patterns=(__import__("re").compile(r"\bpass\b"),))
+        self.assertEqual(p.decide("Bash", {"command": "pass the salt"})[0], "deny")
+        self.assertEqual(p.decide("mcp__cousin__meeting", {"command": "pass"}), ("allow", ""))
+        self.assertEqual(p.decide("mcp__other__shell", {"command": "pass"})[0], "deny")
+
+
 class TestSubagentReply(HermeticCase):
     def setUp(self):
         super().setUp()

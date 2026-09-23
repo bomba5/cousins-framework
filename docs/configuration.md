@@ -563,7 +563,7 @@ all optional:
 | key | default | meaning |
 |---|---|---|
 | `deny_tools` | `[]` | tool names the model may never call; exact name or a `prefix*`. To deny subagents, list both `Task` and `Agent` (the tool's older and newer names) |
-| `deny_bash_patterns` | `[]` | regexes checked against the `command` string of any tool whose input carries one (`Bash`, `PowerShell`, `Monitor`, any other); never against a command a tool builds on the far side (an MCP server that shells out) |
+| `deny_bash_patterns` | `[]` | regexes checked against the `command` string of any tool whose input carries one (`Bash`, `PowerShell`, `Monitor`, any other); never against a command a tool builds on the far side (an MCP server that shells out). The cousin's own `mcp__cousin__*` tools are skipped: their `command` is a verb such as `add` or `pass`, not a command line |
 | `ask` | `[]` | tools that need operator approval; enforced as `deny` until phase 5 gives the console an ask surface, the reason says so |
 | `outbound_filter` | `true` | whether `reply` and `send` cross `config/outbound-filter.json` |
 

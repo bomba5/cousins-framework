@@ -43,6 +43,12 @@ def result(num_turns=1, cost=0.01, is_error=False, session="s-1", usage=None):
                          total_cost_usd=cost, usage=usage)
 
 
+def asked_resume(options):
+    """The session id these options resume, by either path: the store's
+    (`resume`, the key lane) or the CLI's own flag (the login lane)."""
+    return options.resume or (options.extra_args or {}).get("resume")
+
+
 def echo(message):
     """What the CLI replays for a user message it consumed, with
     `--replay-user-messages`, as the SDK's parser builds it
@@ -746,7 +752,7 @@ class TestSdkRunner(HermeticCase):
                               timeout=6.0))
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(len(clients), 2)
-        self.assertIsNone(clients[0].options.resume)
+        self.assertIsNone(asked_resume(clients[0].options))
         # the login lane (the init said "none"): the CLI's own --resume (Task 11)
         self.assertEqual(clients[1].options.extra_args["resume"], "s-orig")
         self.assertFalse(clients[0].connected)

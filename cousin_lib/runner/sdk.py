@@ -170,6 +170,7 @@ class SdkRunner:
         # (cached), a write the loop owes the file, and the id the first
         # init after a resume must name (R12).
         self._saved = None
+        self._saved_lane = "unknown"  # the lane on file (cached: options() reads no file)
         self._pending_save = None
         self._expect_session = None
         self._resume_lost = False     # that init named another id: start fresh
@@ -261,10 +262,13 @@ class SdkRunner:
         return self.home / "data" / "runner-session.json"
 
     def _read_session_file(self):
+        """The file's dict; {} when it is missing, unreadable or not an
+        object (null, a list, a number): a fresh start, never a crash loop."""
         try:
-            return json.loads(self._session_path().read_text())
+            d = json.loads(self._session_path().read_text())
         except (OSError, ValueError):
             return {}
+        return d if isinstance(d, dict) else {}
 
     def saved_session(self):
         return self._read_session_file().get("session_id") or None
@@ -274,18 +278,20 @@ class SdkRunner:
 
     def resume_lane(self):
         """ONE source (R12): the init's apiKeySource, as seen this process
-        or as persisted with the session. Never whether a key was passed."""
-        return self._lane if self._lane != "unknown" else self.saved_lane()
+        or as persisted with the session (cached when the loop read the file
+        at start). Never whether a key was passed."""
+        return self._lane if self._lane != "unknown" else self._saved_lane
 
     def _save_session(self, session_id):
         path = self._session_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"session_id": session_id, "lane": self._lane,
+        lane = self._lane
+        tmp.write_text(json.dumps({"session_id": session_id, "lane": lane,
                                    "generation": boot.read_generation(self.home),
                                    "updated": time.time()}))
         tmp.replace(path)
-        self._saved = session_id
+        self._saved, self._saved_lane = session_id, lane
 
     async def _flush_session(self):
         """The pending write, off the loop. A failed write is an `error`
@@ -316,7 +322,10 @@ class SdkRunner:
                 self.stream.append("system", {"subtype": "resume_failed", "session_id": asked,
                                               "got": session_id,
                                               "error": "the CLI started a new session"})
-        if session_id != self._saved:
+        # a new id, or the same id on another lane than the file says: a
+        # stale lane would pick the wrong resume path at the next start (R12)
+        lane_moved = self._lane != "unknown" and self._lane != self._saved_lane
+        if session_id != self._saved or lane_moved:
             self._pending_save = session_id
 
     def _has_state(self):
@@ -348,9 +357,14 @@ class SdkRunner:
             return
         if self._stop.is_set():
             return      # the row stays queued (durable): the next start runs it
-        first = self.inbox.claim_id(digest_id, claimant=self.session_id)
-        if first is not None:
-            await self._turn(first)
+        # the loop's own guard: this runs outside the loop's per-row try, and a
+        # raise here would end the worker (and a restart would start fresh again)
+        try:
+            first = self.inbox.claim_id(digest_id, claimant=self.session_id)
+            if first is not None:
+                await self._turn(first)
+        except Exception as exc:  # noqa: BLE001 - the idle transition can still raise
+            self._fail_turn([], exc)
 
     def _registry_fallback(self, payload):
         """build_tool_server found no registry and used the shipped
@@ -498,8 +512,9 @@ class SdkRunner:
 
     async def _main(self):
         try:
-            saved = await asyncio.to_thread(self.saved_session)
-            self._saved = saved
+            on_file = await asyncio.to_thread(self._read_session_file)
+            saved = on_file.get("session_id") or None
+            self._saved, self._saved_lane = saved, on_file.get("lane") or "unknown"
             resumed = False
             if saved:
                 resumed = await self._connect(resume=saved, fatal=False, event="resume_failed")
@@ -1086,6 +1101,9 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])          # the next start finishes this rollover
                 self.stream.append("rollover", {"phase": "requeued", "reason": reason})
                 return False
+            # the handoff turn's init may have named another session (a lost
+            # resume): that one is the session being ended and restored
+            old_sid = self._resume_id or old_sid
             await asyncio.to_thread(session.run_phase, self.home, "end")
             await asyncio.to_thread(rollover.archive_generation, self.home, generation)
             await self._disconnect()

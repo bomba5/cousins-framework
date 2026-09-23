@@ -10,6 +10,7 @@ try:
 except ImportError:
     raise unittest.SkipTest("claude-agent-sdk not installed")
 
+from cousin_lib import boot
 from cousin_lib.delivery import Item
 from cousin_lib.runner.sdk import SdkRunner
 from tests._hermetic import HermeticCase
@@ -64,7 +65,11 @@ class TestResume(HermeticCase):
     def bodies(self, r):
         return [(r.inbox.get(i) or {}).get("body") or "" for i in range(1, 30)]
 
+    def session_file(self):
+        return json.loads((self.home / "data" / "runner-session.json").read_text())
+
     def test_stop_and_start_keep_the_session_id(self):
+        g0 = boot.read_generation(self.home)
         r1 = self.runner(); r1.start(); self.one_turn(r1); r1.stop(timeout=5)
         saved = json.loads((self.home / "data" / "runner-session.json").read_text())
         self.assertEqual(saved["session_id"], "s-live")
@@ -74,6 +79,7 @@ class TestResume(HermeticCase):
         kinds = [(e["kind"], e["payload"].get("subtype")) for e in r2.events()]
         self.assertIn(("system", "resumed"), kinds)
         self.assertNotIn(("system", "resume_failed"), kinds)
+        self.assertEqual(boot.read_generation(self.home), g0)   # a deploy costs no generation
 
     def test_the_key_lane_resumes_from_the_store(self):
         # the lane comes from the init's apiKeySource, never from being given a key (R12)
@@ -129,6 +135,54 @@ class TestResume(HermeticCase):
         self.assertEqual((failed[0]["session_id"], failed[0]["got"]), ("s-live", "s-other"))
         self.assertTrue(_wait(lambda: any("carry this too" in b for b in self.bodies(r))))
         self.assertEqual(r.saved_session(), "s-other")
+        digest = next(i for i in range(1, 30)
+                      if "carry this too" in ((r.inbox.get(i) or {}).get("body") or ""))
+        self.assertTrue(_wait(lambda: r.inbox.get(digest)["outcome"] == "delivered"))
+        system = [e["payload"] for e in r.events() if e["kind"] == "system"]
+        at = [p.get("subtype") for p in system].index("resume_failed")
+        fresh = [p for p in system if p.get("subtype") == "fresh"]
+        self.assertEqual(fresh, [{"subtype": "fresh", "digest": True}])    # exactly one
+        self.assertIn(fresh[0], system[at + 1:])                           # after the failure
+
+    def test_a_lane_change_on_the_same_session_rewrites_the_file(self):
+        # the file says key, the CLI's init says login: a stale "key" would
+        # take the store-backed path at the next start (R12)
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "key", "generation": 0, "updated": 0}))
+        r = self.runner(); r.start(); self.one_turn(r)
+        self.assertEqual(self.options[0].resume, "s-live")          # the file's lane, this once
+        self.assertTrue(_wait(lambda: self.session_file()["lane"] == "login"))
+        self.assertEqual(self.session_file()["session_id"], "s-live")
+        r.stop(timeout=5)
+        r2 = self.runner(); r2.start()
+        self.assertTrue(_wait(lambda: len(self.options) == 2))
+        self.assertIsNone(self.options[1].resume)
+        self.assertEqual(self.options[1].extra_args["resume"], "s-live")
+
+    def test_a_session_file_that_is_not_an_object_is_a_fresh_start(self):
+        (self.home / "data" / "runner-session.json").write_text("null")
+        r = self.runner(); r.start(); self.one_turn(r)
+        self.assertIsNone(r.fatal)
+        self.assertIn(("system", "fresh"),
+                      [(e["kind"], e["payload"].get("subtype")) for e in r.events()])
+        self.assertEqual(self.session_file()["session_id"], "s-live")
+
+    def test_a_digest_turn_that_raises_does_not_end_the_worker(self):
+        (self.home / "STATUS.md").write_text("## Open loops\n- x\n")
+        r = self.runner()
+        real = r._turn
+
+        async def turn(first):
+            if first["source"] == "boot":
+                raise RuntimeError("digest turn broke")
+            return await real(first)
+        r._turn = turn
+        r.start()
+        errors = lambda: [e["payload"].get("error", "") for e in r.events() if e["kind"] == "error"]
+        self.assertTrue(_wait(lambda: any("digest turn broke" in m for m in errors())))
+        self.assertTrue(r.worker_alive())
+        self.one_turn(r)                                             # the next row runs
+        self.assertIsNone(r.fatal)
 
     def test_a_brand_new_cousin_gets_no_digest(self):
         r = self.runner(); r.start(); self.one_turn(r)

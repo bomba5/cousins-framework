@@ -24,6 +24,10 @@ cousins/
 # it is regenerated; none of it is source.
 /data/
 
+# The root's run directory: a login capture lives here for at most its
+# window (Task 15).
+/run/
+
 # The root's shared tier: reviewed shared memory and the hive database,
 # which holds bearer tokens. One install's state, never source.
 /shared/

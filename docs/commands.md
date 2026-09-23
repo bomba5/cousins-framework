@@ -56,6 +56,32 @@ cousin-account list
 cousin-account status fleet
 ```
 
+`cousin-account login <name> [--via <slug>]` logs a `claude-login` account in
+through the agent CLI's own login flow; `cousin-account token <name> [--via
+<slug>]` mints a long-lived token for a `claude-token` account through the
+CLI's `setup-token` and saves it only after the CLI reads it back as a token
+login. Both are operator-run from a shell on the host: they refuse to run
+inside a cousin (or under one), and they want a terminal (a usability check,
+not a safeguard). With `--via` the sign-in URL arrives in
+that cousin's chat (and on Telegram when the cousin has a bridge); sign in on
+any device and reply in the same chat with the whole code the page shows
+(`code#state`). Your next message there is taken as the code: it is never
+delivered to the cousin and never kept in the chat history, which holds a
+`[login code received ...]` line instead; for an hour after, a second or late
+code there is discarded the same way. Do not answer a login notice you did not
+start yourself. Without `--via` the URL is printed and the code is asked for
+at the terminal. `--timeout` is the window for the code in seconds (600; it
+must be positive). Exit 0 done, 4 the flow failed (the line says why, in
+the CLI's own words when it gave any), 2 refused (inside a cousin, no
+terminal, an unknown account, a `--via` cousin that is missing or has no
+operator). `login host` re-logs the host's own login in `~/.claude` and says
+so first.
+
+```
+cousin-account login fleet --via wren
+cousin-account token nightly --via wren
+```
+
 `cousin-flip` ends the cousin's current generation and starts the next one on
 a fresh session with a boot packet. `--dry-run` runs the checks only;
 `--confirm` asks the new generation to post one line when it is oriented.

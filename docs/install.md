@@ -101,6 +101,20 @@ scheduled prompts and a flip's boot text are all skipped with a
 cousin never sees it. Without the preset there's nothing to recognise the
 menu by, and all of that gets typed into it, where it can pick options.
 
+A runner cousin can run on an account of its own instead (see
+[configuration](configuration.md#accountstoml)). The first login per account
+kind, always started from a shell on the host:
+
+- a cousin on `host`: `claude auth login` once, as the host user (the step
+  above);
+- a named login account: `cousin-account login <name> --via <any cousin you
+  chat with>`; the sign-in URL arrives in that cousin's chat, you sign in on
+  any device and reply there with the code;
+- a token account: `cousin-account token <name> --via <any cousin you chat
+  with>`, the same way;
+- a key account: write the key to its secret file yourself, mode 0600, in a
+  0700 directory.
+
 Now tell the framework how to start the agent. Use the absolute path, so it
 resolves under systemd's PATH as well as yours:
 

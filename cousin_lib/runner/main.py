@@ -3,9 +3,15 @@
 `[agent] runner` in cousin.toml picks the implementation. No tmux, no
 port: the inbox is the bus and the wake socket is the doorbell.
 
+The home is made absolute and exported as COUSIN_HOME, with its root as
+FRAMEWORK_ROOT, before the runner is built: the in-process tools and the
+model's own `cousin-*` commands locate the cousin and the install that way.
+
 Exit codes: 0 after SIGTERM/SIGINT, or when `--once` has drained the
 inbox; 2 for a configuration problem (no or a bad `[agent] runner`, an
-unreadable key file) or when another runner holds the home's lock; 3
+unreadable key file, a malformed policy.toml, an MCP registry that does
+not parse or names a command with no in-process handler) or when another
+runner holds the home's lock; 3
 when the runner gave up (its worker ended, e.g. it could not connect,
 or `--once` found it `errored` for longer than ERRORED_GIVE_UP_S), so a
 supervisor restarts it.
@@ -66,13 +72,36 @@ def _read_key(home, agent):
                           % (path, err))
 
 
+def root_for(home):
+    """The framework root of a home: the install above it when there is
+    one (FrameworkConfig.root_from_home), else the home's grandparent,
+    the same root SdkRunner hands its tools."""
+    from cousin_lib.config import FrameworkConfig
+    home = Path(os.path.abspath(home))
+    return FrameworkConfig.root_from_home(home) or home.parent.parent
+
+
+def export_environment(home, *, overwrite=True):
+    """COUSIN_HOME (the absolute home) and FRAMEWORK_ROOT (root_for) in
+    this process's environment, which the tools read and the model's
+    commands inherit. `overwrite=False` sets only what is unset."""
+    home = Path(os.path.abspath(home))
+    for name, value in (("COUSIN_HOME", str(home)),
+                        ("FRAMEWORK_ROOT", str(root_for(home)))):
+        if overwrite or not os.environ.get(name):
+            os.environ[name] = value
+
+
 def runner_for(home, *, kind=None):
     """The runner cousin.toml names. A cousin with no `[agent] runner` is
     a tmux cousin: it gets no runner (its inbox has no producer), unless
     `kind` says otherwise. The home's policy.toml is loaded here, once,
     and handed to the runner: a malformed one is a PolicyError, a
-    RunnerError, so the process exits 2 naming the key. No settings
-    file is written: the runner's hooks are in-process."""
+    RunnerError, so the process exits 2 naming the key. An sdk runner's
+    MCP registry is checked here too (tools.validate_registry): one
+    that does not parse or names a command with no handler is a
+    RunnerError, before any session starts. No settings file is
+    written: the runner's hooks are in-process."""
     agent = _agent_table(home)
     kind = kind or agent.get("runner")
     if not kind:
@@ -88,7 +117,9 @@ def runner_for(home, *, kind=None):
         from cousin_lib.runner.fake import FakeRunner
         return FakeRunner(home, policy=policy)
     if kind == "sdk":
+        from cousin_lib.runner import tools
         from cousin_lib.runner.sdk import SdkRunner
+        tools.validate_registry(Path(home), root_for(home))
         return SdkRunner(home, api_key=_read_key(home, agent),
                          model=agent.get("model"), policy=policy)
 
@@ -188,8 +219,10 @@ def runner_main(argv=None):
     parser.add_argument("--once", action="store_true",
                         help="drain the inbox, then exit")
     args = parser.parse_args(argv)
+    args.home = os.path.abspath(args.home)
     try:
         with hold_lock(args.home):
+            export_environment(args.home)
             try:
                 runner = runner_for(args.home, kind=args.runner)
             except RunnerError as err:

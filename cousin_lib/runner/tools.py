@@ -670,35 +670,60 @@ def call(ctx, name, args):
     return text, is_error
 
 
-def build_tool_server(ctx, registry=None, *, on_fallback=None):
-    """The SDK's in-process MCP server config: one tool per definition.
-    RunnerError when a registry command has no handler, before the SDK
-    is touched. With no registry given: the cousin's own, else the
-    install's (default_registry_path); a root that has neither falls
-    back to the shipped default (shipped_default_registry), the one
-    every cousin is given, and says so with a `policy` event
-    (`registry`, `fallback: true`: which tools the model gets is tool
-    policy) rather than refuse to start. `on_fallback(payload)`, when
-    given, receives that event instead of ctx.stream (the runner uses
-    it to say so once, not on every reconnect)."""
-    if registry is None:
-        path = mcp_server.default_registry_path(
-            {"FRAMEWORK_ROOT": str(ctx.root), "COUSIN_HOME": str(ctx.home)})
-        if path is not None:
-            registry = mcp_server.load_registry(path)
-        else:
-            registry = mcp_server.parse_registry(
-                mcp_server.shipped_default_registry(ctx.root), "shipped default")
-            notice = {"registry": "shipped default", "fallback": True,
-                      "why": "no MCP registry under %s or %s/config" % (ctx.home, ctx.root)}
-            if on_fallback is not None:
-                on_fallback(notice)
-            elif ctx.stream is not None:
-                ctx.stream.append("policy", notice)
+def resolve_registry(home, root):
+    """`(registry, notice)`: the cousin's own registry, else the
+    install's (default_registry_path), with notice None; a root that has
+    neither gets the shipped default (shipped_default_registry), the one
+    every cousin is given, and a notice saying so. RegistryError for a
+    registry that does not parse."""
+    path = mcp_server.default_registry_path(
+        {"FRAMEWORK_ROOT": str(root), "COUSIN_HOME": str(home)})
+    if path is not None:
+        return mcp_server.load_registry(path), None
+    registry = mcp_server.parse_registry(
+        mcp_server.shipped_default_registry(root), "shipped default")
+    return registry, {"registry": "shipped default", "fallback": True,
+                      "why": "no MCP registry under %s or %s/config" % (home, root)}
+
+
+def check_registry(registry):
+    """RunnerError naming every registry command with no handler."""
     missing = missing_handlers(registry)
     if missing:
         raise RunnerError("registry commands with no in-process handler: %s"
                           % ", ".join(missing))
+
+
+def validate_registry(home, root):
+    """What build_tool_server will serve, checked without the SDK: a
+    registry that does not parse or a command with no handler is a
+    RunnerError, so cousin-runner exits 2 at start naming it instead of
+    its worker dying on the first connect."""
+    try:
+        registry, _notice = resolve_registry(home, root)
+    except mcp_server.RegistryError as err:
+        raise RunnerError("MCP registry: %s" % err) from err
+    check_registry(registry)
+    return registry
+
+
+def build_tool_server(ctx, registry=None, *, on_fallback=None):
+    """The SDK's in-process MCP server config: one tool per definition.
+    RunnerError when a registry command has no handler, before the SDK
+    is touched. With no registry given: resolve_registry; the shipped
+    default fallback is said with a `policy` event (`registry`,
+    `fallback: true`: which tools the model gets is tool policy) rather
+    than refused. `on_fallback(payload)`, when given, receives that
+    event instead of ctx.stream (the runner uses it to say so once, not
+    on every reconnect)."""
+    if registry is None:
+        registry, notice = resolve_registry(ctx.home, ctx.root)
+        if notice is not None:
+            if on_fallback is not None:
+                on_fallback(notice)
+            elif ctx.stream is not None:
+                ctx.stream.append("policy", notice)
+    check_registry(registry)
     ctx.registry = registry
     from claude_agent_sdk import create_sdk_mcp_server, tool
 

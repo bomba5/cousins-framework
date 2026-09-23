@@ -359,6 +359,96 @@ class TestPolicyAtStart(HermeticCase):
         apply.assert_not_called()
 
 
+class TestEnvironmentAtStart(HermeticCase):
+    """The model's own commands and the in-process tools read COUSIN_HOME
+    and FRAMEWORK_ROOT; a runner started without them exports both."""
+
+    def _cwd(self, path):
+        old = os.getcwd()
+        os.chdir(path)
+        self.addCleanup(os.chdir, old)
+
+    def _tool_calls_succeed(self, ctx):
+        from cousin_lib.runner import tools
+        text, err = tools.call(ctx, "schedule", {"command": "add", "when": "in 2h",
+                                                 "prompt": "water the plants"})
+        self.assertFalse(err, text)
+        text, err = tools.call(ctx, "job", {"command": "start", "kind": "subagent",
+                                            "title": "env check"})
+        self.assertFalse(err, text)
+
+    def test_runner_main_exports_the_home_and_the_root_from_a_relative_home(self):
+        from pathlib import Path
+        from cousin_lib.runner import tools
+        from cousin_lib.runner.policy import Policy
+        home = temp_home(self, runner="fake")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        self.assertNotIn("COUSIN_HOME", os.environ)
+        self.assertNotIn("FRAMEWORK_ROOT", os.environ)
+        inbox_id = Inbox(home).put(Item("operator:priya", "chat", "a", sender="Priya"))
+        self._cwd(root)
+        rc, err = _run(["--home", "cousins/wren", "--once"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(Inbox(home).get(inbox_id)["state"], "done")
+        self.assertEqual(os.environ["COUSIN_HOME"], str(home))
+        self.assertEqual(os.environ["FRAMEWORK_ROOT"], str(root))
+        self._tool_calls_succeed(tools.ToolContext(
+            home=Path(os.environ["COUSIN_HOME"]), slug="wren", name="Wren",
+            root=Path(os.environ["FRAMEWORK_ROOT"]), turn=None, policy=Policy()))
+
+    def test_a_home_with_no_config_dir_above_exports_its_grandparent(self):
+        home = temp_home(self, runner="fake")
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(os.environ["FRAMEWORK_ROOT"], str(home.parent.parent))
+
+    def test_an_sdk_runner_built_directly_exports_both_when_unset(self):
+        from cousin_lib.runner.sdk import SdkRunner
+        home = temp_home(self, runner="sdk")
+        (home.parent.parent / "config").mkdir()
+        r = SdkRunner(home, client_factory=lambda options: None)
+        self.assertEqual(os.environ["COUSIN_HOME"], str(home))
+        self.assertEqual(os.environ["FRAMEWORK_ROOT"], str(home.parent.parent))
+        self._tool_calls_succeed(r.tool_context)
+
+    def test_an_sdk_runner_leaves_variables_that_are_already_set(self):
+        from cousin_lib.runner.sdk import SdkRunner
+        home = temp_home(self, runner="sdk")
+        os.environ["FRAMEWORK_ROOT"] = "/elsewhere/root"
+        os.environ["COUSIN_HOME"] = "/elsewhere/root/cousins/wren"
+        SdkRunner(home, client_factory=lambda options: None)
+        self.assertEqual(os.environ["FRAMEWORK_ROOT"], "/elsewhere/root")
+        self.assertEqual(os.environ["COUSIN_HOME"], "/elsewhere/root/cousins/wren")
+
+
+class TestRegistryAtStart(HermeticCase):
+    """A registry the runner cannot serve is a configuration problem,
+    rc 2 at start, not a worker that dies on its first connect (rc 3)."""
+
+    def _refuse(self, home, needle):
+        from cousin_lib.runner.sdk import SdkRunner
+        with mock.patch.object(SdkRunner, "options",
+                               side_effect=AssertionError("options() reached")):
+            rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2, err)
+        self.assertIn(needle, err)
+        self.assertNotIn("options() reached", err)
+
+    def test_a_registry_tool_with_no_handler_is_rc_2_naming_it(self):
+        home = temp_home(self, runner="sdk")
+        (home / "mcp-registry.toml").write_text(
+            '[tools.weather]\ncommand = "cousin-weather"\n'
+            'description = "Tomorrow\'s forecast."\n\n'
+            '[tools.weather.commands.today]\nargv = ["today"]\n')
+        self._refuse(home, "weather.today")
+
+    def test_a_malformed_registry_is_rc_2(self):
+        home = temp_home(self, runner="sdk")
+        (home / "mcp-registry.toml").write_text("this is not [ toml\n")
+        self._refuse(home, "mcp-registry.toml")
+
+
 class TestIsRunning(HermeticCase):
     def test_is_running_is_false_with_no_lock_file(self):
         home = temp_home(self, runner="fake")

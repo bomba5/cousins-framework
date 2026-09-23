@@ -122,6 +122,11 @@ class SdkRunner:
                  cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None):
         self.home = Path(home)
+        # the tools and the model's own commands find the cousin and the
+        # install through these; cousin-runner exports them, and a runner
+        # built directly sets whichever is unset
+        from cousin_lib.runner.main import export_environment
+        export_environment(self.home, overwrite=False)
         self.api_key = api_key
         self.model = model
         self.cwd = Path(cwd) if cwd else self.home
@@ -154,8 +159,8 @@ class SdkRunner:
         self.policy = policy if policy is not None else Policy.load(self.home)
         self.registry = registry
         slug, name = self._identity()
-        from cousin_lib.config import FrameworkConfig
-        self.root = FrameworkConfig.root_from_home(self.home) or self.home.parent.parent
+        from cousin_lib.runner.main import root_for
+        self.root = root_for(self.home)
         self.tool_context = tools.ToolContext(home=self.home, slug=slug, name=name,
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,

@@ -5,14 +5,14 @@ import time
 import unittest
 
 try:
-    from claude_agent_sdk import (AssistantMessage, CLIConnectionError, ResultMessage,
-                                  SystemMessage, TextBlock, ThinkingBlock, ToolResultBlock,
-                                  ToolUseBlock, UserMessage)
+    from claude_agent_sdk import (AssistantMessage, CLIConnectionError, HookEventMessage,
+                                  ResultMessage, SystemMessage, TextBlock, ThinkingBlock,
+                                  ToolResultBlock, ToolUseBlock, UserMessage)
 except ImportError:  # the `sdk` extra is optional; discovery skips, never errors
     raise unittest.SkipTest("claude-agent-sdk not installed")
 
 from cousin_lib.delivery import Item
-from cousin_lib.runner import wake
+from cousin_lib.runner import hooks, wake
 from cousin_lib.runner.sdk import SdkRunner
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
@@ -453,18 +453,59 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(made["client"].interrupts, 1)
         self.assertTrue(_results(r)[-1]["interrupted"])
 
+    # -- waiting_permission --------------------------------------------------------
+    def _ask_permission(self, r):
+        """What the PermissionRequest hook does mid-turn, under the runner's lock."""
+        cbs = hooks.callbacks(r.home, slug="wren", root=r.home, machine=r.machine,
+                              stream=r.stream, lock=r._lock)
+        asyncio.run(cbs["PermissionRequest"]({"hook_event_name": "PermissionRequest",
+                                              "tool_name": "Bash", "tool_input": {}}, None, {}))
+        self.assertEqual(r.state(), "waiting_permission")
+
+    def _reached_init(self, r):
+        return _wait(lambda: any(e["kind"] == "session_init" for e in r.events()))
+
     def test_a_message_while_waiting_permission_moves_the_machine_back_to_running(self):
-        r, made = self._runner([[init_msg(), "PAUSE", assistant(text="granted"), result()]])
+        hook_event = HookEventMessage(subtype="hook_response", data={},
+                                      hook_event_name="PermissionRequest")
+        r, made = self._runner([[init_msg(), "PAUSE", hook_event, "PAUSE",
+                                 assistant(text="granted"), result()]])
         r.start()
         r.enqueue(self._op("needs a tool"))
-        self.assertTrue(_wait(lambda: r.state() == "running"))
-        with r._lock:   # what the PermissionRequest hook does mid-turn
-            r.machine.to("waiting_permission", "Bash")
+        self.assertTrue(self._reached_init(r))
+        self._ask_permission(r)
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: any(e["kind"] == "system" for e in r.events())
+                              and made["client"].paused))
+        self.assertEqual(r.state(), "waiting_permission")   # a hook's own event settles nothing
         made["client"].resume()
         self.assertTrue(_wait(lambda: _results(r) and r.state() == "idle"))
         moves = [(e["payload"]["from"], e["payload"]["to"]) for e in r.events() if e["kind"] == "state"]
         self.assertIn(("waiting_permission", "running"), moves)
         self.assertEqual(moves[-1], ("running", "idle"))
+
+    def test_a_turn_that_times_out_while_waiting_permission_fails_and_recovers(self):
+        r, _ = self._runner([[init_msg(), "HANG", result()]], idle_timeout_s=1.0)
+        r.start()
+        receipt = r.enqueue(self._op("x"))
+        self.assertTrue(self._reached_init(r))
+        self._ask_permission(r)
+        self.assertTrue(_wait(lambda: any("no message for 1.0s" in e for e in _errors(r))))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "failed")
+        moves = [(e["payload"]["from"], e["payload"]["to"]) for e in r.events() if e["kind"] == "state"]
+        self.assertIn(("waiting_permission", "errored"), moves)
+
+    def test_a_turn_waiting_permission_can_be_interrupted(self):
+        r, made = self._runner([[init_msg(), "WAIT_FOR_INTERRUPT"]])
+        r.start()
+        r.enqueue(self._op("slow"))
+        self.assertTrue(self._reached_init(r))
+        self._ask_permission(r)
+        self.assertTrue(r.interrupt())
+        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=4))
+        self.assertEqual(made["client"].interrupts, 1)
+        self.assertTrue(_results(r)[-1]["interrupted"])
 
     def test_a_stale_interrupt_does_not_kill_the_next_turn(self):
         r, made = self._runner([[init_msg(), result()],

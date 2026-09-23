@@ -50,6 +50,9 @@ def _sdk():
 
 
 _END = object()
+# A turn is live while the model runs it, including while it waits on a
+# permission: every exit from either state (errored, idle, stopped) is legal.
+LIVE_STATES = ("running", "waiting_permission")
 
 
 class _NotWritten(Exception):
@@ -200,7 +203,7 @@ class SdkRunner:
         never lands on a later turn. A loop that closed anyway gets the
         coroutine closed here, never left unawaited."""
         with self._lock:
-            if self.machine.state != "running" or self._loop is None \
+            if self.machine.state not in LIVE_STATES or self._loop is None \
                     or self._client is None:
                 return False
             coro = self._interrupt_turn(self._turn_seq)
@@ -218,7 +221,7 @@ class SdkRunner:
         is cleared at every ResultMessage: an interrupt that arrives after
         the result, while the CLI is between turns, is dropped too, so it
         never marks a finished turn interrupted or reaches an idle CLI."""
-        if seq != self._turn_seq or self.machine.state != "running" or not self._live:
+        if seq != self._turn_seq or self.machine.state not in LIVE_STATES or not self._live:
             self.stream.append("system", {"subtype": "interrupt_dropped",
                                           "turn": seq, "current": self._turn_seq})
             return
@@ -442,7 +445,7 @@ class SdkRunner:
         message = "%s: %s" % (type(exc).__name__, exc)
         # The state first: whoever sees the `error` event also sees `errored`.
         with self._lock:
-            if self.machine.state in ("idle", "running"):
+            if self.machine.state in ("idle",) + LIVE_STATES:
                 self.machine.to("errored", message)
         self.turn.end()
         self.stream.append("error", {"error": message})
@@ -573,9 +576,12 @@ class SdkRunner:
                                 self._live = True   # the CLI took up a carried row
                                 if row["id"] != first["id"]:
                                     self.turn.add(row)
-                        with self._lock:   # a message means the permission was settled
-                            if self.machine.state == "waiting_permission":
-                                self.machine.to("running", "message")
+                        # a message means the permission was settled; a hook's
+                        # own event is not one
+                        if not isinstance(msg, getattr(sdk, "HookEventMessage", ())):
+                            with self._lock:
+                                if self.machine.state == "waiting_permission":
+                                    self.machine.to("running", "message")
                         self._record(sdk, msg, echo_of=echo_of)
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1
@@ -600,7 +606,7 @@ class SdkRunner:
 
         self.turn.end()
         with self._lock:
-            if self.machine.state == "running":
+            if self.machine.state in LIVE_STATES:
                 self.machine.to("idle", "turn done")
         return ok
 

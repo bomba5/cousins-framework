@@ -34,13 +34,16 @@ def _wait(pred, timeout=5.0):
 class PromptHookClient(ScriptedClient):
     """Fires the options' UserPromptSubmit hook for every message INSIDE
     query(), before the echo and before query() returns: the earliest
-    the real CLI could, so the runner has not yet seen the echo."""
+    the real CLI could, so the runner has not yet seen the echo. The
+    prompt is built as the CLI builds it: the text blocks joined with
+    "\n", then trimmed (image blocks dropped)."""
 
     async def query(self, prompt, session_id="default"):
         messages = [prompt] if isinstance(prompt, str) else [m async for m in prompt]
         cb = self.options.hooks["UserPromptSubmit"][0].hooks[0]
         for message in messages:
-            text = message["message"]["content"][0]["text"]
+            text = "\n".join(b["text"] for b in message["message"]["content"]
+                             if b.get("type") == "text").strip()
             await cb({"hook_event_name": "UserPromptSubmit", "prompt": text,
                       "session_id": "s", "transcript_path": "/dev/null", "cwd": "."}, None, {})
 
@@ -87,9 +90,11 @@ class TestWiring(HermeticCase):
         r = self._runner()
         r.options()
         self.assertIn("memory", r.tool_context.registry["tools"])
+        r.options()                       # a reconnect builds the options again
         said = [e["payload"] for e in r.events()
                 if e["kind"] == "policy" and e["payload"].get("registry") == "shipped default"]
-        self.assertTrue(said and said[0]["fallback"], said)
+        self.assertEqual(len(said), 1, said)   # once per runner, not per options()
+        self.assertTrue(said[0]["fallback"])
 
     def test_a_tool_call_through_the_server_spawns_nothing(self):
         r = self._runner()
@@ -150,6 +155,28 @@ class TestBodyForPrompt(HermeticCase):
         r.enqueue(Item("operator:priya", "chat", "where is the boat", sender="Priya"))
         self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
         self.assertEqual(self.searched, ["where is the boat"])
+
+    def test_a_body_with_a_trailing_newline_is_recalled_for_its_own_row(self):
+        # The CLI trims the prompt; the envelope keeps the textarea's newline.
+        # Recall gets the row's body verbatim (NOT stripped): trailing
+        # whitespace does not change a search.
+        r = self._runner()
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "where is the boat\n", sender="Priya"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
+        self.assertEqual(self.searched, ["where is the boat\n"])
+
+    def test_a_trimmed_prompt_does_not_fall_to_an_earlier_prefix_row(self):
+        r = self._runner()
+        head = "[operator:priya] chat from Priya at 2026-01-01 10:00 UTC\n\n"
+        short = {"id": 1, "thread_id": "operator:priya", "body": "where"}
+        full = {"id": 2, "thread_id": "operator:priya", "body": "where is the boat\n"}
+        r._sent = [(short, head + "where"), (full, head + "where is the boat\n")]
+        self.assertEqual(r._body_for_prompt((head + "where is the boat\n").strip()),
+                         "where is the boat\n")
+        # an attachment placeholder after the first block: the longest stripped prefix
+        self.assertEqual(r._body_for_prompt(head + "where is the boat\n[attachment: map.pdf]"),
+                         "where is the boat\n")
 
     def test_a_peer_row_is_not_recalled_for(self):
         r = self._runner()

@@ -53,8 +53,9 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     run on a worker thread; text becomes the prompt's additionalContext,
     hits goes on the `recall` event. Default: default_recall(home).
     body_for_prompt: `f(prompt) -> str`, the text to search for a
-    submitted prompt (the runner passes the live turn's newest row body,
-    not the whole envelope). Default: the prompt itself.
+    submitted prompt (the runner passes the body of the row whose
+    envelope matches the prompt, "" for a thread that is not operator
+    or person chat, never the whole envelope). Default: the prompt itself.
     lock: the runner's state lock (a threading.Lock); the permission
     move checks and transitions under it. Never held across an await.
     policy: a `policy.Policy` (Task 7); when given, the table gains

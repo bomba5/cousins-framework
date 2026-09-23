@@ -670,7 +670,7 @@ def call(ctx, name, args):
     return text, is_error
 
 
-def build_tool_server(ctx, registry=None):
+def build_tool_server(ctx, registry=None, *, on_fallback=None):
     """The SDK's in-process MCP server config: one tool per definition.
     RunnerError when a registry command has no handler, before the SDK
     is touched. With no registry given: the cousin's own, else the
@@ -678,7 +678,9 @@ def build_tool_server(ctx, registry=None):
     back to the shipped default (shipped_default_registry), the one
     every cousin is given, and says so with a `policy` event
     (`registry`, `fallback: true`: which tools the model gets is tool
-    policy) rather than refuse to start."""
+    policy) rather than refuse to start. `on_fallback(payload)`, when
+    given, receives that event instead of ctx.stream (the runner uses
+    it to say so once, not on every reconnect)."""
     if registry is None:
         path = mcp_server.default_registry_path(
             {"FRAMEWORK_ROOT": str(ctx.root), "COUSIN_HOME": str(ctx.home)})
@@ -687,10 +689,12 @@ def build_tool_server(ctx, registry=None):
         else:
             registry = mcp_server.parse_registry(
                 mcp_server.shipped_default_registry(ctx.root), "shipped default")
-            if ctx.stream is not None:
-                ctx.stream.append("policy", {
-                    "registry": "shipped default", "fallback": True,
-                    "why": "no MCP registry under %s or %s/config" % (ctx.home, ctx.root)})
+            notice = {"registry": "shipped default", "fallback": True,
+                      "why": "no MCP registry under %s or %s/config" % (ctx.home, ctx.root)}
+            if on_fallback is not None:
+                on_fallback(notice)
+            elif ctx.stream is not None:
+                ctx.stream.append("policy", notice)
     missing = missing_handlers(registry)
     if missing:
         raise RunnerError("registry commands with no in-process handler: %s"

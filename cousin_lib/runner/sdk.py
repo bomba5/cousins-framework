@@ -147,6 +147,7 @@ class SdkRunner:
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
         self.fatal = None        # why the worker gave up (a connect failure), else None
+        self._fallback_said = False   # the registry-fallback notice, once per runner
         # (row, envelope text) for every row written this runner turn, added
         # BEFORE its query: the prompt hook can fire before the echo.
         self._sent = []
@@ -176,7 +177,8 @@ class SdkRunner:
         # The tools and hooks are in-process: no settings file is read
         # (setting_sources=[]) and none is written; the policy hook runs
         # first on PreToolUse, since bypassPermissions skips can_use_tool.
-        server = tools.build_tool_server(self.tool_context, self.registry)
+        server = tools.build_tool_server(self.tool_context, self.registry,
+                                         on_fallback=self._registry_fallback)
         hook_table = hooks.build_hooks(self.home, slug=self.tool_context.slug, root=self.root,
                                        machine=self.machine, stream=self.stream,
                                        policy=self.policy, lock=self._lock,
@@ -189,20 +191,29 @@ class SdkRunner:
                                       mcp_servers={"cousin": server}, hooks=hook_table,
                                       extra_args={"replay-user-messages": None})
 
+    def _registry_fallback(self, payload):
+        """build_tool_server found no registry and used the shipped
+        default: say so once per runner, not on every (re)connect."""
+        if not self._fallback_said:
+            self._fallback_said = True
+            self.stream.append("policy", payload)
+
     def _body_for_prompt(self, prompt):
         """The body the prompt hook searches: that of the row whose
-        envelope text IS the prompt (the text the echo is matched by),
-        among the rows written this runner turn, echoed or not; the
-        newest row is not it when the hook fires before an echo. "" for
-        a row on a thread that is not operator or person chat (the chat
-        server recalls only for those) and for a prompt no row matches.
-        Runs on the loop thread, which is the only writer of `_sent`."""
-        prompt = prompt or ""
-        sent = list(self._sent)
+        envelope text is the prompt, among the rows written this runner
+        turn, echoed or not; the newest row is not it when the hook
+        fires before an echo. The CLI builds the prompt from the text
+        blocks joined with "\n" and trimmed (image blocks dropped), so
+        both sides are compared stripped: first equal, else the longest
+        envelope the prompt starts with (an attachment placeholder block
+        after the first). The body comes back verbatim, not stripped. ""
+        for a row on a thread that is not operator or person chat (the
+        chat server recalls only for those) and for a prompt no row
+        matches. Runs on the loop thread, the only writer of `_sent`."""
+        prompt = (prompt or "").strip()
+        sent = [(row, text.strip()) for row, text in self._sent]
         match = next((row for row, text in reversed(sent) if text == prompt), None)
         if match is None:
-            # a prompt that carries more than the first text block
-            # (an attachment's placeholder): the longest envelope it starts with
             prefixed = [(len(text), row) for row, text in sent if text and prompt.startswith(text)]
             match = max(prefixed, key=lambda pair: pair[0])[1] if prefixed else None
         if match is None:

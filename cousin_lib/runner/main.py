@@ -2,8 +2,17 @@
 
 `[agent] runner` in cousin.toml picks the implementation. No tmux, no
 port: the inbox is the bus and the wake socket is the doorbell.
+
+Exit codes: 0 after SIGTERM/SIGINT, or when `--once` has drained the
+inbox; 2 for a configuration problem (no or a bad `[agent] runner`, an
+unreadable key file) or when another runner holds the home's lock; 3
+when the runner gave up (its worker ended, e.g. it could not connect,
+or `--once` found it `errored` for longer than ERRORED_GIVE_UP_S), so a
+supervisor restarts it.
 """
 import argparse
+import fcntl
+import os
 import signal
 import sys
 import threading
@@ -14,6 +23,17 @@ from pathlib import Path
 from cousin_lib.runner.base import RunnerError
 
 KINDS = ("sdk", "fake")
+
+# The credentials a runner must never inherit from the shell that started
+# it: the SDK builds the CLI's environment as {**os.environ, **options.env},
+# so an overlay cannot unset them and only removing them here can. The auth
+# lane is `[agent] api_key_file` (options.env) and nothing else.
+AUTH_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+
+# `--once` gives up on a runner that stays `errored` this long.
+ERRORED_GIVE_UP_S = 10.0
+
+_UNSET = object()
 
 
 def _agent_table(home):
@@ -46,8 +66,15 @@ def _read_key(home, agent):
 
 
 def runner_for(home, *, kind=None):
+    """The runner cousin.toml names. A cousin with no `[agent] runner` is
+    a tmux cousin: it gets no runner (its inbox has no producer), unless
+    `kind` says otherwise."""
     agent = _agent_table(home)
-    kind = kind or agent.get("runner") or "sdk"
+    kind = kind or agent.get("runner")
+    if not kind:
+        raise RunnerError("%s/cousin.toml has no [agent] runner: this is a tmux"
+                          " cousin (pass --runner %s to run it here anyway)"
+                          % (home, "|".join(KINDS)))
     if kind == "fake":
         from cousin_lib.runner.fake import FakeRunner
         return FakeRunner(home)
@@ -59,6 +86,67 @@ def runner_for(home, *, kind=None):
                       % (", ".join(KINDS), kind))
 
 
+def _lock(home):
+    """One runner per cousin: an exclusive flock on <home>/run/runner.lock,
+    held for the process's life (the kernel drops it when the process
+    dies, even on SIGKILL). Taken before anything else, because a second
+    runner's `requeue_stale` would steal the first one's live claims."""
+    path = Path(home) / "run" / "runner.lock"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as err:
+        raise RunnerError("cannot open the runner lock %s: %s" % (path, err))
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise RunnerError("another cousin-runner holds %s" % path)
+    return fd
+
+
+def _gone(runner):
+    """The exit-3 line when the runner's worker has ended, else None."""
+    if runner.worker_alive():
+        return None
+    return "cousin-runner: the runner gave up: %s" % (
+        getattr(runner, "fatal", None) or "its worker ended")
+
+
+def _once(runner, stop):
+    """Until the inbox is drained (0), a signal (0), or the runner gives
+    up (3): its worker ended, or it stayed `errored` too long."""
+    errored_since = None
+    while not stop.is_set():
+        why = _gone(runner)
+        if why:
+            print(why, file=sys.stderr)
+            return 3
+        state = runner.state()
+        if runner.inbox.unfinished() == 0 and state != "running":
+            return 0
+        if state == "errored":
+            errored_since = errored_since or time.monotonic()
+            if time.monotonic() - errored_since > ERRORED_GIVE_UP_S:
+                print("cousin-runner: the runner stayed errored for %.0fs"
+                      % ERRORED_GIVE_UP_S, file=sys.stderr)
+                return 3
+        else:
+            errored_since = None
+        time.sleep(0.05)
+    return 0
+
+
+def _forever(runner, stop):
+    while not stop.is_set():
+        why = _gone(runner)
+        if why:
+            print(why, file=sys.stderr)
+            return 3
+        time.sleep(0.2)
+    return 0
+
+
 def runner_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-runner")
     parser.add_argument("--home", required=True)
@@ -67,32 +155,44 @@ def runner_main(argv=None):
                         help="drain the inbox, then exit")
     args = parser.parse_args(argv)
     try:
-        runner = runner_for(args.home, kind=args.runner)
+        lock = _lock(args.home)
     except RunnerError as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
+    try:
+        try:
+            runner = runner_for(args.home, kind=args.runner)
+        except RunnerError as err:
+            print("cousin-runner: %s" % err, file=sys.stderr)
+            return 2
+        for name in AUTH_ENV:
+            os.environ.pop(name, None)
+        return _serve(runner, args.once)
+    finally:
+        os.close(lock)
+
+
+def _serve(runner, once):
     stop = threading.Event()
 
     def _signal(signum, frame):
         stop.set()
 
-    previous_term = signal.signal(signal.SIGTERM, _signal)
-    previous_int = signal.signal(signal.SIGINT, _signal)
+    previous_term = previous_int = _UNSET
     try:
-        # a claim from a runner that died is ours now
+        previous_term = signal.signal(signal.SIGTERM, _signal)
+        previous_int = signal.signal(signal.SIGINT, _signal)
+        # a claim from a runner that died is ours now (the lock says no
+        # other runner is alive on this home)
         runner.inbox.requeue_stale(older_than_s=0.0)
         runner.start()
-        if args.once:
-            while runner.inbox.unfinished() > 0 or runner.state() == "running":
-                time.sleep(0.05)
-            return 0
-        while not stop.is_set():
-            time.sleep(0.2)
-        return 0
+        return _once(runner, stop) if once else _forever(runner, stop)
     finally:
         runner.stop(timeout=30)
-        signal.signal(signal.SIGTERM, previous_term)
-        signal.signal(signal.SIGINT, previous_int)
+        if previous_term is not _UNSET:
+            signal.signal(signal.SIGTERM, previous_term)
+        if previous_int is not _UNSET:
+            signal.signal(signal.SIGINT, previous_int)
 
 
 if __name__ == "__main__":

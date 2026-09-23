@@ -296,6 +296,39 @@ class TestDivert(LoginCase):
         self.assertIsNone(divert_login_code(self.config(), "Priya", "did it work?"))
         self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
 
+    def arm_nightly(self):
+        return accounts.arm_capture(self.root, via="wren", operator="Priya",
+                                    account_name="nightly", ttl=60)
+
+    def test_another_accounts_done_tombstone_never_swallows_the_next_code(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm()                                   # "fleet" sorts before "nightly"
+        divert_login_code(self.config(), "Priya", CODE)
+        self.assertEqual(accounts.take_code(self.root, "fleet", timeout=1, poll=0.01), CODE)
+        self.arm_nightly()
+        other = "zyxwvutsrqponmlkjihgfe#dcba98765"
+        self.assertEqual(divert_login_code(self.config(), "Priya", other),
+                         "[login code received for account nightly]")
+        self.assertEqual(accounts.read_capture(self.root, "nightly")["code"], other)
+
+    def test_another_accounts_late_tombstone_never_swallows_the_next_code(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm(ttl=-1)                             # fleet's window closed: a tombstone
+        self.arm_nightly()
+        self.assertEqual(divert_login_code(self.config(), "Priya", CODE),
+                         "[login code received for account nightly]")
+        self.assertEqual(accounts.read_capture(self.root, "nightly")["code"], CODE)
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
+
+    def test_a_tombstone_past_its_hour_is_removed(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm()
+        self.assertIsNone(accounts.take_code(self.root, "fleet", timeout=0.05, poll=0.01))
+        later = accounts.read_capture(self.root, "fleet")["until"] + 1
+        with mock.patch.object(accounts.time, "time", return_value=later):
+            self.assertIsNone(divert_login_code(self.config(), "Priya", CODE))
+        self.assertIsNone(accounts.read_capture(self.root, "fleet"))
+
     def dead_pid(self):
         proc = subprocess.Popen([sys.executable, "-c", "pass"]); proc.wait()
         return proc.pid
@@ -351,7 +384,7 @@ class TestDivert(LoginCase):
 
 
 class TestOperatorOnly(LoginCase):
-    def main(self, *argv, tty=True, ancestry=False):
+    def main(self, *argv, tty=True, ancestry=None):
         err = io.StringIO()
         stdin = mock.Mock(isatty=lambda: tty)
         with mock.patch.object(sys, "stdin", stdin), contextlib.redirect_stderr(err), \
@@ -359,9 +392,9 @@ class TestOperatorOnly(LoginCase):
             rc = accounts.account_main([*argv, "--root", str(self.root)])
         return rc, err.getvalue()
 
-    def test_login_refuses_under_a_cousin_ancestor(self):
-        rc, err = self.main("login", "fleet", "--via", "wren", ancestry=True)
-        self.assertEqual(rc, 2); self.assertIn("operator-run", err)
+    def test_login_refuses_under_a_cousin_ancestor_and_names_it(self):
+        rc, err = self.main("login", "fleet", "--via", "wren", ancestry=4242)
+        self.assertEqual(rc, 2); self.assertIn("operator-run", err); self.assertIn("4242", err)
 
     def test_the_ancestry_walk_reads_each_ancestors_environment(self):
         parents = {400: 300, 300: 200, 200: 1}
@@ -373,16 +406,16 @@ class TestOperatorOnly(LoginCase):
                 raise envs[pid]
             return envs[pid]
         with mock.patch.object(os, "getppid", return_value=400):
-            self.assertTrue(accounts._inside_cousin_ancestry(
-                parent_of=parents.__getitem__, environ_of=environ_of))
+            self.assertEqual(accounts._inside_cousin_ancestry(
+                parent_of=parents.__getitem__, environ_of=environ_of), 200)
             envs[200] = [b"PATH=/bin"]
-            self.assertFalse(accounts._inside_cousin_ancestry(
+            self.assertIsNone(accounts._inside_cousin_ancestry(
                 parent_of=parents.__getitem__, environ_of=environ_of))
 
             def no_proc(pid):
                 raise FileNotFoundError("/proc")
-            self.assertFalse(accounts._inside_cousin_ancestry(parent_of=no_proc,
-                                                              environ_of=no_proc))
+            self.assertIsNone(accounts._inside_cousin_ancestry(parent_of=no_proc,
+                                                               environ_of=no_proc))
 
     def test_a_timeout_that_is_not_positive_is_refused(self):
         for t in ("0", "-5"):

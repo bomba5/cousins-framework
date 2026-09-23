@@ -623,18 +623,18 @@ def take_code(root, name, *, timeout, poll=0.5):
 
 
 def retire_capture(root, name):
-    """An armed capture whose window closed without its flow's cleanup (the
-    flow died, or the clock ran out first): rewritten as a codeless
-    tombstone, or removed once the tombstone's hour is over too."""
+    """Any capture whose tombstone hour is over is removed; an armed capture
+    whose window closed without its flow's cleanup (the flow died, or the
+    clock ran out first) is rewritten as a codeless tombstone."""
     with _capture_lock(root, name):
         data = read_capture(root, name)
-        if data is None or data.get("state") != "armed":
+        if data is None:
             return
         window = capture_window(data, time.time())
-        if window in ("armed", "taken"):
-            return
         if window is None:
             capture_path(root, name).unlink(missing_ok=True)
+            return
+        if data.get("state") != "armed" or window in ("armed", "taken"):
             return
         _write_private(capture_path(root, name), _tombstone(
             data, "tombstone", data.get("until") or data["expires"] + TOMBSTONE_S))
@@ -689,8 +689,8 @@ def _proc_environ(pid):
 
 
 def _inside_cousin_ancestry(*, parent_of=_proc_parent, environ_of=_proc_environ):
-    """Does any ancestor process carry COUSIN_HOME or COUSIN_SLUG in the
-    environment it was started with? Catches `env -u COUSIN_HOME` run by a
+    """The pid of the nearest ancestor process that carries COUSIN_HOME or
+    COUSIN_SLUG in the environment it was started with, or None. Catches `env -u COUSIN_HOME` run by a
     cousin's own shell. Best effort, a guardrail like the rest: an
     ancestor whose environment cannot be read is skipped, and no /proc
     means no check."""
@@ -702,12 +702,12 @@ def _inside_cousin_ancestry(*, parent_of=_proc_parent, environ_of=_proc_environ)
         except (OSError, ValueError):
             env = ()
         if any(e.startswith((b"COUSIN_HOME=", b"COUSIN_SLUG=")) for e in env):
-            return True
+            return pid
         try:
             pid = parent_of(pid)
         except (OSError, ValueError):
-            return False
-    return False
+            return None
+    return None
 
 
 def _exit_on_hangup():
@@ -825,9 +825,14 @@ def account_main(argv=None):
         # and `env -u` is caught by the ancestor check. A determined
         # process can still get past both; the account files stay
         # readable by the same Unix user until the phase 6 container.
-        if (os.environ.get("COUSIN_HOME") or os.environ.get("COUSIN_SLUG")
-                or _inside_cousin_ancestry()):
+        if os.environ.get("COUSIN_HOME") or os.environ.get("COUSIN_SLUG"):
             print("cousin-account: operator-run only; a cousin never obtains credentials",
+                  file=sys.stderr)
+            return 2
+        ancestor = _inside_cousin_ancestry()
+        if ancestor:
+            print("cousin-account: operator-run only; a cousin never obtains credentials"
+                  " (ancestor process %d was started inside a cousin)" % ancestor,
                   file=sys.stderr)
             return 2
         # A usability check, not a safeguard: anything can fake a terminal.

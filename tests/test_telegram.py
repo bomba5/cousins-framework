@@ -621,6 +621,34 @@ class TestInboundReachesTheInbox(HermeticCase):
         self.assertEqual(kind, "image")
         self.assertEqual(path, str(staged))
 
+    def test_presence_marker_touched_and_operator_correction_captured(self):
+        # The two things /api/send did after storing a message that the
+        # first Telegram pass silently dropped: the presence marker (the
+        # tmux line's dt-since-msg baseline) and operator-correction
+        # capture. Both now ride the shared after_inbound_stored() helper.
+        import time
+        from cousin_lib import telegram
+        from tests.runner._home import temp_home
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n\n[operator]\nname = "Priya"\n'
+            '\n[agent]\nrunner = "fake"\n\n[telegram]\noperators = [42]\n')
+        cfg = telegram.BridgeConfig(slug="wren", token="unused",
+                                    operator_ids={42},
+                                    operator_name={42: "Priya"}, port=0,
+                                    home=home)
+        before = time.time()
+        with mock.patch(
+                "cousin_lib.server.inbound.corrections.detect_and_record"
+        ) as detect:
+            telegram._default_chat_send(cfg, user="Priya",
+                                        message="actually, no")
+        marker = home / "data" / ".last-user-msg"
+        self.assertTrue(marker.is_file())
+        self.assertGreaterEqual(marker.stat().st_mtime, before - 1)
+        detect.assert_called_once_with(home, user="Priya",
+                                       text="actually, no")
+
 
 if __name__ == "__main__":
     unittest.main()

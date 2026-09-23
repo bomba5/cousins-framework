@@ -24,6 +24,16 @@ def normalize_chat_user(name):
     return name.lower().replace(" ", "_")
 
 
+def is_operator(config, user):
+    """Is this sender the configured operator? No operator configured
+    means nobody is: the null profile is "no operator", never a
+    defaulted human being."""
+    operator = getattr(config, "operator_name", None)
+    if not operator:
+        return False
+    return normalize_chat_user(user) == normalize_chat_user(operator)
+
+
 # Extensions written as-is; anything else normalizes to .bin so a
 # crafted subtype cannot choose an arbitrary filename suffix.
 _DATA_URI_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}

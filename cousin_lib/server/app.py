@@ -19,12 +19,13 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cousin_lib import chat_hooks, corrections, delivery, memory_search
+from cousin_lib import chat_hooks, delivery, memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError)
+from cousin_lib.server.inbound import after_inbound_stored
 from cousin_lib.server.netguard import NetGuard
-from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
-                                       save_data_uri)
+from cousin_lib.server.storage import (ChatStore, is_operator,
+                                       normalize_chat_user, save_data_uri)
 
 
 class _BadRequest(Exception):
@@ -65,30 +66,6 @@ def persist_inbound_file(home, message_id, data_uri):
     return "[image attached -> Read %s]" % path
 
 
-def _is_operator(config, user):
-    """Is this sender the configured operator? No operator configured
-    means nobody is: the null profile is "no operator", never a
-    defaulted human being."""
-    operator = config.operator_name
-    if not operator:
-        return False
-    return normalize_chat_user(user) == normalize_chat_user(operator)
-
-
-def _record_correction(config, user, message):
-    """Capture an operator correction from an inbound message. Only the
-    configured operator's messages count (no operator configured means
-    nothing is recorded: a peer's "no" is not calibration). Best-effort
-    by construction: the message is already stored and about to be
-    delivered, and a full disk under data/ must not turn into a 500."""
-    if not _is_operator(config, user):
-        return
-    try:
-        corrections.detect_and_record(config.home, user=user, text=message)
-    except Exception as err:  # noqa: BLE001 - never fails the send
-        print("corrections: not recorded: %s" % err, file=sys.stderr)
-
-
 # Proactive recall: a colleague remembers without being asked. An
 # operator message long enough to carry meaning is searched against the
 # cousin's own memory and the best hits ride along on the DELIVERED line
@@ -111,7 +88,7 @@ def _recall_context(config, user, message):
     delivered item as context and never reaches the stored message.
     Best-effort by contract - a failing search never costs the
     delivery."""
-    if not _is_operator(config, user):
+    if not is_operator(config, user):
         return ""
     # Bounded: the search refreshes its index first, and after a big
     # change that can take longer than the console waits for a send.
@@ -213,8 +190,8 @@ def build_server(home, *, framework_root=None, tmux_bin=None,
                     context=""):
             # wait=False: the line is composed here, in the request
             # thread, because its time prefix reads the presence marker
-            # before _handle_send touches it; only the typing happens on
-            # a background thread.
+            # before after_inbound_stored touches it; only the typing
+            # happens on a background thread.
             source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"
             thread = (delivery.thread_id("system") if source == "hook"
                       else delivery.thread_for_chat(config, user))
@@ -359,7 +336,6 @@ class _ChatHandler(BaseHTTPRequestHandler):
             reply_to=json.dumps(reply_to) if reply_to is not None else None,
         ))
         server = self.chat_server
-        _record_correction(server.config, user, message)
         attachments = []
         image = body.get("image")
         if image:
@@ -369,16 +345,16 @@ class _ChatHandler(BaseHTTPRequestHandler):
         if server.deliver is not None:
             # The recall line rides as context, in the DELIVERED item
             # only: the row above already holds the message as the
-            # operator wrote it.
+            # operator wrote it. Fire-and-forget by design: the outcome
+            # (delivered/queued/failed) is not read here.
             server.deliver(user=user, message=message,
                            message_id=row["id"], attachments=attachments,
                            context=_recall_context(server.config, user,
                                                    message))
-        # Touched after delivery composed its text: the marker's mtime is
-        # the gap baseline for the NEXT message, not this one.
-        marker = server.config.home / "data" / ".last-user-msg"
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
+        # After delivery composed its text: the marker's mtime is the
+        # gap baseline for the NEXT message, not this one, and the
+        # correction capture rides along on the same call.
+        after_inbound_stored(server.config, user, message)
         # Hooks last: the message is stored and its delivery composed,
         # so a hook's inject line is unambiguously the second line.
         _fire_hooks(server, user, message, row["id"])

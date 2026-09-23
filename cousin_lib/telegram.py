@@ -31,6 +31,7 @@ from pathlib import Path
 
 from cousin_lib import chat_hooks, delivery
 from cousin_lib.config import CousinConfig, FrameworkConfig
+from cousin_lib.server.inbound import after_inbound_stored
 from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
                                        save_data_uri)
 
@@ -198,8 +199,14 @@ def _default_chat_send(cfg, *, user, message, attachment=None):
                              message_id=message_id)
         return delivery.deliver(cfg.home, item, wait=False)
 
+    # Fire-and-forget by design: the outcome (delivered/queued/failed)
+    # is not read here.
     deliver(user=user, message=message, message_id=row["id"],
            attachments=(str(path),) if path else ())
+    # After delivery, same order /api/send has: the marker's mtime is
+    # the gap baseline for the NEXT message, and the correction capture
+    # rides along on the same call.
+    after_inbound_stored(config, user, message)
     chat_hooks.on_message(cfg.home, user=user, message=message,
                           message_id=row["id"], slug=cfg.slug,
                           deliver=deliver)

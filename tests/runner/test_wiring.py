@@ -78,19 +78,38 @@ class TestWiring(HermeticCase):
 
     # -- cache-bust guards (A2, A3) --------------------------------------------
     def test_tool_definitions_are_byte_stable_across_connects(self):
+        # The raw bytes the CLI gets, no sort_keys: a dict built in a
+        # different order is a different prompt prefix, a cache miss.
         import json
+        import pathlib
+        import sys
 
         from cousin_lib.runner import tools
         r1 = self._runner()
         r1.options()
-        defs_a = json.dumps(tools.tool_definitions(r1.tool_context.registry), sort_keys=True)
+        defs_a = json.dumps(tools.tool_definitions(r1.tool_context.registry))
         r1.options()   # a reconnect rebuilds the server from scratch
-        defs_b = json.dumps(tools.tool_definitions(r1.tool_context.registry), sort_keys=True)
+        defs_b = json.dumps(tools.tool_definitions(r1.tool_context.registry))
         r2 = self._runner()
         r2.options()
-        defs_c = json.dumps(tools.tool_definitions(r2.tool_context.registry), sort_keys=True)
+        defs_c = json.dumps(tools.tool_definitions(r2.tool_context.registry))
         self.assertEqual(defs_a, defs_b)
         self.assertEqual(defs_a, defs_c)
+        # A fresh interpreter under two hash seeds: nothing set- or
+        # hash-ordered reaches the definitions.
+        script = ("import json, pathlib, sys\n"
+                  "from cousin_lib.runner import tools\n"
+                  "reg, _ = tools.resolve_registry(pathlib.Path(sys.argv[1]),"
+                  " pathlib.Path(sys.argv[2]))\n"
+                  "sys.stdout.write(json.dumps(tools.tool_definitions(reg)))\n")
+        checkout = pathlib.Path(__file__).resolve().parents[2]
+        for seed in ("1", "2"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            out = subprocess.run([sys.executable, "-c", script, str(r1.home), str(r1.root)],
+                                 cwd=str(checkout), env=env, capture_output=True, text=True,
+                                 timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(out.stdout, defs_a, "PYTHONHASHSEED=%s" % seed)
 
     def test_options_system_prompt_is_unchanged_across_calls(self):
         r = self._runner()

@@ -116,10 +116,12 @@ class TestLiveContinuity(HermeticCase):
 
 @unittest.skipUnless(os.environ.get("COUSIN_LIVE_SDK") == "1", "set COUSIN_LIVE_SDK=1")
 class TestLiveCache(HermeticCase):
-    """Cache-bust guard (ruling P23, tracker #69): the second turn of one
-    session must read the prompt cache, not rebuild it. If it doesn't,
-    something per-turn is landing in the cached prefix (A3 guards the
-    two places that could: system_prompt and the hooks table)."""
+    """Cache-bust guard: the second turn of one session must read the
+    prompt cache, not rebuild it, and read back at least what the first
+    turn read or wrote (less 512 tokens of slack). If it doesn't,
+    something per-turn is landing in the cached prefix (test_wiring
+    guards the two places that could: system_prompt and the tool
+    definitions)."""
 
     def _runner(self):
         home = temp_home(self, runner="sdk")
@@ -144,9 +146,15 @@ class TestLiveCache(HermeticCase):
         second_usage = self._last_usage(r)
         print("\nUSAGE turn 1:", first_usage, file=sys.stderr)
         print("USAGE turn 2:", second_usage, file=sys.stderr)
+        evidence = "turn 1 usage: %r; turn 2 usage: %r" % (first_usage, second_usage)
         cache_read = (second_usage or {}).get("cache_read_input_tokens") or 0
-        self.assertGreater(cache_read, 0,
-                           "turn 1 usage: %r; turn 2 usage: %r" % (first_usage, second_usage))
+        self.assertGreater(cache_read, 0, evidence)
+        # Turn 2 reads back at least everything turn 1 read or wrote: a
+        # partial bust (a system prompt or tool list that changed between
+        # the turns) rebuilds part of the prefix and falls short.
+        first_read = (first_usage or {}).get("cache_read_input_tokens") or 0
+        first_created = (first_usage or {}).get("cache_creation_input_tokens") or 0
+        self.assertGreaterEqual(cache_read, first_read + first_created - 512, evidence)
 
 
 if __name__ == "__main__":

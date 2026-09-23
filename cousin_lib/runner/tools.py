@@ -673,13 +673,24 @@ def call(ctx, name, args):
 def build_tool_server(ctx, registry=None):
     """The SDK's in-process MCP server config: one tool per definition.
     RunnerError when a registry command has no handler, before the SDK
-    is touched."""
+    is touched. With no registry given: the cousin's own, else the
+    install's (default_registry_path); a root that has neither falls
+    back to the shipped default (shipped_default_registry), the one
+    every cousin is given, and says so with a `policy` event
+    (`registry`, `fallback: true`: which tools the model gets is tool
+    policy) rather than refuse to start."""
     if registry is None:
         path = mcp_server.default_registry_path(
             {"FRAMEWORK_ROOT": str(ctx.root), "COUSIN_HOME": str(ctx.home)})
-        if path is None:
-            raise RunnerError("no MCP registry under %s or %s/config" % (ctx.home, ctx.root))
-        registry = mcp_server.load_registry(path)
+        if path is not None:
+            registry = mcp_server.load_registry(path)
+        else:
+            registry = mcp_server.parse_registry(
+                mcp_server.shipped_default_registry(ctx.root), "shipped default")
+            if ctx.stream is not None:
+                ctx.stream.append("policy", {
+                    "registry": "shipped default", "fallback": True,
+                    "why": "no MCP registry under %s or %s/config" % (ctx.home, ctx.root)})
     missing = missing_handlers(registry)
     if missing:
         raise RunnerError("registry commands with no in-process handler: %s"

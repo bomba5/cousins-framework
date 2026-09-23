@@ -24,8 +24,9 @@ from cousin_lib.runner.turn import Turn
 
 
 class FakeRunner:
-    def __init__(self, home, *, turn_seconds=0.0, script=None):
+    def __init__(self, home, *, turn_seconds=0.0, script=None, policy=None):
         self.home = home
+        self.policy = policy     # held for symmetry with SdkRunner; no tools, no hooks
         self.turn_seconds = float(turn_seconds)
         self.script = script or ["tool"]
         self.session_id = "fake-" + uuid.uuid4().hex[:8]

@@ -68,22 +68,28 @@ def _read_key(home, agent):
 def runner_for(home, *, kind=None):
     """The runner cousin.toml names. A cousin with no `[agent] runner` is
     a tmux cousin: it gets no runner (its inbox has no producer), unless
-    `kind` says otherwise."""
+    `kind` says otherwise. The home's policy.toml is loaded here, once,
+    and handed to the runner: a malformed one is a PolicyError, a
+    RunnerError, so the process exits 2 naming the key. No settings
+    file is written: the runner's hooks are in-process."""
     agent = _agent_table(home)
     kind = kind or agent.get("runner")
     if not kind:
         raise RunnerError("%s/cousin.toml has no [agent] runner: this is a tmux"
                           " cousin (pass --runner %s to run it here anyway)"
                           % (home, "|".join(KINDS)))
+    if kind not in KINDS:
+        raise RunnerError("cousin.toml [agent] runner must be one of %s, got %r"
+                          % (", ".join(KINDS), kind))
+    from cousin_lib.runner.policy import Policy
+    policy = Policy.load(home)
     if kind == "fake":
         from cousin_lib.runner.fake import FakeRunner
-        return FakeRunner(home)
+        return FakeRunner(home, policy=policy)
     if kind == "sdk":
         from cousin_lib.runner.sdk import SdkRunner
         return SdkRunner(home, api_key=_read_key(home, agent),
-                         model=agent.get("model"))
-    raise RunnerError("cousin.toml [agent] runner must be one of %s, got %r"
-                      % (", ".join(KINDS), kind))
+                         model=agent.get("model"), policy=policy)
 
 
 def _lock(home):
@@ -186,6 +192,9 @@ def _serve(runner, once):
         # other runner is alive on this home)
         runner.inbox.requeue_stale(older_than_s=0.0)
         runner.start()
+        policy = getattr(runner, "policy", None)
+        if policy is not None:
+            runner.stream.append("policy", {"describe": policy.describe()})
         return _once(runner, stop) if once else _forever(runner, stop)
     finally:
         runner.stop(timeout=30)

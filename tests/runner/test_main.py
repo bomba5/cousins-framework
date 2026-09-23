@@ -320,5 +320,44 @@ class TestSigterm(HermeticCase):
         self.assertEqual(Inbox(home).get(row)["state"], "done")
 
 
+
+class TestPolicyAtStart(HermeticCase):
+    def test_a_malformed_policy_is_a_config_error(self):
+        home = temp_home(self, runner="fake")
+        (home / "policy.toml").write_text('deny_tools = "x"\n')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = runner_main.runner_main(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("deny_tools", err.getvalue())
+
+    def test_the_policy_is_described_in_the_stream_at_start(self):
+        home = temp_home(self, runner="fake")
+        Inbox(home).put(Item("operator:priya", "chat", "a", sender="Priya"))
+        rc = runner_main.runner_main(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0)
+        import json
+        events = []
+        for p in (home / "data" / "stream").glob("*.jsonl"):
+            events += [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+        policy_events = [e for e in events
+                         if e["kind"] == "policy" and "no policy.toml" in json.dumps(e)]
+        self.assertTrue(policy_events)
+
+    def test_both_runners_are_handed_the_policy(self):
+        home = temp_home(self, runner="fake")
+        (home / "policy.toml").write_text('deny_tools = ["WebFetch"]\n')
+        r = runner_main.runner_for(home)
+        self.assertEqual(r.policy.deny_tools, ("WebFetch",))
+
+    def test_the_runner_never_writes_harness_settings(self):
+        from cousin_lib import harness_settings
+        home = temp_home(self, runner="fake")
+        with mock.patch.object(harness_settings, "apply_project_settings") as apply:
+            rc = runner_main.runner_main(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0)
+        apply.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

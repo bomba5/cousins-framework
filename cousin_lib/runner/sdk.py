@@ -31,10 +31,11 @@ import time
 import uuid
 from pathlib import Path
 
-from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import envelope, wake
-from cousin_lib.runner.base import Receipt, RunnerError, folds_into_turn
+from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
+from cousin_lib.runner import envelope, hooks, tools, wake
+from cousin_lib.runner.base import FOLDED_KINDS, Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
+from cousin_lib.runner.policy import Policy
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
 from cousin_lib.runner.turn import Turn
@@ -119,7 +120,7 @@ class SdkRunner:
 
     def __init__(self, home, *, client_factory=None, api_key=None, model=None,
                  cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
-                 drain_timeout_s=30.0):
+                 drain_timeout_s=30.0, policy=None, registry=None):
         self.home = Path(home)
         self.api_key = api_key
         self.model = model
@@ -146,17 +147,71 @@ class SdkRunner:
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
         self.fatal = None        # why the worker gave up (a connect failure), else None
+        # (row, envelope text) for every row written this runner turn, added
+        # BEFORE its query: the prompt hook can fire before the echo.
+        self._sent = []
+        self.policy = policy if policy is not None else Policy.load(self.home)
+        self.registry = registry
+        slug, name = self._identity()
+        from cousin_lib.config import FrameworkConfig
+        self.root = FrameworkConfig.root_from_home(self.home) or self.home.parent.parent
+        self.tool_context = tools.ToolContext(home=self.home, slug=slug, name=name,
+                                              root=self.root, turn=self.turn,
+                                              policy=self.policy, stream=self.stream,
+                                              registry=registry)
+
+    def _identity(self):
+        """(slug, name) from cousin.toml; the directory name when it lacks them."""
+        from cousin_lib.config import CousinConfig
+        try:
+            cfg = CousinConfig.load(self.home)
+            return cfg.slug, cfg.name
+        except Exception:  # noqa: BLE001 - a thin toml still runs; the dir names it
+            return self.home.name, self.home.name.capitalize()
 
     # -- options -----------------------------------------------------------
     def options(self, *, resume=None):
         sdk = _sdk()
         env = {"ANTHROPIC_API_KEY": self.api_key} if self.api_key else {}
+        # The tools and hooks are in-process: no settings file is read
+        # (setting_sources=[]) and none is written; the policy hook runs
+        # first on PreToolUse, since bypassPermissions skips can_use_tool.
+        server = tools.build_tool_server(self.tool_context, self.registry)
+        hook_table = hooks.build_hooks(self.home, slug=self.tool_context.slug, root=self.root,
+                                       machine=self.machine, stream=self.stream,
+                                       policy=self.policy, lock=self._lock,
+                                       body_for_prompt=self._body_for_prompt)
         # replay-user-messages: the echo is how a turn knows which rows the
         # model actually took in (see the module docstring).
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=resume,
+                                      mcp_servers={"cousin": server}, hooks=hook_table,
                                       extra_args={"replay-user-messages": None})
+
+    def _body_for_prompt(self, prompt):
+        """The body the prompt hook searches: that of the row whose
+        envelope text IS the prompt (the text the echo is matched by),
+        among the rows written this runner turn, echoed or not; the
+        newest row is not it when the hook fires before an echo. "" for
+        a row on a thread that is not operator or person chat (the chat
+        server recalls only for those) and for a prompt no row matches.
+        Runs on the loop thread, which is the only writer of `_sent`."""
+        prompt = prompt or ""
+        sent = list(self._sent)
+        match = next((row for row, text in reversed(sent) if text == prompt), None)
+        if match is None:
+            # a prompt that carries more than the first text block
+            # (an attachment's placeholder): the longest envelope it starts with
+            prefixed = [(len(text), row) for row, text in sent if text and prompt.startswith(text)]
+            match = max(prefixed, key=lambda pair: pair[0])[1] if prefixed else None
+        if match is None:
+            return ""
+        try:
+            kind, _ = parse_thread(match["thread_id"])
+        except DeliveryError:
+            return ""
+        return (match.get("body") or "") if kind in FOLDED_KINDS else ""
 
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})
@@ -351,6 +406,7 @@ class SdkRunner:
         # The SDK's str path sets this key and its iterable path does not.
         message.setdefault("parent_tool_use_id", None)
         text = message["message"]["content"][0]["text"]
+        self._sent.append((row, text))   # before the query: the prompt hook may fire first
         yielded = []
 
         async def one():
@@ -535,6 +591,7 @@ class SdkRunner:
         the turn is live, and read until every written row is closed.
         Returns False when the turn failed or a result was an error."""
         self._interrupt_requested = False
+        self._sent = []
         open_rows = []    # (row, envelope text): written, not yet closed
         closing = []      # rows a result is closing right now
         ok = True

@@ -63,10 +63,22 @@ class TestLivePrompt(HermeticCase):
         home_b, root_b = self._home("Wren tests caching.")
         _r, first = self._run(home_a, root_a, "Reply only OK.")
         _r, second = self._run(home_b, root_b, "Reply only OK.")
+        # A result's usage is the session's total over every model call in the
+        # turn (num_turns), so the bar has two halves (ruling W9-2): B creates
+        # less than A, which created the block cold; and B's LAST call, the
+        # per-call number, creates under 2000.
+        created_a = (first["usage"] or {}).get("cache_creation_input_tokens") or 0
         created = (second["usage"] or {}).get("cache_creation_input_tokens") or 0
         read = (second["usage"] or {}).get("cache_read_input_tokens") or 0
+        calls = (second["usage"] or {}).get("iterations") or []
+        self.assertTrue(calls, "no per-call usage in the result: %r" % second)
+        last_created = calls[-1].get("cache_creation_input_tokens") or 0
+        print("\nREPORT cache: A created=%d; B created=%d read=%d over %s calls; B last call created=%d"
+              % (created_a, created, read, second.get("num_turns"), last_created))
         self.assertGreater(read, 8000, "the appended block was not read from cache: %r" % second)
-        self.assertLess(created, 2000, "the appended block was re-created: %r" % second)
+        self.assertLess(created, created_a, "B created as much as A did cold: %r vs %r"
+                        % (second, first))
+        self.assertLess(last_created, 2000, "the last call re-created the block: %r" % second)
 
     def test_snapshot_keeps_the_recorded_prompt_across_a_resume(self):
         """Resume the SAME session after the identity file changed: with

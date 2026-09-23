@@ -19,6 +19,9 @@ from pathlib import Path
 
 from cousin_lib import boot, corrections, distill, self_portrait, template_sync, trace
 from cousin_lib.runner import contract
+# The handoff's own patterns (Task 8): the digest reads STATUS.md's open loops
+# exactly the way the handoff writes them.
+from cousin_lib.runner.tools import _NEXT_SECTION, _OPEN_LOOPS_LINE
 
 IDENTITY_ABSENT = (
     "## Identity (degraded)\n\n"
@@ -146,6 +149,17 @@ _TITLES = (("Operator Calibration", "calibration"), ("Active State", "active_sta
            ("Retrieved Memories", "memories"), ("Shared Reference", "shared_index"))
 
 
+def _open_loops(status):
+    """STATUS.md's open loops as the handoff writes them: the heading on a
+    line of its own (not "### Open loops archive", not prose quoting it),
+    up to the next level-1 or level-2 heading. None when there is none."""
+    found = _OPEN_LOOPS_LINE.search(status)
+    if found is None:
+        return None
+    after = _NEXT_SECTION.search(status, found.end())
+    return status[found.start():after.start() if after else len(status)]
+
+
 def _calibration(home):
     """R1: the distilled calibration and the recent corrections, or "".
     Never the portrait's section: the prompt already carries it."""
@@ -181,7 +195,7 @@ def state_digest(home, *, root, slug, generation=None):
         pass
     sections = {
         "calibration": _calibration(home),
-        "active_state": boot._active_state(home),
+        "active_state": boot._active_state(home, open_loops=_open_loops),
         "task_packet": boot._task_packet(home),
         "trace_summary": trace.summary_for_boot(slug, root=root),
         "memories": boot._memories(home, DIGEST_BUDGETS["memories"][1]),

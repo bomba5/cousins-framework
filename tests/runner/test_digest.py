@@ -130,5 +130,49 @@ class TestDigestOwnRules(DigestCase):
 
 
 
+class TestOpenLoopsReadAsTheWriterWritesThem(DigestCase):
+    """Task 8's handoff finds STATUS.md's open loops as a whole heading line
+    and ends the section at the next level-1 or level-2 heading; the
+    digest's active-state layer reads it the same way. The boot packet's
+    own reader is left as it is (the tmux lane's behaviour does not change
+    in this phase)."""
+    ARCHIVE = ("# Wren\n\n### Open loops archive\n\nold archived loop\n\n"
+               "## Open loops\n\n- live loop\n")
+
+    def test_a_deeper_heading_holding_the_words_is_not_the_section(self):
+        (self.home / "STATUS.md").write_text(self.ARCHIVE)
+        text = self.digest()["text"]
+        self.assertIn("- live loop", text)
+        self.assertNotIn("old archived loop", text)
+
+    def test_the_words_in_prose_are_not_the_section(self):
+        (self.home / "STATUS.md").write_text(
+            "# Wren\n\nSee ## Open loops below.\n\n## Open loops\n\n- live loop\n")
+        text = self.digest()["text"]
+        self.assertIn("- live loop", text)
+        self.assertNotIn("See ## Open loops below.", text)
+
+    def test_the_section_ends_at_a_top_level_heading_as_the_writer_ends_it(self):
+        (self.home / "STATUS.md").write_text(
+            "# Wren\n\n## Open loops\n\n- live loop\n\n# Appendix\n\nnot a loop\n")
+        text = self.digest()["text"]
+        self.assertIn("- live loop", text)
+        self.assertNotIn("not a loop", text)
+
+    def test_what_the_handoff_writes_the_digest_reads(self):
+        from cousin_lib.runner import tools
+        from cousin_lib.runner.tools import _with_open_loops
+        (self.home / "STATUS.md").write_text(_with_open_loops(self.ARCHIVE, "Wren", "- handed over"))
+        text = self.digest()["text"]
+        self.assertIn("- handed over", text)
+        self.assertNotIn("- live loop", text)
+        self.assertNotIn("old archived loop", text)
+
+    def test_the_boot_packets_reader_is_untouched(self):
+        (self.home / "STATUS.md").write_text("# Wren\n\n## Open loops\n\n- live loop\n\n## Done\n")
+        self.assertEqual(boot._active_state(self.home),
+                         "### STATUS.md (open loops)\n\n## Open loops\n\n- live loop")
+
+
 if __name__ == "__main__":
     unittest.main()

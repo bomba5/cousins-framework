@@ -119,11 +119,49 @@ class Inbox:
                 raise
         return [_row(r) for r in rows]
 
+    def claim_id(self, inbox_id, *, claimant=""):
+        """Claim THIS row if it is still queued; None otherwise. For a
+        runner that must run a known row next (the rollover's digest),
+        whatever its priority relative to the queue."""
+        with self._db() as conn:
+            cur = conn.execute("UPDATE inbox SET state=?, claimant=?, claimed_at=?"
+                               " WHERE id=? AND state=?",
+                               (CLAIMED, claimant, time.time(), inbox_id, QUEUED))
+            if cur.rowcount != 1:
+                return None
+        return self.get(inbox_id)
+
+    def replace_body(self, inbox_id, body):
+        """Replace a QUEUED row's body; False when it was claimed meanwhile."""
+        with self._db() as conn:
+            cur = conn.execute("UPDATE inbox SET body=? WHERE id=? AND state=?",
+                               (body, inbox_id, QUEUED))
+            return cur.rowcount == 1
+
+    def open_rows(self, source):
+        """The queued or claimed rows of one source, oldest first."""
+        with self._db() as conn:
+            rows = conn.execute("SELECT %s FROM inbox WHERE source=? AND state IN (?, ?)"
+                                " ORDER BY id" % ", ".join(_COLUMNS),
+                                (source, QUEUED, CLAIMED)).fetchall()
+        return [_row(r) for r in rows]
+
     def done(self, inbox_id, outcome, detail=""):
         with self._db() as conn:
             conn.execute(
                 "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
                 " WHERE id=?", (DONE, outcome, detail, time.time(), inbox_id))
+
+    def done_if_queued(self, inbox_id, outcome, detail="", *, body):
+        """Close a row only while it is still queued with exactly `body`;
+        False otherwise. A close decided on a snapshot (a duplicate
+        rollover row) must not land on a row claimed or rewritten since."""
+        with self._db() as conn:
+            cur = conn.execute(
+                "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
+                " WHERE id=? AND state=? AND body=?",
+                (DONE, outcome, detail, time.time(), inbox_id, QUEUED, body))
+            return cur.rowcount == 1
 
     def requeue(self, inbox_id):
         """Return one row to queued, clearing claim and outcome. Idempotent:

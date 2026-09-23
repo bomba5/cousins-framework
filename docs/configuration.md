@@ -538,6 +538,21 @@ gone silent fails the turn) and puts no limit on a whole turn. These are
 constructor defaults of the SDK runner (`idle_timeout_s`, `turn_timeout_s`),
 not cousin.toml keys in this phase.
 
+`rollover_at_percent` (number, default 80) is the context percentage at which
+the runner rolls the cousin over at its next idle: it asks the model for its
+handoff through the `handoff` tool, runs the `[session]` end hooks, starts a
+new session on the same system prompt, then the start hooks, and sends the
+state digest as the new session's first message. When the CLI reports its own
+autocompact threshold, the runner also rolls over once the context is within
+10,000 tokens of it, and an imminent compaction (the `PreCompact` hook) asks
+for a rollover too. After a rollover, pressure waits until the percentage
+drops 10 points below the threshold or 5 turns pass, whichever comes first.
+One pending rollover per cousin: a second request joins the first, except a
+long or multi-line reason (a bequest), which is never merged away. A handoff
+the model does not write within 5 minutes becomes an emergency handoff built
+from the session transcript and marked `degraded_state: true`; the generation
+still ends.
+
 The runner records `usage` on every `result` event in its stream (the SDK's
 own `ResultMessage.usage` dict: at least `input_tokens`, `output_tokens`,
 `cache_creation_input_tokens` and `cache_read_input_tokens`; `None` when the

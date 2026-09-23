@@ -26,14 +26,15 @@ runner turn can emit more than one `result` event, and none is left in
 the stream for the next turn to misread.
 """
 import asyncio
+import json
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from cousin_lib import usage
+from cousin_lib import boot, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import envelope, extract, hooks, tools, wake
+from cousin_lib.runner import envelope, extract, hooks, rollover, tools, wake
 from cousin_lib.runner.base import FOLDED_KINDS, Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.policy import Policy
@@ -96,6 +97,15 @@ async def _aclose(responses):
         await aclose()
 
 
+def _pressure_reason(context_usage):
+    """The rollover reason for a pressure reading: the percentage when the
+    reading has one, else the token count that pulled the trigger."""
+    try:
+        return "context pressure %d%%" % int(context_usage["percentage"])
+    except (KeyError, TypeError, ValueError):
+        return "context pressure %s tokens" % (context_usage or {}).get("totalTokens")
+
+
 def _default_factory(options):
     return _sdk().ClaudeSDKClient(options=options)
 
@@ -121,7 +131,7 @@ class SdkRunner:
 
     def __init__(self, home, *, client_factory=None, api_key=None, model=None,
                  cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
-                 drain_timeout_s=30.0, policy=None, registry=None):
+                 drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None):
         self.home = Path(home)
         # the tools and the model's own commands find the cousin and the
         # install through these; cousin-runner exports them, and a runner
@@ -170,6 +180,15 @@ class SdkRunner:
                                               registry=registry)
         from cousin_lib.runner.session_store import SqliteSessionStore
         self.session_store = SqliteSessionStore(self.home)
+        # The rollover (rollover.py): the handoff tool hands its summary to
+        # the box, which the rollover awaits; pressure is read after every
+        # result, held back by the hysteresis after a rollover.
+        self.handoff_deadline_s = float(handoff_deadline_s or rollover.HANDOFF_DEADLINE_S)
+        self.rollover_at_percent = float(self._agent_value("rollover_at_percent",
+                                                           rollover.ROLLOVER_AT_PERCENT))
+        self.handoff_box = rollover.HandoffBox()
+        self.hysteresis = rollover.Hysteresis()
+        self.tool_context.on_handoff = self.handoff_box.set
 
     def _identity(self):
         """(slug, name) from cousin.toml; the directory name when it lacks them."""
@@ -179,6 +198,15 @@ class SdkRunner:
             return cfg.slug, cfg.name
         except Exception:  # noqa: BLE001 - a thin toml still runs; the dir names it
             return self.home.name, self.home.name.capitalize()
+
+    def _agent_value(self, key, default):
+        """A value from cousin.toml [agent], else default."""
+        import tomllib
+        try:
+            agent = tomllib.loads((self.home / "cousin.toml").read_text()).get("agent") or {}
+        except (OSError, tomllib.TOMLDecodeError):
+            return default
+        return agent.get(key, default)
 
     # -- options -----------------------------------------------------------
     def options(self, *, resume=None):
@@ -192,7 +220,8 @@ class SdkRunner:
         hook_table = hooks.build_hooks(self.home, slug=self.tool_context.slug, root=self.root,
                                        machine=self.machine, stream=self.stream,
                                        policy=self.policy, lock=self._lock,
-                                       body_for_prompt=self._body_for_prompt)
+                                       body_for_prompt=self._body_for_prompt,
+                                       request_rollover=self._request_rollover)
         # The composed prompt (prompt.py): byte-stable across generations,
         # so a rollover and a restart keep the cache (phase 0 finding 3).
         # With snapshot=True a resumed session keeps the prompt it first
@@ -321,7 +350,17 @@ class SdkRunner:
                                          % (type(exc).__name__, exc)})
 
     def rollover(self, reason):
-        return {"ok": False, "reason": "rollover arrives in phase 4"}
+        """End this generation and start the next (spec). One `flip` row
+        (coalesced), claimed at the next turn boundary; waits for it. A
+        runner that is not running leaves the durable row and says so."""
+        return rollover.request(self.inbox, self.home, reason, alive=self.worker_alive,
+                                timeout=self.handoff_deadline_s + rollover.WAIT_SLACK_S)
+
+    def _request_rollover(self, why):
+        """Ask without waiting (pressure, PreCompact): the loop claims it next."""
+        inbox_id, coalesced = rollover.put_once(self.inbox, self.home, why)
+        self.stream.append("rollover", {"phase": "coalesced" if coalesced else "requested",
+                                        "reason": why, "inbox_id": inbox_id})
 
     def events(self, after=None):
         return self.stream.tail(after=after)
@@ -363,7 +402,10 @@ class SdkRunner:
                             None, listener.wait, self.poll_s)
                         continue
                     try:
-                        ok = await self._turn(rows[0])
+                        if rows[0]["source"] == "flip":
+                            ok = await self._rollover_row(rows[0])
+                        else:
+                            ok = await self._turn(rows[0])
                     except Exception as exc:  # noqa: BLE001 - the idle transition can still raise
                         # `[]`: its rows are already closed (FakeRunner._fail_turn)
                         self._fail_turn([], exc)
@@ -390,11 +432,13 @@ class SdkRunner:
         while not self._stop.is_set() and time.monotonic() < deadline:
             await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
 
-    async def _connect(self, *, resume=None, why=None):
+    async def _connect(self, *, resume=None, why=None, fatal=True, event="connect_failed"):
         """A new client, connected. On failure the runner gives up: the
         machine goes `errored`, the reason is `self.fatal` and an `error`
         event, and the worker ends so a supervisor can restart it
-        (`cousin-runner` exits 3). `why` is set on a reconnect."""
+        (`cousin-runner` exits 3). `why` is set on a reconnect. With
+        `fatal=False` a failure is a `system` event of subtype `event`, no
+        client, and False: the caller decides (the rollover's own path)."""
         try:
             self._client = self.client_factory(self.options(resume=resume))
             await self._client.connect()
@@ -402,6 +446,11 @@ class SdkRunner:
             return True
         except Exception as exc:  # noqa: BLE001 - a runner that cannot connect says so
             message = "%s: %s" % (type(exc).__name__, exc)
+            if not fatal:
+                self.stream.append("system", {"subtype": event, "session_id": resume,
+                                              "error": message})
+                self._client = None
+                return False
             if why is not None:
                 message = "reconnect failed: %s (after %s)" % (message, why)
             self._fail_connect(message, resume)
@@ -728,7 +777,23 @@ class SdkRunner:
         whole turn is there). Each step runs off the loop (blocking sqlite
         and file work) and never raises into it: a failure is a `usage`
         or `extract` event, never a broken turn, and a failed usage record
-        does not stop the extraction."""
+        does not stop the extraction. Last, the context pressure check
+        (rollover.pressure_due, held back by the hysteresis): a rollover
+        is requested, never run here; the loop claims it at the boundary."""
+        await self._record_usage(msg)
+        await self._mine(self._resume_id)
+        try:
+            usage_now = await self._context_usage()
+            armed = self.hysteresis.allow(usage_now, self.rollover_at_percent)
+            if armed and rollover.pressure_due(usage_now, self.rollover_at_percent):
+                self._request_rollover(_pressure_reason(usage_now))
+        except Exception as exc:  # noqa: BLE001 - the trigger must never fail a turn
+            self.stream.append("error", {"error": "rollover trigger: %s: %s"
+                                         % (type(exc).__name__, exc)})
+
+    async def _record_usage(self, msg):
+        """The usage record of one ResultMessage, off the loop; a failure is
+        a `usage` event with the error, never a failed turn."""
         try:
             row = await asyncio.to_thread(
                 usage.record, self.home, client_id=self._client_id, session_id=msg.session_id,
@@ -739,10 +804,13 @@ class SdkRunner:
         else:
             self.stream.append("usage", {k: row[k] for k in ("cost_usd", "estimate", "total",
                                                              "error") if k in row})
-        sid = self._resume_id
+
+    async def _mine(self, sid, **extra):
+        """Mine the session's new transcript entries into raw memory, off
+        the loop; the outcome is an `extract` event, never a raise."""
         if not sid:
             return      # no session named yet: nothing to mine
-        payload = {"session_id": sid, "turn": self._turn_seq}
+        payload = dict({"session_id": sid, "turn": self._turn_seq}, **extra)
         store = getattr(self, "session_store", None)
         if store is None:
             # visible in the stream, never a silent stop of extraction
@@ -754,6 +822,221 @@ class SdkRunner:
         except Exception as exc:  # noqa: BLE001 - extraction must never fail a turn
             payload.update(written=-1, error="%s: %s" % (type(exc).__name__, exc))
         self.stream.append("extract", payload)
+
+    async def _context_usage(self):
+        """The client's context usage, or None when it cannot say."""
+        try:
+            return await asyncio.wait_for(self._client.get_context_usage(), 5.0)
+        except Exception:  # noqa: BLE001 - no reading is no trigger, never a failed turn
+            return None
+
+    # -- the rollover (rollover.py) ------------------------------------------
+    async def _until_stopped(self):
+        while not self._stop.is_set():
+            await asyncio.sleep(0.1)
+
+    async def _handoff_exchange(self, sdk, reason):
+        """One turn on the dying session asking for the handoff: write the
+        request, read to its result. Returns the tool's summary, or None
+        when the model answered without calling it. The request is not an
+        inbox row: the durable row is the `flip` row itself."""
+        row = {"id": -1, "thread_id": "system", "source": "flip", "sender": "runner",
+               "body": rollover.handoff_request_text(reason), "attachments": [],
+               "context": "", "message_id": None}
+        self._sent = []
+        await self._send(sdk, row, [])
+        responses = self._client.receive_response()
+        it = responses.__aiter__()
+        try:
+            while True:
+                msg = await _next_by(it, time.monotonic() + self.handoff_deadline_s,
+                                     "handoff deadline")
+                if msg is _END:
+                    raise RunnerError("stream ended during the handoff")
+                self._record(sdk, msg)
+                if isinstance(msg, sdk.ResultMessage):
+                    await self._record_usage(msg)      # the handoff turn costs too
+                    break
+        finally:
+            await _aclose(responses)
+        return self.handoff_box.summary
+
+    async def _ask_handoff(self, reason):
+        """'clean' when the handoff tool answered in time; 'emergency' when
+        it did not (the file is then written from the store's tail);
+        'stopped' when the runner was stopped while waiting."""
+        sdk = _sdk()
+        self.handoff_box.arm(asyncio.get_running_loop())
+        exchange = asyncio.ensure_future(self._handoff_exchange(sdk, reason))
+        stopper = asyncio.ensure_future(self._until_stopped())
+        try:
+            done, _ = await asyncio.wait({exchange, stopper}, timeout=self.handoff_deadline_s,
+                                         return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in (exchange, stopper):
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except BaseException:  # noqa: BLE001 - the abandoned wait, not ours to raise
+                        pass
+            self.handoff_box.disarm()
+        failure = None
+        if exchange in done and not exchange.cancelled():
+            failure = exchange.exception()   # read on every path: never "never retrieved"
+        if self._stop.is_set():
+            return "stopped"
+        if self.handoff_box.summary is not None:
+            self.stream.append("rollover", {"phase": "handoff", "handoff": "clean"})
+            return "clean"
+        if exchange not in done:
+            why = "handoff timeout (%.0fs)" % self.handoff_deadline_s
+        elif failure is not None:
+            why = "handoff turn failed: %s: %s" % (type(failure).__name__, failure)
+        else:
+            why = "the model finished its turn without calling handoff"
+        try:
+            await asyncio.wait_for(self._client.interrupt(), 5.0)
+        except BaseException:  # noqa: BLE001 - a dying client; the file is what matters
+            pass
+        tail = await asyncio.to_thread(self.session_store.tail_text, self._resume_id or "", 2000)
+        await asyncio.to_thread(rollover.write_emergency_handoff, self.home,
+                                name=self.tool_context.name, reason=why, tail=tail)
+        self.stream.append("rollover", {"phase": "handoff", "handoff": "emergency", "why": why})
+        return "emergency"
+
+    def _close_duplicates(self, row, outcome, detail):
+        """A PLAIN duplicate `flip` row that slipped past put_once (two
+        processes between check and put) gets this rollover's answer, not a
+        second rollover. A bequest row is never closed here (R10): it is an
+        operator act and runs as its own rollover. The close is guarded on
+        the body read here: a bequest that replaced it since is left open."""
+        for other in self.inbox.open_rows("flip"):
+            if other["id"] != row["id"] and other["state"] == "queued" \
+                    and not rollover.is_bequest(other["body"]) \
+                    and self.inbox.done_if_queued(other["id"], outcome,
+                                                  json.dumps(dict(detail, coalesced_into=row["id"])),
+                                                  body=other["body"]):
+                self.stream.append("rollover", {"phase": "coalesced", "inbox_id": other["id"],
+                                                "into": row["id"]})
+
+    async def _rollover_row(self, row):
+        """The rollover, at a turn boundary: handoff, end hooks, archive,
+        a final mine, a new client with no resume, THEN the generation,
+        start hooks, the digest as the first message.
+
+        Before the new session exists, any failure is errored -> idle with
+        the row failed, the old session kept (a client resumed on it, or at
+        least `_resume_id` naming it for the next reconnect), and the detail
+        saying where it stopped: never a wedged machine (C1). Once the new
+        session exists (the point of no return) nothing fails the rollover:
+        a failed step degrades it, is named in the row's detail, and the row
+        still closes delivered, because running it again would move the
+        generation twice for one request."""
+        reason = row["body"] or "rollover"
+        old_sid = self._resume_id
+        disconnected = False
+        generation = boot.read_generation(self.home)
+        with self._lock:
+            if self.machine.state != "idle":     # stop() won the race: the row waits
+                self.inbox.requeue(row["id"])
+                return False
+            self.machine.to("rolling_over", reason.splitlines()[0][:120])
+        self.stream.append("rollover", {"phase": "start", "reason": reason, "session_id": old_sid})
+        try:
+            handoff = await self._ask_handoff(reason)
+            if handoff == "stopped":
+                self.inbox.requeue(row["id"])          # the next start finishes this rollover
+                self.stream.append("rollover", {"phase": "requeued", "reason": reason})
+                return False
+            await asyncio.to_thread(session.run_phase, self.home, "end")
+            await asyncio.to_thread(rollover.archive_generation, self.home, generation)
+            await self._disconnect()
+            disconnected = True
+            # a final mine: nothing of the old session arrives after this
+            await self._mine(old_sid, final=True)
+            self._resume_id = None
+            if not await self._connect(resume=None, why="rollover", fatal=False):
+                raise RunnerError("could not start the new session")
+            disconnected = False
+        except Exception as exc:  # noqa: BLE001 - a failed rollover must not wedge the runner
+            message = "%s: %s" % (type(exc).__name__, exc)
+            self.hysteresis.rolled_over()      # no re-request every turn over the threshold
+            # No new session was established: the old one is still the session,
+            # so a later reconnect (this fallback, or _resync) resumes it and
+            # never starts an unbumped, digest-less fresh one.
+            if self._resume_id is None:
+                self._resume_id = old_sid
+            with self._lock:
+                if self.machine.state == "rolling_over":
+                    self.machine.to("errored", "rollover failed: " + message)
+            if disconnected and not self._stop.is_set():
+                await self._connect(resume=old_sid, why="rollover failed", fatal=False)
+            detail = {"reason": reason, "error": message,
+                      "generation": boot.read_generation(self.home),
+                      "old_session": old_sid, "new_session": None}
+            self.inbox.done(row["id"], FAILED, json.dumps(detail))
+            self._close_duplicates(row, FAILED, detail)
+            self.stream.append("rollover", dict(detail, phase="failed"))
+            self._recover()
+            return False
+        # The point of no return: a new session exists, so the generation moves.
+        problems = []
+        try:
+            generation = boot.bump_generation(self.home)
+        except Exception as exc:  # noqa: BLE001 - degraded, named in the detail
+            problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        self.hysteresis.rolled_over()
+        try:
+            await asyncio.to_thread(session.run_phase, self.home, "start")
+        except Exception as exc:  # noqa: BLE001 - degraded, named in the detail
+            problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
+        digest, digest_state = await self._digest(generation)
+        digest_id = None
+        if digest is not None:
+            try:
+                digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
+                                                sender="runner"))
+            except Exception as exc:  # noqa: BLE001 - the session runs on without it
+                digest_state = "none: the digest row could not be stored: %s: %s" \
+                               % (type(exc).__name__, exc)
+        detail = {"reason": reason, "handoff": handoff, "generation": generation,
+                  "old_session": old_sid, "digest": digest_state}
+        if problems:
+            detail["problems"] = problems
+        with self._lock:
+            # stop() may have forced `stopped` meanwhile: the row closes all the same
+            if self.machine.state == "rolling_over":
+                self.machine.to("idle", "rolled over")
+        self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
+        self._close_duplicates(row, DELIVERED, detail)
+        self.stream.append("rollover", dict(detail, phase="done"))
+        if self._stop.is_set() or digest_id is None:
+            return True     # a stored digest row stays queued (durable): the next start runs it
+        # The digest is the new session's FIRST message: claimed by id and run
+        # now, ahead of chat that queued up during the rollover (same priority,
+        # older). The row is durable, so a crash here replays it at the next start.
+        first = self.inbox.claim_id(digest_id, claimant=self.session_id)
+        if first is not None:
+            return await self._turn(first)
+        return True
+
+    async def _digest(self, generation):
+        """(text or None, state): the state digest ("built"); the last
+        handoff marked degraded when it cannot be built ("degraded: ...");
+        None only when even that failed ("none: ..."). Never raises."""
+        from cousin_lib.runner import prompt
+        try:
+            return ((await asyncio.to_thread(prompt.state_digest, self.home, root=self.root,
+                                             slug=self.tool_context.slug,
+                                             generation=generation))["text"], "built")
+        except Exception as exc:  # noqa: BLE001 - a degraded digest, never none
+            state = "degraded: %s: %s" % (type(exc).__name__, exc)
+        try:
+            return rollover.degraded_digest(self.home, slug=self.tool_context.slug,
+                                            generation=generation, error=state), state
+        except Exception as exc:  # noqa: BLE001 - the new session runs on without one
+            return None, "none: %s; then %s: %s" % (state, type(exc).__name__, exc)
 
     def _record(self, sdk, msg, *, echo_of=None):
         """Every SDK message leaves at least one event (a ResultMessage's

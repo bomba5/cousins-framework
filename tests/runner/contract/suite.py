@@ -22,7 +22,8 @@ CONTRACT_ITEMS = ("enqueue_receipt", "priority_order", "consume_after_start",
                   "midturn_fold", "outcome_delivered", "outcome_failed",
                   "outcome_interrupted", "failure_recovers", "stop_ends_turn",
                   "peer_waits", "state_events", "events_after",
-                  "interrupt_idle_false", "enqueue_type_error", "rollover_shape")
+                  "interrupt_idle_false", "enqueue_type_error", "rollover_shape",
+                  "rollover_generation")
 
 
 def item(name):
@@ -273,3 +274,15 @@ class RunnerContract:
         self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=10.0))
         self.assertEqual([x["inbox_ids"] for x in _results(r)],
                          [[first.inbox_id], [peer.inbox_id]])
+
+    @item("rollover_generation")
+    def test_a_rollover_moves_the_generation_and_loses_no_row(self):
+        from cousin_lib import boot
+        r = self._runner()
+        r.start()
+        g0 = boot.read_generation(self.home)
+        out = r.rollover("contract")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(boot.read_generation(self.home), g0 + 1)
+        rec = r.enqueue(_op("after the rollover"))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, rec) == "delivered"))

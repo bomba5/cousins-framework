@@ -149,5 +149,38 @@ class TestTwoProcesses(InboxCase):
         self.assertTrue(set(got) <= set(ids))
 
 
+class TestClaimIdAndOpenRows(HermeticCase):
+    def test_claim_id_takes_that_row_only_while_queued(self):
+        inbox = Inbox(temp_home(self))
+        a = inbox.put(Item("operator:priya", "chat", "older", sender="Priya"))
+        b = inbox.put(Item("system", "boot", "digest", sender="runner"))
+        self.assertEqual(inbox.claim_id(b, claimant="x")["body"], "digest")
+        self.assertIsNone(inbox.claim_id(b, claimant="x"))           # already claimed
+        self.assertEqual(inbox.claim(limit=5)[0]["id"], a)            # the rest is untouched
+
+    def test_open_rows_lists_queued_and_claimed_of_one_source(self):
+        inbox = Inbox(temp_home(self))
+        f1 = inbox.put(Item("system", "flip", "one", sender="runner"))
+        inbox.put(Item("operator:priya", "chat", "x", sender="Priya"))
+        f2 = inbox.put(Item("system", "flip", "two", sender="runner"))
+        inbox.done(f2, "delivered")
+        inbox.claim_id(f1, claimant="x")
+        self.assertEqual([r["id"] for r in inbox.open_rows("flip")], [f1])
+
+
+    def test_done_if_queued_closes_only_a_queued_row_with_that_body(self):
+        inbox = Inbox(temp_home(self))
+        a = inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        self.assertFalse(inbox.done_if_queued(a, "delivered", "d", body="another body"))
+        self.assertTrue(inbox.replace_body(a, "a bequest"))
+        self.assertFalse(inbox.done_if_queued(a, "delivered", "d", body="max_age"))   # rewritten
+        self.assertEqual(inbox.get(a)["state"], "queued")
+        inbox.claim_id(a, claimant="x")
+        self.assertFalse(inbox.done_if_queued(a, "delivered", "d", body="a bequest"))  # claimed
+        b = inbox.put(Item("system", "flip", "max_age", sender="runner"))
+        self.assertTrue(inbox.done_if_queued(b, "delivered", "d", body="max_age"))
+        self.assertEqual((inbox.get(b)["state"], inbox.get(b)["outcome"]), ("done", "delivered"))
+
+
 if __name__ == "__main__":
     unittest.main()

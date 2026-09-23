@@ -63,6 +63,10 @@ def divert_login_code(config, user, message):
             # disk, the capture becomes a tombstone or goes
             accounts.retire_capture(root, name)
         mine.append((cap, name, window))
+    # Only a code-shaped message is ever diverted: the operator's "ok,
+    # doing it" while a flow waits is chat, not the code
+    if not accounts.CODE_SHAPE.match(str(message).strip()):
+        return None
     # An ARMED capture first, whatever its account sorts as: another
     # account's tombstone must never swallow the code a live flow awaits.
     for i, (cap, name, window) in enumerate(mine):
@@ -74,8 +78,6 @@ def divert_login_code(config, user, message):
         # tombstone won the lock): judge the message by the new one below
         mine[i] = (cap, name, accounts.capture_window(accounts.read_capture(root, name),
                                                       time.time()))
-    if not accounts.CODE_SHAPE.match(str(message).strip()):
-        return None
     for cap, name, window in mine:
         if window == "taken":
             return "[a second login code for account %s was discarded]" % name

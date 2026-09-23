@@ -296,6 +296,15 @@ class TestDivert(LoginCase):
         self.assertIsNone(divert_login_code(self.config(), "Priya", "did it work?"))
         self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
 
+    def test_an_ordinary_message_passes_through_while_a_capture_is_armed(self):
+        from cousin_lib.server.inbound import divert_login_code
+        self.arm()
+        self.assertIsNone(divert_login_code(self.config(), "Priya", "ok, doing it now"))
+        self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
+        self.assertEqual(accounts.capture_window(accounts.read_capture(self.root, "fleet"),
+                                                 time.time()), "armed")
+        self.assertIsNotNone(divert_login_code(self.config(), "Priya", CODE))
+
     def arm_nightly(self):
         return accounts.arm_capture(self.root, via="wren", operator="Priya",
                                     account_name="nightly", ttl=60)

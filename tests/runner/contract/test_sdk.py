@@ -11,21 +11,32 @@ from tests.runner.contract.suite import RunnerContract
 from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
 
 
-def _scripts():
-    # enough scripted turns for any contract test; each is start/tool/text/result
-    return [[init_msg(), assistant(tool="Bash"), assistant(text="ok"), result()]
-            for _ in range(6)]
+def _turn():
+    return [init_msg(), assistant(tool="Bash"), assistant(text="ok"), result()]
+
+
+def _scripts(slow):
+    # enough scripted CLI turns for any contract test; a slow first turn is
+    # silent for 3 s, or until interrupted, before it answers
+    scripts = [_turn() for _ in range(6)]
+    if slow:
+        scripts[0] = [init_msg(), assistant(tool="Bash"), ("SLOW", 3.0),
+                      assistant(text="ok"), result()]
+    return scripts
 
 
 class TestSdkRunnerContract(RunnerContract, HermeticCase):
-    def make_runner(self, home, turn_seconds=0.0):
-        delay = 0.15 if turn_seconds else 0.0
-        scripts = _scripts()
-        if turn_seconds:
-            scripts[0] = [init_msg(), assistant(tool="Bash"), "WAIT_FOR_INTERRUPT"] \
-                if turn_seconds >= 2.0 else [init_msg(), assistant(tool="Bash"),
-                                             assistant(text="ok"), result()]
-        return SdkRunner(home, client_factory=lambda o: ScriptedClient(o, scripts, delay=delay))
+    def make_runner(self, home, *, slow=False, fail_first=False):
+        clients = []
+
+        def factory(options):
+            if fail_first and not clients:
+                scripts = [[init_msg(), "END"]]   # the CLI dies mid-turn
+            else:
+                scripts = _scripts(slow and not clients)
+            clients.append(ScriptedClient(options, scripts))
+            return clients[-1]
+        return SdkRunner(home, client_factory=factory, drain_timeout_s=2.0)
 
 
 if __name__ == "__main__":

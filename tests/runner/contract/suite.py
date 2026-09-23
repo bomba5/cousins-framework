@@ -1,9 +1,15 @@
 """THE contract suite: one suite, every runner (master plan, Phase 2).
 
 A concrete case mixes this in, subclasses HermeticCase, and defines
-`make_runner(home)`. Every runner the framework ships passes this
-file, and `unsupported()` is the only permitted way to opt out of an
-item: by declaring it, never by failing it quietly.
+`make_runner(home, *, slow=False, fail_first=False)`:
+  slow        the FIRST turn stays open about 3 s, long enough for a test
+              to act while it runs, and ends at once when interrupted
+  fail_first  the FIRST turn fails (its row closes `failed`); the runner
+              recovers and every later turn works
+Every runner the framework ships passes this file, and `unsupported()`
+is the only permitted way to opt out of an item: by declaring it, never
+by failing it quietly. Each test names its item with `@item`, and a
+runner declaring that item unsupported skips exactly that test.
 """
 import time
 
@@ -13,7 +19,23 @@ from tests.runner._home import temp_home
 
 CONTRACT_ITEMS = ("enqueue_receipt", "priority_order", "consume_after_start",
                   "interrupt_ends_turn", "turn_events", "unsupported_list",
-                  "midturn_fold")
+                  "midturn_fold", "outcome_delivered", "outcome_failed",
+                  "outcome_interrupted", "failure_recovers", "stop_ends_turn",
+                  "peer_waits", "state_events", "events_after",
+                  "interrupt_idle_false", "enqueue_type_error", "rollover_shape")
+
+
+def item(name):
+    """Mark a contract test with the item it proves; `_runner()` skips it
+    when the runner declares that item unsupported."""
+    def mark(fn):
+        def test(self):
+            self._item = name
+            return fn(self)
+        test.__name__, test.__doc__ = fn.__name__, fn.__doc__
+        test.contract_item = name
+        return test
+    return mark
 
 
 def _wait(pred, timeout=5.0, step=0.02):
@@ -29,85 +51,225 @@ def _kinds(runner):
     return [e["kind"] for e in runner.events()]
 
 
+def _results(runner):
+    # a `drained: True` result is a failed turn's leftover, not a turn
+    return [e["payload"] for e in runner.events()
+            if e["kind"] == "result" and not e["payload"].get("drained")]
+
+
+def _op(body):
+    return Item("operator:priya", "chat", body, sender="Priya")
+
+
 class RunnerContract:
-    def make_runner(self, home):
+    _item = None
+
+    def make_runner(self, home, *, slow=False, fail_first=False):
         raise NotImplementedError
 
     def _runner(self, **kw):
         self.home = temp_home(self)
-        r = self.make_runner(self.home, **kw) if kw else self.make_runner(self.home)
+        r = self.make_runner(self.home, **kw)
         self.addCleanup(lambda: r.stop(timeout=5))
+        if self._item is not None and self._item in r.unsupported():
+            self.skipTest("runner declares %s unsupported" % self._item)
         return r
 
-    def _skip_if_declared(self, runner, item):
-        if item in runner.unsupported():
-            self.skipTest("runner declares %s unsupported" % item)
+    def _row_outcome(self, r, receipt):
+        row = r.inbox.get(receipt.inbox_id)
+        return row["outcome"] if row and row["state"] == "done" else None
 
+    # -- the items -------------------------------------------------------------
+    @item("enqueue_receipt")
     def test_enqueue_returns_a_receipt(self):
         r = self._runner()
-        self._skip_if_declared(r, "enqueue_receipt")
-        receipt = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        receipt = r.enqueue(_op("hi"))
         self.assertIsInstance(receipt, Receipt)
         self.assertGreater(receipt.inbox_id, 0)
         self.assertEqual(receipt.outcome, "queued")
 
+    @item("enqueue_type_error")
+    def test_enqueue_refuses_anything_but_an_item(self):
+        r = self._runner()
+        with self.assertRaises(TypeError):
+            r.enqueue("not an item")
+        with self.assertRaises(TypeError):
+            r.enqueue({"thread_id": "operator:priya", "body": "x"})
+
+    @item("priority_order")
     def test_items_are_consumed_in_priority_order(self):
         r = self._runner()
-        self._skip_if_declared(r, "priority_order")
         r.enqueue(Item("loop:heartbeat", "loop", "loop"))
         r.enqueue(Item("peer:testa", "chat", "peer", sender="Testa"))
-        r.enqueue(Item("operator:priya", "chat", "op", sender="Priya"))
+        r.enqueue(_op("op"))
         r.start()
-        self.assertTrue(_wait(lambda: _kinds(r).count("result") >= 3))
+        self.assertTrue(_wait(lambda: len(_results(r)) >= 3))
         bodies = [e["payload"]["bodies"][0] for e in r.events() if e["kind"] == "turn_start"]
         self.assertEqual(bodies, ["op", "peer", "loop"])
 
+    @item("consume_after_start")
     def test_an_item_put_while_stopped_is_consumed_after_start(self):
         r = self._runner()
-        self._skip_if_declared(r, "consume_after_start")
-        r.enqueue(Item("operator:priya", "chat", "later", sender="Priya"))
+        r.enqueue(_op("later"))
         time.sleep(0.1)
         self.assertNotIn("result", _kinds(r))
         r.start()
         self.assertTrue(_wait(lambda: "result" in _kinds(r)))
 
-    def test_interrupt_during_a_turn_ends_it_and_returns_to_idle(self):
-        r = self._runner(turn_seconds=2.0)
-        self._skip_if_declared(r, "interrupt_ends_turn")
+    @item("outcome_delivered")
+    def test_a_finished_turn_closes_its_row_delivered(self):
+        r = self._runner()
         r.start()
-        r.enqueue(Item("operator:priya", "chat", "slow", sender="Priya"))
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        self.assertEqual(self._row_outcome(r, a), "delivered")
+        self.assertEqual(_results(r)[-1]["inbox_ids"], [a.inbox_id])
+        self.assertFalse(_results(r)[-1]["is_error"])
+
+    @item("outcome_failed")
+    def test_a_failed_turn_closes_its_row_failed(self):
+        r = self._runner(fail_first=True)
+        r.start()
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        self.assertEqual(self._row_outcome(r, a), "failed")
+        failed = [x for x in _results(r) if a.inbox_id in x["inbox_ids"]]
+        self.assertTrue(failed and failed[0]["is_error"])
+
+    @item("failure_recovers")
+    def test_a_failure_is_recorded_and_the_next_row_still_runs(self):
+        r = self._runner(fail_first=True)
+        r.start()
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        # the `state` event lands just after the attribute flips: wait for it
+        self.assertTrue(_wait(lambda: any(e["kind"] == "state" and e["payload"]["from"] == "errored"
+                                          for e in r.events()), timeout=8))
+        self.assertIn("error", _kinds(r))
+        states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
+        self.assertIn("errored", states)
+        self.assertEqual(states[states.index("errored") + 1], "idle")
+        b = r.enqueue(_op("two"))
+        self.assertTrue(_wait(lambda: self._row_outcome(r, b) is not None, timeout=8))
+        self.assertEqual(self._row_outcome(r, b), "delivered")
+
+    @item("interrupt_ends_turn")
+    def test_interrupt_during_a_turn_ends_it_and_returns_to_idle(self):
+        r = self._runner(slow=True)
+        r.start()
+        r.enqueue(_op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
         self.assertTrue(_wait(lambda: r.state() == "idle", timeout=3.0))
         self.assertIn("result", _kinds(r))
-        payload = [e for e in r.events() if e["kind"] == "result"][-1]["payload"]
-        self.assertTrue(payload.get("interrupted"))
+        self.assertTrue(_results(r)[-1].get("interrupted"))
 
+    @item("outcome_interrupted")
+    def test_an_interrupted_turns_row_is_delivered(self):
+        r = self._runner(slow=True)
+        r.start()
+        a = r.enqueue(_op("slow"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.assertTrue(r.interrupt())
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None, timeout=3.0))
+        self.assertEqual(self._row_outcome(r, a), "delivered", "the model received it")
+        self.assertTrue(_results(r)[-1]["interrupted"])
+
+    @item("interrupt_idle_false")
+    def test_interrupt_with_no_turn_running_is_false(self):
+        r = self._runner()
+        self.assertFalse(r.interrupt())
+        r.start()
+        time.sleep(0.1)
+        self.assertEqual(r.state(), "idle")
+        self.assertFalse(r.interrupt())
+
+    @item("stop_ends_turn")
+    def test_stop_during_a_turn_returns_within_its_timeout(self):
+        r = self._runner(slow=True)
+        r.start()
+        r.enqueue(_op("slow"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        t = time.monotonic()
+        r.stop(timeout=5)
+        self.assertLess(time.monotonic() - t, 2.5, "the slow turn (3 s) was ended, not waited out")
+        self.assertEqual(r.state(), "stopped")
+        r.stop(timeout=5)
+        self.assertEqual(r.state(), "stopped")
+
+    @item("turn_events")
     def test_every_turn_emits_start_tool_and_result(self):
         r = self._runner()
-        self._skip_if_declared(r, "turn_events")
         r.start()
-        r.enqueue(Item("operator:priya", "chat", "go", sender="Priya"))
+        r.enqueue(_op("go"))
         self.assertTrue(_wait(lambda: "result" in _kinds(r)))
         kinds = _kinds(r)
         self.assertLess(kinds.index("turn_start"), kinds.index("tool"))
         self.assertLess(kinds.index("tool"), kinds.index("result"))
 
+    @item("state_events")
+    def test_every_transition_is_a_state_event_in_order(self):
+        r = self._runner()
+        r.start()
+        r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: "result" in _kinds(r) and r.state() == "idle"))
+        r.stop(timeout=5)
+        states = [e["payload"] for e in r.events() if e["kind"] == "state"]
+        self.assertEqual(states[0]["from"], "idle")
+        for before, after in zip(states, states[1:]):
+            self.assertEqual(after["from"], before["to"])
+        self.assertEqual(states[-1]["to"], "stopped")
+        self.assertIn("running", [s["to"] for s in states])
+
+    @item("events_after")
+    def test_events_after_n_resumes_exactly(self):
+        r = self._runner()
+        r.start()
+        r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: "result" in _kinds(r)))
+        r.stop(timeout=5)   # nothing appends after this: the snapshot is whole
+        everything = list(r.events())
+        self.assertGreater(len(everything), 2)
+        for k in (0, len(everything) // 2, len(everything) - 1):
+            after = list(r.events(after=everything[k]["seq"]))
+            self.assertEqual(after, everything[k + 1:])
+        self.assertEqual(list(r.events(after=None)), everything)
+
+    @item("unsupported_list")
     def test_unsupported_lists_only_contract_items(self):
         r = self._runner()
         for name in r.unsupported():
             self.assertIn(name, CONTRACT_ITEMS)
 
+    @item("rollover_shape")
+    def test_rollover_answers_ok_and_a_reason(self):
+        r = self._runner()
+        out = r.rollover("contract")
+        self.assertIsInstance(out, dict)
+        self.assertIsInstance(out.get("ok"), bool)
+        self.assertIsInstance(out.get("reason"), str)
+
+    @item("midturn_fold")
     def test_a_midturn_operator_message_is_closed_by_the_same_result(self):
-        r = self._runner(turn_seconds=1.0)
-        self._skip_if_declared(r, "midturn_fold")
+        r = self._runner(slow=True)
         r.start()
-        first = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        first = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
-        second = r.enqueue(Item("operator:priya", "chat", "second, mid-turn", sender="Priya"))
-        self.assertTrue(_wait(lambda: "result" in _kinds(r), timeout=4.0))
-        time.sleep(0.2)
-        results = [e for e in r.events() if e["kind"] == "result"]
+        second = r.enqueue(_op("second, mid-turn"))
+        self.assertTrue(_wait(lambda: "result" in _kinds(r), timeout=8.0))
+        time.sleep(0.3)
+        results = _results(r)
         self.assertEqual(len(results), 1, "one result closes both items (finding 1)")
-        self.assertEqual(sorted(results[0]["payload"]["inbox_ids"]),
+        self.assertEqual(sorted(results[0]["inbox_ids"]),
                          sorted([first.inbox_id, second.inbox_id]))
+
+    @item("peer_waits")
+    def test_a_peer_message_put_mid_turn_waits_for_its_own_turn(self):
+        r = self._runner(slow=True)
+        r.start()
+        first = r.enqueue(_op("first"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        peer = r.enqueue(Item("peer:testa", "chat", "peer", sender="Testa"))
+        self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=10.0))
+        self.assertEqual([x["inbox_ids"] for x in _results(r)],
+                         [[first.inbox_id], [peer.inbox_id]])

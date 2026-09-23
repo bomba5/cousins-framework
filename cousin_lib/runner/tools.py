@@ -38,6 +38,7 @@ class ToolContext:
     policy: object            # a policy.Policy: .outbound_filter
     stream: object = None     # EventStream or None
     registry: object = None   # set by build_tool_server
+    on_handoff: object = None     # callable(summary) (phase 4)
 
 
 def _str(a, key, default=""):
@@ -555,19 +556,96 @@ def _send(ctx, a):
 
 # ------------------------------------------------------------ handoff
 
-def handoff(ctx, text):
-    """The handoff for the next generation, at <home>/data/handoff-manual.md."""
-    from cousin_lib import memory
-    text = ("" if text is None else str(text)).strip()
-    if not text:
-        raise ValueError("handoff needs text")
-    path = Path(ctx.home) / "data" / "handoff-manual.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("# Handoff - %s, written %s\n\n%s\n"
-                    % (ctx.name, datetime.now().astimezone().isoformat(timespec="minutes"), text))
-    memory.record_event(ctx.home, "framework", "framework:handoff",
-                        "handoff written (%d chars)" % len(text), "runner")
-    return "handoff written"
+HANDOFF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "position": {"type": "string", "description": "Where the work stands, in a paragraph."},
+        "next_action": {"type": "string",
+                        "description": "The first thing the next generation should do."},
+        "status": {"type": "string",
+                   "description": "The open loops, markdown. Replaces STATUS.md's"
+                                  " '## Open loops' section; the rest of the file is kept."},
+        "active_threads": {"type": "array", "items": {"type": "string"},
+                           "description": "One line per in-flight thread."},
+        "learned": {"type": "array", "description": "What this generation learned that is"
+                    " not in memory yet; each becomes a remembered fact.",
+                    "items": {"type": "object", "properties": {
+                        "topic": {"type": "string"}, "fact": {"type": "string"},
+                        "level": {"type": "string"}, "cite": {"type": "string"}},
+                        "required": ["topic", "fact"], "additionalProperties": False}}},
+    "required": ["position", "next_action", "status"],
+    "additionalProperties": False,
+}
+
+OPEN_LOOPS = "## Open loops"
+
+
+def _with_open_loops(text, name, status):
+    """STATUS.md with its `## Open loops` section replaced by `status`;
+    everything else byte for byte. Absent section: inserted after the
+    title line, where boot._active_state and the digest read it."""
+    block = "%s\n\n%s\n" % (OPEN_LOOPS, status.strip())
+    if not text.strip():
+        return "# Status - %s\n\n%s" % (name, block)
+    start = text.find(OPEN_LOOPS)
+    if start < 0:
+        title, nl, rest = text.partition("\n")
+        return title + "\n\n" + block + ("\n" + rest.lstrip("\n") if rest.strip() else "")
+    end = text.find("\n## ", start + len(OPEN_LOOPS))
+    tail = text[end + 1:] if end >= 0 else ""
+    return text[:start] + block + ("\n" + tail if tail else "")
+
+
+def handoff(ctx, args):
+    """The generation's handoff, in the ritual's order: STATUS.md's open
+    loops, the thread list, the memories, and data/handoff.md LAST."""
+    from cousin_lib import memory, sync_state
+    args = dict(args or {})
+    missing = [k for k in ("position", "next_action", "status") if not str(args.get(k) or "").strip()]
+    if missing:
+        raise ValueError("handoff needs %s" % ", ".join(missing))
+    home = Path(ctx.home)
+    (home / "data").mkdir(parents=True, exist_ok=True)
+    written, errors, learned = [], [], 0
+    status_path = home / "STATUS.md"
+    old = status_path.read_text() if status_path.exists() else ""
+    status_path.write_text(_with_open_loops(old, ctx.name, str(args["status"])))
+    written.append("STATUS.md (open loops)")
+    try:
+        sync_state.write_state(home)
+    except Exception as err:  # noqa: BLE001 - state.json is a view; STATUS is written
+        errors.append("state.json: %s" % err)
+    threads = args.get("active_threads")
+    if threads:
+        (home / "data" / "active-threads.md").write_text(
+            "# Active threads - %s\n\n%s\n" % (ctx.name, "\n".join("- %s" % str(t).strip()
+                                                                   for t in threads)))
+        written.append("data/active-threads.md")
+    for item in args.get("learned") or []:
+        try:
+            memory.remember(home, item.get("topic"), item.get("fact"),
+                            level=item.get("level"), cite=item.get("cite"))
+            learned += 1
+        except (ValueError, AttributeError) as err:
+            errors.append("memory %r: %s" % ((item or {}).get("topic"), err))
+    (home / "data" / "handoff.md").write_text(
+        "# Handoff - %s, written %s\n\ndegraded_state: false\n\n## Position\n\n%s\n\n"
+        "## Next action\n\n%s\n"
+        % (ctx.name, datetime.now().astimezone().isoformat(timespec="minutes"),
+           str(args["position"]).strip(), str(args["next_action"]).strip()))
+    written.append("data/handoff.md")
+    memory.record_event(home, "framework", "framework:handoff",
+                        "handoff written: %s" % ", ".join(written), "runner")
+    summary = {"position": args["position"], "next_action": args["next_action"],
+               "written": written, "learned": learned, "errors": errors}
+    if getattr(ctx, "on_handoff", None) is not None:
+        ctx.on_handoff(summary)
+    line = "handoff written: %s; %d %s" % (", ".join(written), learned,
+                                            "memory" if learned == 1 else "memories")
+    if errors:
+        line += "; %d error%s: %s" % (len(errors), "" if len(errors) == 1 else "s",
+                                      "; ".join(errors))
+    return line
 
 
 RUNNER_TOOLS = [
@@ -584,9 +662,10 @@ RUNNER_TOOLS = [
          "video": {"type": "string", "description": "path to an MP4, WebM, MOV or M4V"}},
          "required": ["text"], "additionalProperties": False}},
     {"name": "handoff",
-     "description": "Write the handoff for the next generation (data/handoff-manual.md).",
-     "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}},
-                     "required": ["text"], "additionalProperties": False}},
+     "description": "Hand off to the next generation in one call: STATUS.md's open loops,"
+                    " your thread list, what you learned, and where you stand. Call it once,"
+                    " when a system message asks for your handoff or before you stop.",
+     "inputSchema": HANDOFF_SCHEMA},
 ]
 
 
@@ -630,7 +709,7 @@ def _dispatch(ctx, name, args):
                      reply_to=args.get("reply_to"), image=args.get("image"),
                      video=args.get("video"))
     if name == "handoff":
-        return handoff(ctx, args.get("text"))
+        return handoff(ctx, args)
     reg_tool = _registry_tool(ctx, name)
     if name == "send" or (reg_tool is not None and reg_tool["kind"] == "send"):
         if reg_tool is not None:

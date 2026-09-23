@@ -308,12 +308,6 @@ class TestRegistryGatedDispatch(HermeticCase):
 
 
 class TestHandoffAndMeeting(HermeticCase):
-    def test_handoff_writes_the_manual_file(self):
-        ctx = _ctx(self)
-        text, err = tools.call(ctx, "handoff", {"text": "carry on from task 3"})
-        self.assertFalse(err, text)
-        self.assertIn("carry on from task 3", (ctx.home / "data" / "handoff-manual.md").read_text())
-
     def test_meeting_say_out_of_turn_is_refused(self):
         ctx = _ctx(self)
         from cousin_lib import meetings

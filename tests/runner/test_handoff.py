@@ -1,0 +1,104 @@
+"""The structured handoff: one call, the ritual's order, STATUS kept outside its section."""
+import importlib.util
+import json
+import unittest
+from unittest import mock
+
+from cousin_lib.runner import tools
+from tests._hermetic import HermeticCase
+from tests.runner.test_tools import _ctx
+
+ARGS = {"position": "Halfway through the ledger audit.",
+        "next_action": "Reconcile March against the bank export.",
+        "status": "- ledger audit: March open\n- invoice run: waiting on Sam",
+        "active_threads": ["ledger audit - March", "invoice run - blocked on Sam"],
+        "learned": [{"topic": "bank export", "fact": "exports are UTC, not local"}]}
+
+
+class TestHandoff(HermeticCase):
+    def test_every_file_is_written(self):
+        ctx = _ctx(self)
+        text, err = tools.call(ctx, "handoff", dict(ARGS))
+        self.assertFalse(err, text)
+        home = ctx.home
+        self.assertIn("March open", (home / "STATUS.md").read_text())
+        self.assertIn("- ledger audit - March", (home / "data" / "active-threads.md").read_text())
+        handoff = (home / "data" / "handoff.md").read_text()
+        self.assertIn("Halfway through the ledger audit.", handoff)
+        self.assertIn("Reconcile March", handoff)
+        self.assertIn("degraded_state: false", handoff)
+        raw = "".join(p.read_text() for p in (home / "memory" / "raw").glob("*.jsonl"))
+        self.assertIn("exports are UTC", raw)
+
+    def test_the_handoff_file_is_written_last(self):
+        ctx = _ctx(self); order = []
+        real_write = type(ctx.home).write_text
+
+        def spy(path, *a, **k):
+            order.append(path.name); return real_write(path, *a, **k)
+        with mock.patch.object(type(ctx.home), "write_text", spy):
+            tools.call(ctx, "handoff", dict(ARGS))
+        self.assertEqual(order[-1], "handoff.md")
+        self.assertLess(order.index("STATUS.md"), order.index("active-threads.md"))
+
+    def test_only_the_open_loops_section_of_status_is_replaced(self):
+        ctx = _ctx(self)
+        (ctx.home / "STATUS.md").write_text(
+            "# Wren - STATUS\n\nOperator notes stay.\n\n## Open loops\n\n- old loop\n\n"
+            "## Done\n\n- shipped the thing\n")
+        tools.call(ctx, "handoff", dict(ARGS))
+        text = (ctx.home / "STATUS.md").read_text()
+        self.assertIn("Operator notes stay.", text)
+        self.assertIn("## Done\n\n- shipped the thing", text)
+        self.assertNotIn("old loop", text)
+        self.assertIn("March open", text)
+
+    def test_a_status_without_the_section_gains_it_where_the_digest_reads_it(self):
+        ctx = _ctx(self)
+        (ctx.home / "STATUS.md").write_text("# Wren - STATUS\n\nfree text\n")
+        tools.call(ctx, "handoff", dict(ARGS))
+        from cousin_lib import boot
+        self.assertIn("March open", boot._active_state(ctx.home))
+
+    @unittest.skipUnless(importlib.util.find_spec("cousin_lib.runner.prompt"),
+                         "needs Task 3: prompt.state_digest")
+    def test_the_next_digest_reflects_the_handoff(self):
+        import os
+        from cousin_lib.runner import prompt
+        ctx = _ctx(self)
+        tools.call(ctx, "handoff", dict(ARGS))
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"}):
+            text = prompt.state_digest(ctx.home, root=ctx.root, slug="wren")["text"]   # C2
+        self.assertIn("March open", text)
+        self.assertIn("ledger audit - March", text)
+
+    def test_missing_required_fields_are_a_tool_error(self):
+        ctx = _ctx(self)
+        text, err = tools.call(ctx, "handoff", {"position": "x"})
+        self.assertTrue(err)
+        self.assertIn("next_action", text)
+        self.assertFalse((ctx.home / "data" / "handoff.md").exists())
+
+    def test_one_bad_memory_does_not_cost_the_handoff(self):
+        ctx = _ctx(self)
+        args = dict(ARGS, learned=[{"topic": "t", "fact": "f", "level": "operator"},   # no cite
+                                   {"topic": "ok", "fact": "kept"}])
+        text, err = tools.call(ctx, "handoff", args)
+        self.assertFalse(err, text)
+        self.assertIn("1 memory", text); self.assertIn("1 error", text)
+        self.assertTrue((ctx.home / "data" / "handoff.md").exists())
+
+    def test_on_handoff_receives_the_summary(self):
+        seen = []
+        ctx = _ctx(self); ctx.on_handoff = seen.append
+        tools.call(ctx, "handoff", dict(ARGS))
+        self.assertEqual(seen[0]["next_action"], ARGS["next_action"])
+        self.assertEqual(seen[0]["learned"], 1)
+
+    def test_the_schema_requires_the_three_fields(self):
+        d = [t for t in tools.RUNNER_TOOLS if t["name"] == "handoff"][0]
+        self.assertEqual(sorted(d["inputSchema"]["required"]), ["next_action", "position", "status"])
+
+
+if __name__ == "__main__":
+    unittest.main()

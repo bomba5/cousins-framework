@@ -1,7 +1,11 @@
 """The composed system prompt: complete, never truncated, byte-stable, root explicit."""
+import contextlib
+import datetime
 import os
 import pathlib
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -16,6 +20,65 @@ TEMPLATE = template_sync._template_text(REPO)
 DOCTRINE = next(p for p in TEMPLATE.split("\n\n") if p.startswith("You are part of"))
 INVARIANT = next(p for p in TEMPLATE.split("\n\n") if p.startswith("Invariant for every cousin"))
 
+
+
+@contextlib.contextmanager
+def _clock_at(epoch):
+    """Every clock and counter a composer could read, moved to `epoch`.
+    Patching time.time alone misses time.strftime(fmt), time.gmtime() and
+    datetime.now(), which read the C clock directly and so saw no jump. A
+    name a cousin_lib module bound at import (`from time import strftime`)
+    is moved too: patching the time module cannot reach it."""
+    gm, lt, strf = time.gmtime, time.localtime, time.strftime
+    wall, wall_ns = time.time, time.time_ns
+    mono, perf = time.monotonic, time.perf_counter
+    shift = epoch - wall()
+    ctime, asctime = time.ctime, time.asctime
+    real_dt, real_date = datetime.datetime, datetime.date
+
+    class _DateTime(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return real_dt.fromtimestamp(epoch, tz)
+
+        @classmethod
+        def utcnow(cls):
+            return real_dt.fromtimestamp(epoch, datetime.timezone.utc).replace(tzinfo=None)
+
+        @classmethod
+        def today(cls):
+            return real_dt.fromtimestamp(epoch)
+
+    class _Date(real_date):
+        @classmethod
+        def today(cls):
+            return real_date.fromtimestamp(epoch)
+
+    moved = {
+        "time.time": lambda: epoch,
+        "time.time_ns": lambda: int(epoch) * 10**9,
+        "time.gmtime": lambda secs=None: gm(epoch if secs is None else secs),
+        "time.localtime": lambda secs=None: lt(epoch if secs is None else secs),
+        "time.strftime": lambda fmt, t=None: strf(fmt, lt(epoch) if t is None else t),
+        "time.ctime": lambda secs=None: ctime(epoch if secs is None else secs),
+        "time.asctime": lambda t=None: asctime(lt(epoch) if t is None else t),
+        "datetime.datetime": _DateTime,
+        "datetime.date": _Date,
+        "time.monotonic": lambda: mono() + shift,
+        "time.perf_counter": lambda: perf() + shift,
+    }
+    real = {id(obj): moved["%s.%s" % (obj.__module__, obj.__name__)]
+            for obj in (wall, wall_ns, gm, lt, strf, ctime, asctime, mono, perf, real_dt, real_date)}
+    with contextlib.ExitStack() as stack:
+        for target, value in moved.items():
+            stack.enter_context(mock.patch(target, value))
+        for name, module in list(sys.modules.items()):
+            if name != "cousin_lib" and not name.startswith("cousin_lib."):
+                continue
+            for attr, value in list(vars(module).items()):
+                if id(value) in real:
+                    stack.enter_context(mock.patch.object(module, attr, real[id(value)]))
+        yield
 
 class PromptCase(HermeticCase):
     def setUp(self):
@@ -89,7 +152,7 @@ class TestCompose(PromptCase):
         boot.bump_generation(self.home)                                  # a rollover happened
         (self.home / "STATUS.md").write_text("## Open loops\n- new\n")  # state moved
         (self.home / "data" / "handoff.md").write_text("handoff\n")
-        with mock.patch("time.time", return_value=4_102_444_800.0):     # years later
+        with _clock_at(4_102_444_800.0):                                 # years later, every clock
             second = self.compose()
         self.assertEqual(first.encode(), second.encode())
 

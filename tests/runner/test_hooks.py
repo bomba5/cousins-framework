@@ -180,6 +180,38 @@ class TestCheckpointsAndState(HooksCase):
         self.assertEqual(sum(e["kind"] == "permission" for e in self.stream.tail()), 2)
         self.assertFalse(any(e["kind"] == "hook" for e in self.stream.tail()))
 
+    def test_only_a_permission_prompt_notification_moves_the_state(self):
+        self.machine.to("running")
+        _run(self.cbs["Notification"](self._base(
+            "Notification", message="waiting for input", notification_type="idle_prompt"), None, {}))
+        self.assertEqual(self.machine.state, "running")
+        _run(self.cbs["Notification"](self._base(
+            "Notification", message="Bash needs approval",
+            notification_type="permission_prompt"), None, {}))
+        self.assertEqual(self.machine.state, "waiting_permission")
+        self.assertEqual(sum(e["kind"] == "permission" for e in self.stream.tail()), 2)
+
+    def test_the_permission_move_runs_under_the_runners_lock(self):
+        class Lock:
+            held, acquired = False, 0
+
+            def __enter__(self):
+                self.held = True; self.acquired += 1
+
+            def __exit__(self, *exc):
+                self.held = False
+        lock, moves = Lock(), []
+        machine = StateMachine(on_change=lambda o, n, d: moves.append((n, lock.held)))
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=machine,
+                              stream=self.stream, lock=lock)
+        machine.to("running")
+        moves.clear()
+        _run(cbs["PermissionRequest"](self._base(
+            "PermissionRequest", tool_name="Bash", tool_input={}), None, {}))
+        self.assertEqual(lock.acquired, 1)
+        self.assertEqual(moves, [("waiting_permission", True)])
+        self.assertFalse(lock.held)
+
     def test_notification_when_idle_only_records(self):
         _run(self.cbs["Notification"](self._base(
             "Notification", message="needs input", notification_type="permission_prompt"), None, {}))

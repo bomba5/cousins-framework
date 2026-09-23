@@ -7,6 +7,7 @@ import os
 import pathlib
 import tempfile
 from datetime import datetime, timezone
+from unittest import mock
 
 from cousin_lib.runner import checkpoints
 from tests._hermetic import HermeticCase
@@ -94,6 +95,18 @@ class TestPreCompactCheckpoint(CheckpointCase):
         self.assertIn("text: event number 25", text); self.assertIn("text: event number 07", text)
         self.assertIn("tool: ", text)
         self.assertNotIn("event number 05", text); self.assertNotIn("stale session", text)
+
+
+    def test_a_long_stream_is_read_from_its_end_only(self):
+        pad = "x" * 100
+        self._write("data/stream/big.jsonl", "".join(json.dumps(
+            {"seq": i, "ts": float(i), "kind": "text", "payload": {"text": "n%04d %s" % (i, pad)}})
+            + "\n" for i in range(3000)))
+        with mock.patch.object(checkpoints, "_read", wraps=checkpoints._read) as read:
+            text = checkpoints.write_pre_compact_checkpoint(self.home, slug="wren", now=NOW).read_text()
+        self.assertNotIn("big.jsonl", [pathlib.Path(c.args[0]).name for c in read.call_args_list])
+        self.assertIn("text: n2999", text); self.assertIn("text: n2980", text)
+        self.assertNotIn("n2979", text)
 
 
 class TestEmptyHome(HermeticCase):

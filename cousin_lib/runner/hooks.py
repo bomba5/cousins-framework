@@ -18,6 +18,7 @@ by RECALL_BUDGET_S. The runner moves `waiting_permission` back to
 `running` when the next SDK message arrives (sdk.py, the turn's message
 loop)."""
 import asyncio
+import contextlib
 import inspect
 
 from cousin_lib import recording
@@ -28,6 +29,7 @@ PRE_MATCHER = "Agent|Task|Bash"
 # The chat server's RECALL_BUDGET_SECONDS: past it the prompt goes on
 # without recall and the search finishes on its thread, index warm.
 RECALL_BUDGET_S = 4.0
+PERMISSION_NOTIFICATION = "permission_prompt"
 
 
 def default_recall(home):
@@ -41,7 +43,7 @@ def default_recall(home):
 
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
-              checkpoints=None, body_for_prompt=None):
+              checkpoints=None, body_for_prompt=None, lock=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -51,12 +53,15 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     hits goes on the `recall` event. Default: default_recall(home).
     body_for_prompt: `f(prompt) -> str`, the text to search for a
     submitted prompt (the runner passes the live turn's newest row body,
-    not the whole envelope). Default: the prompt itself."""
+    not the whole envelope). Default: the prompt itself.
+    lock: the runner's state lock (a threading.Lock); the permission
+    move checks and transitions under it. Never held across an await."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home)
     recorder = recorder or (lambda payload: recording.handle(payload, home, root, slug=slug))
     body_for_prompt = body_for_prompt or (lambda prompt: prompt)
+    lock = lock if lock is not None else contextlib.nullcontext()
 
     def guarded(name, fn):
         is_async = inspect.iscoroutinefunction(fn)
@@ -113,9 +118,13 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             if payload.get(key) is not None:
                 event[key] = payload[key]
         stream.append("permission", event)
-        if machine.state == "running":
-            machine.to("waiting_permission",
-                       payload.get("tool_name") or payload.get("message") or "")
+        if event["event"] == "Notification" and \
+                payload.get("notification_type") != PERMISSION_NOTIFICATION:
+            return {}
+        with lock:
+            if machine.state == "running":
+                machine.to("waiting_permission",
+                           payload.get("tool_name") or payload.get("message") or "")
         return {}
 
     table = {ev: guarded(ev, record) for ev in RECORD_EVENTS}

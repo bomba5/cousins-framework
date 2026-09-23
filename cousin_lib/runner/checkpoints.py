@@ -14,6 +14,7 @@ from pathlib import Path
 DECISIONS = 5
 STATUS_LINES = 20
 STREAM_EVENTS = 20
+STREAM_TAIL_BYTES = 64 * 1024
 EVENT_CHARS = 160
 DISK_FILES = ("CLAUDE.md", "MEMORY.md", "STATUS.md", "PROFILE.md")
 _OPEN_LOOPS = re.compile(r"^## Open loops[^\n]*\n(.*?)(?=^## |\Z)", re.M | re.S)
@@ -76,12 +77,31 @@ def _event_text(payload):
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
+def _mtime(path):
+    try:
+        return path.stat().st_mtime
+    except OSError:  # removed between the glob and the stat
+        return -1.0
+
+
+def _tail_lines(path):
+    """The complete lines in the file's last STREAM_TAIL_BYTES."""
+    try:
+        with open(path, "rb") as fh:
+            size = fh.seek(0, 2)
+            fh.seek(max(0, size - STREAM_TAIL_BYTES))
+            lines = fh.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    return lines[1:] if size > STREAM_TAIL_BYTES else lines
+
+
 def _stream_tail(data):
-    files = sorted((data / "stream").glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    files = sorted((data / "stream").glob("*.jsonl"), key=_mtime)
     if not files:
         return "No event stream."
     out = []
-    for line in (_read(files[-1]) or "").splitlines()[-STREAM_EVENTS:]:
+    for line in _tail_lines(files[-1])[-STREAM_EVENTS:]:
         try:
             e = json.loads(line)
         except ValueError:

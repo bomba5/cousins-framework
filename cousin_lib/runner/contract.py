@@ -57,8 +57,8 @@ call `handoff` exactly once, with `position`, `next_action` and
 `status`, plus `active_threads` and `learned` when you have them. The
 framework writes STATUS.md's open loops, your thread list, your new
 memories and the handoff file from that one call, in that order. The
-next one starts from a digest of that state as its first message. It
-is not announced; the work continues."""
+next generation starts from a digest of that state as its first
+message. A new generation is not announced; the work continues."""
 
 
 def major_minor(version):

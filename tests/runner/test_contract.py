@@ -1,5 +1,6 @@
 """The framework contract: generated, complete, deterministic."""
 import pathlib
+import re
 import unittest
 
 from cousin_lib import mcp_server
@@ -54,8 +55,9 @@ class TestContract(HermeticCase):
 
     def test_nothing_volatile(self):
         text = contract.render(_registry(), "1.12.0")
-        for needle in ("2026", "UTC", "generation ", "Generation:", "/home/", "wren"):
+        for needle in ("2026", "UTC", "/home/", "wren"):
             self.assertNotIn(needle, text)
+        self.assertIsNone(re.search(r"[Gg]eneration:? ?\d", text))
 
     def test_ascii_only(self):
         contract.render(_registry(TRACKER_TOML), "1.12.0").encode("ascii")

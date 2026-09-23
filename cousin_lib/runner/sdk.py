@@ -175,8 +175,8 @@ class SdkRunner:
         sdk = _sdk()
         env = {"ANTHROPIC_API_KEY": self.api_key} if self.api_key else {}
         # The tools and hooks are in-process: no settings file is read
-        # (setting_sources=[]) and none is written; the policy hook runs
-        # first on PreToolUse, since bypassPermissions skips can_use_tool.
+        # (setting_sources=[]) and none is written; the policy is a
+        # PreToolUse hook, since bypassPermissions skips can_use_tool.
         server = tools.build_tool_server(self.tool_context, self.registry,
                                          on_fallback=self._registry_fallback)
         hook_table = hooks.build_hooks(self.home, slug=self.tool_context.slug, root=self.root,

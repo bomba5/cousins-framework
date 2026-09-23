@@ -58,6 +58,57 @@ class TestDecide(HermeticCase):
         self.assertFalse(self.p.outbound_filter)
 
 
+class TestCommandPatternsOnAnyTool(HermeticCase):
+    def test_a_pattern_matches_any_tool_whose_input_carries_a_command(self):
+        p = policy.Policy(deny_bash_patterns=(__import__("re").compile(r"\brm\s+-rf\s+/"),))
+        for tool in ("Bash", "PowerShell", "Monitor", "mcp__other__shell"):
+            decision, reason = p.decide(tool, {"command": "rm -rf / now"})
+            self.assertEqual(decision, "deny", tool)
+            self.assertIn("deny_bash_patterns", reason)
+        self.assertEqual(p.decide("PowerShell", {"command": "Get-ChildItem"})[0], "allow")
+        # a command that is not a string is not a command line
+        self.assertEqual(p.decide("Monitor", {"command": ["rm", "-rf", "/"]})[0], "allow")
+        self.assertEqual(p.decide("Read", {"file_path": "rm -rf /"})[0], "allow")
+
+
+class TestSubagentReply(HermeticCase):
+    def setUp(self):
+        super().setUp()
+        self.home = _home(self)
+        self.stream = EventStream(self.home, "sa")
+        self.cbs = hooks.callbacks(self.home, slug="wren", root=self.home.parent.parent,
+                                   machine=StateMachine(), stream=self.stream,
+                                   policy=policy.Policy())
+        self.base = {"session_id": "s", "transcript_path": "/dev/null", "cwd": str(self.home),
+                     "hook_event_name": "PreToolUse", "tool_name": "mcp__cousin__reply",
+                     "tool_use_id": "t"}
+
+    def _gate(self, **kw):
+        return asyncio.run(self.cbs["PreToolUse:policy"]({**self.base, **kw}, "t", {}))
+
+    def test_a_subagent_reply_without_a_thread_is_denied(self):
+        out = self._gate(agent_id="a-1", agent_type="general-purpose",
+                         tool_input={"text": "done"})
+        spec = out["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny")
+        self.assertEqual(spec["permissionDecisionReason"],
+                         "a subagent must name the thread it answers")
+        events = [e["payload"] for e in self.stream.tail() if e["kind"] == "policy"]
+        self.assertEqual(events, [{"tool": "mcp__cousin__reply", "decision": "deny",
+                                   "reason": "a subagent must name the thread it answers",
+                                   "agent_id": "a-1"}])
+
+    def test_a_blank_thread_is_no_thread(self):
+        out = self._gate(agent_id="a-1", tool_input={"text": "done", "thread": "  "})
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_a_subagent_that_names_the_thread_and_the_main_turn_are_allowed(self):
+        self.assertEqual(self._gate(agent_id="a-1", tool_input={
+            "text": "done", "thread": "operator:priya"}), {})
+        self.assertEqual(self._gate(tool_input={"text": "done"}), {})
+        self.assertFalse(any(e["kind"] == "policy" for e in self.stream.tail()))
+
+
 class TestHookEnforcement(HermeticCase):
     def test_pre_tool_use_denies_with_reason_and_records_a_policy_event(self):
         home = _home(self, 'deny_tools = ["WebFetch"]\nask = ["Write"]\n')

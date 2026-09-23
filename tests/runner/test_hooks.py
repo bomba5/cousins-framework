@@ -132,6 +132,18 @@ class TestRecall(HooksCase):
         recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
         self.assertEqual(recalls, [{"hits": 0, "skipped": "context present"}])
 
+    def test_an_empty_body_is_not_searched(self):
+        seen = []
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream,
+                              recall=lambda body: (seen.append(body), ("[fw-recall] x", 1))[1],
+                              body_for_prompt=lambda prompt: "")
+        out = _run(cbs["UserPromptSubmit"](self._base(
+            "UserPromptSubmit", prompt="[peer:toki] a peer row"), None, {}))
+        self.assertEqual(out, {}); self.assertEqual(seen, [])
+        recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
+        self.assertEqual(recalls, [{"hits": 0, "skipped": "empty body"}])
+
     def test_a_slow_recall_is_cut_off_at_the_budget_off_the_loop(self):
         cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
                               stream=self.stream,
@@ -147,6 +159,85 @@ class TestRecall(HooksCase):
         self.assertEqual(out, {}); self.assertLess(took, 0.5)
         recalls = [e["payload"] for e in self.stream.tail() if e["kind"] == "recall"]
         self.assertEqual(recalls, [{"hits": 0, "timed_out": True}])
+
+
+class TestRecorderChecksThePolicy(HooksCase):
+    """Matched PreToolUse callbacks run concurrently in the CLI: the
+    recorder cannot rely on the policy callback having run first."""
+
+    def _cbs(self, toml):
+        from cousin_lib.runner import policy
+        (self.home / "policy.toml").write_text(toml)
+        return hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                               stream=self.stream, policy=policy.Policy.load(self.home))
+
+    def test_a_denied_agent_pre_tool_use_leaves_no_job_row(self):
+        from cousin_lib import jobs
+        cbs = self._cbs('deny_tools = ["Agent", "Task"]\n')
+        out = _run(cbs["PreToolUse"](self._base(
+            "PreToolUse", tool_name="Agent", tool_input={"prompt": "x", "description": "denied"},
+            tool_use_id="tu-d"), "tu-d", {}))
+        self.assertEqual(out, {})
+        self.assertEqual([j for j in jobs.list_jobs() if j["title"] == "denied"], [])
+
+    def test_a_denied_background_bash_gets_no_row_and_no_rewrite(self):
+        from cousin_lib import jobs
+        cbs = self._cbs("deny_bash_patterns = ['sleep']\n")
+        out = _run(cbs["PreToolUse"](self._base(
+            "PreToolUse", tool_name="Bash",
+            tool_input={"command": "sleep 2", "run_in_background": True},
+            tool_use_id="tu-b"), "tu-b", {}))
+        self.assertEqual(out, {})
+        self.assertEqual([j for j in jobs.list_jobs() if j["kind"] == "shell"], [])
+
+    def test_an_asked_agent_is_not_recorded_either(self):
+        from cousin_lib import jobs
+        cbs = self._cbs('ask = ["Agent"]\n')
+        _run(cbs["PreToolUse"](self._base(
+            "PreToolUse", tool_name="Agent", tool_input={"prompt": "x", "description": "asked"},
+            tool_use_id="tu-a"), "tu-a", {}))
+        self.assertEqual([j for j in jobs.list_jobs() if j["title"] == "asked"], [])
+
+    def test_an_allowed_agent_is_still_recorded(self):
+        from cousin_lib import jobs
+        cbs = self._cbs('deny_tools = ["WebFetch"]\n')
+        _run(cbs["PreToolUse"](self._base(
+            "PreToolUse", tool_name="Agent", tool_input={"prompt": "x", "description": "allowed"},
+            tool_use_id="tu-ok"), "tu-ok", {}))
+        self.assertEqual(len([j for j in jobs.list_jobs() if j["title"] == "allowed"]), 1)
+
+
+class TestOffTheLoop(HooksCase):
+    def test_the_recorder_and_the_checkpoints_run_on_a_worker_thread(self):
+        import threading
+        seen = {}
+
+        class Checkpoints:
+            @staticmethod
+            def write_session_checkpoint(home, *, slug):
+                seen["stop"] = threading.get_ident()
+                return home / "data" / "session-checkpoint.md"
+
+            @staticmethod
+            def write_pre_compact_checkpoint(home, *, slug):
+                seen["precompact"] = threading.get_ident()
+                return home / "data" / "pre-compact-checkpoint.md"
+
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream, checkpoints=Checkpoints,
+                              recorder=lambda payload: seen.__setitem__(
+                                  "record", threading.get_ident()))
+
+        async def drive():
+            seen["loop"] = threading.get_ident()
+            await cbs["PostToolUse"](self._base("PostToolUse", tool_name="Read", tool_input={},
+                                                tool_use_id="t", tool_response={}), "t", {})
+            await cbs["Stop"](self._base("Stop", stop_hook_active=False), None, {})
+            await cbs["PreCompact"](self._base("PreCompact", trigger="auto"), None, {})
+        _run(drive())
+        for key in ("record", "stop", "precompact"):
+            self.assertIn(key, seen)
+            self.assertNotEqual(seen[key], seen["loop"], key)
 
 
 class TestCheckpointsAndState(HooksCase):

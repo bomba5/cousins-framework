@@ -105,6 +105,8 @@ class TestWiring(HermeticCase):
         self.addCleanup(patch.stop)
         r = self._runner()
         opts = r.options()
+        # the prompt is a row's envelope: an empty body is not searched
+        r._sent = [({"id": 1, "thread_id": "operator:priya", "body": "hi"}, "hi")]
         cb = opts.hooks["UserPromptSubmit"][0].hooks[0]
         out = asyncio.run(cb({"hook_event_name": "UserPromptSubmit", "prompt": "hi",
                              "session_id": "s", "transcript_path": "/dev/null",
@@ -219,7 +221,10 @@ class TestBodyForPrompt(HermeticCase):
         r.start()
         r.enqueue(Item("peer:toki", "chat", "status of the boat", sender="Toki"))
         self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
-        self.assertEqual(self.searched, [""])
+        # an empty body is not searched at all (the recall event says so)
+        self.assertEqual(self.searched, [])
+        self.assertIn({"hits": 0, "skipped": "empty body"},
+                      [e["payload"] for e in r.events() if e["kind"] == "recall"])
 
     def test_the_matching_row_wins_over_the_newest(self):
         r = self._runner()

@@ -1,16 +1,24 @@
 """Operator policy as code: <home>/policy.toml (spec, "Hooks in-process",
-`can_use_tool`). Enforced as the first PreToolUse hook, because under
-bypassPermissions the CLI never consults can_use_tool. Missing: allow
-all and say so once. Malformed: fail closed at start, loudly.
+`can_use_tool`). Enforced by a PreToolUse hook with no matcher, because
+under bypassPermissions the CLI never consults can_use_tool. Missing:
+allow all and say so once. Malformed: fail closed at start, loudly.
 
-`deny_bash_patterns` is scoped to `Bash.command` only: a regex here
-never sees a command run by another tool (a subagent's own `Agent` or
-`Task` invocation, an MCP tool that shells out on the far side, an
-editor tool's own file writes). It cannot see inside a subagent's
-turn at all - a nested `Bash` call a `Task`/`Agent` tool spawns runs
-under that subagent's own hook wiring, not this one. Block the outer
-tool with `deny_tools` when the risk is the tool itself, not just the
-shape of a Bash command it might run."""
+The hook fires for every tool call of the session, a subagent's own
+calls included (the hook input then carries `agent_id`), so a deny
+reaches inside a subagent's turn as well.
+
+`deny_bash_patterns` is matched against the `command` string of any
+tool whose input carries one (Bash, PowerShell, Monitor, any other); it
+never sees a command a tool builds on the far side (an MCP server that
+shells out, an editor tool's own file writes). The patterns are a
+guardrail against a known command line, not a sandbox: the same effect
+can be spelled another way. Deny the tool itself with `deny_tools` when
+the risk is the tool, not the shape of one command.
+
+The file lives in the home it governs, so the model can rewrite it; a
+rewrite takes effect at the next start, never mid-session. An operator
+who needs it immutable makes it read-only to the cousin's user or owns
+it."""
 import re
 import tomllib
 from dataclasses import dataclass
@@ -74,16 +82,17 @@ class Policy:
 
     def decide(self, tool_name, tool_input):
         """`("allow", "")`, `("deny", reason)` or `("ask", reason)`:
-        deny_tools first, then a Bash command against
-        deny_bash_patterns, then ask. Anything not named is allowed.
-        `tool_name` is normalised to a string first: a hook payload
-        missing `tool_name` must not raise out of a gate (P19)."""
+        deny_tools first, then a string `command` in the tool's input
+        (whatever the tool) against deny_bash_patterns, then ask.
+        Anything not named is allowed. `tool_name` is normalised to a
+        string first: a hook payload missing `tool_name` must not raise
+        out of a gate and so turn into an allow."""
         tool_name = str(tool_name or "")
         hit = self._named(self.deny_tools, tool_name)
         if hit:
             return "deny", "%s: deny_tools lists %s" % (FILE, hit)
-        if tool_name == "Bash":
-            command = str((tool_input or {}).get("command") or "")
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        if isinstance(command, str):
             for rx in self.deny_bash_patterns:
                 if rx.search(command):
                     return "deny", "%s: deny_bash_patterns %r matches" % (FILE, rx.pattern)

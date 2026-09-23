@@ -226,10 +226,32 @@ def _read_agent_cmd_template(root):
     return cmd
 
 
+def _flip_runner(slug, home, *, reason, deadline, queue_if_stopped):
+    """A runner cousin's flip is a rollover (spec): the `flip` row through
+    the store, the same one Runner.rollover puts (coalesced), awaited.
+    Nothing of the tmux flip runs: no marker, no pane, no pending boot,
+    no transcript mining (the runner mined every turn)."""
+    from cousin_lib.runner import rollover
+    from cousin_lib.runner.inbox import Inbox
+    from cousin_lib.runner.main import is_running
+    result = {"slug": slug, "ok": False, "lane": "runner", "stages": []}
+    if not is_running(home) and not queue_if_stopped:
+        result["error"] = "runner not running; start it before flipping"
+        return result
+    answer = rollover.request(Inbox(home), home, reason, alive=lambda: is_running(home),
+                              timeout=deadline + rollover.WAIT_SLACK_S)
+    result["stages"].append(dict(answer, stage="rollover"))
+    result["ok"] = bool(answer.get("ok"))
+    if not result["ok"]:
+        result["error"] = answer.get("reason", "rollover failed")
+    return result
+
+
 def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
          tmux_socket=None, handoff_deadline=HANDOFF_DEADLINE_SECONDS,
          halfway=HANDOFF_HALFWAY_SECONDS,
-         settle=RESPAWN_SETTLE_SECONDS, which=shutil.which):
+         settle=RESPAWN_SETTLE_SECONDS, which=shutil.which,
+         reason="cousin-flip", queue_if_stopped=False):
     """Run the flip for one cousin. Returns a structured result whose
     ok reflects the verified identity write."""
     result = {"slug": slug, "ok": False, "stages": []}
@@ -240,6 +262,14 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     except MissingConfigError as err:
         result["error"] = str(err)
         return result
+    from cousin_lib.delivery import _runner_kind
+    if _runner_kind(home) in ("sdk", "fake"):
+        if dry_run:
+            result.update(ok=True, lane="runner",
+                          stages=[{"stage": "rollover", "skipped": "dry-run"}])
+            return result
+        return _flip_runner(slug, home, reason=reason, deadline=handoff_deadline,
+                            queue_if_stopped=queue_if_stopped)
     session = config.tmux_session
 
     # Concurrency guard: a FRESH marker means another flip is mid-run;

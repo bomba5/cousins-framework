@@ -22,6 +22,8 @@ import tomllib
 import unittest
 from unittest import mock
 
+from tests._hermetic import HermeticCase
+
 from cousin_lib import lifecycle
 from cousin_lib.lifecycle import (braid_memory, reincarnate,
                                   reincarnate_main, rewrite_role,
@@ -515,3 +517,44 @@ class TestMerge(LifecycleCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReincarnateOnTheRunnerLane(HermeticCase):
+    def test_rolls_over_into_the_new_role_carrying_the_bequest(self):
+        from cousin_lib import lifecycle, memory
+        from cousin_lib.runner.main import hold_lock
+        from cousin_lib.runner.sdk import SdkRunner
+        from tests.runner._home import temp_home
+        from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "law.md").write_text("1. The law.\n")
+        (home / "CLAUDE.md").write_text("# Wren - keeps the ledgers\n\n## Identity\n\nWren keeps the ledgers.\n")
+        memory.remember(home, "ledger", "March is open")
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}); p.start(); self.addCleanup(p.stop)
+        clients = []
+
+        def factory(options):
+            clients.append(ScriptedClient(options, [[init_msg(session="s-%d" % (len(clients) + 1)),
+                                                     assistant(text="ok"), result()]] * 4))
+            return clients[-1]
+        sent = []
+        with hold_lock(home):
+            r = SdkRunner(home, client_factory=factory, handoff_deadline_s=0.5)
+            r.start(); self.addCleanup(lambda: r.stop(timeout=5))
+            out = lifecycle.reincarnate("wren", new_role="audits the audits", root=root,
+                                        send=lambda cfg, text: sent.append(text))
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(sent, [])                                        # no chat-server prompt
+        bequest = [s for s in out["steps"] if s.get("step") == "bequest"][0]
+        self.assertTrue(bequest["carried"])
+        asked = [q["message"]["content"][0]["text"] for q in clients[0].queries]
+        self.assertTrue(any("You are about to be reincarnated" in t for t in asked))  # carried
+        self.assertIn("# Wren - audits the audits", clients[-1].options.system_prompt["append"])
+        raw = "".join(p.read_text() for p in (home / "memory" / "raw").glob("*.jsonl"))
+        self.assertIn("March is open", raw)                               # memory kept
+
+    def test_the_runner_bequest_is_a_bequest(self):
+        from cousin_lib.runner import rollover
+        self.assertTrue(rollover.is_bequest(lifecycle.BEQUEST_PROMPT_RUNNER.format(timeout=300)))

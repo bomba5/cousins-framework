@@ -61,6 +61,19 @@ BEQUEST_PROMPT = (
     " seconds; the flip follows either way."
 )
 
+# The runner lane's bequest: the same request, answered through the handoff
+# tool (R10). Over 120 characters, so rollover.is_bequest keeps it whole.
+BEQUEST_PROMPT_RUNNER = (
+    "[cousin-reincarnate] You are about to be reincarnated: your role"
+    " changes, your memory persists. Before the framework rebuilds"
+    " your session, call the `handoff` tool and put in its `position`"
+    " field, in your own voice, present tense: who you are right now,"
+    " the last work that mattered and its texture, what is in flight,"
+    " and a bequest to your successor - what nothing else on disk will"
+    " tell them. You have {timeout} seconds; the rollover follows"
+    " either way."
+)
+
 
 class LifecycleError(Exception):
     """A refusal: unknown cousin, unknown mode, same slug twice."""
@@ -126,15 +139,16 @@ def _default_do_flip(root):
     """flip.flip reads the root from the environment; the lifecycle
     commands take --root. Bridge the two without a second discovery
     rule: an explicit root wins, an already-set environment is left."""
-    def run(slug):
+    def run(slug, reason=None):
         from cousin_lib.flip import flip
         os.environ.setdefault("FRAMEWORK_ROOT", str(root))
-        return flip(slug)
+        return flip(slug, queue_if_stopped=True,
+                    **({"reason": reason} if reason is not None else {}))
     return run
 
 
-def _flip_one(root, slug, do_flip, base_record):
-    result = do_flip(slug) or {}
+def _flip_one(root, slug, do_flip, base_record, reason=None):
+    result = (do_flip(slug) if reason is None else do_flip(slug, reason=reason)) or {}
     ok = bool(result.get("ok"))
     record = dict(base_record, step="flip", flipped=slug, ok=ok)
     if not ok:
@@ -294,7 +308,15 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
     result["steps"].append({"step": "snapshot", "path": str(snap)})
     _audit(root, dict(base, step="snapshot", path=str(snap)))
 
-    step = _bequest(config, home, timeout=timeout, send=send)
+    from cousin_lib.delivery import _runner_kind
+    bequest_reason = None
+    if _runner_kind(home) in ("sdk", "fake"):
+        from cousin_lib.runner.rollover import HANDOFF_DEADLINE_S
+        bequest_reason = BEQUEST_PROMPT_RUNNER.format(timeout=int(HANDOFF_DEADLINE_S))
+        step = {"step": "bequest", "sent": False, "carried": True,
+                "skipped": "runner lane: the bequest rides the rollover's handoff request"}
+    else:
+        step = _bequest(config, home, timeout=timeout, send=send)
     result["steps"].append(step)
     _audit(root, dict(base, **step))
 
@@ -309,7 +331,7 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
                             "claude_md": claude.is_file()})
     _audit(root, dict(base, step="rewrite", new_role=new_role.strip()))
 
-    ok, flip_result = _flip_one(root, slug, do_flip, base)
+    ok, flip_result = _flip_one(root, slug, do_flip, base, reason=bequest_reason)
     result["steps"].append({"step": "flip", "ok": ok})
     result["flip"] = flip_result
     result["ok"] = ok

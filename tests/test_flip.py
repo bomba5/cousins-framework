@@ -14,6 +14,8 @@ import tomllib
 import unittest
 from unittest import mock
 
+from tests._hermetic import HermeticCase
+
 from cousin_lib.flip import flip
 from tests._fakes import agent_on_path
 from tests.server.test_injection import _FAKE_TMUX
@@ -494,3 +496,47 @@ class TestAssembleSeesTheDyingSessionId(FlipCase):
         self.assertNotEqual(
             read_session_id(self.home), "dying-generation",
             "the flip should have persisted a new id after assembling")
+
+
+class TestFlipOnTheRunnerLane(HermeticCase):
+    def _cousin(self, slug="wren"):
+        from tests.runner._home import temp_home
+        home = temp_home(self, slug=slug, runner="fake")
+        root = home.parent.parent
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "law.md").write_text("1. The law.\n")
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}); p.start(); self.addCleanup(p.stop)
+        return home
+
+    def test_a_running_runner_rolls_over_and_tmux_is_never_touched(self):
+        from cousin_lib import boot, flip
+        from cousin_lib.runner.fake import FakeRunner
+        from cousin_lib.runner.main import hold_lock
+        home = self._cousin()
+        with hold_lock(home):
+            r = FakeRunner(home); r.start(); self.addCleanup(lambda: r.stop(timeout=5))
+            with mock.patch("subprocess.run") as run:
+                out = flip.flip("wren", confirm=True, reason="cousin-flip")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["lane"], "runner")
+        self.assertEqual(out["stages"][0]["stage"], "rollover")
+        self.assertEqual(out["stages"][0]["reason"], "cousin-flip")      # the model sees why
+        self.assertEqual(boot.read_generation(home), 1)
+        self.assertFalse(any("tmux" in str(c) for c in run.call_args_list))
+
+    def test_a_stopped_runner_is_refused_and_nothing_is_queued(self):
+        from cousin_lib import flip
+        from cousin_lib.runner.inbox import Inbox
+        home = self._cousin()
+        out = flip.flip("wren", confirm=True)
+        self.assertFalse(out["ok"])
+        self.assertIn("not running", out["error"])
+        self.assertEqual(Inbox(home).pending(), 0)
+
+    def test_queue_if_stopped_leaves_a_durable_row(self):
+        from cousin_lib import flip
+        from cousin_lib.runner.inbox import Inbox
+        home = self._cousin()
+        out = flip.flip("wren", confirm=True, queue_if_stopped=True)
+        self.assertFalse(out["ok"])
+        self.assertEqual(Inbox(home).pending(), 1)

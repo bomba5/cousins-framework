@@ -109,7 +109,10 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
     provenance prefix is the deliverer's job (`_default_deliver` here,
     the loops daemon's adapter there). Any exception it raises keeps
     that job pending and is reported through `on_error(job_id, err)`;
-    one failing job never stops the rest of the walk. For a runner
+    so does an explicit `False` return (`_default_deliver` returns the
+    producer's acceptance), reported as RuntimeError("delivery not
+    accepted"). A truthy or `None` return marks the job fired. One
+    failing job never stops the rest of the walk. For a runner
     cousin the at-least-once contract ends at the durable inbox put: a
     turn that fails after it is the runner's to handle, not a reason to
     fire the job again."""
@@ -124,7 +127,8 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
         fired = 0
         for job_id, cousin, prompt in rows:
             try:
-                deliver(cousin, prompt)
+                if deliver(cousin, prompt) is False:
+                    raise RuntimeError("delivery not accepted")
             except Exception as err:
                 on_error(job_id, err)
                 continue

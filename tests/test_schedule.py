@@ -162,6 +162,34 @@ class TestTick(ScheduleCase):
         self.assertEqual(schedule.list_entries(include_fired=True)[0]["status"], "fired")
 
 
+class TestTickReadsTheReturnValue(ScheduleCase):
+    """An explicit False from the deliverer is not a delivery: the job
+    stays pending and on_error hears why, as for a raise. True or None
+    keeps the old meaning."""
+
+    def _tick(self, returned):
+        from cousin_lib import schedule
+        self._main(["add", "in 1s", "due job"])
+        past = int(datetime.now().timestamp()) + 5
+        errors = []
+        n = tick(now_ts=past, deliver=lambda slug, prompt: returned,
+                 on_error=lambda job_id, err: errors.append((job_id, err)))
+        return n, schedule.list_entries(include_fired=True)[0]["status"], errors
+
+    def test_a_false_return_keeps_the_job_pending_and_reports_it(self):
+        n, status, errors = self._tick(False)
+        self.assertEqual((n, status), (0, "pending"))
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0][1], RuntimeError)
+        self.assertEqual(str(errors[0][1]), "delivery not accepted")
+
+    def test_a_true_return_marks_the_job_fired(self):
+        self.assertEqual(self._tick(True), (1, "fired", []))
+
+    def test_a_none_return_still_marks_the_job_fired(self):
+        self.assertEqual(self._tick(None), (1, "fired", []))
+
+
 class TestDefaultDeliver(ScheduleCase):
     """A runner cousin is handed the item without waiting; a tmux
     cousin's line is waited on as before."""

@@ -24,6 +24,12 @@ ARGS = {"position": "Mid-audit.", "next_action": "Reconcile March.",
         "status": "- audit: March open", "active_threads": ["audit - March"]}
 
 
+def _asked_resume(options):
+    """The session id these options resume, by either path: the store's
+    (`resume`, the key lane) or the CLI's own flag (the login lane, Task 11)."""
+    return options.resume or (options.extra_args or {}).get("resume")
+
+
 def _wait(pred, timeout=10.0):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
@@ -94,7 +100,7 @@ class TestRollover(RolloverCase):
         self.assertEqual(out["handoff"], "clean")
         self.assertEqual(out["generation"], 1)
         self.assertEqual(len(self.clients), 2)                          # a new client
-        self.assertIsNone(self.clients[1].options.resume)              # a fresh session
+        self.assertIsNone(_asked_resume(self.clients[1].options))      # a fresh session
         self.assertTrue(_wait(lambda: self.clients[1].queries))
         first = self.clients[1].queries[0]["message"]["content"][0]["text"]
         self.assertIn("STATE DIGEST FOR COUSIN: wren", first)          # digest as first message
@@ -155,7 +161,7 @@ class TestRollover(RolloverCase):
         r = self.build(hooks=True); r.start(); self.work(r)
         r.rollover("max_age")
         self.assertIs(self.ended_before_new_client, True)
-        self.assertEqual((self.home / "hooks.log").read_text().split(), ["start"])
+        self.assertEqual((self.home / "hooks.log").read_text().split(), ["start", "start"])
 
     def test_the_generation_counter_moves_once(self):
         r = self.build(); r.start(); self.work(r)
@@ -252,8 +258,9 @@ class TestRolloverFailureModes(RolloverCase):
         out = r.rollover("max_age")
         self.assertFalse(out["ok"]); self.assertIn("could not start the new session", out["reason"])
         self.assertEqual((out["generation"], out["new_session"]), (0, None))
-        self.assertEqual([o.resume for o in self.asked], [None, None, "s-1"])
+        self.assertEqual([_asked_resume(o) for o in self.asked], [None, None, "s-1"])
         self.assertEqual(r._resume_id, "s-1")     # the old session, not None, until the next init
+        self.assertEqual(r.saved_session(), "s-1")   # on file too: a restart resumes it (Task 11)
         self.assertTrue(any(e["kind"] == "system" and e["payload"].get("subtype") == "connect_failed"
                             for e in r.events()))
         rec = self.work(r, "still alive")
@@ -267,7 +274,7 @@ class TestRolloverFailureModes(RolloverCase):
         rec = self.work(r, "still alive")                 # no client: _NotWritten, then _resync
         self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
         self.assertEqual(len(self.asked), 4)
-        self.assertEqual(self.asked[3].resume, "s-1")     # never a fresh, unbumped, digest-less one
+        self.assertEqual(_asked_resume(self.asked[3]), "s-1")   # never a fresh, unbumped, digest-less one
         self.assertEqual(boot.read_generation(self.home), 0)
         texts = [q["message"]["content"][0]["text"] for c in self.clients for q in c.queries]
         self.assertFalse(any("STATE DIGEST" in t for t in texts))

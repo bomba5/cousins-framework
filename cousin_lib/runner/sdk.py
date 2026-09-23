@@ -166,6 +166,13 @@ class SdkRunner:
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
         self.fatal = None        # why the worker gave up (a connect failure), else None
         self._fallback_said = False   # the registry-fallback notice, once per runner
+        # Restart with resume (data/runner-session.json): the id on file
+        # (cached), a write the loop owes the file, and the id the first
+        # init after a resume must name (R12).
+        self._saved = None
+        self._pending_save = None
+        self._expect_session = None
+        self._resume_lost = False     # that init named another id: start fresh
         # (row, envelope text) for every row written this runner turn, added
         # BEFORE its query: the prompt hook can fire before the echo.
         self._sent = []
@@ -231,12 +238,119 @@ class SdkRunner:
                                                     registry=self.tool_context.registry)
         # replay-user-messages: the echo is how a turn knows which rows the
         # model actually took in (see the module docstring).
+        extra = {"replay-user-messages": None}
+        store_resume = resume
+        if resume and self.resume_lane() != "key":
+            # LOGIN lane, or a lane never recorded (R12): the CLI's own --resume.
+            # The SDK's store-backed resume would run the CLI under a temporary
+            # config dir with the OAuth refresh token stripped. options.resume
+            # stays unset so nothing is materialized; session_store stays set,
+            # so the store keeps mirroring. The store is NOT the owner here: a
+            # lost local transcript is resume_failed, then fresh + digest.
+            extra["resume"] = resume
+            store_resume = None
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
                                       permission_mode="bypassPermissions",
-                                      setting_sources=[], resume=resume,
+                                      setting_sources=[], resume=store_resume,
                                       system_prompt=system_prompt, session_store=self.session_store,
                                       mcp_servers={"cousin": server}, hooks=hook_table,
-                                      extra_args={"replay-user-messages": None})
+                                      extra_args=extra)
+
+    # -- the session on file (restart with resume) -----------------------
+    def _session_path(self):
+        return self.home / "data" / "runner-session.json"
+
+    def _read_session_file(self):
+        try:
+            return json.loads(self._session_path().read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def saved_session(self):
+        return self._read_session_file().get("session_id") or None
+
+    def saved_lane(self):
+        return self._read_session_file().get("lane") or "unknown"
+
+    def resume_lane(self):
+        """ONE source (R12): the init's apiKeySource, as seen this process
+        or as persisted with the session. Never whether a key was passed."""
+        return self._lane if self._lane != "unknown" else self.saved_lane()
+
+    def _save_session(self, session_id):
+        path = self._session_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"session_id": session_id, "lane": self._lane,
+                                   "generation": boot.read_generation(self.home),
+                                   "updated": time.time()}))
+        tmp.replace(path)
+        self._saved = session_id
+
+    async def _flush_session(self):
+        """The pending write, off the loop. A failed write is an `error`
+        event and stays pending for the next flush, never a raise."""
+        sid, self._pending_save = self._pending_save, None
+        if sid is None:
+            return
+        try:
+            await asyncio.to_thread(self._save_session, sid)
+        except Exception as exc:  # noqa: BLE001 - the file must never fail a turn or a stop
+            if self._pending_save is None:
+                self._pending_save = sid
+            self.stream.append("error", {"error": "runner-session.json: %s: %s"
+                                         % (type(exc).__name__, exc)})
+
+    def _note_session(self, session_id):
+        """Every init and every result names the session; this runs on the
+        loop, so it only records (the write is _flush_session's). The first
+        name after a resume proves the resume (R12): a different id means the
+        CLI started a new session, and the start is then a fresh one."""
+        if not session_id:
+            return
+        self._resume_id = session_id
+        if self._expect_session is not None:
+            asked, self._expect_session = self._expect_session, None
+            if session_id != asked:
+                self._resume_lost = True
+                self.stream.append("system", {"subtype": "resume_failed", "session_id": asked,
+                                              "got": session_id,
+                                              "error": "the CLI started a new session"})
+        if session_id != self._saved:
+            self._pending_save = session_id
+
+    def _has_state(self):
+        return (self.home / "STATUS.md").exists() or (self.home / "data" / "handoff.md").exists()
+
+    async def _start_fresh(self, *, with_digest):
+        """A generation's start: start hooks once, then the digest as the
+        first message when there is state to carry. Runs at a turn boundary
+        (the machine idle), never inside a turn: the digest is a turn of its
+        own. A failed step is an `error` event, never a raise into the loop."""
+        try:
+            await asyncio.to_thread(session.run_phase, self.home, "start")
+        except Exception as exc:  # noqa: BLE001 - the session runs on without its hooks
+            self.stream.append("error", {"error": "start hooks: %s: %s"
+                                         % (type(exc).__name__, exc)})
+        self.stream.append("system", {"subtype": "fresh", "digest": with_digest})
+        if not with_digest:
+            return
+        generation = await asyncio.to_thread(boot.read_generation, self.home)
+        digest, _ = await self._digest(generation)   # never raises; degraded when it must
+        if digest is None:
+            return
+        try:
+            digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
+                                            sender="runner"))
+        except Exception as exc:  # noqa: BLE001 - the session runs on without it
+            self.stream.append("error", {"error": "the digest row could not be stored: %s: %s"
+                                         % (type(exc).__name__, exc)})
+            return
+        if self._stop.is_set():
+            return      # the row stays queued (durable): the next start runs it
+        first = self.inbox.claim_id(digest_id, claimant=self.session_id)
+        if first is not None:
+            await self._turn(first)
 
     def _registry_fallback(self, payload):
         """build_tool_server found no registry and used the shipped
@@ -384,8 +498,20 @@ class SdkRunner:
 
     async def _main(self):
         try:
-            if not await self._connect():
-                return
+            saved = await asyncio.to_thread(self.saved_session)
+            self._saved = saved
+            resumed = False
+            if saved:
+                resumed = await self._connect(resume=saved, fatal=False, event="resume_failed")
+                if resumed:
+                    self._resume_id = saved
+                    self._expect_session = saved    # the first init must name it (R12)
+                    self.stream.append("system", {"subtype": "resumed", "session_id": saved})
+            if not resumed:
+                if not await self._connect():
+                    return
+                has_state = await asyncio.to_thread(self._has_state)
+                await self._start_fresh(with_digest=bool(saved) or has_state)
             with wake.listen(self.home, self._wake_error) as listener:
                 while not self._stop.is_set() and self.fatal is None:
                     await self._backoff()
@@ -411,7 +537,15 @@ class SdkRunner:
                         self._fail_turn([], exc)
                         ok = False
                     self._failures = 0 if ok else self._failures + 1
+                    if self._resume_lost:
+                        # The resume came back as a new session (R12). Known only
+                        # from the first init, inside that turn, so the fresh
+                        # start runs here, at the boundary after it: that turn's
+                        # row ran on the new session and is not lost.
+                        self._resume_lost = False
+                        await self._start_fresh(with_digest=True)
         finally:
+            await self._flush_session()     # a stop never loses the last id
             await self._disconnect()
 
     def _wake_error(self, message):
@@ -779,7 +913,10 @@ class SdkRunner:
         or `extract` event, never a broken turn, and a failed usage record
         does not stop the extraction. Last, the context pressure check
         (rollover.pressure_due, held back by the hysteresis): a rollover
-        is requested, never run here; the loop claims it at the boundary."""
+        is requested, never run here; the loop claims it at the boundary.
+        First of all, the session id this result (or its init) named goes
+        to runner-session.json, off the loop."""
+        await self._flush_session()
         await self._record_usage(msg)
         await self._mine(self._resume_id)
         try:
@@ -956,6 +1093,9 @@ class SdkRunner:
             # a final mine: nothing of the old session arrives after this
             await self._mine(old_sid, final=True)
             self._resume_id = None
+            self._expect_session, self._resume_lost = None, False   # the new session is fresh
+            self._pending_save = None
+            await asyncio.to_thread(self._save_session, None)   # cleared before the new client
             if not await self._connect(resume=None, why="rollover", fatal=False):
                 raise RunnerError("could not start the new session")
             disconnected = False
@@ -967,6 +1107,10 @@ class SdkRunner:
             # never starts an unbumped, digest-less fresh one.
             if self._resume_id is None:
                 self._resume_id = old_sid
+            if self._resume_id != self._saved:
+                # the file too: a restart after this resumes the old session
+                self._pending_save = self._resume_id
+                await self._flush_session()
             with self._lock:
                 if self.machine.state == "rolling_over":
                     self.machine.to("errored", "rollover failed: " + message)
@@ -1044,13 +1188,13 @@ class SdkRunner:
         if isinstance(msg, sdk.SystemMessage):
             if msg.subtype == "init":
                 d = msg.data or {}
-                self._resume_id = d.get("session_id") or self._resume_id
                 self._lane = usage.lane_for(d.get("apiKeySource"))
                 self.stream.append("session_init", {"apiKeySource": d.get("apiKeySource"),
                                                     "model": d.get("model"),
                                                     "session_id": d.get("session_id"),
                                                     "tools": list(d.get("tools") or []),
                                                     "mcp_servers": list(d.get("mcp_servers") or [])})
+                self._note_session(d.get("session_id"))   # after the lane: it is saved with it
             elif msg.subtype == "mirror_error":
                 # the SDK retried and dropped this batch: the store is missing entries
                 self.stream.append("error", {"error": "session store append failed: %s"
@@ -1091,6 +1235,6 @@ class SdkRunner:
                                             "echo_of": echo_of})
         elif isinstance(msg, sdk.ResultMessage):
             # the caller closes the turn from it and appends its `result`
-            self._resume_id = msg.session_id or self._resume_id
+            self._note_session(msg.session_id)
         else:
             self.stream.append("other", {"type": type(msg).__name__})

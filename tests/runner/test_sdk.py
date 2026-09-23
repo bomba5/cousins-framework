@@ -526,7 +526,10 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(self._reached_init(r))
         self._ask_permission(r)
         made["client"].resume()
-        self.assertTrue(_wait(lambda: any(e["kind"] == "system" for e in r.events())
+        # the hook's own event, not any `system` one: a start appends `fresh` (Task 11)
+        self.assertTrue(_wait(lambda: any(e["kind"] == "system"
+                                          and e["payload"].get("subtype") == "hook_response"
+                                          for e in r.events())
                               and made["client"].paused))
         self.assertEqual(r.state(), "waiting_permission")   # a hook's own event settles nothing
         made["client"].resume()
@@ -744,7 +747,8 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(len(clients), 2)
         self.assertIsNone(clients[0].options.resume)
-        self.assertEqual(clients[1].options.resume, "s-orig")
+        # the login lane (the init said "none"): the CLI's own --resume (Task 11)
+        self.assertEqual(clients[1].options.extra_args["resume"], "s-orig")
         self.assertFalse(clients[0].connected)
         reconnect = next(e for e in r.events() if e["kind"] == "error"
                          and e["payload"]["error"].startswith("reconnected:"))

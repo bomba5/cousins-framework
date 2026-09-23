@@ -783,6 +783,7 @@ class TestSdkRunner(HermeticCase):
                     if e["kind"] == "system" and e["payload"].get("subtype") == "backoff"]
         self.assertEqual(backoffs, [0.1, 0.2, 0.3])
         self.assertEqual(r.inbox.get(ok.inbox_id)["outcome"], "delivered")
+        self.assertTrue(_wait(lambda: r._failures == 0, timeout=8))
         self.assertEqual(r._failures, 0)
 
     def test_a_connect_failure_at_start_ends_the_worker(self):

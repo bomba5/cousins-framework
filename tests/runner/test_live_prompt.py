@@ -3,7 +3,6 @@ Each measures an EFFECT the switch alone can produce (phase 0 finding 7)."""
 import json
 import os
 import pathlib
-import time
 import unittest
 import uuid
 from unittest import mock
@@ -62,27 +61,39 @@ class TestLivePrompt(HermeticCase):
         Phase 0 finding 3: with the cwd in the system prompt (before our
         block) the second session re-creates the whole block. With the
         switch working, the cwd is in the first user message instead and
-        the second session reads the block from cache."""
+        the second session reads the block from cache.
+
+        The bar (ruling W9-4). A result's `usage` is the session's total over
+        every model call of the turn (`num_turns`). A creates the appended
+        block cold (the per-run nonce first in LAW makes sure of it, W9-3);
+        B re-creating it would create about as much as A again, and B reading
+        it from cache creates only the tail after it (the first user message,
+        where the cwd is re-injected, and the turn's own messages). So B's
+        cumulative cache_creation must be under half of A's. `read > 8000`
+        says the block was read at all.
+
+        `usage["iterations"]` is NOT a per-call breakdown: the CLI documents
+        it as "per-iteration usage when the request ran several sampling
+        iterations", the sampling passes of ONE request, and it had one entry
+        on num_turns=4. Its figure reflects reuse inside the session and is
+        near zero whether or not the switch worked, so it is printed for the
+        record and never asserted."""
         home_a, root_a = self._home("Wren tests caching.")
         home_b, root_b = self._home("Wren tests caching.")
         _r, first = self._run(home_a, root_a, "Reply only OK.")
         _r, second = self._run(home_b, root_b, "Reply only OK.")
-        # A result's usage is the session's total over every model call in the
-        # turn (num_turns), so the bar has two halves (ruling W9-2): B creates
-        # less than A, which created the block cold; and B's LAST call, the
-        # per-call number, creates under 2000.
         created_a = (first["usage"] or {}).get("cache_creation_input_tokens") or 0
         created = (second["usage"] or {}).get("cache_creation_input_tokens") or 0
         read = (second["usage"] or {}).get("cache_read_input_tokens") or 0
-        calls = (second["usage"] or {}).get("iterations") or []
-        self.assertTrue(calls, "no per-call usage in the result: %r" % second)
-        last_created = calls[-1].get("cache_creation_input_tokens") or 0
-        print("\nREPORT cache: A created=%d; B created=%d read=%d over %s calls; B last call created=%d"
-              % (created_a, created, read, second.get("num_turns"), last_created))
+        iterations = (second["usage"] or {}).get("iterations") or []
+        last_iteration = (iterations[-1].get("cache_creation_input_tokens")
+                          if iterations else None)
+        print("\nREPORT cache: A created=%d; B created=%d read=%d over %s turns;"
+              " B usage.iterations[-1] created=%s (informational)"
+              % (created_a, created, read, second.get("num_turns"), last_iteration))
         self.assertGreater(read, 8000, "the appended block was not read from cache: %r" % second)
-        self.assertLess(created, created_a, "B created as much as A did cold: %r vs %r"
+        self.assertLess(created, created_a / 2, "B re-created the block A created cold: %r vs %r"
                         % (second, first))
-        self.assertLess(last_created, 2000, "the last call re-created the block: %r" % second)
 
     def test_snapshot_keeps_the_recorded_prompt_across_a_resume(self):
         """Resume the SAME session after the identity file changed: with

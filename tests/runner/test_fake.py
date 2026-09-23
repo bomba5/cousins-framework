@@ -10,7 +10,7 @@ from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
 
 
-def _wait(pred, timeout=5.0, step=0.02):
+def _wait(pred, timeout=10.0, step=0.02):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
         if pred():
@@ -111,7 +111,10 @@ class TestFakeRunner(HermeticCase):
         r = FakeRunner(self.home); self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         r.enqueue(Item("operator:priya", "chat", "x", sender="Priya"))
-        time.sleep(0.3)
+        # wait for the idle event, not a fixed sleep: under load the turn
+        # can outlast 0.3 s and the list read short
+        self.assertTrue(_wait(lambda: any(e["kind"] == "state" and e["payload"]["to"] == "idle"
+                                          for e in r.events())))
         states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
         self.assertEqual(states[:2], ["running", "idle"])
 

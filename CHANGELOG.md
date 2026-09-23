@@ -3,6 +3,51 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.11.0 - 2026-09-23
+
+### Added
+- In-process tools on the SDK lane: the runner serves every registry tool
+  (`memory`, `send`, `job`, `schedule`, `meeting`, and any other the cousin's
+  `mcp-registry.toml` enables) as an in-process MCP server built from the one
+  registry, so a tool exists on both transports or on neither, plus two tools
+  that exist only there: `reply`, the only writer of the chat surface, which
+  routes by the live turn (one thread implicit, two must be named, a named
+  operator or person thread always reachable), and `handoff`. A registry
+  command with no in-process handler stops the runner at start with the list.
+  No process is spawned per tool call.
+- In-process hooks: recording (job rows, activity lines) through the new
+  `cousin_lib/recording.py`, memory recall off the loop with a 4 s budget and
+  the chat server's own gates (one implementation, `memory_search.recall_context`),
+  Stop and PreCompact checkpoints, `waiting_permission` on permission requests,
+  and `policy.toml` (deny_tools, deny_bash_patterns on any tool's command, ask,
+  outbound_filter) enforced as a PreToolUse hook that fails closed; a subagent
+  must name the thread it replies to. Matched PreToolUse callbacks run
+  concurrently in the CLI; the recorder consults the policy itself.
+- Prompt-cache guards: every `result` event carries the SDK's `usage`;
+  `session_init` carries the tools and MCP servers the CLI offered; tool
+  definitions are byte-stable across connects (tested across interpreters);
+  an opt-in live check requires turn 2 to read back what turn 1 cached.
+- Producers on the runner: `delivery.accepted()` (a durable put is
+  acceptance) and `delivery.is_alive()` (liveness from `run/runner.lock`);
+  schedules, loops and meetings hand a runner cousin its items without
+  waiting; a Telegram message for a runner cousin is stored and delivered by
+  the bridge; chat hooks are one library call every send path makes.
+  `cousin-runner` exports `COUSIN_HOME` and `FRAMEWORK_ROOT`, refuses an
+  unservable registry with rc 2, and holds one lock per cousin.
+
+### Changed
+- `memory` (decide, remember, recall, activity) and `schedule` (add, list,
+  cancel) are library functions the CLI calls, byte-identical output.
+- `cousin-schedule tick` keeps a job pending when its deliverer says the
+  delivery was not accepted.
+- `[agent] runner = "sdk"` is no longer experimental for chat, schedules,
+  loops and meetings; the composed prompt and the console views arrive in
+  phases 4 and 5.
+- The master plan takes the accepted review's order and, after 2.0.0, a
+  wishlist; phases 4, 5, 7 and 10 gain the breakdown ledger, the cache hit
+  rate in the tokens view, valid-time claims with a tensions view, a review
+  gate for bulk memory writes, and a glossary.
+
 ## 1.10.0 - 2026-09-23
 
 ### Added

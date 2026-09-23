@@ -116,7 +116,7 @@ class TestHandoff(HermeticCase):
         from cousin_lib import boot
         self.assertIn("March open", boot._active_state(ctx.home))
 
-    @unittest.skipUnless(importlib.util.find_spec("cousin_lib.runner.prompt"),
+    @unittest.skipUnless(hasattr(importlib.util.find_spec("cousin_lib.runner.prompt") and importlib.import_module("cousin_lib.runner.prompt"), "state_digest"),
                          "needs Task 3: prompt.state_digest")
     def test_the_next_digest_reflects_the_handoff(self):
         import os

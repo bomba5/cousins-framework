@@ -712,15 +712,74 @@ def persist_runtime(home, key, value):
                                      value))
 
 
+# The validating turn of a model change, run as a child process: the
+# turn's own budget (sdk.validate_account's 90 s) plus a grace for the
+# child's start and teardown, after which it is killed.
+VALIDATE_TURN_MODULE = "cousin_lib.runner.validate_turn"
+VALIDATE_TURN_TIMEOUT = 90.0
+VALIDATE_TURN_GRACE = 15.0
+
+
+def validate_turn_out_of_process(home, root, model, effort, *,
+                                 timeout=VALIDATE_TURN_TIMEOUT,
+                                 grace=VALIDATE_TURN_GRACE, command=None):
+    """(rc, line) of one validating turn on the cousin's account, run in a
+    child of the same interpreter (runner.validate_turn), never in this
+    process: sdk.validate_account scrubs os.environ process-wide for the
+    turn, and the console has other threads (#100 review). The child
+    starts without any accounts.AUTH_VARS variable and in a session of its
+    own, so a timeout kills it and the CLI it started. Only its JSON
+    verdict is read; anything else is a failed turn (4)."""
+    from cousin_lib import accounts
+    argv = list(command or [sys.executable, "-m", VALIDATE_TURN_MODULE])
+    argv += ["--home", str(home), "--root", str(root), "--model", model]
+    if effort:
+        argv += ["--effort", effort]
+    argv += ["--timeout", "%g" % timeout]
+    env = {k: v for k, v in os.environ.items() if k not in accounts.AUTH_VARS}
+    # the child imports the cousin_lib this process runs, wherever its cwd is
+    package_root = str(Path(__file__).resolve().parent.parent)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (package_root, env.get("PYTHONPATH")) if p)
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env,
+                                start_new_session=True)
+    except OSError as err:
+        return 2, "validate: cannot start the validating process: %s" % err
+    try:
+        out, err = proc.communicate(timeout=timeout + grace)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        proc.communicate()
+        return 4, "validate: no answer within %.0fs" % timeout
+    for line in reversed(out.splitlines()):
+        try:
+            verdict = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(verdict, dict) and isinstance(verdict.get("rc"), int) \
+                and isinstance(verdict.get("line"), str):
+            return verdict["rc"], verdict["line"]
+    said = (err.strip().splitlines() or ["no output"])[-1][:300]
+    return 4, "validate: the validating process exited %s without a verdict: %s" % (
+        proc.returncode, said)
+
+
 def persist_agent_value(home, key, value, *, root=None):
     """Set a runner-lane cousin's [agent] model or effort, the keys its
     runner reads (#100; [runtime] is the tmux lane's and the runner never
     reads it). Validated per lane, as migrate validates what it writes:
     effort is one of the levels and only the sdk lane uses it; an sdk model
     must pass one smallest turn on the cousin's own account (the runner's
-    validate_account: NEVER_UNRUN), an opencode model the lane's own checks
+    validate_account: NEVER_UNRUN), run in a child process
+    (validate_turn_out_of_process), an opencode model the lane's own checks
     (ruling P9-1, "<provider>/<model>", a provider the account holds). A
-    refusal is a SpawnError with the reason; nothing is written then."""
+    refusal is a SpawnError with the reason; nothing is written then. An
+    unchanged value runs no turn and writes nothing."""
     from cousin_lib import accounts, delivery, migrate
     from cousin_lib.config import FrameworkConfig
     home = Path(home)
@@ -733,6 +792,9 @@ def persist_agent_value(home, key, value, *, root=None):
     root = Path(root) if root is not None else FrameworkConfig.root_from_home(home)
     if key == "effort" and lane != "sdk":
         raise SpawnError("effort applies to the sdk lane only; %s runs on %s" % (home.name, lane))
+    previous = agent.get(key)
+    if previous == value:
+        return      # nothing changes: no validating turn, no write, no event
     if key == "model" and lane in ("sdk", "opencode"):
         try:
             account = accounts.for_cousin(home, root)
@@ -746,22 +808,15 @@ def persist_agent_value(home, key, value, *, root=None):
             except RunnerError as err:
                 raise SpawnError(str(err))
         else:
-            from cousin_lib.runner import sdk
-            try:
-                rc, line = sdk.validate_account(account, root, model=value,
-                                                effort=agent.get("effort"))
-            except Exception as err:  # noqa: BLE001 - a validation that cannot run did not pass
-                rc, line = 2, "validate: %s: %s" % (type(err).__name__, err)
+            rc, line = validate_turn_out_of_process(home, root, value, agent.get("effort"))
             if rc != 0:
                 raise SpawnError("model %s did not pass one turn on account %s: %s"
                                  % (value, account.name, line))
-    previous = agent.get(key)
     path = home / "cousin.toml"
     text = migrate.set_agent_keys(path.read_text(), {key: value})
     migrate._write_toml(home, text.encode("utf-8"), path.stat().st_mode & 0o777)
-    if previous != value:
-        framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"
-                        % (key, previous or "(the CLI's default)", value))
+    framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"
+                    % (key, previous or "(the CLI's default)", value))
 
 # The identity keys the console edits in place, by the name its routes
 # use: (table, key) in cousin.toml.

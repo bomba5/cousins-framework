@@ -252,7 +252,7 @@ Body `{"content": "..."}`, up to 200000 characters. The old file is copied to `d
 
 ### `POST /api/cousins/<slug>/model`
 
-Body `{"model": "claude-opus-5"}`. A tmux cousin's goes to `[runtime] model` in cousin.toml; a runner cousin's to `[agent] model`, the key its runner reads. It has to be one word of letters, digits and `._:/+-`, because it goes into the agent's argv. On the runner lane it is validated first, as `cousin-migrate` validates: on `sdk`, one smallest model turn on the cousin's own account; on `opencode`, `"<provider>/<model>"` on a provider the account holds, never a Claude model. `200 {"ok": true, "slug", "model", "restart_required": true}`: the running agent keeps the model it started with. `400` empty or splittable, or a model that did not pass (the reason, the API's own words on `sdk`); nothing is written then.
+Body `{"model": "claude-opus-5"}`. A tmux cousin's goes to `[runtime] model` in cousin.toml; a runner cousin's to `[agent] model`, the key its runner reads. It has to be one word of letters, digits and `._:/+-`, because it goes into the agent's argv. On the runner lane it is validated first, as `cousin-migrate` validates: on `sdk`, one smallest model turn on the cousin's own account, run in a child process (up to 90 s) so the console's own environment is never touched; on `opencode`, `"<provider>/<model>"` on a provider the account holds, never a Claude model. `200 {"ok": true, "slug", "model", "restart_required": true}`: the running agent keeps the model it started with. `400` empty or splittable, or a model that did not pass (the reason, the API's own words on `sdk`); nothing is written then. The cousin's current value is a `200` with no validating turn and no write.
 
 ### `POST /api/cousins/<slug>/effort`
 

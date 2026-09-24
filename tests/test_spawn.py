@@ -655,6 +655,105 @@ class TestPersistRuntimeValues(CreateCase):
             (out["home"] / "cousin.toml").read_text()))
 
 
+class TestPersistAgentValues(CreateCase):
+    """#100 review: the sdk lane's validating turn runs in a child
+    process. validate_account scrubs os.environ process-wide for the turn
+    (_ScrubbedAuthEnv), so run inside the console it would pull the auth
+    variables from under every other thread of the console."""
+
+    def _runner_cousin(self, extra=""):
+        root = self._framework_root()
+        out = self._create(root)
+        path = out["home"] / "cousin.toml"
+        path.write_text(path.read_text() + '\n[agent]\nrunner = "sdk"\neffort = "low"\n'
+                        + extra)
+        return root, out["home"], path
+
+    def test_the_sdk_models_turn_runs_out_of_process(self):
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin()
+        with mock.patch("cousin_lib.runner.sdk.validate_account") as in_process, \
+                mock.patch.object(spawn, "validate_turn_out_of_process",
+                                  return_value=(0, "validate: ok")) as child:
+            spawn.persist_agent_value(home, "model", "m-two", root=root)
+        in_process.assert_not_called()
+        child.assert_called_once_with(home, root, "m-two", "low")
+        self.assertEqual(tomllib.loads(path.read_text())["agent"]["model"], "m-two")
+        with mock.patch.object(spawn, "validate_turn_out_of_process",
+                               return_value=(4, "validate: not_found_error")):
+            with self.assertRaises(SpawnError) as ctx:
+                spawn.persist_agent_value(home, "model", "m-bad", root=root)
+        self.assertIn("not_found_error", str(ctx.exception))
+        self.assertEqual(tomllib.loads(path.read_text())["agent"]["model"], "m-two")
+
+    def test_an_unchanged_value_runs_no_turn_and_writes_nothing(self):
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin('model = "m-one"\n')
+        before = (path.read_bytes(), path.stat().st_mtime_ns)
+        with mock.patch.object(spawn, "validate_turn_out_of_process") as child, \
+                mock.patch.object(spawn, "framework_event") as event:
+            spawn.persist_agent_value(home, "model", "m-one", root=root)
+            spawn.persist_agent_value(home, "effort", "low", root=root)
+        child.assert_not_called()
+        event.assert_not_called()
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
+
+
+class TestValidateTurnOutOfProcess(unittest.TestCase):
+    """The child's verdict is one JSON line on stdout; the parent reads
+    only that, under a timeout, and its own os.environ is never edited."""
+
+    def _run(self, script, **kw):
+        import sys
+        from cousin_lib import spawn
+        return spawn.validate_turn_out_of_process(
+            Path("/nonexistent/home"), Path("/nonexistent/root"), "m-two", "low",
+            command=[sys.executable, "-c", script], **kw)
+
+    def test_the_childs_json_verdict_is_the_answer(self):
+        rc, line = self._run(
+            "import json, sys; print('noise'); "
+            "print(json.dumps({'rc': 4, 'line': ' '.join(sys.argv[1:])}))")
+        self.assertEqual(rc, 4)
+        self.assertEqual(line, "--home /nonexistent/home --root /nonexistent/root"
+                               " --model m-two --effort low --timeout 90")
+
+    def test_the_child_gets_no_auth_variable_and_the_parents_env_is_untouched(self):
+        from cousin_lib import accounts
+        env = {"ANTHROPIC_API_KEY": "parent-key", "CLAUDE_CONFIG_DIR": "/parent"}
+        with mock.patch.dict("os.environ", env):
+            import os
+            before = dict(os.environ)
+            rc, line = self._run(
+                "import json, os; from cousin_lib import accounts; "
+                "print(json.dumps({'rc': 0, 'line': ','.join("
+                "v for v in accounts.AUTH_VARS if v in os.environ)}))")
+            self.assertEqual(dict(os.environ), before)
+        self.assertEqual((rc, line), (0, ""), accounts.AUTH_VARS)
+
+    def test_a_child_without_a_verdict_fails_with_its_words(self):
+        rc, line = self._run("import sys; sys.stderr.write('boom\\n'); sys.exit(3)")
+        self.assertEqual(rc, 4)
+        self.assertIn("boom", line)
+
+    def test_a_child_past_the_budget_is_killed_and_fails(self):
+        import time
+        started = time.monotonic()
+        rc, line = self._run("import time; time.sleep(30)", timeout=0.2, grace=0.3)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(rc, 4)
+        self.assertIn("no answer within", line)
+
+    def test_the_real_entry_answers_in_json(self):
+        """The module the console runs, as a real child: a home with no
+        cousin.toml is a configuration error before any model call."""
+        from cousin_lib import spawn
+        rc, line = spawn.validate_turn_out_of_process(
+            Path("/nonexistent/home"), Path("/nonexistent/root"), "m-two", None)
+        self.assertEqual(rc, 2, line)
+        self.assertIn("cousin.toml", line)
+
+
 class TestCreateWithRuntimeOptions(CreateCase):
     def test_create_writes_runtime_heartbeat_and_scope(self):
         root = self._framework_root()

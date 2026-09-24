@@ -190,6 +190,11 @@ class ChatHeaderEffort(unittest.TestCase):
         self.assertRegex(self.header, r"\.efforts\s*\|\|")
         self.assertNotRegex(self.header, r'\[\s*"low"\s*,')
 
+    def test_the_effort_title_names_the_table_the_lane_writes(self):
+        self.assertIn("cousin.runner", self.header)
+        self.assertIn("cousin.toml [agent] effort", self.header)
+        self.assertIn("cousin.toml [runtime] effort", self.header)
+
     def test_no_media_filter_returned_with_it(self):
         # The source's "all" dropdown beside the effort select was the
         # media-kind filter; media is out of scope and it stays out.
@@ -296,6 +301,14 @@ class InspectorIdentityEditors(unittest.TestCase):
         self.assertIn("/api/spawn/options", self.inspector)
         self.assertIn("cancel", self.field)
         self.assertIn("setErr(", self.field)
+
+    def test_model_and_effort_name_the_table_the_lane_writes(self):
+        """#100 review: a runner cousin's model and effort go to [agent];
+        the labels said [runtime] for every cousin."""
+        self.assertNotIn('"[runtime] model"', self.cousins)
+        self.assertNotIn('"[runtime] effort"', self.cousins)
+        self.assertRegex(self.cousins, r'c\.runner \? "\[agent\]" : "\[runtime\]"')
+        self.assertIn("spec.title(cousin)", self.field)
 
     def test_heartbeat_reads_in_seconds_and_a_human_form(self):
         beat = _component(self.cousins, "fmtBeat")

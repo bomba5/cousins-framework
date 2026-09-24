@@ -80,7 +80,7 @@ class FakeServer:
             self.fake.mcp = mcp
         else:
             self.fake = FakeOpencode(self.factory.scripts, password=secrets.token_urlsafe(8),
-                                     config=config, mcp=mcp,
+                                     config=config, mcp=mcp, providers=self.factory.providers,
                                      directory=str(self.kwargs["cwd"])).start()
             if self.factory.shared is not None:
                 self.factory.shared.fake = self.fake
@@ -100,8 +100,9 @@ class FakeServer:
 
 
 class Factory:
-    def __init__(self, scripts=(), *, mcp=None, shared=None):
+    def __init__(self, scripts=(), *, mcp=None, shared=None, providers=None):
         self.scripts, self.mcp, self.shared = list(scripts), mcp, shared
+        self.providers = providers
         self.calls, self.servers = [], []
 
     def __call__(self, **kwargs):

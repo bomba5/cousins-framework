@@ -610,7 +610,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_TMUX_SOCKET` | a non-default tmux socket, read by the chat server and the watchdog. The console takes `--tmux-socket` instead. |
 | `COUSIN_FILTER_OVERRIDE` | `1` switches the outbound filter off for one command |
 | `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
-| `COUSIN_DEFAULT_RUNNER` | `sdk` or `fake`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
+| `COUSIN_DEFAULT_RUNNER` | `sdk`, `fake` or `opencode`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 | `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set (the `opencode` image sets it); unset: `opencode` on `PATH` |
 
@@ -782,7 +782,7 @@ exit 2; a missing secret file is let through as a login to do, see
 [accounts.toml](#accountstoml)). The terms risk of running a cousin on a login is the
 user's.
 
-`cousin-spawn --runner sdk|fake [--account <name>]` (or the console's spawn
+`cousin-spawn --runner sdk|fake|opencode [--account <name>]` (or the console's spawn
 with `runner` and `account`) writes both keys when the cousin is created, and
 `COUSIN_DEFAULT_RUNNER` / `COUSIN_DEFAULT_ACCOUNT` supply them when the flags
 are left out (see [Environment variables](#environment-variables)); an
@@ -898,7 +898,9 @@ resident memory per interactive CLI on the reference host.
 
 ### [agent] on the opencode lane
 
-A cousin whose runner is opencode (`OpencodeRunner`, phase 9) runs on a
+`runner = "opencode"` puts the cousin on `cousin-runner` with opencode as its
+agent loop (`OpencodeRunner`, phase 9) instead of the Claude Agent SDK: the
+same inbox, event stream, tools, policy and memory. It runs on a
 `kind = "opencode"` account (see [accounts.toml](#accountstoml)) and these
 `[agent]` keys:
 
@@ -929,6 +931,16 @@ opencode appends it to its own agent prompt. A restart resumes the session
 recorded in `data/runner-session.json` (lane `opencode`) while opencode
 still holds it; otherwise a new session starts, with the state digest as its
 first message when there is state to carry.
+
+A rollover is the SDK lane's: the handoff is asked for in the old session
+(the model calls `cousin_handoff`), then a new opencode session starts,
+with the state digest as its first message; the old session stays in
+opencode's store. Context pressure is the last answer's tokens against the
+model's context limit as opencode reports it (`GET /config/providers`),
+against `rollover_at_percent`; a model opencode reports no limit for has no
+pressure rollover (the stream says so once) and only the daily cadence
+applies. `cousin-spawn --runner opencode` writes no model: add `model` (and
+the account) before the first start, or the runner refuses it.
 
 ### policy.toml
 

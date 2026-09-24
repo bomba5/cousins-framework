@@ -33,7 +33,7 @@ DELIVERED, QUEUED, FAILED = "delivered", "queued", "failed"
 # The `[agent] runner` values that put a cousin on the runner lane: the
 # one list (backend_for, spawn, the supervisor, the flip and the lifecycle
 # read it), so a new runner kind is added here once.
-RUNNER_KINDS = ("sdk", "fake")
+RUNNER_KINDS = ("sdk", "fake", "opencode")
 
 
 class DeliveryError(ValueError):

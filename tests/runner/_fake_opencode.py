@@ -15,6 +15,7 @@ queue and abort measurements recorded with Task 2):
                                  first, server.heartbeat every `heartbeat` s
   POST /permission/{id}/reply    true; 400 on a bad reply, 404 unknown id
   GET  /config                   the config it was given
+  GET  /config/providers         {"providers": <the providers it was given>, "default": {}}
   GET  /mcp                      the MCP status it was given
 
 Each prompt consumes the next script (a list of steps); when the scripts
@@ -78,6 +79,7 @@ _ROUTES = [
     ("GET", re.compile(r"^/event$"), "event"),
     ("POST", re.compile(r"^/permission/([^/]+)/reply$"), "reply"),
     ("GET", re.compile(r"^/config$"), "config"),
+    ("GET", re.compile(r"^/config/providers$"), "providers"),
     ("GET", re.compile(r"^/mcp$"), "mcp"),
 ]
 _CLOSE = object()
@@ -119,10 +121,11 @@ class FakeOpencode:
     every bus event (not the per-connection server.connected/heartbeat)."""
 
     def __init__(self, scripts=(), *, password="pw", config=None, mcp=None, heartbeat=10.0,
-                 tokens=None, directory=None, port=0):
+                 tokens=None, directory=None, port=0, providers=None):
         self.password = password
         self.config = _copy(config if config is not None else {})
         self.mcp = _copy(mcp if mcp is not None else {})
+        self.providers = _copy(providers if providers is not None else [])
         self.heartbeat = heartbeat
         self.tokens = _copy(tokens if tokens is not None else TOKENS)
         self.directory = directory or os.getcwd()
@@ -575,6 +578,9 @@ class FakeOpencode:
 
     def _route_config(self, req, match, body):
         return 200, self.config
+
+    def _route_providers(self, req, match, body):
+        return 200, {"providers": self.providers, "default": {}}
 
     def _route_mcp(self, req, match, body):
         return 200, self.mcp

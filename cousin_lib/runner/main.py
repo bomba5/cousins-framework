@@ -11,8 +11,10 @@ Exit codes: 0 after SIGTERM/SIGINT, or when `--once` has drained the
 inbox, or when `--check-auth` found the account logged in; 2 for a
 configuration problem (no or a bad `[agent] runner`, an unknown account,
 or a secret file that is open to others or malformed, all checked before
-the lock; a malformed policy.toml, an MCP registry that does not parse or
-names a command with no in-process handler, an [agent] effort outside the
+the lock; an account on the other lane, an opencode cousin with no
+`[agent] model` or one whose config names the subscription bridge; a
+malformed policy.toml, an MCP registry that does not parse or names a
+command with no in-process handler, an [agent] effort outside the
 levels); 3 when the runner gave up
 (its worker ended, e.g. it could not connect, or `--once` found it
 `errored` for longer than ERRORED_GIVE_UP_S), so a supervisor restarts
@@ -146,10 +148,12 @@ def runner_for(home, *, kind=None):
     a tmux cousin: it gets no runner (its inbox has no producer), unless
     `kind` says otherwise. The home's policy.toml is loaded here, once,
     and handed to the runner: a malformed one is a PolicyError, a
-    RunnerError, so the process exits 2 naming the key. An sdk runner's
-    MCP registry is checked here too (tools.validate_registry): one
-    that does not parse or names a command with no handler is a
-    RunnerError, before any session starts. No settings file is
+    RunnerError, so the process exits 2 naming the key. An sdk or
+    opencode runner's MCP registry is checked here too
+    (tools.validate_registry): one that does not parse or names a
+    command with no handler is a RunnerError, before any session starts; so is an account on the
+    other lane (accounts.check_lane: an opencode runner on an opencode
+    account only, an sdk runner never on one). No settings file is
     written: the runner's hooks are in-process."""
     agent = _agent_table(home)
     kind = kind or agent.get("runner")
@@ -171,15 +175,29 @@ def runner_for(home, *, kind=None):
                               " runner = \"sdk\"" % ", ".join(side))
         from cousin_lib.runner.fake import FakeRunner
         return FakeRunner(home, policy=policy)
+    from cousin_lib.runner import tools
+    tools.validate_registry(Path(home), root_for(home))
+    account = account_for(home)
+    try:
+        # R12: the Claude kinds never reach opencode, opencode's never the SDK
+        accounts.check_lane(account, kind)
+    except accounts.AccountsError as err:
+        raise RunnerError(str(err))
     if kind == "sdk":
-        from cousin_lib.runner import tools
         from cousin_lib.runner.sdk import SdkRunner
-        tools.validate_registry(Path(home), root_for(home))
-        common = dict(account=account_for(home), model=agent.get("model"),
+        common = dict(account=account, model=agent.get("model"),
                       effort=effort_of(agent), policy=policy)
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)
+    if kind == "opencode":
+        if side:
+            raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
+                              " runner = \"sdk\"" % ", ".join(side))
+        # R6 (the model named), R13 (the bridge guard) and the models'
+        # provider check are the constructor's: each a RunnerError, exit 2
+        from cousin_lib.runner.opencode import OpencodeRunner
+        return OpencodeRunner(home, account=account, policy=policy)
 
 
 @contextlib.contextmanager
@@ -362,6 +380,17 @@ def _check_auth(home, *, validate=False):
     print(line)
     if rc != 0 or not validate:
         return rc
+    try:
+        kind = accounts.for_cousin(home, root).kind
+    except accounts.AccountsError as err:
+        print("cousin-runner: %s" % err, file=sys.stderr)
+        return 2
+    if kind == "opencode":
+        # the validating turn is the SDK's (a bare Claude client): never on this lane
+        print("cousin-runner: --validate runs one turn on the sdk lane; an opencode account"
+              " has no validating turn (--check-auth alone reports its presence)",
+              file=sys.stderr)
+        return 2
     for name in AUTH_ENV:         # the SDK merges os.environ under options.env
         os.environ.pop(name, None)
     try:

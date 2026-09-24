@@ -41,6 +41,7 @@ from pathlib import Path
 from cousin_lib import accounts, boot, session
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import auth, envelope, opencode_guard, tools, wake
+from cousin_lib.runner import rollover as _rollover
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.opencode_http import (EventReader, OpencodeClient, OpencodeError,
@@ -200,6 +201,9 @@ class _Run:
         self.last_event = time.monotonic()
         self.over = False
         self.results = 0
+        self.fold = True            # the handoff turn folds nothing
+        self.quiet = False          # nor does it write a result: no inbox row is its
+        self.deadline = None
 
     def unclosed(self):
         return [s for s in self.sent if not s.closed]
@@ -220,7 +224,7 @@ class OpencodeRunner:
 
     def __init__(self, home, *, server_factory=None, account=None, model=None, small_model=None,
                  policy=None, registry=None, idle_timeout_s=600.0,
-                 health_timeout_s=HEALTH_TIMEOUT_S, environ=None):
+                 health_timeout_s=HEALTH_TIMEOUT_S, handoff_deadline_s=None, environ=None):
         self.home = Path(os.path.abspath(home))
         from cousin_lib.runner.main import export_environment, root_for
         export_environment(self.home, overwrite=False)
@@ -266,6 +270,15 @@ class OpencodeRunner:
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
                                               registry=registry)
+        # The rollover (R11): the handoff tool, reached over MCP, hands its
+        # summary to the box; pressure is read after every good turn.
+        self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
+        self.rollover_at_percent = float(agent.get("rollover_at_percent",
+                                                   _rollover.ROLLOVER_AT_PERCENT))
+        self.handoff_box = _rollover.HandoffBox()
+        self.hysteresis = _rollover.Hysteresis()
+        self.tool_context.on_handoff = self.handoff_box.set
+        self._limit = None            # (model, limit.context or None), read once per start
         self.fatal = None
         self._server = self._client = self._reader = self._mcp = None
         self._reader_stop = threading.Event()
@@ -373,9 +386,16 @@ class OpencodeRunner:
         return True
 
     def rollover(self, reason):
-        from cousin_lib.runner import rollover as _rollover
+        """End this generation and start the next: one `flip` row
+        (coalesced), claimed at the next turn boundary; waits for it."""
         return _rollover.request(self.inbox, self.home, reason, alive=self.worker_alive,
-                                 timeout=10.0)
+                                 timeout=self.handoff_deadline_s + _rollover.WAIT_SLACK_S)
+
+    def _request_rollover(self, why):
+        """Ask without waiting (pressure): the loop claims it next."""
+        inbox_id, coalesced = _rollover.put_once(self.inbox, self.home, why)
+        self.stream.append("rollover", {"phase": "coalesced" if coalesced else "requested",
+                                        "reason": why, "inbox_id": inbox_id})
 
     def events(self, after=None):
         return self.stream.tail(after=after)
@@ -440,6 +460,7 @@ class OpencodeRunner:
             if self._stop.is_set():
                 return False
             self._client = OpencodeClient(self._server.url, self._server.password)
+            self._limit = None
             self._reader = EventReader(self._server.url, self._server.password, self._events.put,
                                        stop_event=self._reader_stop,
                                        backoff=self.reader_backoff_s)
@@ -537,9 +558,11 @@ class OpencodeRunner:
         self._new_session()
         self._start_fresh(with_digest=bool(on_file.get("session_id")) or self._has_state())
 
-    def _new_session(self):
-        created = self._client.create_session(
-            "%s generation %d" % (self.tool_context.slug, boot.read_generation(self.home)))
+    def _new_session(self, generation=None):
+        if generation is None:
+            generation = boot.read_generation(self.home)
+        created = self._client.create_session("%s generation %d" % (self.tool_context.slug,
+                                                                    generation))
         self.opencode_session = created["id"]
         try:
             self._save_session(self.opencode_session)
@@ -568,7 +591,6 @@ class OpencodeRunner:
     def _put_digest(self, generation):
         """The digest row's id; a degraded digest when it cannot be built."""
         from cousin_lib.runner import prompt
-        from cousin_lib.runner import rollover as _rollover
         slug = self.tool_context.slug
         try:
             try:
@@ -649,12 +671,190 @@ class OpencodeRunner:
             if self.machine.state == "errored" and not self._login_blocked:
                 self.machine.to("idle", "recovered")
 
+    # -- the rollover (R11) ------------------------------------------------------
     def _rollover_row(self, row):
-        """Phase 9 Task 5b. Until then the row closes failed, saying so."""
-        detail = {"reason": row["body"], "error": "rollover is not implemented on the opencode"
-                  " runner yet", "generation": boot.read_generation(self.home)}
-        self.inbox.done(row["id"], FAILED, json.dumps(detail))
-        self.stream.append("rollover", dict(detail, phase="failed"))
+        """At a turn boundary: the handoff (asked in the old session), end
+        hooks, archive, a NEW opencode session, THEN the generation, start
+        hooks and the digest as the new session's first message. Before the
+        new session exists a failure keeps the old one (errored -> idle, the
+        row failed); after it nothing fails the rollover (SdkRunner's
+        rules). The old session stays in opencode's store."""
+        reason = row["body"] or "rollover"
+        old = self.opencode_session
+        generation = boot.read_generation(self.home)
+        with self._lock:
+            if self.machine.state != "idle":     # stop() won the race: the row waits
+                self.inbox.requeue(row["id"])
+                return
+            self.machine.to("rolling_over", reason.splitlines()[0][:120])
+        self.stream.append("rollover", {"phase": "start", "reason": reason, "session_id": old})
+        try:
+            handoff = self._ask_handoff(reason)
+            if handoff == "stopped":
+                self.inbox.requeue(row["id"])      # the next start finishes this rollover
+                self.stream.append("rollover", {"phase": "requeued", "reason": reason})
+                return
+            if handoff == "login_required":
+                self.inbox.requeue(row["id"])      # first after the fix (priority 0)
+                self.stream.append("rollover", {"phase": "postponed", "reason": reason,
+                                                "why": auth.LOGIN})
+                return
+            session.run_phase(self.home, "end")
+            _rollover.archive_generation(self.home, generation)
+            self._new_session(generation + 1)
+        except Exception as exc:  # noqa: BLE001 - a failed rollover must not wedge the runner
+            message = "%s: %s" % (type(exc).__name__, exc)
+            self.hysteresis.rolled_over()          # no re-request every turn over the threshold
+            self.opencode_session = old
+            with self._lock:
+                if self.machine.state == "rolling_over":
+                    self.machine.to("errored", "rollover failed: " + message)
+            detail = {"reason": reason, "error": message,
+                      "generation": boot.read_generation(self.home),
+                      "old_session": old, "new_session": None}
+            self.inbox.done(row["id"], FAILED, json.dumps(detail))
+            self._close_duplicates(row, FAILED, detail)
+            self.stream.append("rollover", dict(detail, phase="failed"))
+            with self._lock:
+                if self.machine.state == "errored" and not self._login_blocked:
+                    self.machine.to("idle", "recovered")
+            return
+        # the point of no return: degrade, never fail
+        problems = []
+        try:
+            generation = boot.bump_generation(self.home)
+        except Exception as exc:  # noqa: BLE001 - named in the detail
+            problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        self.hysteresis.rolled_over()
+        try:
+            session.run_phase(self.home, "start")
+        except Exception as exc:  # noqa: BLE001 - named in the detail
+            problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
+        digest_id = self._put_digest(generation)
+        detail = {"reason": reason, "handoff": handoff, "generation": generation,
+                  "old_session": old, "new_session": self.opencode_session,
+                  "digest": "built" if digest_id else "none"}
+        if problems:
+            detail["problems"] = problems
+        with self._lock:
+            if self.machine.state == "rolling_over":
+                self.machine.to("idle", "rolled over")
+        self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
+        self._close_duplicates(row, DELIVERED, detail)
+        self.stream.append("rollover", dict(detail, phase="done"))
+        if digest_id is None or self._stop.is_set():
+            return          # a stored digest row stays queued (durable): the next start runs it
+        first = self.inbox.claim_id(digest_id, claimant=self.session_id)
+        if first is not None:
+            self._turn(first)
+
+    def _ask_handoff(self, reason):
+        """One prompt into the dying session asking for the handoff; read to
+        its idle, bounded by the handoff deadline. 'clean' when the handoff
+        tool answered, 'emergency' when not (the file is then written from
+        the session's tail), 'stopped', or 'login_required'."""
+        self.handoff_box.summary = None
+        run = _Run()
+        run.fold, run.quiet = False, True
+        run.deadline = time.monotonic() + self.handoff_deadline_s
+        with self._lock:
+            self._turn_seq += 1
+            self._interrupt_requested = False
+            self._roles = {}
+            self._run = run
+            self._live = True
+        try:
+            self._send(run, None, _rollover.handoff_request_text(reason))
+            self._drive(run)
+        except Exception as exc:  # noqa: BLE001 - an emergency handoff, never a wedge
+            if run.error is None:
+                run.error = ("failed", "%s: %s" % (type(exc).__name__, exc))
+        finally:
+            with self._lock:
+                self._live = False
+                self._run = None
+        if run.error is not None and run.error[0] == "auth" \
+                and self.handoff_box.summary is None:
+            return "login_required"     # the login is the problem, not the model: postpone
+        if self._stop.is_set():
+            return "stopped"
+        if self.handoff_box.summary is not None:
+            self.stream.append("rollover", {"phase": "handoff", "handoff": "clean"})
+            return "clean"
+        why = run.error[1] if run.error else "the model finished its turn without calling handoff"
+        _rollover.write_emergency_handoff(self.home, name=self.tool_context.name, reason=why,
+                                          tail=self._session_tail())
+        self.stream.append("rollover", {"phase": "handoff", "handoff": "emergency", "why": why})
+        return "emergency"
+
+    def _session_tail(self, chars=2000):
+        """The session's last words from opencode's own store: the emergency
+        handoff's observed activity."""
+        try:
+            messages = self._client.messages(self.opencode_session) or []
+        except OpencodeError as err:
+            return "(the session could not be read: %s)" % err
+        lines = []
+        for m in messages:
+            role = (m.get("info") or {}).get("role") or "?"
+            for part in m.get("parts") or []:
+                if part.get("type") == "text" and part.get("text"):
+                    lines.append("%s: %s" % (role, part["text"]))
+        return "\n".join(lines)[-chars:]
+
+    def _close_duplicates(self, row, outcome, detail):
+        """A plain duplicate `flip` row gets this rollover's answer; a
+        bequest never (R10). The close is guarded on the body read here."""
+        for other in self.inbox.open_rows("flip"):
+            if other["id"] != row["id"] and other["state"] == "queued" \
+                    and not _rollover.is_bequest(other["body"]) \
+                    and self.inbox.done_if_queued(other["id"], outcome,
+                                                  json.dumps(dict(detail, coalesced_into=row["id"])),
+                                                  body=other["body"]):
+                self.stream.append("rollover", {"phase": "coalesced", "inbox_id": other["id"],
+                                                "into": row["id"]})
+
+    def _context_limit(self):
+        """The model's limit.context from GET /config/providers, read once
+        per start; None when opencode reports none (pressure is then off,
+        said once). The providers' keys in that answer never leave here."""
+        if self._limit is not None:
+            return self._limit[1]
+        provider, model = split_model(self.model)
+        limit = None
+        try:
+            for entry in (self._client.request("GET", "/config/providers") or {}).get(
+                    "providers") or []:
+                if entry.get("id") == provider:
+                    limit = ((entry.get("models") or {}).get(model) or {}).get(
+                        "limit", {}).get("context")
+        except OpencodeError:
+            limit = None
+        if not isinstance(limit, (int, float)) or limit <= 0:
+            limit = None
+            self.stream.append("system", {"subtype": "pressure_off", "model": self.model,
+                                          "why": "opencode reports no context limit for it"})
+        self._limit = (self.model, limit)
+        return limit
+
+    def _pressure(self, run):
+        """After a good turn: the last answer's tokens against the limit
+        (R11), held back by the hysteresis after a rollover."""
+        try:
+            limit = self._context_limit()
+            tokens = run.tokens or {}
+            if not limit or not tokens:
+                return
+            cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+            used = sum(float(x or 0) for x in (tokens.get("input"), tokens.get("output"),
+                                               cache.get("read"), cache.get("write")))
+            usage = {"percentage": 100.0 * used / limit, "totalTokens": used, "maxTokens": limit}
+            if self.hysteresis.allow(usage, self.rollover_at_percent) \
+                    and _rollover.pressure_due(usage, self.rollover_at_percent):
+                self._request_rollover("context pressure %d%%" % int(usage["percentage"]))
+        except Exception as exc:  # noqa: BLE001 - the trigger must never fail a turn
+            self.stream.append("error", {"error": "rollover trigger: %s: %s"
+                                         % (type(exc).__name__, exc)})
 
     # -- events ----------------------------------------------------------------
     def _pump(self):
@@ -860,6 +1060,8 @@ class OpencodeRunner:
             return False
         ok = self._drive(run)
         self._end_turn(run)
+        if ok and not self._interrupt_requested and run.tokens:
+            self._pressure(run)
         return ok
 
     def _unsent(self, run, row, exc):
@@ -931,6 +1133,9 @@ class OpencodeRunner:
         event for `idle_timeout_s`, or the server gone. True when settled."""
         if run.pending_error is not None and now - run.pending_at >= self.error_grace_s:
             run.error, run.pending_error = run.pending_error, None
+        elif run.deadline is not None and now >= run.deadline:
+            run.error = ("failed", "handoff timeout (%.0fs)" % self.handoff_deadline_s)
+            self._abort(quiet=True)
         elif now - run.last_event >= self.idle_timeout_s:
             run.error = ("failed", "no event from opencode for %.0fs" % self.idle_timeout_s)
             self._abort(quiet=True)
@@ -938,7 +1143,8 @@ class OpencodeRunner:
             run.error = ("failed", "opencode serve exited during the turn")
         else:
             return False
-        run.sent[0].echoed = True           # the turn's own row is what failed
+        if run.sent:
+            run.sent[0].echoed = True       # the turn's own row is what failed
         self._settle(run)
         return True
 
@@ -977,7 +1183,7 @@ class OpencodeRunner:
         """Operator/person chat that lands during the live turn is sent at
         once: opencode folds it into the running run (R14'). Anything else
         goes back to the queue; a peer waits for its own turn."""
-        if self._interrupt_requested or run.over:
+        if self._interrupt_requested or run.over or not run.fold:
             return
         rows = self.inbox.claim(limit=10, claimant=self.session_id)
         for i, row in enumerate(rows):
@@ -1073,7 +1279,8 @@ class OpencodeRunner:
         if kind == "auth":
             payload.update(auth=auth.LOGIN, repeat_in_transcript=True)
         run.results += 1
-        self.stream.append("result", payload)
+        if not run.quiet:
+            self.stream.append("result", payload)
         run.over = not run.unclosed()
         if kind == "auth":
             self._login_required(detail)

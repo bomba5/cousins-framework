@@ -25,7 +25,7 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one (what the start-at-boot unit
-uses); `--runner sdk|fake` and `--account <name>` make it a runner cousin
+uses); `--runner sdk|fake|opencode` and `--account <name>` make it a runner cousin
 (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
 `COUSIN_DEFAULT_ACCOUNT`), which `--start` starts through `cousin-supervisor`;
 `--repair-settings` rewrites an
@@ -153,7 +153,7 @@ fresh session carrying the state digest as its first message when it cannot
 SIGTERM or SIGINT, then stops the runner with a 30 second timeout
 (`runner.main.STOP_TIMEOUT_S`). `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or
-SIGINT, or when the runner gives up. `--runner sdk|fake` overrides the
+SIGINT, or when the runner gives up. `--runner sdk|fake|opencode` overrides the
 cousin's `[agent] runner`. One runner per cousin: it holds a lock on
 `<home>/run/runner.lock` for its life. It reads `policy.toml` at start; a
 malformed policy is rc 2, and so is an MCP registry that does not parse or
@@ -173,15 +173,16 @@ without a restart. A missing secret file is such a login, not exit 2.
 validity), and prints one line. `--validate` (only with `--check-auth`) then
 runs ONE smallest model turn on a bare throwaway client under the account: no
 tools, no MCP server, no hooks, no session store, one turn, a temporary
-directory, a timeout. Both run before the lock, the runner and the
+directory, a timeout (the SDK lane's turn: for an `opencode` account
+`--check-auth` reports presence only and `--validate` is refused, rc 2). Both run before the lock, the runner and the
 environment export, so they work beside a live runner and take nothing from
 it. An install script can gate on `cousin-runner --home H --check-auth`.
 
 | exit | meaning |
 |---|---|
 | 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox, or `--check-auth` found the account logged in (and `--validate`'s turn answered) |
-| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler |
-| 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across rebuilds that fail to connect; a rebuild that connects ends it); the long-running mode keeps rebuilding a side session and never exits for one |
+| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler, an account on the other lane (an `opencode` runner on a Claude account, an `sdk` runner on an `opencode` one), an `opencode` cousin with no `[agent] model` or whose config or environment names the Claude-subscription bridge |
+| 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed; on opencode: the server did not start, or it does not report the runner's MCP server connected), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across rebuilds that fail to connect; a rebuild that connects ends it); the long-running mode keeps rebuilding a side session and never exits for one |
 | 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner, or any of its side sessions, waiting for a login. A supervisor must not restart on it |
 | 5 | busy: another runner holds `<home>/run/runner.lock` (tried for about a second first, so a status probe of the lock never refuses a runner). Not a configuration problem: a supervisor retries after its backoff and never counts it |
 

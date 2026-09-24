@@ -133,6 +133,24 @@ class TestTheNode(unittest.TestCase):
         self.assertEqual(kw["body"]["msg_id"], "kestrel-abc12345")
         self.assertLess(abs(kw["body"]["sent_at"] - time.time()), 5)
 
+    def test_a_dropped_tell_home_is_logged_and_never_retried(self):
+        """Review round 2 on M4: the node sends a tell-home once; when the
+        queen does not take it, or no home is configured, the log says so."""
+        node = self._node()
+        for env in ({"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x",
+                     "QUEEN_URL": "http://192.0.2.10:8600", "TELL_HOME": "1"},
+                    {"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x"}):
+            config = node.NodeConfig(env)
+            hive = node.Hive(config.queen_url, config.token)
+            logged, calls = [], []
+            brain = node.Brain(config, hive, None, log=logged.append)
+            with mock.patch.object(hive, "_call", side_effect=lambda path, **kw: calls.append(
+                    path)):
+                self.assertFalse(brain._tell_home("ready"))
+            self.assertLessEqual(len(calls), 1, env)
+            self.assertEqual(len(logged), 1, env)
+            self.assertIn("tell-home dropped", logged[0])
+
     def test_the_archive_env_carries_tell_home(self):
         env = spawn_node.render_node_env(slug="kestrel", name="Kestrel", port=8210,
                                          queen_url="http://192.0.2.10:8600", token="hive_x",

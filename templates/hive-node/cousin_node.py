@@ -465,11 +465,18 @@ class Brain:
             return reply
 
     def _tell_home(self, text):
+        """Sent once, never retried (docs/reference/hive-api.md): a
+        message the queen or the home chat does not take is dropped, and
+        the log says so."""
         if self.config.tell_home:
-            return self.hive.tell_home(text, msg_id="%s-%s" % (
+            sent = self.hive.tell_home(text, msg_id="%s-%s" % (
                 self.config.slug, uuid.uuid4().hex))
+            if not sent:
+                self.log("tell-home dropped: the queen did not take it")
+            return sent
         url = self.config.home_chat_url
         if not url:
+            self.log("tell-home dropped: no TELL_HOME or HOME_CHAT_URL")
             return False
         request = urllib.request.Request(
             url + "/api/send",
@@ -480,7 +487,7 @@ class Brain:
             with urllib.request.urlopen(request, timeout=8):
                 return True
         except Exception as err:
-            self.log("tell-home: %s" % err)
+            self.log("tell-home dropped: %s" % err)
             return False
 
 

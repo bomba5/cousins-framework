@@ -369,5 +369,53 @@ class TestReplayIndex(ImportCase):
         self.assertEqual([c for c, _t in seen], [t for _c, t in seen])
 
 
+class TestReplayIndexOverAnUnbackfilledDecisionLog(ImportCase):
+    """Item 1 (final fix wave): a home whose data/decisions.jsonl still
+    holds orphans (no mark) when the baseline runs. _index_current must
+    backfill them BEFORE it brings the index current, or the baseline's
+    own first search (memory_search.search -> memory.try_backfill,
+    memory_search.py:919) appends them into raw right after the index
+    was declared current, re-staling it; the semantic leg then only
+    catches up FOREGROUND_BUDGET chunks per search, so the baseline
+    ranks against a partly built index while a later --verify (run once
+    the daemon or later searches have caught it up) ranks against a
+    complete one."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "config" / "embedding.toml").write_text(
+            'url = "http://embed.invalid"\nmodel = "stub"\n')
+        stub = lambda text, config: [float(len(text) % 7 + 1), float(text.count("e") + 1), 1.0]
+        for target, value in (("_embed", stub), ("FOREGROUND_BUDGET", 1)):
+            p = mock.patch.object(memory_search, target, value); p.start(); self.addCleanup(p.stop)
+        with open(self.home / "data" / "decisions.jsonl", "a") as fh:
+            for i in range(3):
+                fh.write(json.dumps({
+                    "timestamp": "2026-05-1%dT10:00:00+02:00" % i,
+                    "topic": "orphan-%d" % i,
+                    "decision": "kept only in the log %d" % i,
+                    "reasoning": "a copy %d" % i}) + "\n")
+        from cousin_lib import reinforce
+        # A hand-written log entry: a real search here would itself run
+        # try_backfill and defeat the setup (the mark would already exist
+        # before take_baseline ever runs).
+        reinforce.record(self.home, [str(self.auto / "feedback_ledgers.md")],
+                         query="quokka ledgers Monday")
+
+    def test_the_baseline_never_re_stales_the_index_it_just_built(self):
+        reports = []
+        real = memory_search.ensure_index
+
+        def spy(*a, **kw):
+            report = real(*a, **kw)
+            reports.append(report)
+            return report
+        with mock.patch.object(memory_search, "ensure_index", spy):
+            memory_import.apply(self.home, root=self.root)
+        self.assertTrue((self.home / "data" / ".decisions-backfilled").exists())
+        self.assertTrue(reports)
+        self.assertFalse(any(r["incomplete"] for r in reports), reports)
+
+
 if __name__ == "__main__":
     unittest.main()

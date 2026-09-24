@@ -231,8 +231,19 @@ def _index_current(home, root):
     before a replay searches: a search embeds at most FOREGROUND_BUDGET
     stale chunks, and right after an import every copy is a new key, so a
     replay on a partly built index would measure the index filling in,
-    not the import (R19)."""
-    from cousin_lib import memory_search
+    not the import (R19). The one-time decisions backfill runs first, for
+    the same reason: a replay's first search runs it too (memory_search's
+    R2), and a home that reaches it here first would have the index
+    declared current, then re-staled by the raw entries that search's
+    backfill appends, caught up only FOREGROUND_BUDGET chunks at a time.
+    ensure_backfilled (not try_backfill) so a broken backfill fails loudly
+    in a command a person runs by hand, rather than silently leaving the
+    baseline or verify comparing against an incomplete import; it raises
+    only OSError/ValueError, never ManifestError, so import-auto's
+    ManifestError/exit-2 contract (plan()'s strict manifest read) is
+    untouched."""
+    from cousin_lib import memory, memory_search
+    memory.ensure_backfilled(home)
     memory_search.build_index(home, root)
     config = memory_search._embedding_config(root)
     if isinstance(config, dict):

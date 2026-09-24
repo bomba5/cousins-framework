@@ -119,6 +119,18 @@ def _default_factory(options):
     return _sdk().ClaudeSDKClient(options=options)
 
 
+# A thinking block in the reasoning stream: its text, bounded as a tool
+# result's is (the whole block stays in the session store's transcript).
+THINKING_CHARS = 8000
+
+
+def _thinking_payload(text):
+    payload = {"length": len(text), "text": text[:THINKING_CHARS]}
+    if len(text) > THINKING_CHARS:
+        payload["truncated"] = True
+    return payload
+
+
 def _tool_result_text(content):
     if isinstance(content, str):
         return content
@@ -1736,7 +1748,7 @@ class SdkRunner:
                     self.stream.append("tool", {"id": block.id, "name": block.name,
                                                 "input": block.input})
                 elif isinstance(block, sdk.ThinkingBlock):
-                    self.stream.append("thinking", {"length": len(block.thinking or "")})
+                    self.stream.append("thinking", _thinking_payload(block.thinking or ""))
                 else:
                     continue
                 recorded += 1

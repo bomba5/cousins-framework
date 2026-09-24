@@ -232,5 +232,51 @@ class TestRecallToolRoot(HermeticCase):
         self.assertEqual(called, [])
 
 
+class TestBackfillNeverSilencesRecall(HermeticCase):
+    """Review fix round 1, finding 1: the backfill runs inside search() and
+    recall; a failure there (a bad byte in the log, a read-only data/) must
+    cost the backfill, never the search, and leave no mark so it retries."""
+
+    def test_a_failing_backfill_leaves_search_and_recall_answering(self):
+        home = _home(self)
+        memory.remember(home, "spare keys", "Toki keeps the spare keys.")
+        _log(home, [("2026-05-17T10:00:00+02:00", "orphan", "kept only in the log", "a copy")])
+        bad = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        err = io.StringIO()
+        with mock.patch.object(memory, "backfill_decisions", side_effect=bad) as backfill, \
+                contextlib.redirect_stderr(err):
+            hits, _notice = memory_search.search("spare keys", home=home)
+            listed = [e["topic"] for e in memory.recall_entries(home)]
+        self.assertTrue(hits)
+        self.assertEqual(listed, ["spare keys"])
+        self.assertEqual(backfill.call_count, 2)                  # every call retries
+        self.assertFalse((home / "data" / ".decisions-backfilled").exists())
+        self.assertIn("backfill", err.getvalue())
+
+    def test_a_bad_byte_in_the_log_costs_only_that_line(self):
+        home = _home(self)
+        with open(home / "data" / "decisions.jsonl", "wb") as fh:
+            fh.write(b'{"topic": "broken \xff", "decision": "x", "reasoning": "y"}\n')
+            fh.write(json.dumps({"timestamp": "2026-05-17T10:00:00+02:00", "topic": "orphan",
+                                 "decision": "kept only in the log",
+                                 "reasoning": "a copy"}).encode() + b"\n")
+        self.assertEqual([e["topic"] for e in memory.recall_entries(home, "orphan")], ["orphan"])
+        self.assertTrue((home / "data" / ".decisions-backfilled").exists())
+
+
+class TestBackfillRespectsTheTrash(HermeticCase):
+    """Review fix round 1, finding 2 (ruling P7-7): a raw line the operator
+    trashed must not come back from the old log it is still in."""
+
+    def test_a_trashed_raw_twin_is_not_resurrected(self):
+        from cousin_lib import memory_trash
+        home = _home(self)
+        memory.decide(home, "ports", "exclude claimed ports", "they collide")   # log AND raw
+        raw = next(memory.raw_dir(home).glob("*.jsonl"))
+        memory_trash.trash_lines(home, [(raw.relative_to(home).as_posix(), 1, None)], by="Priya")
+        self.assertEqual(memory.backfill_decisions(home, dry_run=True), 0)
+        self.assertEqual(memory.recall_entries(home, "ports"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

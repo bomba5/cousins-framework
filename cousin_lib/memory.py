@@ -396,7 +396,7 @@ def _decision_rows(home):
     data = Path(home) / "data"
     for path in sorted(data.glob("decisions-archive-*.jsonl")) + [data / "decisions.jsonl"]:
         try:
-            lines = path.read_text().splitlines()
+            lines = path.read_text(errors="replace").splitlines()
         except OSError:
             continue
         for line in lines:
@@ -431,6 +431,27 @@ def _raw_memories(home):
     return seen
 
 
+def _trashed_memories(home):
+    """{(topic, content)} of every raw line still in the memory trash
+    (memory/.trash/<id>/manifest.json, items of kind "line"), normalised
+    as _raw_memories normalises: removed on purpose, so never a twin to
+    bring back. A restored batch leaves the trash, so it is not here."""
+    from cousin_lib import memory_trash
+    seen = set()
+    for manifest in memory_trash.list_trash(home):
+        for item in manifest.get("items") or []:
+            if not isinstance(item, dict) or item.get("kind") != "line":
+                continue
+            try:
+                entry = json.loads(item.get("line") or "")
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                seen.add((str(entry.get("topic") or "").strip(),
+                          " ".join(str(entry.get("content") or "").split())))
+    return seen
+
+
 def backfill_decisions(home, *, dry_run=False):
     """Every decision in data/decisions.jsonl (and its rotated archives)
     with no raw twin becomes a raw entry: source "decision", its original
@@ -442,7 +463,9 @@ def backfill_decisions(home, *, dry_run=False):
     Returns the number written, or with dry_run the number that would be
     (dry_run writes nothing)."""
     home = Path(home)
-    have = _raw_memories(home)
+    # A raw line the cousin or its operator trashed is not an orphan: the
+    # old log still holds it, and backfilling it would undo the removal.
+    have = _raw_memories(home) | _trashed_memories(home)
     todo = []
     for row in _decision_rows(home):
         content = "%s - why: %s" % (row["decision"], row.get("reasoning", ""))
@@ -490,6 +513,18 @@ def ensure_backfilled(home):
                         % (datetime.now(timezone.utc).isoformat(), count))
 
 
+def try_backfill(home):
+    """ensure_backfilled for a reader (search, recall): a failure (a
+    read-only or full data/, an unreadable log) costs the backfill, never
+    the read. It says so on stderr and writes no mark, so the next read
+    tries again."""
+    try:
+        ensure_backfilled(home)
+    except (OSError, ValueError) as err:
+        print("memory: decisions backfill skipped: %s: %s" % (type(err).__name__, err),
+              file=sys.stderr)
+
+
 def _relevant(home, keyword, hits, top, root):
     """The hits recall prints: those the keyword leg found, and those the
     semantic leg ranks at or above [recall] min_score. The semantic leg
@@ -519,7 +554,7 @@ def recall_entries(home, keyword="", last=10, *, root=None):
     runner passes its own."""
     from cousin_lib import distill, memory_search
     home = Path(home)
-    ensure_backfilled(home)
+    try_backfill(home)
     last = int(last or 0)
     keyword = str(keyword or "").strip()
     if keyword:

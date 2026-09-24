@@ -892,7 +892,7 @@ def search(query, *, top=5, home=None, collection=None, root=None, record=True):
     home = Path(home) if home else _home()
     if collection in (None, "raw"):
         from cousin_lib import memory
-        memory.ensure_backfilled(home)   # decisions only the old log holds reach raw first (R2)
+        memory.try_backfill(home)   # decisions only the old log holds reach raw first (R2)
     keyword_hits = _keyword_search(query, home, top, collection, root)
     config = _embedding_config(root)
     semantic_hits = []

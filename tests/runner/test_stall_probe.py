@@ -65,14 +65,14 @@ class TestStallProbe(HermeticCase):
                             "no stall named while it ran")
             self.assertTrue(_wait(lambda: any(not s.get("ongoing") for s in stalls()), 5),
                             "no stall named when it ended")
-        # the fold's query write (send) is nested in the fold: both are named,
-        # while they run and when they end, the write being the site that held
+        # the fold hands its write to the turn's writer (#118, after #104) and
+        # returns at once: the write (send) is the site that held, named while
+        # it runs and when it ends; the reader never waits at the fold
         self.assertTrue(_wait(lambda: {s["site"] for s in stalls() if not s.get("ongoing")}
-                              == {"send", "fold"}, 5), stalls())
-        self.assertEqual({s["site"] for s in stalls() if s.get("ongoing")}, {"send", "fold"})
+                              == {"send"}, 5), stalls())
+        self.assertEqual({s["site"] for s in stalls() if s.get("ongoing")}, {"send"})
         ended = {s["site"]: s["seconds"] for s in stalls() if not s.get("ongoing")}
         self.assertGreaterEqual(ended["send"], 1.5)
-        self.assertGreaterEqual(ended["fold"], ended["send"])
 
     def test_short_waits_write_nothing(self):
         home = temp_home(self)

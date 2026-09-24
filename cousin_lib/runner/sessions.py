@@ -194,8 +194,10 @@ class SideSession(SdkRunner):
         return wake.Poller()
 
     async def _start_fresh(self, *, with_digest):
-        self._generation = await asyncio.to_thread(boot.read_generation, self.home)
+        # due first: a new session's first turn carries the side digest (R6),
+        # even when the generation read below fails for a moment
         self._digest_due = True
+        self._generation = await asyncio.to_thread(boot.read_generation, self.home)
         self.stream.append("system", {"subtype": "fresh", "digest": "side",
                                       "session": self.kind})
 

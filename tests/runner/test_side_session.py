@@ -270,6 +270,40 @@ class TestReset(SideCase):
         self.assertTrue(r.worker_alive())
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "queued"))
 
+    def test_a_generation_read_error_in_a_fresh_start_keeps_the_digest_due(self):
+        """R6: the side digest is due from the moment a fresh session exists.
+        A transient error reading the generation in _start_fresh must not
+        leave the new session's first turn without it."""
+        r = self.side([[_turn("s-1")], [_turn("s-2")]])
+        armed = []
+        real_connect, real_read = r._connect, boot.read_generation
+
+        async def connect(**kw):
+            ok = await real_connect(**kw)
+            if ok and kw.get("why") == "side reset":
+                armed.append(True)        # the next generation read is _start_fresh's
+            return ok
+
+        def read_generation(home):
+            if armed:
+                armed.clear()
+                raise PermissionError("generation.txt: denied for a moment")
+            return real_read(home)
+
+        r._connect = connect
+        with mock.patch.object(boot, "read_generation", side_effect=read_generation):
+            r.start()
+            a = r.enqueue(_peer("one"))
+            self.assertTrue(self.done(r, a))
+            r._request_rollover("context pressure 85%")
+            b = r.enqueue(_peer("two"))
+            self.assertTrue(self.done(r, b, timeout=15))
+        self.assertTrue(any(e["kind"] == "error" and "denied for a moment" in e["payload"]["error"]
+                            for e in r.events()))
+        self.assertEqual(len(self.clients), 2)
+        self.assertIn("SIDE SESSION", _text(self.clients[1].queries[0]))
+        self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
+
 class TestStreamHead(SideCase):
     """The P8-2 rule: a side session's stream is headed `side_session`, never
     `runner`, so a reader of the primary's stream never takes it."""

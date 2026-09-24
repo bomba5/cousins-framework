@@ -124,8 +124,9 @@ class TestTurns(Case):
         self.write(r, {"type": "user", "promptSource": "queued", "promptId": "pq",
                        "message": {"role": "user", "content": "sent now from the pane"}})
         self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
-        results = [e["payload"] for e in r.events() if e["kind"] == "result"]
-        self.assertTrue(results[0]["interrupted"])
+        results = lambda: [e["payload"] for e in r.events() if e["kind"] == "result"]
+        self.assertTrue(_wait(results), "the row closes a moment before its result event")
+        self.assertTrue(results()[0]["interrupted"])
 
     def test_a_closed_nonce_seen_again_is_a_duplicate(self):
         r = self.runner()
@@ -314,6 +315,10 @@ class TestStop(Case):
         class Unstoppable(FakePane):
             def key(self, name):
                 self.keys.append(name)             # the Escape is never answered
+
+            def kill(self):
+                self._dead = True                  # a killed CLI writes nothing more
+                super().kill()
         r = self.runner(pane=lambda path: Unstoppable(path, slow=True, slow_s=10.0,
                                                       context_home=self.home))
         r.start()
@@ -362,6 +367,58 @@ class TestRecovery(Case):
         self.assertEqual(self.outcome(r2, rec)[1], "delivered")
         self.assertTrue(_wait(lambda: any("cut short by a restart" in body
                                           for _f, body in self.panes[-1].typed)))
+
+    def test_the_cut_notice_waits_for_a_pane_still_booting(self):
+        """Review I1 (probe B): the pane's box appears 1.5 s after start."""
+        r, rec = self.first_runner_types(slow=True)
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r._stop.set()
+        r._thread.join(3)
+        self.panes[0].die()
+        r2 = self.runner(pane=lambda path: FakePane(path, boot_s=1.5, context_home=self.home))
+        r2.start()
+        self.assertTrue(_wait(lambda: self.outcome(r2, rec)[2] == "cut by restart"))
+        self.assertTrue(_wait(lambda: any("cut short" in b and "restart" in b
+                                          for _f, b in self.panes[-1].typed), timeout=6))
+
+    def test_a_turn_cut_by_a_requested_stop_is_told_as_one(self):
+        class Unstoppable(FakePane):
+            def key(self, name):
+                self.keys.append(name)             # the Escape is never answered
+
+            def kill(self):
+                self._dead = True                  # a killed CLI writes nothing more
+                super().kill()
+        r = self.runner(pane=lambda path: Unstoppable(path, slow=True, slow_s=10.0,
+                                                      context_home=self.home))
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        (self.home / "run" / "held").write_text("2026-09-24T23:00:00+00:00 console")
+        r.stop(timeout=2)
+        (self.home / "run" / "held").unlink()        # the supervisor's start releases it
+        r2 = self.runner()
+        r2.start()
+        self.assertTrue(_wait(lambda: self.panes and any(
+            "a requested stop" in b for _f, b in self.panes[0].typed), timeout=6))
+        self.assertFalse(any("restarted" in b for _f, b in self.panes[0].typed))
+        self.assertEqual(self.outcome(r2, rec)[2], "cut by stop")
+        from cousin_lib.runner import restart_note
+        self.assertTrue(_wait(lambda: restart_note.read(self.home) is None), "taken once typed")
+
+    def test_a_notice_that_cannot_be_typed_in_time_is_said(self):
+        r, rec = self.first_runner_types(slow=True)
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r._stop.set()
+        r._thread.join(3)
+        self.panes[0].die()
+        r2 = self.runner(pane=lambda path: FakePane(path, boot_s=60, context_home=self.home))
+        r2.notice_wait_s = 0.5
+        r2.start()
+        said = lambda: [e["payload"] for e in r2.events() if e["kind"] == "system"
+                        and e["payload"].get("subtype") == "notice_not_typed"]
+        self.assertTrue(_wait(lambda: said(), timeout=5))
+        self.assertIn("cut short", said()[0]["text"])
 
     def test_an_untaken_row_is_requeued_and_typed_again(self):
         class Deaf(FakePane):

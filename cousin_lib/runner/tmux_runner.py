@@ -49,6 +49,7 @@ REOPEN_BASE_S = 1.0       # a lost pane is started again after this, doubling pe
 REOPEN_MAX_S = 60.0       # up to this
 BLOCKED_BASE_S = 0.5      # a screen that refuses typing is tried again after this, doubling
 BLOCKED_MAX_S = 5.0       # up to this
+NOTICE_WAIT_S = 120.0     # a runner line owed at the first idle is tried this long, then said
 STOP_SETTLE_S = 15.0      # a stop waits this long (at most half its timeout) for the cut turn's end
 MAX_ID = 128              # a hook datagram's session_id; a CLI's is a 36-character uuid
 MAX_SOURCE = 32           # and its SessionStart source ("startup", "resume", "clear", "compact")
@@ -146,6 +147,7 @@ class TmuxRunner:
         self._blocked = None             # {"delay", "until"} while typing is refused
         self._notice = None              # {"text", "nonce"}: a runner line owed at the first idle
         self.reopen_base_s = REOPEN_BASE_S
+        self.notice_wait_s = NOTICE_WAIT_S
         self.hooks_silent_s = HOOKS_SILENT_S   # tests shorten these three
         self.kill_grace_s, self.kill_bound_s = KILL_GRACE_S, KILL_BOUND_S
         self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
@@ -546,20 +548,55 @@ class TmuxRunner:
     def _typing_held(self):
         return self._blocked is not None and time.monotonic() < self._blocked["until"]
 
-    def _owe_notice(self, text):
-        self._notice = {"text": text, "nonce": None}
+    def _owe_notice(self, text, *, clears_note=False):
+        self._notice = {"text": text, "nonce": None, "clears_note": clears_note,
+                        "until": time.monotonic() + self.notice_wait_s}
+
+    def _owe_start_notice(self, how):
+        """What a start owes the model (R23, #98): a turn a restart or a
+        stop cut, said as the one it was. The mark a stop left
+        (restart_note) says who cut it; it is taken once the line is typed.
+        A fresh session has nothing interrupted in it: the mark is dropped."""
+        note = restart_note.read(self.home)
+        if note is not None and how == "fresh" and not self._cut:
+            restart_note.clear(self.home)
+            return
+        if note is None and not self._cut:
+            return
+        if note is not None:
+            text = restart_note.body(note)
+            if self._cut:
+                text += " The cut turn's message was delivered; check what it did."
+            self._owe_notice(text, clears_note=True)
+            return
+        held = restart_note.held_by(self.home)
+        who = ("a requested stop (%s)" % held) if held else "a restart"
+        self._owe_notice("The previous turn was cut short by %s before it finished; its"
+                         " message was delivered. Check what it did and continue." % who)
 
     def _maybe_notice(self):
         """A runner line owed at the first idle (a cut turn, R23), typed
-        before any row. True when this tick was spent on it."""
-        if self._notice is None or self._pending_typed() or self._typing_held():
+        before any row once the pane takes input (review I1: a pane still
+        booting has no box), tried again until NOTICE_WAIT_S, then said as a
+        `notice_not_typed` event. True when this tick was spent on it."""
+        if self._notice is None or self._pending_typed():
             return False
+        if time.monotonic() >= self._notice["until"]:
+            self.stream.append("system", {"subtype": "notice_not_typed",
+                                          "text": self._notice["text"][:400],
+                                          "waited_s": self.notice_wait_s})
+            self._notice = None
+            return False
+        if self._typing_held():
+            return True
         if not self._screen_allows():
             return True
         if self._notice["nonce"] is None:
             self._notice["nonce"] = secrets.token_hex(6)
         out = self._runner_line(self._notice["text"], nonce=self._notice["nonce"])
         if out is Outcome.TYPED:
+            if self._notice["clears_note"]:
+                restart_note.clear(self.home)
             self._notice, self._blocked = None, None
         elif out is Outcome.BLOCKED:
             self._blocked_stretch("notice")
@@ -656,10 +693,7 @@ class TmuxRunner:
             elif how == "adopted":
                 self._clear_stranded()
             self._persist_cursor()
-            if self._cut:
-                self._owe_notice("The previous turn was cut short by a restart before it "
-                                 "finished; its message was delivered. Check what it did and "
-                                 "continue.")
+            self._owe_start_notice(how)
         except Exception as exc:  # noqa: BLE001 - never a silent death
             self._to("errored", "start failed: %s: %s" % (type(exc).__name__, exc))
             self.stream.append("error", {"error": "start: %s: %s" % (type(exc).__name__, exc)})

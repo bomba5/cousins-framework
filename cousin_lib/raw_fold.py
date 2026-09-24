@@ -57,9 +57,15 @@ def _load_digest(path):
     return out
 
 
-def _merge_digest(digest, entry, month):
+def _merge_digest(digest, entry, month, hidden=frozenset()):
+    """Fold one entry into its topic's digest line. A line the memory
+    views leave out (memory.view_noise, or an id in `hidden`) is archived
+    but never becomes a digest's text: a digest stands for what the
+    views may show."""
     topic = str(entry.get("topic") or "").strip()
     if not topic or not entry.get("content"):
+        return
+    if memory.view_noise(entry) or memory.entry_id(entry) in hidden:
         return
     day = str(_stamp(entry) or "")[:10]
     current = digest.get(topic)
@@ -87,7 +93,7 @@ def _merge_digest(digest, entry, month):
         current["last_at"] = day
 
 
-def _fold_month(home, month, files, report):
+def _fold_month(home, month, files, report, hidden=frozenset()):
     dpath = digest_path(home, month)
     digest = _load_digest(dpath)
     archive = archive_dir(home) / ("%s.jsonl.gz" % month)
@@ -102,7 +108,7 @@ def _fold_month(home, month, files, report):
                     entry = json.loads(line)
                 except ValueError:
                     continue
-                _merge_digest(digest, entry, month)
+                _merge_digest(digest, entry, month, hidden)
                 report["folded_entries"] += 1
             report["folded_days"] += 1
     tmp = dpath.with_suffix(".jsonl.tmp")
@@ -132,6 +138,7 @@ def fold_raw(home, *, keep_days=DEFAULT_KEEP_DAYS):
     if not by_month:
         return report
     archive_dir(home).mkdir(parents=True, exist_ok=True)
+    hidden = memory.hidden_ids(memory._all_raw(home))
     for month, files in by_month.items():
         # One month's read, archive, digest and unlink are one section under
         # the home's memory write lock: the decisions backfill appends to a
@@ -141,5 +148,5 @@ def fold_raw(home, *, keep_days=DEFAULT_KEEP_DAYS):
             files = [p for p in files if p.exists()]   # a concurrent fold took it
             if not files:
                 continue
-            _fold_month(home, month, files, report)
+            _fold_month(home, month, files, report, hidden)
     return report

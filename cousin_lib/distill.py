@@ -170,9 +170,29 @@ def _distill(home, *, max_lines, since_days):
     memory.ensure_layout(home)
     groups = defaultdict(list)
     total = 0
-    for entry in memory.list_raw(home, since_days=since_days):
+    raw = memory.list_raw(home, since_days=since_days)
+    # What the views leave out (memory.hidden_ids: an entry an entry-level
+    # mark retired) is read from the whole history, archives included: the
+    # monthly fold keeps one digest line per topic, and a digest neither
+    # carries a mark's `entry` nor knows its month's lines were retired
+    # (it copies its newest line's text, so its id can equal a retired
+    # one). A topic with hidden entries is therefore built from the whole
+    # history instead of its digests.
+    truth = memory._all_raw(home)
+    hidden = memory.hidden_ids(truth)
+    rebuild = {str(e.get("topic") or "").strip() for e in truth
+               if memory.view_noise(e) or memory.entry_id(e) in hidden}
+    cutoff = datetime.now(timezone.utc).timestamp() - since_days * 86400
+    source = [e for e in raw if str(e.get("topic") or "").strip() not in rebuild]
+    source += [e for e in truth if str(e.get("topic") or "").strip() in rebuild
+               and (memory.entry_timestamp(e) or cutoff) >= cutoff]
+    for entry in source:
         topic = str(entry.get("topic") or "").strip()
         if not topic or not entry.get("content"):
+            continue
+        # an entry-level mark is not the topic's newest word (a topic-level
+        # mark still retires the whole topic, below)
+        if memory.view_noise(entry) or memory.entry_id(entry) in hidden:
             continue
         groups[topic].append(entry)
         total += 1

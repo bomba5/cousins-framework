@@ -12,6 +12,7 @@ Search and reindex dispatch to the keyword search module
 import argparse
 import fcntl
 import gzip
+import hashlib
 import json
 import re
 import os
@@ -177,6 +178,7 @@ def _append_raw(home, entry):
     path = raw_dir / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     with memory_lock.write_lock(home), open(path, "a") as fh:
         fh.write(json.dumps(entry) + "\n")
+    return entry
 
 
 # Automatic writers (the framework, the job tracker) are bounded so one
@@ -236,13 +238,138 @@ class ObsoleteRefused(ValueError):
     pass
 
 
+# ---- valid time (master plan phase 7 task 9) --------------------------
+# raw is append-only; validity is derived from it, never written back.
+# An entry is valid from its own `valid_from`, else when it was written;
+# it is valid to its own `valid_to`, else the time of the first later
+# L5_OBSOLETE mark that covers it: a topic-level mark (no `entry`) covers
+# the topic's earlier entries, an entry-level mark (`entry: <id>`) covers
+# that entry alone. An id hashes the entry's timestamp, topic and content,
+# so it survives the monthly fold (raw_fold copies lines byte-identical).
+
+def entry_id(entry):
+    """A stable 12-hex id for a raw entry."""
+    key = json.dumps([str(entry.get("timestamp") or entry.get("created_at") or ""),
+                      str(entry.get("topic") or "").strip(),
+                      str(entry.get("content") or "")], ensure_ascii=False)
+    return hashlib.sha1(key.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _all_raw(home):
+    """Every raw entry, the hot days and the monthly archives, oldest
+    first; a month's digest is a summary of entries already here, so it
+    is left out."""
+    from cousin_lib import memory_search
+    out = []
+    for path in memory_search._raw_files(home):
+        opener = gzip.open if path.suffix == ".gz" else open
+        try:
+            with opener(path, "rt", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict) and entry.get("source") != "digest" \
+                    and str(entry.get("topic") or "").strip():
+                out.append(entry)
+    out.sort(key=lambda e: entry_timestamp(e) or 0.0)
+    return out
+
+
+def _is_mark(entry):
+    return normalize_level(entry.get("truth_level")) == OBSOLETE_LEVEL
+
+
+def is_entry_mark(entry):
+    """An entry-level obsolete mark: an L5 line naming one entry's id."""
+    return _is_mark(entry) and bool(entry.get("entry"))
+
+
+def hidden_ids(entries):
+    """The ids the memory views (distilled, the boot packet) leave out,
+    from `entries` (the whole history, `_all_raw`): every entry an
+    entry-level mark retired."""
+    return {e["entry"] for e in entries if is_entry_mark(e)}
+
+
+def view_noise(entry):
+    """A raw line that is bookkeeping, never a line of the views: an
+    entry-level mark (a topic-level mark is the topic's newest word and
+    stays)."""
+    return is_entry_mark(entry)
+
+
+def validity(home):
+    """Every raw entry that is a claim (obsolete marks left out), oldest
+    first, as a copy with `id`, `valid_from`, `valid_to` and `retired_by`
+    (the covering mark's id, or None). The covering mark is the earliest
+    of: an entry-level mark naming the entry (whenever it was written),
+    and a topic-level mark on its topic written at or after it. Marks are
+    indexed by entry and by topic, so this is one pass over the history."""
+    import bisect
+    entries = _all_raw(Path(home))
+    by_entry, by_topic = {}, {}
+    for m in entries:                       # oldest first: the first seen is the earliest
+        if not _is_mark(m):
+            continue
+        if m.get("entry"):
+            by_entry.setdefault(m["entry"], m)
+        else:
+            by_topic.setdefault(str(m.get("topic") or "").strip(), []).append(m)
+    stamps = {t: [entry_timestamp(m) or 0.0 for m in ms] for t, ms in by_topic.items()}
+    out = []
+    for e in entries:
+        if _is_mark(e):
+            continue
+        row = dict(e, id=entry_id(e))
+        when = entry_timestamp(e) or 0.0
+        topic = str(e.get("topic") or "").strip()
+        candidates = []
+        if row["id"] in by_entry:
+            candidates.append(by_entry[row["id"]])
+        if topic in by_topic:
+            i = bisect.bisect_left(stamps[topic], when)
+            if i < len(by_topic[topic]):
+                candidates.append(by_topic[topic][i])
+        cover = min(candidates, key=lambda m: entry_timestamp(m) or 0.0) if candidates else None
+        row["valid_from"] = e.get("valid_from") or e.get("timestamp") or e.get("created_at")
+        row["valid_to"] = e.get("valid_to") or (cover.get("timestamp") if cover else None)
+        row["retired_by"] = entry_id(cover) if cover else None
+        out.append(row)
+    return out
+
+
+def live_entries(home, *, at=None):
+    """The claims valid at `at` (an ISO time; now when None)."""
+    moment = datetime.fromisoformat(at).timestamp() if at else \
+        datetime.now(timezone.utc).timestamp()
+
+    def ts(value):
+        try:
+            return datetime.fromisoformat(str(value)).timestamp()
+        except ValueError:
+            return None
+    out = []
+    for row in validity(home):
+        start, end = ts(row["valid_from"]), ts(row["valid_to"]) if row["valid_to"] else None
+        if (start is None or start <= moment) and (end is None or moment < end):
+            out.append(row)
+    return out
+
+
 def mark_obsolete(home, topic, why, *, by=None, force=False,
-                  source="obsolete"):
+                  source="obsolete", entry=None):
     """Append an L5_OBSOLETE entry for `topic`: the distiller leaves a
     topic whose newest entry is L5 out of the distilled views, and a
     later entry of any other level revives it. The history stays in
     raw. Refuses an empty reason, and a topic with no raw entries
     unless force (a typo would otherwise retire nothing, silently).
+    With `entry` (an id from `validity`/`cousin-memory history`) the
+    mark retires that one entry and leaves the topic in the views.
     Returns the entry written."""
     topic = str(topic or "").strip()
     why = " ".join(str(why or "").split())
@@ -259,12 +386,20 @@ def mark_obsolete(home, topic, why, *, by=None, force=False,
         hint = (" (similar: %s)" % ", ".join(near[:5])) if near else ""
         raise ObsoleteRefused("no raw entries for topic %r%s; pass --force"
                               " to mark it anyway" % (topic, hint))
-    entry = {"topic": topic, "content": "obsolete: %s" % why,
-             "truth_level": OBSOLETE_LEVEL, "source": source, "why": why}
+    target = None
+    if entry:
+        target = next((r for r in validity(home)
+                       if r["id"] == entry and str(r.get("topic") or "").strip() == topic), None)
+        if target is None:
+            raise ObsoleteRefused("no entry %r on topic %r (cousin-memory history %s lists"
+                                  " them)" % (entry, topic, topic))
+    mark = {"topic": topic, "content": "obsolete: %s" % why,
+            "truth_level": OBSOLETE_LEVEL, "source": source, "why": why}
+    if target is not None:
+        mark["entry"] = target["id"]
     if by:
-        entry["by"] = str(by)
-    _append_raw(home, entry)
-    return entry
+        mark["by"] = str(by)
+    return _append_raw(home, mark)
 
 
 def _rotate_decisions_if_needed(path):
@@ -684,13 +819,28 @@ def _cmd_obsolete(args):
     home = _home(args)
     try:
         mark_obsolete(home, args.topic, args.why, force=args.force,
-                      by=os.environ.get("COUSIN_SLUG") or home.name)
+                      by=os.environ.get("COUSIN_SLUG") or home.name, entry=args.entry)
     except ObsoleteRefused as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
     print("Marked obsolete [%s]: %s" % (args.topic.strip(),
                                         " ".join(args.why.split())))
     return _run_distill(home)
+
+
+def _cmd_history(args):
+    """A topic's claims, oldest first, each with its id and valid time."""
+    home = _home(args)
+    topic = args.topic.strip()
+    rows = [r for r in validity(home) if str(r.get("topic") or "").strip() == topic]
+    if not rows:
+        print("no claims for topic %r" % topic)
+        return 1
+    for r in rows:
+        state = ("valid to %s" % r["valid_to"]) if r["valid_to"] else "live"
+        print("%s [%s] %s  (%s)" % (r["id"], str(r["valid_from"] or "?")[:16],
+                                   " ".join(str(r.get("content", "")).split())[:200], state))
+    return 0
 
 
 def _cmd_recall(args):
@@ -984,7 +1134,16 @@ def memory_main(argv=None):
                    help="what superseded it (required, non-empty)")
     p.add_argument("--force", action="store_true",
                    help="mark a topic that has no raw entries")
+    p.add_argument("--entry", default=None,
+                   help="retire one entry of the topic by its id (cousin-memory history"
+                        " lists them); the topic stays in the views")
     p.set_defaults(func=_cmd_obsolete)
+    p = sub.add_parser(
+        "history",
+        help="a topic's claims, oldest first, each with its id and valid time"
+             " (live, or valid to when an obsolete mark retired it)")
+    p.add_argument("topic")
+    p.set_defaults(func=_cmd_history)
     p = sub.add_parser("recall")
     p.add_argument("keyword", nargs="?", default="")
     p.add_argument("--last", type=int, default=20)

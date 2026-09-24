@@ -263,7 +263,8 @@ cousin-supervisor start --name loops
 | `search QUERY [--top N] [--collection memory\|notes\|harness] [--json]` | keyword search, plus semantic when embeddings are configured |
 | `remember TOPIC FACT [--level L] [--cite SRC]` | one fact into raw memory with its truth level |
 | `decide TOPIC DECISION REASONING [--level L] [--cite SRC] [--stdin]` | log a decision (and a raw copy of it) |
-| `obsolete TOPIC --why REASON [--force]` | retire a topic (L5): out of the distilled views, history kept |
+| `obsolete TOPIC --why REASON [--force] [--entry ID]` | retire a topic (L5): out of the distilled views, history kept; with `--entry`, retire one of its claims by its id and keep the topic |
+| `history TOPIC` | a topic's claims, oldest first: each one's id, when it became valid, and `live` or when an obsolete mark retired it (valid time is derived from raw, never written back) |
 | `recall [KEYWORD] [--last N]` | raw memory through the search index: with a keyword the best-ranked N entries, without one the newest N you wrote (the framework's own log left out); a decision prints with its `Why:` line |
 | `activity TEXT` | set the "what I'm doing now" line |
 | `distill [--max-lines N]` | rebuild `memory/distilled/` from raw |

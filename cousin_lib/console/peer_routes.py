@@ -17,12 +17,16 @@ No route here reads a session cookie or a bearer token, and no /api/ or
 /hive/ route reads a peer signature: a credential is worth nothing outside
 its own world.
 
-An entry is usable only when it names a `reach` (ruling P10a-3: the local
-cousins it may write to; there is no default-all) and its slug is not a
-local cousin's (review I1). An unusable entry, or a secret file that is
-unreadable or readable by others, is logged here and answered with a
-generic 503: nothing about peers, paths or file modes goes to the wire
-(review I4). The message itself goes through peer_inbound.accept (the
+Until the signature verifies, every refusal is the same `401
+unauthorized` (review round 2, N2): an unknown sender, a wrong signature,
+a malformed body, an unusable config/external-peers.toml and a secret
+file that is unreadable or readable by others look alike, so a caller
+cannot tell which peers are configured. An authenticated entry is usable
+only when it names a `reach` (ruling P10a-3: the local cousins it may
+write to; there is no default-all) and its slug is not a local cousin's
+(review I1); an unusable one is answered with a generic 503. Either way
+the detail is logged here, and nothing about peers, paths or file modes
+goes to the wire (review I4). The message itself goes through peer_inbound.accept (the
 window, the dedupe, the rate, the size, a plain name that is never the
 operator's or a cousin's, and a 404 for anything outside the reach,
 identical to a cousin that does not exist).
@@ -67,28 +71,21 @@ def handle(root, method, path, headers, raw_body):
         peer = chat.load_external_peers(root).get(sender)
     except MissingConfigError as err:
         _log("config/external-peers.toml is unusable: %s" % err)
-        return UNAVAILABLE
+        return UNAUTHORIZED
     if peer is None or not peer.inbound_token_file:
         return UNAUTHORIZED
-    local = {c.slug for c in FrameworkConfig(root).list_cousins()}
-    if peer.slug in local:
-        _log("external peer %s shares its slug with a local cousin; refused" % peer.slug)
-        return UNAVAILABLE
-    if not peer.reach:
-        _log("external peer %s names no reach; refused (reach is required)" % peer.slug)
-        return UNAVAILABLE
     try:
         secret = chat.read_secret(root, peer.inbound_token_file,
                                   "external peer %s inbound_token_file" % peer.slug)
     except MissingConfigError as err:
         _log(str(err))
-        return UNAVAILABLE
+        return UNAUTHORIZED
     try:
         body = json.loads(raw_body) if raw_body and raw_body.strip() else {}
     except ValueError:
-        return 400, {"error": "malformed JSON"}
+        return UNAUTHORIZED
     if not isinstance(body, dict):
-        return 400, {"error": "JSON body must be an object"}
+        return UNAUTHORIZED
     to, message = body.get("to"), body.get("message")
     msg_id, sent_at = body.get("msg_id"), body.get("sent_at")
     try:
@@ -98,6 +95,13 @@ def handle(root, method, path, headers, raw_body):
         return UNAUTHORIZED
     if not hmac.compare_digest(expected, signature):
         return UNAUTHORIZED
+    local = {c.slug for c in FrameworkConfig(root).list_cousins()}
+    if peer.slug in local:
+        _log("external peer %s shares its slug with a local cousin; refused" % peer.slug)
+        return UNAVAILABLE
+    if not peer.reach:
+        _log("external peer %s names no reach; refused (reach is required)" % peer.slug)
+        return UNAVAILABLE
     reach = set(peer.reach)
     try:
         out = peer_inbound.accept(

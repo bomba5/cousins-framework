@@ -5,9 +5,12 @@ P10a-2: `Authorization: HMAC <sender>:<hex>`, the secret never on the
 wire), behind the network guard, with no console session. The signature
 names the sender: the body's `user` is ignored, and the message is shown
 under the entry's `name`. A peer needs a `reach` (P10a-3), and anything
-outside it answers 404 like an absent cousin; a replay is refused; an
-unusable entry or secret file answers a generic 503 and logs the detail
-(review I4); a peer signature opens nothing under /api/, a console session
+outside it answers 404 like an absent cousin; a replay is refused. Until
+the signature verifies, every refusal is the same 401 (review round 2,
+N2: an unknown sender, a bad signature, a malformed body and an unusable
+entry or secret file look alike, so a caller cannot list the peers); an
+authenticated peer whose entry is unusable gets a generic 503; the detail
+of either goes to the log (review I4). A peer signature opens nothing under /api/, a console session
 or a bearer token nothing under /peer/. The sending side signs and never
 sends its secret."""
 import json
@@ -130,8 +133,28 @@ class TestPeerSend(PeerCase):
         """Review I4: the detail goes to the log, never to the caller."""
         os.chmod(self.secret_file, 0o644)
         self.serve()
-        self.assertEqual(self.peer_send(self.body()), (503, {"error": "external peers unavailable"}))
+        self.assertEqual(self.peer_send(self.body()), (401, {"error": "unauthorized"}))
         self.assertIn("chmod 600", " ".join(self.logged))
+        self.assertEqual(_messages(self.home), [])
+
+    def test_before_the_signature_every_refusal_is_the_same(self):
+        """Review round 2, N2: nothing tells a known sender from an unknown one."""
+        self.serve()
+        body = self.body()
+        bad = "HMAC kestrel:" + "0" * 64
+        answers = [
+            self.peer_send(body, auth=self.signed(body, sender="nobody")),     # unknown sender
+            self.peer_send(body, auth=bad),                                    # a wrong signature
+            self.peer_send(None, auth=bad, raw=b"{not json"),                  # malformed JSON
+            self.peer_send(None, auth=bad, raw=b"[1, 2]"),                     # not an object
+            self.peer_send(dict(body, sent_at="now"), auth=bad),               # no usable fields
+        ]
+        (self.root / "config" / "external-peers.toml").write_text("[peers.kestrel\n")
+        answers.append(self.peer_send(body))                                  # an unusable file
+        self.peers(reach=["wren"])
+        os.chmod(self.secret_file, 0o644)
+        answers.append(self.peer_send(body))                                  # an unusable secret
+        self.assertEqual(answers, [(401, {"error": "unauthorized"})] * len(answers))
         self.assertEqual(_messages(self.home), [])
 
     def test_a_peer_that_shares_a_local_cousins_slug_is_refused(self):

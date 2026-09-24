@@ -3,6 +3,46 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.15.0 - 2026-09-24
+
+### Added
+- Side sessions on the SDK lane: `[agent.sessions]` in cousin.toml maps a
+  thread kind to `"primary"` (the default) or `"own"`. A kind mapped `"own"`
+  gets one session of its own for all its threads, in the same
+  `cousin-runner` process and over the same inbox, with the primary's
+  system prompt, tools and working directory (the cached prefix is shared)
+  and the same memory. It answers while the primary is busy: a peer is no
+  longer kept waiting behind a long task. Its first turn carries a side
+  digest (the primary's state, the kinds of threads it is on and since
+  when, the cousin's last activity note, then the state digest); it never
+  carries a row's words, a sender or a thread key from the primary's live
+  turn. The `handoff` tool is refused in a side session; it never proposes
+  memories, never runs the `[session]` hooks, and starts over at context
+  pressure or when the primary moves to a new generation. A side session
+  that fails is restarted inside the process after a backoff; the primary
+  and its running turn are never stopped for it. `operator` and `system`
+  are always the primary's; an unknown kind or value is exit 2. Its session
+  id is kept in `data/runner-session-<kind>.json`, its event stream in
+  `data/stream/sdk-<kind>-<id>.jsonl`, headed by a `side_session` event.
+  `runner = "fake"` refuses side sessions. A side session is not
+  interruptible from the console in this release.
+- One memory writer at a time per home: an flock on
+  `data/.memory-write.lock`, held by the file-backed memory writes (raw,
+  the decisions log and its rotation, the decisions backfill, the recall
+  counts, the distilled views with their read of raw, the extraction
+  cursors, the activity note), across threads and processes, on a lock
+  file opened read-only (another user's lock file never shuts a cousin
+  out). Before it, two writers at once could lose a decision from the log
+  during its rotation, a recall count, or an extraction cursor.
+
+### Changed
+- `data/last-activity.txt` is written through a temporary file, so a reader
+  never sees it empty mid-write; a side session's note reads
+  `[<kind> session] ...`.
+- `data/generation.txt` is bumped through a temporary file and a rename.
+- `cousin-runner --once` exits 4 when any session waits for a login, not
+  only when the primary does, and 3 when a side session cannot start.
+
 ## 1.14.0 - 2026-09-24
 
 ### Added

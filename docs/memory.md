@@ -154,6 +154,18 @@ Plain Markdown files are memory too. Anything the cousin writes under
 `memory/` or `notes/` is searchable. Writing somewhere else in the home
 means search won't find it.
 
+One writer at a time: the writes to the file-backed stores (the raw day
+file, `data/decisions.jsonl` and its rotation, the decisions backfill, the
+recall counts and log, the distilled views with the read of raw behind them,
+the extraction and proposal cursors, `data/last-activity.txt`) hold an flock
+on `data/.memory-write.lock` while they read and write. Two sessions of one
+cousin (see `[agent.sessions]` in [configuration](configuration.md)), the
+cousin's own `cousin-memory` commands and the runner's per-turn miner can all
+write at once, and none of them loses the other's entry. Outside the lock:
+the trash (`memory_trash`, which re-reads and retries when a file changed
+under it), `cousin-memory import-auto`, and `compact`/the raw fold (they
+touch only files older than the hot window, never today's).
+
 ## Truth levels
 
 Every raw entry carries a truth level, so the cousin (and you) can tell

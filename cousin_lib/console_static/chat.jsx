@@ -1229,28 +1229,50 @@ function runnerEventLine(ev) {
 
 // The pane's liveness/state follow the stream it already reads, with the
 // fleet row (the 15s `cousins-refresh` poll) as the fallback before any
-// stream evidence: a `session` frame (the runner started or restarted) or a
+// stream evidence: a `session` frame (the runner started or restarted)
+// marks it alive with a neutral "starting" state (never the previous
+// runner's leftover state, e.g. "stopped" surviving as if it were live); a
 // `state` event marks it alive and records the state; a `state` event to
 // the runner's one terminal state ("stopped", cousin_lib/runner/state.py)
-// marks it not alive. A `fleet` event is called whenever the cousins prop
-// actually refreshes, so whichever event this function sees LAST is by
+// marks it not alive. A `fleet` event is dispatched only when the fleet
+// row's own runner data actually changed (never on an unrelated patch,
+// e.g. app.jsx's `cousin-status` handler, which replaces the cousin object
+// but not its `runner`), so whichever event this function sees LAST is by
 // construction the freshest evidence - a fleet update landing after the
-// last stream evidence wins, exactly because it is newer.
+// last stream evidence wins, exactly because it is newer, and it adopts
+// BOTH alive and state from the fleet row together, never just alive (a
+// mismatched pair, e.g. alive:true with a leftover state:"stopped", is
+// never produced).
 function paneLiveness(prev, event, fleetRunner) {
   const p = prev || { alive: null, state: null };
   if (!event) return p;
   switch (event.kind) {
     case "session":
-      return { alive: true, state: p.state };
+      return { alive: true, state: "starting" };
     case "state": {
       const to = event.payload && event.payload.to;
       return { alive: to !== "stopped", state: to };
     }
     case "fleet":
-      return { alive: fleetRunner ? fleetRunner.alive !== false : p.alive, state: p.state };
+      return fleetRunner
+        ? { alive: fleetRunner.alive !== false, state: fleetRunner.state != null ? fleetRunner.state : null }
+        : p;
     default:
       return p;
   }
+}
+
+// The fleet row's own data, as a value (not object-reference) key: two
+// runner snapshots with the same alive/state/session/since are the same
+// evidence, even as two distinct objects (a fresh, otherwise-unchanged
+// cousins-refresh; or app.jsx's `cousin-status` SSE handler, which spreads
+// a brand new cousin row on the console's own start/stop actions WITHOUT
+// touching `c.runner`). Keying the fleet effect on this, not on `cousin`
+// itself, is what keeps an unrelated status patch from re-dispatching a
+// stale runner snapshot as "fresh" fleet evidence over live stream events.
+function runnerFleetKey(runner) {
+  const r = runner || {};
+  return JSON.stringify([r.alive, r.state, r.session, r.since]);
 }
 
 function RunnerPaneView({ cousin, onClose }) {
@@ -1269,13 +1291,23 @@ function RunnerPaneView({ cousin, onClose }) {
   const listRef = React.useRef(null);
   const runnerRef = React.useRef(runner);
   runnerRef.current = runner;
+  // A stable signature of the fields paneLiveness reads off the fleet row.
+  // Keyed on this, not on `cousin` itself: app.jsx's `cousin-status`
+  // handler (around app.jsx:454, driven by routes_fleet.py's `cousin-status`
+  // SSE events on the console's own start/stop actions) replaces the whole
+  // cousin object on every status patch WITHOUT touching `c.runner`, so
+  // keying on `cousin` re-dispatched that unchanged (and possibly stale)
+  // runner snapshot as "fresh" fleet evidence, able to land after and
+  // override a live stream event with the same old bug, just shorter.
+  const runnerKey = runnerFleetKey(runner);
 
-  // The fleet row only actually changes (a new `cousin` reference) when the
-  // cousins-refresh poll lands, not on every render, so this fires once per
-  // poll: a fresh, authoritative snapshot that outranks stale stream state.
+  // The fleet row's own data only actually changes when the cousins-refresh
+  // poll lands (or the initial snapshot), not on every render and not on an
+  // unrelated cousin-status patch, so this fires once per real refresh: a
+  // fresh, authoritative snapshot that outranks stale stream state.
   React.useEffect(() => {
     setLive(prev => paneLiveness(prev, { kind: "fleet" }, runnerRef.current));
-  }, [cousin]);
+  }, [runnerKey]);
 
   React.useEffect(() => {
     if (!slug) return undefined;
@@ -1784,4 +1816,4 @@ function fmtShortTime(ts) {
   } catch (e) { return ""; }
 }
 
-Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, paneLiveness, renderMarkdown, resolveChatUser, groupReactions });
+Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, paneLiveness, runnerFleetKey, renderMarkdown, resolveChatUser, groupReactions });

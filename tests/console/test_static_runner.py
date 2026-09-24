@@ -85,37 +85,74 @@ process.stdout.write(JSON.stringify([
         refreshes on the 15s `cousins-refresh` poll, so a restart or a stop
         lagged by up to 15s while the stream already had the truth. The
         fleet row is now only the fallback before any stream evidence, and
-        the tiebreaker whenever it refreshes after the last stream event."""
+        the tiebreaker whenever it refreshes after the last stream event.
+        Round 1 fixes: a `session` frame resets state to a neutral
+        "starting" (never a stale leftover state like "stopped" read as
+        live), and a `fleet` event that IS applied adopts alive and state
+        TOGETHER, never a mismatched pair."""
         src = self.chat[self.chat.index("function runnerEventLine("):
                         self.chat.index("function RunnerPaneView(")]
         self.assertIn("function paneLiveness(", src)
         probe = src + """
-const alive = (fr) => ({ alive: fr.alive !== false, state: null });
-let s = paneLiveness(null, {kind: "fleet"}, {alive: false});   // fallback before any stream evidence
+let s = paneLiveness(null, {kind: "fleet"}, {alive: false, state: "stopped"});  // fallback before any stream evidence
 const results = {};
 results.fallback = s;
-s = paneLiveness(s, {kind: "session"}, {alive: false});        // a restart's session frame: alive
-results.session = s;
+s = paneLiveness(s, {kind: "session"}, {alive: false});        // a restart's session frame: alive, neutral state
+results.session_after_stopped = s;
 s = paneLiveness(s, {kind: "state", payload: {from: "idle", to: "running"}}, {alive: false});
 results.running = s;                                            // a state event: alive + the state
 s = paneLiveness(s, {kind: "state", payload: {from: "running", to: "stopped"}}, {alive: true});
 results.stopped = s;                                             // the terminal state: not alive
-s = paneLiveness(s, {kind: "fleet"}, {alive: true});               // a newer fleet row wins
+s = paneLiveness(s, {kind: "fleet"}, {alive: true, state: "running"});  // a newer fleet row wins, as a whole pair
 results.fleet_after_stopped = s;
 process.stdout.write(JSON.stringify(results));
 """
         out = subprocess.run(["node", "-e", probe], capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
         results = json.loads(out.stdout)
-        self.assertEqual(results["fallback"], {"alive": False, "state": None})
-        self.assertEqual(results["session"], {"alive": True, "state": None})
+        self.assertEqual(results["fallback"], {"alive": False, "state": "stopped"})
+        self.assertEqual(results["session_after_stopped"], {"alive": True, "state": "starting"})
         self.assertEqual(results["running"], {"alive": True, "state": "running"})
         self.assertEqual(results["stopped"], {"alive": False, "state": "stopped"})
         # A fresh fleet row landing after the stopped-state evidence is
-        # fresher; here it says the runner is alive again (e.g. a restart
-        # the stream connection missed), and it wins over the stale
-        # stopped-state evidence even though it contradicts it.
-        self.assertEqual(results["fleet_after_stopped"], {"alive": True, "state": "stopped"})
+        # fresher (e.g. a restart the stream connection missed): it wins,
+        # and alive/state come from it TOGETHER, never a mismatched pair
+        # like alive:true with a leftover state:"stopped".
+        self.assertEqual(results["fleet_after_stopped"], {"alive": True, "state": "running"})
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_fleet_effect_is_keyed_on_the_runners_own_data_not_the_cousin_row(self):
+        """Round 1 finding 1: app.jsx's `cousin-status` SSE handler (around
+        app.jsx:454, driven by routes_fleet.py's `cousin-status` events on
+        the console's own start/stop actions) spreads a brand new cousin
+        row on every status patch WITHOUT touching `c.runner`. Keying the
+        fleet effect on `cousin` itself re-dispatched that unchanged runner
+        snapshot as "fresh" evidence, able to land after and override a live
+        stream event - the same bug, shorter. `runnerFleetKey` gives the
+        effect a value key instead: unchanged runner data (even as a new
+        object) must not look like a fresh update, and changed data must."""
+        src = self.chat[self.chat.index("function runnerEventLine("):
+                        self.chat.index("function RunnerPaneView(")]
+        self.assertIn("function runnerFleetKey(", src)
+        pane = self.chat[self.chat.index("function RunnerPaneView("):]
+        pane = pane[:pane.index("\n}\n")]
+        self.assertIn("runnerFleetKey(runner)", pane)
+        self.assertNotIn("}, [cousin]);", pane)
+        probe = src + """
+const a = runnerFleetKey({alive: true, state: "running", session: "s1", since: 100});
+// A status-only patch (app.jsx's cousin-status handler) spreads a NEW
+// cousin object but the SAME runner data (a distinct object, same values):
+// the key must be equal, so the effect it gates does not re-fire.
+const b = runnerFleetKey({alive: true, state: "running", session: "s1", since: 100});
+// A real refresh with different runner data must produce a different key.
+const c = runnerFleetKey({alive: false, state: "stopped", session: "s1", since: 100});
+process.stdout.write(JSON.stringify({same: a === b, different: a === c}));
+"""
+        out = subprocess.run(["node", "-e", probe], capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        result = json.loads(out.stdout)
+        self.assertTrue(result["same"])
+        self.assertFalse(result["different"])
 
 
 class TestFleetAndTokens(unittest.TestCase):

@@ -242,6 +242,7 @@ class Keys(AccountsCase):
         path = self.root / ".secrets" / "accounts" / "metered"
         self.assertEqual(path.read_text(), KEY + "\n")
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE((self.root / ".secrets").stat().st_mode), 0o700)
         self.assertNotIn(KEY, json.dumps(body))
         self.assertNotIn(KEY, self.everything_served())
 

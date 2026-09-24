@@ -541,6 +541,9 @@ def register():
         if not (os.path.realpath(path).startswith(os.path.realpath(within) + os.sep)):
             raise HttpError(400, "account %s's secret file is outside .secrets/: write it by"
                                  " hand (mode 0600, its directory 0700)" % name)
+        # the install's .secrets/ is private: made 0700 when it is missing
+        # (os.makedirs would leave an intermediate directory at the umask)
+        within.mkdir(mode=0o700, exist_ok=True)
         try:
             state = secrets.write_secret_file(path, value, within=within)
         except ValueError as err:

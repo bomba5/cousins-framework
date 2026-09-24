@@ -479,15 +479,16 @@ function CousinAccountPanel({ cousin }) {
   React.useEffect(() => {
     setErr(null); setShowLogin(false); setAccount(null);
     if (!runnerLane) return;
+    if (!c.account) return;       // the deprecated [agent] api_key_file: no account row
     apiGet("/api/accounts").then(d => {
-      const row = d && (d.accounts || []).find(a => a.name === (c.account || "host"));
+      const row = d && (d.accounts || []).find(a => a.name === c.account);
       setAccount(row || null);
     });
   }, [c.slug, c.account, runnerLane]);
   if (!runnerLane) return null;
 
   const run = async (validate) => {
-    if (validate && !window.confirm(`validate spends one smallest model turn on account ${c.account || "host"}. Run it?`)) return;
+    if (validate && !window.confirm(`validate spends one smallest model turn on ${c.account ? "account " + c.account : "the cousin's key"}. Run it?`)) return;
     setErr(null);
     try { await accountPost(`/api/cousins/${encodeURIComponent(c.slug)}/check-auth`, { validate }); }
     catch (e) { setErr(String(e.message || e)); }
@@ -498,7 +499,9 @@ function CousinAccountPanel({ cousin }) {
       <SectionLabel style={{ marginTop: 20 }}>account</SectionLabel>
       <div data-account-panel style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ ...ACCOUNT_MONO, color: "var(--fg-1)" }}>
-          {c.account || "host"}{account ? ` · ${account.kind}` : ""}
+          {c.account
+            ? <>{c.account}{account ? ` · ${account.kind}` : ""}</>
+            : <span style={{ color: "var(--amber)" }}>[agent] api_key_file (deprecated: move the key to an account)</span>}
         </div>
         {c.loginRequired && (
           <div className="card-attention" data-login-required>

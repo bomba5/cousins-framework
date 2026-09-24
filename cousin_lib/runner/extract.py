@@ -146,33 +146,35 @@ def propose_turn(home, session_id, *, store, turn_bodies=(), now=None):
     past PROPOSAL_CAP in the rolling window. Reads the store's entries
     after its own cursor and advances it on every path, a proposal's own
     turn included, so no turn is read twice and a re-run proposes once.
-    Never raises: None on any error."""
-    try:
-        home = Path(home)
-        cursors = _load(home, _PROPOSE_CURSOR)
-        entries, cursor = store.entries_after(session_id, int(cursors.get(session_id, 0)))
-        cursors[session_id] = cursor
-        _save(home, cursors, _PROPOSE_CURSOR)
-        if any(str(b).startswith(PROPOSAL_MARK) for b in turn_bodies):
-            return None                  # a proposal's own turn: consumed, never proposed about
-        if not entries or _recorded_memory(entries):
-            return None
-        texts = list(transcript_mine.texts_from_entries(entries))
-        picked = [s for s in transcript_mine.candidates(texts, max_entries=10 ** 6)
-                  if transcript_mine.level_for(s) == transcript_mine.TRUTH_LEVEL
-                  and PROPOSAL_WORDS.search(s)]
-        if not picked:
-            return None
-        now = now or datetime.now(timezone.utc)
-        start = now - timedelta(seconds=WINDOW_S)
-        sent = [s for s in _load(home, _PROPOSALS).get("sent", [])
-                if (_when({"timestamp": s}) or start) > start]
-        if len(sent) >= PROPOSAL_CAP:
-            return None
-        _save(home, {"sent": sent + [now.isoformat()]}, _PROPOSALS)
-        return proposal_text(picked[:PROPOSAL_SENTENCES])
-    except Exception:  # noqa: BLE001 - a proposal never fails a turn
+    Raises on a broken store or corrupt state (a bad cursor, a
+    proposals.json whose shape is not the one this module writes): None
+    already means "nothing to propose", so folding an error into it
+    would switch proposals off without a trace. The caller (SdkRunner
+    ._propose) is the one that must never fail a turn; it catches this
+    and records the error on the `propose` event."""
+    home = Path(home)
+    cursors = _load(home, _PROPOSE_CURSOR)
+    entries, cursor = store.entries_after(session_id, int(cursors.get(session_id, 0)))
+    cursors[session_id] = cursor
+    _save(home, cursors, _PROPOSE_CURSOR)
+    if any(str(b).startswith(PROPOSAL_MARK) for b in turn_bodies):
+        return None                  # a proposal's own turn: consumed, never proposed about
+    if not entries or _recorded_memory(entries):
         return None
+    texts = list(transcript_mine.texts_from_entries(entries))
+    picked = [s for s in transcript_mine.candidates(texts, max_entries=10 ** 6)
+              if transcript_mine.level_for(s) == transcript_mine.TRUTH_LEVEL
+              and PROPOSAL_WORDS.search(s)]
+    if not picked:
+        return None
+    now = now or datetime.now(timezone.utc)
+    start = now - timedelta(seconds=WINDOW_S)
+    sent = [s for s in _load(home, _PROPOSALS).get("sent", [])
+            if (_when({"timestamp": s}) or start) > start]
+    if len(sent) >= PROPOSAL_CAP:
+        return None
+    _save(home, {"sent": sent + [now.isoformat()]}, _PROPOSALS)
+    return proposal_text(picked[:PROPOSAL_SENTENCES])
 
 
 def mine_turn(home, session_id, turn_no, *, store, now=None):

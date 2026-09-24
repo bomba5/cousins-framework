@@ -105,11 +105,16 @@ class TestProposeTurn(HermeticCase):
         later = now + timedelta(seconds=extract.WINDOW_S + 1)
         self.assertIsNotNone(extract.propose_turn(self.home, "sess-late", store=self.store, now=later))
 
-    def test_a_broken_store_is_none_never_a_raise(self):
+    def test_a_broken_store_raises_so_the_caller_can_surface_it(self):
+        """None already means "nothing to propose": folding a broken store
+        or corrupt state into it would switch proposals off with no
+        trace (P7-8). propose_turn raises; SdkRunner._propose is the
+        layer that must never fail a turn, and it catches this."""
         class Broken:
             def entries_after(self, *a, **k):
                 raise RuntimeError("store gone")
-        self.assertIsNone(extract.propose_turn(self.home, "sess-0001", store=Broken()))
+        with self.assertRaises(RuntimeError):
+            extract.propose_turn(self.home, "sess-0001", store=Broken())
 
 
 class TestPriority(unittest.TestCase):
@@ -168,6 +173,30 @@ class TestWiring(HermeticCase):
             rec = r.enqueue(Item("operator:priya", "chat", "start", sender="Priya"))
             self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"))
             self.assertTrue(_wait(lambda: any("boom" in str(p.get("error")) for p in self._proposals(r))))
+        self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
+
+    def test_a_corrupt_proposals_state_is_a_propose_error_not_a_silent_null(self):
+        """P7-8: proposals.json in a shape this module never writes (an
+        int where the cap's list belongs) must show up as the `propose`
+        event's error, not a quiet {"proposal": null} indistinguishable
+        from "nothing to propose". ScriptedClient never writes to the
+        session store (that is the real SDK's job), so the turn a
+        conclusion is proposed about is seeded into the store directly,
+        the same way TestProposeTurn does."""
+        (self.home / "data" / "proposals.json").write_text('{"sent": 5}')
+        r = self._runner()
+        asyncio.run(r.session_store.append(
+            {"project_key": "p", "session_id": "s-1"},
+            [{"type": "user", "uuid": "u1", "message": {"role": "user", "content": "go"}},
+             {"type": "assistant", "uuid": "a1",
+              "message": {"role": "assistant", "content": [{"type": "text", "text": DECIDED}]}}]))
+        r.start()
+        rec = r.enqueue(Item("operator:priya", "chat", "start", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"))
+        self.assertTrue(_wait(lambda: self._proposals(r)))
+        payload = self._proposals(r)[0]
+        self.assertIsNone(payload["proposal"])
+        self.assertTrue(payload.get("error"))
         self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
 
 

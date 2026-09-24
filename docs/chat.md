@@ -244,7 +244,10 @@ cousin-chat send kestrel "the descaling schedule moved to Fridays"
 ```
 
 That lands in Kestrel's pane as `(Chat Wren): ...`, the same way your
-messages do, and Kestrel answers with `cousin-chat send wren ...`. The
+messages do, and Kestrel answers with `cousin-chat send wren ...`. A
+runner cousin (`[agent] runner = "sdk"`) needs no chat server for this:
+the message is written into its chat history and inbox directly, from
+the sender's own process. The
 sender name is the sending cousin's `name`; `--from` overrides it.
 
 The two paths don't mix, and picking the wrong one fails quietly:

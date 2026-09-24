@@ -832,9 +832,18 @@ def register():
         if not isinstance(to, str) or to == slug:
             raise HttpError(400, "to must name another cousin")
         dest = load_cousin(req.server, to)
-        status, body = chat_call(dest, "/api/send", method="POST",
-                                 payload={"user": source.name,
-                                          "message": text.strip()},
+        payload = {"user": source.name, "message": text.strip()}
+        from cousin_lib import chat
+        from cousin_lib.server import chat_api
+        if chat.is_local_runner(dest):
+            # a runner cousin needs no chat server: its store and inbox
+            # directly (phase 10a)
+            try:
+                body = chat.deliver_local(dest, payload)
+            except chat_api.BadRequest as err:
+                raise HttpError(400, str(err))
+            return 200, {"ok": True, "to": to, "id": body.get("id")}
+        status, body = chat_call(dest, "/api/send", method="POST", payload=payload,
                                  timeout=10.0)
         if status != 200:
             return status, body

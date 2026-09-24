@@ -9,8 +9,9 @@ registry command with no handler stops the runner at start.
 
 Every handler is a plain synchronous function `(ctx, args) -> str` that
 returns the text the CLI would have printed, and never starts a
-subprocess: a peer send is an HTTP POST, everything else is a library
-call in this process.
+subprocess: a peer send is chat.send_message (a runner-lane peer is
+written in this process, a tmux-lane one gets an HTTP POST to its chat
+server), everything else is a library call in this process.
 
 `reply` is the only writer of chat.db on this lane. It routes by the
 live Turn: one thread, implicit; two, the destination must be named.

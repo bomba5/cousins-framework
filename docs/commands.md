@@ -367,7 +367,9 @@ EOF
 ```
 
 `cousin-chat` sends a message to another cousin (or an external peer), or
-lists who is addressable. Subcommands: `send SLUG TEXT [--from NAME]`, `list`.
+lists who is addressable. A runner cousin is written directly (its chat
+history and inbox, no chat server needed); a tmux cousin is reached
+through its chat server. Subcommands: `send SLUG TEXT [--from NAME]`, `list`.
 
 ```
 cousin-chat send kestrel "the greenhouse report is ready" --from Wren

@@ -1,7 +1,12 @@
-"""Cousin-to-cousin chat: send a message to a peer's chat server.
+"""Cousin-to-cousin chat: send a message to a peer.
 
 Targets resolve from the filesystem registry, so peer chat works with no
-other service running. The peer-visibility gate is bidirectional: a
+other service running. A local runner-lane peer (`[agent] runner`) is
+written directly, in this process: its chat store and its inbox, through
+server/chat_api.send, the same function its chat server's /api/send
+would run (phase 10a: a runner cousin needs no chat server to be
+reachable). A tmux-lane peer is still reached through its chat server's
+/api/send, until the tmux lane is gone. The peer-visibility gate is bidirectional: a
 cousin marked not peer-visible is absent from peer lists and sees no
 peers itself, because isolation that depends on the isolated party not
 looking is not isolation. Operator surfaces do not use this gate.
@@ -184,6 +189,21 @@ def _resolve(fw, dest_slug):
     raise NoContextError("no cousin %r in the registry" % dest_slug)
 
 
+def deliver_local(target, payload):
+    """One message to a local runner-lane cousin, in this process:
+    chat_api.send with the delivery the chat server itself would use.
+    `payload` is /api/send's body ({user, message}). Returns its body."""
+    from cousin_lib.server import chat_api
+    return chat_api.send(target, payload, deliver=chat_api.make_deliver(target))
+
+
+def is_local_runner(target):
+    """True for a local cousin on the runner lane (delivery reads the same
+    `[agent] runner`): reached in-process, never over HTTP."""
+    from cousin_lib import delivery
+    return isinstance(delivery.backend_for(target.home), delivery.InboxBackend)
+
+
 def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
                  guard=None):
     if sender is None or not sender.slug:
@@ -213,6 +233,8 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
             from cousin_lib.server.netguard import NetGuard
             guard = NetGuard.from_config(fw.root)
         return _post_external(target, payload, guard)
+    if is_local_runner(target):
+        return deliver_local(target, payload)
     url = "http://%s:%d/api/send" % (
         target.chat_host or "localhost",
         target.require_chat_port(),

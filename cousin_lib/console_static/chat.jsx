@@ -1304,19 +1304,26 @@ function highlightJson(text) {
 }
 
 // A JSON value within the pane's existing budget (`limit` characters of
-// its compact form): pretty-printed when it fits, else the compact form
-// cut, as the plain line always was.
+// its compact form): pretty-printed when it fits and its indentation does
+// not blow it up (deep nesting), else the compact form cut, as the plain
+// line always was.
 function rpJsonBlock(value, limit) {
   const compact = JSON.stringify(value);
   if (compact === undefined) return [];
-  return highlightJson(compact.length <= limit ? JSON.stringify(value, null, 2) : rpCut(compact, limit));
+  if (compact.length <= limit) {
+    const pretty = JSON.stringify(value, null, 2);
+    if (pretty.length <= limit * 3) return highlightJson(pretty);
+  }
+  return highlightJson(rpCut(compact, limit));
 }
 
 // Inline markdown: `code`, **bold**, *italic*, [label](http(s) url). A
-// link with any other scheme stays literal text.
+// link with any other scheme stays literal text. Every alternative's
+// repeat is bounded: the text is untrusted, and an unbounded group that
+// can fail late (a line of unclosed `[`) is quadratic in the line length.
 function mdInline(text) {
   const s = String(text == null ? "" : text);
-  const re = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|\*([^*\s](?:[^*\n]*?[^*\s])?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  const re = /`([^`\n]{1,2000})`|\*\*([^*\n]{1,2000}?)\*\*|\*([^*\s](?:[^*\n]{0,2000}?[^*\s])?)\*|\[([^\]\n]{1,300})\]\(([^)\s]{1,500})\)/g;
   const out = [];
   let last = 0, m;
   while ((m = re.exec(s)) !== null) {
@@ -1334,10 +1341,13 @@ function mdInline(text) {
 
 // Block markdown, one node per line: fenced code (```diff and a detected
 // diff get diff colors, ```json the JSON colors), headings, list items,
-// quotes, rules, paragraphs.
+// quotes, rules, paragraphs. Only the first RP_MD_MAX characters are
+// parsed; the rest follows as plain text.
+const RP_MD_MAX = 20000;
 function renderMarkdownLite(text) {
-  const src = String(text == null ? "" : text);
-  if (!src) return [];
+  const all = String(text == null ? "" : text);
+  if (!all) return [];
+  const src = all.slice(0, RP_MD_MAX);
   const lines = src.split("\n");
   const out = [];
   let i = 0;
@@ -1370,6 +1380,7 @@ function renderMarkdownLite(text) {
     }
     i++;
   }
+  if (all.length > RP_MD_MAX) out.push({ tag: "div", cls: "rp-md-rest", children: [all.slice(RP_MD_MAX)] });
   return out;
 }
 
@@ -1388,9 +1399,12 @@ function rpToolInput(input) {
 
 // A tool's output: JSON when it parses as JSON, a diff when it is one,
 // plain text otherwise; within runnerEventLine's 600-character budget.
+// Above RP_JSON_PARSE_MAX the JSON path is skipped (it would parse the
+// whole output to show 600 characters of it).
+const RP_JSON_PARSE_MAX = 65536;
 function rpToolOutput(text) {
   const s = String(text == null ? "" : text);
-  const t = s.trim();
+  const t = s.length <= RP_JSON_PARSE_MAX ? s.trim() : "";
   if (/^[\[{]/.test(t)) {
     try { return rpJsonBlock(JSON.parse(t), 600); } catch (e) { /* not JSON */ }
   }

@@ -346,6 +346,88 @@ process.stdout.write(JSON.stringify({tags: [...tags].sort(), texts, made}));
             self.assertIsNone(el["href"])
 
 
+class TestRunnerPaneHighlightingCost(unittest.TestCase):
+    """Review round 1: the text is untrusted and the pane's thread renders
+    it, so no input may cost more than linear time. The link alternative
+    was unbounded (a line of unclosed `[` was quadratic: 80 KB took about
+    5 s at a374601), and text events reached the markdown renderer with no
+    length cap."""
+
+    def setUp(self):
+        chat = (_STATIC / "chat.jsx").read_text()
+        self.src = chat[chat.index("function runnerEventLine("):
+                        chat.index("function RunnerPaneView(")]
+
+    def run_node(self, body):
+        out = subprocess.run(["node", "-e", self.src + body], capture_output=True,
+                             text=True, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_adversarial_markdown_renders_in_linear_time(self):
+        got = self.run_node(r"""
+const ms = (f) => { const t = process.hrtime.bigint(); f(); return Number(process.hrtime.bigint() - t) / 1e6; };
+const mixed = ["[`*a**b](x [*`", "[a](b", "**a*b`c[d", "`[**a [b](", "*a [b *c](d"]
+  .map(u => u.repeat(Math.ceil(50000 / u.length)).slice(0, 50000));
+process.stdout.write(JSON.stringify({
+  brackets: ms(() => renderMarkdownLite("[a".repeat(40000))),
+  textEvent: ms(() => runnerEventBody({kind: "text", payload: {text: "[a".repeat(40000)}})),
+  mixed: mixed.map(m => ms(() => renderMarkdownLite(m))),
+  // the regex bound alone, without the length cap in front of it
+  inlineBrackets: ms(() => mdInline("[a".repeat(40000))),
+  inlineLinks: ms(() => mdInline("[a](b".repeat(16000))),
+}));
+""")
+        self.assertLess(got["brackets"], 100, got)
+        self.assertLess(got["textEvent"], 100, got)
+        for t in got["mixed"]:
+            self.assertLess(t, 100, got)
+        self.assertLess(got["inlineBrackets"], 300, got)
+        self.assertLess(got["inlineLinks"], 300, got)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_long_text_is_parsed_up_to_the_cap_and_kept_after_it(self):
+        got = self.run_node(r"""
+const text = "**b**\n" + "x".repeat(30000) + "\n**tail**";
+const nodes = renderMarkdownLite(text);
+const flat = (n) => typeof n === "string" ? n : (n.children || []).map(flat).join("");
+const last = nodes[nodes.length - 1];
+process.stdout.write(JSON.stringify({
+  first: nodes[0].children[0].tag, lastCls: last.cls, lastTag: last.tag,
+  tail: flat(last).slice(-8), total: nodes.map(flat).join("").length,
+}));
+""")
+        self.assertEqual(got["first"], "strong")
+        self.assertEqual(got["lastCls"], "rp-md-rest")
+        self.assertEqual(got["tail"], "**tail**")      # plain text past the cap, not bold
+        self.assertEqual(got["total"], len("b") + 30000 + len("\n**tail**"))
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_json_is_not_parsed_above_the_threshold_nor_pretty_when_it_explodes(self):
+        got = self.run_node(r"""
+const cls = (nodes) => nodes.filter(n => typeof n === "object").map(n => n.cls);
+const big = JSON.stringify({rows: Array.from({length: 8000}, (_, i) => ({i, s: "row"}))});
+let parsed = 0;
+const orig = JSON.parse;
+JSON.parse = (t) => { parsed++; return orig(t); };
+const out = rpToolOutput(big);
+JSON.parse = orig;
+const deep = "[".repeat(100) + "]".repeat(100);
+const deepOut = runnerEventBody({kind: "tool_result", payload: {text: deep}});
+process.stdout.write(JSON.stringify({
+  bigLen: big.length, parsed, bigCls: cls(out), bigText: out.join("").length,
+  deepText: deepOut.map(n => typeof n === "string" ? n : n.children.join("")).join(""),
+}));
+""")
+        self.assertGreater(got["bigLen"], 65536)
+        self.assertEqual(got["parsed"], 0)
+        self.assertEqual(got["bigCls"], [])
+        self.assertEqual(got["bigText"], 600)
+        # 200 compact characters, about 10 KB pretty: stays compact
+        self.assertEqual(got["deepText"], "[" * 100 + "]" * 100)
+
+
 class TestFleetAndTokens(unittest.TestCase):
     def test_the_card_shows_the_runners_state_and_unsupported_items(self):
         cousins = (_STATIC / "cousins.jsx").read_text()

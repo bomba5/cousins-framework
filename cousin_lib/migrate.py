@@ -875,6 +875,27 @@ def fresh_packet(home):
     return generation
 
 
+
+def _runner_session_files(home):
+    """The runner lane's session state in a home: data/runner-session.json,
+    each side session's data/runner-session-<kind>.json, and the restart
+    mark (restart_note)."""
+    data = Path(home) / "data"
+    found = sorted(data.glob("runner-session*.json"))
+    mark = data / "runner-restart.json"
+    return found + ([mark] if mark.exists() else [])
+
+
+def _remove_all(paths):
+    gone = []
+    for path in paths:
+        try:
+            path.unlink()
+            gone.append(path.name)
+        except FileNotFoundError:
+            pass
+    return gone
+
 def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, release,
              new_packet=fresh_packet, force=False, sleep=time.sleep, clock=time.monotonic,
              **_unused):
@@ -963,6 +984,14 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
     from cousin_lib import handover
     if any((home / rel).exists() for rel in (handover.RECORD, handover.CONSUMED)):
         step("handover", lambda: handover.remove(home),
+             lambda gone: "removed %s" % ", ".join(gone), once=False)
+    # #107: what the runner lane kept of its session (the primary's and the
+    # side sessions' records, the restart mark) goes with it: a
+    # re-migration after this rollback starts a fresh session, with the
+    # handover first, instead of resuming the old runner session
+    lane_files = _runner_session_files(home)
+    if lane_files:
+        step("runner_session", lambda: _remove_all(lane_files),
              lambda gone: "removed %s" % ", ".join(gone), once=False)
     step("release", lambda: release(home),
          lambda _: "no runner hold left on the tmux cousin (run/held)")

@@ -327,8 +327,9 @@ lock for 10 seconds, and the chat server answers `/health`).
 written before the first step, and each step's outcome. `rollback <slug>
 --yes` undoes what ran: it stops the runner and waits until it lets go of
 its lock, puts the file back, has the supervisor rescan, writes a fresh
-boot packet, starts the tmux session unless it already runs, and releases
-the supervisor's hold on the runner (`run/held`). It refuses a second rollback,
+boot packet, starts the tmux session unless it already runs, removes the
+runner lane's session record (`data/runner-session*.json`, the restart
+mark), and releases the supervisor's hold on the runner (`run/held`). It refuses a second rollback,
 inbox rows still waiting and an inbox it cannot read (`--force` rolls back
 anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]`
 is the week's measure, from the migration on by default: inbox rows not

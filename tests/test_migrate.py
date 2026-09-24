@@ -442,6 +442,30 @@ class TestRollback(HermeticCase):
         self.assertEqual(_names(live)[-1], "release")
 
 
+class TestRollbackForgetsTheRunnerSession(HermeticCase):
+    def test_a_rollback_removes_what_the_runner_lane_kept_of_its_session(self):
+        """#107: the runner lane's session record outlived a rollback, so a
+        re-migration resumed the old runner session instead of a fresh
+        start, and #103's handover (a fresh session's first message) came
+        late. The tmux lane reads none of these files."""
+        root, home = _root(self)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
+        data = pathlib.Path(home) / "data"
+        kept = ("runner-session.json", "runner-session-peer.json", "runner-restart.json")
+        for name in kept:
+            (data / name).write_text('{"session_id": "s-runner", "lane": "login"}')
+        (data / "keep-me.json").write_text("{}")
+        rec = migrate.rollback(home, root=root, **live.kw())
+        for name in kept:
+            self.assertFalse((data / name).exists(), name)
+        self.assertTrue((data / "keep-me.json").exists())
+        step = [s for s in rec["rollback_steps"] if s["step"] == "runner_session"]
+        self.assertEqual(len(step), 1, rec["rollback_steps"])
+        for name in kept:
+            self.assertIn(name, step[0]["detail"])
+
+
 class TestReMigration(HermeticCase):
     def test_what_the_cousin_wrote_on_tmux_between_migrations_is_not_held(self):
         """Review round 2 N1: apply, rollback, writes on tmux, apply again:

@@ -11,6 +11,7 @@ import pathlib
 import shlex
 import tempfile
 import unittest
+from unittest import mock
 
 from cousin_lib import harness_settings
 from cousin_lib.harness_settings import (
@@ -301,6 +302,127 @@ class TestAttribution(SettingsCase):
         self._apply()
         data = self._read()
         self.assertTrue(all(not str(k).startswith("_cousin") for k in data))
+
+
+class TestAttributionCrashSafety(SettingsCase):
+    """Round 3 review: the two writes are ordered by DIRECTION, not
+    always the same way, so neither crash window ever needs a
+    claim-by-match to heal (round 2's claim-by-match reopened Critical
+    1: an operator's own pre-existing includeCoAuthoredBy: false got
+    adopted on a turn-off and then deleted on a later turn-on).
+    Turning off ADDS keys: the marker goes first (it can only ever
+    under-claim, never over-claim, across a crash). Turning on REMOVES
+    keys: settings.json goes first, and a stale marker claim is
+    reconciled away (_reconcile_owned) at the start of the next run.
+    Minor: the marker's write is skipped when its content did not
+    change, same as settings.json's own short-circuit."""
+
+    def _cousin_agent(self, extra):
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "testa"\n\n[agent]\n' + extra)
+
+    def _marker_path(self):
+        return harness_settings._marker_path(self.home)
+
+    def test_turn_off_crash_after_the_marker_before_settings_json_heals(self):
+        # the marker claims the keys it is about to add BEFORE
+        # settings.json is touched; a crash right there must still let
+        # the next run add exactly what was already claimed.
+        self._cousin_agent("commit_attribution = false\n")
+        with mock.patch.object(harness_settings, "_write_settings_file",
+                               side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self._apply()
+        self.assertEqual(json.loads(self._marker_path().read_text()),
+                         {"includeCoAuthoredBy": False,
+                          "attribution": {"commit": "", "pr": ""}})
+        self.assertFalse(settings_path(self.home).exists())   # never reached
+        self._apply()   # the real run: heals by adding what was claimed
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+
+    def test_turn_on_crash_after_settings_json_before_the_marker_heals(self):
+        # settings.json is written first on turn-on; a crash before the
+        # marker catches up leaves it claiming keys that are already
+        # gone. The next run must reconcile that away, not choke on it
+        # or resurrect the keys.
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()   # a normal off cycle: both keys claimed
+        stale = json.loads(self._marker_path().read_text())
+        self.assertIn("includeCoAuthoredBy", stale)
+        # simulate the crash: settings.json already has the keys
+        # removed (as turn-on's own write would leave them), the marker
+        # untouched - written directly, not through apply_project_settings,
+        # to model the process dying right after its settings.json write.
+        path = settings_path(self.home)
+        data = json.loads(path.read_text())
+        del data["includeCoAuthoredBy"]
+        del data["attribution"]
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        self.assertFalse(self._marker_path().exists())   # reconciled away
+        data = self._read()
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self.assertNotIn("attribution", data)
+
+    def test_operators_preexisting_identical_value_survives_off_then_on(self):
+        # Critical 1, reopened by round 2's claim-by-match: the operator
+        # already had includeCoAuthoredBy: false, with no marker entry,
+        # before this module ever ran. Off must never claim it; on must
+        # then have nothing of its own to remove.
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text(json.dumps({
+            "includeCoAuthoredBy": False,
+            "attribution": {"commit": "", "pr": ""},
+        }, indent=2) + "\n")
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        self.assertFalse(self._marker_path().exists())   # never claimed
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], False)   # untouched
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        data = self._read()   # still there: on had nothing owned to remove
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+
+    def test_a_crash_before_any_write_leaves_both_files_as_they_were(self):
+        # the reverse order: nothing this module touches happens before
+        # settings.json's own read+merge step, so a failure while
+        # building `data` (here: an unreadable settings.json) leaves the
+        # marker untouched too - there is nothing to roll back.
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text("{not json")
+        marker = self._marker_path()
+        marker.write_text(json.dumps({"includeCoAuthoredBy": False}))
+        before = marker.read_text()
+        self._cousin_agent("commit_attribution = true\n")
+        with self.assertRaises(SettingsError):
+            self._apply()
+        self.assertEqual(path.read_text(), "{not json")
+        self.assertEqual(marker.read_text(), before)
+
+    def test_the_marker_write_is_skipped_when_unchanged(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        before_mtime = self._marker_path().stat().st_mtime_ns
+        before_bytes = self._marker_path().read_bytes()
+        with mock.patch("tempfile.mkstemp") as mkstemp:
+            self._apply()
+        mkstemp.assert_not_called()
+        self.assertEqual(self._marker_path().stat().st_mtime_ns, before_mtime)
+        self.assertEqual(self._marker_path().read_bytes(), before_bytes)
+
+    def test_the_marker_write_still_happens_when_it_changed(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        self.assertFalse(self._marker_path().exists())
 
 
 class TestHooksDir(unittest.TestCase):

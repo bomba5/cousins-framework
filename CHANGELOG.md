@@ -56,7 +56,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   straight into the account's `auth.json` (0600, merged, tmp + rename),
   never through chat; `--method <label> [--via <slug>]` runs an OAuth
   method through the pty and relays its URL and instruction line one way
-  (opencode 1.18.31 takes no code back). Refused: the provider `anthropic`
+  (opencode 1.18.31 takes no code back; another vendor's subscription in a
+  client it did not write is the user's terms risk). Refused: the provider `anthropic`
   by key or by OAuth, the provider `opencode`, anything naming the
   Claude-subscription bridge.
 - The image's opencode variant: `--target opencode` adds the pinned

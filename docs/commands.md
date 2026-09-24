@@ -128,6 +128,11 @@ flags on any other kind of account. The binary is `COUSIN_OPENCODE_BIN`
 (an absolute path), else `opencode` on `PATH`. `--timeout` bounds the wait
 for an OAuth login.
 
+An OAuth `--method` puts another vendor's subscription (a ChatGPT plan, for
+example) into a client that vendor did not write: the terms risk of doing so
+is the user's, as it is for a Claude login on the SDK lane. An API key or a
+local model carries no such risk.
+
 ```
 cousin-account login keyed --provider openai --key-file ~/keys/openai.key
 pass show openai | cousin-account login keyed --provider openai

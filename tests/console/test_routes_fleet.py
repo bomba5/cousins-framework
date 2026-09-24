@@ -591,6 +591,69 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(self.post("/api/cousins/nobody/model",
                                    {"model": "m"})[0], 404)
 
+    def test_a_runner_cousins_effort_goes_to_agent_where_the_runner_reads_it(self):
+        """#100: the runner reads [agent] model and effort, never [runtime]:
+        the console's change of a runner-lane cousin did nothing."""
+        home = self.cousin("wren", extra='\n[runtime]\nsession_id = "abc"\n'
+                                         '\n[agent]\nrunner = "sdk"\n')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/effort", {"effort": "max"})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["restart_required"])
+        data = tomllib.loads((home / "cousin.toml").read_text())
+        self.assertEqual(data["agent"]["effort"], "max")
+        self.assertNotIn("effort", data["runtime"])
+        self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["effort"], "max")
+        self.assertEqual(self.post("/api/cousins/wren/effort", {"effort": "ultra"})[0], 400)
+
+    def test_a_runner_cousins_model_is_validated_by_one_turn_before_it_is_written(self):
+        """As migrate does (NEVER_UNRUN): one smallest turn with the model on
+        the cousin's own account; a failure is the API's words, nothing
+        written."""
+        from unittest import mock
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\neffort = "low"\n')
+        self.serve()
+        seen = []
+
+        def passes(account, root, *, model=None, effort=None):
+            seen.append((account.name, model, effort))
+            return 0, "validate: ok"
+        with mock.patch("cousin_lib.runner.sdk.validate_account", passes):
+            status, body = self.post("/api/cousins/wren/model", {"model": "m-two"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(seen, [("host", "m-two", "low")])
+        self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
+                         "m-two")
+        self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["model"], "m-two")
+        with mock.patch("cousin_lib.runner.sdk.validate_account",
+                        lambda *a, **k: (4, "model not_a_model: not_found_error")):
+            status, body = self.post("/api/cousins/wren/model", {"model": "not_a_model"})
+        self.assertEqual(status, 400, body)
+        self.assertIn("not_found_error", body["error"])
+        self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
+                         "m-two")
+
+    def test_an_opencode_cousins_model_takes_the_lanes_checks_and_no_effort(self):
+        (self.root / "config" / "accounts.toml").write_text(
+            '[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "opencode"\naccount = "oc"\n'
+                                         'model = "openai/gpt-4o"\n')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/model", {"model": "openai/gpt-5"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
+                         "openai/gpt-5")
+        for bad, needle in (("openai/claude-proxy", "Agent SDK"), ("mistral/large", "keys for"),
+                            ("gpt-5", "provider")):
+            status, body = self.post("/api/cousins/wren/model", {"model": bad})
+            self.assertEqual(status, 400, (bad, body))
+            self.assertIn(needle, body["error"])
+        status, body = self.post("/api/cousins/wren/effort", {"effort": "high"})
+        self.assertEqual(status, 400, body)
+        self.assertIn("sdk", body["error"])
+        self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
+                         "openai/gpt-5")
+
     def test_spawn_options_without_a_harness_file(self):
         from cousin_lib.config import DEFAULT_MODELS, EFFORT_LEVELS
         self.serve()

@@ -281,6 +281,26 @@ def server_env(account, root, *, home, environ=None, models_fetch=True):
     return env
 
 
+def check_model(account, model, what="model"):
+    """`model` is one this opencode account can run: not named for Claude
+    (ruling P9-1), "<provider>/<model>", on the account's endpoint or one of
+    its providers. RunnerError naming the key. The runner checks both of its
+    models at construction; the console checks a model change (#100)."""
+    try:
+        accounts.refuse_claude_name("cousin.toml [agent] %s" % what, model)
+    except accounts.AccountsError as err:
+        raise RunnerError(str(err))
+    provider, _ = split_model(model, what)
+    if account.endpoint and provider != ENDPOINT_PROVIDER:
+        raise RunnerError("cousin.toml [agent] %s %r: account %s is a local endpoint,"
+                          " rendered as provider %r: name \"%s/%s\""
+                          % (what, model, account.name, ENDPOINT_PROVIDER,
+                             ENDPOINT_PROVIDER, account.endpoint_model))
+    if account.providers and provider not in account.providers:
+        raise RunnerError("cousin.toml [agent] %s %r: account %s holds keys for %s only"
+                          % (what, model, account.name, ", ".join(account.providers)))
+
+
 def foreign_config_sources(account, root, home):
     """The config sources opencode would merge or load over the rendered
     file: anything in its global config dir but CONFIG_DIR_OWN, and
@@ -582,20 +602,7 @@ class OpencodeRunner:
     def _check_models(self):
         """Both models well formed, on a provider this account reaches."""
         for what, model in (("model", self.model), ("small_model", self.small_model)):
-            try:
-                accounts.refuse_claude_name("cousin.toml [agent] %s" % what, model)
-            except accounts.AccountsError as err:
-                raise RunnerError(str(err))
-            provider, _ = split_model(model, what)
-            if self.account.endpoint and provider != ENDPOINT_PROVIDER:
-                raise RunnerError("cousin.toml [agent] %s %r: account %s is a local endpoint,"
-                                  " rendered as provider %r: name \"%s/%s\""
-                                  % (what, model, self.account.name, ENDPOINT_PROVIDER,
-                                     ENDPOINT_PROVIDER, self.account.endpoint_model))
-            if self.account.providers and provider not in self.account.providers:
-                raise RunnerError("cousin.toml [agent] %s %r: account %s holds keys for %s only"
-                                  % (what, model, self.account.name,
-                                     ", ".join(self.account.providers)))
+            check_model(self.account, model, what)
 
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})

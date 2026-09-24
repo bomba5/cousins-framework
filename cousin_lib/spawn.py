@@ -713,6 +713,69 @@ def persist_runtime(home, key, value):
 
 
 
+
+def runner_lane(home):
+    """The cousin's [agent] runner (sdk, fake, opencode), or None for a
+    tmux cousin."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    runner = (data.get("agent") or {}).get("runner")
+    return runner if isinstance(runner, str) and runner else None
+
+
+def persist_agent_value(home, key, value, *, root=None):
+    """Set a runner-lane cousin's [agent] model or effort, the keys its
+    runner reads (#100; [runtime] is the tmux lane's and the runner never
+    reads it). Validated per lane, as migrate validates what it writes:
+    effort is one of the levels and only the sdk lane uses it; an sdk model
+    must pass one smallest turn on the cousin's own account (the runner's
+    validate_account: NEVER_UNRUN), an opencode model the lane's own checks
+    (ruling P9-1, "<provider>/<model>", a provider the account holds). A
+    refusal is a SpawnError with the reason; nothing is written then."""
+    from cousin_lib import accounts, migrate
+    from cousin_lib.config import FrameworkConfig
+    home = Path(home)
+    check_runtime_value(key, value)
+    lane = runner_lane(home)
+    if lane is None:
+        raise SpawnError("%s is a tmux cousin: its %s is [runtime]'s" % (home.name, key))
+    data = tomllib.loads((home / "cousin.toml").read_text())
+    agent = data.get("agent") or {}
+    root = Path(root) if root is not None else FrameworkConfig.root_from_home(home)
+    if key == "effort" and lane != "sdk":
+        raise SpawnError("effort applies to the sdk lane only; %s runs on %s" % (home.name, lane))
+    if key == "model" and lane in ("sdk", "opencode"):
+        try:
+            account = accounts.for_cousin(home, root)
+        except accounts.AccountsError as err:
+            raise SpawnError(str(err))
+        if lane == "opencode":
+            from cousin_lib.runner import opencode
+            from cousin_lib.runner.base import RunnerError
+            try:
+                opencode.check_model(account, value)
+            except RunnerError as err:
+                raise SpawnError(str(err))
+        else:
+            from cousin_lib.runner import sdk
+            try:
+                rc, line = sdk.validate_account(account, root, model=value,
+                                                effort=agent.get("effort"))
+            except Exception as err:  # noqa: BLE001 - a validation that cannot run did not pass
+                rc, line = 2, "validate: %s: %s" % (type(err).__name__, err)
+            if rc != 0:
+                raise SpawnError("model %s did not pass one turn on account %s: %s"
+                                 % (value, account.name, line))
+    previous = agent.get(key)
+    path = home / "cousin.toml"
+    text = migrate.set_agent_keys(path.read_text(), {key: value})
+    migrate._write_toml(home, text.encode("utf-8"), path.stat().st_mode & 0o777)
+    if previous != value:
+        framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"
+                        % (key, previous or "(the CLI's default)", value))
+
 # The identity keys the console edits in place, by the name its routes
 # use: (table, key) in cousin.toml.
 IDENTITY_KEYS = {

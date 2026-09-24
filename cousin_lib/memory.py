@@ -16,6 +16,7 @@ import hashlib
 import json
 import re
 import os
+import shlex
 import sys
 import zlib
 from collections import Counter, defaultdict
@@ -358,6 +359,30 @@ def live_entries(home, *, at=None):
         start, end = ts(row["valid_from"]), ts(row["valid_to"]) if row["valid_to"] else None
         if (start is None or start <= moment) and (end is None or moment < end):
             out.append(row)
+    return out
+
+
+def tensions(home):
+    """Topics whose live claims disagree, for the operator to settle:
+    an authored topic (not the framework's own log, distill.MACHINE_PREFIXES)
+    with two or more live claims of different content (whitespace aside).
+    Whether two claims are opposite is not judged here: a correction or a
+    "RESOLVED" beside the claim it resolves is the usual case, and settling
+    one (mark_obsolete with its `entry`) clears the tension. Newest first:
+    [{"topic", "claims": [row, ...]}], each claim a `validity` row."""
+    from cousin_lib import distill
+    by_topic = {}
+    for row in live_entries(home):
+        topic = str(row.get("topic") or "").strip()
+        if distill.is_machine_topic(topic):
+            continue
+        by_topic.setdefault(topic, []).append(row)
+    out = []
+    for topic, claims in by_topic.items():
+        words = {" ".join(str(c.get("content") or "").split()) for c in claims}
+        if len(claims) >= 2 and len(words) >= 2:
+            out.append({"topic": topic, "claims": claims})
+    out.sort(key=lambda t: max(entry_timestamp(c) or 0.0 for c in t["claims"]), reverse=True)
     return out
 
 
@@ -843,6 +868,26 @@ def _cmd_history(args):
     return 0
 
 
+def _cmd_tensions(args):
+    """Topics whose live claims disagree, and how to settle one."""
+    home = _home(args)
+    found = tensions(home)
+    if args.json:
+        print(json.dumps(found, indent=1, default=str))
+        return 0
+    if not found:
+        print("no tensions")
+        return 0
+    for t in found:
+        print("%s (%d live claims)" % (t["topic"], len(t["claims"])))
+        for c in t["claims"]:
+            print("  %s [%s] %s" % (c["id"], str(c["valid_from"] or "?")[:16],
+                                   " ".join(str(c.get("content", "")).split())[:200]))
+        print("  settle: cousin-memory obsolete %s --why \"...\" --entry <id>"
+              % shlex.quote(t["topic"]))
+    return 0
+
+
 def _cmd_recall(args):
     home = _home(args)
     keyword = (args.keyword or "").lower()
@@ -1138,6 +1183,12 @@ def memory_main(argv=None):
                    help="retire one entry of the topic by its id (cousin-memory history"
                         " lists them); the topic stays in the views")
     p.set_defaults(func=_cmd_obsolete)
+    p = sub.add_parser(
+        "tensions",
+        help="topics whose live claims disagree (two or more live claims of"
+             " different content on an authored topic), each with how to settle it")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=_cmd_tensions)
     p = sub.add_parser(
         "history",
         help="a topic's claims, oldest first, each with its id and valid time"

@@ -12,6 +12,8 @@ confined to the cousin home by cousin_lib.home_files; the harness
 layer reads its own configured directory the same way."""
 from __future__ import annotations
 
+import json
+
 import time
 from pathlib import Path
 
@@ -131,6 +133,14 @@ def register():
         except home_files.PathRefused as err:
             raise refused(err)
 
+    @router.route("GET", "/api/memory/{slug}/tensions")
+    def tensions(req, slug):
+        """Topics whose live claims disagree (memory.tensions), for the
+        operator to settle with an entry-level obsolete."""
+        from cousin_lib import memory
+        home = cousin_home(req.server, slug)
+        return 200, {"tensions": json.loads(json.dumps(memory.tensions(home), default=str))}
+
     @router.route("GET", "/api/memory/{slug}/trash")
     def trash(req, slug):
         home = cousin_home(req.server, slug)
@@ -177,21 +187,26 @@ def register():
 
     @router.route("POST", "/api/memory/{slug}/obsolete")
     def obsolete(req, slug):
-        """{"topic", "why", "force"?}: append an L5_OBSOLETE entry for the
-        topic, recorded as by the logged-in user, then regenerate the
-        distilled views (which leave the topic out until a later entry
-        revives it). Nothing is removed from raw."""
+        """{"topic", "why", "force"?, "entry"?}: append an L5_OBSOLETE entry
+        for the topic, recorded as by the logged-in user, then regenerate
+        the distilled views (which leave the topic out until a later entry
+        revives it). With `entry` (a claim's id, from the tensions list)
+        the mark retires that one claim and the topic stays. Nothing is
+        removed from raw."""
         from cousin_lib import distill, memory
 
         home = cousin_home(req.server, slug)
         topic = req.body.get("topic")
         why = req.body.get("why")
+        claim = req.body.get("entry")
         if not isinstance(topic, str) or not isinstance(why, str):
             raise HttpError(400, "topic and why must be strings")
+        if claim is not None and not isinstance(claim, str):
+            raise HttpError(400, "entry must be a claim id string")
         try:
             entry = memory.mark_obsolete(home, topic, why, by=_who(req),
                                          force=_flag(req.body.get("force")),
-                                         source="console")
+                                         source="console", entry=claim or None)
         except memory.ObsoleteRefused as err:
             raise HttpError(400, str(err))
         effects = {"distilled": False}

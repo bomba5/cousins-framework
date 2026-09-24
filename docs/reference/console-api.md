@@ -517,6 +517,10 @@ Query `layer`: `active`, `index`, `distilled`, `memory`, `notes`, `harness` or `
 
 Query `path`, `start`, `count`, and `layer=harness` to read from the harness auto-memory directory (`404` if none is configured). Same answer as [the file reader](#get-apicousinsslugfilesread).
 
+### `GET /api/memory/<slug>/tensions`
+
+`{"tensions": [{"topic", "claims": [...]}]}`, newest first: the cousin's authored topics with two or more live claims of different content (`cousin-memory tensions`). Each claim is a raw entry with its `id`, `valid_from` and `valid_to` (null while live). Nothing judges whether the claims are opposite; the operator settles a tension by retiring one claim, `cousin-memory obsolete <topic> --why <reason> --entry <id>` or `POST /api/memory/<slug>/obsolete` with `entry`.
+
 ### `GET /api/memory/<slug>/trash`
 
 `{"batches": [{"id", "deleted_at", "by", "items"}]}`, newest first. An item is `{"kind": "line", "path", "line_no", "sha", "line"}` or `{"kind": "file", "path", "size"}`.
@@ -537,7 +541,7 @@ The batch lands in `<home>/memory/.trash/<id>/` with one audit line per item in 
 
 ### `POST /api/memory/<slug>/obsolete`
 
-Body `{"topic": "...", "why": "...", "force": false}`. Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
+Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
 
 ### `POST /api/memory/<slug>/restore`
 

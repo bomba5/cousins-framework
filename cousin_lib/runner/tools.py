@@ -99,7 +99,9 @@ def _m_obsolete(ctx, a):
     # of printed so nothing reaches this process's stdout.
     from cousin_lib import distill, memory
     topic, why = _str(a, "topic"), _str(a, "why")
-    memory.mark_obsolete(ctx.home, topic, why, force=bool(a.get("force")), by=ctx.slug)
+    # `entry` retires one claim by its id (`tensions`/`history` list them)
+    memory.mark_obsolete(ctx.home, topic, why, force=bool(a.get("force")), by=ctx.slug,
+                         entry=_str(a, "entry") or None)
     lines = ["Marked obsolete [%s]: %s" % (topic.strip(), " ".join(why.split()))]
     report = distill.distill(Path(ctx.home))
     lines.append("distilled %d topics from %d raw entries:"

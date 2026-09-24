@@ -40,6 +40,7 @@ level = { type = "string", optional = true, enum = ["operator", "framework", "to
 cite = { type = "string", optional = true, description = "where it comes from: chat message id, quote, file, date (decide, remember); required for level operator" }
 why = { type = "string", description = "what superseded the topic (obsolete); required, non-empty" }
 force = { type = "boolean", description = "mark a topic that has no raw entries yet (obsolete)" }
+entry = { type = "string", optional = true, description = "retire one claim of the topic by its id, from `tensions` or `history`; the topic stays (obsolete)" }
 keyword = { type = "string", optional = true, description = "what to recall; empty lists the newest entries (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
 text = { type = "string", description = "what you are doing now (activity)" }
@@ -60,7 +61,7 @@ options = { level = "--level", cite = "--cite" }
 
 [tools.memory.commands.obsolete]
 argv = ["obsolete", "{topic}"]
-options = { why = "--why", force = "--force" }
+options = { why = "--why", force = "--force", entry = "--entry" }
 
 [tools.memory.commands.recall]
 argv = ["recall", "{keyword}"]

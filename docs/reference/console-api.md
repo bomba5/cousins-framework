@@ -696,7 +696,7 @@ The same for one cousin (`?all=1` for its history, 100 at most).
 
 ### `POST /api/system/users`
 
-`{"name", "password"}`: a new console user (letters, digits and `._@-`, a password of 8 or more characters). `201 {"ok": true, "user", "users"}`; `409` the user exists. The first user closes the console to everyone without a session, so that request is also logged in as it (`Set-Cookie`, `"logged_in": true`). The password is never returned or logged.
+`{"name", "password"}`: a new console user. The name is taken as `cousin-console adduser` takes it (any non-empty string without NUL, kept exactly; percent-encode it in a path); the password is 8 or more characters, kept as typed. `201 {"ok": true, "user", "users"}`; `409` the user exists. The first user closes the console to everyone without a session, so that request is also logged in as it (`Set-Cookie`, `"logged_in": true`). The password is never returned or logged.
 
 ### `POST /api/system/users/<name>/password`
 
@@ -708,28 +708,28 @@ The same for one cousin (`?all=1` for its history, 100 at most).
 
 ### `POST /api/system/backup`
 
-`{"dest": "/abs/dir", "slugs": ["wren"] | "all"}`: `cousin-backup` for each cousin, each a long operation (`kind: "backup"`, `GET /api/cousins/<slug>/op`, the `cousin-op` event) and a `backup` row in the jobs store. `dest` must be absolute, an existing directory the console can write, and neither it nor any `<dest>/<slug>` may resolve inside the root's `cousins/`, `config/` or `.secrets/` (`400` otherwise). `202 {"ok": true, "dest", "ops": {slug: op}, "busy": {slug: reason}}`; `409` when every cousin asked for is busy. A snapshot lands in `<dest>/<slug>/<YYYY-MM-DD>/`.
+`{"dest": "/abs/dir", "slugs": ["wren"] | "all"}`: `cousin-backup` for each cousin, each a long operation (`kind: "backup"`, `GET /api/cousins/<slug>/op`, the `cousin-op` event) and a `backup` row in the jobs store. `dest` must be absolute, an existing directory the console can write, and neither it nor any `<dest>/<slug>` may resolve (symlinks followed) inside the install root at all (`400` otherwise). `<dest>/<slug>` is created `0700` before the snapshot and checked again, and every directory under it ends `0700`, every file `0600`. `202 {"ok": true, "dest", "ops": {slug: op}, "busy": {slug: reason}}`; `409` when every cousin asked for is busy. A snapshot lands in `<dest>/<slug>/<YYYY-MM-DD>/`.
 
 ### `GET /api/system/config`
 
 The install config files, each `{"path", "exists", "error", "applies", "restart"}` plus its values:
 
-- `media`: `kinds.<image|voice|video>` = `{url, model, timeout_s, key_file, key: {set, last4, error}}` or null;
+- `media`: `kinds.<image|voice|video>` = `{url, model, timeout_s, key_file, key: {set, last4, error}}` or null; `key` is read as media reads it (a plain read under the root);
 - `embedding`, `hive`: `values` by key (`recall.min_score` for a subtable key);
-- `peers`: `peers.<slug>` = `{url, send_path, name, sender, reach, token_file, inbound_token_file, token, inbound_token, shadowed, unknown_reach}`;
+- `peers`: `peers.<slug>` = `{url, send_path, name, sender, reach, token_file, inbound_token_file, token, inbound_token, shadowed, unknown_reach}`; a token is read as `chat.read_secret` reads it, so a file group or others can read shows its refusal in `error`;
 - `outbound_filter`, `law`: `{content, sha}`;
 - `allowlist`: `{allow, sha, client, builtin}`, and `restart` naming the console and the chat servers;
 - `commands`: `agent-cmd` and `worker-cmd` as `{path, exists, content}`, shown only: no route writes them.
 
-A secret's value is never in the answer: `{set, last4}` only, `last4` for a value of 16 characters or more.
+A secret's value is never in the answer: `{set, last4, error}` only, `last4` for a value of 16 characters or more. A key or token file outside `config/` is never read (`set: null`).
 
 ### `POST /api/system/config/<name>`
 
-`<name>` is `media`, `embedding`, `hive` or `peers`. `{"changes": [{"table", "key", "value"}], "remove_tables": [...]}`: `table` is `""` for a top-level key, `image`/`voice`/`video` for media, `recall` or `options` for embedding, `peers.<slug>` for a peer; a `null` or `""` value removes the key. Only the keys the editor lists are accepted (`url`, `model`, `timeout_s` for media; the documented keys for the others); a path to a secret (`key_file`, `token_file`, `inbound_token_file`) is never set here. The edited text is checked by the file's own loader (`hive.hive_config`, `chat.load_external_peers`, the embedding reader, which needs `url`) and written through `toml_edit`, every other line kept, the file created `0600` when absent. `200 {"ok": true, "file"}`; `400` with the loader's reason; `404` another name.
+`<name>` is `media`, `embedding`, `hive` or `peers`. `{"changes": [{"table", "key", "value"} | {"table", "key", "remove": true}], "remove_tables": [...]}`: `table` is `""` for a top-level key, `image`/`voice`/`video` for media, `recall` or `options` for embedding, `peers.<slug>` for a peer. A key is removed only by `"remove": true`: a missing, `null`, empty or non-finite value is `400`, so a mistyped number never deletes the key. A table in `remove_tables` that the file defines without a `[table]` header of its own (an inline table, dotted keys) is `400`: remove it by hand. Only the keys the editor lists are accepted (`url`, `model`, `timeout_s` for media; the documented keys for the others); a path to a secret (`key_file`, `token_file`, `inbound_token_file`) is never set here. The edited text is checked by the file's own loader (`hive.hive_config`, `chat.load_external_peers`, the embedding reader, which needs `url`) and written through `toml_edit`, every other line kept, the file created `0600` when absent. `200 {"ok": true, "file"}`; `400` with the loader's reason; `404` another name.
 
 ### `POST /api/system/config/<name>/<target>/secret`
 
-`{"value", "which"?}`: a media kind's key (`<name>` `media`, `<target>` the kind) or a peer's token (`peers`, the peer's slug, `which` `outbound` or `inbound`). Written by `secrets.write_secret_file` to `config/media-keys/<kind>.key` or `config/peer-tokens/<slug>[.inbound].token` (`0600` in a `0700` directory), then `key_file`, `token_file` or `inbound_token_file` points at it. `200 {"ok": true, "secret": {set, last4, error}}`; `400` a value that is not one printable line; `404` a peer that is not in the file.
+`{"value", "which"?}`: a media kind's key (`<name>` `media`, `<target>` the kind) or a peer's token (`peers`, the peer's slug, `which` `outbound` or `inbound`). Written by `secrets.write_secret_file` to `config/media-keys/<kind>.key` or `config/peer-tokens/<slug>[.inbound].token` (`0600` in a `0700` directory), then `key_file`, `token_file` or `inbound_token_file` points at it. When that TOML write fails, the secret file is put back as it was. `200 {"ok": true, "secret": {set, last4, error}}`; `400` a value that is not one printable line; `404` a peer that is not in the file.
 
 ### `POST /api/system/config/<name>/<target>/secret/clear`
 
@@ -737,7 +737,7 @@ Removes the key from the file and deletes the secret file when it is the one thi
 
 ### `POST /api/system/outbound-filter`
 
-`{"content", "base_sha"}`: the whole of `config/outbound-filter.json`, refused (`400`) unless it is `{"terms", "protected", "trusted_peers": [strings], "surfaces": {name: {"add": [strings]}}}` with no other key: the filter's loader would read anything else as an inert filter. `409` when the file changed since `base_sha` was read. The old file is copied to `data/config-backups/` first (the last 20 kept). `200 {"ok": true, "backup", "sha"}`.
+`{"content", "base_sha"}`: the whole of `config/outbound-filter.json`, refused (`400`) unless it is a JSON object whose `terms`, `protected` and `trusted_peers` are lists of non-empty strings and whose `surfaces` maps each name to an object with an `add` list of them: the loader reads an unparsable file as an inert filter and a string as its characters. Keys it ignores are kept. `409` when the file changed since `base_sha` was read. The old file is copied to `data/config-backups/` first (the last 20 kept). `200 {"ok": true, "backup", "sha"}`.
 
 ### `POST /api/system/law`
 
@@ -753,7 +753,7 @@ Removes the key from the file and deletes the secret file when it is the one thi
 
 ### `POST /api/system/agent-defaults`
 
-Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean); `null` removes the key. Checked by `config.agent_config`, `commit_attribution` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
+Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean), and `"remove": [keys]` to drop keys; a `null` or empty value is `400`. Checked by `config.agent_config`, `commit_attribution` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
 
 ## `GET /api/events`
 

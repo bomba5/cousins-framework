@@ -77,6 +77,12 @@ class RemoveTable(unittest.TestCase):
     def test_an_absent_table_changes_nothing(self):
         self.assertEqual(toml_edit.remove_table(PEERS, "peers.none"), PEERS)
 
+    def test_a_table_without_a_header_of_its_own_is_refused(self):
+        for text in ('[peers]\nkestrel = {url = "x"}\n', '[peers]\nkestrel.url = "x"\n',
+                     'peers.kestrel.url = "x"\n'):
+            with self.assertRaises(ValueError, msg=text):
+                toml_edit.remove_table(text, "peers.kestrel")
+
     def test_a_bad_name_is_refused(self):
         with self.assertRaises(ValueError):
             toml_edit.remove_table(PEERS, "peers.a b")

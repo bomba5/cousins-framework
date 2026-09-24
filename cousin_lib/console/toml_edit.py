@@ -281,8 +281,10 @@ def _without_table(doc, table, prune):
 def remove_table(text, table):
     """Return the text without `[table]`: its header and its body up to
     its last key (a comment or blank after that stays, it may introduce
-    the next table). An absent table changes nothing. The result must
-    read back as the document without that table, else ValueError."""
+    the next table). An absent table changes nothing; one the document
+    defines without a `[table]` header of its own is ValueError. The
+    result must read back as the document without that table, else
+    ValueError."""
     if table == "":
         raise ValueError("the root table cannot be removed")
     _check_table(table)
@@ -293,6 +295,11 @@ def remove_table(text, table):
         raise ValueError("cannot find the statements of this file")
     found = _table_body(statements, table)
     if found is None:
+        present, _value = _lookup(before, *table.rsplit(".", 1)) if "." in table \
+            else (table in before, None)
+        if present:
+            raise ValueError("[%s] is defined without a header of its own (an inline"
+                             " table or dotted keys); remove it by hand" % table)
         return text
     (hi, hj, _h), body = found
     end = hj

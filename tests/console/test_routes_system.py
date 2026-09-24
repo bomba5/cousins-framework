@@ -8,6 +8,7 @@ import os
 import stat
 import tempfile
 import time
+import urllib.parse
 import tomllib
 from pathlib import Path
 from unittest import mock
@@ -248,10 +249,25 @@ class Users(ConsoleCase):
     def test_a_short_password_a_bad_name_and_a_duplicate_are_refused(self):
         self.setup_users("ana")
         for payload, code in (({"name": "bo", "password": "short"}, 400),
-                              ({"name": "b o", "password": "long-enough"}, 400),
+                              ({"name": "", "password": "long-enough"}, 400),
+                              ({"name": "a\x00b", "password": "long-enough"}, 400),
+                              ({"name": 7, "password": "long-enough"}, 400),
                               ({"name": "ana", "password": "long-enough"}, 409)):
             status, _ = self.post("/api/system/users", payload)
             self.assertEqual(status, code, payload)
+
+    def test_any_name_adduser_takes_is_taken_and_reached_by_its_path(self):
+        self.setup_users("ana")
+        for name in ("Bo Hansen", "x/y", "ele.na+1"):
+            status, body = self.post("/api/system/users", {"name": name, "password": "long-enough"})
+            self.assertEqual(status, 201, (name, body))
+            quoted = urllib.parse.quote(name, safe="")
+            status, body = self.post("/api/system/users/%s/password" % quoted,
+                                     {"password": "  spaced pw  "})
+            self.assertEqual(status, 200, (name, body))
+            self.assertTrue(auth.Users(self.users_file()).verify(name, "  spaced pw  "))
+            status, body = self.post("/api/system/users/%s/remove" % quoted, {"confirm": name})
+            self.assertEqual(status, 200, (name, body))
 
     def test_a_removed_users_session_ends(self):
         self.setup_users("ana", "bo")
@@ -319,6 +335,39 @@ class Backup(ConsoleCase):
             self.assertEqual(status, 400, (dest, body))
         self.assertEqual(os.listdir(self.root / "config"), [])
 
+    def test_a_destination_inside_the_root_is_refused(self):
+        self.cousin("wren")
+        (self.root / "backups").mkdir()
+        self.serve()
+        status, body = self.post("/api/system/backup",
+                                 {"dest": str(self.root / "backups"), "slugs": ["wren"]})
+        self.assertEqual(status, 400, body)
+        self.assertEqual(os.listdir(self.root / "backups"), [])
+
+    def test_a_slug_dir_linked_into_the_root_is_refused(self):
+        self.cousin("wren")
+        dest = self.dest()
+        os.symlink(self.root / "cousins" / "wren", Path(dest) / "wren")
+        self.serve()
+        status, body = self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
+        self.assertEqual(status, 400, body)
+
+    def test_the_snapshot_is_owner_only(self):
+        home = self.cousin("wren")
+        (home / "MEMORY.md").write_text("# memory\n")
+        os.chmod(home / "MEMORY.md", 0o644)
+        (home / "memory" / "fact.md").write_text("x\n")
+        dest = self.dest()
+        self.serve()
+        status, body = self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
+        self.assertEqual(status, 202, body)
+        op = wait_op(self, "wren")
+        self.assertEqual(op["status"], "done", op)
+        top = Path(dest) / "wren"
+        for path in [top] + list(top.rglob("*")):
+            want = 0o700 if path.is_dir() else 0o600
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), want, path)
+
     def test_a_snapshot_dir_may_not_land_in_the_live_root(self):
         self.cousin("config")  # a slug named like a protected directory
         self.serve()
@@ -356,7 +405,8 @@ class TomlConfig(ConsoleCase):
         return self.root / "config" / name
 
     def change(self, name, changes, removes=None):
-        body = {"changes": [dict(table=t, key=k, value=v) for t, k, v in changes]}
+        body = {"changes": [dict(table=t, key=k, remove=True) if v is None
+                            else dict(table=t, key=k, value=v) for t, k, v in changes]}
         if removes:
             body["remove_tables"] = removes
         return self.post("/api/system/config/%s" % name, body)
@@ -384,6 +434,33 @@ class TomlConfig(ConsoleCase):
         status, body = self.change("peers", [("peers.kestrel", "token_file", "x")])
         self.assertEqual(status, 400, body)
         self.assertFalse(self.cfg("media.toml").exists())
+
+    def test_a_key_goes_only_on_an_explicit_remove(self):
+        self.cfg("media.toml").write_text('[image]\nurl = "http://h/i"\ntimeout_s = 60\n')
+        self.serve()
+        for value in (None, "", "abc", float("nan")):
+            body = {"changes": [{"table": "image", "key": "timeout_s", "value": value}]}
+            if value != value:
+                raw = '{"changes": [{"table": "image", "key": "timeout_s", "value": NaN}]}'
+                status, resp = self.request("POST", "/api/system/config/media", raw)
+            else:
+                status, resp = self.post("/api/system/config/media", body)
+            self.assertEqual(status, 400, (value, resp))
+        status, resp = self.post("/api/system/config/media", {"changes": [
+            {"table": "image", "key": "timeout_s"}]})
+        self.assertEqual(status, 400, resp)
+        self.assertEqual(tomllib.loads(self.cfg("media.toml").read_text())["image"]["timeout_s"], 60)
+        status, resp = self.post("/api/system/config/media", {"changes": [
+            {"table": "image", "key": "timeout_s", "remove": True}]})
+        self.assertEqual(status, 200, resp)
+        self.assertNotIn("timeout_s", tomllib.loads(self.cfg("media.toml").read_text())["image"])
+
+    def test_a_headerless_table_is_not_silently_kept(self):
+        self.cfg("external-peers.toml").write_text(
+            '[peers]\nkestrel = {url = "http://127.0.0.1:8085"}\n')
+        self.serve()
+        status, body = self.change("peers", [], removes=["peers.kestrel"])
+        self.assertEqual(status, 400, body)
 
     def test_bad_values_are_refused_and_nothing_written(self):
         self.serve()
@@ -484,6 +561,23 @@ class Secrets(ConsoleCase):
         self.assertEqual(chat.read_secret(self.root, "config/peer-tokens/kestrel.inbound.token",
                                           "token"), "t" * 32)
 
+    def test_a_key_in_a_group_readable_config_dir_reads_as_media_reads_it(self):
+        os.chmod(self.root / "config", 0o755)
+        key = self.root / "config" / "image.key"
+        key.write_text("sk-abcdefghijklmnop1234\n")
+        os.chmod(key, 0o644)
+        (self.root / "config" / "media.toml").write_text(
+            '[image]\nurl = "http://h/i"\nkey_file = "config/image.key"\n')
+        (self.root / "config" / "external-peers.toml").write_text(
+            '[peers.kestrel]\nurl = "http://127.0.0.1:8085"\ntoken_file = "config/image.key"\n')
+        self.serve()
+        _, cfg = self.get("/api/system/config")
+        media = cfg["files"]["media"]["kinds"]["image"]["key"]
+        self.assertEqual(media, {"set": True, "last4": "1234", "error": None})
+        token = cfg["files"]["peers"]["peers"]["kestrel"]["token"]
+        self.assertFalse(token["set"])
+        self.assertIn("chmod 600", token["error"])
+
     def test_a_key_file_outside_config_is_never_read(self):
         secret = self.root / "elsewhere.key"
         secret.write_text("x" * 40 + "\n")
@@ -495,6 +589,20 @@ class Secrets(ConsoleCase):
         key = cfg["files"]["media"]["kinds"]["image"]["key"]
         self.assertIsNone(key["set"])
         self.assertIsNone(key["last4"])
+
+    def test_a_failed_toml_write_restores_the_previous_secret(self):
+        self.serve()
+        status, _ = self.post("/api/system/config/media/image/secret", {"value": "old-" + "k" * 20})
+        self.assertEqual(status, 200)
+        key = self.root / "config" / "media-keys" / "image.key"
+        (self.root / "config" / "media.toml").write_text("[image]\nkey_file = \"elsewhere\"\n")
+        with mock.patch("cousin_lib.console.toml_edit.write_file_keys",
+                        side_effect=OSError("disk full")):
+            status, _ = self.post("/api/system/config/media/image/secret",
+                                  {"value": "new-" + "k" * 20})
+        self.assertEqual(status, 500)
+        self.assertEqual(key.read_text(), "old-" + "k" * 20 + "\n")
+        self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
 
     def test_a_bad_secret_is_refused(self):
         self.serve()
@@ -522,12 +630,13 @@ class TextConfig(ConsoleCase):
     def test_the_outbound_filter_is_checked_against_what_its_loader_reads(self):
         self.serve()
         for content in ("not json", '{"terms": "x"}', '{"protected": [""]}',
-                        '{"surfaces": {"chat": {"add": [1]}}}', '{"term": []}'):
+                        '{"surfaces": {"chat": {"add": [1]}}}', '{"surfaces": {"chat": 1}}',
+                        '[]'):
             status, body = self.post("/api/system/outbound-filter",
                                      {"content": content, "base_sha": ""})
             self.assertEqual(status, 400, (content, body))
         good = '{"terms": ["alpha"], "protected": ["beta"], "trusted_peers": [],' \
-               ' "surfaces": {"chat": {"add": ["gamma"]}}}'
+               ' "surfaces": {"chat": {"add": ["gamma"], "note": "x"}}, "comment": "kept"}'
         status, body = self.post("/api/system/outbound-filter",
                                  {"content": good, "base_sha": ""})
         self.assertEqual(status, 200, body)
@@ -605,7 +714,7 @@ class AgentDefaults(ConsoleCase):
         self.serve()
         status, body = self.post("/api/system/agent-defaults",
                                  {"default_effort": "high", "commit_attribution": True,
-                                  "default_model": None})
+                                  "remove": ["default_model"]})
         self.assertEqual(status, 200, body)
         data = tomllib.loads(path.read_text())
         self.assertEqual(data["agent"], {"commit_attribution": True, "default_effort": "high"})
@@ -619,7 +728,8 @@ class AgentDefaults(ConsoleCase):
         path.write_text(self.HARNESS)
         self.serve()
         for payload in ({"default_effort": "huge"}, {"commit_attribution": "false"},
-                        {"default_model": "two words"}, {}):
+                        {"default_model": "two words"}, {"default_model": None},
+                        {"default_effort": ""}, {"remove": ["transcripts_dir"]}, {}):
             status, body = self.post("/api/system/agent-defaults", payload)
             self.assertEqual(status, 400, (payload, body))
         self.assertEqual(path.read_text(), self.HARNESS)

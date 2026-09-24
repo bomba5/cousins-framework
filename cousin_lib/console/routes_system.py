@@ -52,7 +52,7 @@ from cousin_lib.console import router  # noqa: F401 - the package's routes use i
 
 # ---- shared helpers -------------------------------------------------------
 
-_USER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$")
+USER_MAX_CHARS = 1024
 _PEER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 PROMPT_MAX_CHARS = 8000
 TEXT_MAX_CHARS = 256 * 1024
@@ -199,10 +199,14 @@ def _schedule_rows(rows):
 # ---- console users ---------------------------------------------------------
 
 def _check_user(name, *, from_path=False):
+    """A console user's name as `cousin-console adduser` takes it: any
+    non-empty string (argv never holds a NUL), kept exactly as given. In a
+    path it arrives percent-encoded."""
     if from_path and isinstance(name, str):
         name = urllib.parse.unquote(name)
-    if not isinstance(name, str) or not _USER_RE.match(name):
-        raise _err(400, "a user name is letters, digits and . _ @ -, at most 64")
+    if not isinstance(name, str) or not name or "\x00" in name or len(name) > USER_MAX_CHARS:
+        raise _err(400, "a user name is a non-empty string without NUL, at most %d"
+                        " characters" % USER_MAX_CHARS)
     return name
 
 
@@ -230,23 +234,34 @@ def _under(path, base):
     return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
 
 
+def _refuse_in_root(root, target):
+    """ValueError when `target`, symlinks resolved, is the live root or
+    inside it (its cousins/, config/ and .secrets/ named, being the worst)."""
+    real = os.path.realpath(target)
+    for sub in ("cousins", "config", ".secrets"):
+        bad = os.path.realpath(os.path.join(str(root), sub))
+        if _under(real, bad):
+            raise ValueError("the destination may not be inside %s: a backup there"
+                             " writes into the live install" % bad)
+    base = os.path.realpath(str(root))
+    if _under(real, base):
+        raise ValueError("the destination may not be inside the install (%s): keep"
+                         " backups off the live root" % base)
+    return real
+
+
 def check_backup_dest(root, dest, slugs=()):
     """The destination as a real path, or ValueError: absolute, an
     existing directory the console can write, and neither it nor any
-    snapshot directory under it (<dest>/<slug>) inside the live root's
-    cousins/, config/ or .secrets/ (symlinks resolved)."""
+    snapshot directory under it (<dest>/<slug>, each realpath'd) inside
+    the live root at all (symlinks resolved)."""
     if not isinstance(dest, str) or not dest.strip() or "\x00" in dest:
         raise ValueError("the destination is required")
     if not os.path.isabs(dest):
         raise ValueError("the destination must be an absolute path")
-    real = os.path.realpath(dest)
-    forbidden = [os.path.realpath(os.path.join(str(root), sub))
-                 for sub in ("cousins", "config", ".secrets")]
-    for target in [real] + [os.path.join(real, s) for s in slugs]:
-        for bad in forbidden:
-            if _under(target, bad):
-                raise ValueError("the destination may not be inside %s: a backup there"
-                                 " writes into the live install" % bad)
+    real = _refuse_in_root(root, dest)
+    for slug in slugs:
+        _refuse_in_root(root, os.path.join(real, slug))
     if not os.path.isdir(real):
         raise ValueError("%s is not an existing directory" % real)
     if not os.access(real, os.W_OK | os.X_OK):
@@ -254,17 +269,40 @@ def check_backup_dest(root, dest, slugs=()):
     return real
 
 
-def _backup_work(home, slug, dest):
+def _owner_only(top):
+    """Every directory under `top` 0700 and every file 0600; a symlink is
+    left alone (never followed)."""
+    os.chmod(top, 0o700)
+    for base, dirs, files in os.walk(top):
+        for name in dirs + files:
+            path = os.path.join(base, name)
+            if os.path.islink(path):
+                continue
+            os.chmod(path, 0o700 if os.path.isdir(path) else 0o600)
+
+
+def _backup_work(root, home, slug, dest):
     def work(op):
         from cousin_lib import backup, jobs
+        from cousin_lib.console.longop import OpError
         op.stage("snapshot", "running", dest)
+        top = os.path.join(dest, slug)
         with jobs.track_job("backup", "backup %s" % slug, description="into %s" % dest,
                             spawned_by=slug) as job:
+            # <dest>/<slug> first, 0700, checked again now it exists: the
+            # snapshot's own files are then never readable by others, even
+            # before the pass that tightens them.
+            try:
+                os.makedirs(top, mode=0o700, exist_ok=True)
+                os.chmod(top, 0o700)
+                _refuse_in_root(root, top)
+            except (OSError, ValueError) as err:
+                raise OpError("backup of %s refused: %s" % (slug, err))
             try:
                 snap = backup.snapshot(home, dest)
             except backup.BackupError as err:
-                from cousin_lib.console.longop import OpError
                 raise OpError("backup of %s failed: %s" % (slug, err))
+            _owner_only(top)
             job.summary = str(snap)
         op.stage("snapshot", "done", str(snap))
         return {"ok": True, "snapshot": str(snap)}
@@ -279,10 +317,11 @@ def _is_num(value):
 
 
 def _check_value(kind, value, where):
-    """The value normalized for `kind`, None (remove the key) for None or
-    "", or ValueError."""
-    if value is None or value == "":
-        return None
+    """The value normalized for `kind`, or ValueError. A key is removed
+    only by an explicit `remove`, never by a missing, null or empty value:
+    a mistyped number must not delete the key."""
+    if value is None:
+        raise ValueError("%s needs a value (remove it with remove: true)" % where)
     if kind == "url":
         parsed = urllib.parse.urlsplit(value) if isinstance(value, str) else None
         if (parsed is None or parsed.scheme not in ("http", "https") or not parsed.hostname
@@ -290,8 +329,9 @@ def _check_value(kind, value, where):
             raise ValueError("%s must be an http(s) URL" % where)
         return value
     if kind == "str":
-        if not isinstance(value, str) or "\n" in value or "\r" in value or len(value) > 256:
-            raise ValueError("%s must be one line of at most 256 characters" % where)
+        if not isinstance(value, str) or not value or "\n" in value or "\r" in value \
+                or len(value) > 256:
+            raise ValueError("%s must be one non-empty line of at most 256 characters" % where)
         return value
     if kind == "bool":
         if not isinstance(value, bool):
@@ -490,7 +530,15 @@ def _toml_changes(spec, body):
             raise ValueError("%s is not a key this editor sets"
                              % (("%s.%s" % (table, key)) if table else key))
         where = ("%s.%s" % (table, key)) if table else key
-        changes.append((table, key, _check_value(kind, item.get("value"), where)))
+        remove = item.get("remove", False)
+        if not isinstance(remove, bool):
+            raise ValueError("%s: remove must be true or false" % where)
+        if remove:
+            if "value" in item:
+                raise ValueError("%s: a value or remove, not both" % where)
+            changes.append((table, key, None))
+        else:
+            changes.append((table, key, _check_value(kind, item.get("value"), where)))
     removes = body.get("remove_tables", [])
     if not isinstance(removes, list) or not all(isinstance(t, str) for t in removes):
         raise ValueError("remove_tables must be a list of table names")
@@ -510,19 +558,38 @@ def _parse_toml_file(path):
         return True, {}, "does not parse: %s" % err
 
 
-def _secret_state_rel(server, rel):
-    """secret_state of a key or token file the config names, read only
-    when it resolves under the root's config/: a path set by hand to
-    some other private file is never opened for its last four."""
-    from cousin_lib.console.secrets import secret_state
+def _secret_state_rel(server, rel, reader):
+    """What may be shown about a key or token file the config names, read
+    the way its own reader reads it (`reader`: "media" is media._read_key,
+    a plain read relative to the root; "peer" is chat.read_secret, which
+    refuses a file group or others can read and says so). Read only when
+    it resolves under the root's config/: a path set by hand to some other
+    file is never opened for its last four. Never the value."""
+    from cousin_lib import chat
+    from cousin_lib.config import MissingConfigError
+    from cousin_lib.console.secrets import LAST4_MIN_LEN
     if not isinstance(rel, str) or not rel:
         return None
-    path = rel if os.path.isabs(rel) else os.path.join(str(server.root), rel)
-    if not _under(os.path.realpath(path), os.path.realpath(os.path.join(str(server.root),
-                                                                       "config"))):
+    root = str(server.root)
+    path = os.path.join(root, rel)
+    if not _under(os.path.realpath(path), os.path.realpath(os.path.join(root, "config"))):
         return {"set": None, "last4": None,
                 "error": "outside the install's config/: not read here"}
-    return secret_state(path)
+    if not os.path.exists(path):
+        return {"set": False, "last4": None, "error": "%s does not exist" % rel}
+    try:
+        if reader == "peer":
+            value = chat.read_secret(root, rel, "token file")
+        else:
+            value = Path(path).read_text().strip()
+    except MissingConfigError as err:
+        return {"set": False, "last4": None, "error": str(err)}
+    except (OSError, UnicodeDecodeError) as err:
+        return {"set": False, "last4": None, "error": "%s is unreadable: %s" % (rel, err)}
+    if not value:
+        return {"set": False, "last4": None, "error": "%s is empty" % rel}
+    return {"set": True, "last4": value[-4:] if len(value) >= LAST4_MIN_LEN else None,
+            "error": None}
 
 
 def _file_state(server, name):
@@ -546,7 +613,7 @@ def _file_state(server, name):
             kinds[kind] = {"url": section.get("url"), "model": section.get("model"),
                            "timeout_s": section.get("timeout_s"),
                            "key_file": section.get("key_file"),
-                           "key": _secret_state_rel(server, section.get("key_file"))}
+                           "key": _secret_state_rel(server, section.get("key_file"), "media")}
         out["kinds"] = kinds
     elif name in ("embedding", "hive"):
         values = {}
@@ -570,8 +637,9 @@ def _file_state(server, name):
                 "reach": entry.get("reach") or [],
                 "token_file": entry.get("token_file"),
                 "inbound_token_file": entry.get("inbound_token_file"),
-                "token": _secret_state_rel(server, entry.get("token_file")),
-                "inbound_token": _secret_state_rel(server, entry.get("inbound_token_file")),
+                "token": _secret_state_rel(server, entry.get("token_file"), "peer"),
+                "inbound_token": _secret_state_rel(server, entry.get("inbound_token_file"),
+                                                   "peer"),
                 "shadowed": slug in local,
                 "unknown_reach": sorted(set(entry.get("reach") or []) - local)
                 if isinstance(entry.get("reach"), list) else [],
@@ -588,10 +656,27 @@ def _secret_rel(name, target, which=None):
     return "config/peer-tokens/%s%s.token" % (target, ".inbound" if which == "inbound" else "")
 
 
+def _restore_secret(full, previous):
+    """Put a secret file back as it was before a failed save: its old
+    bytes through the same private writer (0600, atomic), or gone."""
+    from cousin_lib import accounts
+    try:
+        if previous is None:
+            os.unlink(full)
+        else:
+            accounts._write_private_text(Path(full), previous.decode("utf-8"))
+    except OSError:
+        pass
+
+
 def set_secret(server, name, target, value, which=None):
     """Write the secret for a media kind's key_file or a peer's token file
-    at the path this module picks, then point the TOML key at it. The
-    TOML change is checked before the secret is written."""
+    at the path this module picks (secrets.write_secret_file), then point
+    the TOML key at it through edit_toml, which checks the change with the
+    file's loader. The secret is written first; when the TOML write then
+    fails, the file is put back as it was (removed when there was none),
+    so a failed save leaves both files unchanged. Returns the key's state
+    as its reader sees it."""
     from cousin_lib.console import secrets
     rel = _secret_rel(name, target, which)
     table = target if name == "media" else "peers.%s" % target
@@ -610,13 +695,9 @@ def set_secret(server, name, target, value, which=None):
         if toml_edit._lookup(data, table, key) != (True, rel):
             edit_toml(server, name, [(table, key, rel)])
     except BaseException:
-        if previous is None:
-            try:
-                os.unlink(full)
-            except OSError:
-                pass
+        _restore_secret(full, previous)
         raise
-    return state
+    return _secret_state_rel(server, rel, "media" if name == "media" else "peer") or state
 
 
 def clear_secret(server, name, target, which=None):
@@ -687,25 +768,25 @@ def _write_text(server, path, text, base_sha):
 
 
 def check_outbound_filter(data):
-    """The structure OutboundPolicy.load reads; it swallows a malformed
-    file into an inert filter, so this refuses what it would drop."""
+    """The keys OutboundPolicy.load reads, in the shape it reads them: it
+    swallows an unparsable file into an inert filter and iterates a string
+    as its characters, so this refuses what it would misread. Keys it
+    ignores (a comment, an extra key in a surface) are accepted as the
+    loader accepts them."""
     if not isinstance(data, dict):
         raise ValueError("the filter is a JSON object")
-    unknown = sorted(set(data) - {"terms", "protected", "trusted_peers", "surfaces"})
-    if unknown:
-        raise ValueError("unknown keys: %s" % ", ".join(unknown))
     for key in ("terms", "protected", "trusted_peers"):
-        value = data.get(key, [])
+        value = data.get(key) or []
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip()
                                                   for v in value):
             raise ValueError("%s must be a list of non-empty strings" % key)
-    surfaces = data.get("surfaces", {})
+    surfaces = data.get("surfaces") or {}
     if not isinstance(surfaces, dict):
         raise ValueError("surfaces must be an object of {\"add\": [terms]}")
     for name, entry in surfaces.items():
-        if not isinstance(entry, dict) or set(entry) - {"add"}:
+        if not isinstance(entry, dict):
             raise ValueError("surfaces.%s must be {\"add\": [terms]}" % name)
-        add = entry.get("add", [])
+        add = entry.get("add") or []
         if not isinstance(add, list) or not all(isinstance(v, str) and v.strip() for v in add):
             raise ValueError("surfaces.%s.add must be a list of non-empty strings" % name)
 
@@ -924,7 +1005,7 @@ def register():
         for slug in slugs:
             try:
                 ops[slug] = longop.start(server, slug, "backup",
-                                         _backup_work(homes[slug], slug, dest),
+                                         _backup_work(server.root, homes[slug], slug, dest),
                                          params={"dest": dest})
             except longop.Busy as err:
                 busy[slug] = str(err)
@@ -1089,13 +1170,20 @@ def register():
         if not path.is_file():
             raise _err(409, "config/harness.toml is absent: copy one of the"
                             " config/harness.toml*.example files first")
-        changes = []
-        for key in ("default_model", "default_effort", "commit_attribution"):
+        keys = ("default_model", "default_effort", "commit_attribution")
+        removes = req.body.get("remove", [])
+        if not isinstance(removes, list) or not all(k in keys for k in removes):
+            raise _err(400, "remove is a list of %s" % ", ".join(keys))
+        changes = [("agent", key, None) for key in removes]
+        for key in keys:
             if key not in req.body:
                 continue
             value = req.body[key]
+            if key in removes:
+                raise _err(400, "%s: a value or remove, not both" % key)
             if value is None or value == "":
-                changes.append(("agent", key, None))
+                raise _err(400, "%s needs a value (remove it with remove: [\"%s\"])"
+                           % (key, key))
             elif key == "default_model":
                 try:
                     changes.append(("agent", key, spawn.check_runtime_value("model", value)))

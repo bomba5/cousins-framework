@@ -7,7 +7,7 @@
 // own schedules also sit in its inspector (slot inspector.panels).
 //
 // Secrets are write-only (SecretField, cleared before it posts); a
-// destructive action asks twice (ConfirmButton) or for a typed name; a
+// destructive action asks twice (SysConfirmButton) or for a typed name; a
 // change that needs a restart says which service and offers the console's
 // existing restart route, nothing more.
 
@@ -22,7 +22,7 @@ function SysNote({ msg }) {
 }
 
 // A button that asks once more: the first click arms it for four seconds.
-function ConfirmButton({ label, confirmLabel = "click again to confirm", onConfirm, tone = "danger",
+function SysConfirmButton({ label, confirmLabel = "click again to confirm", onConfirm, tone = "danger",
                          disabled = false, small = true }) {
   const [armed, setArmed] = React.useState(false);
   React.useEffect(() => {
@@ -49,7 +49,7 @@ async function sysSend(method, path, body) {
 // What a saved change needs before it takes effect. The console's own
 // restart is the one service control offered here (its existing route);
 // a cousin restarts from its inspector.
-function RestartOffer({ restart, applies }) {
+function SysRestartOffer({ restart, applies }) {
   const [msg, setMsg] = React.useState(null);
   if (!restart) {
     return applies ? <div className="field"><span className="hint">{applies}</span></div> : null;
@@ -66,12 +66,12 @@ function RestartOffer({ restart, applies }) {
     <span className="hint">{applies}. Needs a restart of: {(restart.services || []).join(", ")}.
       {restart.note ? " " + restart.note + "." : ""}</span>
     {(restart.services || []).includes("console") &&
-      <div><ConfirmButton label="restart console" onConfirm={go} /></div>}
+      <div><SysConfirmButton label="restart console" onConfirm={go} /></div>}
     <SysNote msg={msg} />
   </div>;
 }
 
-function Panel({ title, sub, right, children }) {
+function SysPanel({ title, sub, right, children }) {
   return <div className="panel" style={{ marginTop: 14 }}>
     <div className="panel-hdr">
       <span className="title">{title}</span>
@@ -87,11 +87,15 @@ function Panel({ title, sub, right, children }) {
 
 // ---- the supervisor ----------------------------------------------------------
 
-function SupervisorPanel() {
+function SysSupervisorPanel() {
   const [st, setSt] = React.useState(null);
+  const [failed, setFailed] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
   const [busy, setBusy] = React.useState(null);
-  const load = React.useCallback(async () => setSt(await apiGet("/api/system/supervisor")), []);
+  const load = React.useCallback(async () => {
+    const d = await apiGet("/api/system/supervisor");
+    if (d) { setSt(d); setFailed(false); } else setFailed(true);
+  }, []);
   React.useEffect(() => {
     load();
     const id = setInterval(load, 5000);
@@ -118,10 +122,11 @@ function SupervisorPanel() {
     if (res.ok) window.dispatchEvent(new CustomEvent("fw-restart", { detail: { target: "console", etaSeconds: res.d.eta_seconds || 4 } }));
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
-  return <Panel title="supervisor" sub={st && st.running ? `pid ${st.pid} · up since ${st.started || "-"}` : ""}
+  return <SysPanel title="supervisor" sub={st && st.running ? `pid ${st.pid} · up since ${st.started || "-"}` : ""}
                 right={st && st.running && <button className="btn" style={small} onClick={reload}>reload</button>}>
     <SysNote msg={msg} />
-    {!st ? <span className="muted">loading...</span> : !st.running ? (
+    {failed && <SysNote msg={{ ok: false, text: "the console did not answer /api/system/supervisor" + (st ? "; showing the last answer" : "") }} />}
+    {!st ? (!failed && <span className="muted">loading...</span>) : !st.running ? (
       <div className="field"><span className="hint">{st.running === false ? "no cousin-supervisor runs for this install" : "the supervisor did not answer"}: {st.reason}</span></div>
     ) : (
       <div className="table-scroll">
@@ -141,10 +146,10 @@ function SupervisorPanel() {
                   {a.start && row.state !== "running" &&
                     <button className="btn" style={small} disabled={busy === row.name + "start"} onClick={() => act("start", row.name)}>start</button>}
                   {a.stop && row.state !== "stopped" &&
-                    <ConfirmButton label="stop" confirmLabel={a.confirm === "loops" ? "stops every loop: confirm" : "click again to stop"}
+                    <SysConfirmButton label="stop" confirmLabel={a.confirm === "loops" ? "stops every loop: confirm" : "click again to stop"}
                                    disabled={busy === row.name + "stop"}
                                    onConfirm={() => act("stop", row.name, a.confirm ? { confirm: a.confirm } : null)} />}
-                  {a.restart && <ConfirmButton label="restart" onConfirm={restartConsole} />}
+                  {a.restart && <SysConfirmButton label="restart" onConfirm={restartConsole} />}
                   {!a.start && !a.stop && !a.restart && <span className="muted" title={a.why}>follows its runner</span>}
                 </td>
               </tr>;
@@ -156,7 +161,7 @@ function SupervisorPanel() {
     <span className="hint mono" style={{ fontSize: 11, color: "var(--fg-3)" }}>
       the console restarts through its own route and is never stopped from here; a bridge follows its runner cousin
     </span>
-  </Panel>;
+  </SysPanel>;
 }
 
 // ---- schedules -----------------------------------------------------------------
@@ -189,7 +194,7 @@ function SchedulesPanel({ slug, cousins }) {
     load();
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
-  return <Panel title="schedules" sub="one-shot prompts (cousin-schedule)"
+  return <SysPanel title="schedules" sub="one-shot prompts (cousin-schedule)"
                 right={<label className="mono" style={{ fontSize: 11 }}>
                   <input type="checkbox" checked={history} onChange={e => setHistory(e.target.checked)} /> history</label>}>
     <SysNote msg={msg} />
@@ -203,7 +208,7 @@ function SchedulesPanel({ slug, cousins }) {
             <td className="mono">{row.when}</td>
             <td><Pill tone={row.status === "pending" ? "amber" : row.status === "fired" ? "green" : "gray"}>{row.status}</Pill></td>
             <td style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{row.prompt}</td>
-            <td>{row.status === "pending" && <ConfirmButton label="cancel" onConfirm={() => cancel(row)} />}</td>
+            <td>{row.status === "pending" && <SysConfirmButton label="cancel" onConfirm={() => cancel(row)} />}</td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -218,12 +223,12 @@ function SchedulesPanel({ slug, cousins }) {
                 onChange={e => setPrompt(e.target.value)} placeholder="the prompt the cousin receives, marked as scheduled" />
       <button className="btn primary" style={small} disabled={!target || !prompt.trim() || !when.trim()} onClick={add}>schedule</button>
     </div>
-  </Panel>;
+  </SysPanel>;
 }
 
 // ---- console users --------------------------------------------------------------
 
-function UsersPanel() {
+function SysUsersPanel() {
   const [st, setSt] = React.useState(null);
   const [name, setName] = React.useState("");
   const [pw, setPw] = React.useState("");
@@ -258,7 +263,7 @@ function UsersPanel() {
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
   const users = (st && st.users) || [];
-  return <Panel title="console users" sub={st && !st.configured ? "auth not configured: the network guard is the only boundary" : "passwords are write-only"}>
+  return <SysPanel title="console users" sub={st && !st.configured ? "auth not configured: the network guard is the only boundary" : "passwords are write-only"}>
     <SysNote msg={msg} />
     {users.length > 0 && <table className="data sys-users">
       <thead><tr><th>user</th><th></th></tr></thead>
@@ -266,9 +271,8 @@ function UsersPanel() {
         <td className="mono">{u}{st.me === u && <span className="muted"> (you)</span>}</td>
         <td style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {st.me !== u && resetFor !== u && <button className="btn" style={small} onClick={() => setResetFor(u)}>reset password</button>}
-          {resetFor === u && <SecretField placeholder={`new password for ${u} (8+)`} submitLabel="reset"
-                                          onCancel={() => setResetFor(null)} autoFocus
-                                          onSubmit={v => reset(u, v)} />}
+          {resetFor === u && <SysPasswordReset user={u} onCancel={() => setResetFor(null)}
+                                               onSubmit={v => reset(u, v)} />}
           {st.me !== u && users.length > 1 && removeFor !== u &&
             <button className="btn danger" style={small} onClick={() => { setRemoveFor(u); setTyped(""); }}>remove</button>}
           {removeFor === u && <>
@@ -289,14 +293,39 @@ function UsersPanel() {
     </div>
     {st && !st.configured && <span className="hint" style={{ fontSize: 11, color: "var(--fg-3)" }}>
       the first user closes the console to everyone without a session; this browser is logged in as that user.</span>}
-  </Panel>;
+  </SysPanel>;
+}
+
+// A new password for another user: typed twice, sent exactly as typed
+// (spaces are part of a password), both boxes cleared before it goes out.
+function SysPasswordReset({ user, onSubmit, onCancel }) {
+  const [pw, setPw] = React.useState("");
+  const [pw2, setPw2] = React.useState("");
+  const [err, setErr] = React.useState(null);
+  const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
+  const send = () => {
+    if (pw !== pw2) { setErr("the passwords differ"); return; }
+    const value = pw;
+    setPw(""); setPw2(""); setErr(null);
+    onSubmit(value);
+  };
+  return <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+    <input className="txt" style={{ width: 160 }} type="password" value={pw} autoFocus autoComplete="new-password"
+           placeholder={`new password for ${user} (8+)`} onChange={e => setPw(e.target.value)} />
+    <input className="txt" style={{ width: 120 }} type="password" value={pw2} autoComplete="new-password"
+           placeholder="again" onChange={e => setPw2(e.target.value)}
+           onKeyDown={e => { if (e.key === "Enter") send(); }} />
+    <button className="btn primary" style={small} disabled={!pw || !pw2} onClick={send}>reset</button>
+    <button className="btn" style={small} onClick={() => { setPw(""); setPw2(""); onCancel(); }}>cancel</button>
+    {err && <span className="pill red">{err}</span>}
+  </span>;
 }
 
 // ---- backup ------------------------------------------------------------------------
 
 const SYS_BACKUP_KEY = "console_system_backup_dest";
 
-function BackupPanel({ cousins }) {
+function SysBackupPanel({ cousins }) {
   const local = (cousins || []).filter(c => !c.remote && c.type !== "remote").map(c => c.slug).sort();
   const [dest, setDest] = React.useState(() => { try { return localStorage.getItem(SYS_BACKUP_KEY) || ""; } catch (_e) { return ""; } });
   const [pick, setPick] = React.useState(null);  // null = every cousin
@@ -317,7 +346,7 @@ function BackupPanel({ cousins }) {
     setStarted(Object.keys(res.d.ops));
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
-  return <Panel title="backup" sub="cousin-backup: databases, memory and core files">
+  return <SysPanel title="backup" sub="cousin-backup: databases, memory and core files">
     <div className="field">
       <label>destination</label>
       <input className="txt" value={dest} onChange={e => setDest(e.target.value)} placeholder="/an/absolute/directory" />
@@ -331,18 +360,20 @@ function BackupPanel({ cousins }) {
     <SysNote msg={msg} />
     {started.map(slug => <div key={slug}><span className="mono" style={{ fontSize: 11 }}>{slug}</span>
       <LongOpStatus slug={slug} kind="backup" /></div>)}
-  </Panel>;
+  </SysPanel>;
 }
 
 // ---- harness [agent] defaults ---------------------------------------------------------
 
-function AgentDefaultsPanel() {
+function SysAgentDefaultsPanel() {
   const [st, setSt] = React.useState(null);
+  const [failed, setFailed] = React.useState(false);
   const [draft, setDraft] = React.useState({});
   const [msg, setMsg] = React.useState(null);
   const load = React.useCallback(async () => {
     const d = await apiGet("/api/system/agent-defaults");
-    setSt(d);
+    setFailed(!d);
+    if (d) setSt(d);
     if (d) setDraft({
       default_model: d.values.default_model.source.startsWith("config") ? d.values.default_model.value : "",
       default_effort: d.values.default_effort.source.startsWith("config") ? d.values.default_effort.value : "",
@@ -350,19 +381,22 @@ function AgentDefaultsPanel() {
     });
   }, []);
   React.useEffect(() => { load(); }, [load]);
-  if (!st) return <Panel title="agent defaults"><span className="muted">loading...</span></Panel>;
+  if (!st) return <SysPanel title="agent defaults">{failed
+    ? <SysNote msg={{ ok: false, text: "the console did not answer /api/system/agent-defaults" }} />
+    : <span className="muted">loading...</span>}</SysPanel>;
   const save = async () => {
-    const body = {
-      default_model: draft.default_model || null,
-      default_effort: draft.default_effort || null,
-      commit_attribution: draft.commit_attribution === "" ? null : draft.commit_attribution === "true",
-    };
+    // an emptied field is an explicit remove, never a null value
+    const body = { remove: [] };
+    if (draft.default_model) body.default_model = draft.default_model; else body.remove.push("default_model");
+    if (draft.default_effort) body.default_effort = draft.default_effort; else body.remove.push("default_effort");
+    if (draft.commit_attribution !== "") body.commit_attribution = draft.commit_attribution === "true";
+    else body.remove.push("commit_attribution");
     const res = await sysSend("POST", "/api/system/agent-defaults", body);
     setMsg(res.ok ? { ok: true, text: "saved to config/harness.toml" } : { ok: false, text: res.d.error || `HTTP ${res.status}` });
     if (res.ok) load();
   };
   const src = (key) => <span className="hint">now {JSON.stringify(st.values[key].value)} · {st.values[key].source}</span>;
-  return <Panel title="agent defaults" sub="config/harness.toml [agent], install-wide">
+  return <SysPanel title="agent defaults" sub="config/harness.toml [agent], install-wide">
     {st.error && <SysNote msg={{ ok: false, text: st.error }} />}
     {!st.exists && <SysNote msg={{ ok: false, text: "config/harness.toml is absent: copy an example file first" }} />}
     <div className="field">
@@ -392,39 +426,50 @@ function AgentDefaultsPanel() {
     </div>
     <div><button className="btn primary" style={{ fontSize: 10, padding: "2px 8px", minHeight: 18 }} disabled={!st.exists} onClick={save}>save</button></div>
     <SysNote msg={msg} />
-    <RestartOffer applies={st.applies} />
-  </Panel>;
+    <SysRestartOffer applies={st.applies} />
+  </SysPanel>;
 }
 
 // ---- install config editors ------------------------------------------------------------
 
 // fields: [{table, key, label, kind}] with kind str | url | num | int | bool | list.
-function fieldToInput(kind, value) {
+function sysFieldToInput(kind, value) {
   if (value === null || value === undefined) return "";
   if (kind === "list") return (value || []).join(", ");
   return String(value);
 }
-function inputToValue(kind, text) {
+// {value} or {remove: true} for an emptied field, or {error}: a number that
+// does not parse is refused here, never sent as something that deletes the key.
+function sysInputToValue(kind, text, label) {
   const t = String(text).trim();
-  if (t === "") return null;
-  if (kind === "num" || kind === "int") return Number(t);
-  if (kind === "bool") return t === "true";
-  if (kind === "list") return t.split(",").map(s => s.trim()).filter(Boolean);
-  return t;
+  if (t === "") return { remove: true };
+  if (kind === "num" || kind === "int") {
+    const n = Number(t);
+    if (!Number.isFinite(n)) return { error: `${label} is not a number` };
+    if (kind === "int" && !Number.isInteger(n)) return { error: `${label} must be a whole number` };
+    return { value: n };
+  }
+  if (kind === "bool") return { value: t === "true" };
+  if (kind === "list") return { value: t.split(",").map(s => s.trim()).filter(Boolean) };
+  return { value: t };
 }
 
-function TomlForm({ name, fields, values, onSaved, extraChanges }) {
-  const initial = React.useMemo(() => {
-    const out = {};
-    for (const f of fields) out[f.label] = fieldToInput(f.kind, values[f.label]);
-    return out;
-  }, [fields, values]);
+function SysTomlForm({ name, fields, values, onSaved, extraChanges }) {
+  // Keyed on what the fields and values say, not on the objects: a parent
+  // re-render hands in new arrays, and must not wipe what is being typed.
+  const sig = JSON.stringify([fields, values]);
+  const initial = React.useMemo(() => Object.fromEntries(fields.map(f => [f.label, sysFieldToInput(f.kind, values[f.label])])), [sig]);
   const [draft, setDraft] = React.useState(initial);
   const [msg, setMsg] = React.useState(null);
   React.useEffect(() => setDraft(initial), [initial]);
   const dirty = fields.filter(f => draft[f.label] !== initial[f.label]);
   const save = async () => {
-    const changes = dirty.map(f => ({ table: f.table, key: f.key, value: inputToValue(f.kind, draft[f.label]) }));
+    const changes = [];
+    for (const f of dirty) {
+      const v = sysInputToValue(f.kind, draft[f.label], f.label);
+      if (v.error) { setMsg({ ok: false, text: v.error + "; nothing saved" }); return; }
+      changes.push(v.remove ? { table: f.table, key: f.key, remove: true } : { table: f.table, key: f.key, value: v.value });
+    }
     const res = await sysSend("POST", `/api/system/config/${name}`, { changes: changes.concat(extraChanges || []) });
     setMsg(res.ok ? { ok: true, text: "saved" } : { ok: false, text: res.d.error || `HTTP ${res.status}` });
     if (res.ok && onSaved) onSaved(res.d.file);
@@ -450,14 +495,14 @@ function TomlForm({ name, fields, values, onSaved, extraChanges }) {
   </>;
 }
 
-function FileHead({ file }) {
+function SysFileHead({ file }) {
   return <div className="mono" style={{ fontSize: 11, color: "var(--fg-3)" }}>
     {file.path} · {file.exists ? "present" : "absent (saving creates it)"}
     {file.error && <div style={{ marginTop: 4 }}><Pill tone="red">error</Pill> {file.error}</div>}
   </div>;
 }
 
-function MediaEditor({ file, reload }) {
+function SysMediaEditor({ file, reload }) {
   const [msg, setMsg] = React.useState(null);
   const fieldsFor = (kind) => [
     { table: kind, key: "url", label: "url", kind: "url", placeholder: "http(s)://... (unset: kind off)" },
@@ -479,8 +524,8 @@ function MediaEditor({ file, reload }) {
     setMsg(res.ok ? { ok: true, text: `[${kind}] removed` } : { ok: false, text: res.d.error || "refused" });
     reload();
   };
-  return <Panel title="media" sub="config/media.toml: image, voice, video providers">
-    <FileHead file={file} />
+  return <SysPanel title="media" sub="config/media.toml: image, voice, video providers">
+    <SysFileHead file={file} />
     <SysNote msg={msg} />
     {["image", "voice", "video"].map(kind => {
       const k = file.kinds[kind] || {};
@@ -489,22 +534,23 @@ function MediaEditor({ file, reload }) {
           <span className="eyebrow">{kind}</span>
           <Pill tone={k.url ? "green" : "gray"}>{k.url ? "on" : "off"}</Pill>
           <span style={{ flex: 1 }} />
-          {file.kinds[kind] && <ConfirmButton label={`remove [${kind}]`} onConfirm={() => remove(kind)} />}
+          {file.kinds[kind] && <SysConfirmButton label={`remove [${kind}]`} onConfirm={() => remove(kind)} />}
         </div>
-        <TomlForm name="media" fields={fieldsFor(kind)} values={k} onSaved={reload} />
+        <SysTomlForm name="media" fields={fieldsFor(kind)} values={k} onSaved={reload} />
         <div className="field">
           <label>key (sent as Bearer)</label>
           <SecretField status={k.key || { set: false }} placeholder={`paste the ${kind} provider key`}
                        onSubmit={v => secret(kind, v)} hint={k.key_file ? `key_file = ${k.key_file}` : "stored under config/media-keys/"} />
-          {k.key_file && <div><ConfirmButton label="clear key" onConfirm={() => clear(kind)} /></div>}
+          {k.key && k.key.error && <span className="hint">{k.key.error}</span>}
+          {k.key_file && <div><SysConfirmButton label="clear key" onConfirm={() => clear(kind)} /></div>}
         </div>
       </div>;
     })}
-    <RestartOffer applies={file.applies} restart={file.restart} />
-  </Panel>;
+    <SysRestartOffer applies={file.applies} restart={file.restart} />
+  </SysPanel>;
 }
 
-const EMBEDDING_FIELDS = [
+const SYS_EMBEDDING_FIELDS = [
   { table: "", key: "url", label: "url", kind: "url", hint: "required: takes {model, prompt}, returns {embedding}" },
   { table: "", key: "model", label: "model", kind: "str" },
   { table: "", key: "timeout_s", label: "timeout_s", kind: "num", placeholder: "10" },
@@ -516,7 +562,7 @@ const EMBEDDING_FIELDS = [
   { table: "recall", key: "top", label: "recall.top", kind: "int", placeholder: "3" },
 ];
 
-const HIVE_FIELDS = [
+const SYS_HIVE_FIELDS = [
   { table: "", key: "enabled", label: "enabled", kind: "bool" },
   { table: "", key: "public_url", label: "public_url", kind: "url", hint: "the queen as nodes reach it; required when enabled" },
   { table: "", key: "checkin_seconds", label: "checkin_seconds", kind: "int", placeholder: "60" },
@@ -524,15 +570,15 @@ const HIVE_FIELDS = [
   { table: "", key: "home_chat_url", label: "home_chat_url", kind: "url", hint: "legacy, unauthenticated" },
 ];
 
-function PlainTomlEditor({ title, sub, name, file, fields, reload }) {
-  return <Panel title={title} sub={sub}>
-    <FileHead file={file} />
-    <TomlForm name={name} fields={fields} values={file.values || {}} onSaved={reload} />
-    <RestartOffer applies={file.applies} restart={file.restart} />
-  </Panel>;
+function SysPlainTomlEditor({ title, sub, name, file, fields, reload }) {
+  return <SysPanel title={title} sub={sub}>
+    <SysFileHead file={file} />
+    <SysTomlForm name={name} fields={fields} values={file.values || {}} onSaved={reload} />
+    <SysRestartOffer applies={file.applies} restart={file.restart} />
+  </SysPanel>;
 }
 
-const PEER_FIELDS = (slug) => [
+const SYS_PEER_FIELDS = (slug) => [
   { table: `peers.${slug}`, key: "url", label: "url", kind: "url", hint: "the peer's chat server or console base URL" },
   { table: `peers.${slug}`, key: "send_path", label: "send_path", kind: "str", placeholder: "/api/send (/peer/send with a token)" },
   { table: `peers.${slug}`, key: "name", label: "name", kind: "str", hint: "how its messages show here" },
@@ -540,7 +586,7 @@ const PEER_FIELDS = (slug) => [
   { table: `peers.${slug}`, key: "reach", label: "reach", kind: "list", hint: "local cousins it may write to, comma separated" },
 ];
 
-function PeersEditor({ file, reload }) {
+function SysPeersEditor({ file, reload }) {
   const [msg, setMsg] = React.useState(null);
   const [slug, setSlug] = React.useState("");
   const [url, setUrl] = React.useState("");
@@ -567,8 +613,8 @@ function PeersEditor({ file, reload }) {
     reload();
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
-  return <Panel title="external peers" sub="config/external-peers.toml: cousins on another install">
-    <FileHead file={file} />
+  return <SysPanel title="external peers" sub="config/external-peers.toml: cousins on another install">
+    <SysFileHead file={file} />
     <SysNote msg={msg} />
     {Object.entries(file.peers || {}).map(([s, p]) => <div key={s} style={{ borderTop: "1px solid var(--line-soft)", paddingTop: 8 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -576,16 +622,17 @@ function PeersEditor({ file, reload }) {
         {p.shadowed && <Pill tone="amber">a local cousin has this slug: the local one wins</Pill>}
         {p.unknown_reach.length > 0 && <Pill tone="amber">reach names no local cousin: {p.unknown_reach.join(", ")}</Pill>}
         <span style={{ flex: 1 }} />
-        <ConfirmButton label="remove peer" onConfirm={() => remove(s)} />
+        <SysConfirmButton label="remove peer" onConfirm={() => remove(s)} />
       </div>
-      <TomlForm name="peers" fields={PEER_FIELDS(s)} values={p} onSaved={reload} />
+      <SysTomlForm name="peers" fields={SYS_PEER_FIELDS(s)} values={p} onSaved={reload} />
       {[["outbound", "token", "token_file", "signs what this install sends it"],
         ["inbound", "inbound_token", "inbound_token_file", "checks what it sends to POST /peer/send"]].map(([which, stKey, fileKey, what]) =>
         <div key={which} className="field">
           <label>{which} token ({what})</label>
           <SecretField status={p[stKey] || { set: false }} placeholder={`paste the shared ${which} secret`}
                        onSubmit={v => token(s, which, v)} hint={p[fileKey] ? `${fileKey} = ${p[fileKey]}` : "stored under config/peer-tokens/"} />
-          {p[fileKey] && <div><ConfirmButton label={`clear ${which} token`} onConfirm={() => clearToken(s, which)} /></div>}
+          {p[stKey] && p[stKey].error && <span className="hint">{p[stKey].error}</span>}
+          {p[fileKey] && <div><SysConfirmButton label={`clear ${which} token`} onConfirm={() => clearToken(s, which)} /></div>}
         </div>)}
     </div>)}
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid var(--line-soft)", paddingTop: 8 }}>
@@ -593,13 +640,13 @@ function PeersEditor({ file, reload }) {
       <input className="txt" style={{ flex: "1 1 200px" }} value={url} onChange={e => setUrl(e.target.value)} placeholder="http://host:port" />
       <button className="btn primary" style={small} disabled={!slug || !url} onClick={add}>add peer</button>
     </div>
-    <RestartOffer applies={file.applies} restart={file.restart} />
-  </Panel>;
+    <SysRestartOffer applies={file.applies} restart={file.restart} />
+  </SysPanel>;
 }
 
 // A text file: its content, saved whole with the sha it was loaded at so a
 // change made meanwhile is refused, backed up by the server first.
-function TextFileEditor({ title, sub, file, route, reload, rows = 14, hint }) {
+function SysTextFileEditor({ title, sub, file, route, reload, rows = 14, hint }) {
   const [text, setText] = React.useState(file.content);
   const [msg, setMsg] = React.useState(null);
   React.useEffect(() => setText(file.content), [file.content, file.sha]);
@@ -609,17 +656,17 @@ function TextFileEditor({ title, sub, file, route, reload, rows = 14, hint }) {
                   : { ok: false, text: res.d.error || `HTTP ${res.status}` });
     if (res.ok) reload();
   };
-  return <Panel title={title} sub={sub}>
-    <FileHead file={file} />
+  return <SysPanel title={title} sub={sub}>
+    <SysFileHead file={file} />
     {hint && <span className="hint" style={{ fontSize: 11, color: "var(--fg-3)" }}>{hint}</span>}
     <textarea className="txt code" rows={rows} value={text} onChange={e => setText(e.target.value)} spellCheck={false} />
-    <div><ConfirmButton label="save" tone="primary" disabled={text === file.content} onConfirm={save} /></div>
+    <div><SysConfirmButton label="save" tone="primary" disabled={text === file.content} onConfirm={save} /></div>
     <SysNote msg={msg} />
-    <RestartOffer applies={file.applies} restart={file.restart} />
-  </Panel>;
+    <SysRestartOffer applies={file.applies} restart={file.restart} />
+  </SysPanel>;
 }
 
-function AllowlistEditor({ file, reload }) {
+function SysAllowlistEditor({ file, reload }) {
   const [items, setItems] = React.useState(file.allow || []);
   const [add, setAdd] = React.useState("");
   const [msg, setMsg] = React.useState(null);
@@ -632,14 +679,14 @@ function AllowlistEditor({ file, reload }) {
   };
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
   const dirty = JSON.stringify(items) !== JSON.stringify(file.allow || []);
-  return <Panel title="network allowlist" sub="config/net-allowlist.json: networks beyond loopback and the private ranges">
-    <FileHead file={file} />
+  return <SysPanel title="network allowlist" sub="config/net-allowlist.json: networks beyond loopback and the private ranges">
+    <SysFileHead file={file} />
     <span className="hint mono" style={{ fontSize: 11, color: "var(--fg-3)" }}>
       always allowed: {file.builtin.join(", ")} · you are {file.client}; a list that would leave you out is refused
     </span>
     {items.map((cidr, i) => <div key={cidr + i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <span className="mono" style={{ flex: 1 }}>{cidr}</span>
-      <ConfirmButton label="remove" onConfirm={() => setItems(items.filter((_, j) => j !== i))} />
+      <SysConfirmButton label="remove" onConfirm={() => setItems(items.filter((_, j) => j !== i))} />
     </div>)}
     <div style={{ display: "flex", gap: 8 }}>
       <input className="txt" style={{ width: 200 }} value={add} onChange={e => setAdd(e.target.value)} placeholder="100.64.0.0/10" />
@@ -647,42 +694,46 @@ function AllowlistEditor({ file, reload }) {
       <button className="btn primary" style={small} disabled={!dirty} onClick={save}>save</button>
     </div>
     <SysNote msg={msg} />
-    <RestartOffer applies={file.applies} restart={saved || file.restart} />
-  </Panel>;
+    <SysRestartOffer applies={file.applies} restart={saved || file.restart} />
+  </SysPanel>;
 }
 
-function CommandsView({ commands }) {
-  return <Panel title="agent and worker commands" sub="read-only: a command line is code execution; edit it on the host">
+function SysCommandsView({ commands }) {
+  return <SysPanel title="agent and worker commands" sub="read-only: a command line is code execution; edit it on the host">
     {Object.entries(commands).map(([name, c]) => <div key={name} className="field">
       <label>{c.path}</label>
       {c.exists ? <pre className="mono" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: 0, fontSize: 11 }}>{c.content}</pre>
                 : <span className="hint">absent</span>}
     </div>)}
-  </Panel>;
+  </SysPanel>;
 }
 
-function ConfigEditors() {
+function SysConfigEditors() {
   const [cfg, setCfg] = React.useState(null);
+  const [failed, setFailed] = React.useState(false);
   const load = React.useCallback(async () => {
     const d = await apiGet("/api/system/config");
+    setFailed(!d);
     if (d) setCfg(d.files);
   }, []);
   React.useEffect(() => { load(); }, [load]);
-  if (!cfg) return <Panel title="install config"><span className="muted">loading...</span></Panel>;
+  if (!cfg) return <SysPanel title="install config">{failed
+    ? <SysNote msg={{ ok: false, text: "the console did not answer /api/system/config" }} />
+    : <span className="muted">loading...</span>}</SysPanel>;
   return <>
-    <MediaEditor file={cfg.media} reload={load} />
-    <PlainTomlEditor title="embedding" sub="config/embedding.toml: the semantic leg of memory search"
-                     name="embedding" file={cfg.embedding} fields={EMBEDDING_FIELDS} reload={load} />
-    <PlainTomlEditor title="hive" sub="config/hive.toml: the console as the hive's queen"
-                     name="hive" file={cfg.hive} fields={HIVE_FIELDS} reload={load} />
-    <PeersEditor file={cfg.peers} reload={load} />
-    <TextFileEditor title="outbound filter" sub="config/outbound-filter.json" file={cfg.outbound_filter}
+    <SysMediaEditor file={cfg.media} reload={load} />
+    <SysPlainTomlEditor title="embedding" sub="config/embedding.toml: the semantic leg of memory search"
+                     name="embedding" file={cfg.embedding} fields={SYS_EMBEDDING_FIELDS} reload={load} />
+    <SysPlainTomlEditor title="hive" sub="config/hive.toml: the console as the hive's queen"
+                     name="hive" file={cfg.hive} fields={SYS_HIVE_FIELDS} reload={load} />
+    <SysPeersEditor file={cfg.peers} reload={load} />
+    <SysTextFileEditor title="outbound filter" sub="config/outbound-filter.json" file={cfg.outbound_filter}
                     route="/api/system/outbound-filter" reload={load}
                     hint='{"terms": [...], "protected": [...], "trusted_peers": [...], "surfaces": {"<surface>": {"add": [...]}}}' />
-    <TextFileEditor title="law" sub="config/law.md: every cousin's boot packet" file={cfg.law}
+    <SysTextFileEditor title="law" sub="config/law.md: every cousin's boot packet" file={cfg.law}
                     route="/api/system/law" reload={load} rows={18} />
-    <AllowlistEditor file={cfg.allowlist} reload={load} />
-    <CommandsView commands={cfg.commands} />
+    <SysAllowlistEditor file={cfg.allowlist} reload={load} />
+    <SysCommandsView commands={cfg.commands} />
   </>;
 }
 
@@ -703,12 +754,12 @@ function SystemView({ cousins }) {
     <div className="radio-row">
       {SYSTEM_TABS.map(([id, label]) => <button key={id} className={tab === id ? "sel" : ""} onClick={() => pick(id)}>{label}</button>)}
     </div>
-    {tab === "services" && <SupervisorPanel />}
+    {tab === "services" && <SysSupervisorPanel />}
     {tab === "schedules" && <SchedulesPanel cousins={cousins} />}
-    {tab === "users" && <UsersPanel />}
-    {tab === "backup" && <BackupPanel cousins={cousins} />}
-    {tab === "agent" && <AgentDefaultsPanel />}
-    {tab === "config" && <ConfigEditors />}
+    {tab === "users" && <SysUsersPanel />}
+    {tab === "backup" && <SysBackupPanel cousins={cousins} />}
+    {tab === "agent" && <SysAgentDefaultsPanel />}
+    {tab === "config" && <SysConfigEditors />}
   </div>;
 }
 
@@ -716,5 +767,4 @@ registerView({ id: "system", label: "System", icon: I.host, order: 60, render: (
 registerSlot("inspector.panels", { id: "schedules", order: 40,
   render: ({ cousin }) => (cousin && !cousin.remote && cousin.type !== "remote") ? <SchedulesPanel slug={cousin.slug} /> : null });
 
-Object.assign(window, { SystemView, SupervisorPanel, SchedulesPanel, UsersPanel, BackupPanel,
-                        AgentDefaultsPanel, ConfigEditors, ConfirmButton, RestartOffer });
+Object.assign(window, { SystemView, SchedulesPanel });

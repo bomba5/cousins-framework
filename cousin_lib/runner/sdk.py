@@ -28,6 +28,7 @@ the stream for the next turn to misread.
 import asyncio
 import json
 import threading
+import contextlib
 import time
 import uuid
 from datetime import datetime, timezone
@@ -143,6 +144,13 @@ def _tool_result_text(content):
     return ""
 
 
+# #104 (b): a turn's fold, interrupt-row control or query write that runs
+# longer than this is named on the stream (`system` `stall`, its site and
+# duration): the SDK buffers 100 messages from the CLI, and a consumer held
+# that long lets it fill, after which its reader answers no hook.
+STALL_REPORT_S = 30.0
+STALL_CHECK_S = 5.0
+
 class SdkRunner:
     kind = "sdk"          # what runner/status.py reports (the `runner` event)
     # The contract items this runner DECLARES unsupported, and those a
@@ -228,6 +236,7 @@ class SdkRunner:
         self._failures = 0       # consecutive failed turns
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
+        self._waits = []         # the turn's long waits in progress (#104 b)
         # A rejected rate limit (epoch seconds): nothing is claimed before it
         # (_wait_rate_limit); None when no limit holds.
         self._limited_until = None
@@ -910,6 +919,7 @@ class SdkRunner:
             runner.run(self._main())
 
     async def _main(self):
+        watchdog = asyncio.ensure_future(self._stall_watch())
         try:
             # the start-up sweep first, before a resume or a fresh start: what
             # a dead runner wrote and never held is held before this session's
@@ -989,9 +999,36 @@ class SdkRunner:
                         elif self.fatal is None:
                             await self._start_fresh(with_digest=True)
         finally:
+            watchdog.cancel()
             await self._stop_review()
             await self._flush_session()     # a stop never loses the last id
             await self._disconnect()
+
+    @contextlib.contextmanager
+    def _waiting_at(self, site):
+        """A turn waits at `site` (#104 b): the watchdog names it while it
+        runs past STALL_REPORT_S, and its end is named with its duration."""
+        mark = {"site": site, "since": time.monotonic(), "said": False}
+        self._waits.append(mark)
+        try:
+            yield
+        finally:
+            self._waits.remove(mark)
+            took = time.monotonic() - mark["since"]
+            if took >= STALL_REPORT_S:
+                self.stream.append("system", {"subtype": "stall", "site": site,
+                                              "seconds": round(took, 1), "ongoing": False})
+
+    async def _stall_watch(self):
+        while True:
+            await asyncio.sleep(STALL_CHECK_S)
+            now = time.monotonic()
+            for mark in list(self._waits):
+                if not mark["said"] and now - mark["since"] >= STALL_REPORT_S:
+                    mark["said"] = True
+                    self.stream.append("system", {"subtype": "stall", "site": mark["site"],
+                                                  "seconds": round(now - mark["since"], 1),
+                                                  "ongoing": True})
 
     def _wake_error(self, message):
         self.stream.append("error", {"error": message})
@@ -1115,7 +1152,8 @@ class SdkRunner:
 
         gen = one()
         try:
-            await self._client.query(gen)
+            with self._waiting_at("send"):
+                await self._client.query(gen)
         except Exception as exc:
             if not yielded or _nothing_written(sdk, exc):
                 raise _NotWritten(row, exc) from exc
@@ -1197,10 +1235,12 @@ class SdkRunner:
             while True:
                 if control is not None and time.monotonic() - last_control >= self.poll_s:
                     last_control = time.monotonic()
-                    await control()
+                    with self._waiting_at("control"):
+                        await control()
                 if fold is not None and time.monotonic() - self._last_fold >= self.poll_s:
                     self._last_fold = time.monotonic()
-                    await fold()
+                    with self._waiting_at("fold"):
+                        await fold()
                 now = time.monotonic()
                 wait, overrun = idle_deadline - now, "no message for %.1fs" % self.idle_timeout_s
                 if self.turn_timeout_s is not None:

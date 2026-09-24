@@ -171,7 +171,7 @@ class List(AccountsCase):
         self.assertEqual(rows["fleet"]["kind"], "claude-login")
         self.assertEqual(rows["fleet"]["where"], "data/accounts/fleet")
         self.assertEqual(rows["fleet"]["cousins"], ["wren"])
-        self.assertEqual(rows["fleet"]["lanes"], ["sdk", "fake"])
+        self.assertEqual(rows["fleet"]["lanes"], ["sdk", "fake", "tmux"])
         self.assertEqual(rows["keyed"]["lanes"], ["opencode"])
         self.assertEqual(rows["keyed"]["entry"]["providers"], ["openai", "mistral"])
         self.assertEqual(rows["metered"]["where"], ".secrets/accounts/metered")

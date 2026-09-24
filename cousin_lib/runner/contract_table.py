@@ -58,6 +58,7 @@ RUNNER_CLASSES = {
     "sdk": "cousin_lib.runner.sdk:SdkRunner",
     "fake": "cousin_lib.runner.fake:FakeRunner",
     "opencode": "cousin_lib.runner.opencode:OpencodeRunner",
+    "tmux": "cousin_lib.runner.tmux_runner:TmuxRunner",
 }
 
 PAGE = Path("docs") / "reference" / "runners.md"

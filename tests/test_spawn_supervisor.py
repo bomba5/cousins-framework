@@ -309,7 +309,7 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertEqual(data["agent"], {"runner": "fake", "account": "fleet"})
 
     def test_an_invalid_runner_is_refused_before_anything_is_written(self):
-        self.assertIn("runner must be one of sdk, fake", self.refused(runner="tmux"))
+        self.assertIn("runner must be one of sdk, fake", self.refused(runner="pane"))
         os.environ["COUSIN_DEFAULT_RUNNER"] = "docker"
         self.assertIn("COUSIN_DEFAULT_RUNNER", self.refused())
 
@@ -334,11 +334,14 @@ class TestCreateOnTheRunnerLane(_CreateCase):
 
     def test_a_runner_that_is_not_a_runner_kind_is_not_the_runner_lane(self):
         """#100 review: a second runner_lane returned the raw string, so
-        `runner = "tmux"` read as the runner lane everywhere."""
+        `runner = "tmux"` read as the runner lane everywhere. Since phase 11
+        "tmux" names the tmux kind, a runner kind; a value outside the kinds
+        is still not the runner lane."""
         self.create()
         text = self.toml()
-        for runner, lane in (("tmux", False), ("", False), ("sdk", True),
-                             ("fake", True), ("opencode", True)):
+        for runner, lane in (("tmux-legacy", False), ("bogus", False), ("", False),
+                             ("sdk", True), ("fake", True), ("opencode", True),
+                             ("tmux", True)):
             (self.home / "cousin.toml").write_text(
                 text + '\n[agent]\nrunner = "%s"\n' % runner)
             self.assertIs(spawn.runner_lane(self.home), lane, runner)

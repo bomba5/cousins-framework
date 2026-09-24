@@ -91,14 +91,26 @@ class Describe(_Case):
         self.assertEqual(d["settings"], {})
 
     def test_the_kinds_are_read_from_delivery(self):
-        home = self.cousin('runner = "tmux"\nenv_allow = ["LANG"]\n')
+        home = self.cousin('runner = "bogus"\n')
         self.assertEqual(agent_settings.describe(home, self.root)["lane"],
                          agent_settings.TMUX_LEGACY)
-        with mock.patch.object(delivery, "RUNNER_KINDS", delivery.RUNNER_KINDS + ("tmux",)):
+        with mock.patch.object(delivery, "RUNNER_KINDS", delivery.RUNNER_KINDS + ("bogus",)):
             d = agent_settings.describe(home, self.root)
-            self.assertEqual(d["lane"], "tmux")
-            self.assertIn("tmux", d["kinds"])
-            self.assertEqual(d["settings"]["env_allow"]["value"], ["LANG"])
+            self.assertEqual(d["lane"], "bogus")
+            self.assertIn("bogus", d["kinds"])
+
+    def test_the_tmux_kind_reads_model_effort_and_env_allow(self):
+        """Phase 11: `tmux` is a runner kind; its pane takes --model and
+        --effort, and its environment allowlist is its own key."""
+        home = self.cousin('runner = "tmux"\nenv_allow = ["LANG"]\neffort = "high"\n')
+        d = agent_settings.describe(home, self.root)
+        self.assertEqual(d["lane"], "tmux")
+        self.assertIn("tmux", d["kinds"])
+        self.assertEqual(set(d["settings"]),
+                         {"runner", "account", "auto_start", "model", "effort", "env_allow"})
+        self.assertEqual(d["settings"]["env_allow"]["value"], ["LANG"])
+        self.assertEqual(d["settings"]["effort"]["value"], "high")
+        self.assertEqual(d["settings"]["account"]["choices"], ["host", "fleet"])   # no key account
 
     def test_a_broken_current_value_is_reported_not_raised(self):
         home = self.cousin('runner = "sdk"\naccount = "oc"\neffort = "ultra"\n')
@@ -180,6 +192,11 @@ class Validate(_Case):
         agent_settings.validate(home, self.root, {"account": "box", "model": "local/qwen3",
                                                    "small_model": None})
         self.assertIn("opencode", self.refused(home, {"account": "fleet"}, "account"))
+
+    def test_a_tmux_kind_cousin_refuses_a_key_account(self):
+        home = self.cousin('runner = "tmux"\n')
+        self.assertIn("subscription login", self.refused(home, {"account": "metered"}, "account"))
+        agent_settings.validate(home, self.root, {"account": "fleet", "effort": "low"})
 
     def test_a_tmux_cousin_has_nothing_to_validate_here(self):
         home = self.cousin(None)

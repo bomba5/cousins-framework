@@ -35,6 +35,17 @@ AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
              "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_FOUNDRY_API_KEY",
              "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_AWS_API_KEY",
              "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
+# A name shaped like a credential: *SECRET*, *_PASSWORD, *_KEY, *_TOKEN
+# (opencode review round 2, minor 6). One rule for every kind that builds a
+# model's environment from names (opencode's shell_env, the tmux pane).
+SECRET_NAME = re.compile(r"SECRET|_PASSWORD$|_KEY$|_TOKEN$", re.IGNORECASE)
+
+
+def credential_name(name):
+    """True for an auth variable (AUTH_VARS) or a credential-shaped name."""
+    return name in AUTH_VARS or bool(SECRET_NAME.search(name))
+
+
 # Never set for any kind (1.18.2): CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 puts
 # the bundled CLI in its CI hardening mode, which forces the permission
 # mode to `default` (every tool asks, and a runner has nobody to answer)

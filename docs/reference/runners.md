@@ -23,7 +23,12 @@ runner's process against the live turn, whatever the kind.
 A row that arrives while a turn runs is either folded into that turn (written
 into it at once and closed by the same result) or kept for a turn of its own.
 The rule is `base.FOLDED_KINDS`, the same on every runner that folds (`sdk`,
-`opencode`, `fake`):
+`opencode`, `fake`). The `tmux` kind folds nothing (`midturn_fold` is
+DECLARED): the pane's CLI queues typed input to the turn's end or interrupts,
+never folds, so every row, an operator's or a peer's included, is claimed at
+idle and waits for the running turn to end. On that kind the operator's
+urgent path is the interrupt, and a peer's STOP arrives after the turn it
+meant to stop.
 
 | row | while a turn runs |
 |---|---|
@@ -67,8 +72,14 @@ the cousin's card and its chat header. Nothing is skipped silently.
 | `sdk` | the Claude Agent SDK (its bundled Claude Code CLI), in-process tools and hooks | `claude-login` (and `host`), `claude-token`, `anthropic-key` | the default lane: Claude models, on a login or an API key. Side sessions (`[agent.sessions]`) are this kind only |
 | `fake` | none: a scripted turn that answers at once | none needed | tests, demos and the Docker exit checks: the whole lane (inbox, stream, supervisor) with no model |
 | `opencode` | `opencode serve`, driven over HTTP and its event stream (`OpencodeRunner`) | `opencode` only | another provider's models on its own API key, or a local OpenAI-compatible model. Never a Claude subscription |
+| `tmux` | the host's interactive Claude Code CLI in a tmux pane on the framework's own socket (`run/tmux.sock`), driven by `TmuxRunner`; the CLI's transcript is the source of truth, its hooks only wake the runner | `claude-login` (and `host`) only | the fallback if Agent SDK usage moves off subscription limits. It cannot fold a message into a running turn (`midturn_fold`) |
 
-A cousin with no `[agent] runner` is a tmux cousin: it has no runner at all.
+A cousin moves between `sdk` and `tmux` with `cousin-migrate --to <kind>`,
+keeping its session (`data/runner-session.json`, resumed with `claude
+--resume`).
+
+A cousin with no `[agent] runner` is a legacy tmux cousin: it has no runner at
+all.
 
 ## Picking one
 
@@ -127,29 +138,29 @@ not DECLARED against every kind (`tests/runner/contract/test_<kind>.py`; the
 so an IMPLEMENTED or PLUGIN cell is one the suite enforces.
 
 <!-- contract-table:begin (python3 -m cousin_lib.runner.contract_table --write) -->
-| item | what the suite proves | `sdk` | `fake` | `opencode` |
-|---|---|---|---|---|
-| `enqueue_receipt` | `enqueue` answers a `Receipt` with an inbox id, outcome `queued` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `priority_order` | queued rows run in priority order: operator, then schedule, then loop | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `consume_after_start` | a row put while the runner is stopped runs after `start()` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_ends_turn` | `interrupt()` ends the running turn; the runner is idle again | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `turn_events` | every turn emits `turn_start`, then `tool`, then `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `unsupported_list` | `unsupported()` names contract items only | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `midturn_fold` | an operator or peer message put mid-turn is closed by the same `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `outcome_delivered` | a finished turn closes its row `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `outcome_failed` | a failed turn closes its row `failed`, the result an error | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `outcome_interrupted` | an interrupted turn's row is `delivered` (the model had it) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `failure_recovers` | after a failure (`errored`, then `idle`) the next row runs | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `stop_ends_turn` | `stop()` during a turn ends it within its timeout | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `loop_waits` | a loop row put mid-turn waits for a turn of its own | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `state_events` | every state transition is a `state` event, in order | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `events_after` | `events(after=n)` resumes exactly after event `n` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_idle_false` | `interrupt()` with no turn running answers False | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `enqueue_type_error` | `enqueue` refuses anything but an `Item` (TypeError) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `rollover_shape` | `rollover()` answers `{ok, reason}` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `rollover_generation` | a rollover moves the generation and loses no row | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_row` | an `interrupt` inbox row ends the live turn and is `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_row_idle` | an `interrupt` row with no turn running is `failed`, never a turn | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| item | what the suite proves | `sdk` | `fake` | `opencode` | `tmux` |
+|---|---|---|---|---|---|
+| `enqueue_receipt` | `enqueue` answers a `Receipt` with an inbox id, outcome `queued` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `priority_order` | queued rows run in priority order: operator, then schedule, then loop | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `consume_after_start` | a row put while the runner is stopped runs after `start()` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_ends_turn` | `interrupt()` ends the running turn; the runner is idle again | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `turn_events` | every turn emits `turn_start`, then `tool`, then `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `unsupported_list` | `unsupported()` names contract items only | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `midturn_fold` | an operator or peer message put mid-turn is closed by the same `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | DECLARED |
+| `outcome_delivered` | a finished turn closes its row `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `outcome_failed` | a failed turn closes its row `failed`, the result an error | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `outcome_interrupted` | an interrupted turn's row is `delivered` (the model had it) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `failure_recovers` | after a failure (`errored`, then `idle`) the next row runs | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `stop_ends_turn` | `stop()` during a turn ends it within its timeout | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `loop_waits` | a loop row put mid-turn waits for a turn of its own | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `state_events` | every state transition is a `state` event, in order | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `events_after` | `events(after=n)` resumes exactly after event `n` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_idle_false` | `interrupt()` with no turn running answers False | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `enqueue_type_error` | `enqueue` refuses anything but an `Item` (TypeError) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `rollover_shape` | `rollover()` answers `{ok, reason}` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `rollover_generation` | a rollover moves the generation and loses no row | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_row` | an `interrupt` inbox row ends the live turn and is `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_row_idle` | an `interrupt` row with no turn running is `failed`, never a turn | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 <!-- contract-table:end -->
 
 `midturn_fold` on `opencode` is measured, not assumed: a prompt sent while a
@@ -263,3 +274,9 @@ none is a contract item:
   Processes opencode starts other
   than a shell (language servers, formatters) run with the server's own
   environment, `HOME` in the account's data dir.
+- **tmux kind: a `/clear` typed in the pane is not followed.** The CLI starts
+  a new session id; the runner keeps reading the recorded session's
+  transcript and says so once with a `system` `session_changed` event naming
+  both ids. The next start finds the hook's record on the new id, refuses to
+  adopt the pane (`adopt_refused`, `session_mismatch`) and resumes the
+  recorded session.

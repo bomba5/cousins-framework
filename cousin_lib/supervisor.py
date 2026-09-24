@@ -954,6 +954,24 @@ class Supervisor:
             answer["error"] = child.reason
         return answer
 
+    REAP_TIMEOUT_S = 15.0
+
+    def _reap_pane(self, home):
+        """A tmux-kind cousin stopped while its runner is down or failing:
+        its pane may still be running a turn, and nothing else would kill
+        it (phase 11 R21). The kill is the runner module's (`cousin-runner
+        --reap-pane`), so no tmux call lives here; it holds the runner lock
+        while it kills. Bounded; a failure is said, never raised."""
+        if (_agent_table(home) or {}).get("runner") != "tmux":
+            return
+        try:
+            r = subprocess.run([sys.executable, "-m", "cousin_lib.runner.main", "--home", str(home),
+                                "--reap-pane"], capture_output=True, text=True,
+                               timeout=self.REAP_TIMEOUT_S, check=False)
+            self.say("reap %s: rc=%d %s" % (Path(home).name, r.returncode, (r.stdout or "").strip()[:120]))
+        except (OSError, subprocess.SubprocessError) as err:
+            self.say("reap %s failed: %s" % (Path(home).name, err))
+
     def stop_child(self, name, pending=None, *, wait=True, by="a stop request"):
         """`stop` by child name: SIGTERM, then the child is held `stopped`
         (never restarted) until `start`; a runner cousin's hold is also
@@ -971,6 +989,8 @@ class Supervisor:
             except OSError as err:
                 self.say("cannot write %s: %s" % (Path(home) / HELD, err))
             self._sync_bridges(name[len("runner:"):])      # held: its bridge goes down with it
+        if home is not None and (child is None or not child.alive):
+            self._reap_pane(home)
         if child is None:
             return {"ok": True, "name": name, "state": "stopped"}
         if not child.alive:

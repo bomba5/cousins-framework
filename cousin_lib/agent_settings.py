@@ -48,9 +48,9 @@ SCHEMA = {
                 "hint": "the credentials the runner uses (config/accounts.toml)"},
     "auto_start": {"type": "bool", "lanes": ALL, "default": True,
                    "hint": "the supervisor starts this runner with itself"},
-    "model": {"type": "model", "lanes": ("sdk", "opencode"),
-              "hint": "sdk: a model name; opencode: \"<provider>/<model>\""},
-    "effort": {"type": "effort", "lanes": ("sdk",)},
+    "model": {"type": "model", "lanes": ("sdk", "opencode", "tmux"),
+              "hint": "sdk, tmux: a model name; opencode: \"<provider>/<model>\""},
+    "effort": {"type": "effort", "lanes": ("sdk", "tmux")},
     "rollover_at_percent": {"type": "percent", "lanes": ("sdk", "opencode"),
                             "min": 1, "max": 100,
                             "hint": "context use at which the session rolls over"},
@@ -66,7 +66,7 @@ SCHEMA = {
     "api_key_file": {"type": "str", "lanes": ("sdk", "fake"), "readonly": True,
                      "deprecated": True, "only_when_set": True,
                      "hint": "deprecated: move the key to an account"},
-    # Phase 11 slot: the tmux kind's keys, live once `tmux` is a RUNNER_KIND.
+    # The tmux kind's own key (phase 11): its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},
 }
@@ -95,6 +95,19 @@ def lane_keys(lane):
         return []
     return [k for k, spec in SCHEMA.items()
             if spec["lanes"] == ALL or lane in spec["lanes"]]
+
+
+def _check_lane(account, lane):
+    """accounts.check_lane, plus the tmux kind's own refusal (runner/main.py
+    runner_for, phase 11 P11-6): a token or API-key account never runs a
+    pane. An AccountsError either way."""
+    accounts.check_lane(account, lane)
+    if lane == "tmux":
+        from cousin_lib.runner.tmux_launch import REFUSED_KINDS
+        if account.kind in REFUSED_KINDS:
+            raise accounts.AccountsError(
+                "the tmux kind runs on a subscription login (host or a claude-login"
+                " account); account %s is %s" % (account.name, account.kind))
 
 
 def _read_agent(home):
@@ -232,7 +245,7 @@ def _cross(root, agent, home=None):
                 errors[key] = str(err)
     try:
         account = _account(root, agent, home)
-        accounts.check_lane(account, lane)
+        _check_lane(account, lane)
         # the runner's preflight before its lock (runner/main.account_for): a
         # secret open to others, not ours, a symlink or malformed is exit 2;
         # a missing one is a login to do, which the runner waits for
@@ -293,7 +306,7 @@ def _choices(key, lane, root):
         out = [] if lane == "opencode" else [accounts.HOST]
         for name in sorted(known):
             try:
-                accounts.check_lane(known[name], lane)
+                _check_lane(known[name], lane)
             except accounts.AccountsError:
                 continue
             out.append(name)
@@ -304,7 +317,7 @@ def _choices(key, lane, root):
 def _suggestions(key, lane, root, agent):
     if key != "model":
         return None
-    if lane == "sdk":
+    if lane in ("sdk", "tmux"):
         from cousin_lib.config import DEFAULT_MODELS, MissingConfigError, agent_config
         try:
             return list(agent_config(root)["models"])

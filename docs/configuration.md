@@ -783,7 +783,16 @@ session with no settings files and `bypassPermissions`; `policy.toml`
 (`deny_tools`, `deny_bash_patterns`, `ask`, `outbound_filter`) is what stands
 in for a settings file's deny rules, read once at start and enforced by a
 `PreToolUse` hook, and a malformed one is a config error, exit 2, naming the
-key. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
+key. `runner = "fake"` is for tests. `runner = "tmux"` (phase 11) runs the
+host's interactive Claude Code in a tmux pane on the framework's own socket,
+fed by the same inbox; it runs on `host` or a named `claude-login` account only
+(`claude-token` and `anthropic-key` accounts are refused, exit 2), and the pane
+starts from a fixed allowlist of the runner's environment (`HOME`, `PATH`,
+`USER`, `LOGNAME`, `SHELL`, `SSH_AUTH_SOCK`, `XDG_RUNTIME_DIR`,
+`DBUS_SESSION_BUS_ADDRESS`, `LANG`, `LOCALE_ARCHIVE`, `TZ`, `COLORTERM`,
+`TMPDIR`, every `LC_*`) plus the names `[agent] env_allow` lists (a list of
+variable names; a `CLAUDE*` or `ANTHROPIC*` name is refused, since those never
+reach the pane). Absent: the tmux path, unchanged
 (and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
 cousin.toml that does not parse is also the tmux path, and `cousin-runner`
 refuses it the same way).
@@ -797,7 +806,7 @@ item, not that it answered it: the rows of an interrupted turn are delivered.
 
 `model` names the model the runner asks for, and `effort` its effort (`low`,
 `medium`, `high`, `xhigh` or `max`; anything else is exit 2 at start). A runner
-reads only `[agent]`: `[runtime]` (model, effort, auth) is the tmux lane's, and
+reads only `[agent]`: `[runtime]` (model, effort, auth) is the legacy tmux lane's, and
 `cousin-migrate` carries it over, validated (see [migrating](migrating.md)).
 `account` names the account the
 cousin runs on, one of `config/accounts.toml`'s (see
@@ -811,7 +820,7 @@ exit 2; a missing secret file is let through as a login to do, see
 [accounts.toml](#accountstoml)). The terms risk of running a cousin on a login is the
 user's.
 
-`cousin-spawn --runner sdk|fake|opencode [--account <name>]` (or the console's spawn
+`cousin-spawn --runner sdk|fake|opencode|tmux [--account <name>]` (or the console's spawn
 with `runner` and `account`) writes both keys when the cousin is created, and
 `COUSIN_DEFAULT_RUNNER` / `COUSIN_DEFAULT_ACCOUNT` supply them when the flags
 are left out (see [Environment variables](#environment-variables)); an

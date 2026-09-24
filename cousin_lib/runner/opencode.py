@@ -107,8 +107,7 @@ SHELL_BLANK = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_
 SHELL_PASS = ("USER", "LOGNAME")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # A name shaped like a credential is never passed to the model's shell
-# (review round 2, minor 6): *SECRET*, *_PASSWORD, *_KEY, *_TOKEN.
-_SECRET_NAME = re.compile(r"SECRET|_PASSWORD$|_KEY$|_TOKEN$", re.IGNORECASE)
+# (review round 2, minor 6): accounts.credential_name, shared with the tmux pane.
 TURN_GUARD_RETRY_S = 0.5            # one more try of the per-turn checks before giving up
 ACCOUNT_HOLDER = "account.holder"   # the home of the runner holding the account (its flock)
 ACCOUNT_TAKE_S = 1.0                # a restarting runner's predecessor may still be exiting
@@ -181,7 +180,7 @@ def shell_env(home, agent, environ=None):
         raise RunnerError("cousin.toml [agent] shell_env must be a list of variable names")
     for name in named:
         if (not _ENV_NAME.match(name) or name == "HOME" or name.startswith(("XDG_", "OPENCODE_"))
-                or name in accounts.AUTH_VARS or _SECRET_NAME.search(name)):
+                or accounts.credential_name(name)):
             raise RunnerError("cousin.toml [agent] shell_env names %r: HOME, XDG_*, OPENCODE_*"
                               " and credentials are the runner's to set, never passed to the"
                               " model's shell" % name)

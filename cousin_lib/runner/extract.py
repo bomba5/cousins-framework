@@ -74,6 +74,17 @@ def _save(home, state, parts=_CURSOR):
     tmp.replace(path)
 
 
+def set_cursor(home, session_id, cursor):
+    """Move one session's mining cursor (R17: a kind switch keeps the
+    session id and moves the cursor to the end, in the TARGET kind's unit:
+    a byte offset in the CLI's transcript for tmux, a store row id for the
+    SDK), so nothing is mined twice across the switch."""
+    with memory_lock.write_lock(Path(home)):
+        state = _load(home)
+        state[session_id] = int(cursor)
+        _save(home, state)
+
+
 def _raw_entries(home, since_day):
     raw = Path(home) / "memory" / "raw"
     for path in sorted(raw.glob("*.jsonl")) if raw.is_dir() else []:

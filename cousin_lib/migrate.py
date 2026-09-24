@@ -91,6 +91,8 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
+
 RECORD = "data/migration.json"
 STEPS = ("close", "handover", "import", "toml", "start", "verify")
 STALE_S = 3600.0          # an inbox row not done after this long is a lost message
@@ -591,9 +593,17 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     home, root = Path(home), Path(root)
     checks = []
     agent = _agent(home)
-    lane_ok = agent.get("runner") not in ("sdk", "fake")
-    checks.append(_check("lane", lane_ok, "on the tmux lane" if lane_ok else
-                         "already on the runner lane ([agent] runner = %r)" % agent.get("runner")))
+    runner = agent.get("runner")
+    lane_ok = runner not in RUNNER_KINDS
+    if lane_ok:
+        lane_detail = "on the tmux lane"
+    elif runner == "tmux":
+        lane_detail = ("[agent] runner = \"tmux\" is the tmux runner kind, not the legacy tmux"
+                       " lane: it is already on the runner lane; switch kinds with --to sdk"
+                       " (phase 11)")
+    else:
+        lane_detail = "already on the runner lane ([agent] runner = %r)" % runner
+    checks.append(_check("lane", lane_ok, lane_detail))
     running = lane_ok and tmux_alive(home)
     if lane_ok:
         checks.append(_check("running", running, "its tmux session is up" if running else
@@ -1122,6 +1132,16 @@ def check(home, *, since=None, now=None, health=None, root=None, validate=False,
     out = {"since": since, "inbox": inbox, "inbox_readable": rows is not None,
            "tool_calls": len(calls), "unrecorded": unrecorded, "hook_errors": hook_errors}
     out["config"], out["mismatches"] = config_mismatches(home, root)
+    out["warnings"] = []
+    try:
+        tmux_kind = _agent(home).get("runner") == "tmux"
+    except MigrateError:
+        tmux_kind = False
+    account, _err = _account(home, root) if tmux_kind else (None, None)
+    if account is not None and account_mcp_servers(account):
+        out["warnings"].append("the account's config holds MCP servers (%s): they load in"
+                               " the pane and not in the SDK kind (P11-13)"
+                               % ", ".join(account_mcp_servers(account)))
     out["cli"] = (cli_version or runner_cli)()
     ok = rows is not None and inbox["stale"] == 0 and not unrecorded and not hook_errors \
         and not out["mismatches"]
@@ -1213,6 +1233,325 @@ def _live():
             home, agent_cmd=flip._read_agent_cmd_template(Path(root)), root=root))
 
 
+# ------------------------------------------------------------ the kind switch
+# Phase 11 (R17, I9, P11-11, P11-13): `--to sdk|tmux` moves a runner cousin
+# between the two Claude kinds. The session id in data/runner-session.json is
+# the continuity: the source stops at idle keeping it, the target resumes it.
+
+SWITCH_RECORD = "data/kind-switch.json"
+SWITCH_KINDS = ("sdk", "tmux")
+SWITCH_STEPS = {"tmux": ("trust", "close", "toml", "start", "verify"),
+                "sdk": ("close", "toml", "start", "verify")}
+
+
+def read_switch_record(home):
+    try:
+        data = json.loads((Path(home) / SWITCH_RECORD).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_switch_record(home, rec):
+    path = Path(home) / SWITCH_RECORD
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec, indent=2))
+    os.replace(tmp, path)
+
+
+def _account(home, root):
+    from cousin_lib import accounts
+    try:
+        return accounts.for_cousin(home, root), None
+    except accounts.AccountsError as err:
+        return None, str(err)
+
+
+def _claude_json(account):
+    """The account's config dir's .claude.json (the host login's is
+    ~/.claude.json), as a dict; {} when absent or unreadable."""
+    path = (Path(account.config_dir) / ".claude.json" if account.config_dir is not None
+            else Path.home() / ".claude.json")
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def trust_recorded(home, account):
+    """P11-11: the config dir has recorded the trust dialog for this home
+    (projects[<home>].hasTrustDialogAccepted, Z9)."""
+    projects = _claude_json(account).get("projects")
+    entry = projects.get(str(Path(home))) if isinstance(projects, dict) else None
+    return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
+
+
+def account_mcp_servers(account):
+    """The account-level MCP servers (.claude.json mcpServers): they load in
+    a tmux-kind pane and not in the SDK kind (P11-13)."""
+    servers = _claude_json(account).get("mcpServers")
+    return sorted(servers) if isinstance(servers, dict) else []
+
+
+def _session_record(home):
+    try:
+        data = json.loads((Path(home) / "data" / "runner-session.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _recorded_session(home):
+    sid = _session_record(home).get("session_id")
+    return sid if isinstance(sid, str) and sid else None
+
+
+def switch_plan(home, *, root, to, supervisor_up, **_unused):
+    """{"slug", "from", "to", "steps", "checks", "warnings", "ready"}; writes
+    nothing."""
+    home, root = Path(home), Path(root)
+    checks, warnings = [], []
+    try:
+        current = _agent(home).get("runner")
+    except MigrateError as err:
+        current = None
+        checks.append(_check("toml", False, str(err)))
+    if to not in SWITCH_KINDS:
+        checks.append(_check("to", False, "--to must be one of %s" % ", ".join(SWITCH_KINDS)))
+        return {"slug": home.name, "from": current, "to": to, "steps": [], "checks": checks,
+                "warnings": warnings, "ready": False}
+    if current not in RUNNER_KINDS:
+        checks.append(_check("kind", False, "%s is on the legacy tmux lane: the kind switch is"
+                             " between runner kinds; migrate it first (cousin-migrate apply)"
+                             % home.name))
+    elif current == to:
+        checks.append(_check("kind", False, "%s is already the %s kind" % (home.name, to)))
+    elif current not in SWITCH_KINDS:
+        checks.append(_check("kind", False, "%s runs runner = %r: the switch is between sdk and"
+                             " tmux only" % (home.name, current)))
+    else:
+        checks.append(_check("kind", True, "%s -> %s" % (current, to)))
+    account, err = _account(home, root)
+    if account is None:
+        checks.append(_check("account", False, err))
+    elif to == "tmux" and account.kind in ("claude-token", "anthropic-key"):
+        checks.append(_check("account", False, "the tmux kind runs on a subscription login;"
+                             " %s accounts are refused until a login-free config dir is shown"
+                             " to start with no menu (P11-6; A4: onboarding is skippable by"
+                             " seeding, but a token's login screen is not measured)" % account.kind))
+    else:
+        checks.append(_check("account", True, "%s (%s)" % (account.name, account.kind)))
+    sid = _recorded_session(home)
+    # I5: "fresh" is a tmux rollover's new id whose CLI has not written the
+    # session yet; the other kind would resume a session nothing holds
+    fresh = sid is not None and _session_record(home).get("fresh") is True
+    checks.append(_check("session", sid is not None and not fresh,
+                         "session %s continues" % sid if sid and not fresh else
+                         "session %s is a rollover in flight (\"fresh\" in"
+                         " data/runner-session.json): nothing is written under it yet;"
+                         " let the cousin take one turn first" % sid if fresh else
+                         "no recorded session in data/runner-session.json: nothing to continue;"
+                         " start the cousin once first"))
+    checks.append(_check("supervisor", supervisor_up(root),
+                         "the supervisor runs" if supervisor_up(root) else
+                         "no cousin-supervisor: the switch stops and starts through it"))
+    if to == "tmux" and account is not None:
+        if trust_recorded(home, account):
+            checks.append(_check("trust", True, "the trust dialog is recorded for this home"))
+        else:
+            env = ("CLAUDE_CONFIG_DIR=%s " % account.config_dir
+                   if account.config_dir is not None else "")
+            checks.append(_check("trust", False, (
+                "a one-time operator step (P11-11): in a terminal, run `cd %s && %sclaude`,"
+                " accept the trust dialog (and the bypass one if it shows), then /exit;"
+                " then apply again" % (home, env))))
+    if account is not None:
+        servers = account_mcp_servers(account)
+        if servers and to == "tmux":
+            warnings.append("the account's config holds MCP servers (%s): they load in the"
+                            " pane and not in the SDK kind (P11-13)" % ", ".join(servers))
+    return {"slug": home.name, "from": current, "to": to, "steps": list(SWITCH_STEPS[to]),
+            "checks": checks, "warnings": warnings, "ready": all(c["ok"] for c in checks)}
+
+
+def _switch_notice(home, old, new):
+    """R10's notice: one runner line at the first idle after the switch, as
+    the framework's start-up line (a system `boot` row), which is also the
+    turn verify reads."""
+    from cousin_lib.delivery import Item
+    from cousin_lib.runner.inbox import Inbox
+    Inbox(home).put(Item(thread_id="system", source="boot", sender="runner", body=(
+        "[runner] this cousin moved from the %s kind to the %s kind; the session goes on."
+        " Instructions written for the %s kind are superseded by this kind's contract."
+        % (old, new, old))))
+
+
+def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor_up,
+                 clock=time.time, **_unused):
+    """Run the switch; the record, state `switched` or `failed`. MigrateError
+    when the plan is not ready (nothing is changed then: the trust step
+    stops it until it is recorded)."""
+    from cousin_lib import harness_settings
+    from cousin_lib.runner import extract
+    home, root = Path(home), Path(root)
+    p = switch_plan(home, root=root, to=to, supervisor_up=supervisor_up)
+    if not p["ready"]:
+        raise MigrateError("not ready: %s" % "; ".join(
+            "%s: %s" % (c["check"], c["detail"]) for c in p["checks"] if not c["ok"]))
+    path = home / "cousin.toml"
+    prior = path.read_bytes()
+    sid = _recorded_session(home)
+    rec = {"state": "switching", "from": p["from"], "to": to, "session_id": sid,
+           "started_at": _now(), "prior_toml_b64": base64.b64encode(prior).decode(),
+           "prior_mode": path.stat().st_mode & 0o777, "steps": []}
+
+    def step(name, detail="done"):
+        rec["steps"].append({"step": name, "detail": detail, "at": _now()})
+        _write_switch_record(home, rec)
+
+    _write_switch_record(home, rec)
+    if to == "tmux":
+        step("trust", "recorded in the account's config dir")
+    close(home, root)
+    step("close", "the %s runner stopped at idle; session %s kept" % (p["from"], sid))
+    text = set_agent_keys(prior.decode("utf-8"), {"runner": to})
+    _write_toml(home, text.encode("utf-8"), rec["prior_mode"])
+    if to == "tmux":
+        harness_settings.apply_project_settings(home, root=root, kind="tmux")
+    else:
+        harness_settings.remove_kind_settings(home)
+    step("toml", "[agent] runner = %r, the kind's settings %s"
+         % (to, "written" if to == "tmux" else "removed"))
+    since = clock()
+    start(home, root)
+    step("start", "the %s runner resumes %s" % (to, sid))
+    _switch_notice(home, p["from"], to)
+    step("notice")
+    ok, detail = verify(home, root, sid, to, since)
+    if not ok:
+        rec.update(state="failed", failed="verify", error=detail)
+        step("verify", detail)
+        raise MigrateError("verify: %s (roll back with --to %s, or look at it first)"
+                           % (detail, p["from"]))
+    step("verify", detail)
+    extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
+    step("cursor", "the mining cursor at the end of the %s kind's record" % to)
+    rec.update(state="switched", switched_at=_now())
+    _write_switch_record(home, rec)
+    return rec
+
+
+def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
+    """Back from a kind switch (R17, Task 11b), switched or failed: the
+    runner stopped, cousin.toml restored byte for byte, the kind's settings
+    as the restored kind wants them, the runner started again; the session
+    id is never touched, so the restored kind resumes it. `to` must name
+    the kind the switch came from."""
+    from cousin_lib import harness_settings
+    from cousin_lib.runner import extract
+    home, root = Path(home), Path(root)
+    rec = read_switch_record(home)
+    if rec is None or "prior_toml_b64" not in rec:
+        raise MigrateError("no kind switch recorded in %s: nothing to roll back" % SWITCH_RECORD)
+    if rec.get("state") == "rolled_back":
+        raise MigrateError("already rolled back at %s" % rec.get("rolled_back_at"))
+    if to != rec.get("from"):
+        raise MigrateError("the switch came from %s: roll back with --to %s"
+                           % (rec.get("from"), rec.get("from")))
+    steps = []
+
+    def step(name, detail="done"):
+        steps.append({"step": name, "detail": detail, "at": _now()})
+        rec["rollback_steps"] = steps
+        _write_switch_record(home, rec)
+
+    close(home, root)
+    step("close", "the %s runner stopped" % rec.get("to"))
+    _write_toml(home, base64.b64decode(rec["prior_toml_b64"]), int(rec["prior_mode"]))
+    if to == "tmux":
+        harness_settings.apply_project_settings(home, root=root, kind="tmux")
+    else:
+        harness_settings.remove_kind_settings(home)
+    step("restore", "cousin.toml as it was, byte for byte; the %s kind's settings" % to)
+    start(home, root)
+    step("start", "the %s runner resumes %s" % (to, rec.get("session_id")))
+    sid = rec.get("session_id")
+    if sid:
+        extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
+        step("cursor", "the mining cursor at the end of the %s kind's record" % to)
+    rec.update(state="rolled_back", rolled_back_at=_now())
+    _write_switch_record(home, rec)
+    return rec
+
+
+def _switch_live():
+    """The kind switch's live actions: the supervisor stops and starts the
+    runner; verify reads the target kind's own record of the resumed session."""
+    from cousin_lib import supervisor
+    from cousin_lib.runner import transcript
+    from cousin_lib.runner.session_store import SqliteSessionStore
+
+    def close(home, root):
+        answer = supervisor.request(root, "stop", slug=Path(home).name, wait=True,
+                                    by="cousin-migrate", timeout=60.0)
+        if not answer.get("ok"):
+            raise MigrateError("the supervisor refused the stop: %s" % answer.get("error"))
+
+    def start(home, root):
+        answer = supervisor.request(root, "start", slug=Path(home).name)
+        if not answer.get("ok"):
+            raise MigrateError("the supervisor refused the start: %s" % answer.get("error"))
+
+    def _transcript(home, root, sid):
+        account, _err = _account(home, root)
+        return transcript.locate(home, session_id=sid,
+                                 config_dir=account.config_dir if account else None)
+
+    def _turn_started(home, root, sid, since):
+        entries, _ = transcript.read_from(_transcript(home, root, sid), 0)
+        for e in entries:
+            if e.kind == "turn_start":
+                stamp = _stamp(str(e.raw.get("timestamp") or ""))
+                if stamp is not None and stamp >= since:
+                    return True
+        return False
+
+    def _session_init(home, sid, since):
+        for path in sorted((Path(home) / "data" / "stream").glob("*.jsonl")):
+            for line in path.read_text(errors="replace").splitlines():
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if (ev.get("kind") == "session_init" and float(ev.get("ts") or 0) >= since
+                        and (ev.get("payload") or {}).get("session_id") == sid):
+                    return True
+        return False
+
+    def verify(home, root, sid, to, since, timeout=VERIFY_S):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if (_turn_started(home, root, sid, since) if to == "tmux"
+                    else _session_init(home, sid, since)):
+                return True, ("a turn start under %s in the pane's transcript" % sid
+                              if to == "tmux" else "the SDK's session_init names %s" % sid)
+            time.sleep(1.0)
+        return False, ("no %s under %s within %ds" % (
+            "turn start" if to == "tmux" else "session_init", sid, timeout))
+
+    def cursor_end(home, root, sid, to):
+        if to == "tmux":
+            try:
+                return _transcript(home, root, sid).stat().st_size
+            except OSError:
+                return 0
+        return SqliteSessionStore(home).entries_after(sid, 0)[1]
+
+    return dict(close=close, start=start, verify=verify, cursor_end=cursor_end,
+                supervisor_up=lambda root: supervisor.snapshot(root) is not None)
+
+
 # ------------------------------------------------------------ the CLI
 
 def _print_plan(p):
@@ -1231,6 +1570,34 @@ def _print_plan(p):
         if p["ready"] else "not ready"))
 
 
+def _switch_cli(args, home, root):
+    live = _switch_live()
+    try:
+        if args.cmd == "plan":
+            p = switch_plan(home, root=root, to=args.to, **live)
+            print("%s: %s -> %s, steps %s" % (p["slug"], p["from"], p["to"], ", ".join(p["steps"])))
+            for c in p["checks"]:
+                print("  %s %-10s %s" % ("ok " if c["ok"] else "NO ", c["check"], c["detail"]))
+            for w in p["warnings"]:
+                print("  warn %s" % w)
+            print("ready" if p["ready"] else "NOT ready")
+            return 0 if p["ready"] else 1
+        if args.cmd == "rollback":
+            rec = switch_rollback(home, root=root, to=args.to, **live)
+            for s in rec["rollback_steps"]:
+                print("  ok  %-10s %s" % (s["step"], s["detail"]))
+            print(rec["state"])
+            return 0
+        rec = switch_apply(home, root=root, to=args.to, **live)
+    except MigrateError as err:
+        print("error: %s" % err, file=sys.stderr)
+        return 2
+    for s in rec["steps"]:
+        print("  ok  %-10s %s" % (s["step"], s["detail"]))
+    print(rec["state"])
+    return 0
+
+
 def migrate_main(argv=None):
     from cousin_lib.config import FrameworkConfig
     parser = argparse.ArgumentParser(
@@ -1245,11 +1612,15 @@ def migrate_main(argv=None):
         p.add_argument("--validate", action="store_true",
                        help="one smallest model turn with the model, effort and account the"
                             " runner will run (needed when a model is carried: %s)" % NEVER_UNRUN)
+        p.add_argument("--to", choices=SWITCH_KINDS, default=None,
+                       help="switch a runner cousin between the sdk and tmux kinds (phase 11)")
         if name == "apply":
             p.add_argument("--yes", action="store_true", help="really run the steps")
     p = sub.add_parser("rollback")
     p.add_argument("slug")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--to", choices=SWITCH_KINDS, default=None,
+                   help="roll a kind switch back to the kind it came from (phase 11)")
     p.add_argument("--force", action="store_true",
                    help="roll back with inbox rows waiting, or an inbox that cannot be read")
     p = sub.add_parser("check")
@@ -1290,12 +1661,16 @@ def migrate_main(argv=None):
                     "%s=%s" % kv for kv in c["config"]["runner"].items()))
             for line in c["mismatches"]:
                 print("MISMATCH %s" % line)
+            for line in c.get("warnings") or ():
+                print("warn %s" % line)
             print("ok" if c["ok"] else "NOT ok")
         return 0 if c["ok"] else 1
     if args.cmd in ("apply", "rollback") and not args.yes:
         print("error: %s changes a live cousin; run `cousin-migrate plan %s` first, then"
               " pass --yes" % (args.cmd, args.slug), file=sys.stderr)
         return 2
+    if getattr(args, "to", None):
+        return _switch_cli(args, home, root)
     live = _live()
     try:
         if args.cmd == "plan":

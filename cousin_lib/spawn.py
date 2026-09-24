@@ -334,7 +334,7 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         # absolute path with the home in each command, and the approval
         # of its `cousin` server. Without them a session inherits
         # whatever hooks the user-wide settings carry.
-        apply_project_settings(home, root=root)
+        apply_project_settings(home, root=root, kind=_settings_kind(home))
     except Exception as err:
         # The partial state is the one that squats a slug; a failed
         # create leaves nothing.
@@ -805,7 +805,9 @@ def persist_agent_value(home, key, value, *, root=None):
     """Set a runner-lane cousin's [agent] model or effort, the keys its
     runner reads (#100; [runtime] is the tmux lane's and the runner never
     reads it). Validated per lane, as migrate validates what it writes:
-    effort is one of the levels and only the sdk lane uses it; an sdk model
+    effort is one of the levels and only the sdk and tmux lanes use it; a
+    tmux model is written as given (the pane's CLI takes it at its next
+    start, and no turn runs here without a pane); an sdk model
     must pass one smallest turn on the cousin's own account (the runner's
     validate_account: NEVER_UNRUN), run in a child process
     (validate_turn_out_of_process), an opencode model the lane's own checks
@@ -823,8 +825,9 @@ def persist_agent_value(home, key, value, *, root=None):
     data = tomllib.loads((home / "cousin.toml").read_text())
     agent = data.get("agent") or {}
     root = Path(root) if root is not None else FrameworkConfig.root_from_home(home)
-    if key == "effort" and lane != "sdk":
-        raise SpawnError("effort applies to the sdk lane only; %s runs on %s" % (home.name, lane))
+    if key == "effort" and lane not in ("sdk", "tmux"):
+        raise SpawnError("effort applies to the sdk and tmux lanes only; %s runs on %s"
+                         % (home.name, lane))
     previous = agent.get(key)
     if previous == value:
         return False    # nothing changes: no validating turn, no write, no event
@@ -1304,6 +1307,18 @@ def _start_existing_runner(root, slug):
     return 0
 
 
+def _settings_kind(home):
+    """"tmux" when the home's [agent] runner is the tmux kind (its settings
+    carry the kind's keys and bridge hooks, harness_settings.TMUX_KEYS), else
+    None. An unreadable cousin.toml is None: the file's own error is the
+    caller's to report."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return "tmux" if (data.get("agent") or {}).get("runner") == "tmux" else None
+
+
 def _repair_settings(root, slug):
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
@@ -1311,7 +1326,7 @@ def _repair_settings(root, slug):
               % (slug, root / "cousins"), file=sys.stderr)
         return 2
     try:
-        out = apply_project_settings(home, root=root)
+        out = apply_project_settings(home, root=root, kind=_settings_kind(home))
         reg = refresh_mcp_json(home, root=root, slug=slug)
     except (SettingsError, RegistrationError) as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)
@@ -1401,7 +1416,7 @@ def spawn_main(argv=None):
                         help="cousin.toml [runtime] effort, rendered into"
                              " the {effort} placeholder; absent, [agent]"
                              " default_effort applies. A runner cousin's"
-                             " goes to [agent] effort (the sdk lane only)")
+                             " goes to [agent] effort (the sdk and tmux lanes)")
     parser.add_argument("--heartbeat", type=int, metavar="SECONDS",
                         help="cousin.toml [heartbeat] context_beat_seconds"
                              " (absent: the documented default)")

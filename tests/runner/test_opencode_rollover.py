@@ -190,7 +190,7 @@ class TestWiring(OpencodeCase):
     LAB = '[accounts.lab]\nkind = "opencode"\nendpoint = "%s"\nendpoint_model = "m1"\n' % ENDPOINT
 
     def test_opencode_is_a_runner_kind_with_one_source(self):
-        self.assertEqual(delivery.RUNNER_KINDS, ("sdk", "fake", "opencode"))
+        self.assertIn("opencode", delivery.RUNNER_KINDS)     # phase 11 added tmux after it
         self.assertIs(runner_main.KINDS, delivery.RUNNER_KINDS)
 
     def test_runner_for_builds_the_opencode_runner_on_its_account(self):

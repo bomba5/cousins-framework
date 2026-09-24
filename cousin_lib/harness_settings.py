@@ -61,6 +61,20 @@ ATTRIBUTION_OFF = {"commit": "", "pr": ""}
 # runner-session.json, login-required.json), so a sidecar there is the
 # framework's own convention, not a new one.
 ATTRIBUTION_MARKER = pathlib.Path("data") / "harness-attribution-owned.json"
+# The tmux kind (phase 11 I7, P11-8, P11-12): its pane runs the host's
+# interactive CLI, so its project settings carry the kind's switches (no
+# built-in editor, no auto-continue at a limit, no auto-compaction, no
+# remote control), the policy's deny_tools as the CLI's permissions.deny,
+# and the hooks that bridge the pane to its runner. Attribution is not one
+# of the kind's keys: [agent] commit_attribution (#112, below) owns it for
+# every kind, so the operator's setting decides it on the pane too.
+TMUX_KEYS = {"editorMode": "normal", "autoContinueAtUsageLimit": False,
+             "autoCompactEnabled": False, "remoteControlAtStartup": False}
+TMUX_HOOK_MODULE = "cousin_lib.runner.tmux_hook"
+TMUX_HOOK_EVENTS = ("UserPromptSubmit", "Stop", "Notification", "SessionStart")
+TMUX_HOOK_TIMEOUT = 5      # the hook bounds itself at 3 s (tmux_hook.HARD_S); the CLI's own bound
+# What the kind added, so remove_kind_settings undoes exactly that.
+TMUX_OWNED = pathlib.Path(".claude") / "cousin-tmux-owned.json"
 
 
 class SettingsError(Exception):
@@ -92,7 +106,7 @@ def _owned(command):
     if head.parent.name == "hooks" and head.name in {
             s for _e, s in SHELL_HOOKS}:
         return True
-    return "-m" in argv and JOB_HOOK_MODULE in argv
+    return "-m" in argv and (JOB_HOOK_MODULE in argv or TMUX_HOOK_MODULE in argv)
 
 
 def desired_hooks(home, *, root, python=None, hooks_root=None):
@@ -271,13 +285,50 @@ def _strip_owned(groups):
     return kept
 
 
-def apply_project_settings(home, *, root, python=None, hooks_root=None):
+def _tmux_hooks(home, python):
+    home = pathlib.Path(os.path.abspath(home))
+    python = python or sys.executable
+    return {event: [{"hooks": [{"type": "command", "command": shlex.join(
+        [str(python), "-m", TMUX_HOOK_MODULE, "--home", str(home), event]),
+        "timeout": TMUX_HOOK_TIMEOUT}]}]
+        for event in TMUX_HOOK_EVENTS}
+
+
+def _policy_deny(home):
+    """policy.toml's deny_tools, as the CLI's permissions.deny entries.
+    deny_bash_patterns are regular expressions, which the CLI's rules
+    cannot say; the pane's PreToolUse hook is not ours to add (T3 notes)."""
+    from cousin_lib.runner.policy import Policy
+    return list(Policy.load(home).deny_tools)
+
+
+def apply_project_settings(home, *, root, python=None, hooks_root=None, kind=None):
     """Create or merge <home>/.claude/settings.json: this cousin's hooks
-    and its `cousin` MCP server approved. Returns {path, events,
-    missing}. Idempotent."""
+    and its `cousin` MCP server approved; for kind "tmux", also the kind's
+    keys, the policy's deny rules and the bridge hooks (TMUX_*). Returns
+    {path, events, missing}. Idempotent."""
     home = pathlib.Path(home)
     path = settings_path(home)
     data = _load(path)
+    kind_owned = None
+    if kind == "tmux":
+        kind_owned = _read_owned(home)
+        for key, value in TMUX_KEYS.items():
+            data[key] = value
+        perms = data.get("permissions", {})
+        if not isinstance(perms, dict):
+            raise SettingsError("%s: permissions is not an object, left as it is" % path)
+        deny = perms.get("deny", [])
+        if not isinstance(deny, list):
+            raise SettingsError("%s: permissions.deny is not a list, left as it is" % path)
+        added = [d for d in kind_owned.get("deny", []) if d in deny]
+        deny = [d for d in deny if d not in added]
+        mine = [d for d in _policy_deny(home) if d not in deny]
+        perms["deny"] = deny + mine
+        data["permissions"] = perms
+        kind_owned = {"keys": sorted(TMUX_KEYS), "deny": mine,
+                      "had_permissions": kind_owned.get("had_permissions",
+                                                        "permissions" in _load(path))}
     enabled = data.get("enabledMcpjsonServers", [])
     if not isinstance(enabled, list):
         raise SettingsError("%s: enabledMcpjsonServers is not a list, left"
@@ -291,6 +342,9 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
                             % path)
     wanted, missing = desired_hooks(home, root=root, python=python,
                                     hooks_root=hooks_root)
+    if kind == "tmux":
+        for event, groups in _tmux_hooks(home, python).items():
+            wanted.setdefault(event, []).extend(groups)
     for event in list(hooks):
         if isinstance(hooks[event], list):
             hooks[event] = _strip_owned(hooks[event])
@@ -341,4 +395,74 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
         data, new_owned = _compute_attribution_off(data, owned)
         _write_owned_attribution(home, new_owned, previous=owned_raw)
         _write_settings_file(path, data)
+    if kind_owned is not None:
+        _write_owned(home, kind_owned)
     return {"path": path, "events": sorted(wanted), "missing": missing}
+
+
+def _read_owned(home):
+    try:
+        data = json.loads((pathlib.Path(home) / TMUX_OWNED).read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_owned(home, owned):
+    path = pathlib.Path(home) / TMUX_OWNED
+    text = json.dumps(owned, indent=2) + "\n"
+    if not path.exists() or path.read_text() != text:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+
+
+def remove_kind_settings(home):
+    """Undo exactly what apply_project_settings(kind="tmux") added (a switch
+    back to the sdk kind): the kind's keys, the deny entries it added (the
+    operator's own stay), and the bridge hooks; the job hooks and the
+    `cousin` server stay. Idempotent."""
+    home = pathlib.Path(home)
+    path = settings_path(home)
+    if not path.exists():
+        return
+    data = _load(path)
+    owned = _read_owned(home)
+    for key in TMUX_KEYS:
+        if key in data and data[key] == TMUX_KEYS[key]:
+            del data[key]
+    perms = data.get("permissions")
+    if isinstance(perms, dict) and isinstance(perms.get("deny"), list):
+        perms["deny"] = [d for d in perms["deny"] if d not in owned.get("deny", [])]
+        if not perms["deny"]:
+            del perms["deny"]
+        if not perms and not owned.get("had_permissions", True):
+            del data["permissions"]
+    hooks = data.get("hooks")
+    if isinstance(hooks, dict):
+        for event in list(hooks):
+            groups = hooks[event]
+            if not isinstance(groups, list):
+                continue
+            kept = []
+            for group in groups:
+                inner = group.get("hooks") if isinstance(group, dict) else None
+                if isinstance(inner, list):
+                    rest = [h for h in inner if not (isinstance(h, dict) and isinstance(
+                        h.get("command"), str) and TMUX_HOOK_MODULE in h["command"])]
+                    if not rest and inner:
+                        continue
+                    group = dict(group, hooks=rest)
+                kept.append(group)
+            if kept:
+                hooks[event] = kept
+            else:
+                del hooks[event]
+    text = json.dumps(data, indent=2) + "\n"
+    if path.read_text() != text:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    (home / TMUX_OWNED).unlink(missing_ok=True)

@@ -108,18 +108,34 @@ def compose_system_prompt(home, *, root, registry, version=None, tool_name=None,
     `tool_name` names the tools for the lane (contract.render); None is
     the SDK lane's `mcp__cousin__<name>`. `runner` is the lane's name in
     the contract (contract.render); None is the SDK runner."""
+    identity, _degraded = authored_identity(home, root=root)
+    return _compose(root, registry, version, identity=identity.strip(), tool_name=tool_name,
+                    runner=runner, other_servers=other_servers)
+
+
+def compose_context_block(home, *, root, registry, version=None):
+    """The tmux kind's block (phase 11 I8, R10): law + contract (the pane's
+    runner label, the stdio server's `cousin` tool names) + operator rules,
+    no identity: the pane's CLI reads the identity from CLAUDE.md itself.
+    The runner writes it to data/run/tmux-context.md; the launcher appends it
+    on a fresh start."""
+    return _compose(root, registry, version, identity=None, runner=contract.PANE_RUNNER)
+
+
+def _compose(root, registry, version, *, identity, tool_name=None, runner=None,
+             other_servers=contract.OTHER_SERVERS):
     if version is None:
         from cousin_lib.version import version as _v
         version = _v()
     law = boot.law_text(root).strip()
-    identity, _degraded = authored_identity(home, root=root)
     rules, _index = boot.shared_parts(root)
     sections = []
     if law:
         sections.append("# Framework law\n\n" + law)
     sections.append(contract.render(registry, version, tool_name=tool_name,
                                     runner=runner, other_servers=other_servers).strip())
-    sections.append(identity.strip())
+    if identity is not None:
+        sections.append(identity.strip())
     if rules:
         sections.append("# Operator rules every cousin follows\n\n" + "\n\n".join(rules))
     return "\n\n".join(sections) + "\n"

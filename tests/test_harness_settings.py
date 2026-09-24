@@ -432,3 +432,101 @@ class TestHooksDir(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTmuxKindSettings(SettingsCase):
+    """Phase 11 Task 3, the settings half (I7, P11-8, P11-12): the tmux kind's
+    pane runs the real CLI, so its project settings carry the kind's switches,
+    the policy's deny rules and the four bridge hooks; an sdk or legacy home
+    gets none of them, and a switch back to sdk removes exactly those."""
+
+    KEYS = {"editorMode": "normal", "autoContinueAtUsageLimit": False,
+            "autoCompactEnabled": False, "remoteControlAtStartup": False}
+    EVENTS = ("UserPromptSubmit", "Stop", "Notification", "SessionStart")
+
+    def setUp(self):
+        super().setUp()
+        (self.home / "policy.toml").write_text(
+            'deny_tools = ["WebFetch", "mcp__cousin__send"]\n')
+
+    def _bridge(self, data, event):
+        return [c for c in self._commands(data, event) if "cousin_lib.runner.tmux_hook" in c]
+
+    def test_the_kinds_settings_are_written(self):
+        self._apply(kind="tmux", python="/usr/bin/python3")
+        data = self._read()
+        for key, value in self.KEYS.items():
+            self.assertEqual(data[key], value, key)
+        self.assertIn("cousin", data["enabledMcpjsonServers"])
+        self.assertEqual(data["permissions"]["deny"], ["WebFetch", "mcp__cousin__send"])
+        for event in self.EVENTS:
+            self.assertEqual(self._bridge(data, event), [shlex.join(
+                ["/usr/bin/python3", "-m", "cousin_lib.runner.tmux_hook", "--home",
+                 str(self.home.resolve()), event])], event)
+        self.assertTrue(self._commands(data, "PreToolUse"))       # the job hooks stay (parity)
+        for event in self.EVENTS:                                 # the CLI bounds the bridge hook too
+            self.assertEqual([h.get("timeout") for g in data["hooks"][event] for h in g["hooks"]
+                              if "cousin_lib.runner.tmux_hook" in h["command"]], [5], event)
+
+    def test_an_sdk_or_legacy_home_gets_none_of_them(self):
+        self._apply()
+        data = self._read()
+        for key in self.KEYS:
+            self.assertNotIn(key, data)
+        self.assertNotIn("permissions", data)
+        for event in self.EVENTS:
+            self.assertEqual(self._bridge(data, event), [])
+
+    def test_a_second_run_changes_nothing_and_keeps_the_operators_own(self):
+        path = settings_path(self.home)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"permissions": {"deny": ["Bash(rm:*)"],
+                                                    "allow": ["Read"]}, "theme": "dark"}))
+        self._apply(kind="tmux")
+        first = path.read_text()
+        self._apply(kind="tmux")
+        self.assertEqual(path.read_text(), first)
+        data = self._read()
+        self.assertEqual(data["theme"], "dark")
+        self.assertEqual(data["permissions"]["allow"], ["Read"])
+        self.assertEqual(data["permissions"]["deny"],
+                         ["Bash(rm:*)", "WebFetch", "mcp__cousin__send"])
+
+    def _agent(self, extra):
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "testa"\n\n[agent]\nrunner = "tmux"\n' + extra)
+
+    def test_attribution_on_the_pane_follows_commit_attribution(self):
+        """#112 owns attribution on every kind: the tmux kind forces
+        nothing, so the operator's commit_attribution decides the pane's."""
+        self._agent("")
+        self._apply(kind="tmux")
+        data = self._read()
+        self.assertNotIn("attribution", data)                 # unset: the CLI's stock behaviour
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self._agent("commit_attribution = false\n")
+        self._apply(kind="tmux")
+        data = self._read()
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        harness_settings.remove_kind_settings(self.home)      # a switch back keeps #112's own keys
+        data = self._read()
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self._agent("commit_attribution = true\n")
+        self._apply(kind="tmux")
+        data = self._read()
+        self.assertNotIn("attribution", data)
+        self.assertNotIn("includeCoAuthoredBy", data)
+
+    def test_the_switch_back_removes_exactly_the_kinds_settings(self):
+        path = settings_path(self.home)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"permissions": {"deny": ["Bash(rm:*)"]}, "theme": "dark"}))
+        self._apply()
+        before = self._read()
+        self._apply(kind="tmux")
+        harness_settings.remove_kind_settings(self.home)
+        self.assertEqual(self._read(), before)
+        harness_settings.remove_kind_settings(self.home)          # idempotent
+        self.assertEqual(self._read(), before)

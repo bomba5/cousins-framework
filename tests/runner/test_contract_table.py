@@ -95,15 +95,20 @@ class TestDeclarations(HermeticCase):
 
     def test_a_kind_with_no_class_is_refused(self):
         with self.assertRaisesRegex(ct.TableError, "has no class"):
-            ct.runner_class("tmux")
+            ct.runner_class("pane")
 
-    def test_the_shipped_runners_declare_nothing(self):
-        """R14 (OPERATOR), measured in Task 7: opencode DECLARES no item and
-        no item rides on a plugin (the plugin pack is the policy veto,
-        which is not a contract item)."""
+    def test_the_shipped_runners_declare_only_what_was_measured(self):
+        """R14 (OPERATOR), measured in phase 9 Task 7: opencode DECLARES no
+        item and no item rides on a plugin (the plugin pack is the policy
+        veto, not a contract item). Phase 11 (I2, S3/S3b): the tmux kind's
+        CLI queues or interrupts a message sent mid-turn, never folds it, so
+        it DECLARES midturn_fold and nothing else."""
+        declared = {"tmux": {"midturn_fold"}}
         for kind, column in ct.cells().items():
             with self.subTest(kind=kind):
-                self.assertEqual(set(column.values()), {ct.IMPLEMENTED})
+                self.assertEqual({item for item, cell in column.items() if cell == ct.DECLARED},
+                                 declared.get(kind, set()))
+                self.assertNotIn(ct.PLUGIN, set(column.values()))
 
 
 class TestPage(HermeticCase):

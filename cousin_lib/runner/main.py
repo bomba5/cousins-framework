@@ -216,6 +216,24 @@ def runner_for(home, *, kind=None):
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)
+    if kind == "tmux":
+        if side:
+            raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
+                              " runner = \"sdk\"" % ", ".join(side))
+        if account.kind in ("claude-token", "anthropic-key"):
+            raise RunnerError("the tmux kind runs on a subscription login (host or a"
+                              " claude-login account); %s accounts are refused until a"
+                              " login-free config dir is shown to start with no menu"
+                              " (phase 11 P11-6; A4: onboarding is skippable by seeding,"
+                              " but a token's login screen is not measured)" % account.kind)
+        from cousin_lib.runner.tmux_launch import env_allow_of
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        try:
+            env_allow = env_allow_of(agent)
+        except ValueError as exc:
+            raise RunnerError(str(exc))
+        return TmuxRunner(home, account=account, model=agent.get("model"),
+                          effort=effort_of(agent), policy=policy, env_allow=env_allow)
     if kind == "opencode":
         if side:
             raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
@@ -345,6 +363,8 @@ def runner_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-runner")
     parser.add_argument("--home", required=True)
     parser.add_argument("--runner", choices=KINDS)
+    parser.add_argument("--reap-pane", action="store_true",
+                        help="the tmux kind: kill this cousin's pane while no runner holds its lock")
     parser.add_argument("--once", action="store_true",
                         help="drain the inbox, then exit")
     parser.add_argument("--check-auth", action="store_true",
@@ -353,6 +373,9 @@ def runner_main(argv=None):
                         help="with --check-auth: one smallest model turn on a throwaway client")
     args = parser.parse_args(argv)
     args.home = os.path.abspath(args.home)
+    if args.reap_pane:
+        from cousin_lib.runner.tmux_runner import reap_pane
+        return reap_pane(args.home)
     if args.validate and not args.check_auth:
         parser.error("--validate goes with --check-auth")
     if args.check_auth:
@@ -453,8 +476,12 @@ def _serve(runner, once):
         # other runner is alive on this home). That runner died in a turn:
         # the resumed session is told so (#98, restart_note). A mark a
         # requested stop left for the same turn keeps its hold: that stop
-        # was asked for, whatever the sweep finds after it
-        if runner.inbox.requeue_stale(older_than_s=0.0):
+        # was asked for, whatever the sweep finds after it.
+        # A kind whose claims can be live in a pane that outlived its runner
+        # (tmux, recovers_claims) recovers them itself in start() (P11-9),
+        # and closes a turn the restart cut there; it takes no restart note.
+        if not getattr(runner, "recovers_claims", False) \
+                and runner.inbox.requeue_stale(older_than_s=0.0):
             try:
                 earlier = restart_note.read(runner.home) or {}
                 restart_note.mark(runner.home, "the last runner died with a row claimed",

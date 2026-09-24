@@ -363,7 +363,7 @@ class TestCreateRunnerCousin(_Case):
 
     def test_a_bad_runner_or_account_is_400_and_nothing_is_created(self):
         self.serve()
-        for extra in ({"runner": "tmux"}, {"runner": 5}, {"account": ["metered"]},
+        for extra in ({"runner": "pane"}, {"runner": 5}, {"account": ["metered"]},
                       {"runner": "sdk", "account": "nobody"}):
             payload = dict({"slug": "toki", "role": "r", "voice": "v"}, **extra)
             status, body = self.post("/api/cousins", payload)

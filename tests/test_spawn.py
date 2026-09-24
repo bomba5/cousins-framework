@@ -699,6 +699,24 @@ class TestPersistAgentValues(CreateCase):
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
 
 
+class TestPersistAgentValuesOnTmux(CreateCase):
+    """Phase 11: the tmux kind's pane takes --model and --effort, so both
+    are its [agent] keys; no validating turn runs (no pane here)."""
+
+    def test_model_and_effort_are_written_with_no_turn(self):
+        from cousin_lib import spawn
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        path = home / "cousin.toml"
+        path.write_text(path.read_text() + '\n[agent]\nrunner = "tmux"\n')
+        with mock.patch.object(spawn, "validate_turn_out_of_process") as child:
+            self.assertTrue(spawn.persist_agent_value(home, "effort", "high", root=root))
+            self.assertTrue(spawn.persist_agent_value(home, "model", "m-two", root=root))
+        child.assert_not_called()
+        agent = tomllib.loads(path.read_text())["agent"]
+        self.assertEqual((agent["effort"], agent["model"]), ("high", "m-two"))
+
+
 class TestValidateTurnOutOfProcess(unittest.TestCase):
     """The child's verdict is one JSON line on stdout; the parent reads
     only that, under a timeout, and its own os.environ is never edited."""

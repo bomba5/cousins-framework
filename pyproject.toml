@@ -53,6 +53,7 @@ cousin-chat-watchdog = "cousin_lib.chat_watchdog:watchdog_main"
 cousin-mcp = "cousin_lib.mcp_server:mcp_main"
 cousin-runner = "cousin_lib.runner.main:runner_main"
 cousin-watch = "cousin_lib.watch:watch_main"
+cousin-supervisor = "cousin_lib.supervisor:supervisor_main"
 
 [project.optional-dependencies]
 # Serving MCP needs the reference SDK; everything else in the adapter

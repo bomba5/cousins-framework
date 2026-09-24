@@ -544,6 +544,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_SLUG` | set by the framework for session hooks, chat hooks and the MCP server |
 | `COUSIN_TMUX_SOCKET` | a non-default tmux socket, read by the chat server and the watchdog. The console takes `--tmux-socket` instead. |
 | `COUSIN_FILTER_OVERRIDE` | `1` switches the outbound filter off for one command |
+| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you |
 
 ## cousin.toml
 
@@ -697,6 +698,17 @@ unknown account, or a secret file that is open to others or malformed, is
 exit 2; a missing secret file is let through as a login to do, see
 [accounts.toml](#accountstoml)). The terms risk of running a cousin on a login is the
 user's.
+
+`auto_start` (default `true`) says whether `cousin-supervisor` starts this
+runner cousin by itself when it starts or rescans (see
+[commands](commands.md)). `auto_start = false` leaves it down until
+`cousin-supervisor start <slug>`; only a literal `false` opts out. A tmux
+cousin is never the supervisor's, whatever this says. A runtime stop (the
+console's, `cousin-supervisor stop <slug>`) also keeps a runner cousin down
+across a supervisor or container restart: it writes `<home>/run/held` (the
+time and who asked), which the supervisor honours at every start and rescan,
+and the next start removes it. `auto_start` is the lasting opt-out, the
+marker the operator's last word.
 
 `api_key_file` is deprecated: an implicit `anthropic-key` account named after
 the cousin, whose secret file is this path (relative to the framework root),

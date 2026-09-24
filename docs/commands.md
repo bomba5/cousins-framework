@@ -205,6 +205,48 @@ cousin-watch wren -f
 cousin-watch wren --json --after 120
 ```
 
+`cousin-supervisor run` keeps an install's daemons up in one process: the
+console, the loops daemon and one `cousin-runner` per runner cousin (every
+cousin whose `cousin.toml` says `[agent] runner = "sdk"` or `"fake"`, unless
+`[agent] auto_start = false`; tmux cousins are never its). It is a container's
+init and a bare host's single unit. Each child's output goes to its stdout,
+every line prefixed with the child's name (`console | ...`, `runner:wren |
+...`). A child that exits is restarted after 1, 2, 4 ... up to 60 seconds; five
+exits inside a minute mark it `failing` and leave it down, loudly. A runner's
+exit 2 (configuration) is `failing` at once, its exit 4 (a login to do) is
+never restarted and its exit 5 (another runner holds the cousin's lock) is
+retried after the backoff; the console's own restart (exit 75) comes back at
+once. On SIGTERM or SIGINT it stops the runners first (together, 35 seconds
+each: the runner's own 30 second stop, `runner.main.STOP_TIMEOUT_S`, plus 5),
+then the loops daemon, then the console, and exits 0. On
+SIGHUP (or `reload`) it rescans `cousins/`: a new runner cousin is started, one
+that is gone or left the runner lane is stopped, a `failing` child is started
+again, nothing healthy is touched. `--no-console`, `--no-loops`,
+`--console-host` (`127.0.0.1`), `--console-port` (8600) and `--loops-interval`
+(30) shape what it runs; `--root R` picks the install, else `FRAMEWORK_ROOT`,
+else the checkout you are in. One supervisor per install: it holds
+`run/supervisor.lock`, and a second one exits 2.
+
+The running supervisor answers on `run/supervisor.sock` (the `run/` directory
+is private to its user). `status [--json]` lists every child with its state
+(`running`, `backoff`, `failing`, `stopped`), pid, restarts and the reason;
+`start <slug>` starts a runner cousin's child (also one with `auto_start =
+false`) or clears a `failing` one; `stop <slug>` stops it once its turn is done
+(`--no-wait` answers once it is signalled) and holds it down until `start`,
+across supervisor restarts too (`<home>/run/held`, see
+[configuration](configuration.md)). A slug is only ever a runner cousin; the
+console and the loops daemon are `--name console` and `--name loops`, held
+until `start` or the next supervisor start. `reload` is SIGHUP. These exit 0
+done, 1 when no supervisor is running, 2 when it refused (the line says why).
+`run/supervisor.json` holds the same status for readers that want a file.
+
+```
+cousin-supervisor run --console-host 0.0.0.0
+cousin-supervisor status
+cousin-supervisor stop wren && cousin-supervisor start wren
+cousin-supervisor start --name loops
+```
+
 ## Memory
 
 `cousin-memory` is the cousin's memory tool. Subcommands:

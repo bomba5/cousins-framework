@@ -113,11 +113,15 @@ class TmuxBackend:
         except (MissingConfigError, OSError):
             return FAILED
         text = self.render(home, item)
+        # a chat or hook line names its sender, so a long one is headed
+        # (injection.paste_header); every other source is typed as given
+        kw = ({"sender": item.sender}
+              if item.source in ("chat", "hook") and item.sender else {})
         injector = TmuxInjector(session, **opts)
         if not wait:
-            injector.inject_async(text)
+            injector.inject_async(text, **kw)
             return QUEUED
-        return DELIVERED if injector.inject(text) else FAILED
+        return DELIVERED if injector.inject(text, **kw) else FAILED
 
 
 class InboxBackend:

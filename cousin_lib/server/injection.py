@@ -20,6 +20,21 @@ _INJECT_LOCK = threading.Lock()
 # of the command: 12 KB leaves room for that and for multibyte text.
 SEND_KEYS_MAX_BYTES = 12000
 
+# A line longer than this may reach the agent as a paste, and gets the
+# sender header (paste_header) typed before it. Claude Code (2.1.281)
+# reads one keyboard read of more than 800 characters as a paste; bytes
+# count at least as many as its UTF-16 characters, and the margin covers
+# a keystroke or two landing in the same read.
+PASTE_HEADER_MIN_BYTES = 600
+
+# Seconds between typing the header and typing the body. Two writes the
+# agent has not read yet come back as ONE read: the header would ride
+# inside the paste it exists to stand outside of. Measured with a slow
+# fake reader on a private tmux server: back to back, the header and a
+# 1521-character body arrived as one 1570-character read; with a pause
+# longer than the reader's stall, as 49 and 1521.
+HEADER_SETTLE_S = 0.25
+
 
 def default_settle(text_length):
     """Seconds to wait between the paste and the Enter. send-keys returns
@@ -27,6 +42,42 @@ def default_settle(text_length):
     Enter processed before the paste drains lands as a bare newline and
     strands the message in the input box. Scale with length, capped."""
     return min(0.1 + text_length / 4000.0, 0.6)
+
+
+def _clean_name(name):
+    """The sender name as it appears on a line: control characters
+    dropped (they would be typed as keystrokes, review I5) and every run
+    of whitespace, newlines included, collapsed to one space, so a name
+    cannot open a second line."""
+    from cousin_lib.server.inbound import strip_controls
+    return " ".join(strip_controls(name).split())
+
+
+def paste_header(name):
+    """The one-line header typed before a chat line that may be read as a
+    paste: `(Chat <Name>): <Name>'s message follows in full below;
+    answer the message, not this line.` The second clause makes it read
+    as a label for what follows, not a message of its own to answer.
+
+    Why it exists: Claude Code treats a long burst of typed input (one
+    read over 800 characters, or a bracketed paste) as a paste, puts it
+    in a pasted-content block, and its own system prompt tells the model
+    to follow instructions inside such a block only where the user's own
+    message asks it to. A long chat line typed in one burst therefore
+    arrived as a bare paste with nothing typed outside it (#111: 41 of
+    244 inbound messages in one cousin's transcript), and the operator's
+    own instructions could be read as untrusted pasted data. The header
+    is typed as ordinary keystrokes first, so the typed part of the turn
+    says whose message the block is.
+
+    What it does not change: the line that follows is the whole line the
+    sender's message became, byte for byte, with its own `(Chat <Name>): `
+    prefix; the header adds a sentence before it and removes nothing.
+    It is built from the sender's name alone, never from the message, so
+    a message cannot forge one."""
+    name = _clean_name(name)
+    return ("(Chat %s): %s's message follows in full below; answer the"
+            " message, not this line." % (name, name))
 
 
 def compose_delivery(name, message, *, marker_path, attachments=(),
@@ -54,7 +105,7 @@ def compose_delivery(name, message, *, marker_path, attachments=(),
     # control characters would be typed as keystrokes (review I5); the
     # name gets the same, and no newline, so it cannot open a second line
     from cousin_lib.server.inbound import strip_controls
-    name = " ".join(strip_controls(name).split())
+    name = _clean_name(name)
     text = " ".join(strip_controls(message).split())
     text = " ".join(filter(None, [text, *attachments]))
     if suffix_provider is not None:
@@ -131,6 +182,19 @@ class TmuxInjector:
     the input box and retry Enter exactly once. The tmux binary and
     socket come from configuration/PATH.
 
+    A chat line that may be read as a paste (multi-line, or over
+    PASTE_HEADER_MIN_BYTES, which includes every line over
+    SEND_KEYS_MAX_BYTES) is preceded by paste_header(sender): typed as
+    its own send-keys call, with no newline, then a pause (header_settle)
+    so the agent reads it as typing before the body arrives. The one
+    Enter still comes after the body and submits both. The attention
+    gate is read again after the pause. If the body cannot be typed, or
+    the pane now shows an attention pattern, the header is erased with
+    one BSpace per character (never Escape: a double Escape opens the
+    CLI's rewind) and nothing is submitted. A short
+    single-line message, and anything delivered without a sender (loops,
+    schedules, meetings, reactions), is typed exactly as before.
+
     Before any of that, when attention patterns are configured, the
     pane is read once: a pane showing one (the agent's login or trust
     menu) is waiting on a person, and typed text there selects menu
@@ -140,10 +204,17 @@ class TmuxInjector:
     environment names; a list pins them.
     """
 
+    # seconds before one tmux call counts as hung (TimeoutExpired)
+    tmux_timeout = 3
+
     def __init__(self, session, *, tmux_bin="tmux", socket=None,
                  settle=default_settle, verify_delay=0.2, log=None,
-                 attention_patterns=None, root=None, input_mode=None):
+                 attention_patterns=None, root=None, input_mode=None,
+                 header_settle=HEADER_SETTLE_S,
+                 paste_header_min_bytes=PASTE_HEADER_MIN_BYTES):
         self.session = session
+        self.header_settle = header_settle
+        self.paste_header_min_bytes = paste_header_min_bytes
         self.attention_patterns = attention_patterns
         self.input_mode = input_mode
         self.root = root
@@ -159,7 +230,8 @@ class TmuxInjector:
             cmd += ["-S", self.socket]
         cmd += list(args)
         return subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=3, check=False, input=input)
+                              timeout=self.tmux_timeout, check=False,
+                              input=input)
 
     def _paste(self, text):
         """Put the text in the input box. A short line goes as literal
@@ -175,6 +247,48 @@ class TmuxInjector:
             return r
         return self._tmux("paste-buffer", "-b", buffer, "-d", "-t",
                           self.session)
+
+    def _may_read_as_paste(self, text):
+        return ("\n" in text or "\r" in text
+                or len(text.encode("utf-8")) > self.paste_header_min_bytes)
+
+    def _skipped(self, blocked, typed="nothing typed"):
+        print(
+            "[chat-server] tmux delivery SKIPPED target=%r: the pane shows"
+            " %r (waiting on a person, not ready); %s"
+            % (self.session, blocked, typed),
+            file=self.log, flush=True,
+        )
+
+    def _erase(self, header):
+        """Take a typed header back out of the input box: one BSpace per
+        character, in one call, so a failed or skipped body never leaves
+        it to prefix the next delivery. One BSpace per code point: sender
+        names are expected to be ASCII-ish, but _clean_name keeps other
+        characters, and a name whose characters the input box deletes
+        several code points at a time would be over-erased. Never Escape (a double Escape
+        opens the CLI's rewind, which can roll back the conversation and
+        files) and never C-u (unmeasured in the CLI's input). A failed
+        erase is logged; nothing else is typed."""
+        r = self._tmux("send-keys", "-t", self.session,
+                       *(["BSpace"] * len(header)))
+        if r.returncode != 0:
+            print(
+                "[chat-server] tmux header erase FAILED (rc=%d) target=%r:"
+                " the header may still be in the input box: %s"
+                % (r.returncode, self.session, (r.stderr or "")[:200]),
+                file=self.log, flush=True,
+            )
+        return r.returncode == 0
+
+    def _failed(self, r):
+        # The only trace that the cousin never received the message
+        # (dead or renamed session, tmux down).
+        print(
+            "[chat-server] tmux delivery FAILED (rc=%d) target=%r: %s"
+            % (r.returncode, self.session, (r.stderr or "")[:200]),
+            file=self.log, flush=True,
+        )
 
     def _submitted(self, text):
         """Did the Enter actually submit? The probe is the normalized tail
@@ -223,23 +337,21 @@ class TmuxInjector:
             return None
         return pane_attention(r.stdout or "", patterns)
 
-    def inject(self, text):
+    def inject(self, text, *, sender=None):
         """Type one line into the session. Failures are logged loudly and
         never raised: the message is already stored, and the HTTP
         response that triggered this has long since returned. Returns
         True when the line was typed, False when it was skipped or
-        failed."""
+        failed. `sender` names who a chat line is from: a line that may
+        be read as a paste gets paste_header(sender) typed first."""
         with _INJECT_LOCK:
+            # progress, for the exception path: a header typed with no
+            # body started is erased; once the body started, nothing is
+            header, header_typed, body_started = None, False, False
             try:
                 blocked = self._blocked_by()
                 if blocked is not None:
-                    print(
-                        "[chat-server] tmux delivery SKIPPED target=%r:"
-                        " the pane shows %r (waiting on a person, not"
-                        " ready); nothing typed"
-                        % (self.session, blocked),
-                        file=self.log, flush=True,
-                    )
+                    self._skipped(blocked)
                     return False
                 mode = self._mode()
                 if mode:
@@ -249,19 +361,34 @@ class TmuxInjector:
                         # text as commands; put it back in typing mode.
                         self._tmux("send-keys", "-t", self.session, "-l",
                                    mode["insert_keys"])
+                if sender and self._may_read_as_paste(text):
+                    # typed on its own, no newline, trailing space as a
+                    # separator: keystrokes, not part of the paste below
+                    header = paste_header(sender) + " "
+                    r = self._tmux("send-keys", "-t", self.session, "-l",
+                                   header)
+                    if r.returncode != 0:
+                        self._failed(r)
+                        return False
+                    header_typed = True
+                    time.sleep(self.header_settle)
+                    blocked = self._blocked_by()
+                    if blocked is not None:
+                        # a menu came up during the pause: the body
+                        # would pick its options
+                        self._erase(header)
+                        self._skipped(blocked, "header erased, body not"
+                                      " typed")
+                        return False
+                body_started = True
                 r = self._paste(text)
                 if r.returncode != 0:
-                    # The only trace that the cousin never received the
-                    # message (dead or renamed session, tmux down).
                     # Nothing was pasted, so there is nothing to submit:
-                    # stop here rather than pressing Enter into the void.
-                    print(
-                        "[chat-server] tmux delivery FAILED (rc=%d)"
-                        " target=%r: %s"
-                        % (r.returncode, self.session,
-                           (r.stderr or "")[:200]),
-                        file=self.log, flush=True,
-                    )
+                    # stop here rather than pressing Enter into the void,
+                    # and take back a header typed ahead of it.
+                    self._failed(r)
+                    if header_typed:
+                        self._erase(header)
                     return False
                 time.sleep(self.settle(len(text)))
                 self._tmux("send-keys", "-t", self.session, "Enter")
@@ -276,14 +403,39 @@ class TmuxInjector:
                     % (self.session, type(err).__name__, err),
                     file=self.log, flush=True,
                 )
+                if header_typed and not body_started:
+                    try:
+                        self._erase(header)
+                    except (subprocess.TimeoutExpired, FileNotFoundError,
+                            OSError) as erase_err:
+                        print(
+                            "[chat-server] tmux header erase FAILED"
+                            " target=%r: %s: %s; the header may still be"
+                            " in the input box"
+                            % (self.session, type(erase_err).__name__,
+                               erase_err),
+                            file=self.log, flush=True,
+                        )
+                elif header_typed:
+                    # The body may be partly typed: erasing the header's
+                    # length would eat the end of the body, and Escape or
+                    # C-u are unmeasured (Escape twice opens the rewind).
+                    # The next delivery's Enter submits whatever is left
+                    # in front of it; _submitted cannot see this.
+                    print(
+                        "[chat-server] stranded input possible in %r:"
+                        " header + partial body, not erased"
+                        % (self.session,),
+                        file=self.log, flush=True,
+                    )
                 return False
 
-    def inject_async(self, text):
+    def inject_async(self, text, *, sender=None):
         """Fire inject on a background thread so the HTTP response never
         waits on tmux. Returns the thread (tests join it; the server
         does not)."""
         thread = threading.Thread(target=self.inject, args=(text,),
-                                  daemon=True)
+                                  kwargs={"sender": sender}, daemon=True)
         thread.start()
         return thread
 
@@ -302,6 +454,6 @@ def make_deliver(home, injector, *, suffix_provider=None):
             user, message, marker_path=marker, attachments=attachments,
             suffix_provider=suffix_provider,
         )
-        injector.inject_async(line)
+        injector.inject_async(line, sender=user)
 
     return deliver

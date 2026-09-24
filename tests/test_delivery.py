@@ -144,6 +144,24 @@ class TestDeliver(unittest.TestCase):
         self.assertTrue(any("[cousin-schedule] check CI" in c
                             for c in self._calls()))
 
+    def test_a_long_chat_item_is_headed_with_its_sender(self):
+        # #111: the header names the item's sender, typed before the line.
+        (self.log.parent / "pane.txt").write_text("> _\n")
+        item = Item(thread_id="operator:Sam", source="chat", sender="Sam",
+                    body="(Chat Eve): " + "b" * 1500)
+        self.assertEqual(delivery.deliver(self.home, item, header_settle=0,
+                                          **self.opts), delivery.DELIVERED)
+        calls = self._calls()
+        self.assertEqual(calls[0], "send-keys -t wren -l (Chat Sam): Sam's"
+                         " message follows in full below; answer the"
+                         " message, not this line. ")
+        self.assertIn("(Chat Sam): (Chat Eve): bbb", calls[1])
+
+    def test_a_long_loop_item_gets_no_chat_header(self):
+        item = Item(thread_id="loop:digest", source="loop", body="b" * 1500)
+        delivery.deliver(self.home, item, **self.opts)
+        self.assertEqual(self._calls()[0], "send-keys -t wren -l " + "b" * 1500)
+
     def test_a_failed_paste_is_failed_not_delivered(self):
         item = Item(thread_id="loop:digest", source="loop", body="beat")
         with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):

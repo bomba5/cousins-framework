@@ -263,6 +263,93 @@ class TestRawFoldAndTrash(RaceCase):
         self.assertEqual(contents, ["Mallory audits in March.", "Toki keeps the spare keys."])
 
 
+class TestTheOtherLockedWriters(RaceCase):
+    """The lock hunks the tests above do not reach: the proposal cursor, the
+    carry of recall counts, the activity note and the decisions backfill.
+    Each fails with its hunk reverted."""
+
+    def test_two_sessions_proposing_keep_both_cursors(self):
+        home = _home(self)
+
+        class Store:
+            def entries_after(self, session_id, cursor):
+                return [], cursor + 3
+
+        pause = _Pause()
+        results = []
+        with mock.patch.object(extract, "_load", pause.wrap(
+                extract._load, when=lambda home, parts=None: parts == extract._PROPOSE_CURSOR)):
+            self.race(pause,
+                      lambda: results.append(extract.propose_turn(home, "sess-primary",
+                                                                  store=Store())),
+                      lambda: results.append(extract.propose_turn(home, "sess-peer",
+                                                                  store=Store())))
+        self.assertEqual(results, [None, None])
+        state = json.loads((home / "data" / "propose-cursor.json").read_text())
+        self.assertEqual(state, {"sess-peer": 3, "sess-primary": 3})
+
+    def test_two_sessions_carrying_counts_keep_both(self):
+        home = _home(self)
+        counts = {"memory/ledger.md": {"count": 2, "last": "2030-01-01T10:00:00+00:00"},
+                  "memory/keys.md": {"count": 5, "last": "2030-01-02T10:00:00+00:00"}}
+        path = home / "memory" / ".recall-counts.json"
+        path.write_text(json.dumps(counts))
+        pause = _Pause()
+        with mock.patch.object(reinforce, "load_counts", pause.wrap(reinforce.load_counts)):
+            self.race(pause,
+                      lambda: reinforce.carry(home, {"memory/ledger.md": "memory/books.md"}),
+                      lambda: reinforce.carry(home, {"memory/keys.md": "memory/spares.md"}))
+        after = reinforce.load_counts(home)
+        self.assertEqual(after.get("memory/books.md", {}).get("count"), 2, after)
+        self.assertEqual(after.get("memory/spares.md", {}).get("count"), 5, after)
+
+    def test_two_sessions_noting_activity_at_once_both_finish(self):
+        """The note is written through one tmp name: unserialized, the second
+        writer's replace takes the first one's tmp and the first one's
+        replace raises."""
+        home = _home(self)
+        pause = _Pause()
+        real_write = pathlib.Path.write_text
+        with mock.patch.object(pathlib.Path, "write_text", pause.wrap(
+                real_write, when=lambda self, *a, **k: self.name.startswith("last-activity"))):
+            self.race(pause, lambda: memory.note_activity(home, "[primary] closing the ledger"),
+                      lambda: memory.note_activity(home, "[peer session] answering Testa"))
+        text = (home / "data" / "last-activity.txt").read_text()
+        self.assertEqual(len(text.splitlines()), 1, text)
+        self.assertTrue(text.rstrip().endswith(("closing the ledger", "answering Testa")), text)
+
+    def test_a_reader_never_sees_the_activity_note_mid_write(self):
+        """A side session's digest reads the note while the primary writes
+        it: it sees the old note or the new one, never an empty file."""
+        from cousin_lib.runner import sessions
+        home = _home(self)
+        memory.note_activity(home, "reviewing Priya's patch")
+        pause = _Pause()
+        real_open = pathlib.Path.open
+        seen = []
+
+        def is_write(self, mode="r", *a, **k):
+            return self.name.startswith("last-activity") and "w" in mode
+
+        with mock.patch.object(pathlib.Path, "open", pause.wrap(real_open, when=is_write)):
+            self.race(pause, lambda: memory.note_activity(home, "answering Testa"),
+                      lambda: seen.append(sessions.last_activity(home)))
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].endswith("reviewing Priya's patch"), seen)
+
+    def test_a_decision_logged_during_a_backfill_is_not_written_twice(self):
+        """The backfill reads raw, then the decisions log: a decision another
+        session logs (and bridges to raw) in between has no twin in what the
+        backfill read, so it wrote a second raw entry."""
+        home = _home(self)
+        pause = _Pause()
+        with mock.patch.object(memory, "_raw_memories", pause.wrap(memory._raw_memories)):
+            self.race(pause, lambda: memory.backfill_decisions(home),
+                      lambda: memory.decide(home, "keys", "Sam keeps the keys", "he is home"))
+        contents = [json.loads(line)["content"] for line in _every_raw_line(home)]
+        self.assertEqual(contents.count("Sam keeps the keys - why: he is home"), 1, contents)
+
+
 class TestTheLock(HermeticCase):
     def test_a_lock_file_this_user_cannot_write_still_locks(self):
         """Review M6: flock needs no write access; a lock file another uid

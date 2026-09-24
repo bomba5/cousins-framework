@@ -209,9 +209,12 @@ cousin-watch wren --json --after 120
 ```
 
 `cousin-supervisor run` keeps an install's daemons up in one process: the
-console, the loops daemon and one `cousin-runner` per runner cousin (every
+console, the loops daemon, one `cousin-runner` per runner cousin (every
 cousin whose `cousin.toml` says `[agent] runner = "sdk"` or `"fake"`, unless
-`[agent] auto_start = false`; tmux cousins are never its). It is a container's
+`[agent] auto_start = false`; tmux cousins are never its) and, for a runner
+cousin whose `[telegram]` is enabled and complete, its Telegram bridge
+(`telegram:<slug>`, started after the runner, stopped and held with it; see
+[telegram](telegram.md)). It is a container's
 init and a bare host's single unit. Each child's output goes to its stdout,
 every line prefixed with the child's name (`console | ...`, `runner:wren |
 ...`). A child that exits is restarted after 1, 2, 4 ... up to 60 seconds; five
@@ -223,12 +226,14 @@ install's): the child waits in `backoff`, retried after 1, 2, 4 ... 60
 seconds with one line per attempt, and a busy exit is never counted toward
 `failing`, so the child starts as soon as the holder is gone, however long
 it stayed. The console's own restart (exit 75) comes back at
-once. On SIGTERM or SIGINT it stops the runners first (together, 35 seconds
+once. On SIGTERM or SIGINT it stops the bridges first (together, 10 seconds
+each), then the runners (together, 35 seconds
 each: the runner's own 30 second stop, `runner.main.STOP_TIMEOUT_S`, plus 5),
 then the loops daemon, then the console, and exits 0. On
 SIGHUP (or `reload`) it rescans `cousins/`: a new runner cousin is started, one
-that is gone or left the runner lane is stopped, a `failing` child is started
-again, nothing healthy is touched. `--no-console`, `--no-loops`,
+that is gone or left the runner lane is stopped, a bridge is added or removed
+as `[telegram] enabled` changed and restarted when its token or operators did,
+a `failing` child is started again, nothing else healthy is touched. `--no-console`, `--no-loops`,
 `--console-host` (`127.0.0.1`), `--console-port` (8600) and `--loops-interval`
 (30) shape what it runs; `--root R` picks the install, else `FRAMEWORK_ROOT`,
 else the checkout you are in. One supervisor per install: it holds

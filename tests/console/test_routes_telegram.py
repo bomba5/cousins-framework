@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from cousin_lib import telegram_admin
+from tests._stub_supervisor import StubSupervisor
 from tests.console._harness import ConsoleCase
 
 TOKEN = "123456789:" + "B" * 35
@@ -47,6 +48,62 @@ class TestTelegramRoutes(ConsoleCase):
                          (True, "starts with the cousin", False))
         self.assertIsNone(body["ready"])
         self.assertEqual(self.get("/api/cousins/nobody/telegram")[0], 404)
+
+
+
+class TestRunnerLaneToggle(ConsoleCase):
+    """A runner cousin's bridge is the supervisor's child (#101): the
+    console flips the config and asks the supervisor to rescan; it never
+    starts a bridge of its own."""
+
+    def setUp(self):
+        super().setUp()
+        for name, fake in (
+                ("_get_me", lambda token: {"username": "WrenBot"}),
+                ("_get_updates", lambda token: [])):
+            patch = mock.patch.object(telegram_admin, name, fake)
+            patch.start()
+            self.addCleanup(patch.stop)
+        # telegram_admin.start_bridge's Popen is the unsupervised bridge:
+        # recorded, never run
+        sub = mock.patch.object(telegram_admin, "subprocess")
+        self.popen = sub.start().Popen
+        self.popen.return_value.pid = 4242
+        self.addCleanup(sub.stop)
+
+    def runner_cousin(self):
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
+        telegram_admin.set_token(home, self.root, "wren", TOKEN)
+        telegram_admin.set_operators(home, [{"user_id": 42, "name": "Ana"}])
+        return home
+
+    def test_the_toggle_asks_the_supervisor_and_spawns_nothing(self):
+        self.runner_cousin()
+        self.tmux_running(True)          # whatever tmux says: not this cousin's lane
+        stub = StubSupervisor(self.root, {"reload": {"ok": True, "added": ["telegram:wren"],
+                                                     "removed": []}}).start()
+        self.addCleanup(stub.close)
+        self.serve()
+        status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": True})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["bridge"], "supervised")
+        self.assertEqual(stub.ops(), [("reload", None)])
+        status, body = self.post("/api/cousins/wren/telegram/operators", {
+            "operators": [{"user_id": 42, "name": "Ana"}, {"user_id": 43, "name": "Bo"}]})
+        self.assertEqual(status, 200, body)
+        status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": False})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(stub.ops(), [("reload", None)] * 3)
+        self.popen.assert_not_called()
+
+    def test_without_a_supervisor_the_toggle_still_starts_nothing(self):
+        self.runner_cousin()
+        self.tmux_running(True)
+        self.serve()
+        status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": True})
+        self.assertEqual(status, 200, body)
+        self.assertIn("no cousin-supervisor", body["bridge"])
+        self.popen.assert_not_called()
 
 
 if __name__ == "__main__":

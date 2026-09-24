@@ -3,10 +3,13 @@
 senders waiting to be added, the enable switch and a token check. The
 token never leaves the server: every answer says only whether one is
 set. Enabling starts the bridge when the cousin runs; disabling stops
-it."""
+it. A runner cousin's bridge is the supervisor's child (R10, #101): a
+change there is written to cousin.toml and the supervisor is asked to
+rescan (`reload`), which adds, removes or restarts `telegram:<slug>`;
+the console never starts a runner cousin's bridge itself."""
 from __future__ import annotations
 
-from cousin_lib import telegram_admin
+from cousin_lib import supervisor, telegram_admin
 from cousin_lib.console import router
 from cousin_lib.console.app import HttpError
 from cousin_lib.config import CousinConfig
@@ -30,9 +33,28 @@ def _cousin_running(req, home):
     return session_alive(req.server, CousinConfig.load(home))
 
 
+def _runner_lane(home):
+    from cousin_lib import spawn
+    return spawn.runner_lane(home)
+
+
+def _supervisor_rescan(req):
+    """A runner cousin's config change, handed to the supervisor: its
+    rescan starts, stops or restarts the bridge. What to report."""
+    try:
+        answer = supervisor.request(req.server.root, "reload")
+    except supervisor.SupervisorUnavailable:
+        return "no cousin-supervisor running; the bridge starts with it"
+    if not answer.get("ok"):
+        return "the supervisor refused the rescan: %s" % (answer.get("error") or "no reason given")
+    return "supervised"
+
+
 def _restart_bridge(req, home):
     """Apply a config change: the bridge reads its config once, at
     start. It runs only while its cousin runs, like the chat server."""
+    if _runner_lane(home):
+        return _supervisor_rescan(req)
     telegram_admin.stop_bridge(home)
     if _cousin_running(req, home):
         telegram_admin.start_bridge(home, req.server.root)
@@ -79,7 +101,13 @@ def register():
         if not isinstance(enabled, bool):
             raise HttpError(400, "enabled must be true or false")
         telegram_admin.set_enabled(home, enabled)
-        if enabled and _cousin_running(req, home):
+        if _runner_lane(home):
+            state = _supervisor_rescan(req)
+            if not enabled:
+                # a bridge started outside the supervisor (before #101)
+                # is not the rescan's to stop; the switch still means off
+                telegram_admin.stop_bridge(home)
+        elif enabled and _cousin_running(req, home):
             state, _pid = telegram_admin.start_bridge(home, req.server.root)
         elif enabled:
             state = "starts with the cousin"

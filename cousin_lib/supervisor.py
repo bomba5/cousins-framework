@@ -1,9 +1,9 @@
 """cousin-supervisor: one process that keeps an install's daemons up.
 
 It is the container's init and a bare host's single unit. It starts the
-console, the loops daemon (the one clock) and one `cousin-runner` per
-runner cousin, restarts what crashes, and stops everything in order on
-SIGTERM.
+console, the loops daemon (the one clock), one `cousin-runner` per
+runner cousin and that cousin's Telegram bridge when it has one,
+restarts what crashes, and stops everything in order on SIGTERM.
 
 Children. Each is `sys.executable -m cousin_lib.<module> ...` (one
 interpreter for every child, whatever PATH says), started in its own
@@ -38,7 +38,8 @@ Exits, by the child's documented exit codes (classify_exit):
     60 s is healthy and starts again from 1 s; five counted exits
     inside 60 s mark it `failing`, left down with one loud line.
 
-Stop (SIGTERM or SIGINT): the reverse of the start order. Every runner
+Stop (SIGTERM or SIGINT): the reverse of the start order. Every bridge
+is signalled together and waited for (10 s each), then every runner
 is signalled together and waited for together (up to
 runner.main.STOP_TIMEOUT_S + 5 s each: the runner gives its turn
 STOP_TIMEOUT_S), then the loops daemon, then the console
@@ -74,10 +75,30 @@ skips a held cousin, so a stop survives a supervisor or container
 restart, as a stopped tmux cousin stays stopped. `auto_start = false`
 stays the config-level opt-out. A `stop` of the console or the loops
 daemon holds only until `start` or the next supervisor start.
+
+Bridges (#101). A runner cousin whose `[telegram]` passes
+telegram.load_bridge_config (enabled, a token, operators) gets a child
+`telegram:<slug>` (`python3 -m cousin_lib.telegram --home <home>`, the
+entry point the tmux lane's telegram_admin.start_bridge runs), added
+after its runner and stopped with it: a runner held by a `stop` holds
+its bridge too, and a `start` brings both back. A config that fails the
+check is one line with the reason, never a child. The bridge's pid is
+written to data/telegram.pid and its output also goes to
+data/telegram.log, where telegram_admin and the console look. A bridge
+already running outside the supervisor (that pid file names a live
+bridge we did not start) is left alone: ours waits in `backoff`,
+uncounted, and starts once that one is gone, never a second poller on
+the bot (Telegram answers 409). A rescan adds or removes the bridge as
+`[telegram] enabled` changes, and restarts it when its token, operators
+or port changed; a tmux cousin's bridge is never ours (spawn starts it).
+There is no `start`/`stop` of a bridge by name: it follows its runner,
+and the console's Telegram switch writes cousin.toml, then asks for a
+`reload`.
 """
 import argparse
 import collections
 import fcntl
+import hashlib
 import json
 import os
 import queue
@@ -100,7 +121,7 @@ STATES = ("running", "backoff", "failing", "stopped")
 SOCKET = "run/supervisor.sock"
 SNAPSHOT = "run/supervisor.json"
 LOCK = "run/supervisor.lock"
-KINDS = ("console", "loops", "runner")
+KINDS = ("console", "loops", "runner", "telegram")
 # Start order by kind; stop order is its reverse (R5).
 _KIND_ORDER = {kind: i for i, kind in enumerate(KINDS)}
 
@@ -108,7 +129,8 @@ _KIND_ORDER = {kind: i for i, kind in enumerate(KINDS)}
 # STOP_TIMEOUT_S (runner/main.py _serve: runner.stop(timeout=STOP_TIMEOUT_S));
 # 5 more for it to close its inbox row and exit. One constant: a longer
 # runner stop moves this budget with it.
-STOP_TIMEOUTS = {"console": 10.0, "loops": 10.0, "runner": STOP_TIMEOUT_S + 5.0}
+STOP_TIMEOUTS = {"console": 10.0, "loops": 10.0, "runner": STOP_TIMEOUT_S + 5.0,
+                 "telegram": 10.0}
 
 BACKOFF = (1, 2, 4, 8, 16, 32, 60)
 WINDOW_S = 60.0          # the sliding window five counted exits must fall in
@@ -147,11 +169,15 @@ def _now_iso():
 
 
 class ChildSpec:
-    """What to run: a name (`console`, `loops`, `runner:<slug>`), a kind
-    (KINDS), the argv, the SIGTERM-to-SIGKILL timeout, the cousin's slug
-    for a runner, and extra environment on top of the supervisor's."""
+    """What to run: a name (`console`, `loops`, `runner:<slug>`,
+    `telegram:<slug>`), a kind (KINDS), the argv, the SIGTERM-to-SIGKILL
+    timeout, the cousin's slug and home for a runner or a bridge, and
+    extra environment on top of the supervisor's. `pid_file` holds the
+    live pid while the child runs; `log_file` gets a copy of its output
+    lines (unprefixed), on top of the supervisor's own output."""
 
-    def __init__(self, name, kind, argv, stop_timeout=None, slug=None, env=None):
+    def __init__(self, name, kind, argv, stop_timeout=None, slug=None, env=None,
+                 home=None, pid_file=None, log_file=None):
         if kind not in KINDS:
             raise ValueError("child kind must be one of %s, got %r" % (", ".join(KINDS), kind))
         self.name = name
@@ -160,6 +186,9 @@ class ChildSpec:
         self.stop_timeout = float(STOP_TIMEOUTS[kind] if stop_timeout is None else stop_timeout)
         self.slug = slug
         self.env = dict(env or {})
+        self.home = Path(home) if home is not None else None
+        self.pid_file = Path(pid_file) if pid_file is not None else None
+        self.log_file = Path(log_file) if log_file is not None else None
 
     def __repr__(self):
         return "ChildSpec(%r, %r)" % (self.name, self.kind)
@@ -183,7 +212,54 @@ def runner_spec(home):
     slug = Path(home).name
     return ChildSpec("runner:%s" % slug, "runner",
                      [sys.executable, "-m", "cousin_lib.runner.main", "--home", str(home)],
-                     slug=slug)
+                     slug=slug, home=home)
+
+
+def _bridge_argv(home):
+    # the entry point telegram_admin.start_bridge runs on the tmux lane
+    return [sys.executable, "-m", "cousin_lib.telegram", "--home", str(home)]
+
+
+def telegram_spec(home):
+    """A runner cousin's Telegram bridge. Its pid goes to data/telegram.pid
+    and its output also to data/telegram.log, where telegram_admin and
+    the console look on either lane."""
+    home = Path(home)
+    slug = home.name
+    return ChildSpec("telegram:%s" % slug, "telegram", _bridge_argv(home), slug=slug,
+                     home=home, pid_file=home / "data" / "telegram.pid",
+                     log_file=home / "data" / "telegram.log")
+
+
+def bridge_config(home, root):
+    """(digest, None) when the cousin's bridge can run
+    (telegram.load_bridge_config accepts its config; the digest changes
+    when the token, the operators or the port do), else (None, why).
+    `why` is None as well when cousin.toml has no [telegram] table: a
+    cousin without Telegram is not worth a line."""
+    from cousin_lib import telegram
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as err:
+        return None, "cannot read cousin.toml: %s" % err
+    if not data.get("telegram"):
+        return None, None
+    try:
+        cfg = telegram.load_bridge_config(home, root=root)
+    except telegram.TelegramConfigError as err:
+        return None, str(err)
+    except Exception as err:          # noqa: BLE001 - a bad config is a reason, never a crash
+        return None, "bad [telegram] configuration (%s: %s)" % (type(err).__name__, err)
+    body = json.dumps([cfg.token, sorted(cfg.operator_ids),
+                       sorted([str(k), v] for k, v in cfg.operator_name.items()), cfg.port])
+    return hashlib.sha256(body.encode()).hexdigest(), None
+
+
+def _outside_bridge(home):
+    """The pid of a live bridge for this home that we did not start (its
+    data/telegram.pid, checked as telegram_admin checks it), or None."""
+    from cousin_lib import telegram_admin
+    return telegram_admin.bridge_pid(home)
 
 
 def classify_exit(kind, code):
@@ -282,6 +358,8 @@ class Child:
         self.reader = None
         self.waiters = []            # `stop` requests answered when the child is down
         self.remove_when_down = False  # reload: its cousin left the runner lane
+        self.restart_when_down = False  # reload: a bridge whose config changed
+        self.config_digest = None      # a bridge: bridge_config's digest it runs with
 
     @property
     def name(self):
@@ -347,13 +425,26 @@ class Supervisor:
             except (OSError, ValueError):
                 pass                   # our stdout is gone: keep supervising
 
-    def _pump(self, name, stream):
+    def _pump(self, name, stream, log_file=None):
         """One child's merged output, line by line, prefixed. A partial
-        last line is written at EOF with its newline."""
+        last line is written at EOF with its newline. With `log_file`,
+        each line is also appended there, unprefixed."""
+        log = None
+        if log_file is not None:
+            try:
+                log = open(log_file, "a", encoding="utf-8")
+            except OSError:
+                log = None
         try:
             for raw in iter(stream.readline, b""):
                 line = raw.decode("utf-8", "replace").rstrip("\n")
                 self._write("%s | %s\n" % (name, line))
+                if log is not None:
+                    try:
+                        log.write(line + "\n")
+                        log.flush()
+                    except (OSError, ValueError):
+                        log = None
         except (OSError, ValueError):
             pass
         finally:
@@ -361,6 +452,11 @@ class Supervisor:
                 stream.close()
             except OSError:
                 pass
+            if log is not None:
+                try:
+                    log.close()
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------ the table
 
@@ -372,8 +468,8 @@ class Supervisor:
         return child
 
     def _ordered(self):
-        """The start order: console, loops, runners (each in table order;
-        runner specs are built in slug order)."""
+        """The start order: console, loops, runners, bridges (each in
+        table order; runner specs are built in slug order)."""
         return sorted(self.children.values(), key=lambda c: _KIND_ORDER[c.spec.kind])
 
     def _env(self, spec):
@@ -384,6 +480,19 @@ class Supervisor:
 
     def _start(self, child):
         spec = child.spec
+        if spec.kind == "telegram" and spec.home is not None:
+            outside = _outside_bridge(spec.home)
+            if outside is not None:
+                # never a second bridge on one bot (Telegram answers 409):
+                # wait, uncounted, until that one is gone
+                reason = "a bridge outside the supervisor runs (pid %d)" % outside
+                now = self.clock()
+                child.next_start = now + child.policy.on_busy(0.0)
+                if child.reason != reason:
+                    self.say("%s not started: %s; left alone, started once it is gone"
+                             % (child.name, reason))
+                child.set_state("backoff", reason)
+                return
         try:
             proc = subprocess.Popen(spec.argv, env=self._env(spec), stdin=subprocess.DEVNULL,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -400,15 +509,35 @@ class Supervisor:
         child.kill_at = None
         child.give_up_at = None
         child.set_state("running")
-        child.reader = threading.Thread(target=self._pump, args=(child.name, proc.stdout),
+        if spec.pid_file is not None:
+            try:
+                spec.pid_file.parent.mkdir(parents=True, exist_ok=True)
+                spec.pid_file.write_text("%d\n" % proc.pid)
+            except OSError as err:
+                self.say("cannot write %s: %s" % (spec.pid_file, err))
+        child.reader = threading.Thread(target=self._pump,
+                                        args=(child.name, proc.stdout, spec.log_file),
                                         name="supervisor-out-%s" % child.name, daemon=True)
         child.reader.start()
         self.say("started %s (pid %d)" % (child.name, proc.pid))
 
+    def _clear_pid_file(self, child):
+        """Remove the child's pid file when it still names this child."""
+        path = child.spec.pid_file
+        if path is None or child.proc is None:
+            return
+        try:
+            if path.read_text().strip() == str(child.proc.pid):
+                path.unlink()
+        except (OSError, ValueError):
+            pass
+
     def start_all(self):
+        """Every child in start order, then each runner cousin's bridge."""
         for child in self._ordered():
-            if not child.alive:
+            if child.spec.kind != "telegram" and not child.alive:
                 self._start(child)
+        self._sync_bridges()
 
     # ------------------------------------------------------------ reaping (R1)
 
@@ -439,10 +568,17 @@ class Supervisor:
     def _exited(self, child, code):
         child.proc.returncode = code         # by hand: Popen never waits (R1)
         child.last_exit = how = describe_exit(code)
+        self._clear_pid_file(child)
         now = self.clock()
         if child.stopping:
             child.stopping = False
             child.kill_at = None
+            if child.restart_when_down:
+                child.restart_when_down = False
+                self.say("%s stopped (%s), starting it again" % (child.name, how))
+                child.policy.reset()
+                self._start(child)
+                return
             child.set_state("stopped", child.reason or "stopped")
             self.say("%s stopped (%s)" % (child.name, how))
             self._settle(child)
@@ -541,9 +677,10 @@ class Supervisor:
                 pass
 
     def stop_all(self, reason="supervisor stopping"):
-        """The ordered stop (R5): runners together, then loops, then the
-        console. Each group is signalled, then waited for up to each
-        child's stop_timeout (SIGKILL after), reaping as we go."""
+        """The ordered stop (R5): bridges together, then runners
+        together, then loops, then the console. Each group is signalled,
+        then waited for up to each child's stop_timeout (SIGKILL after),
+        reaping as we go."""
         groups = collections.OrderedDict()
         for child in reversed(self._ordered()):
             groups.setdefault(child.spec.kind, []).append(child)
@@ -552,6 +689,7 @@ class Supervisor:
             self.say("stopping %d children" % len(live))
         for kind, group in groups.items():
             for child in group:
+                child.restart_when_down = False
                 self._signal_stop(child, reason)
             self._wait_down(group)
         for child in self.children.values():
@@ -574,6 +712,7 @@ class Supervisor:
                     self.say("%s (pid %d) survived SIGKILL; leaving it"
                              % (child.name, child.proc.pid))
                     child.proc.returncode = -signal.SIGKILL
+                    self._clear_pid_file(child)
                     child.set_state("stopped", child.reason)
                     self._settle(child)
             self._answer_requests(stopping=True)
@@ -797,6 +936,8 @@ class Supervisor:
         if not child.alive:
             child.policy.reset()
             self._start(child)
+        if home is not None:
+            self._sync_bridges(child.spec.slug, retry_failing=True)
         answer = {"ok": child.state == "running", "name": child.name, "state": child.state}
         if not answer["ok"]:
             answer["error"] = child.reason
@@ -818,6 +959,7 @@ class Supervisor:
                 hold(home, by)
             except OSError as err:
                 self.say("cannot write %s: %s" % (Path(home) / HELD, err))
+            self._sync_bridges(name[len("runner:"):])      # held: its bridge goes down with it
         if child is None:
             return {"ok": True, "name": name, "state": "stopped"}
         if not child.alive:
@@ -852,13 +994,103 @@ class Supervisor:
                 self._signal_stop(child, "removed: no longer a runner cousin")
             else:
                 self.children.pop(child.name, None)
+        bridges_added, bridges_removed = self._sync_bridges(retry_failing=True)
+        added += bridges_added
+        removed += bridges_removed
         for child in self.children.values():
-            if child.state == "failing" and child.name not in removed:
+            if child.state == "failing" and child.name not in removed \
+                    and child.spec.kind != "telegram":
                 child.policy.reset()
                 self._start(child)
         self.say("reload: added %s; removed %s"
                  % (", ".join(added) or "-", ", ".join(removed) or "-"))
         return added, removed
+
+    # ------------------------------------------------------------ bridges (#101)
+
+    def _sync_bridges(self, slug=None, *, retry_failing=False):
+        """Make each runner cousin's `telegram:<slug>` child match its
+        cousin.toml (all runner children, or the one `slug`): present
+        while `[telegram]` passes bridge_config and its runner child is in
+        the table, running unless the runner is held (stopped by
+        request), restarted when its config changed. A bridge whose
+        runner is gone or leaving goes with it. retry_failing also
+        starts a `failing` bridge again (reload, an explicit start).
+        Returns (added, removed) child names."""
+        added, removed = [], []
+        runners = {c.spec.slug: c for c in self.children.values()
+                   if c.spec.kind == "runner" and c.spec.slug and c.spec.home is not None}
+        for bridge in [c for c in self.children.values() if c.spec.kind == "telegram"]:
+            if slug is not None and bridge.spec.slug != slug:
+                continue
+            runner = runners.get(bridge.spec.slug)
+            if runner is None or runner.remove_when_down:
+                self._remove_bridge(bridge, "its runner left")
+                removed.append(bridge.name)
+        for runner in runners.values():
+            if slug is not None and runner.spec.slug != slug:
+                continue
+            if runner.remove_when_down:
+                continue
+            change = self._sync_bridge(runner, retry_failing)
+            if change == "added":
+                added.append("telegram:%s" % runner.spec.slug)
+            elif change == "removed":
+                removed.append("telegram:%s" % runner.spec.slug)
+        return added, removed
+
+    def _sync_bridge(self, runner, retry_failing):
+        home = runner.spec.home
+        name = "telegram:%s" % runner.spec.slug
+        bridge = self.children.get(name)
+        digest, why = bridge_config(home, self.root)
+        if digest is None:
+            if bridge is not None:
+                self._remove_bridge(bridge, why or "no [telegram] table")
+                return "removed"
+            if why is not None:
+                self.say("%s not started: %s" % (name, why))
+            return None
+        change = None
+        changed = False
+        if bridge is None:
+            bridge = self._add(telegram_spec(home))
+            self.say("added %s" % name)
+            change = "added"
+        elif bridge.config_digest != digest:
+            changed = True
+        bridge.config_digest = digest
+        if is_held(home):
+            bridge.restart_when_down = False
+            bridge.next_start = None
+            if bridge.alive:
+                self._signal_stop(bridge, "stopped with %s" % runner.name)
+            elif bridge.state != "stopped":
+                bridge.set_state("stopped", "stopped with %s" % runner.name)
+            return change
+        if bridge.alive:
+            if changed and not bridge.stopping:
+                self._signal_stop(bridge, "restarting: its configuration changed")
+                bridge.restart_when_down = True
+                self.say("%s: its configuration changed, restarting it" % name)
+            return change
+        if bridge.state == "backoff":
+            return change                   # its restart is due by itself
+        if bridge.state == "failing" and not retry_failing:
+            return change
+        bridge.policy.reset()
+        self._start(bridge)
+        return change
+
+    def _remove_bridge(self, bridge, why):
+        """Stop a bridge and drop it from the table once it is down."""
+        bridge.restart_when_down = False
+        self.say("removing %s: %s" % (bridge.name, why))
+        if bridge.alive:
+            bridge.remove_when_down = True
+            self._signal_stop(bridge, "removed: %s" % why)
+        else:
+            self.children.pop(bridge.name, None)
 
     # ------------------------------------------------------------ snapshot (R7)
 

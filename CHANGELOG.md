@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- A runner cousin's Telegram bridge is now a `cousin-supervisor` child,
+  `telegram:<slug>`, beside `runner:<slug>` (#101). It used to start only
+  from the console's switch, as a process nothing watched: nothing brought it
+  back after a reboot, a supervisor restart or a crash, and nothing stopped it
+  with the runner. Now it starts after its runner when `[telegram]` passes the
+  bridge's own check (a config that does not is one line with the reason, and
+  no child), is restarted with the usual backoff, and is stopped and held with
+  its runner. A rescan (`reload`, SIGHUP) adds or removes it as `[telegram]
+  enabled` changes and restarts it when its token or operators change.
+  `cousin-supervisor status` lists it. For a runner cousin the console's
+  Telegram switch, token and operator changes write `cousin.toml` and ask the
+  supervisor to rescan; they never start a bridge themselves. A bridge already
+  running outside the supervisor is left alone, and the child starts once it
+  is gone. A tmux cousin's bridge is unchanged.
+
 ## 1.19.0 - 2026-09-24
 
 ### Added

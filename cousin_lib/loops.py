@@ -1112,7 +1112,22 @@ def hold_loops_lock(root):
     (the kernel drops it when the process dies, even on SIGKILL). Two
     daemons on one root would each fire every due one-shot, heartbeat,
     [[loops]] entry and daily flip: nothing else claims them. Raises
-    LoopsLockHeld when another process holds it."""
+    LoopsLockHeld when another process holds it.
+
+    flock locks are shared across fork: a worker loop's job runs through
+    jobs._spawn_tracked, which forks twice (no exec) from inside this
+    process, and the job-runner child would otherwise inherit our copy
+    of the fd and keep the lock held after we exit - no clock, until the
+    job ends. os.register_at_fork closes our copy in every child forked
+    from here on. Once registered, a handler is never unregistered, so a
+    process that calls this more than once (every test in one interpreter,
+    a daemon that re-acquires after losing the lock) accumulates one
+    handler per call; the fd number a stale handler names can be reused
+    for something unrelated by the time a later, unrelated fork runs it,
+    and closing that would be a bug of its own, not a fix. Each handler
+    therefore checks the fd is still open on the same file (device and
+    inode) it locked before closing it - the only tolerance a stale or
+    already-closed fd needs."""
     import fcntl
     import os
     path = Path(root) / "run" / "loops.lock"
@@ -1123,6 +1138,22 @@ def hold_loops_lock(root):
     except OSError:
         os.close(fd)
         raise LoopsLockHeld("another loops daemon holds %s" % path)
+    identity = os.fstat(fd)
+    ident_key = (identity.st_dev, identity.st_ino)
+
+    def _close_in_child():
+        try:
+            st = os.fstat(fd)
+        except OSError:
+            return    # already closed: nothing to do
+        if (st.st_dev, st.st_ino) != ident_key:
+            return    # the fd number was reused for something else; not ours
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+    os.register_at_fork(after_in_child=_close_in_child)
     return fd
 
 

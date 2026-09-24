@@ -459,8 +459,13 @@ def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):
     `stopping`, never as stopped. With no supervisor running nothing
     runs to stop, but the stop still holds (O9): the hold is written
     here, `"held": true`, so a supervisor started later leaves the cousin
-    down until `start`, as it would had it been up to take the stop."""
-    from cousin_lib import supervisor
+    down until `start`, as it would had it been up to take the stop.
+    With no supervisor to ask, delivery.is_alive still says whether a
+    runner is there to be held: a hand-started one (no supervisor ever
+    launched it) reads truthfully as "running", never a guessed "not
+    running"; this call cannot signal it either way, only hold it down
+    for the next supervisor."""
+    from cousin_lib import delivery, supervisor
     root = _supervisor_root(home, root)
     try:
         answer = supervisor.request(root, "stop", slug=Path(home).name,
@@ -468,7 +473,8 @@ def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):
                                     timeout=SUPERVISOR_STOP_TIMEOUT)
     except supervisor.SupervisorUnavailable:
         if supervisor.snapshot(root) is None:
-            out = {"runner": "not running", "supervisor": "not running"}
+            runner_state = "running" if delivery.is_alive(home) else "not running"
+            out = {"runner": runner_state, "supervisor": "not running"}
             try:
                 supervisor.hold(home, by)
             except OSError as err:
@@ -1135,10 +1141,19 @@ def _start_existing(root, slug, agent_cmd, resume=False):
 
 def _start_existing_runner(root, slug):
     """`cousin-spawn <slug> --start` on a runner cousin: the supervisor
-    starts it (a no-op when a runner already holds its lock)."""
-    from cousin_lib import delivery
+    starts it (a no-op when a runner already holds its lock).
+
+    delivery.is_alive reads the runner's own lock, which a stopping
+    runner can still hold for up to ~35s after a no-wait stop; trusting
+    that alone would report "already running" for a cousin the
+    supervisor already holds down (supervisor.is_held, written at once
+    by the stop) and never ask it to start. When held, the alive
+    short-circuit is skipped and the supervisor is asked instead: it
+    answers "still stopping" while the old runner is on its way out, or
+    starts a fresh one once it is down - never a silent no-op."""
+    from cousin_lib import delivery, supervisor
     home = root / "cousins" / slug
-    if delivery.is_alive(home):
+    if delivery.is_alive(home) and not supervisor.is_held(home):
         print("%s is already running (cousin-runner); nothing started" % slug)
         return 0
     try:

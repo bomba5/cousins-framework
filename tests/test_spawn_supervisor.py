@@ -131,6 +131,19 @@ class TestRunnerLaneStop(_Case):
         self.assertTrue(supervisor.held_path(home).read_text().rstrip().endswith(" Testa"))
         self.assertNotIn(home, supervisor.runner_cousins(self.root))   # a new supervisor skips it
 
+    def test_a_hand_started_runner_with_no_supervisor_reports_running(self):
+        # item 3: with no supervisor, a runner started by hand (bypassing
+        # cousin-supervisor) still holds its lock; the stop must check
+        # delivery.is_alive before claiming "not running" - a truthful
+        # "running" (nothing here can signal it, there is no supervisor),
+        # still held so the next supervisor leaves it down until `start`.
+        home = runner_home(self.root, "wren")
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True):
+            out = spawn.stop_cousin(home, tmux_bin=str(self.tmux), root=self.root, by="Testa")
+        self.assertEqual(out, {"runner": "running", "supervisor": "not running",
+                               "held": True})
+        self.assertTrue(supervisor.is_held(home))
+
     def test_a_hold_that_cannot_be_written_says_so(self):
         home = runner_home(self.root, "wren")
         with mock.patch("cousin_lib.supervisor.hold", side_effect=PermissionError("read-only")):
@@ -352,6 +365,25 @@ class TestSpawnCliOnTheRunnerLane(_CreateCase):
         rc, out, err = self.cli("wren", "--start")
         self.assertEqual(rc, 0, err)
         self.assertEqual(stub.ops(), [("start", "wren")])
+
+    def test_start_of_an_existing_runner_never_already_running_while_held(self):
+        # item 2, CLI half: delivery.is_alive can still read True while
+        # the runner finishes its stop (up to ~35s); supervisor.is_held
+        # is true throughout, and must skip the alive short-circuit so a
+        # Start in that window reaches the supervisor and reports its
+        # true answer, not a stale "already running".
+        from cousin_lib import supervisor
+        self.create(runner="fake")
+        stub = self.stub(start={"ok": False, "name": "runner:wren",
+                                "error": "runner:wren is still stopping;"
+                                         " start it once it is down"})
+        supervisor.hold(self.home, "Testa")
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True):
+            rc, out, err = self.cli("wren", "--start")
+        self.assertEqual(rc, 1)
+        self.assertNotIn("already running", out)
+        self.assertEqual(stub.ops(), [("start", "wren")])
+        self.assertIn("still stopping", err)
 
     def test_start_with_no_supervisor_keeps_the_home_and_says_how(self):
         rc, out, err = self.cli(*self.ARGS, "--runner", "fake", "--start")

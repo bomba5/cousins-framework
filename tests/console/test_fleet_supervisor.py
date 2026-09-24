@@ -55,6 +55,27 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual(body["status"], "already running")
         self.assertEqual(stub.requests, [])
 
+    def test_a_start_during_a_no_wait_stop_is_never_silently_already_running(self):
+        # item 2: after a 202 stopping, the runner can keep its lock up
+        # to ~35s (delivery.is_alive still True) while the supervisor
+        # already holds it (supervisor.is_held, written at once by the
+        # stop). A Start in that window must not trust the stale alive
+        # read: it must ask the supervisor and report its true answer -
+        # here "still stopping" - never "already running" and never a
+        # silent no-op that leaves the cousin down and held.
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        stub = self.stub(start={"ok": False, "name": "runner:wren",
+                                "error": "runner:wren is still stopping;"
+                                         " start it once it is down"})
+        self.serve()
+        supervisor.hold(home, "console")
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True):
+            status, body = self.post("/api/cousins/wren/start")
+        self.assertNotEqual(body.get("status"), "already running", body)
+        self.assertEqual(stub.ops(), [("start", "wren")])
+        self.assertIn("still stopping", body.get("error", ""), body)
+
     def test_start_without_a_supervisor_is_503_and_says_how(self):
         self.cousin("wren", extra=RUNNER)
         self.serve()

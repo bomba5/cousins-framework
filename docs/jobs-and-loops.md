@@ -179,6 +179,11 @@ cousin-loops fire wren morning-standup
 cousin-loops requests
 ```
 
+`run` takes an exclusive lock on the root (one clock per root): a
+one-shot `--ticks 1` run beside an already-running daemon does not
+borrow its tick, it exits 5, busy, at once, the same as a second
+daemon started by mistake. Stop or wait for the running one first.
+
 `systemd/cousin-loops.service` runs it for you ([operations](operations.md)).
 If the daemon isn't running, nothing recurring happens: no heartbeats,
 no loops, no one-shots, no timed flips, no index refresh (a search still

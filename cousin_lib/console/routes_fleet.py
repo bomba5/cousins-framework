@@ -358,9 +358,16 @@ def fleet_rows(server):
 def _start_runner(server, slug, config):
     """The runner lane: the cousin-supervisor starts the runner. No
     config/agent-cmd (a container has none), no chat server, no tmux;
-    "already running" is a runner holding the cousin's lock. 503 when
-    no supervisor runs for the root."""
-    if delivery.is_alive(config.home):
+    "already running" is a runner holding the cousin's lock - but a
+    stopping runner can still hold it for up to ~35s after a no-wait
+    stop, and supervisor.is_held is true for that whole window (the
+    stop writes it at once). Trusting the lock alone there would answer
+    "already running" for a cousin the supervisor already holds down,
+    and never ask it to start. Held skips that short-circuit and asks
+    the supervisor instead: "still stopping" while the old runner is on
+    its way out, or a fresh start once it is down. 503 when no
+    supervisor runs for the root."""
+    if delivery.is_alive(config.home) and not supervisor.is_held(config.home):
         return {"ok": True, "slug": slug, "status": "already running"}
     server.emit("cousin-status", {"slug": slug, "status": "starting"})
     try:

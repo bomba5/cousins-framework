@@ -103,7 +103,8 @@ the console and the loops daemon itself, so it replaces
 `cousin-console.service` and `cousin-loops.service`. Enable one set, never
 both: two consoles would serve one root, and the second loops daemon is
 refused by the first one's lock, which leaves the supervisor's loops child
-`failing`.
+in `backoff` (busy, retried against the holder's lock forever, never
+counted toward `failing`), not `failing`.
 
 The supervisor's console listens on `127.0.0.1:8600` unless told otherwise,
 not where your old console did. First read the old console's address: the

@@ -13,6 +13,7 @@ import tempfile
 import time
 
 from cousin_lib import loops
+from cousin_lib.loops import hold_loops_lock
 from tests._hermetic import HermeticCase
 
 
@@ -78,3 +79,47 @@ class TestLoopsLock(HermeticCase):
         self.assertFalse(_held(self.lock))
         self.assertEqual(loops.loops_main(["run", "--ticks", "1", "--interval", "0"]), 0)
         self.assertEqual(oct(os.stat(self.lock.parent).st_mode & 0o777), "0o700")
+
+
+class TestLoopsLockSurvivesFork(HermeticCase):
+    """jobs._spawn_tracked forks (twice, no exec) from inside the loops
+    daemon's own process to run a worker loop's command; flock locks are
+    shared across fork, so the job-runner child inherits the daemon's
+    copy of run/loops.lock and, without a fix, holds it open until the
+    job ends - the daemon can die and the clock stays held (phase 6 fix
+    wave item 1). hold_loops_lock must close its own fd in every forked
+    child from then on, tolerant of a fd already closed."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name) / "root"
+        self.root.mkdir()
+
+    def test_a_forked_child_does_not_keep_the_lock_held(self):
+        fd = hold_loops_lock(self.root)
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            os.write(write_fd, b"up\n")
+            os.close(write_fd)
+            time.sleep(10)
+            os._exit(0)
+        os.close(write_fd)
+        try:
+            with os.fdopen(read_fd) as fh:
+                self.assertEqual(fh.readline(), "up\n",
+                                 "the forked child never signalled it was up")
+            os.close(fd)     # the parent gives up its own copy, as the daemon does on exit
+            self.assertEqual(os.waitpid(pid, os.WNOHANG), (0, 0),
+                             "the forked child must still be alive for this to test anything")
+            second = hold_loops_lock(self.root)
+            os.close(second)
+        finally:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+            os.waitpid(pid, 0)

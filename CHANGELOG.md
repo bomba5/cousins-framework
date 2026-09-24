@@ -117,6 +117,33 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   (#79): `is_running` probes by taking the same lock for microseconds (the
   loops tick, the fleet poll, the console's stream), and a runner starting
   inside a probe was refused. This closes the race for every prober.
+- `hold_loops_lock` closes its own fd in every process forked from the
+  daemon (an at-fork handler, tolerant of a reused fd number): a worker
+  loop's job runs through `jobs._spawn_tracked`, which forks twice with
+  no exec, and flock locks are shared across fork, so the job-runner
+  child used to inherit the daemon's copy of `run/loops.lock` and hold it
+  open past the daemon's own exit - no clock until the job ended.
+- A `start` (the console's route, `cousin-spawn <slug> --start`) on a
+  runner cousin no longer trusts a stale `delivery.is_alive` read while
+  the supervisor is stopping it: a runner can keep its lock for up to
+  ~35s after a no-wait stop, and `supervisor.is_held` is true for that
+  whole window (the stop writes it at once). A start in that window used
+  to read the lock as live and answer "already running" without asking
+  the supervisor at all, then the runner went down and stayed held with
+  nothing said. It now asks the supervisor whenever the cousin is held,
+  and reports its true answer - "still stopping", or a fresh start once
+  it is down.
+- `spawn.stop_cousin` with no supervisor running answered a runner
+  "not running" without checking; a runner started by hand (bypassing
+  `cousin-supervisor`) still holds its lock, and the stop now checks
+  `delivery.is_alive` and reports "running" truthfully instead. It still
+  cannot signal a runner with no supervisor to ask, so it only holds it
+  down for the next one, as before.
+- `docs/jobs-and-loops.md` did not say that `cousin-loops run --ticks 1`
+  beside an already-running daemon exits 5, busy (the same lock a second
+  daemon takes); `systemd/README.md` said a second loops daemon left the
+  supervisor's loops child `failing` - it is `backoff` (busy, retried
+  against the holder forever, never counted toward `failing`).
 
 ## 1.15.0 - 2026-09-24
 

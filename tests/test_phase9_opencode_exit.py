@@ -61,15 +61,12 @@ class TestPhase9Exit(unittest.TestCase):
                        "21/21", "nothing DECLARED", "[agent.sessions]", "RUNNER_KINDS"):
             self.has(needle, entry, "the phase 9 CHANGELOG entry")
 
-    def test_another_vendors_subscription_is_said_to_be_the_users_risk(self):
-        """Ruling P9-2 (review Important 5): `--method` stays, and the spec's
-        Auth rule applies to it: the docs that describe it say the terms
-        risk is the user's."""
+    def test_another_vendors_subscription_is_documented(self):
+        """Ruling P9-2: `--method` stays and is documented; the operator
+        dropped the terms-risk sentence (2026-09-24)."""
         commands = self.read("docs/commands.md")
-        at = commands.index("--method")
-        self.has("terms risk", commands[at:at + 4000], "commands.md, cousin-account login --method")
+        self.has("--method", commands, "commands.md")
         runners = self.read("docs/reference/runners.md")
-        self.has("terms risk", runners, "runners.md")
         self.has("--method", runners, "runners.md")
 
     def test_the_per_turn_check_promises_no_time_bound(self):

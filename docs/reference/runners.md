@@ -65,12 +65,9 @@ Anthropic provider (or `ANTHROPIC_BASE_URL`) pointed at a loopback address.
 Removing a bridge a live install still carries is an operator step:
 [migrating](../migrating.md).
 
-**Another vendor's subscription is the user's risk (ruling P9-2).** An
-opencode account may hold another vendor's OAuth login (`cousin-account
-login <name> --provider <id> --method <label>`), which runs that
-subscription through a client its vendor did not write. The terms risk of
-that is the user's, as it is for the login lane on the SDK; an API key or a
-local model carries none.
+**Another vendor's subscription (ruling P9-2).** An opencode account may
+hold another vendor's OAuth login (`cousin-account login <name> --provider
+<id> --method <label>`) as well as API keys or a local model.
 
 **No Claude model on this lane (ruling P9-1).** Claude cousins run on the
 Agent SDK and nowhere else, so an opencode account that names the

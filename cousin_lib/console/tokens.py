@@ -91,9 +91,15 @@ def _add_line(days, line, seen=None):
                 return
             seen.add(mid)
     total, output = _usage_total(usage)
-    bucket = days.setdefault(day, {"total": 0, "output": 0})
+    bucket = days.setdefault(day, {"total": 0, "output": 0, "read": 0, "creation": 0,
+                                   "input": 0})
     bucket["total"] += total
     bucket["output"] += output
+    for key, name in (("cache_read_input_tokens", "read"),
+                      ("cache_creation_input_tokens", "creation"), ("input_tokens", "input")):
+        value = usage.get(key) or 0
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            bucket[name] = bucket.get(name, 0) + int(value)
 
 
 def _transcripts(root, home, since):
@@ -130,17 +136,18 @@ def _scan(entry, path):
     entry["offset"] += len(data)
 
 
-def day_totals(server, home, *, days=SERIES_DAYS):
-    """{day: {"total", "output"}} for one cousin. A cousin on runner =
-    "sdk" is read from its usage.db ONLY: the SDK also writes the
-    harness's local transcript for it (phase 0 finding 2), and scanning
-    that too would count its turns twice. Every other cousin: every
-    transcript touched in the last `days` days, scanning only the bytes
-    appended since the last call on this server."""
+def _day_buckets(server, home, *, days=SERIES_DAYS):
+    """{day: {"total", "output", "read", "creation", "input"}} for one
+    cousin. A cousin on runner = "sdk" is read from its usage.db ONLY: the
+    SDK also writes the harness's local transcript for it (phase 0 finding
+    2), and scanning that too would count its turns twice. Every other
+    cousin: every transcript touched in the last `days` days, scanning only
+    the bytes appended since the last call on this server."""
     from cousin_lib import usage
     from cousin_lib.delivery import _runner_kind
     if _runner_kind(home) == "sdk":
-        return {day: {"total": b["total"], "output": b["output"]}
+        return {day: {"total": b["total"], "output": b["output"], "read": b["cache_read"],
+                      "creation": b["cache_creation"], "input": b["input"]}
                 for day, b in usage.day_totals(home, days=days).items()}
     state = server.state.setdefault("tokens", {})
     files = state.setdefault(str(home), {})
@@ -157,10 +164,48 @@ def day_totals(server, home, *, days=SERIES_DAYS):
                                              "seen": set()})
         _scan(entry, path)
         for day, bucket in entry["days"].items():
-            agg = out.setdefault(day, {"total": 0, "output": 0})
-            agg["total"] += bucket["total"]
-            agg["output"] += bucket["output"]
+            agg = out.setdefault(day, {"total": 0, "output": 0, "read": 0, "creation": 0,
+                                       "input": 0})
+            for key in agg:
+                agg[key] += bucket.get(key, 0)
     return out
+
+
+def day_totals(server, home, *, days=SERIES_DAYS):
+    """{day: {"total", "output"}} for one cousin (_day_buckets)."""
+    return {day: {"total": b["total"], "output": b["output"]}
+            for day, b in _day_buckets(server, home, days=days).items()}
+
+
+def _rate(read, creation, inp):
+    """cache_read / (cache_read + cache_creation + input), None with no
+    cacheable input at all. A result that carried no usage adds nothing to
+    either side: it is left out of the rate, never counted as a miss."""
+    seen = read + creation + inp
+    return read / seen if seen else None
+
+
+def cache_days(server, home, *, days=SERIES_DAYS):
+    """{day: {"read", "creation", "input", "rate"}}: the prompt-cache hit
+    rate per day from the usage the model reported, measured not inferred."""
+    return {day: {"read": b["read"], "creation": b["creation"], "input": b["input"],
+                  "rate": _rate(b["read"], b["creation"], b["input"])}
+            for day, b in _day_buckets(server, home, days=days).items()}
+
+
+def cache(server, home, *, days=SERIES_DAYS):
+    """The tokens view's cache block: the rate over the window and one row
+    per day of it, oldest first (a day with no usage: zeros and rate None)."""
+    per = cache_days(server, home, days=days)
+    today = _today()
+    rows = []
+    for back in range(days - 1, -1, -1):
+        day = (today - timedelta(days=back)).isoformat()
+        b = per.get(day, {"read": 0, "creation": 0, "input": 0, "rate": None})
+        rows.append(dict(b, day=day))
+    return {"rate": _rate(sum(r["read"] for r in rows), sum(r["creation"] for r in rows),
+                          sum(r["input"] for r in rows)),
+            "days": rows}
 
 
 def _today():

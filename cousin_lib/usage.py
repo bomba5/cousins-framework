@@ -96,9 +96,14 @@ def day_totals(home, *, days=14):
     since = (datetime.now(timezone.utc) - timedelta(days=days + 1)).date().isoformat()
     out = {}
     with _db(home) as conn:
-        for day, total, output, cost, estimate in conn.execute(
-                "SELECT day, SUM(total), SUM(output), SUM(cost_usd), MAX(estimate)"
+        for day, total, output, cost, estimate, read, creation in conn.execute(
+                "SELECT day, SUM(total), SUM(output), SUM(cost_usd), MAX(estimate),"
+                " SUM(cache_read), SUM(cache_creation)"
                 " FROM usage WHERE day >= ? GROUP BY day", (since,)):
+            # total is input + output + cache_read + cache_creation (_totals),
+            # so the uncached input is exact without a column of its own
             out[day] = {"total": int(total), "output": int(output),
-                        "cost_usd": float(cost), "estimate": bool(estimate)}
+                        "cost_usd": float(cost), "estimate": bool(estimate),
+                        "cache_read": int(read), "cache_creation": int(creation),
+                        "input": int(total) - int(output) - int(read) - int(creation)}
     return out

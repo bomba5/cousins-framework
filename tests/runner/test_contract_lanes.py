@@ -21,10 +21,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # sha256 of contract.render(<shipped registry>, "1.12.0") on main 84d1a67
 # (1.19.0, whose 5e8b72f added "Tools, not the terminal CLIs"), plus the
 # OTHER_SERVERS paragraph feat/runner-mcp-json (5edd58e) appends on the SDK
-# lane: the bytes the SDK lane's renderer produces. A registry or static-text edit changes it on
+# lane, plus 1.21.0's memory triggers (remember when asked, search first) and
+# the job tool's `run` line in "Tools, not the terminal CLIs": the bytes the
+# SDK lane's renderer produces. A registry or static-text edit changes it on
 # purpose: update the hash in the same commit, knowing every SDK cousin's
 # prompt cache resets.
-SDK_CONTRACT_SHA256 = "63f7128219d08a97963e8ba16cab1254c255faa4cff7ef05de6494e1893f7cdf"
+SDK_CONTRACT_SHA256 = "479380f33105001c7c8a7bcd0e51bfa8758a30734466a9c23a296f4959abdb88"
 
 
 def as_opencode(sdk_text):

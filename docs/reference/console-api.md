@@ -945,7 +945,7 @@ Removes the key from the file and deletes the secret file when it is the one thi
 
 ### `POST /api/system/allowlist`
 
-`{"allow": [cidr], "base_sha"}`: `config/net-allowlist.json`'s `allow`, every other key kept. Each entry must be a network the guard reads (`10.0.0.0/8`, not `10.0.0.1/8`) and not `/0`; `400` when the new list would no longer admit the requesting address. The console and each chat server read it when they start: the answer's `restart` names them and the console's restart route.
+`{"allow": [cidr], "base_sha"}`: `config/net-allowlist.json`'s `allow`, every other key kept. Each entry must be a network the guard reads (`192.0.2.0/24`, not `192.0.2.1/24`) and not `/0`; `400` when the new list would no longer admit the requesting address. The console and each chat server read it when they start: the answer's `restart` names them and the console's restart route.
 
 ### `GET /api/system/agent-defaults`
 

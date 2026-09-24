@@ -757,7 +757,7 @@ class TextConfig(ConsoleCase):
         self.assertEqual(status, 200, body)
         data = json.loads(path.read_text())
         self.assertEqual(data, {"allow": ["100.64.0.0/10", "203.0.113.0/24"], "note": "kept"})
-        for allow_list in (["0.0.0.0/0"], ["10.0.0.1/8"], ["nonsense"], "x"):
+        for allow_list in (["0.0.0.0/0"], ["192.0.2.1/24"], ["nonsense"], "x"):
             status, body = self.post("/api/system/allowlist", {"allow": allow_list})
             self.assertEqual(status, 400, (allow_list, body))
 

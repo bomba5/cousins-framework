@@ -217,6 +217,26 @@ class TestCalls(McpCase):
         self.assertEqual(seen[0][2:], ("reply", {"text": "hello Priya"}))
         self.assertEqual(self.chat_rows(), [("priya", "Wren", "hello Priya")])
 
+    def test_a_call_the_policy_denies_never_reaches_the_tool(self):
+        """Review minor: the plugin's veto runs inside opencode, but the MCP
+        server is reachable over loopback with its bearer token, so it
+        applies policy.toml too (the SDK lane's names), as defence in depth."""
+        from cousin_lib.runner.policy import Policy
+        (self.ctx.home / "policy.toml").write_text(
+            'deny_tools = ["mcp__cousin__send"]\nask = ["mcp__cousin__memory"]\n')
+        self.ctx.policy = Policy.load(self.ctx.home)
+        self.turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
+        with mock.patch.object(mcp_http.tools, "call") as call:
+            for name, needle in (("send", "deny_tools lists mcp__cousin__send"),
+                                 ("memory", "ask lists mcp__cousin__memory")):
+                result = self.rpc("tools/call", {"name": name, "arguments": {"to": "sam"}})["result"]
+                self.assertTrue(result["isError"], result)
+                self.assertTrue(result["content"][0]["text"].startswith("denied by policy: "))
+                self.assertIn(needle, result["content"][0]["text"])
+            call.assert_not_called()
+        reply = self.rpc("tools/call", {"name": "reply", "arguments": {"text": "allowed"}})
+        self.assertFalse(reply["result"]["isError"], reply)
+
     def test_the_live_turn_is_read_at_call_time(self):
         # The same server, the turn moving under it: a reply outside a turn
         # is refused, the next turn's thread is the one answered.

@@ -31,7 +31,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from cousin_lib import mcp_server
-from cousin_lib.runner import tools
+from cousin_lib.runner import contract, tools
+
+DENIED = "denied by policy: "   # what a vetoed call reads as (the plugin's own prefix)
 
 PATH = "/mcp"
 # Newest first. initialize echoes the client's version when it is one of
@@ -240,6 +242,14 @@ class McpHttpServer:
         return _error(rid, METHOD_NOT_FOUND, "method not found: %s" % method)
 
     def _call(self, name, args):
+        # policy.toml here too, in the SDK lane's names: the plugin's veto runs
+        # inside opencode, and this server is reachable over loopback with its
+        # token (defence in depth; `ask` is enforced as deny, as everywhere)
+        policy = getattr(self.ctx, "policy", None)
+        if policy is not None:
+            decision, reason = policy.decide(contract.sdk_tool_name(name), args)
+            if decision != "allow":
+                return {"content": [{"type": "text", "text": DENIED + reason}], "isError": True}
         try:
             text, is_error = tools.call(self.ctx, name, args)
         except Exception as err:  # noqa: BLE001 - a broken call is a tool error, never a crash

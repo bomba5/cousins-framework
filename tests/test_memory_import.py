@@ -233,5 +233,141 @@ class TestManifestIsTheRecord(ImportCase):
         self.assertEqual(self._target("feedback_ledgers.md").read_text(), "Wren's own correction.\n")
 
 
+class TestReplay(ImportCase):
+    """The recall regression test over the cousin's REAL queries, before
+    against after: the queries come from memory/.recall-log.jsonl
+    (reinforce.record, every search); --apply replays them as a baseline
+    just before it writes, --verify replays them again. The searches below
+    are real searches in this home, logged the same way."""
+
+    def _search(self, query):
+        return memory_search.search(query, top=3, home=self.home, root=self.root)
+
+    def _cli(self, *args):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = memory.memory_main(["--home", str(self.home), "import-auto", *args])
+        return rc, out.getvalue()
+
+    def test_the_logged_queries_keep_their_memories_after_the_import(self):
+        self._search("quokka ledgers Monday")
+        self._search("spare keys blue tin")
+        memory_import.apply(self.home, root=self.root)
+        base = json.loads(self._target(memory_import.BASELINE).read_text())
+        self.assertEqual(sorted(q["query"] for q in base["queries"]),
+                         ["quokka ledgers Monday", "spare keys blue tin"])
+        report = memory_import.verify(self.home, root=self.root)
+        self.assertEqual((report["queries"], report["kept"], report["lost"]), (2, 2, []))
+
+    def test_a_lost_memory_is_reported(self):
+        """The dedupe (R9) hides a harness file whose source is unchanged;
+        a copy that no longer holds the memory must show as a loss. (The
+        query avoids the file's own name: the keyword index matches paths.)"""
+        self._search("Priya quokka Monday")
+        memory_import.apply(self.home, root=self.root)
+        self._target("feedback_ledgers.md").write_text("Wren rewrote this page.\n")
+        report = memory_import.verify(self.home, root=self.root)
+        self.assertEqual(report["lost"], [{"query": "Priya quokka Monday",
+                                           "missing": ["feedback_ledgers.md"]}])
+
+    def test_a_memory_the_query_already_missed_before_the_import_is_not_a_loss(self):
+        """The log's own result is history: a harness file the query no
+        longer surfaced before the import cannot be lost by it."""
+        self._search("Priya quokka Monday")
+        (self.auto / "feedback_ledgers.md").write_text("Toki took over the accounts.\n")
+        memory_import.apply(self.home, root=self.root)
+        self.assertEqual(memory_import.verify(self.home, root=self.root)["lost"], [])
+
+    def test_a_dropped_copy_is_not_a_loss(self):
+        self._search("quokka ledgers Monday")
+        memory_import.apply(self.home, root=self.root)
+        self._target("feedback_ledgers.md").unlink()
+        self.assertEqual(memory_import.verify(self.home, root=self.root)["lost"], [])
+
+    def test_the_replay_does_not_reinforce_what_it_measures(self):
+        """guard: search(record=False) arrives in Task 2; this pins that the
+        baseline and the replay both use it."""
+        self._search("quokka ledgers Monday")
+        log = self.home / "memory" / ".recall-log.jsonl"
+        before = log.read_text()
+        memory_import.apply(self.home, root=self.root)
+        memory_import.verify(self.home, root=self.root)
+        self.assertEqual(log.read_text(), before)
+
+    def test_nothing_to_compare_exits_2(self):
+        (self.home / "memory" / "chores.md").write_text("# Chores\nSam waters the ferns.\n")
+        self._search("ferns Sam")         # no word any harness file holds (the keyword leg ORs words)
+        rc, out = self._cli("--verify")
+        self.assertEqual(rc, 2)
+        self.assertIn("no baseline", out)
+        rc, out = self._cli("--apply", "--verify")
+        self.assertEqual(rc, 2)
+        self.assertIn("replayed 0 queries", out)
+
+    def test_the_cli_replays_and_exits_1_on_a_loss(self):
+        self._search("Priya quokka Monday")
+        rc, out = self._cli("--apply", "--verify")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("replayed 1 logged query: 1 kept, 0 lost", out)
+        self._target("feedback_ledgers.md").write_text("Wren rewrote this page.\n")
+        rc, _out = self._cli("--verify")
+        self.assertEqual(rc, 1)
+
+
+class TestReplayOverACorruptManifest(ImportCase):
+    """Controller ruling on Task 6 (Task 5's strict manifest kept): a
+    --verify over a manifest it cannot read must not pretend to compare,
+    because without it a dropped copy looks like a loss."""
+
+    def test_verify_refuses_and_the_cli_exits_2(self):
+        memory_search.search("Priya quokka Monday", top=3, home=self.home, root=self.root)
+        memory_import.apply(self.home, root=self.root)
+        self._target(memory_import.MANIFEST).write_text("{not json")
+        with self.assertRaises(memory_import.ManifestError):
+            memory_import.verify(self.home, root=self.root)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = memory.memory_main(["--home", str(self.home), "import-auto", "--verify"])
+        self.assertEqual(rc, 2)
+        self.assertIn(memory_import.MANIFEST, err.getvalue())
+        self.assertNotIn("replayed", out.getvalue())
+
+
+class TestReplayIndex(ImportCase):
+    """R19: every search a replay runs sees a fully current index. The
+    embedder is a stub, and the foreground budget is cut to 1 so a single
+    search cannot catch up by itself."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "config" / "embedding.toml").write_text(
+            'url = "http://embed.invalid"\nmodel = "stub"\n')
+        stub = lambda text, config: [float(len(text) % 7 + 1), float(text.count("e") + 1), 1.0]
+        for target, value in (("_embed", stub), ("FOREGROUND_BUDGET", 1)):
+            p = mock.patch.object(memory_search, target, value); p.start(); self.addCleanup(p.stop)
+
+    def _coverage(self):
+        config = memory_search._embedding_config(self.root)
+        chunks = memory_search._chunks(self.home, config, self.root)
+        index = memory_search._load_index(self.home) or {}
+        current = sum(1 for key, (_c, _p, text) in chunks.items()
+                      if (index.get(key) or {}).get("vector")
+                      and index[key].get("text_hash") == memory_search._text_hash(text))
+        return current, len(chunks)
+
+    def test_every_replay_search_sees_a_fully_current_index(self):
+        memory_search.search("quokka ledgers Monday", top=3, home=self.home, root=self.root)
+        seen, real = [], memory_search.search
+
+        def spy(query, **kw):
+            seen.append(self._coverage())
+            return real(query, **kw)
+        with mock.patch.object(memory_search, "search", spy):
+            memory_import.apply(self.home, root=self.root)          # the baseline's searches
+            memory_import.verify(self.home, root=self.root)         # the replay's searches
+        self.assertGreaterEqual(len(seen), 2)
+        self.assertEqual([c for c, _t in seen], [t for _c, t in seen])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -868,12 +868,19 @@ def _cmd_import_auto(args):
         return 2
     try:
         if args.apply:
-            rows = memory_import.apply(home, root=root)
+            rows = memory_import.apply(home, root=root, sample=args.sample)
         else:
             rows = memory_import.plan(home, root=root)
+        report = memory_import.verify(home, root=root) if args.verify else None
     except memory_import.ManifestError as err:
         print("ERROR: import-auto: %s" % err, file=sys.stderr)
         return 2
+    if report is not None:
+        print(json.dumps(report, indent=1) if args.json
+              else memory_import.format_verify(report))
+        if not report["baseline"] or not report["queries"]:
+            return 2          # nothing was compared: the check proved nothing
+        return 1 if report["lost"] else 0
     if args.json:
         print(json.dumps(rows, indent=1))
     else:
@@ -980,6 +987,13 @@ def memory_main(argv=None):
              " --apply; idempotent; an edited copy is never overwritten)")
     p.add_argument("--apply", action="store_true")
     p.add_argument("--json", action="store_true", help="print the plan's rows as JSON")
+    p.add_argument("--verify", action="store_true",
+                   help="replay the queries --apply took as its baseline and report any"
+                        " that lost a memory (exit 1 on a loss, 2 when nothing was"
+                        " compared)")
+    p.add_argument("--sample", type=int, default=50,
+                   help="with --apply: how many of the newest logged queries the"
+                        " baseline replays")
     p.set_defaults(func=_cmd_import_auto)
     p = sub.add_parser(
         "consolidate",

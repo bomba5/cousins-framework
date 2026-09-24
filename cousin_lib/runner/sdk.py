@@ -112,10 +112,10 @@ async def _aclose(responses):
 
 class _Job:
     """One write the turn's writer runs: `fn` is awaited on the writer
-    task; `on_ok(value)`, `on_error(exc)` and `on_dropped()` (never
-    started: the writer closed first) run on the loop thread, the first
-    two right after `fn` returns or raises. `started` tells a job
-    cancelled mid-write from one never begun."""
+    task. `on_ok(value)` and `on_error(exc)` run right after `fn` returns
+    or raises; `on_dropped(started)` runs when the writer closes first:
+    `started` True for the write it cut off mid-flight (it may have
+    reached the CLI), False for one never begun. All on the loop thread."""
 
     def __init__(self, fn, on_ok=None, on_error=None, on_dropped=None):
         self.fn, self.on_ok, self.on_error, self.on_dropped = fn, on_ok, on_error, on_dropped
@@ -138,11 +138,12 @@ class _Writer:
     job's `on_dropped` called before it returns; no task outlives it."""
 
     def __init__(self, report):
-        self._report = report       # report(text): a handler that raised, said, never fatal
+        self._report = report       # report(text): said on the stream, never fatal
         self._jobs = collections.deque()
         self._wake = asyncio.Event()
-        self._task = asyncio.ensure_future(self._run())
+        self._current = None        # the job being written
         self._closed = False
+        self._task = asyncio.ensure_future(self._run())
 
     def submit(self, job):
         if self._closed:
@@ -159,22 +160,33 @@ class _Writer:
                 continue
             job = self._jobs.popleft()
             job.started = True
+            self._current = job
             try:
                 value = await job.fn()
             except asyncio.CancelledError:
-                job.future.cancel()
-                raise
+                me = asyncio.current_task()
+                if me is not None and me.cancelling():
+                    raise       # close(): it drops this job as started
+                # raised inside the client, not asked for: a failed write,
+                # said, and the writer goes on with the next one
+                exc = RunnerError("the write was cancelled inside the client")
+                self._report("writer: %s" % exc)
+                self._fail(job, exc)
             except Exception as exc:  # noqa: BLE001 - handed to the job's owner
-                job.future.set_exception(exc)
-                job.future.exception()      # read here: its owner may not await it
-                self._call(job.on_error, exc)
+                self._fail(job, exc)
             else:
                 job.future.set_result(value)
                 self._call(job.on_ok, value)
+            self._current = None
+
+    def _fail(self, job, exc):
+        job.future.set_exception(exc)
+        job.future.exception()      # read here: its owner may not await it
+        self._call(job.on_error, exc)
 
     def _call(self, handler, arg):
-        # a handler that raises must not end the writer: the writes queued
-        # behind it would never reach the CLI
+        # a handler that raises must not end the writer, nor the close: the
+        # jobs behind it would never be written, or never be dropped
         if handler is None:
             return
         try:
@@ -183,22 +195,35 @@ class _Writer:
             self._report("writer: %s: %s" % (type(exc).__name__, exc))
 
     async def close(self):
-        """Stop the writer: a write in progress is cancelled (it may have
-        reached the CLI: its owner decides), and every job never begun is
-        dropped through its `on_dropped`, in order, before this returns."""
+        """Stop the writer: the write in progress is cancelled and dropped
+        as started, every job never begun is dropped as not started, in
+        order, before this returns. A cancellation of the task calling
+        close() (the turn's) is re-raised once the jobs are dropped."""
         if self._closed:
             return
         self._closed = True
         self._task.cancel()
+        cancelled = False
         try:
             await self._task
-        except BaseException:  # noqa: BLE001 - the cancel we asked for
-            pass
-        while self._jobs:
-            job = self._jobs.popleft()
-            job.future.cancel()
-            if job.on_dropped is not None:
-                job.on_dropped()
+        except asyncio.CancelledError:
+            me = asyncio.current_task()
+            cancelled = me is not None and me.cancelling() > 0
+        except Exception as exc:  # noqa: BLE001 - the writer died: said, jobs still dropped
+            self._report("writer ended: %s: %s" % (type(exc).__name__, exc))
+        finally:
+            dropped = []
+            if self._current is not None:
+                dropped.append((self._current, True))
+                self._current = None
+            while self._jobs:
+                dropped.append((self._jobs.popleft(), False))
+            for job, started in dropped:
+                if not job.future.done():
+                    job.future.cancel()
+                self._call(job.on_dropped, started)
+        if cancelled:
+            raise asyncio.CancelledError()
 
 
 def _pressure_reason(context_usage):
@@ -309,6 +334,7 @@ class SdkRunner:
         self._loop = None
         self._client = None
         self._interrupt_requested = False
+        self._interrupt_sent = False    # an interrupt reached the client this turn (_close)
         self._live = False       # the CLI is generating for this turn (see _interrupt_turn)
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
@@ -706,6 +732,7 @@ class SdkRunner:
             return False
         self._interrupt_requested = True
         if self._writer is None:
+            self._interrupt_sent = True
             await self._client.interrupt()
             return True
         # in line behind any fold already handed over (_Writer)
@@ -717,6 +744,7 @@ class SdkRunner:
         never reaches a CLI whose turn has ended."""
         if not self._interrupt_may_go(seq):
             return False
+        self._interrupt_sent = True     # what _close reads: an interrupt that reached the client
         await self._client.interrupt()
         return True
 
@@ -898,7 +926,7 @@ class SdkRunner:
         except Exception as exc:  # noqa: BLE001 - recorded; the wait still starts
             self.stream.append("error", {"error": "requeueing a turn the login failed: %s: %s"
                                          % (type(exc).__name__, exc)})
-        self._interrupt_requested = False
+        self._interrupt_requested = self._interrupt_sent = False
         self._login_required(signal["detail"], reason=signal["reason"])
 
     def _note_good_result(self):
@@ -1234,13 +1262,17 @@ class SdkRunner:
             return False
 
         def on_error(exc):
+            if entry not in open_rows:
+                return      # already closed or requeued (a login's result): nothing to fail
             if isinstance(exc, _NotWritten):
                 forget()
             if self._write_error is None:
                 self._write_error = exc
 
-        def on_dropped():
-            if forget():
+        def on_dropped(started):
+            # cut off mid-write it may have reached the CLI: it stays open,
+            # and the turn's failure path fails it; never begun, it goes back
+            if not started and forget():
                 self.inbox.requeue(row["id"])
         self._writer.submit(_Job(lambda: self._write(sdk, row, message),
                                  on_error=on_error, on_dropped=on_dropped))
@@ -1272,7 +1304,7 @@ class SdkRunner:
         the one write every fold takes; anything else goes back to the
         queue (`base.FOLDED_KINDS` says why)."""
         rows = self._claim(10)
-        for row in rows:
+        for i, row in enumerate(rows):
             if row["source"] == INTERRUPT or self._interrupt_requested \
                     or not folds_into_turn(row["source"], row["thread_id"]):
                 # an interrupt row is _take_interrupts' (it runs every poll)
@@ -1281,7 +1313,12 @@ class SdkRunner:
             # handed to the writer, never awaited here: this runs on the
             # reader's path (_next), and a write blocked on a full stdout
             # would stop the reader that drains it (_Writer)
-            self._send_later(sdk, row, open_rows)
+            try:
+                self._send_later(sdk, row, open_rows)
+            except Exception:
+                for rest in rows[i + 1:]:   # claimed here, never offered: back to the queue
+                    self.inbox.requeue(rest["id"])
+                raise
 
     async def _take_interrupts(self):
         """Interrupt rows (phase 5), taken on every poll of a live turn
@@ -1314,7 +1351,7 @@ class SdkRunner:
             self._writer.submit(_Job(lambda: self._interrupt_write(seq),
                                      on_ok=self._interrupt_row_ok(row),
                                      on_error=self._interrupt_row_refused(row),
-                                     on_dropped=lambda row=row: self.inbox.requeue(row["id"])))
+                                     on_dropped=self._interrupt_row_dropped(row)))
 
     def _interrupt_row_ok(self, row):
         def ok(went):
@@ -1324,10 +1361,25 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
         return ok
 
+    def _interrupt_row_dropped(self, row):
+        def dropped(started):
+            # Cut off mid-write by the turn's end: DELIVERED, not requeued.
+            # The control request was handed to the client while its turn
+            # was live, and that turn is over, which is what it asked for;
+            # a requeue would close it FAILED "no turn was running", untrue
+            # when it was taken, and an interrupt never reruns as a turn.
+            # Never begun: back to the queue, closed NO_TURN at the boundary.
+            if started:
+                self.inbox.done(row["id"], DELIVERED, "written as the turn ended")
+            else:
+                self.inbox.requeue(row["id"])
+        return dropped
+
     def _interrupt_row_refused(self, row):
         def refused(exc):
             # a refused interrupt fails its own row, never the turn
             self._interrupt_requested = False
+            self._interrupt_sent = False
             message = "interrupt: %s: %s" % (type(exc).__name__, exc)
             self.stream.append("error", {"error": message})
             self.inbox.done(row["id"], FAILED, message)
@@ -1509,7 +1561,7 @@ class SdkRunner:
         """One runner turn: write `first`, fold operator/person/peer chat while
         the turn is live, and read until every written row is closed.
         Returns False when the turn failed or a result was an error."""
-        self._interrupt_requested = False
+        self._interrupt_requested = self._interrupt_sent = False
         self._auth_turn = None
         self._sent = []
         open_rows = []    # (row, envelope text): written, not yet closed
@@ -1619,7 +1671,9 @@ class SdkRunner:
     def _close(self, msg, open_rows, echoed, closing):
         """Close every row echoed since the last result with this one;
         rows written but not echoed stay open for the next CLI turn."""
-        interrupted = self._interrupt_requested
+        # sent, not asked: one still queued behind a fold when the result
+        # came never reached the CLI, and this turn was not interrupted
+        interrupted = self._interrupt_sent
         is_error = bool(msg.is_error)
         closing[:] = [row for row, _ in open_rows if row["id"] in echoed]
         open_rows[:] = [(row, text) for row, text in open_rows if row["id"] not in echoed]
@@ -1645,7 +1699,7 @@ class SdkRunner:
                                           "total_cost_usd": msg.total_cost_usd,
                                           "session_id": msg.session_id, "usage": msg.usage,
                                           "repeat_in_transcript": True, "auth": signal["reason"]})
-            self._interrupt_requested = False
+            self._interrupt_requested = self._interrupt_sent = False
             self._login_required(signal["detail"], reason=signal["reason"])
             return True     # the failure counter must not back off on top of the wait
         if not is_error:
@@ -1665,7 +1719,7 @@ class SdkRunner:
                                           "total_cost_usd": msg.total_cost_usd,
                                           "session_id": msg.session_id, "usage": msg.usage,
                                           "repeat_in_transcript": True})
-            self._interrupt_requested = False
+            self._interrupt_requested = self._interrupt_sent = False
             return True
         outcome = FAILED if (is_error and not interrupted) else DELIVERED
         ids = [row["id"] for row in closing]
@@ -1677,7 +1731,7 @@ class SdkRunner:
                                       "is_error": is_error, "num_turns": msg.num_turns,
                                       "total_cost_usd": msg.total_cost_usd,
                                       "session_id": msg.session_id, "usage": msg.usage})
-        self._interrupt_requested = False
+        self._interrupt_requested = self._interrupt_sent = False
         return not (is_error and not interrupted)
 
     async def _after_turn(self, msg):

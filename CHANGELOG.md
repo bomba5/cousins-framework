@@ -12,11 +12,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   turn to end, and a turn has no length bound: a coordinator's 13 messages,
   two of them STOP, sat queued behind one 60-minute turn while the peer
   duplicated finished work. Meeting, loop and schedule rows still wait for a
-  turn of their own. The claim order at a turn boundary is unchanged. `reply`
-  still never answers a peer thread; with a peer folded into an operator's
-  turn, an unnamed `reply` goes to the operator's thread (a peer thread is no
-  candidate). The contract item `peer_waits` is now `loop_waits`, and
-  `midturn_fold` covers a peer message too.
+  turn of their own, and a peer already queued when one of those turns
+  starts folds into it. The claim order at a turn boundary is unchanged.
+  `reply` still never answers a peer thread, and with a peer folded into an
+  operator's turn a `reply` that names no thread is refused, never guessed:
+  the refusal names the operator's `thread=` and the peer's `send`. The
+  contract item `peer_waits` is now `loop_waits`, and `midturn_fold` covers a
+  peer message too.
 - On the `sdk` runner a mid-turn write (a folded message, an interrupt row)
   no longer stops the turn's reader. It used to be awaited on the path that
   reads the CLI's output: once that output was full and unread, the CLI
@@ -27,8 +29,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   interrupt is written before it) while the reader keeps reading. A folded
   row still counts as delivered only when the CLI echoes it; a write that
   wrote nothing still requeues its row and fails the turn; a write never
-  begun when the turn ends goes back to the queue; no writer outlives its
-  turn.
+  begun when the turn ends goes back to the queue; an interrupt whose control
+  write the turn's end cut off is closed delivered ("written as the turn
+  ended"), never left claimed; a result counts as interrupted only when the
+  interrupt reached the client; no writer outlives its turn.
 
 ## 1.21.0 - 2026-09-24
 

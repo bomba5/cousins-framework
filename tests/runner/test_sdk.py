@@ -546,8 +546,8 @@ class TestSdkRunner(HermeticCase):
     def test_with_a_peer_folded_reply_never_targets_the_peer_and_send_does(self):
         """#118: an operator turn with a peer folded has two live threads.
         reply is the chat surface only: named, the peer thread is refused
-        with the send hint; unnamed, it goes to the one surface thread
-        (the peer is no candidate). send reaches the peer."""
+        with the send hint; unnamed, it is refused (never guessed); named,
+        the operator's thread works. send reaches the peer."""
         from unittest import mock
         from cousin_lib.runner import tools
         from tests.runner.test_tools import _install
@@ -565,6 +565,9 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(err, text)
         self.assertIn("send", text)
         text, err = tools.call(ctx, "reply", {"text": "on it"})
+        self.assertTrue(err, text)                 # two live threads: never guessed
+        self.assertIn("thread=operator:priya", text)
+        text, err = tools.call(ctx, "reply", {"text": "on it", "thread": "operator:priya"})
         self.assertFalse(err, text)
         self.assertIn("replied to priya", text)
         with mock.patch("cousin_lib.chat.send_message", return_value={"ok": True}) as sm:
@@ -1134,6 +1137,75 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         # requeued, never failed: a later turn runs it
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
 
+    def test_an_interrupt_row_cut_off_mid_write_by_the_turn_end_is_closed(self):
+        """Review of #118: the interrupt's control write is still pending
+        when the turn ends (its result arrived meanwhile). The row must not
+        stay `claimed`: it is closed delivered, "written as the turn ended"."""
+        class SlowInterrupt(ScriptedClient):
+            async def interrupt(self):
+                await asyncio.Event().wait()     # the control reply never comes
+        made = {}
+
+        def factory(options):
+            made["client"] = SlowInterrupt(options, [
+                [init_msg(), assistant(tool="Bash"), "PAUSE", assistant(text="x"), result()]])
+            return made["client"]
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        stop = r.enqueue(Item("system", "interrupt", "stop", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "claimed"))
+        time.sleep(0.3)
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: _results(r)))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"),
+                        "the interrupt row was left claimed")
+        row = r.inbox.get(stop.inbox_id)
+        self.assertEqual(row["outcome"], "delivered")
+        self.assertIn("written as the turn ended", row["detail"])
+
+    def test_a_result_before_a_queued_interrupt_was_sent_is_not_interrupted(self):
+        """Review of #118 (minor 3): an interrupt row taken while a fold's
+        write is blocked waits behind it; a result that comes first was
+        not interrupted, whatever was asked."""
+        import threading
+        gate = threading.Event()
+
+        class GatedFold(ScriptedClient):
+            blocking = False
+
+            async def query(self, prompt, session_id="default"):
+                if self.queries and not gate.is_set():
+                    self.blocking = True
+                    while not gate.is_set():
+                        await asyncio.sleep(0.01)
+                await super().query(prompt, session_id)
+        made = {}
+
+        def factory(options):
+            made["client"] = GatedFold(options, [
+                [init_msg(), assistant(tool="Bash"), "PAUSE", assistant(text="x"), result()]])
+            return made["client"]
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        self.addCleanup(gate.set)
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: made["client"].blocking))
+        stop = r.enqueue(Item("system", "interrupt", "stop", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "claimed"))
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: _results(r)))
+        self.assertFalse(_results(r)[0]["interrupted"], _results(r)[0])
+        self.assertEqual(made["client"].interrupts, 0)
+        gate.set()
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", timeout=8))
+
     def test_an_interrupt_row_behind_a_blocked_fold_is_written_after_it(self):
         """One writer, in order: the fold that was taken first reaches the
         CLI first, then the interrupt; the reader never waits on either."""
@@ -1174,7 +1246,7 @@ class TestTurnWriter(HermeticCase):
                     if wait:
                         await gate.wait()
                     return name
-                return _Job(fn, on_dropped=lambda: dropped.append(name))
+                return _Job(fn, on_dropped=lambda started: dropped.append((name, started)))
             first = w.submit(job("a"))
             w.submit(job("b", wait=True))       # blocks: c and d wait behind it
             w.submit(job("c")); w.submit(job("d"))
@@ -1183,7 +1255,8 @@ class TestTurnWriter(HermeticCase):
             self.assertEqual(order, ["a", "b"])
             await w.close()
             self.assertTrue(w._task.done())
-            self.assertEqual(dropped, ["c", "d"])
+            # b was cut off mid-write: said as started, then c and d never begun
+            self.assertEqual(dropped, [("b", True), ("c", False), ("d", False)])
             with self.assertRaises(RunnerError):
                 w.submit(job("e"))
             others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -1211,6 +1284,77 @@ class TestTurnWriter(HermeticCase):
         asyncio.run(go())
         self.assertEqual(done, [1])
         self.assertEqual(reports, ["writer: ValueError: inbox gone"])
+
+
+class TestTurnWriterEdges(HermeticCase):
+    """Review of #118: the writer's close and its failures."""
+
+    def test_a_raising_on_dropped_does_not_orphan_the_jobs_behind_it(self):
+        from cousin_lib.runner.sdk import _Job, _Writer
+        dropped, reports = [], []
+
+        async def go():
+            w = _Writer(reports.append)
+            never = asyncio.Event()
+
+            async def blocks():
+                await never.wait()
+
+            def bad(_started):
+                raise ValueError("inbox gone")
+            w.submit(_Job(blocks, on_dropped=bad))
+            w.submit(_Job(blocks, on_dropped=lambda st: dropped.append(("b", st))))
+            w.submit(_Job(blocks, on_dropped=lambda st: dropped.append(("c", st))))
+            await asyncio.sleep(0.02)
+            await w.close()
+        asyncio.run(go())
+        self.assertEqual(dropped, [("b", False), ("c", False)])
+        self.assertEqual(reports, ["writer: ValueError: inbox gone"])
+
+    def test_close_reraises_a_cancellation_of_the_turn_after_dropping_the_jobs(self):
+        from cousin_lib.runner.sdk import _Job, _Writer
+        dropped = []
+
+        async def go():
+            w = _Writer(lambda text: None)
+            never = asyncio.Event()
+
+            async def blocks():
+                await never.wait()
+            w.submit(_Job(blocks, on_dropped=lambda st: dropped.append(st)))
+            await asyncio.sleep(0.02)
+
+            async def turn():
+                await w.close()
+                return "not cancelled"
+            t = asyncio.ensure_future(turn())
+            await asyncio.sleep(0)       # the turn is inside close()
+            t.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await t
+        asyncio.run(go())
+        self.assertEqual(dropped, [True])
+
+    def test_a_cancelled_error_from_inside_the_client_fails_the_job_and_the_writer_goes_on(self):
+        from cousin_lib.runner.sdk import _Job, _Writer
+        errors, done, reports = [], [], []
+
+        async def go():
+            w = _Writer(reports.append)
+
+            async def sdk_cancels():
+                raise asyncio.CancelledError()     # an anyio scope inside the SDK, say
+
+            async def fine():
+                return "ok"
+            w.submit(_Job(sdk_cancels, on_error=errors.append))
+            last = w.submit(_Job(fine, on_ok=done.append))
+            self.assertEqual(await last.future, "ok")
+            await w.close()
+        asyncio.run(go())
+        self.assertEqual([type(e).__name__ for e in errors], ["RunnerError"])
+        self.assertEqual(done, ["ok"])
+        self.assertTrue(any("cancelled inside the client" in r for r in reports), reports)
 
 
 class TestMirrorError(HermeticCase):

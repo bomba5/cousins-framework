@@ -36,11 +36,14 @@ A peer folds like an operator: a turn has no length bound, and a peer's
 message (a coordinator's STOP) that waited for the turn to end would arrive
 after the work it meant to stop. The model knows who it answers from the
 envelope header, `[peer:<slug>] chat from <Name> at ...`. `reply` never
-answers a peer thread: named, it is refused with the hint to use `send`;
-unnamed, only the live `operator:` and `person:` threads are candidates, so a
-peer folded into an operator's turn leaves the operator's thread as the
-default. Folding changes nothing in the claim order at a turn boundary:
-operator and person chat first, then a meeting, then a peer.
+answers a peer thread: named, it is refused with the hint to use `send`. A
+peer folded into an operator's turn makes two live threads, and a `reply`
+that names no thread is refused, never guessed; the refusal says which thread
+takes `thread=` and which peer takes `send`. Folding changes nothing in the
+claim order at a turn boundary: operator and person chat first, then a
+meeting, then a peer. A peer row already queued when a meeting, loop or
+memory-proposal turn starts folds into that turn, as operator and person rows
+do.
 
 On the `sdk` lane a fold is never written by the reader of the turn: each
 turn has one writer task, and the fold's write (and an interrupt row's

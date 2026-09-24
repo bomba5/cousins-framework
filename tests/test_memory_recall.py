@@ -206,5 +206,31 @@ class TestRecallFacts(HermeticCase):
             self.assertEqual([e["topic"] for e in memory.recall_entries(home, "where are the keys")],
                              ["spare keys"])
 
+
+class TestRecallToolRoot(HermeticCase):
+    def test_the_recall_tool_never_reads_the_environments_install(self):
+        """Review Focus 1, the memory tool's leg: recall reads the runner's
+        root. The environment names another install whose embedding
+        service must never be called."""
+        from cousin_lib.runner import tools
+        from tests.runner.test_tools import _ctx
+        ctx = _ctx(self)
+        memory.remember(ctx.home, "ledger reconciliation cadence", FACT)
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        other = pathlib.Path(tmp.name)
+        (other / "config").mkdir()
+        (other / "config" / "embedding.toml").write_text(
+            'url = "http://127.0.0.1:9/embed"\nmodel = "m"\n')
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(other)})
+        p.start(); self.addCleanup(p.stop)
+        called = []
+        with mock.patch.object(memory_search, "_embed",
+                               side_effect=lambda text, config: called.append(config["url"])):
+            text, err = tools.call(ctx, "memory", {"command": "recall", "keyword": "reconciliation"})
+        self.assertFalse(err, text)
+        self.assertIn(FACT, text)
+        self.assertEqual(called, [])
+
+
 if __name__ == "__main__":
     unittest.main()

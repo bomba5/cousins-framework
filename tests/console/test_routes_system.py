@@ -221,6 +221,15 @@ class Users(ConsoleCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(auth.Users(self.users_file()).names(), ["ana"])
 
+    def test_a_name_with_an_at_sign_is_reached_through_its_encoded_path(self):
+        self.setup_users("ana", "bo@home")
+        status, body = self.post("/api/system/users/bo%40home/password",
+                                 {"password": "another-pw"})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(auth.Users(self.users_file()).verify("bo@home", "another-pw"))
+        status, body = self.post("/api/system/users/bo%40home/remove", {"confirm": "bo@home"})
+        self.assertEqual(status, 200, body)
+
     def test_yourself_and_the_last_user_are_never_removed(self):
         self.setup_users("ana")
         status, body = self.post("/api/system/users/ana/remove", {"confirm": "ana"})
@@ -474,6 +483,18 @@ class Secrets(ConsoleCase):
         from cousin_lib import chat
         self.assertEqual(chat.read_secret(self.root, "config/peer-tokens/kestrel.inbound.token",
                                           "token"), "t" * 32)
+
+    def test_a_key_file_outside_config_is_never_read(self):
+        secret = self.root / "elsewhere.key"
+        secret.write_text("x" * 40 + "\n")
+        os.chmod(secret, 0o600)
+        (self.root / "config" / "media.toml").write_text(
+            '[image]\nurl = "http://h/i"\nkey_file = "elsewhere.key"\n')
+        self.serve()
+        _, cfg = self.get("/api/system/config")
+        key = cfg["files"]["media"]["kinds"]["image"]["key"]
+        self.assertIsNone(key["set"])
+        self.assertIsNone(key["last4"])
 
     def test_a_bad_secret_is_refused(self):
         self.serve()

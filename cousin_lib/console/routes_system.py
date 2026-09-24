@@ -198,7 +198,9 @@ def _schedule_rows(rows):
 
 # ---- console users ---------------------------------------------------------
 
-def _check_user(name):
+def _check_user(name, *, from_path=False):
+    if from_path and isinstance(name, str):
+        name = urllib.parse.unquote(name)
     if not isinstance(name, str) or not _USER_RE.match(name):
         raise _err(400, "a user name is letters, digits and . _ @ -, at most 64")
     return name
@@ -509,10 +511,17 @@ def _parse_toml_file(path):
 
 
 def _secret_state_rel(server, rel):
+    """secret_state of a key or token file the config names, read only
+    when it resolves under the root's config/: a path set by hand to
+    some other private file is never opened for its last four."""
     from cousin_lib.console.secrets import secret_state
     if not isinstance(rel, str) or not rel:
         return None
     path = rel if os.path.isabs(rel) else os.path.join(str(server.root), rel)
+    if not _under(os.path.realpath(path), os.path.realpath(os.path.join(str(server.root),
+                                                                       "config"))):
+        return {"set": None, "last4": None,
+                "error": "outside the install's config/: not read here"}
     return secret_state(path)
 
 
@@ -863,7 +872,7 @@ def register():
     @router.route("POST", "/api/system/users/{name}/password")
     def reset_password(req, name):
         server = req.server
-        _check_user(name)
+        name = _check_user(name, from_path=True)
         password = _check_password(req.body.get("password"))
         if req.user is not None and name == req.user:
             raise _err(400, "your own password changes with the current one"
@@ -878,7 +887,7 @@ def register():
     @router.route("POST", "/api/system/users/{name}/remove")
     def remove_user(req, name):
         server = req.server
-        _check_user(name)
+        name = _check_user(name, from_path=True)
         if req.body.get("confirm") != name:
             raise _err(400, "type the user's name to confirm the removal")
         if req.user is not None and name == req.user:

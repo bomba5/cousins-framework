@@ -7,6 +7,8 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
 --yes` undoes it.
 
   plan      the checks and the steps; writes nothing (the default look).
+            Its `mcp` line names the .mcp.json servers the runner will
+            load (the file stays; `cousin` in it is skipped).
             The cousin must be RUNNING on the tmux lane: migrating a
             stopped cousin would start it (the supervisor starts every
             runner cousin), so it is started first or left alone.
@@ -593,6 +595,14 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
                              % ", ".join(conflicts)))
     except Exception as err:  # noqa: BLE001 - ManifestError, an unreadable source
         checks.append(_check("import", False, "%s: %s" % (type(err).__name__, err)))
+    # the home's .mcp.json stays where it is; the runner reads it and skips
+    # `cousin` (it serves its own in-process). Names only, never a blocker.
+    from cousin_lib.runner import mcp_config
+    try:
+        checks.append(_check("mcp", True, mcp_config.describe(home)))
+    except Exception as err:  # noqa: BLE001 - the runner treats it as not fatal too
+        checks.append(_check("mcp", True, "%s not read: %s" % (mcp_config.FILE,
+                                                                type(err).__name__)))
     # what 2.0.0 will reject (removed_keys): a warning, never a blocker on 1.x
     from cousin_lib import removed_keys
     return {"slug": home.name, "account": name, "checks": checks, "steps": list(STEPS),

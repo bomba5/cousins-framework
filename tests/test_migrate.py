@@ -148,6 +148,38 @@ class TestPlan(HermeticCase):
         self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
         self.assertEqual(_names(live), [])
 
+    def test_the_plan_lists_the_mcp_servers_the_runner_will_load_by_name(self):
+        root, home = _root(self)
+        (home / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "cousin": {"command": "/usr/bin/cousin-mcp"},
+            "notes": {"command": "notes-mcp", "env": {"TOKEN": "${NOTES_TOKEN}"}},
+            "ha": {"type": "http", "url": "http://ha.example/mcp",
+                   "headers": {"Authorization": "Bearer plain-4b1d"}},
+            "ws": {"type": "websocket", "url": "ws://x.example"}}}))
+        before = _tree(root)
+        live = Live()
+        p = migrate.plan(home, root=root, validate=True, account="team", **live.kw())
+        self.assertTrue(p["ready"], p)                 # informational, never a blocker
+        mcp = [c for c in p["checks"] if c["check"] == "mcp"]
+        self.assertEqual(len(mcp), 1, p["checks"])
+        self.assertIn("ha, notes", mcp[0]["detail"])
+        self.assertIn("cousin", mcp[0]["detail"])      # skipped, and said
+        self.assertIn("ws", mcp[0]["detail"])
+        self.assertNotIn("plain-4b1d", json.dumps(p))  # names only
+        self.assertNotIn("ha.example", json.dumps(p))
+        self.assertEqual(_tree(root), before)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            migrate._print_plan(p)
+        self.assertIn("ha, notes", out.getvalue())
+
+    def test_the_plan_says_when_there_is_no_mcp_json(self):
+        root, home = _root(self)
+        p = migrate.plan(home, root=root, validate=True, account="team", **Live().kw())
+        mcp = [c for c in p["checks"] if c["check"] == "mcp"]
+        self.assertTrue(mcp[0]["ok"])
+        self.assertIn("no .mcp.json", mcp[0]["detail"])
+
     def test_a_blocker_makes_the_plan_not_ready_and_apply_refuses(self):
         root, home = _root(self)
         for live, needle in ((Live(logged_in=False), "cousin-account login"),

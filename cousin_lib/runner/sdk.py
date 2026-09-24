@@ -242,6 +242,10 @@ class SdkRunner:
         self._opened = False          # a client connected at least once
         self._bg = set()              # tasks _record starts (the early interrupt)
         self._fallback_said = False   # the registry-fallback notice, once per runner
+        # The home's .mcp.json (mcp_config.py), read at the first options()
+        # and kept for the runner's life: a reconnect or a rollover offers
+        # the same set, and an edit lands at the next start.
+        self._user_mcp = None
         # Restart with resume (data/runner-session.json): the id on file
         # (cached), a write the loop owes the file, and the id the first
         # init after a resume must name (R12).
@@ -345,12 +349,29 @@ class SdkRunner:
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
                                       system_prompt=system_prompt, session_store=self.session_store,
-                                      # alwaysLoad: the CLI would defer these behind its
-                                      # tool search, so a cousin's first memory, send or
-                                      # reply call would need a search first (#94).
-                                      mcp_servers={"cousin": {**server, "alwaysLoad": True}},
+                                      mcp_servers=self._mcp_servers(server),
                                       hooks=hook_table,
                                       extra_args=extra)
+
+    def _mcp_servers(self, server):
+        """`cousin` first, then the home's .mcp.json servers by name.
+        alwaysLoad is the cousin's alone: the CLI would defer its tools
+        behind its tool search, so a cousin's first memory, send or reply
+        call would need a search first (#94). A user server's tools stay
+        deferred: a server with many tools (or one whose list changes
+        between starts) then costs no prompt bytes until the model looks
+        one up, and the cached prefix does not move with it."""
+        if self._user_mcp is None:
+            from cousin_lib.runner import mcp_config
+            try:
+                self._user_mcp = mcp_config.load(self.home)
+            except Exception as err:  # noqa: BLE001 - never fatal: the cousin keeps `cousin`
+                self._user_mcp = mcp_config.Loaded(True, skipped=[{
+                    "name": None, "reason": "%s not read: %s" % (mcp_config.FILE,
+                                                                 type(err).__name__)}])
+            if self._user_mcp.present:
+                self.stream.append("mcp_config", self._user_mcp.event())
+        return dict({"cousin": {**server, "alwaysLoad": True}}, **self._user_mcp.servers)
 
     # -- the session on file (restart with resume) -----------------------
     def _session_path(self):

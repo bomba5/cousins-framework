@@ -85,6 +85,12 @@ next generation starts from a digest of that state as its first
 message. A new generation is not announced; the work continues."""
 
 
+# One fixed sentence, never the servers themselves: a home's .mcp.json
+# changes with the home, and this text must not (byte-stable prompt).
+OTHER_SERVERS = """Other MCP servers, from your home's .mcp.json, may be present beside
+these; their tools are named mcp__<server>__<tool>."""
+
+
 def major_minor(version):
     m = _VERSION.match(str(version or ""))
     return "%s.%s" % m.groups() if m else "unknown"
@@ -108,5 +114,5 @@ def render(registry, version):
     from cousin_lib.runner.tools import tool_definitions
     blocks = [_tool_block(d, registry) for d in tool_definitions(registry)]
     text = "\n\n".join([HEADER.format(version=major_minor(version)), STATIC,
-                        "## Your tools\n\n" + "\n".join(blocks)])
+                        "## Your tools\n\n" + "\n".join(blocks), OTHER_SERVERS])
     return text.rstrip("\n") + "\n"

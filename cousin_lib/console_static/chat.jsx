@@ -172,6 +172,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   // keeps the level it started with, so a saved change shows "restart
   // to apply" rather than pretending it is live.
   const [efforts, setEfforts] = React.useState([]);
+  const [laneKeys, setLaneKeys] = React.useState(null);
   const [effort, setEffort] = React.useState(cousin.effort || "");
   const [effortHint, setEffortHint] = React.useState(null);
   React.useEffect(() => { setEffort(cousin.effort || ""); setEffortHint(null); }, [cousin.effort, cousin.slug]);
@@ -181,6 +182,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
       const d = await apiGet("/api/spawn/options");
       if (cancelled || !d) return;
       setEfforts(d.efforts || []);
+      setLaneKeys(d.lane_keys || {});
       setEffort(e => e || d.default_effort || "");
     })();
     return () => { cancelled = true; };
@@ -197,6 +199,13 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
     }
   };
 
+  // Shown only on a lane that reads effort (agent.jsx agentLaneReads, from the
+  // lane_keys the options route serves): opencode and fake read none. The
+  // route writes it through the lane's own path (spawn.persist_agent_values
+  // for a runner cousin).
+  const readsEffort = !laneKeys || !window.agentLaneReads
+    || window.agentLaneReads(cousin.lane, "effort", laneKeys);
+
   return (
     <div className="chat-header">
       <span className="ch-title">
@@ -204,7 +213,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
         {remote && <span className="ch-sub" title={`a hive node at ${cousin.host}:${cousin.port}`}>&middot; remote</span>}
       </span>
       <span style={{ flex: 1 }} />
-      {!embed && !remote && (
+      {!embed && !remote && readsEffort && (
         <label className="ch-effort">
           <span>effort</span>
           <select

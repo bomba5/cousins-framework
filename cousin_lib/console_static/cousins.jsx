@@ -304,6 +304,7 @@ function Inspector({ cousin: c, onClose, onAct }) {
   }, [c, onClose]);
   const [filesOpen, setFilesOpen] = React.useState(false);
   if (!c) return null;
+  const tmuxLane = !c.lane || c.lane === "tmux-legacy";
   return (
     <div className="inspector">
       <div className="hdr">
@@ -325,9 +326,14 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>tmux</dt><dd>{c.tmuxSession}{c.host ? ` @ ${c.host}` : ""}</dd>
           <dt>chat</dt><dd>{c.port ? `:${c.port} · ${c.chat}` : "none"}</dd>
           <dt>heartbeat</dt><dd><IdentityField cousin={c} field="heartbeat" options={options} /></dd>
+          {/* model, effort and the auth mode are the tmux-legacy lane's
+              ([runtime]); a runner cousin's are its agent panel's (agent.jsx),
+              where the account is the credential */}
+          {tmuxLane && <>
           <dt>model</dt><dd><IdentityField cousin={c} field="model" options={options} /></dd>
           <dt>effort</dt><dd><IdentityField cousin={c} field="effort" options={options} /></dd>
           <dt>auth</dt><dd><AuthField cousin={c} /></dd>
+          </>}
           <dt>lane</dt><dd>{c.lane || "-"}{c.account ? ` · account ${c.account}` : ""}{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</dd>
           <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>uptime</dt><dd>{c.uptime_seconds == null ? <span style={{ color: "var(--fg-3)" }}>-</span> : fmtDuration(c.uptime_seconds)}</dd>
@@ -1417,6 +1423,11 @@ function SpawnModal({ onClose, onSpawn }) {
   // the harness catalogue is a valid suggestion there (never on a lane
   // that refuses those models)
   const laneModelRule = (runner && (options?.lane_models || {})[runner]) || null;
+  // what the chosen account offers (an opencode account's "<provider>/"), else
+  // the harness catalogue where the lane takes it
+  const accountModels = (laneAccounts.find(a => a.name === account) || {}).models || [];
+  const laneSuggestions = accountModels.length ? accountModels
+    : (laneModelRule && laneModelRule.catalogue ? models : []);
   React.useEffect(() => {
     // a lane change keeps the account only when it still runs there
     setAccount(a => laneAccounts.some(x => x.name === a) ? a : (laneAccounts[0]?.name || ""));
@@ -1535,7 +1546,7 @@ function SpawnModal({ onClose, onSpawn }) {
           <div className="grid2">
             <FormField label="lane" hint="tmux-legacy runs the agent in a tmux pane; a runner kind runs it under cousin-supervisor.">
               <select className="sel" value={runner} onChange={e => setRunner(e.target.value)} disabled={!options}>
-                <option value="">tmux-legacy</option>
+                <option value="">{options?.tmux_lane || "tmux-legacy"}</option>
                 {runners.map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </FormField>
@@ -1561,11 +1572,11 @@ function SpawnModal({ onClose, onSpawn }) {
               </FormField>
             ) : laneReads("model") ? (
               <FormField label="model" hint={"[agent] model, the one the runner reads: " + ((laneModelRule && laneModelRule.hint) || "a model name")}>
-                <input className="txt" list={laneModelRule && laneModelRule.catalogue ? "spawn-lane-models" : undefined}
+                <input className="txt" list={laneSuggestions.length ? "spawn-lane-models" : undefined}
                        value={laneModel} onChange={e => setLaneModel(e.target.value)}
                        placeholder={laneModelRule && laneModelRule.required ? "<provider>/<model>" : "the runner's default"} />
-                {laneModelRule && laneModelRule.catalogue && (
-                  <datalist id="spawn-lane-models">{models.map(m => <option key={m} value={m} />)}</datalist>
+                {laneSuggestions.length > 0 && (
+                  <datalist id="spawn-lane-models">{laneSuggestions.map(m => <option key={m} value={m} />)}</datalist>
                 )}
               </FormField>
             ) : (

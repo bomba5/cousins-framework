@@ -155,6 +155,16 @@ class _Writer:
         self._closed = False
         self._task = asyncio.ensure_future(self._run())
 
+    def ended(self):
+        """Why the writer's task ended without a close, or None."""
+        if self._closed or not self._task.done():
+            return None
+        if self._task.cancelled():
+            return "the turn's writer ended: cancelled"
+        exc = self._task.exception()
+        return "the turn's writer ended: %s" % (
+            "%s: %s" % (type(exc).__name__, exc) if exc is not None else "returned")
+
     def submit(self, job):
         if self._closed:
             raise RunnerError("the turn's writer is closed")
@@ -1324,9 +1334,10 @@ class SdkRunner:
 
     async def _fold(self, sdk, open_rows):
         """Operator, person and peer chat that arrived during the live
-        turn is written into it (finding 1, #118), each through `_send`,
-        the one write every fold takes; anything else goes back to the
-        queue (`base.FOLDED_KINDS` says why)."""
+        turn is handed to the turn's writer (finding 1, #118), each through
+        `_send_later`, never awaited here; a row that cannot be rendered is
+        failed and the rest of the claim folds on; anything else goes back
+        to the queue (`base.FOLDED_KINDS` says why)."""
         rows = self._claim(10)
         for i, row in enumerate(rows):
             if row["source"] == INTERRUPT or self._interrupt_requested \
@@ -1341,12 +1352,16 @@ class SdkRunner:
                 self._send_later(sdk, row, open_rows)
             except _Unrenderable as exc:
                 # not transient: this row fails, the live turn goes on, and
-                # the rest, claimed here and never offered, go back
-                self.inbox.done(row["id"], FAILED, str(exc))
-                self.stream.append("error", {"error": "fold: %s" % exc, "inbox_id": row["id"]})
-                for rest in rows[i + 1:]:
-                    self.inbox.requeue(rest["id"])
-                return
+                # the rest of this claim folds at once
+                try:
+                    self.inbox.done(row["id"], FAILED, str(exc))
+                    self.stream.append("error", {"error": "fold: %s" % exc,
+                                                 "inbox_id": row["id"]})
+                except Exception:
+                    for rest in rows[i + 1:]:   # never stranded behind a failed close
+                        self.inbox.requeue(rest["id"])
+                    raise
+                continue
             except Exception:
                 # this row (it could not be handed over) and the rest,
                 # claimed here and never offered: back to the queue
@@ -1382,10 +1397,17 @@ class SdkRunner:
             # handed over; this runs on the reader's path and never waits.
             self._interrupt_requested = True
             seq = self._turn_seq
-            self._writer.submit(_Job(lambda: self._interrupt_write(seq),
-                                     on_ok=self._interrupt_row_ok(row),
-                                     on_error=self._interrupt_row_refused(row),
-                                     on_dropped=self._interrupt_row_dropped(row)))
+            try:
+                self._writer.submit(_Job(lambda: self._interrupt_write(seq),
+                                         on_ok=self._interrupt_row_ok(row),
+                                         on_error=self._interrupt_row_refused(row),
+                                         on_dropped=self._interrupt_row_dropped(row)))
+            except RunnerError:
+                # the writer has ended: the row goes back (the boundary
+                # closes it NO_TURN), nothing was asked, and the turn fails
+                self._interrupt_requested = False
+                self.inbox.requeue(row["id"])
+                raise
 
     def _interrupt_row_ok(self, row):
         def ok(went):
@@ -1472,10 +1494,15 @@ class SdkRunner:
 
     def _raise_write_error(self):
         """A fold write that failed on the writer fails the turn here, on
-        the reader, as it did when the reader wrote it itself."""
+        the reader, as it did when the reader wrote it itself. So does a
+        writer whose task ended on its own: nothing handed to it would be
+        written, and the turn fails now rather than at the idle timeout."""
         exc, self._write_error = self._write_error, None
         if exc is not None:
             raise exc
+        why = self._writer.ended() if self._writer is not None else None
+        if why is not None:
+            raise RunnerError(why)
 
     async def _close_writer(self):
         writer, self._writer = self._writer, None

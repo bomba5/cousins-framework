@@ -1473,7 +1473,7 @@ class TestUnrenderableRow(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(good.inbox_id)["state"] == "done", timeout=8))
         self.assertEqual(r.inbox.get(good.inbox_id)["outcome"], "delivered")
 
-    def test_a_fold_that_cannot_be_rendered_is_failed_and_the_rest_are_requeued(self):
+    def test_a_fold_that_cannot_be_rendered_is_failed_and_the_rest_fold_at_once(self):
         made = {}
 
         def factory(options):
@@ -1501,8 +1501,9 @@ class TestUnrenderableRow(HermeticCase):
         self.assertEqual((row["outcome"], row["detail"]),
                          ("failed", "could not be rendered: ValueError: attachment unreadable"))
         self.assertNotIn(bad, requeued)
-        self.assertIn(b, requeued); self.assertIn(c, requeued)
-        self.assertTrue(_wait(lambda: len(made["client"].queries) == 3))   # folded next poll
+        # the rest of the claim folds at once: never requeued
+        self.assertNotIn(b, requeued); self.assertNotIn(c, requeued)
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 3))
         made["client"].resume()
         self.assertTrue(_wait(lambda: all(r.inbox.get(i)["state"] == "done"
                                           for i in (a.inbox_id, b, c)), timeout=8))
@@ -1533,6 +1534,49 @@ class TestRefusedSubmit(HermeticCase):
         asyncio.run(go())
         self.assertEqual(open_rows, [])
         self.assertEqual([r.inbox.get(i)["state"] for i in ids], ["queued", "queued"])
+
+
+class TestDeadWriter(HermeticCase):
+    """#118 review round 4: a writer whose task ended on its own."""
+
+    def _runner(self):
+        r = SdkRunner(temp_home(self), client_factory=lambda o: ScriptedClient(o, []))
+        return r
+
+    def test_an_interrupt_row_a_dead_writer_refuses_goes_back_and_the_flag_clears(self):
+        from cousin_lib.runner.base import RunnerError
+        from cousin_lib.runner.sdk import _Writer
+        r = self._runner()
+        stop = r.inbox.put(Item("system", "interrupt", "stop", sender="Priya"))
+
+        async def go():
+            r.machine.to("running", "turn")
+            r._live = True
+            r._writer = _Writer(lambda t: None)
+            r._writer._task.cancel()
+            await asyncio.sleep(0); await asyncio.sleep(0)
+            with self.assertRaises(RunnerError):      # the turn fails, as before
+                await r._take_interrupts()
+            await r._writer.close()
+        asyncio.run(go())
+        self.assertEqual(r.inbox.get(stop)["state"], "queued")
+        self.assertFalse(r._interrupt_requested)
+
+    def test_the_reader_fails_the_turn_as_soon_as_the_writer_has_ended(self):
+        from cousin_lib.runner.base import RunnerError
+        from cousin_lib.runner.sdk import _Writer
+        r = self._runner()
+
+        async def go():
+            r._writer = _Writer(lambda t: None)
+            r._raise_write_error()                    # alive: nothing to raise
+            r._writer._task.cancel()
+            await asyncio.sleep(0); await asyncio.sleep(0)
+            with self.assertRaisesRegex(RunnerError, "writer ended"):
+                r._raise_write_error()
+            await r._writer.close()
+            r._raise_write_error()                    # closed on purpose: nothing
+        asyncio.run(go())
 
 
 class TestMirrorError(HermeticCase):

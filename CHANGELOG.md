@@ -33,6 +33,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   write the turn's end cut off is closed delivered ("written as the turn
   ended"), never left claimed; a result counts as interrupted only when the
   interrupt reached the client; no writer outlives its turn.
+- A chat row the runner cannot render into a message (a broken attachment,
+  say) is closed `failed` with the detail "could not be rendered: <type>:
+  <message>", whether it starts a turn or is folded into one; it used to be
+  left `claimed` as a turn's first row. A folded one fails alone: the live
+  turn and the rest of its claim go on.
 
 ## 1.21.0 - 2026-09-24
 

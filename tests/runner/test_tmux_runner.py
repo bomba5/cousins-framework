@@ -298,6 +298,36 @@ class TestStop(Case):
         self.assertEqual(self.panes[0].kills, 1)
 
 
+    def test_a_stop_mid_turn_waits_for_the_turns_end_and_closes_the_row_once(self):
+        r = self.runner(slow=True, slow_s=5.0)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        (self.home / "run" / "held").write_text("2026-09-24T23:00:00+00:00 cousin-migrate")
+        r.stop(timeout=5)
+        self.assertEqual(self.outcome(r, rec)[:2], ("done", "delivered"))
+        self.assertIn("interrupted", self.outcome(r, rec)[2], "closed by the turn's own end")
+        from cousin_lib.runner import restart_note
+        self.assertIn("cousin-migrate", restart_note.read(self.home)["held"])
+
+    def test_a_held_stop_whose_turn_never_ends_settles_the_row_cut(self):
+        class Unstoppable(FakePane):
+            def key(self, name):
+                self.keys.append(name)             # the Escape is never answered
+        r = self.runner(pane=lambda path: Unstoppable(path, slow=True, slow_s=10.0,
+                                                      context_home=self.home))
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        (self.home / "run" / "held").write_text("2026-09-24T23:00:00+00:00 console")
+        t = time.monotonic()
+        r.stop(timeout=2)
+        self.assertLess(time.monotonic() - t, 3.0, "bounded")
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by stop"))
+        self.assertEqual(r.inbox.requeue_stale(older_than_s=0.0), 0, "nothing left claimed")
+        self.assertEqual(json.loads((self.home / "data" / "tmux-claims.json").read_text())["claims"], [])
+
+
 class TestRecovery(Case):
     """R23: a second runner on the same home settles what the first typed."""
 

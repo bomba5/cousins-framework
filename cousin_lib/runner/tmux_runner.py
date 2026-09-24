@@ -29,7 +29,7 @@ import uuid
 from pathlib import Path
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import blocks, transcript, tmux_hook, tmux_turn, wake
+from cousin_lib.runner import blocks, restart_note, transcript, tmux_hook, tmux_turn, wake
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
@@ -49,6 +49,7 @@ REOPEN_BASE_S = 1.0       # a lost pane is started again after this, doubling pe
 REOPEN_MAX_S = 60.0       # up to this
 BLOCKED_BASE_S = 0.5      # a screen that refuses typing is tried again after this, doubling
 BLOCKED_MAX_S = 5.0       # up to this
+STOP_SETTLE_S = 15.0      # a stop waits this long (at most half its timeout) for the cut turn's end
 MAX_ID = 128              # a hook datagram's session_id; a CLI's is a 36-character uuid
 MAX_SOURCE = 32           # and its SessionStart source ("startup", "resume", "clear", "compact")
 CHANGES_KEPT = 32         # session ids a session_changed was said for, the newest kept
@@ -120,6 +121,7 @@ class TmuxRunner:
         self.pane = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._stopping = threading.Event()   # a stop is under way: no claim, the transcript still read
         self._thread = None
         self._session_id, self._fresh = None, True
         self._path, self._cursor = None, 0
@@ -173,19 +175,68 @@ class TmuxRunner:
         self._thread.start()
 
     def stop(self, *, timeout=30.0):
+        """End the live turn and stop at idle (R21, R17's close): no new
+        claim, one Escape on a live turn, then the worker reads the turn's
+        end from the transcript (the row closes there, once) for at most
+        STOP_SETTLE_S; only then does the loop end, and a held stop kill the
+        pane. A claim still open once the pane is killed is settled here, as
+        R23 settles a dead pane's (review C5): the next runner, of either
+        kind, finds nothing claimed. A turn the stop cut leaves the #98 mark
+        (restart_note), so the resumed session is told who stopped it."""
         if self.machine.state == "stopped":
             return
+        deadline = time.monotonic() + timeout
+        self._stopping.set()
+        held = restart_note.held_by(self.home)
+        cut = False
+        if self._live is not None and self.pane is not None and self.worker_alive():
+            cut = self._send_interrupt()
+            settle = time.monotonic() + min(STOP_SETTLE_S, timeout / 2.0)
+            while self._live is not None and self.worker_alive() and time.monotonic() < settle:
+                wake.poke(self.home)
+                time.sleep(POLL_S)
         self._stop.set()
-        if self._live is not None and self.pane is not None:
-            self._send_interrupt()
-        if self.pane is not None and (self.home / "run" / "held").exists():
-            self.pane.kill()
         wake.poke(self.home)
         if self._thread is not None:
-            self._thread.join(timeout)
+            self._thread.join(max(0.0, deadline - time.monotonic()))
+        if self.pane is not None and held is not None:
+            self.pane.kill()
+            cut = self._settle_on_stop() or cut
+        if cut:
+            try:
+                restart_note.mark(self.home, "a stop cut the turn in flight", held=held)
+            except OSError as exc:
+                self.stream.append("error", {"error": "restart mark: %s" % exc})
+        self._turn_file(None)
         with self._lock:
             if self.machine.state != "stopped":
                 self.machine.to("stopped")
+
+    def _settle_on_stop(self):
+        """The claims left once a held stop killed the pane (the worker has
+        ended): a taken row closes `delivered`, cut by the stop; an untaken
+        one is requeued. True when a taken row was cut."""
+        if self.worker_alive() or not self._claims:
+            return False
+        try:
+            self._pump()                     # a turn end written before the kill
+        except Exception as exc:  # noqa: BLE001 - settled from what was read
+            self.stream.append("error", {"error": "reading the transcript at the stop: %s: %s"
+                                         % (type(exc).__name__, exc)})
+        cut = []
+        for inbox_id, c in sorted(self._claims.items()):
+            self._closed_nonces |= set(c["nonces"])
+            if c["taken"] is not None:
+                self.inbox.done(inbox_id, DELIVERED, "cut by stop")
+                cut.append(inbox_id)
+            else:
+                self.inbox.requeue(inbox_id)
+        self._claims = {}
+        self._persist_claims()
+        if cut:
+            self.stream.append("result", {"inbox_ids": cut, "interrupted": True, "is_error": False})
+        self._live = None
+        return bool(cut)
 
     def state(self):
         return self.machine.state
@@ -617,14 +668,15 @@ class TmuxRunner:
             while not self._stop.is_set():
                 try:
                     if self._lost is not None:
-                        self._reopen()
+                        if not self._stopping.is_set():
+                            self._reopen()
                     else:
                         self._pump()
                         if not self._check_alive():
                             pass                             # said and settled: reopened next
                         elif self._live is not None:
                             self._take_interrupts()
-                        elif not self._stop.is_set() and not self._maybe_notice():
+                        elif not self._stopping.is_set() and not self._maybe_notice():
                             self._maybe_claim()
                 except Exception as exc:  # noqa: BLE001 - recorded, the loop goes on
                     self._fail_turn([], exc)

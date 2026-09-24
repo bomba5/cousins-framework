@@ -239,3 +239,61 @@ class TestRollback(SwitchCase):
         with self.assertRaises(migrate.MigrateError) as err:
             migrate.switch_rollback(self.home, root=self.root, to="tmux", **self.live())
         self.assertIn("came from sdk", str(err.exception))
+
+
+class TestSwitchMidTurn(SwitchCase):
+    """Review C5: tmux -> sdk with a row mid-turn. The close is the
+    supervisor's held stop; the target's start sweeps the claims the source
+    left (runner.main._serve). The row is delivered exactly once."""
+
+    def test_a_row_mid_turn_at_the_close_is_delivered_once(self):
+        import time
+        from cousin_lib.delivery import Item
+        from cousin_lib.runner.fake import FakeRunner
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        from tests.runner._fake_pane import FakePane
+
+        def wait(pred, timeout=10.0):
+            t = time.monotonic()
+            while time.monotonic() - t < timeout:
+                if pred():
+                    return True
+                time.sleep(0.02)
+            return False
+        self.kind("tmux")
+        panes = []
+
+        def factory(path):
+            panes.append(FakePane(path, slow=True, slow_s=5.0, context_home=self.home))
+            return panes[-1]
+        source = TmuxRunner(self.home, account=None, pane_factory=factory,
+                            config_dir=self.config_dir,
+                            launch_argv=lambda sid, fresh: ["claude", sid] + (["--fresh"] if fresh else []))
+        self.addCleanup(lambda: source.stop(timeout=5))
+        source.start()
+        rec = source.enqueue(Item("operator:wren", "chat", "mid-turn at the switch", sender="Wren"))
+        self.assertTrue(wait(lambda: source.state() == "running"))
+        targets = []
+
+        def close(home, root):              # the supervisor's stop: the hold, then SIGTERM
+            (home / "run").mkdir(exist_ok=True)
+            (home / "run" / "held").write_text("2026-09-24T23:00:00+00:00 cousin-migrate")
+            source.stop(timeout=10)
+
+        def start(home, root):              # the sdk kind's _serve: sweep, then run
+            Inbox(home).requeue_stale(older_than_s=0.0)
+            target = FakeRunner(home)
+            targets.append(target)
+            self.addCleanup(lambda: target.stop(timeout=5))
+            target.start()
+        live = dict(self.live(), close=close, start=start)
+        migrate.switch_apply(self.home, root=self.root, to="sdk", **live)
+        self.assertTrue(wait(lambda: Inbox(self.home).get(rec.inbox_id)["state"] == "done"))
+        time.sleep(0.5)                     # the target had its chance to deliver it again
+        again = [e for e in targets[0].events() if e["kind"] == "turn_start"
+                 and rec.inbox_id in (e["payload"].get("inbox_ids") or [])]
+        self.assertEqual(again, [], "delivered again by the target kind")
+        typed = [t for p in panes for t in p.typed if "mid-turn at the switch" in t[1]]
+        self.assertEqual(len(typed), 1)
+        self.assertEqual(Inbox(self.home).get(rec.inbox_id)["outcome"], "delivered")
+        self.assertEqual(panes[0].kills, 1, "the held stop killed the pane")

@@ -443,5 +443,158 @@ class TestReplayIndexOverAnUnbackfilledDecisionLog(ImportCase):
         self.assertFalse(any(r["incomplete"] for r in reports), reports)
 
 
+class TestOriginalText(unittest.TestCase):
+    """P7-10: original_text() inverts render() byte for byte, so the
+    index can read an imported copy as exactly its original."""
+
+    SOURCES = {
+        "with frontmatter": LEDGERS,
+        "nested frontmatter": KEYS,
+        "without frontmatter": "Sam waters the ferns on Sundays.\n",
+        "no final newline": "---\nname: eof\ntype: user\n---",
+        "empty frontmatter": "---\n\n---\nTesta keeps the empty block.\n",
+        "crlf with frontmatter": "---\r\nname: crlf\r\n---\r\nSam uses CRLF.\r\n",
+        "crlf without frontmatter": "Sam uses CRLF.\r\nTwice.\r\n",
+        "empty body": "---\nname: empty\n---\n",
+        "empty file": "",
+        "only dashes": "---\n---\n",
+        "provenance-looking body": ("---\nname: tricky\n---\nimported_from: not-this.md\n"
+                                    "imported_sha256: 00\nimported_at: never\n"),
+        "provenance-looking body, no frontmatter": ("imported_from: not-this.md\n"
+                                                    "imported_sha256: 00\nimported_at: never\n"),
+        "a copy of a copy": ("---\nname: twice\nimported_from: a.md\nimported_sha256: 11\n"
+                             "imported_at: 2029-01-01\n---\nMallory imported this once.\n"),
+        "long body": "---\nname: long\n---\n" + "Priya counts the quokkas. " * 400,
+    }
+
+    def test_it_inverts_render_exactly(self):
+        for label, src in self.SOURCES.items():
+            with self.subTest(label):
+                written = memory_import.render("x.md", src, imported_at="2030-01-01T00:00:00+00:00")
+                self.assertNotEqual(written, src)
+                self.assertEqual(memory_import.original_text(written), src)
+
+    def test_it_inverts_render_over_generated_sources(self):
+        import random
+        rng = random.Random(710)
+        alphabet = ["---", "\n", "\r\n", "-", "name: x", "imported_from: y", "imported_at: z",
+                    "Toki", " ", ":", "\n---\n"]
+        for _ in range(3000):
+            src = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+            if rng.random() < 0.5:
+                src = "---\n" + src
+            written = memory_import.render("gen.md", src, imported_at="2030-01-01")
+            self.assertEqual(memory_import.original_text(written), src, repr(src))
+
+    def test_text_that_is_not_a_render_is_returned_as_is(self):
+        for text in ("", "Sam waters the ferns.\n", LEDGERS, KEYS, "---\nname: open\n"):
+            self.assertEqual(memory_import.original_text(text), text)
+
+    def test_an_edited_copy_loses_only_the_provenance_left_in_its_head(self):
+        """Not a render (a provenance line was deleted by hand): every
+        provenance line still in the head frontmatter is stripped, the
+        rest of the file is kept, and it never raises."""
+        written = memory_import.render("x.md", LEDGERS, imported_at="2030-01-01")
+        edited = re.sub(r"imported_sha256: .*\n", "", written)
+        self.assertEqual(memory_import.original_text(edited), LEDGERS)
+        created = memory_import.render("x.md", "Sam waters the ferns.\n", imported_at="2030-01-01")
+        edited = re.sub(r"imported_at: .*\n", "", created)
+        self.assertEqual(memory_import.original_text(edited), "Sam waters the ferns.\n")
+        body = ("---\nname: kept\nimported_from: x.md\n---\n"
+                "imported_from: body line stays\n")
+        self.assertEqual(memory_import.original_text(body),
+                         "---\nname: kept\n---\nimported_from: body line stays\n")
+
+
+GARAGE = ("---\nname: garage\ndescription: where the sedan lives\ntype: reference\n---\n"
+          "Toki parks the sedan in the left bay; the coupe and the other cars go right.\n"
+          "Mallory checks the car tyres each spring.\n")
+DRIVEWAY = ("# Driveway\nSam leaves two cars on the driveway, the coupe by the gate and"
+            " the old sedan behind it, overnight.\n")
+_CONCEPT = {"car", "cars", "sedan", "coupe", "automobile"}
+
+
+def _concept_embed(text, config):
+    """Deterministic stub: [concept words, other words]. The query
+    `automobile` is in no file and no path, so the keyword leg finds
+    nothing and every hit below is semantic-only; a file's cosine is its
+    concept density, so any text the copy adds moves its rank."""
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    concept = sum(w in _CONCEPT for w in words)
+    return [float(concept), float(len(words) - concept)]
+
+
+class TestTheCopyIndexesLikeItsOriginal(ImportCase):
+    """P7-10: an imported copy indexes exactly like its original. Measured
+    before the fix: the copy's provenance lines shifted every chunk window
+    and changed every embedding, and the replay reported semantic-only
+    memories as lost although every one was still findable."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "config" / "embedding.toml").write_text(
+            'url = "http://embed.invalid"\nmodel = "stub"\n')
+        p = mock.patch.object(memory_search, "_embed", _concept_embed)
+        p.start(); self.addCleanup(p.stop)
+        (self.auto / "reference_garage.md").write_text(GARAGE)
+        (self.home / "memory" / "driveway.md").write_text(DRIVEWAY)
+
+    def _chunk_texts(self, collection_prefix):
+        config = memory_search._embedding_config(self.root)
+        chunks = memory_search._chunks(self.home, config, self.root)
+        out = {}
+        for key, (_c, _p, text) in chunks.items():
+            if key.startswith(collection_prefix):
+                name, idx = key[len(collection_prefix):].rsplit("#", 1)
+                out.setdefault(name, {})[int(idx)] = text
+        return out
+
+    def _names(self, query, top):
+        hits, _notice = memory_search.search(query, top=top, home=self.home, root=self.root,
+                                             record=False)
+        return [pathlib.Path(h["path"]).name for h in hits], hits
+
+    def test_a_harness_file_and_its_copy_yield_identical_chunk_texts(self):
+        (self.auto / "long_with_front.md").write_text(
+            "---\nname: long\ntype: user\n---\n" + "Priya counts the quokkas. " * 400)
+        (self.auto / "long_without_front.md").write_text("Toki counts the ferns. " * 300)
+        before = self._chunk_texts("harness:")
+        self.assertGreater(len(before["long_with_front.md"]), 2)      # several windows
+        memory_import.apply(self.home, root=self.root)
+        after = self._chunk_texts("memory:imported/auto/")
+        self.assertEqual(sorted(after), sorted(before))
+        for name in before:
+            self.assertEqual(after[name], before[name], name)
+
+    def test_the_keyword_leg_indexes_the_originals_text(self):
+        """The provenance is metadata the copy carries, not text the
+        memory holds: the keyword index never matches it."""
+        memory_import.apply(self.home, root=self.root)
+        self.assertTrue(memory_search._keyword_search("Toki parks", self.home, 5, root=self.root))
+        self.assertEqual(memory_search._keyword_search("imported_sha256", self.home, 5,
+                                                       root=self.root), [])
+
+    def test_a_semantic_only_hit_keeps_its_rank_after_the_import(self):
+        """The Review Focus: found by the semantic leg only, at rank 0 of
+        2 before; after apply() the copy is found at the same rank."""
+        before, hits = self._names("automobile", 2)
+        self.assertEqual(before, ["reference_garage.md", "driveway.md"])
+        self.assertTrue(all(h["snippet"] and "[" not in h["snippet"] for h in hits))
+        memory_import.apply(self.home, root=self.root)
+        after, hits = self._names("automobile", 2)
+        self.assertEqual(after, before)
+        self.assertEqual(hits[0]["path"], str(self._target("reference_garage.md")))
+
+    def test_the_replay_loses_nothing_on_semantic_only_hits(self):
+        memory_search.search("automobile", top=1, home=self.home, root=self.root)
+        memory_import.take_baseline(self.home, root=self.root)
+        memory_import.apply(self.home, root=self.root)
+        base = json.loads(self._target(memory_import.BASELINE).read_text())
+        self.assertEqual(base["queries"], [{"query": "automobile", "top": 1,
+                                            "names": ["reference_garage.md"]}])
+        report = memory_import.verify(self.home, root=self.root)
+        self.assertEqual((report["queries"], report["kept"], report["lost"]), (1, 1, []))
+
+
 if __name__ == "__main__":
     unittest.main()

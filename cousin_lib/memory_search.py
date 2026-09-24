@@ -278,6 +278,21 @@ def _read(path):
         return None
 
 
+def _source_text(collection, path, rel):
+    """The text both legs index for a source: the file's text, except that
+    a memory_import copy (memory/imported/auto/*.md) is indexed as the
+    original it was rendered from. The copy's provenance lines would
+    otherwise shift every chunk window and re-embed every chunk, and a
+    replay would measure that noise as a lost memory (P7-10)."""
+    body = _read(path)
+    if body is None or collection != "memory":
+        return body
+    from cousin_lib import memory_import
+    if rel.startswith("/".join(memory_import.TARGET[1:]) + "/"):
+        return memory_import.original_text(body)
+    return body
+
+
 # ------------------------------------------------------------ keyword leg
 
 def build_index(home=None, root=None):
@@ -296,8 +311,8 @@ def build_index(home=None, root=None):
         )
         count = 0
         latest = 0.0
-        for collection, path, _rel in _sources(home, root):
-            body = _read(path)
+        for collection, path, rel in _sources(home, root):
+            body = _source_text(collection, path, rel)
             if body is None:
                 continue
             conn.execute(
@@ -514,7 +529,7 @@ def _chunks(home, config, root=None):
     overlap = int(config.get("chunk_overlap", _DEFAULTS["chunk_overlap"]))
     out = {}
     for collection, path, rel in _sources(home, root):
-        body = _read(path)
+        body = _source_text(collection, path, rel)
         if body is None:
             continue
         for i, text in enumerate(_chunk_text(body, size=size,

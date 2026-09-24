@@ -130,6 +130,49 @@ class TestResumeAndTail(HomeCase):
         self.assertEqual([_data(f)["seq"] for f in frames], [1, 2, 3, 4, 5])
         self.assertTrue(frames[0].startswith(b"id: fake-new:1\n"))
 
+    def test_a_pane_opened_before_the_runner_wrote_anything_is_told_its_session(self):
+        """Phase 5 execution review (Task 5): the pane is opened while the
+        runner starts, before its stream exists. When the first file
+        appears, a `session` frame names it and every id carries it; a
+        reconnect then resumes instead of re-receiving a tail."""
+        state = {"n": 0}
+
+        def sleep(_):
+            state["n"] += 1
+            if state["n"] == 2:
+                self._file("fake-first", 3)
+        gen = console_stream.stream_events(self.home, sleep=sleep, poll=0)
+        first = next(gen)
+        self.assertIn(b"event: session", first)
+        self.assertEqual(_data(first), {"session": "fake-first"})
+        frames = _frames(gen, 3)
+        self.assertTrue(frames[0].startswith(b"id: fake-first:1\n"), frames[0][:40])
+        self.assertTrue(frames[2].startswith(b"id: fake-first:3\n"), frames[2][:40])
+
+    def test_the_label_is_the_file_follow_reads_never_a_second_lookup(self):
+        """A restart between two lookups must not tag one file's events with
+        the other's session: the label comes from follow alone. The old
+        file holds tool events, the new one text events."""
+        old = EventStream(self.home, "fake-old")
+        old.append("runner", {"kind": "fake"}); old.append("tool", {"name": "Bash"})
+        time.sleep(0.02)
+        new = EventStream(self.home, "fake-new")
+        new.append("runner", {"kind": "fake"}); new.append("text", {"text": "hi"})
+        calls = {"n": 0}
+
+        def newest(home):
+            calls["n"] += 1
+            return old.path if calls["n"] == 1 else new.path
+        gen = console_stream.stream_events(self.home, newest=newest, sleep=lambda _: None, poll=0)
+        frames = [f for f in (next(gen) for _ in range(6)) if f.startswith(b"id: ")]
+        for f in frames:
+            label = f.split(b"\n", 1)[0][4:].split(b":")[0].decode()
+            kind = _data(f)["kind"]
+            if kind == "tool":
+                self.assertEqual(label, "fake-old", f[:60])
+            if kind == "text":
+                self.assertEqual(label, "fake-new", f[:60])
+
     def test_a_reconnect_to_the_same_runner_resumes_after_its_last_event(self):
         self._file("fake-a", 10)
         gen = console_stream.stream_events(self.home, after=7, session="fake-a",

@@ -388,7 +388,7 @@ A server-sent event stream over the runner's primary stream: the newest `data/st
 | event | data | when |
 |---|---|---|
 | `runner-event` | the event as written: `{"seq", "ts", "kind", "payload"}`; the frame's `id` is `<session>:<seq>` | the starting events, then each one as it is appended |
-| `session` | `{"session"}` | the runner restarted: its new stream is read from its first event (the old one is read to its end first) |
+| `session` | `{"session"}` | the stream changed: the runner's first stream appeared (the pane was opened before the runner wrote anything), or the runner restarted (its new stream is read from its first event, the old one to its end first) |
 | `: ping` | comment | 15 s without either |
 
 `kind` is what the runner recorded: `state`, `turn_start`, `text`, `thinking` (`{"length", "text"[, "truncated"]}`, the text bounded at 8000 characters), `tool`, `tool_result`, `tool_call`, `result`, `user`, `error`, `auth`, `rate_limit`, `rollover`, `usage`, `system` and the rest the runner writes. `400` for an `after` that is neither `<seq>` nor `<session>:<seq>`.
@@ -399,7 +399,7 @@ No body. Puts an `interrupt` item in the cousin's inbox and waits up to 5 s for 
 
 ### `POST /api/cousins/<slug>/say`
 
-Body `{"text": "..."}`. A `chat` item on the operator's thread (`operator:<[operator] name>`), put in the cousin's inbox: the runner writes it into a live turn, or takes it next. Not stored in `chat.db`: it is the pane's input, as typing into a tmux pane is. A login code while a login flow waits on this cousin is diverted first, as on every operator send path, and never delivered: `200 {"ok": true, "outcome": "diverted"}`. Otherwise `200 {"ok": true, "outcome": "queued"}`; `400` no text; `409` no operator configured.
+Body `{"text": "..."}`. A `chat` item on the operator's thread (`operator:<[operator] name>`), sent as the configured operator whichever console user types it (the chat page sends as the operator the same way), put in the cousin's inbox: the runner writes it into a live turn, or takes it next. Not stored in `chat.db`: it is the pane's input, as typing into a tmux pane is. A login code while a login flow waits on this cousin is diverted first, as on every operator send path, and never delivered: `200 {"ok": true, "outcome": "diverted"}`. Otherwise `200 {"ok": true, "outcome": "queued"}`; `400` no text; `409` no operator configured.
 
 ## Jobs
 

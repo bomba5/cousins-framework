@@ -83,14 +83,13 @@ def stream_events(home, after=None, session=None, *, tail=TAIL_EVENTS, newest=No
     the last `tail` events; a reconnect resumes after the event it names."""
     from cousin_lib.runner import status
     last_out = clock()
-    current = session
-    if current is None:
-        path = (newest or status.primary_stream)(home)
-        current = path.stem if path is not None else None
+    current = None               # the label comes from follow alone: "start" or "session"
     for what, value in status.follow(home, after=after, session=session, tail=tail,
                                      newest=newest, sleep=sleep, poll=poll):
         now = clock()
-        if what == "event":
+        if what == "start":
+            current = value
+        elif what == "event":
             last_out = now
             yield runner_frame(value, current)
         elif what == "session":

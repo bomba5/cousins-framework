@@ -95,6 +95,8 @@ def run(home, *, after=None, tail=None, follow=False, as_json=False, out=None,
                                      sleep=sleep):
         if what == "event":
             out.write((json.dumps(value) if as_json else format_event(value)) + "\n")
+        elif what == "start":
+            continue
         elif what == "session":
             out.write((json.dumps({"kind": "session", "session": value}) if as_json
                        else "-- a new runner: %s --" % value) + "\n")

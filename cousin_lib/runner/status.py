@@ -176,9 +176,14 @@ def follow(home, *, after=None, session=None, tail=TAIL_EVENTS, forever=True, ne
     reader: its last `tail` events (all of them for tail None or 0).
     `after` alone applies to the current primary stream.
 
-    Yields ("event", event), ("session", <stem>), and ("idle", None) once per
-    poll that found nothing; with forever=False it stops at the first idle
-    poll (caught up). Reads at most READ_BYTES at a time, from a byte
+    Yields ("start", <stem>) first for the file it begins with (the label
+    of what follows, nothing new to the reader), ("event", event),
+    ("session", <stem>) whenever the file changes (the runner's first file
+    appearing, a restart, a resumed session that is gone), and ("idle",
+    None) once per poll that found nothing; with forever=False it stops at
+    the first idle poll (caught up). Every event is preceded by the
+    "start" or "session" naming its file, so a reader labels from these
+    yields alone. Reads at most READ_BYTES at a time, from a byte
     offset, never the whole file; a torn last line waits for its end.
     `newest(home) -> Path | None` defaults to primary_stream."""
     newest = newest or primary_stream
@@ -187,6 +192,8 @@ def follow(home, *, after=None, session=None, tail=TAIL_EVENTS, forever=True, ne
         if session is not None and path.stem != session:
             yield "session", path.stem
             after = None
+        else:
+            yield "start", path.stem
         try:
             offset = _offset(path, tail=None if after is not None else tail, after=after)
         except OSError:
@@ -212,9 +219,8 @@ def follow(home, *, after=None, session=None, tail=TAIL_EVENTS, forever=True, ne
             continue                          # the rest of a long file, a bounded read at a time
         current = newest(home)
         if current is not None and current != path:
-            if path is not None:
-                found = True
-                yield "session", current.stem
+            found = True                      # the runner's first file, or a restart
+            yield "session", current.stem
             path, offset, pending, after = current, 0, b"", None
             continue
         if not found:

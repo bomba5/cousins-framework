@@ -330,6 +330,13 @@ class TestSdkRunner(HermeticCase):
         r2 = SdkRunner(self.home, client_factory=lambda o: ScriptedClient(o, []), api_key="sk-test")
         self.assertEqual(r2.options().env["ANTHROPIC_API_KEY"], "sk-test")
 
+    def test_the_cousin_tools_are_always_loaded_never_deferred(self):
+        # The CLI defers MCP tools behind its tool search; a cousin then
+        # has to search before its first memory, send or reply call.
+        server = self._runner([])[0].options().mcp_servers["cousin"]
+        self.assertEqual(server["type"], "sdk")
+        self.assertIs(server["alwaysLoad"], True)
+
     def test_options_ask_the_cli_to_replay_every_user_message(self):
         r, _ = self._runner([])
         self.assertIn("replay-user-messages", r.options().extra_args)

@@ -342,7 +342,11 @@ class SdkRunner:
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
                                       system_prompt=system_prompt, session_store=self.session_store,
-                                      mcp_servers={"cousin": server}, hooks=hook_table,
+                                      # alwaysLoad: the CLI would defer these behind its
+                                      # tool search, so a cousin's first memory, send or
+                                      # reply call would need a search first (#94).
+                                      mcp_servers={"cousin": {**server, "alwaysLoad": True}},
+                                      hooks=hook_table,
                                       extra_args=extra)
 
     # -- the session on file (restart with resume) -----------------------

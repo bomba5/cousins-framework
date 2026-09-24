@@ -88,7 +88,9 @@ data/telegram.log, where telegram_admin and the console look. A bridge
 already running outside the supervisor (that pid file names a live
 bridge we did not start) is left alone: ours waits in `backoff`,
 uncounted, and starts once that one is gone, never a second poller on
-the bot (Telegram answers 409). A rescan adds or removes the bridge as
+the bot (Telegram answers 409); once the config no longer runs, the
+rescan SIGTERMs that outside bridge, so off means off. A bridge
+switched off and on again before it is down stays and comes back up. A rescan adds or removes the bridge as
 `[telegram] enabled` changes, and restarts it when its token, operators
 or port changed; a tmux cousin's bridge is never ours (spawn starts it).
 There is no `start`/`stop` of a bridge by name: it follows its runner,
@@ -255,11 +257,13 @@ def bridge_config(home, root):
     return hashlib.sha256(body.encode()).hexdigest(), None
 
 
-def _outside_bridge(home):
+def _outside_bridge(home, ours=None):
     """The pid of a live bridge for this home that we did not start (its
-    data/telegram.pid, checked as telegram_admin checks it), or None."""
+    data/telegram.pid, checked as telegram_admin checks it; `ours` is our
+    own child's pid, never outside), or None."""
     from cousin_lib import telegram_admin
-    return telegram_admin.bridge_pid(home)
+    pid = telegram_admin.bridge_pid(home)
+    return None if pid is None or pid == ours else pid
 
 
 def classify_exit(kind, code):
@@ -1045,10 +1049,12 @@ class Supervisor:
         bridge = self.children.get(name)
         digest, why = bridge_config(home, self.root)
         if digest is None:
-            if bridge is not None:
+            if why is not None:
+                self._stop_outside_bridge(home, bridge, why)
+            if bridge is not None and not bridge.remove_when_down:
                 self._remove_bridge(bridge, why or "no [telegram] table")
                 return "removed"
-            if why is not None:
+            if bridge is None and why is not None:
                 self.say("%s not started: %s" % (name, why))
             return None
         change = None
@@ -1056,6 +1062,13 @@ class Supervisor:
         if bridge is None:
             bridge = self._add(telegram_spec(home))
             self.say("added %s" % name)
+            change = "added"
+        elif bridge.remove_when_down:
+            # removed by an earlier rescan and still on its way down: the
+            # config is valid again, so it stays and comes back up once down
+            bridge.remove_when_down = False
+            bridge.restart_when_down = bridge.stopping
+            self.say("%s: enabled again before it was down, keeping it" % name)
             change = "added"
         elif bridge.config_digest != digest:
             changed = True
@@ -1081,6 +1094,21 @@ class Supervisor:
         bridge.policy.reset()
         self._start(bridge)
         return change
+
+    def _stop_outside_bridge(self, home, bridge, why):
+        """A cousin whose [telegram] no longer runs, with a bridge still
+        polling outside the supervisor (one started by hand or by an
+        older console): SIGTERM it, as the console's switch used to, so
+        `off` means off. Never our own child, and never waited for."""
+        ours = bridge.proc.pid if bridge is not None and bridge.alive else None
+        pid = _outside_bridge(home, ours)
+        if pid is None:
+            return
+        self.say("stopping the bridge outside the supervisor (pid %d): %s" % (pid, why))
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
 
     def _remove_bridge(self, bridge, why):
         """Stop a bridge and drop it from the table once it is down."""

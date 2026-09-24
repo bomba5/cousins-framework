@@ -1,6 +1,7 @@
 """Telegram provisioning routes: the token is accepted and never
 answered; enabling a stopped cousin's bridge waits for its start."""
 import json
+import time
 import unittest
 from unittest import mock
 
@@ -94,6 +95,47 @@ class TestRunnerLaneToggle(ConsoleCase):
         status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": False})
         self.assertEqual(status, 200, body)
         self.assertEqual(stub.ops(), [("reload", None)] * 3)
+        self.popen.assert_not_called()
+
+    def test_a_supervised_disable_leaves_the_stop_to_the_supervisor(self):
+        self.runner_cousin()
+        stub = StubSupervisor(self.root, {"reload": {"ok": True, "added": [],
+                                                     "removed": ["telegram:wren"]}}).start()
+        self.addCleanup(stub.close)
+        self.serve()
+        stops = []
+        with mock.patch.object(telegram_admin, "stop_bridge",
+                               lambda home, **kw: stops.append(home) or "stopped"):
+            began = time.monotonic()
+            status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": False})
+            took = time.monotonic() - began
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["bridge"], "supervised")
+        self.assertEqual(stub.ops(), [("reload", None)])
+        self.assertEqual(stops, [])
+        self.assertLess(took, 2.0)
+
+    def test_without_a_supervisor_a_disable_stops_the_bridge_itself(self):
+        self.runner_cousin()
+        self.serve()
+        stops = []
+        with mock.patch.object(telegram_admin, "stop_bridge",
+                               lambda home, **kw: stops.append(home) or "stopped"):
+            status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": False})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(len(stops), 1)
+
+    def test_token_and_operator_changes_report_the_bridge(self):
+        self.runner_cousin()
+        stub = StubSupervisor(self.root).start()
+        stub.answers["reload"] = {"ok": True, "added": [], "removed": []}
+        self.addCleanup(stub.close)
+        self.serve()
+        status, body = self.post("/api/cousins/wren/telegram/token", {"token": TOKEN})
+        self.assertEqual((status, body["bridge"]), (200, "supervised"), body)
+        status, body = self.post("/api/cousins/wren/telegram/operators", {
+            "operators": [{"user_id": 42, "name": "Ana"}]})
+        self.assertEqual((status, body["bridge"]), (200, "supervised"), body)
         self.popen.assert_not_called()
 
     def test_without_a_supervisor_the_toggle_still_starts_nothing(self):

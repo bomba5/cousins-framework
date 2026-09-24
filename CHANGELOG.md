@@ -18,8 +18,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `cousin-supervisor status` lists it. For a runner cousin the console's
   Telegram switch, token and operator changes write `cousin.toml` and ask the
   supervisor to rescan; they never start a bridge themselves. A bridge already
-  running outside the supervisor is left alone, and the child starts once it
-  is gone. A tmux cousin's bridge is unchanged.
+  running outside the supervisor is left alone while its config runs (the
+  child starts once it is gone) and is stopped by the rescan once the config
+  no longer runs. Switching the bridge off and on again before the old one is
+  down keeps it. The token and operator routes report `bridge` like the
+  switch does. A tmux cousin's bridge is unchanged.
 
 ## 1.19.0 - 2026-09-24
 

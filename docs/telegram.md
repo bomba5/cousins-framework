@@ -211,9 +211,13 @@ Telegram answer 409 Conflict. Who starts it depends on the cousin's lane:
   `[telegram]` by hand, run `cousin-supervisor reload`. Its output goes to the
   supervisor's output (`telegram:wren | ...`) and to `data/telegram.log`.
   A bridge already running outside the supervisor (one started by hand, or
-  by an older console) is left alone: the child waits in
-  `backoff`, says why in `status`, and starts once that bridge is gone. To
-  hand an old bridge to the supervisor, switch it off and on in the console.
+  by an older console) is left alone while the config runs: the child waits
+  in `backoff`, says why in `status`, and starts once that bridge is gone.
+  When the config no longer runs (switched off, no operator left), the
+  supervisor's rescan stops that outside bridge too. To hand an old bridge to
+  the supervisor, switch it off and on in the console. With no supervisor
+  running, the console's switch still stops such a bridge; it never starts
+  one.
 
 To run it by hand, `--home` alone is enough on a standard install. The
 root comes from `FRAMEWORK_ROOT` or from the home's location:

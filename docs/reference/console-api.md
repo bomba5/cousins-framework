@@ -77,11 +77,11 @@ The status.
 
 ### `POST /api/cousins/<slug>/telegram/token`
 
-Body `{"token"}`. Stores it and checks it with Telegram (`getMe`); answers the status plus `check: {"ok", "bot"?, "error"?}`. `400` for something that is not a bot token. A running bridge restarts on the new token.
+Body `{"token"}`. Stores it and checks it with Telegram (`getMe`); answers the status plus `check: {"ok", "bot"?, "error"?}`. `400` for something that is not a bot token. A running bridge restarts on the new token; `bridge` says what happened to it, as in the `enabled` answer.
 
 ### `POST /api/cousins/<slug>/telegram/operators`
 
-Body `{"operators": [{"user_id", "name"}]}`, the whole list. `400` for a non-numeric or repeated id or a bad name.
+Body `{"operators": [{"user_id", "name"}]}`, the whole list. `400` for a non-numeric or repeated id or a bad name. A running bridge restarts on the new list; `bridge` says what happened to it, as in the `enabled` answer.
 
 ### `POST /api/cousins/<slug>/telegram/enabled`
 

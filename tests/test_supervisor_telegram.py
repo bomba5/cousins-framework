@@ -267,6 +267,23 @@ class TestRescan(_Case):
         self.assertNotEqual(self.row(sup, "telegram:wren")["pid"], first)
         self.assertEqual(self.row(sup, "telegram:wren")["restarts"], 0)   # not a crash
 
+    def test_a_disable_then_enable_before_the_exit_is_reaped_keeps_the_bridge(self):
+        home = _cousin(self.root, "wren", telegram={"enabled": True})
+        sup, _ = self.supervise([_runner(home)])
+        self.assertTrue(_wait_for(lambda: len(_starts(home)) == 1, step=sup.step))
+        first = self.row(sup, "telegram:wren")["pid"]
+        _write(self.root, home, "wren", telegram={"enabled": False})
+        sup.reload()                                   # SIGTERM, not reaped yet
+        _write(self.root, home, "wren", telegram={"enabled": True})
+        sup.reload()                                   # before any step() reaps it
+        # no further reload: once the exit is reaped the bridge runs again
+        self.assertTrue(_wait_for(lambda: len(_starts(home)) == 2, step=sup.step))
+        _wait_for(lambda: False, timeout=0.3, step=sup.step)
+        row = self.row(sup, "telegram:wren")
+        self.assertIsNotNone(row)
+        self.assertEqual(row["state"], "running")
+        self.assertNotEqual(row["pid"], first)
+
     def test_a_cousin_leaving_the_runner_lane_takes_its_bridge(self):
         home = _cousin(self.root, "wren", telegram={"enabled": True})
         sup, _ = self.supervise([_runner(home)])
@@ -297,6 +314,32 @@ class TestNoDoubleBridge(_Case):
         outside.wait(5)
         self.assertTrue(_wait_for(lambda: len(_starts(home)) == 1, step=sup.step))
         self.assertEqual(self.row(sup, "telegram:wren")["state"], "running")
+
+    def test_a_disable_stops_a_bridge_running_outside_the_supervisor(self):
+        home = _cousin(self.root, "wren", telegram={"enabled": True})
+        outside = subprocess.Popen([sys.executable, "-c", _SLEEP, "cousin_lib.telegram"],
+                                   start_new_session=True)
+        self.addCleanup(lambda: outside.poll() is None and outside.kill())
+        (home / "data" / "telegram.pid").write_text("%d\n" % outside.pid)
+        sup, out = self.supervise([_runner(home)])
+        self.assertEqual(self.row(sup, "telegram:wren")["state"], "backoff")
+        _write(self.root, home, "wren", telegram={"enabled": False})
+        sup.reload()
+        self.assertTrue(_wait_for(lambda: outside.poll() is not None, timeout=5.0))
+        self.assertIsNone(self.row(sup, "telegram:wren"))
+        self.assertIn("stopping the bridge outside the supervisor (pid %d)" % outside.pid,
+                      out.getvalue())
+        self.assertEqual(_starts(home), [])
+
+    def test_a_disabled_cousin_never_stops_a_bridge_the_supervisor_runs(self):
+        # the pid file names our own child: it is ours to stop, once
+        home = _cousin(self.root, "wren", telegram={"enabled": True})
+        sup, out = self.supervise([_runner(home)])
+        self.assertTrue(_wait_for(lambda: len(_starts(home)) == 1, step=sup.step))
+        _write(self.root, home, "wren", telegram={"enabled": False})
+        sup.reload()
+        self.assertNotIn("outside the supervisor", out.getvalue())
+        self.assertTrue(_wait_for(lambda: self.row(sup, "telegram:wren") is None, step=sup.step))
 
 
 if __name__ == "__main__":

@@ -120,7 +120,7 @@ class TestWiring(HermeticCase):
 
     def test_additional_context_comes_only_from_the_prompt_hook_not_options(self):
         patch = mock.patch.object(hooks, "default_recall",
-                                  lambda home: lambda body: ("a recalled line", 1))
+                                  lambda home, root=None: lambda body: ("a recalled line", 1))
         patch.start()
         self.addCleanup(patch.stop)
         r = self._runner()
@@ -216,7 +216,7 @@ class TestBodyForPrompt(HermeticCase):
         os.environ["FRAMEWORK_ROOT"] = str(self.home.parent.parent)
         self.searched = []
         patch = mock.patch.object(hooks, "default_recall",
-                                  lambda home: lambda body: (self.searched.append(body),
+                                  lambda home, root=None: lambda body: (self.searched.append(body),
                                                              (None, 0))[1])
         patch.start()
         self.addCleanup(patch.stop)

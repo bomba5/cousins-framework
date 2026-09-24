@@ -429,10 +429,10 @@ def note_activity(home, text):
     return "Activity saved: %s" % text[:80]
 
 
-def search_text(home, query, *, top=5, collection=None):
+def search_text(home, query, *, top=5, collection=None, root=None):
     from cousin_lib import memory_search
     hits, notice = memory_search.search(query, top=top, home=Path(home),
-                                        collection=collection)
+                                        collection=collection, root=root)
     fmt = getattr(memory_search, "format_results", None)
     if fmt is not None:
         text = fmt(hits)

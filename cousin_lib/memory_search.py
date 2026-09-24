@@ -255,9 +255,10 @@ def _read(path):
 
 # ------------------------------------------------------------ keyword leg
 
-def build_index(home=None):
+def build_index(home=None, root=None):
     """(Re)build the FTS index over the current sources. Returns the
-    number of files indexed."""
+    number of files indexed. `root` as in _sources: None discovers it,
+    a path is used as given."""
     home = Path(home) if home else _home()
     db_path = _fts_path(home)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,7 +271,7 @@ def build_index(home=None):
         )
         count = 0
         latest = 0.0
-        for collection, path, _rel in _sources(home):
+        for collection, path, _rel in _sources(home, root):
             body = _read(path)
             if body is None:
                 continue
@@ -300,7 +301,7 @@ def build_index(home=None):
         conn.close()
 
 
-def _index_stale(home):
+def _index_stale(home, root=None):
     """The index is stale when any source is newer than the newest
     source at build time, or when the file counts differ (a deleted
     file also invalidates)."""
@@ -318,7 +319,7 @@ def _index_stale(home):
     if not row:
         return True
     built_mtime, built_files = row
-    sources = _sources(home)
+    sources = _sources(home, root)
     raw = _raw_entries(home)
     if len(sources) + len(raw) != built_files:
         return True
@@ -327,20 +328,20 @@ def _index_stale(home):
     return any(m > built_mtime for _c, _k, _b, m in raw)
 
 
-def index_stale(home):
+def index_stale(home, root=None):
     """Either index behind its sources: the keyword index by its own
     rule, the vector index when a source is newer than embeddings.json
     (or it is missing while an embedding service is configured)."""
     home = Path(home)
-    if _index_stale(home):
+    if _index_stale(home, root):
         return True
-    if _embedding_config() in (None, "broken"):
+    if _embedding_config(root) in (None, "broken"):
         return False
     try:
         built = _index_path(home).stat().st_mtime
     except OSError:
         return True
-    return any(p.stat().st_mtime > built for _, p, _r in _sources(home))
+    return any(p.stat().st_mtime > built for _, p, _r in _sources(home, root))
 
 
 def refresh_if_stale(home, root=None):
@@ -349,11 +350,11 @@ def refresh_if_stale(home, root=None):
     Returns what it did, or None when both were fresh. Never waits on a
     pass another process holds: that pass is doing this work already."""
     home = Path(home)
-    if not index_stale(home):
+    if not index_stale(home, root):
         return None
     report = {"files": None, "embedded": 0, "failed": 0, "busy": False}
-    if _index_stale(home):
-        report["files"] = build_index(home)
+    if _index_stale(home, root):
+        report["files"] = build_index(home, root)
     config = _embedding_config(root)
     if config not in (None, "broken"):
         out = ensure_index(home, config, root=root, wait=False)
@@ -374,9 +375,9 @@ def _sanitize(query, max_tokens=32):
     return " OR ".join('"%s"' % t for t in tokens)
 
 
-def _keyword_search(query, home, top, collection=None):
-    if _index_stale(home):
-        build_index(home)
+def _keyword_search(query, home, top, collection=None, root=None):
+    if _index_stale(home, root):
+        build_index(home, root)
     match = _sanitize(query)
     if not match:
         return []
@@ -745,7 +746,7 @@ def _first_line(text):
     return ""
 
 
-def _semantic_search(query, home, top, config, collection=None):
+def _semantic_search(query, home, top, config, collection=None, root=None):
     """Embed the query, bring the index up to date, cosine-rank every
     chunk and keep the best chunk per file. The query is embedded
     FIRST: a dead service fails once here instead of once per file,
@@ -754,10 +755,10 @@ def _semantic_search(query, home, top, config, collection=None):
     (hits, failed) where failed counts chunks the pass could not
     embed."""
     query_vector = _embed(query, config)
-    report = ensure_index(home, config, wait=False,
+    report = ensure_index(home, config, wait=False, root=root,
                           budget=FOREGROUND_BUDGET)
     index = _load_index(home) or {}
-    chunks = _chunks(home, config)
+    chunks = _chunks(home, config, root)
     best = {}
     for key, (coll, path, text) in chunks.items():
         if collection and coll != collection:
@@ -826,7 +827,7 @@ def _fuse(keyword_hits, semantic_hits, top, bonuses=None):
 _CURATED = ("memory", "harness")
 
 
-def _curated_floor(ranked, top, query, home):
+def _curated_floor(ranked, top, query, home, root=None):
     """Keep one curated hit in the result when the ranking would drop
     every one of them.
 
@@ -844,7 +845,7 @@ def _curated_floor(ranked, top, query, home):
         return ranked
     have = {h["path"] for h in ranked}
     for collection in _CURATED:
-        for hit in _keyword_search(query, home, 1, collection):
+        for hit in _keyword_search(query, home, 1, collection, root):
             if hit["path"] not in have:
                 return ranked[:top - 1] + [hit]
     return ranked
@@ -875,7 +876,7 @@ def _record(home, query, hits):
         pass
 
 
-def search(query, *, top=5, home=None, collection=None):
+def search(query, *, top=5, home=None, collection=None, root=None, record=True):
     """Ranked hits plus the degrade notice: (hits, notice). Each hit is
     {"path", "collection", "score", "snippet", "chunk", "similarity"}.
     collection limits both legs to one of memory, notes, harness.
@@ -883,10 +884,14 @@ def search(query, *, top=5, home=None, collection=None):
     configuration promised, and a human-readable explanation whenever
     the semantic leg was promised and could not fully serve. Every
     return that carries hits applies the usage bonus and records the
-    surfaced paths, the keyword-only ones included."""
+    surfaced paths, the keyword-only ones included, unless record=False
+    (a recall or a replay is not a search the cousin made, and must not
+    reinforce what it measures). `root`: None
+    discovers the framework root (the CLI, the tmux lane); a path is
+    used as given and the environment is never read (the runner)."""
     home = Path(home) if home else _home()
-    keyword_hits = _keyword_search(query, home, top, collection)
-    config = _embedding_config()
+    keyword_hits = _keyword_search(query, home, top, collection, root)
+    config = _embedding_config(root)
     semantic_hits = []
     notice = None
     if config == "broken":
@@ -895,7 +900,7 @@ def search(query, *, top=5, home=None, collection=None):
     elif config is not None:
         try:
             semantic_hits, report = _semantic_search(
-                query, home, top, config, collection)
+                query, home, top, config, collection, root)
         except Exception as err:
             notice = ("embedding service unreachable (%s); keyword-only"
                       " results" % err)
@@ -926,8 +931,9 @@ def search(query, *, top=5, home=None, collection=None):
     hits = _fuse(keyword_hits, semantic_hits, top,
                  _bonuses(home, keyword_hits, semantic_hits))
     if collection is None:
-        hits = _curated_floor(hits, top, query, home)
-    _record(home, query, hits)
+        hits = _curated_floor(hits, top, query, home, root)
+    if record:
+        _record(home, query, hits)
     return hits, notice
 
 
@@ -954,12 +960,12 @@ RECALL_PREFIX = "[fw-recall] possibly relevant from your memory: "
 RECALL_SUFFIX = " - cousin-memory search for details; ignore if not."
 
 
-def recall_thresholds():
+def recall_thresholds(root=None):
     """The [recall] table of config/embedding.toml, defaults when the
     seam is absent or unusable. Returns (thresholds, configured):
     configured says whether a semantic leg was promised, which decides
     how a hit qualifies."""
-    config = _embedding_config()
+    config = _embedding_config(root)
     if isinstance(config, dict):
         return config["recall"], True
     return dict(_RECALL_DEFAULTS), config is not None
@@ -979,7 +985,34 @@ def _hit_title(path):
     return path.stem
 
 
-def _hit_relpath(home, hit):
+def raw_entry(key):
+    """The raw entry a `raw` hit names ("<file>#<line>", the key
+    _raw_entries gives it), or None when the line is gone or unreadable."""
+    path, _, number = str(key).rpartition("#")
+    try:
+        wanted = int(number)
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", errors="replace") as fh:
+            for n, line in enumerate(fh, 1):
+                if n == wanted:
+                    entry = json.loads(line)
+                    return entry if isinstance(entry, dict) else None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _hit_name(hit):
+    """What a recall line calls a hit: a raw entry by its topic (its
+    file stem is only a date), a file by its first heading."""
+    if hit.get("collection") == "raw":
+        topic = str((raw_entry(hit["path"]) or {}).get("topic") or "").strip()
+        if topic:
+            return topic
+    return _hit_title(Path(hit["path"]))
+
+
+def _hit_relpath(home, hit, root=None):
     """<relpath> inside the hit's collection: memory/ and notes/ live
     under the home; the harness collection is wherever config/harness.toml
     put it. A path outside every known base falls back to its name."""
@@ -988,8 +1021,8 @@ def _hit_relpath(home, hit):
     bases = [home / collection] if collection in ("memory", "notes") else []
     if collection == "harness":
         try:
-            template = (harness_config(FrameworkConfig.resolve().root)
-                        or {}).get("auto_memory_dir")
+            base_root = root if root is not None else FrameworkConfig.resolve().root
+            template = (harness_config(base_root) or {}).get("auto_memory_dir")
             if template:
                 bases.append(expand_harness_path(template, home))
         except MissingConfigError:
@@ -1002,7 +1035,7 @@ def _hit_relpath(home, hit):
     return path.name
 
 
-def recall_entries(home, text, *, config=None):
+def recall_entries(home, text, *, config=None, root=None):
     """The hits that qualify for proactive recall, each rendered as
     'Title (collection:relpath)'; [] when a gate says no. The gates:
     `[memory] proactive_recall` (config, the cousin's CousinConfig,
@@ -1017,22 +1050,22 @@ def recall_entries(home, text, *, config=None):
     home = Path(home)
     if not config.proactive_recall:
         return []
-    thresholds, configured = recall_thresholds()
+    thresholds, configured = recall_thresholds(root)
     if not configured and not config.recall_keyword_only:
         # no semantic leg: a keyword match on an OR-joined query is too
         # loose to interrupt with; the cousin opts in per install
         return []
     if len(text.strip()) < int(thresholds["min_chars"]):
         return []
-    hits, _notice = search(text, top=int(thresholds["top"]), home=home)
+    hits, _notice = search(text, top=int(thresholds["top"]), home=home, root=root)
     kept = []
     for hit in hits:
         if configured:
             similarity = hit.get("similarity")
             if similarity is None or similarity < float(thresholds["min_score"]):
                 continue
-        kept.append("%s (%s:%s)" % (_hit_title(Path(hit["path"])),
-                                    hit.get("collection"), _hit_relpath(home, hit)))
+        kept.append("%s (%s:%s)" % (_hit_name(hit), hit.get("collection"),
+                                    _hit_relpath(home, hit, root)))
     return kept
 
 
@@ -1045,7 +1078,7 @@ def recall_line(entries):
     return " ".join((RECALL_PREFIX + "; ".join(entries) + RECALL_SUFFIX).split())
 
 
-def recall_context(home, text, *, config=None):
+def recall_context(home, text, *, config=None, root=None):
     """The '[fw-recall] ...' line for `text`, or None: recall_entries'
     gates, rendered by recall_line."""
-    return recall_line(recall_entries(home, text, config=config))
+    return recall_line(recall_entries(home, text, config=config, root=root))

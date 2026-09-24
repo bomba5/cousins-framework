@@ -70,9 +70,10 @@ def _m_search(ctx, a):
     top = int(a.get("top") or 5)
     if a.get("json"):
         hits, _notice = memory_search.search(query, top=top, home=Path(ctx.home),
-                                             collection=a.get("collection"))
+                                             collection=a.get("collection"), root=ctx.root)
         return json.dumps(hits)
-    return memory.search_text(ctx.home, query, top=top, collection=a.get("collection"))
+    return memory.search_text(ctx.home, query, top=top, collection=a.get("collection"),
+                              root=ctx.root)
 
 
 def _m_decide(ctx, a):

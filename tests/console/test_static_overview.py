@@ -101,7 +101,7 @@ process.stdout.write(JSON.stringify([
   fleetRunnerKind({runner: {kind: "opencode"}}),
   fleetRunnerKind({runner: {kind: "something-new"}}),
   fleetRunnerKind({runner: {}}),
-  fleetRunnerKind({tmuxSession: "juno"}),
+  fleetRunnerKind({tmuxSession: "wren"}),
   fleetRunnerKind({type: "worker", tmuxSession: "w"}),
   fleetRunnerKind({remote: true}),
   fleetRunnerKind({}),

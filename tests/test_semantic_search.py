@@ -15,6 +15,7 @@ sunrise or dawn embeds to vector A, everything else to vector B, so
 cosine ranks the sunrise document first for a query the keyword leg
 cannot match.
 """
+import math
 import os
 import pathlib
 import tempfile
@@ -205,6 +206,113 @@ class TestSemanticLeg(SemanticCase):
         self.assertIn("long.md", by_path)
         self.assertGreaterEqual(by_path["long.md"]["chunk"], 1)
         self.assertTrue(by_path["long.md"]["snippet"])
+
+
+class TestFusionDepth(unittest.TestCase):
+    """Tracker #83: search() asked each leg for exactly `top` candidates,
+    so a document ranked just past the cut in BOTH legs could never
+    reach _fuse, although a hit present (even weakly) in both legs
+    beats a single strong leg once RRF sums the two.
+
+    Fixture (20 files, one chunk each):
+      - k1..k5: keyword-only. Strong 'needle' term frequency (ranks
+        0-4 in the keyword leg); a distinct low cosine each so they
+        rank 15-19 in the semantic leg.
+      - s1..s5: semantic-only. No 'needle'; a distinct high cosine
+        each, ranks 0-4 in the semantic leg.
+      - f1..f9: semantic filler. No 'needle'; cosine placed between
+        'buried' and the k-docs, occupying semantic ranks 6-14. Their
+        only job is to push k1..k5 down to ranks 15-19: even paired
+        with the single best keyword rank (0) and the single best
+        semantic rank a k-doc can reach (15), 1/60 + 1/75 = 0.0300
+        stays under 'buried' below, for ANY permutation of which k
+        gets which rank.
+      - buried: one 'needle' mention (keyword rank 5, the 6th match)
+        and a cosine placed exactly at semantic rank 5 (6th). Fused
+        score 1/65 + 1/65 = 2/65 = 0.030769, ahead of every other
+        candidate's ceiling.
+
+    The corpus is exactly FUSION_DEPTH_MIN (20), so both legs return
+    every file, fully ranked, for top=5 (depth 20) AND top=10 (depth
+    40): the candidate pool - and so the fused order - cannot depend
+    on which top was asked. That is what makes the prefix property
+    provable here rather than incidental.
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.home = self.root / "cousins" / "wren"
+        (self.home / "memory").mkdir(parents=True)
+
+        cosines = {}
+        for i in range(1, 6):
+            marker = "K%dMARK" % i
+            cosines[marker] = 0.12 - 0.02 * i  # 0.10 .. 0.02
+            (self.home / "memory" / ("k%d.md" % i)).write_text(
+                "# K%d\n\n%s %s\n"
+                % (i, " ".join(["needle"] * (11 - i)), marker))
+        for i in range(1, 6):
+            marker = "SEM%dMARK" % i
+            cosines[marker] = 1.1 - 0.1 * i  # 1.0 .. 0.6
+            (self.home / "memory" / ("s%d.md" % i)).write_text(
+                "# S%d\n\n%s, unrelated to the search term.\n"
+                % (i, marker))
+        for i in range(1, 10):
+            marker = "FILL%dMARK" % i
+            cosines[marker] = 0.5 - 0.01 * i  # 0.49 .. 0.41
+            (self.home / "memory" / ("f%d.md" % i)).write_text(
+                "# Filler %d\n\n%s, also unrelated.\n" % (i, marker))
+        cosines["BURIEDMARK"] = 0.5
+        (self.home / "memory" / "buried.md").write_text(
+            "# Buried\n\nneedle appears once here. BURIEDMARK\n")
+
+        def vector_for(text):
+            if text == "needle":
+                return [1.0, 0.0]
+            for marker, cos in cosines.items():
+                if marker in text:
+                    return [cos, math.sqrt(max(0.0, 1.0 - cos * cos))]
+            return [0.0, 1.0]
+
+        ctx = fake_embedder(vector_for=vector_for)
+        url = ctx.__enter__()
+        self.addCleanup(ctx.__exit__, None, None, None)
+
+        (self.root / "config").mkdir()
+        (self.root / "config" / "embedding.toml").write_text(
+            'url = "%s"\nmodel = "test-embed"\ntimeout_s = 2\n' % url)
+
+        patcher = mock.patch.dict(os.environ, {
+            "COUSIN_HOME": str(self.home),
+            "FRAMEWORK_ROOT": str(self.root),
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_hit_strong_in_both_legs_survives_a_small_top(self):
+        hits, _ = search("needle", top=5)
+        names = [pathlib.Path(h["path"]).name for h in hits]
+        self.assertIn("buried.md", names,
+                       "a doc ranked 6th in BOTH legs must still fuse"
+                       " into a top=5 result (tracker #83)")
+
+    def test_fused_rank_is_stable_across_top(self):
+        hits5, _ = search("needle", top=5)
+        hits10, _ = search("needle", top=10)
+        names5 = [pathlib.Path(h["path"]).name for h in hits5]
+        names10 = [pathlib.Path(h["path"]).name for h in hits10]
+        self.assertIn("buried.md", names5)
+        self.assertEqual(names5.index("buried.md"),
+                         names10.index("buried.md"))
+
+    def test_top_n_is_a_prefix_of_top_m(self):
+        hits5, _ = search("needle", top=5)
+        hits10, _ = search("needle", top=10)
+        names5 = [pathlib.Path(h["path"]).name for h in hits5]
+        names10 = [pathlib.Path(h["path"]).name for h in hits10]
+        self.assertEqual(names5, names10[:5])
 
 
 if __name__ == "__main__":

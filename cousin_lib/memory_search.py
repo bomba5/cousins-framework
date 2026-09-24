@@ -62,6 +62,12 @@ from cousin_lib.sqlite_util import wal
 _EMBED_CAP_CHARS = 6000
 _RRF_K = 60
 _SNIPPET_CHARS = 160
+# search() asks each leg for this many candidates, not just `top`: a
+# hit ranked just past `top` in BOTH legs would out-score a
+# single-leg hit once RRF sums the two, but only if fusion ever saw
+# it (tracker #83). _fuse still cuts the fused result to `top`.
+FUSION_DEPTH_MIN = 20
+FUSION_DEPTH_FACTOR = 4
 _DEFAULTS = {"chunk_chars": 2000, "chunk_overlap": 200}
 _RECALL_DEFAULTS = {"min_chars": 24, "min_score": 0.45, "top": 3}
 _TRASH_DIR = ".trash"
@@ -933,7 +939,8 @@ def search(query, *, top=5, home=None, collection=None, root=None, record=True):
     if collection in (None, "raw"):
         from cousin_lib import memory
         memory.try_backfill(home)   # decisions only the old log holds reach raw first (R2)
-    keyword_hits = _keyword_search(query, home, top, collection, root)
+    depth = max(FUSION_DEPTH_MIN, FUSION_DEPTH_FACTOR * top)
+    keyword_hits = _keyword_search(query, home, depth, collection, root)
     config = _embedding_config(root)
     semantic_hits = []
     notice = None
@@ -943,7 +950,7 @@ def search(query, *, top=5, home=None, collection=None, root=None, record=True):
     elif config is not None:
         try:
             semantic_hits, report = _semantic_search(
-                query, home, top, config, collection, root)
+                query, home, depth, config, collection, root)
         except Exception as err:
             notice = ("embedding service unreachable (%s); keyword-only"
                       " results" % err)

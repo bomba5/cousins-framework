@@ -44,12 +44,13 @@ Everything below is relative to the cousin home.
 | Monthly digests | `memory/raw/YYYY-MM-digest.jsonl` | the raw fold | distiller, boot packet |
 | Raw archive | `memory/raw/archive/YYYY-MM.jsonl.gz` | the raw fold | nothing automatic (`zcat` it) |
 | Distilled views | `memory/distilled/*.md` | the distiller | boot packet |
-| Decisions | `data/decisions.jsonl` | `decide` | `recall`, `consolidate`, the boot packet's staleness warning |
+| Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the first `recall` in a home copies the decisions only this log holds into raw) |
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
 | Corrections | `data/corrections.jsonl` | the chat server, from your messages | boot packet (calibration layer) |
-| Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search** |
-| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself | search, explorer |
+| Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
+| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off on the SDK lane) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
+| Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
 | Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
 | Trash | `memory/.trash/` | removals from the console explorer | `cousin-memory trash restore` |
@@ -107,9 +108,29 @@ cousin-memory recall [KEYWORD] [--last N]
 (`"source": "decision"`, content `<decision> - why: <reasoning>`), so a
 decision reaches the distilled views. `remember` writes only the raw
 entry, for a fact that isn't a decision. `activity` overwrites
-`data/last-activity.txt` with a timestamped one-liner. `recall` prints
-past decisions, optionally filtered by a keyword in the topic, decision
-or reasoning.
+`data/last-activity.txt` with a timestamped one-liner. `recall` reads
+raw memory through the same index `search` uses: with a keyword it
+prints the best-ranked entries (with an embedding service configured,
+only those the keyword matched or that clear `[recall] min_score`),
+without one the newest entries you wrote (the framework's own log,
+topics starting `episode:`, `job:` or `framework:`, is left out),
+oldest first either way. A decision prints with its `Why:` line, a
+folded month's digest of one too. Times are the raw entry's own: UTC for
+what `decide` writes now. `recall` is not a search you made, so it
+changes no recall weighting. `data/decisions.jsonl` is still written,
+for the boot packet's staleness warning and the hooks; the first
+`recall` or search in a home copies every decision that only that log
+(or one of its rotated archives) holds into raw, once, with its original
+time (most old ones carry a local time without an offset), and marks it
+done in `data/.decisions-backfilled`. `consolidate` counts raw only, so
+a decision is counted once. A decision line you removed through the
+console's trash is not brought back by the backfill: a trashed raw
+twin counts as already handled. If the backfill itself fails (a
+read-only or full `data/`, a bad byte in the log), `search` and `recall`
+still answer from what raw memory already holds; one line goes to
+stderr and no mark is written, so the next read tries again.
+`consolidate` runs the backfill unguarded, since it is a command you run
+and a loud failure there is the right one.
 
 If the decision text has backticks or `$(...)` in it, don't pass it as
 arguments: your shell runs them before `decide` sees the text. Use the
@@ -229,7 +250,10 @@ Otherwise it's a whole-word match on the topic and source, for example
 "tone" or "style" to `preferences.md`, "host", "api" or "config" to
 `project-facts.md`, "glossary" or "term:" to `glossary.md`. Everything
 else goes to `decisions.md`. Each file keeps the top 40 lines
-(`--max-lines` changes it), ranked by entry count then recency.
+(`--max-lines` changes it), ranked by entry count then recency, except
+that the framework's own log (topics starting `episode:`, `job:` or
+`framework:`) ranks after everything you wrote: it fills only the lines
+your memory leaves. Search finds those entries either way.
 
 You can write in these files. Everything above the line
 `<!-- distilled:auto - lines below are regenerated from memory/raw; edit above this line only -->`
@@ -425,6 +449,68 @@ Every search records the files it returned in
 keep coming up get a small boost on later searches: at most 15%, halving
 for every 14 days the file isn't recalled. It breaks ties, it doesn't
 beat a better match. Delete the two files to reset it.
+
+### Importing the agent CLI's own memory
+
+On the SDK lane the runner switches the agent CLI's own auto-memory off
+(`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`), so framework memory is the only
+one. What the CLI kept before that folds in once:
+
+```
+cousin-memory import-auto                      # a dry run: what would be copied, nothing written
+cousin-memory import-auto --apply --verify     # copy into memory/imported/auto/, then check it
+```
+
+Every `*.md` in the directory `config/harness.toml` names in
+`auto_memory_dir`, the CLI's own `MEMORY.md` index included, is copied
+to `memory/imported/auto/<name>` with its frontmatter kept and three
+keys added: `imported_from`, `imported_sha256`, `imported_at`. Backups
+and databases in that directory are listed and skipped. Running it
+again copies only what changed since; it never overwrites a copy you
+edited (a conflict, to merge by hand) and never brings back a copy you
+removed (`dropped`). Once a file's copy is current, search finds the
+copy instead of the original, so one memory is one hit, and the copy
+inherits the original's recall weighting. The imported index is
+searchable like any memory file; nothing puts it in your context by
+itself.
+
+A manifest it cannot read (missing is fine; unreadable or not valid
+JSON is not) refuses instead of guessing: `import-auto` prints one
+`ERROR:` line naming the manifest on stderr, writes nothing, and exits
+2. Search stays tolerant of the same manifest: it treats it as empty
+rather than erroring, so a corrupt manifest degrades recall, never
+crashes it. A copy on disk with no row in the manifest is a conflict to
+merge by hand, unless it is byte-for-byte what this import would have
+written (a run that died after copying a file but before saving the
+manifest converges instead of blocking forever).
+
+The check is before and after. Just before `--apply` writes, it replays
+the newest 50 (`--sample N`) of your own logged searches
+(`memory/.recall-log.jsonl`) that surfaced a file from that directory
+and keeps what each surfaces now; `--verify` replays the same queries
+and reports any that lost a memory, as itself or as its copy. Both first
+bring the search indexes fully up to date, so they compare the import,
+not an index still filling in. It exits
+1 on a loss and 2 when nothing was compared (no baseline yet, or no
+logged query ever reached that memory). A `--verify` over a manifest it
+cannot read exits 2 the same way as `--apply`, without comparing
+anything. Neither replay counts as a recall, so neither changes the
+ranking it measures.
+
+### Memory proposals on the SDK lane
+
+After a turn in which the cousin reached a decision (a sentence the
+transcript miner keeps that also says "decided", "agreed", "from now
+on", "the fix is" and the like) and recorded nothing with the memory
+tool, the runner queues one question: those sentences, and whether any
+is worth keeping. It runs when nothing else is waiting, never about its
+own turn, and at most `PROPOSAL_CAP` times a rolling day
+(`cousin_lib/runner/extract.py`). The answer is an ordinary `remember`
+or `decide`, under a topic the cousin chose. A step that fails while
+building the proposal (a broken store, a corrupt cursor or cap file)
+never falls back to silence: it surfaces as the `propose` event's own
+`error`, the same event a normal turn's proposal (or its absence) uses,
+and the turn still delivers.
 
 ### Proactive recall in chat
 

@@ -36,6 +36,11 @@ LOGIN = "\n".join([
     " Select login method:",
     " ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise",
     "   2. Anthropic Console account · API usage billing"])
+# the binary's texts (2.1.281), not captured live: onboarding, bypass, MCP approval
+ONBOARDING = " Choose the text style that looks best with your terminal"
+BYPASS = " WARNING: Claude Code running in Bypass Permissions mode"
+MCP = " New MCP server found in .mcp.json: cousin"
+LIMIT = " You've hit your usage limit · resets at 5pm"
 REWIND = "\n".join([
     "    [inbox:4721] Reply with the word OK only.", "    No code changes",
     "  ❯ (current)", "  Enter to continue · Esc to cancel"])
@@ -173,6 +178,8 @@ class TestScreen(PaneCase):
     def test_attention_screens(self):
         self.assertIsNone(self.pane.attention())
         for text, want in ((TRUST, "trust"), (LOGIN, "login"), (REWIND, "rewind"),
+                           (ONBOARDING, "onboarding"), (BYPASS, "bypass"), (MCP, "mcp_approval"),
+                           (LIMIT, "limit"),
                            ("Claude usage limit reached. Your limit resets at 5pm", "limit")):
             self.show(text)
             self.assertEqual(self.pane.attention(), want, want)
@@ -202,7 +209,7 @@ class TestTyping(PaneCase):
         self.assertFalse(any("paste-buffer" in c for c in self.calls()))
 
     def test_an_attention_screen_is_never_typed_into(self):
-        for text in (TRUST, LOGIN, REWIND):
+        for text in (TRUST, LOGIN, REWIND, ONBOARDING, BYPASS, MCP, LIMIT):
             self.screen.write_text(text)
             self.log.write_text("")
             self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.BLOCKED)

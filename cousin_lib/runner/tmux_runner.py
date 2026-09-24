@@ -240,8 +240,10 @@ class TmuxRunner:
         self._path = self._transcript_path()
         self._fresh = fresh and self._size() == 0
         self.pane = self._make_pane(self._path)
-        if not self._fresh and self.pane.alive():
-            how = "adopted"
+        # a live pane runs the recorded id, fresh or not: a rollover ends the
+        # old CLI before it writes the new id, so the pane is never the old one
+        if recorded is not None and self.pane.alive():
+            how, self._fresh = "adopted", False
         else:
             self.pane.start(self._argv(self._fresh), cwd=str(self.home), env_base=self._env_base())
             how = "fresh" if self._fresh else "resumed"
@@ -312,6 +314,17 @@ class TmuxRunner:
         self._persist_claims()
         self._cut = cut
 
+    def _clear_stranded(self):
+        """An adopted pane with no live turn and text in its box: a paste the
+        previous runner left un-entered (R23). Its row was requeued by
+        _recover, so the text is cleared, never entered: entering it would
+        merge it with the next row's prompt."""
+        stranded = self.pane.box_text()
+        if stranded and not self.pane.queued():
+            self.pane.clear()
+            self.stream.append("error", {"error": "stranded input in the adopted pane's box cleared",
+                                         "text": stranded[:120]})
+
     # -- the worker ---------------------------------------------------------
     def _wake_error(self, message):
         self.stream.append("error", {"error": message})
@@ -323,6 +336,8 @@ class TmuxRunner:
             self._recover(how)
             if self._live is not None:
                 self._to("running", "adopted mid-turn")
+            elif how == "adopted":
+                self._clear_stranded()
             self._persist_cursor()
             if self._cut:
                 self._runner_line("The previous turn was cut short by a restart before it "

@@ -207,6 +207,45 @@ class TestRecovery(Case):
         time.sleep(0.3)
         self.assertEqual(len(self.panes[0].typed), 1, "never typed twice")
 
+    def test_a_stranded_paste_in_an_adopted_pane_is_cleared_never_entered(self):
+        class Stranded(FakePane):
+            box = "[Pasted text #1 +3 lines]"
+
+            def box_text(self):
+                return self.box
+
+            def clear(self):
+                super().clear()
+                self.box = ""
+        shared = []
+
+        def one_pane(path):                 # the second runner adopts the first's pane
+            if not shared:
+                shared.append(Stranded(path))
+            return shared[0]
+        r = self.runner(pane=one_pane)
+        r.start()
+        self.assertTrue(_wait(lambda: shared and shared[0].alive()))
+        r.stop(timeout=3)                   # unheld: the pane lives on
+        self.assertTrue(shared[0].alive())
+        r2 = self.runner(pane=one_pane)
+        r2.start()
+        self.assertTrue(_wait(lambda: "C-u" in shared[0].keys))
+        self.assertEqual(shared[0].box, "")
+        self.assertEqual(shared[0].typed, [], "nothing entered on top of the stranded text")
+
+
+class TestLimits(Case):
+    def test_a_limit_end_requeues_the_taken_row_and_the_runner_waits(self):
+        self.on_prompt = lambda pane, first, body: "limit"
+        r = self.runner()
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "over the limit", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "rate_limited"))
+        self.assertEqual(self.outcome(r, rec)[0], "queued", "requeued, never failed")
+        time.sleep(0.3)
+        self.assertEqual(len(self.panes[0].typed), 1, "not retyped inside the limit window")
+
 
 def _handoff_tool(pane, first_line, body):
     """The model's side of the handoff turn: the tool writes data/handoff.md last."""

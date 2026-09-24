@@ -200,7 +200,7 @@ class TestAuthLane(HermeticCase):
     def test_the_login_lane_carries_no_inherited_credential(self):
         home = temp_home(self, runner="sdk")
         seen = self._capture(home)
-        self.assertEqual(seen["options_env"], {})
+        self.assertEqual(seen["options_env"], {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
 
     def test_no_auth_or_provider_variable_from_the_shell_reaches_the_child(self):
@@ -248,7 +248,8 @@ class TestAuthLane(HermeticCase):
         self.assertEqual(seen["options_env"], {
             "ANTHROPIC_API_KEY": "sk-from-file",
             "CLAUDE_CONFIG_DIR": str(root / "data" / "accounts" / "wren"),
-            "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"})
+            "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1",
+            "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
 
 

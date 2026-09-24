@@ -221,6 +221,48 @@ class TestLivePrompt(HermeticCase):
         print("\nREPORT auto-memory reaches the first user message: %s" % seen)
         (home.parent.parent / "live-report.json").write_text(json.dumps({"auto_memory_in_first_user_message": seen}))
 
+    def test_the_switch_keeps_the_clis_auto_memory_out_with_a_control(self):
+        """Phase 7 (R6). Phase 4 finding 8 measured that the CLI's auto-memory
+        does not appear in the first user entry of our store, so the store
+        cannot show whether the model saw it. The probe is the model's
+        ANSWER, given without any tool (so the switched run cannot find the
+        canary on disk). A canary line is planted in the auto-memory of this
+        cousin's project, under the account's config directory
+        (CLAUDE_CONFIG_DIR from the session env, else ~/.claude), and each
+        run checks that the CLI wrote its session into THAT project: a canary
+        in the wrong directory would read as "never seen". The CONTROL, with
+        the switch removed, MUST answer the canary: otherwise the CLI never
+        loads that memory on this lane and the switched run proves nothing.
+        The switched run must not answer it."""
+        import re
+        import shutil
+        from cousin_lib.runner import sdk as sdk_mod
+        ask = ("Without using any tool: if your memory holds a canary line with a code,"
+               " reply with the code only; if it holds none, reply NONE.")
+
+        def answer(switch):
+            home, root = self._home("Wren tests memory.")
+            off = sdk_mod.AUTO_MEMORY_OFF if switch else {}
+            with mock.patch.object(sdk_mod, "AUTO_MEMORY_OFF", off), \
+                    mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}):
+                env = SdkRunner(home, model=MODEL).options().env
+            config = pathlib.Path(env.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
+            project = config / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(home))
+            (project / "memory").mkdir(parents=True, exist_ok=True)
+            (project / "memory" / "MEMORY.md").write_text("- canary line: QUOKKA-7731 lives here\n")
+            self.addCleanup(shutil.rmtree, project, True)
+            with mock.patch.object(sdk_mod, "AUTO_MEMORY_OFF", off):
+                r = self._run_lane(home, root, ask)
+            sid = json.loads((home / "data" / "runner-session.json").read_text())["session_id"]
+            self.assertTrue((project / ("%s.jsonl" % sid)).exists(),
+                            "the CLI wrote this session elsewhere: the canary sat in the wrong project")
+            return " ".join(e["payload"]["text"] for e in r.events() if e["kind"] == "text")
+
+        self.assertIn("QUOKKA-7731", answer(switch=False),
+                      "control: without the switch the model did not see its auto-memory,"
+                      " so the switched run cannot prove anything")
+        self.assertNotIn("QUOKKA-7731", answer(switch=True))
+
 
 if __name__ == "__main__":
     unittest.main()

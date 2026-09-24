@@ -57,6 +57,13 @@ _END = object()
 # A turn is live while the model runs it, including while it waits on a
 # permission: every exit from either state (errored, idle, stopped) is legal.
 LIVE_STATES = ("running", "waiting_permission")
+# One memory system (spec): the agent CLI keeps its own auto-memory
+# unless told not to, and on this lane framework memory is the only one.
+# The bundled CLI reads this variable (and the setting autoMemoryEnabled:
+# false) and logs which one disabled it. Set after the account's env so
+# no account kind can drop it; proven by effect in
+# tests/runner/test_live_prompt.py, with a control run (phase 7).
+AUTO_MEMORY_OFF = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 
 
 class _NotWritten(Exception):
@@ -258,7 +265,7 @@ class SdkRunner:
         # SecretMissing (a login to do: _connect waits for it, Task 16), or a
         # secret broken after the start: a connect failure with its message,
         # never the secret.
-        env = accounts.account_env(self.account, self.root)
+        env = dict(accounts.account_env(self.account, self.root), **AUTO_MEMORY_OFF)
         # The tools and hooks are in-process: no settings file is read
         # (setting_sources=[]) and none is written; the policy is a
         # PreToolUse hook, since bypassPermissions skips can_use_tool.

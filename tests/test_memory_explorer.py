@@ -11,7 +11,7 @@ import time
 import unittest
 
 from cousin_lib import memory_explorer as mx
-from cousin_lib import memory_trash
+from cousin_lib import memory, memory_trash
 
 
 def _w(path, text):
@@ -195,6 +195,18 @@ class RawEntries(ExplorerCase):
                          ["kestrel api", "old idea"])
         self.assertEqual(topics(tier="digest"), ["folded"])
         self.assertEqual(topics(tier="archive"), ["folded"])
+
+    def test_an_operator_entry_carries_its_citation(self):
+        # the cite is a known field, so it is not in `extra`; the record
+        # carries it on its own (the console shows it under the entry)
+        memory.remember(self.home, "cable run", "the cable goes under the desk",
+                        level="operator", cite="chat 2026-09-18, message 42")
+        got = mx.raw_entries(self.home, topic="cable run")["entries"]
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["cite"], "chat 2026-09-18, message 42")
+        self.assertNotIn("cite", got[0]["extra"])
+        plain = [e for e in mx.raw_entries(self.home)["entries"] if e["topic"] == "plain"][0]
+        self.assertIsNone(plain["cite"])
 
     def test_digest_entries_carry_their_span_and_archive_has_no_ref(self):
         dig = mx.raw_entries(self.home, tier="digest")["entries"][0]

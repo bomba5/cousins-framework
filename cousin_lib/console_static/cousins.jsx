@@ -104,7 +104,7 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
   return (
     <div className="wrap-pad">
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+        <div className="eyebrow">
           {visibleCousins.length} cousins · {visibleCousins.filter(c => c.status === "running").length} running
           {remoteCount > 0 && <span style={{ marginLeft: 8 }}>· {remoteCount} remote</span>}
           {hiddenCount > 0 && !showHidden && <span style={{ marginLeft: 8, color: "var(--fg-3)" }}>· {hiddenCount} hidden</span>}
@@ -163,6 +163,8 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
 
 function CousinCard({ c, onClick, onAct, onChat }) {
   const isWorker = c.type === "worker";
+  const st = window.fleetState ? fleetState(c)
+    : { word: c.status === "running" ? (c.active ? "working" : "idle") : "stopped", tone: c.status === "running" ? "green" : "gray", pulse: !!c.active };
   return (
     <div className="cousin-card" onClick={onClick}>
       <div className="name-row">
@@ -171,14 +173,13 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         <div className="slug">@{c.slug}</div>
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           {isWorker && <Pill tone="gray">worker</Pill>}
-          {c.status === "running"
-            ? <Pill tone={c.active ? "green" : "amber"}>{isWorker ? "enrolled" : c.active ? "active" : "idle"}</Pill>
-            : <Pill tone="gray">stopped</Pill>}
+          {/* the state in words and colour, the same reading as the overview */}
+          <Pill tone={st.tone}>{st.word}</Pill>
         </div>
       </div>
       <div className="role">{c.role}</div>
       {c.attention && (
-        <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber)" }}
+        <div className="card-attention"
              title="the pane shows text config/harness.toml attention_patterns lists: the agent is waiting on a person">
           needs attention · the pane shows "{c.attention}"
         </div>
@@ -1201,18 +1202,16 @@ function LoopsEditor({ cousin }) {
 }
 
 const inputStyle = {
-  fontFamily: "var(--mono)", fontSize: 11,
-  background: "var(--bg-1)", color: "var(--fg-0)",
-  border: "1px solid var(--line)", borderRadius: 2,
-  padding: "3px 6px", outline: "none",
+  fontFamily: "var(--sans)", fontSize: 12,
+  background: "var(--bg-0)", color: "var(--fg-0)",
+  border: "1px solid var(--line)", borderRadius: 6,
+  padding: "4px 8px", outline: "none",
 };
 
 function SectionLabel({ children, style }) {
   return (
-    <div style={{
-      fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)",
-      textTransform: "uppercase", letterSpacing: "0.1em",
-      borderTop: "1px solid var(--line-soft)", paddingTop: 10, marginBottom: 10,
+    <div className="eyebrow" style={{
+      borderTop: "1px solid var(--hair)", paddingTop: 14, marginBottom: 10,
       ...(style || {}),
     }}>{children}</div>
   );

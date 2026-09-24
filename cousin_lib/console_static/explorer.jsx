@@ -117,16 +117,47 @@ function FileViewer({ readUrl, downloadUrl, path, onDelete, deleteLabel }) {
 }
 
 // ============ MEMORY EXPLORER ============
+// ---- truth-level helpers (pure: no React, no fetch; tests run them in node) ----
 const TRUTH_LEVELS = [
   "L0_OPERATOR", "L1_FRAMEWORK", "L2_TOOL",
   "L3_COUSIN_CONCLUSION", "L4_COUSIN_HYPOTHESIS", "L5_OBSOLETE",
 ];
-const LEVEL_TONE = {
-  L0_OPERATOR: "green", L1_FRAMEWORK: "cyan", L2_TOOL: "cyan",
-  L3_COUSIN_CONCLUSION: "gray", L4_COUSIN_HYPOTHESIS: "amber",
-  L5_OBSOLETE: "red", other: "violet",
+// Each level's word, the tone it is drawn in, and what it means. The
+// operator's level is the accent: it is the one the others answer to.
+const LEVEL_META = {
+  L0_OPERATOR:          { label: "operator",   tone: "cyan",   note: "what the operator said, with where" },
+  L1_FRAMEWORK:         { label: "framework",  tone: "violet", note: "state changes the framework made" },
+  L2_TOOL:              { label: "tool",       tone: "green",  note: "a measurement or a command's output" },
+  L3_COUSIN_CONCLUSION: { label: "conclusion", tone: "blue",   note: "the cousin's own reasoning" },
+  L4_COUSIN_HYPOTHESIS: { label: "hypothesis", tone: "amber",  note: "unverified" },
+  L5_OBSOLETE:          { label: "obsolete",   tone: "gray",   note: "superseded: kept, struck through" },
+  other:                { label: "other",      tone: "red",    note: "a level the framework does not know" },
 };
+const LEVEL_TONE = Object.fromEntries(Object.entries(LEVEL_META).map(([k, v]) => [k, v.tone]));
 const LEVEL_SHORT = (l) => (l || "").replace(/^(L\d)_.*/, "$1") || "?";
+const levelMeta = (l) => LEVEL_META[l] || LEVEL_META.other;
+
+// Entries grouped by truth level, the levels in their order (operator
+// first, obsolete last, an unknown level after them), each group's
+// entries in the order they came (the route sends newest first). Empty
+// levels are left out; nothing is dropped.
+function groupByLevel(entries) {
+  const order = TRUTH_LEVELS.concat(["other"]);
+  const groups = {};
+  for (const e of entries || []) {
+    const lvl = TRUTH_LEVELS.includes(e.level) ? e.level : "other";
+    (groups[lvl] = groups[lvl] || []).push(e);
+  }
+  return order.filter(l => groups[l]).map(l => ({ level: l, entries: groups[l] }));
+}
+
+// Where an operator-stated entry says it came from: the record's `cite`
+// (cousin-memory remember/decide --cite), else null.
+function entryCite(e) {
+  const c = e ? (e.cite != null ? e.cite : e.extra && e.extra.cite) : null;
+  return c == null || String(c).trim() === "" ? null : String(c);
+}
+// ---- end truth-level helpers ----
 
 function fmtStamp(iso) {
   if (!iso) return "undated";
@@ -155,6 +186,11 @@ function MemoryExplorer({ slug }) {
   const [layer, setLayer] = React.useState("insights");
   const [toast, setToast] = React.useState(null);
   const [tick, setTick] = React.useState(0);
+  // The truth-level filter lives here, not in the entry list: the rail
+  // sets it from any layer and the raw, digest and archive lists read it.
+  const [levels, setLevels] = React.useState([]);
+  const [levelCounts, setLevelCounts] = React.useState(null);
+  React.useEffect(() => { setLevels([]); setLevelCounts(null); }, [slug]);
 
   const refresh = React.useCallback(async () => {
     const d = await apiGet(`/api/memory/${slug}/overview`);
@@ -195,6 +231,17 @@ function MemoryExplorer({ slug }) {
   };
 
   if (!ov) return <div className="mx-empty">loading @{slug} memory...</div>;
+  const rawLayer = layer === "raw" || layer === "digest" || layer === "archive";
+  // The rail counts what the list would show: the current tier under the
+  // current filters while a raw list is open, else the live entries the
+  // overview counted.
+  const counts = (rawLayer && levelCounts) || (ov.insights && ov.insights.levels) || {};
+  const countTotal = Object.values(counts).reduce((a, b) => a + (Number(b) || 0), 0);
+  const pickLevel = (lvl) => {
+    if (!rawLayer) setLayer("raw");
+    if (lvl === null) { setLevels([]); return; }
+    setLevels(ls => ls.includes(lvl) ? ls.filter(x => x !== lvl) : [...ls, lvl]);
+  };
   const layers = ov.layers || [];
   const byId = Object.fromEntries(layers.map(l => [l.id, l]));
   const groups = [
@@ -220,6 +267,33 @@ function MemoryExplorer({ slug }) {
       <div className="mx-side panel">
         <div className="panel-hdr"><span className="title">@{slug} memory</span></div>
         <div className="panel-body" style={{ padding: 0, overflowY: "auto", flex: 1 }}>
+          <div className="mx-group">truth level</div>
+          <div className="mx-levels" data-level-rail>
+            <div className={"mx-lvl" + (rawLayer && !levels.length ? " sel" : "")} onClick={() => pickLevel(null)}
+                 title="every level">
+              <span className="mx-lvl-bar tone-all" />
+              <span className="mx-lvl-n">all levels</span>
+              <span className="mx-lvl-c">{countTotal}</span>
+            </div>
+            {TRUTH_LEVELS.map(l => (
+              <div key={l} data-level={l}
+                   className={"mx-lvl lvl-" + LEVEL_SHORT(l) + (levels.includes(l) ? " sel" : "") + (counts[l] ? "" : " dim")}
+                   onClick={() => pickLevel(l)}
+                   title={`${l}: ${levelMeta(l).note}. Click to filter; click again to clear.`}>
+                <span className={"mx-lvl-bar tone-" + levelMeta(l).tone} />
+                <span className="mx-lvl-n">{levelMeta(l).label}</span>
+                <span className="mx-lvl-c">{counts[l] || 0}</span>
+              </div>
+            ))}
+            {counts.other ? (
+              <div className="mx-lvl dim" title={LEVEL_META.other.note}>
+                <span className="mx-lvl-bar tone-red" />
+                <span className="mx-lvl-n">other</span>
+                <span className="mx-lvl-c">{counts.other}</span>
+              </div>
+            ) : null}
+          </div>
+          <div className="mx-group">layers</div>
           <div className={"mx-layer" + (layer === "insights" ? " sel" : "")} onClick={() => setLayer("insights")} data-layer="insights">
             <div className="mx-layer-t">insights</div>
             <div className="mx-layer-s">levels, recall, hygiene</div>
@@ -246,9 +320,11 @@ function MemoryExplorer({ slug }) {
             {toast.undo && <button className="btn ghost" onClick={() => { restore(toast.undo); setToast(null); }}>undo</button>}
           </div>
         )}
-        {layer === "insights" && <MemoryInsights ov={ov} slug={slug} onPick={setLayer} />}
-        {(layer === "raw" || layer === "digest" || layer === "archive") &&
-          <RawEntries key={layer} slug={slug} tier={layer === "raw" ? "daily" : layer} reload={tick} onRemove={remove} onObsolete={markObsolete} />}
+        {layer === "insights" && <MemoryInsights ov={ov} slug={slug} onPick={setLayer} onLevel={pickLevel} />}
+        {rawLayer &&
+          <RawEntries key={layer} slug={slug} tier={layer === "raw" ? "daily" : layer} reload={tick}
+                      levels={levels} setLevels={setLevels} onCounts={setLevelCounts}
+                      onRemove={remove} onObsolete={markObsolete} />}
         {layer === "decisions" && <DecisionList slug={slug} reload={tick} onRemove={remove} />}
         {["active", "index", "distilled", "memory", "notes", "harness", "legacy"].includes(layer) &&
           <LayerFiles key={layer} slug={slug} layer={layer} info={byId[layer]} reload={tick} onRemove={remove} />}
@@ -271,7 +347,7 @@ function BarRow({ label, value, max, tone, onClick }) {
   );
 }
 
-function MemoryInsights({ ov, only }) {
+function MemoryInsights({ ov, only, onLevel }) {
   const ins = ov.insights || {};
   const levels = ins.levels || {};
   const maxLevel = Math.max(1, ...Object.values(levels));
@@ -306,7 +382,9 @@ function MemoryInsights({ ov, only }) {
         <div className="panel-hdr"><span className="title">entries per truth level</span><span className="muted">{ins.topics || 0} topics · {ins.multi_entry_topics || 0} with history</span></div>
         <div className="panel-body">
           {Object.entries(levels).map(([lvl, n]) => (
-            <BarRow key={lvl} label={lvl} value={n} max={maxLevel} tone={LEVEL_TONE[lvl]} />
+            <BarRow key={lvl} label={`${LEVEL_SHORT(lvl)} ${levelMeta(lvl).label}`} value={n} max={maxLevel}
+                    tone={levelMeta(lvl).tone}
+                    onClick={onLevel && lvl !== "other" ? () => onLevel(lvl) : undefined} />
           ))}
         </div>
       </div>
@@ -373,78 +451,116 @@ function SearchInfo({ l }) {
   );
 }
 
-function RawEntries({ slug, tier, reload, onRemove, onObsolete }) {
-  const [levels, setLevels] = React.useState([]);
+function RawEntries({ slug, tier, reload, onRemove, onObsolete, levels: levelsProp, setLevels: setLevelsProp, onCounts }) {
+  // The level filter normally comes from the explorer's rail; alone, the
+  // list keeps its own.
+  const [ownLevels, setOwnLevels] = React.useState([]);
+  const levels = levelsProp || ownLevels;
+  const setLevels = setLevelsProp || setOwnLevels;
   const [topic, setTopic] = React.useState("");
   const [q, setQ] = React.useState("");
   const [since, setSince] = React.useState("");
   const [until, setUntil] = React.useState("");
   const [data, setData] = React.useState(null);
   const [limit, setLimit] = React.useState(100);
+  const [grouping, setGrouping] = React.useState("level");  // level | time
   React.useEffect(() => {
     let cancelled = false;
     const t = setTimeout(async () => {
       const p = new URLSearchParams({ tier, limit: String(limit) });
-      if (levels.length) p.set("level", levels.join(","));
       if (topic.trim()) p.set("topic", topic.trim());
       if (q.trim()) p.set("q", q.trim());
       if (since) p.set("since", since);
       if (until) p.set("until", until);
-      const d = await apiGet(`/api/memory/${slug}/raw?` + p.toString());
-      if (!cancelled) setData(d || { entries: [], total: 0, facets: {} });
+      // The rail's counts are every level under the other filters: with a
+      // level chosen, one more call without it, cut to a single row.
+      const all = new URLSearchParams(p);
+      all.set("limit", "1");
+      if (levels.length) p.set("level", levels.join(","));
+      const [d, whole] = await Promise.all([
+        apiGet(`/api/memory/${slug}/raw?` + p.toString()),
+        levels.length ? apiGet(`/api/memory/${slug}/raw?` + all.toString()) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      const got = d || { entries: [], total: 0, facets: {} };
+      setData(got);
+      if (onCounts) onCounts(((whole || got).facets || {}).levels || {});
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
   }, [slug, tier, levels.join(","), topic, q, since, until, limit, reload]);
-  const toggle = (lvl) => setLevels(ls => ls.includes(lvl) ? ls.filter(x => x !== lvl) : [...ls, lvl]);
   const facets = (data && data.facets && data.facets.levels) || {};
+
+  const renderEntry = (e) => {
+    const meta = levelMeta(e.level);
+    const cite = entryCite(e);
+    const extra = Object.entries(e.extra || {}).filter(([k]) => !(k === "cite" && e.level === "L0_OPERATOR"));
+    return (
+      <div key={(e.ref ? e.ref.path + ":" + e.ref.line_no : e.file + e.timestamp + e.topic)}
+           className={"mx-entry lvl-" + LEVEL_SHORT(e.level)} data-entry-level={e.level}>
+        <div className="mx-entry-h">
+          <span className={"pill " + meta.tone} title={e.truth_level || "(no level stored: default)"}>{LEVEL_SHORT(e.level)} {meta.label}</span>
+          <span className="mx-topic">{e.topic || <i>no topic</i>}</span>
+          <span style={{ flex: 1 }} />
+          <span className="muted">{fmtStamp(e.timestamp)}</span>
+        </div>
+        <div className="mx-content">{e.content}</div>
+        {e.level === "L0_OPERATOR" && (
+          <div className={"mx-cite" + (cite ? "" : " missing")} data-cite>
+            {cite ? <>cited · <b>{cite}</b></> : "no citation stored"}
+          </div>
+        )}
+        <div className="mx-meta">
+          {e.source && <span>source · <b>{e.source}</b></span>}
+          {e.tier === "digest" && <span>folded · <b>{e.entries}</b> entries {e.first_at} to {e.last_at}</span>}
+          {extra.map(([k, v]) => <span key={k}>{k} · <b>{typeof v === "object" ? JSON.stringify(v) : String(v)}</b></span>)}
+          <span className="muted">{e.file}{e.ref ? ":" + e.ref.line_no : ""}</span>
+          <span style={{ flex: 1 }} />
+          {e.topic && e.level !== "L5_OBSOLETE" && onObsolete &&
+            <button className="btn ghost" data-mark-obsolete={e.topic}
+                    title="mark this topic superseded (L5): out of the distilled views, history kept in raw"
+                    onClick={(ev) => { ev.stopPropagation(); onObsolete(e.topic); }}>mark obsolete</button>}
+          {e.ref && <ConfirmButton className="btn ghost danger-text" label="remove"
+                                   onConfirm={() => onRemove({ kind: "entry", ...e.ref }, `entry "${e.topic}"`)} />}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="mx-list-wrap">
       <div className="mx-filters" data-raw-filters>
-        <div className="mx-chips">
-          {TRUTH_LEVELS.map(l => (
-            <button key={l} data-level={l} className={"mx-chip" + (levels.includes(l) ? " on" : "")} onClick={() => toggle(l)} title={l}>
-              <span className={"pill " + LEVEL_TONE[l]}>{LEVEL_SHORT(l)}</span> {l.replace(/^L\d_/, "").toLowerCase().replace(/_/g, " ")}
-            </button>
-          ))}
-        </div>
         <div className="mx-inputs">
           <input placeholder="topic" value={topic} onChange={e => setTopic(e.target.value)} />
           <input placeholder="text" value={q} onChange={e => setQ(e.target.value)} />
           <label>from <input type="date" value={since} onChange={e => setSince(e.target.value)} /></label>
           <label>to <input type="date" value={until} onChange={e => setUntil(e.target.value)} /></label>
+          <span style={{ flex: 1 }} />
+          <div className="radio-row" data-grouping={grouping}>
+            <button className={grouping === "level" ? "sel" : ""} onClick={() => setGrouping("level")}>by level</button>
+            <button className={grouping === "time" ? "sel" : ""} onClick={() => setGrouping("time")}>newest first</button>
+          </div>
         </div>
         <div className="muted mx-count">
           {data ? `${data.total} ${tier} entries match` : "loading..."}
+          {levels.length > 0 && <> · levels: {levels.map(l => levelMeta(l).label).join(", ")} <button className="btn ghost mx-clear" onClick={() => setLevels([])}>clear</button></>}
           {data && Object.keys(facets).length > 0 && " · " + Object.entries(facets).map(([k, v]) => `${LEVEL_SHORT(k)} ${v}`).join(" · ")}
           {tier === "archive" && " · the archive is the forensic tier: read-only"}
         </div>
       </div>
       <div className="mx-list" data-raw-list>
         {data && data.entries.length === 0 && <div className="mx-empty">no entries</div>}
-        {data && data.entries.map(e => (
-          <div key={(e.ref ? e.ref.path + ":" + e.ref.line_no : e.file + e.timestamp + e.topic)} className="mx-entry" data-entry-level={e.level}>
-            <div className="mx-entry-h">
-              <span className={"pill " + (LEVEL_TONE[e.level] || "gray")} title={e.truth_level || "(no level stored: default)"}>{e.level}</span>
-              <span className="mx-topic">{e.topic || <i>no topic</i>}</span>
-              <span style={{ flex: 1 }} />
-              <span className="muted">{fmtStamp(e.timestamp)}</span>
+        {data && grouping === "level" && groupByLevel(data.entries).map(g => (
+          <section key={g.level} className={"mx-lgroup lvl-" + LEVEL_SHORT(g.level)} data-level-group={g.level}>
+            <div className="mx-lgroup-h">
+              <span className={"mx-lvl-bar tone-" + levelMeta(g.level).tone} />
+              <span className="mx-lgroup-t">{levelMeta(g.level).label}</span>
+              <span className="mx-lgroup-c">{g.entries.length}{facets[g.level] > g.entries.length ? ` of ${facets[g.level]}` : ""}</span>
+              <span className="mx-lgroup-note">{levelMeta(g.level).note}</span>
             </div>
-            <div className="mx-content">{e.content}</div>
-            <div className="mx-meta">
-              {e.source && <span>source · <b>{e.source}</b></span>}
-              {e.tier === "digest" && <span>folded · <b>{e.entries}</b> entries {e.first_at} to {e.last_at}</span>}
-              {Object.entries(e.extra || {}).map(([k, v]) => <span key={k}>{k} · <b>{typeof v === "object" ? JSON.stringify(v) : String(v)}</b></span>)}
-              <span className="muted">{e.file}{e.ref ? ":" + e.ref.line_no : ""}</span>
-              <span style={{ flex: 1 }} />
-              {e.topic && e.level !== "L5_OBSOLETE" && onObsolete &&
-                <button className="btn ghost" data-mark-obsolete={e.topic}
-                        title="mark this topic superseded (L5): out of the distilled views, history kept in raw"
-                        onClick={(ev) => { ev.stopPropagation(); onObsolete(e.topic); }}>mark obsolete</button>}
-              {e.ref && <ConfirmButton className="btn ghost danger-text" label="remove"
-                                       onConfirm={() => onRemove({ kind: "entry", ...e.ref }, `entry "${e.topic}"`)} />}
-            </div>
-          </div>
+            {g.entries.map(renderEntry)}
+          </section>
         ))}
+        {data && grouping === "time" && data.entries.map(renderEntry)}
         {data && data.total > data.entries.length && (
           <button className="btn" onClick={() => setLimit(l => Math.min(1000, l + 200))}>show more ({data.total - data.entries.length} left)</button>
         )}
@@ -694,5 +810,5 @@ function CousinFilesModal({ slug, onClose }) {
 
 Object.assign(window, {
   MemoryExplorer, CousinFiles, CousinFilesModal, FileViewer, MarkdownDoc,
-  sanitizeHtml, ConfirmButton, fmtBytes,
+  sanitizeHtml, ConfirmButton, fmtBytes, groupByLevel, entryCite, LEVEL_META,
 });

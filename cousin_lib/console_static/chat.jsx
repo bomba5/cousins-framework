@@ -29,9 +29,15 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
     return () => { cancelled = true; };
   }, [sessionUser]);
   const chatUser = resolveChatUser(embedUser, c, me);
+  // The pane sits beside the chat (it used to replace it, under the key
+  // fw_pane_open): you watch the cousin work while you talk to it. With
+  // no choice stored yet it opens wherever both fit.
   const [paneOpen, setPaneOpen] = React.useState(() => {
-    try { return localStorage.getItem("fw_pane_open") === "1"; }
-    catch (e) { return false; }
+    try {
+      const v = localStorage.getItem("fw_pane_side");
+      if (v === "1" || v === "0") return v === "1";
+    } catch (e) { /* storage unavailable: fall through to the default */ }
+    return typeof window !== "undefined" && window.innerWidth > 1100;
   });
   const [search, setSearch] = React.useState("");
   const [toast, setToast] = React.useState(null);
@@ -69,7 +75,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   }, [activeCousin, chatUser]);
 
   React.useEffect(() => {
-    try { localStorage.setItem("fw_pane_open", paneOpen ? "1" : "0"); }
+    try { localStorage.setItem("fw_pane_side", paneOpen ? "1" : "0"); }
     catch (e) { /* ignore */ }
   }, [paneOpen]);
   React.useEffect(() => {
@@ -125,19 +131,11 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
 
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0 }}>
-      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "row", overflow: "hidden" }}>
-        {/* LEFT: chat - fills the window until the pane takes over */}
-        <div
-          className="chat-col"
-          style={{
-            flex: paneShown ? "0 0 0" : "1 1 auto",
-            minWidth: 0,
-            overflow: "hidden",
-            position: "relative",              /* anchor for the jump-to-bottom button */
-            display: "flex", flexDirection: "column",
-            transition: "flex 240ms cubic-bezier(0.4, 0, 0.2, 1)",
-          }}
-        >
+      {/* The chat and the pane side by side: the pane is the runner's
+          reasoning stream (with the interrupt) or the tmux terminal. On a
+          phone the open pane takes the whole width, as it always did. */}
+      <div className={"chat-split" + (paneShown ? " pane-open" : "")}>
+        <div className="chat-col">
           <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneShown} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} />
           {fullscreen && (
             <button className="chat-fullscreen-exit"
@@ -149,28 +147,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
               and the previous cousin's messages render until the new fetch lands
               -- a cross-cousin content leak between private chats. */}
           <ChatBody key={c.slug + "|" + chatUser} cousin={c} search={search} setSearch={setSearch} chatUser={chatUser} showArchived={showArchived} mediaShown={mediaShown} />
-          {toast && (
-            <div style={{
-              position: "absolute", bottom: 90, left: "50%", transform: "translateX(-50%)",
-              background: "var(--bg-2)", color: "var(--fg-0)",
-              border: "1px solid var(--line)", borderRadius: 4,
-              padding: "6px 12px", fontFamily: "var(--mono)", fontSize: 11,
-              zIndex: 10,
-            }}>{toast}</div>
-          )}
+          {toast && <div className="chat-toast">{toast}</div>}
         </div>
-        {/* RIGHT: terminal pane - slides in from the right, takes the whole chat window when open */}
-        <div
-          className={`pane-col ${paneShown ? "open" : ""}`}
-          style={{
-            flex: paneShown ? "1 1 auto" : "0 0 0",
-            minWidth: 0,
-            overflow: "hidden",
-            display: "flex", flexDirection: "column",
-            background: "var(--bg-0)",
-            transition: "flex 240ms cubic-bezier(0.4, 0, 0.2, 1)",
-          }}
-        >
+        <div className={`pane-col ${paneShown ? "open" : ""}`}>
           {paneShown && (c.runner
             ? <RunnerPaneView key={c.slug} cousin={c} onClose={() => setPaneOpen(false)} />
             : <PaneView cousin={c} onClose={() => setPaneOpen(false)} />)}
@@ -181,7 +160,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
 }
 
 function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown }) {
-  const btnH = 24;  // shared height for input + buttons
+  const btnH = 28;  // shared height for input + buttons
   // A remote cousin's node serves send and history only: no effort to
   // set, no archive, no pane.
   const remote = !!cousin.remote;
@@ -218,30 +197,22 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   };
 
   return (
-    <div className="chat-header" style={{
-      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-      padding: "8px 14px",
-      borderBottom: "1px solid var(--line)",
-      background: "var(--bg-1)",
-      fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)",
-    }}>
-      <span>chat &middot; @{cousin.slug}{chatUser ? ` as ${chatUser}` : ""}</span>
-      {remote && <span title={`a hive node at ${cousin.host}:${cousin.port}`}>&middot; remote</span>}
+    <div className="chat-header">
+      <span className="ch-title">
+        <span className="ch-sub">chat &middot; @{cousin.slug}{chatUser ? ` as ${chatUser}` : ""}</span>
+        {remote && <span className="ch-sub" title={`a hive node at ${cousin.host}:${cousin.port}`}>&middot; remote</span>}
+      </span>
       <span style={{ flex: 1 }} />
       {!embed && !remote && (
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+        <label className="ch-effort">
           <span>effort</span>
           <select
             value={effort}
             onChange={e => applyEffort(e.target.value)}
             disabled={!efforts.length}
             title="cousin.toml [runtime] effort: rendered into the agent command at the next start"
-            style={{
-              fontFamily: "var(--mono)", fontSize: 11,
-              background: "var(--bg-0)", color: "var(--fg-0)",
-              border: "1px solid var(--line)", borderRadius: 3,
-              padding: "0 6px", height: btnH, boxSizing: "border-box", outline: "none",
-            }}
+            className="sel-inline"
+            style={{ height: btnH }}
           >
             {!efforts.length && <option value={effort}>{effort || "..."}</option>}
             {efforts.map(l => <option key={l} value={l}>{l}</option>)}
@@ -259,30 +230,22 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
         onClick={onArchive}
         disabled={!chatUser}
         title="archive ALL active messages"
-        style={{ height: btnH, padding: "0 10px", boxSizing: "border-box" }}
+        style={{ height: btnH }}
       >archive</button>
       <button
-        className="btn ghost"
+        className={"btn ghost" + (showArchived ? " active" : "")}
         onClick={() => setShowArchived(v => !v)}
         title={showArchived ? "showing archived messages, click to return to live" : "browse archived messages"}
-        style={{
-          height: btnH, padding: "0 10px", boxSizing: "border-box",
-          background: showArchived ? "var(--accent)" : undefined,
-          color: showArchived ? "var(--bg-0)" : undefined,
-        }}
+        style={{ height: btnH }}
       >{showArchived ? "live" : "archived"}</button>
       </>)}
       {setMediaShown && (
         <button
-          className="btn ghost chat-media-toggle"
+          className={"btn ghost chat-media-toggle" + (mediaShown ? "" : " active")}
           onClick={() => setMediaShown(v => !v)}
           aria-pressed={!mediaShown}
           title={mediaShown ? "media shown: click to hide images, videos and audio" : "media hidden: click to show"}
-          style={{
-            height: btnH, padding: "0 10px", boxSizing: "border-box",
-            background: mediaShown ? undefined : "var(--accent)",
-            color: mediaShown ? undefined : "var(--bg-0)",
-          }}
+          style={{ height: btnH }}
         >{mediaShown ? "media on" : "media off"}</button>
       )}
       {!remote && (
@@ -291,29 +254,23 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="search..."
-        style={{
-          fontFamily: "var(--mono)", fontSize: 11,
-          background: "var(--bg-0)", color: "var(--fg-0)",
-          border: "1px solid var(--line)", borderRadius: 3,
-          padding: "0 8px", width: 140, maxWidth: "40vw", height: btnH, lineHeight: `${btnH - 2}px`,
-          boxSizing: "border-box", outline: "none",
-        }}
+        style={{ height: btnH }}
       />
       )}
       {!paneOpen && !embed && !remote && (
         <button
           className="btn ghost"
           onClick={() => setPaneOpen(true)}
-          title="show the terminal pane"
-          style={{ height: btnH, padding: "0 10px", boxSizing: "border-box" }}
-        >pane &rsaquo;</button>
+          title={cousin.runner ? "show the reasoning stream beside the chat" : "show the terminal pane beside the chat"}
+          style={{ height: btnH }}
+        >{cousin.runner ? "reasoning" : "terminal"} &rsaquo;</button>
       )}
       {setFullscreen && !embed && (
         <button
           className="btn ghost chat-fullscreen-toggle"
           onClick={() => setFullscreen(v => !v)}
           title={fullscreen ? "exit fullscreen" : "fullscreen chat"}
-          style={{ height: btnH, padding: "0 8px", boxSizing: "border-box" }}
+          style={{ height: btnH }}
         >{fullscreen ? "⤢ exit" : "⤢"}</button>
       )}
     </div>
@@ -606,7 +563,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
       {showSecondaryBar && (
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
-          padding: "6px 16px", borderBottom: "1px solid var(--line)",
+          padding: "6px 24px", borderBottom: "1px solid var(--hair)",
           fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)",
           background: searchActive ? "oklch(from var(--accent) 0.25 0.06 h)" : "var(--bg-1)",
         }}>
@@ -631,7 +588,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
         ref={scrollerRef}
         onScroll={onScroll}
         style={{
-          flex: 1, overflowY: "auto", overflowX: "hidden", padding: "14px 18px",
+          flex: 1, overflowY: "auto", overflowX: "hidden", padding: "18px 24px 10px",
           background: "var(--bg-0)",
           fontFamily: "var(--mono)", fontSize: 13, lineHeight: 1.55,
           minHeight: 0, minWidth: 0,
@@ -685,16 +642,15 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
+        className="chat-composer"
         style={{
-        borderTop: "1px solid var(--line)",
-        background: dragOver ? "oklch(from var(--accent) l c h / 0.18)" : "var(--bg-1)",
+        background: dragOver ? "oklch(from var(--accent) l c h / 0.18)" : "var(--bg-0)",
         outline: dragOver ? "2px dashed var(--accent)" : "none",
         outlineOffset: -4,
-        padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6,
       }}>
         {replyingTo && (
           <div style={{ display: "flex", alignItems: "stretch", gap: 8, padding: 6,
-                        background: "var(--bg-0)", border: "1px solid var(--line)", borderRadius: 3,
+                        background: "var(--bg-1)", border: "1px solid var(--hair)", borderRadius: 8,
                         borderLeft: "3px solid var(--accent)" }}>
             <div style={{ flex: 1, fontSize: 11, fontFamily: "var(--mono)", color: "var(--fg-2)",
                           cursor: "pointer", overflow: "hidden" }}
@@ -717,7 +673,7 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
         )}
         {attachment && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 6,
-                        background: "var(--bg-0)", border: "1px solid var(--line)", borderRadius: 3 }}>
+                        background: "var(--bg-1)", border: "1px solid var(--hair)", borderRadius: 8 }}>
             <img src={attachment.dataUrl} alt="" style={{ height: 40, borderRadius: 2 }} />
             <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--fg-2)", flex: 1 }}>
               {attachment.name || "image"}
@@ -752,10 +708,10 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
             lineHeight: "20px",                /* 20 + 7 + 7 + 1 + 1 = 36px */
             fontFamily: "var(--sans)",
             fontSize: 14,
-            background: "var(--bg-0)",
+            background: "var(--bg-1)",
             color: "var(--fg-0)",
             border: "1px solid var(--line)",
-            borderRadius: 3,
+            borderRadius: 10,
             outline: "none",
             boxSizing: "border-box",
             overflowY: "auto",
@@ -1161,27 +1117,24 @@ function PaneView({ cousin, onClose }) {
 
   return (
     <React.Fragment>
-      <div style={{
-        display: "flex", alignItems: "center", gap: 0,
-        padding: "6px 14px", borderBottom: "1px solid var(--line)",
-        fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)",
-        background: "var(--bg-1)",
-      }}>
-        <span>tmux {tmuxSession} &middot; </span>
+      <div className="pane-hdr">
+        <span className={"led " + (status === "live" ? "green" : status === "connecting" ? "amber" : "red")} />
+        <span className="pane-title">Terminal</span>
+        <span className="pane-chip">tmux {tmuxSession}</span>
         <span style={{ color: status === "live" ? "var(--green)" : status === "connecting" ? "var(--amber)" : "var(--red)" }}>{status}</span>
-        <span style={{ marginLeft: 10, color: "var(--fg-2)" }}>interactive</span>
-        {lastPoll && <span style={{ marginLeft: 10 }}>polled {fmtAgoShort((Date.now() - lastPoll.getTime()) / 1000)}</span>}
-        {lastChange && <span style={{ marginLeft: 10 }}>changed {fmtAgoShort((Date.now() - lastChange.getTime()) / 1000)}</span>}
-        {sendError && <span style={{ marginLeft: 10, color: "var(--red)" }}>input err: {sendError}</span>}
+        <span style={{ color: "var(--fg-2)" }}>interactive</span>
+        {lastPoll && <span>polled {fmtAgoShort((Date.now() - lastPoll.getTime()) / 1000)}</span>}
+        {lastChange && <span>changed {fmtAgoShort((Date.now() - lastChange.getTime()) / 1000)}</span>}
+        {sendError && <span style={{ color: "var(--red)" }}>input err: {sendError}</span>}
         <span style={{ flex: 1 }} />
         {held && (
           <button className="btn ghost"
                   onClick={() => { const t = termRef.current; if (t) t.scrollToBottom(); }}
                   title="scrolled back: live updates are held until you return to the bottom"
-                  style={{ padding: "0 6px", minHeight: 20, marginRight: 6, color: "var(--amber)" }}
+                  style={{ padding: "0 8px", minHeight: 22, color: "var(--amber)" }}
           >scrolled back &middot; jump to live</button>
         )}
-        {onClose && <button className="btn ghost" onClick={onClose} title="collapse the terminal pane" style={{ padding: "0 6px", minHeight: 20 }}>x</button>}
+        {onClose && <button className="btn ghost pane-x" onClick={onClose} title="collapse the terminal pane">x</button>}
       </div>
       {/* The padding lives on this wrapper, not on the xterm host:
           FitAddon counts rows from the host's computed height, which
@@ -1604,43 +1557,38 @@ function RunnerPaneView({ cousin, onClose }) {
   };
   const unsupported = runner.unsupported || [];
 
+  const turnLive = live.alive && (live.state === "running" || live.state === "waiting_permission");
   return (
     <React.Fragment>
-      <div style={{
-        display: "flex", alignItems: "center", gap: 0,
-        padding: "6px 14px", borderBottom: "1px solid var(--line)",
-        fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)",
-        background: "var(--bg-1)",
-      }}>
-        <span>runner {runner.kind || "?"} &middot; </span>
+      <div className="pane-hdr">
+        <span className={"led " + (!live.alive ? "gray" : live.state === "waiting_permission" ? "amber" : "green") + (turnLive && live.state === "running" ? " pulse" : "")} />
+        <span className="pane-title">Reasoning</span>
+        <span className="pane-chip">runner {runner.kind || "?"}</span>
         <span style={{ color: status === "live" ? "var(--green)" : "var(--amber)" }}>{status}</span>
-        <span style={{ marginLeft: 10, color: "var(--fg-2)" }}>{!live.alive ? "not running (last: " + (live.state || "none") + ")" : (live.state || "no state yet")}</span>
-        {unsupported.length > 0 && <span style={{ marginLeft: 10 }}>unsupported: {unsupported.join(", ")}</span>}
-        {note && <span style={{ marginLeft: 10 }}>{note}</span>}
+        <span style={{ color: "var(--fg-1)" }}>{!live.alive ? "not running (last: " + (live.state || "none") + ")" : (live.state || "no state yet").replace(/_/g, " ")}</span>
+        {unsupported.length > 0 && <span>unsupported: {unsupported.join(", ")}</span>}
         <span style={{ flex: 1 }} />
-        <button className="btn ghost" onClick={interrupt} title="interrupt the running turn"
-                disabled={!live.alive || (live.state !== "running" && live.state !== "waiting_permission")}
-                style={{ padding: "0 6px", minHeight: 20, marginRight: 6 }}>interrupt</button>
-        {onClose && <button className="btn ghost" onClick={onClose} title="collapse the pane" style={{ padding: "0 6px", minHeight: 20 }}>x</button>}
+        {onClose && <button className="btn ghost pane-x" onClick={onClose} title="collapse the pane">x</button>}
       </div>
-      <div ref={listRef} style={{
-        flex: 1, minHeight: 0, overflowY: "auto",
-        padding: "6px 10px", background: "#0a0a0a",
-        fontFamily: "var(--mono)", fontSize: 11, lineHeight: 1.45, color: "var(--fg-2)",
-        whiteSpace: "pre-wrap", wordBreak: "break-word",
-      }}>
+      <div ref={listRef} className="rp-list">
         {events.map((ev, i) => (
           <div key={i} className={"runner-ev runner-ev-" + ev.kind + " rp-" + runnerKindClass(ev.kind)}>
             <span className="rp-kind">{ev.kind}</span>
             <div className="rp-body">{rpRowBody(ev)}</div>
           </div>
         ))}
+        {events.length === 0 && <div className="rp-empty">{status === "live" ? "no events yet: the stream shows the runner's turns as they happen" : "connecting to the stream..."}</div>}
       </div>
-      <div style={{ display: "flex", gap: 6, padding: "6px 10px", borderTop: "1px solid var(--line)", background: "var(--bg-1)" }}>
-        <input className="input" value={said} onChange={e => setSaid(e.target.value)}
-               onKeyDown={e => { if (e.key === "Enter") say(); }}
-               placeholder="say to the running turn" style={{ flex: 1 }} />
-        <button className="btn" onClick={say} disabled={!said.trim()}>say</button>
+      <div className="pane-foot">
+        {note && <div className="pane-note">{note}</div>}
+        <div className="pane-foot-row">
+          <input className="txt" value={said} onChange={e => setSaid(e.target.value)}
+                 onKeyDown={e => { if (e.key === "Enter") say(); }}
+                 placeholder="say to the running turn" style={{ flex: 1 }} />
+          <button className="btn" onClick={say} disabled={!said.trim()}>say</button>
+          <button className="btn rp-interrupt" onClick={interrupt} title="interrupt the running turn"
+                  disabled={!live.alive || (live.state !== "running" && live.state !== "waiting_permission")}>interrupt</button>
+        </div>
       </div>
     </React.Fragment>
   );
@@ -1959,7 +1907,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
              style={{
                position: "fixed", left: menu.x, top: menu.y,
                background: "var(--bg-1)", border: "1px solid var(--line)",
-               borderRadius: 4, padding: 6, zIndex: 9000,
+               borderRadius: 10, padding: 6, zIndex: 9000,
                boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
                display: "flex", flexDirection: "column", gap: 4,
                maxWidth: "92vw",

@@ -70,7 +70,8 @@ characters; your other sessions stay valid) and log out.
 
 ## Layout
 
-The top bar has a button that collapses the sidebar, the brand, and the
+The top bar has a button that collapses the sidebar, the console's icon and
+brand, and the
 version the console is running: `v0.1.0 0a119f6`. In a git checkout with a
 browsable `origin` remote, the version links to the repository and the
 commit hash to that commit. The version is read when the console starts, so
@@ -79,7 +80,10 @@ are an eye toggle that shows or hides hidden cousins and loops, the logged-in
 user, and a clock.
 
 The sidebar lists the pages (Ctrl/Cmd + 1 to 7, 0 for Settings) and below
-them your cousins. Click a cousin to open its chat. A stopped cousin is
+them your cousins. The Overview entry carries a count when cousins are
+waiting on a person, and the foot of the sidebar shows the next daily flip:
+the earliest `flip_at` among the running cousins, how far away it is, and
+who flips then. Click a cousin to open its chat. A stopped cousin is
 greyed out and can't be clicked; start it from Cousins first. A dot next to
 a name means it has replied since you last looked at its chat. You can group
 cousins: right-click one to move it to a group or make a new group, drag
@@ -101,15 +105,47 @@ A few URL parameters are handy for bookmarks and embedding:
 
 ## Overview
 
-The landing page. Host stats (hostname, kernel, uptime, CPU and load, memory,
-disk for `/`, network rate and totals, how long the console has been up), a
-table of cousins with status, chat state, operator, heartbeat and tokens
-today, today's totals, and the most recent loop and heartbeat fires.
+The landing page. It opens with one sentence of fleet health: how many
+cousins are running, how many need you, and when the next daily flip is
+("5 of 6 running · 1 needs you · next flip 04:00, in 8h 28m"). Under it a
+strip of the numbers you compare: cousins running, tokens today, jobs in the
+last 24 hours (running and failed), and loops with their recent fires or the
+loops daemon's complaint.
+
+The fleet table has one row per cousin, what needs you first, then
+warnings, then the running ones, then the stopped ones. The columns:
+
+- **state**, in words beside its dot: `working`, `idle`, `needs you`,
+  `rate limited`, `errored`, `enrolled` (a worker) or `stopped`. A cousin
+  "needs you" when its pane shows one of the `attention_patterns` or its
+  runner waits for a permission; the reason replaces the role line in the
+  cousin column. A running cousin whose chat server is down is a warning.
+  A stopped cousin is never flagged: stopping it was your decision.
+- **cousin**: name, slug and role.
+- **runner**: the lane, read from the row: the runner's own kind (`sdk`,
+  `opencode`, ...), `tmux`, `worker` or `remote`, with the chat server's
+  state under a tmux cousin.
+- **model** and effort, what the next start renders.
+- **next flip**: the cousin's own `[lifecycle] flip_at` and how far away it
+  is on your browser's clock; `default` when it takes the install default
+  (the route does not say which time that is), `never` for an opt-out.
+- **beat**, **operator** and **tokens today**.
+
+Click a running cousin's row to open its chat. The fleet rows carry no
+generation or context fill, so the table shows neither.
+
+Beside the table (under it on narrower screens) sit the host (hostname,
+kernel, uptime, CPU and load, memory, disk for `/`, network rate and totals,
+how long the console has been up) and an activity rail: jobs from the last
+24 hours, loop and heartbeat fires, and any flip the console saw while the
+page was open, newest first.
 
 ## Cousins
 
-One card per cousin. A card shows the name and slug, a status pill (`active`
-if the pane changed in the last minute, `idle`, or `stopped`), the role, and
+One card per cousin. A card shows the name and slug, its state in words, the
+same reading as the overview's (`working` if the pane changed in the last
+minute or the runner is mid-turn, `idle`, `needs you`, `enrolled` for a
+worker, or `stopped`), the role, and
 a row of facts: chat port, memory scope, operator, heartbeat, flip time,
 host, model, the agent's pid and uptime, the last activity line and tokens
 spent today. A runner cousin's card shows `chat · console` (the console
@@ -294,7 +330,8 @@ The header has:
 - **search**: searches the thread (the archive too while you're in archived
   mode), highlights matches and gives you up and down arrows to step
   through them.
-- **pane**: opens the live terminal.
+- **terminal** (a tmux cousin) or **reasoning** (a runner cousin): opens
+  the pane beside the chat, when it is closed.
 - **fullscreen**: hides the rest of the console.
 
 A remote cousin's chat has only send, history and the media toggle; its node
@@ -313,9 +350,18 @@ Escape or a click outside closes it.
 placeholder like `[image hidden]`. The choice is stored in your browser.
 Generating media is a separate, optional thing: see [media](media.md).
 
+### Beside the chat: the pane
+
+The pane sits beside the chat rather than in place of it, so you watch the
+cousin work while you talk to it: a runner cousin's reasoning stream, or a
+tmux cousin's terminal. Where the window is wide enough for both it opens by
+default; its "x" closes it and the header's button brings it back, and the
+choice is kept in your browser. On a phone the open pane takes the whole
+width, as it always did.
+
 ### The terminal pane
 
-"pane" slides the cousin's tmux session in from the right, rendered with
+For a tmux cousin the pane is its tmux session, rendered with
 xterm. It's interactive: what you type goes to the session, through the same
 lock the chat server uses to inject messages, so keystrokes and chat
 deliveries never interleave. Keys are batched for 40 ms and mapped to tmux
@@ -338,17 +384,19 @@ The pane header shows the tmux session and when the pane last changed. The
 ### The reasoning pane (a runner cousin)
 
 A cousin on the runner (`[agent] runner` in its `cousin.toml`) has no tmux
-session, so for it "pane" opens its reasoning stream instead: every state
+session, so for it the pane is its reasoning stream instead: every state
 change, turn, text, thinking block, tool call and tool output the runner
 records, live, as it records them (read from the cousin's own
 `data/stream/`). It opens at the newest 200 events, not the whole history;
 a dropped connection picks up where it left off, and a runner that
 restarted meanwhile is marked with a new-session line. When no runner is
 running, the header says "not running" beside the last state it recorded.
-"interrupt" ends the running turn, past its first answer too; the button is
-live only while a turn runs, and the header says what came of it
-(`delivered`, or `failed` when the turn had already finished or the agent
-refused). The box at the bottom says
+A tool call and its output read as structure: the call, then its result
+hung under it; a turn opens under a rule. "interrupt", beside the say box
+at the foot of the stream, ends the running turn, past its first answer
+too; the button is live only while a turn runs, and the foot says what came
+of it (`delivered`, or `failed` when the turn had already finished or the
+agent refused). The box at the bottom says
 something to the running turn as its operator: the runner writes it into the
 live turn, or takes it next. What you say there is not stored in the chat,
 as typing into a tmux pane is not; a login code typed there while a login
@@ -385,7 +433,11 @@ can't approve their own proposal. The audit table underneath shows the
 recent proposals, promotions and rejections.
 
 **@wren** (a cousin tab) opens the memory explorer for that cousin. The left
-column lists the layers, grouped:
+column starts with the truth levels, each with its colour and its count:
+operator, framework, tool, conclusion, hypothesis, obsolete. Click one to
+filter the raw entries to it (click more to add levels, "all levels" to
+clear); the counts follow the list's other filters while a raw list is
+open, and count the live entries otherwise. Under them the layers, grouped:
 
 | group | layers |
 |---|---|
@@ -401,8 +453,11 @@ be folded, distilled views behind raw), sources and the busiest topics, raw
 entries per month, and the state of the keyword and semantic indexes.
 
 Raw entries can be filtered by truth level (L0 operator down to L5 obsolete),
-topic, text, source and date range. Each entry shows its level, topic,
-content, source and time. Decisions show what was decided and why. File
+topic, text, source and date range, and are grouped by level (operator
+first, obsolete last; "newest first" lists them in time order instead).
+Each entry shows its level in words and colour, topic, content, source and
+time. An operator-stated entry shows where it was cited (or says none was
+stored); an obsolete one is struck through and dimmed, never hidden. Decisions show what was decided and why. File
 layers show a list and a viewer. The levels themselves are explained in
 [memory](memory.md).
 

@@ -228,7 +228,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
           style={{
             position: "fixed", left: groupMenu.x, top: groupMenu.y,
             background: "var(--bg-1)", border: "1px solid var(--line)",
-            borderRadius: 4, padding: 6, zIndex: 9000,
+            borderRadius: 10, padding: 6, zIndex: 9000,
             boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
             display: "flex", flexDirection: "column", gap: 2, minWidth: 160,
           }}>
@@ -253,7 +253,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
           style={{
             position: "fixed", left: contextMenu.x, top: contextMenu.y,
             background: "var(--bg-1)", border: "1px solid var(--line)",
-            borderRadius: 4, padding: 6, zIndex: 9000,
+            borderRadius: 10, padding: 6, zIndex: 9000,
             boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
             display: "flex", flexDirection: "column", gap: 2, minWidth: 180,
           }}>
@@ -305,7 +305,8 @@ function LoginScreen({ onLogin }) {
   };
   return (
     <div className="login-screen" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-0)" }}>
-      <form className="panel" onSubmit={submit} style={{ width: "min(360px, 92vw)" }}>
+      <form className="panel" onSubmit={submit} style={{ width: "min(360px, 92vw)", paddingTop: 22 }}>
+        <img className="login-mark" src="favicon.svg" alt="" aria-hidden="true" />
         <div className="panel-hdr"><span className="title">console login</span></div>
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10, padding: 18 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--fg-3)" }}>
@@ -537,6 +538,13 @@ function App() {
     return () => window.removeEventListener("fw-restart", onRestart);
   }, []);
 
+  // One reading of the fleet for the sidebar: how many cousins wait on a
+  // person (the Overview entry's count) and when the next daily flip is
+  // (the card at the sidebar's foot). Both from the rows the SSE keeps.
+  const health = window.fleetHealth
+    ? fleetHealth(cousins.filter(c => showHidden || !c.hidden), clock.getTime()) : null;
+  const nextFlipAt = health && health.nextFlip;
+
   if (auth === null) {
     return <div style={{ padding: 20, fontFamily: "var(--mono)", color: "var(--fg-3)" }}>connecting...</div>;
   }
@@ -553,6 +561,7 @@ function App() {
           title={sidebarCollapsed ? "expand sidebar" : "collapse sidebar"}
           style={{ minHeight: 24, padding: "0 6px", fontSize: 12, marginRight: 4 }}
         >{sidebarCollapsed ? "›" : "‹"}</button>
+        <img className="brand-icon" src="favicon.svg" alt="" aria-hidden="true" />
         <span className="brand">cousins<span className="dim">//</span>console</span>
         {build && <span className="build">{build.repo_url ? <a href={build.repo_url} title={build.repo_url} target="_blank" rel="noopener noreferrer">v{build.version}</a> : `v${build.version}`}{build.commit ? " " : ""}{build.commit ? (build.commit_url ? <a href={build.commit_url} title={build.commit_url} target="_blank" rel="noopener noreferrer">{build.commit}</a> : build.commit) : ""}</span>}
         <span className="spacer" />
@@ -578,6 +587,9 @@ function App() {
                title={`ctrl/cmd + ${n.kbd}`}>
             <span className="icon">{n.icon}</span>
             <span>{n.label}</span>
+            {n.id === "overview" && health && health.needs > 0 && (
+              <span className="nav-count" title={`${health.needs} cousin${health.needs === 1 ? "" : "s"} waiting on a person`}>{health.needs}</span>
+            )}
           </div>
         ))}
         <SidebarGroups
@@ -590,6 +602,17 @@ function App() {
         />
 
         <div style={{ flex: 1 }} />
+        {nextFlipAt && (
+          <div className="flip-card" data-next-flip
+               title="the earliest [lifecycle] flip_at among the running cousins, on this browser's clock">
+            <div className="fc-label">next flip</div>
+            <div className="fc-time">{nextFlipAt.at}<span className="fc-in">in {fleetIn(nextFlipAt.inSec)}</span></div>
+            <div className="fc-sub">
+              {nextFlipAt.slugs.map(s => "@" + s).join(", ")}
+              {nextFlipAt.onDefault ? ` · ${nextFlipAt.onDefault} on the install default` : ""}
+            </div>
+          </div>
+        )}
       </nav>
 
       <main className="main">
@@ -604,7 +627,7 @@ function App() {
           {view === "tracker"  && <TrackerView cousins={cousins} />}
           {view === "meetings" && window.MeetingsView && <MeetingsView cousins={cousins} sessionUser={sessionUser} initialMeeting={initialMeeting} />}
           {view === "settings" && <SettingsView auth={auth} setAuth={setAuth} />}
-          {view === "overview" && <HostView />}
+          {view === "overview" && <HostView onOpen={(slug) => { setActiveCousin(slug); pickView("chat"); }} />}
         </div>
       </main>
 
@@ -635,17 +658,19 @@ function App() {
 
 function MainHeader({ view, cousins, activeCousin }) {
   const c = cousins.find(x => x.slug === activeCousin);
+  // The cousin's state in words beside its dot (views.jsx fleetState).
+  const st = c && window.fleetState ? fleetState(c) : null;
   const titles = {
-    chat: "chat." + (activeCousin || "-"),
-    cousins: "cousins",
-    jobs: "jobs",
-    memory: "memory.explorer",
-    loops: "loops.status",
-    tokens: "tokens.meter",
-    tracker: "tracker",
-    meetings: "meetings",
-    settings: "settings",
-    overview: "host.stats",
+    chat: c ? (c.name || c.slug) : "Chat",
+    cousins: "Cousins",
+    jobs: "Jobs",
+    memory: "Memory",
+    loops: "Loops",
+    tokens: "Tokens",
+    tracker: "Tracker",
+    meetings: "Meetings",
+    settings: "Settings",
+    overview: "Overview",
   };
   const paths = {
     chat: "/console/chat/@" + (activeCousin || "-"),
@@ -665,9 +690,9 @@ function MainHeader({ view, cousins, activeCousin }) {
       <span className="path">{paths[view] || ""}</span>
       <span className="spacer" />
       {view === "chat" && c && (
-        <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-2)" }}>
-          <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
-          {" "}{c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
+        <span className="hdr-meta">
+          <span className={"led " + (st ? st.tone : "gray") + (st && st.pulse ? " pulse" : "")} />
+          <span className={"fleet-state tone-" + (st ? st.tone : "gray")}>{st ? st.word : c.status}</span> · {c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
         </span>
       )}
     </div>

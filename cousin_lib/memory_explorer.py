@@ -161,6 +161,9 @@ def _record(home, path, line_no, text, entry, tier):
         "timestamp": _stamp(entry) or None,
         "when": memory.entry_timestamp(entry),
         "id": entry.get("id"),
+        # where an operator-stated entry says it came from (remember and
+        # decide --cite); null when the entry carries none
+        "cite": entry.get("cite"),
         "extra": extra,
         "ref": None,
     }

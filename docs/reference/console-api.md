@@ -503,7 +503,7 @@ Raw memory entries, newest first: `{"entries", "total", "offset", "limit", "face
 | `tier` | `live` (default: daily files plus monthly digests), `daily`, `digest`, `archive`, `all`; anything else `400` |
 | `limit`, `offset` | default 200, max 1000 |
 
-Each entry is broken out into fields (`tier`, `file`, `topic`, `content`, `truth_level`, `level`, `source`, `timestamp`, `id`, `extra`, ...) and carries `ref: {"path", "line_no", "sha"}` for deleting it. Archive entries have `ref: null`: the archive stays whole.
+Each entry is broken out into fields (`tier`, `file`, `topic`, `content`, `truth_level`, `level`, `source`, `timestamp`, `id`, `cite`, `extra`, ...), where `cite` is where an operator-stated entry says it came from (null when it carries none), and carries `ref: {"path", "line_no", "sha"}` for deleting it. Archive entries have `ref: null`: the archive stays whole.
 
 ### `GET /api/memory/<slug>/decisions`
 

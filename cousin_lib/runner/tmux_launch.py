@@ -8,7 +8,9 @@ launcher then
   - reads the cousin's account (accounts.for_cousin) and adds its
     variables (a named login's CLAUDE_CONFIG_DIR; `host` adds none);
     `claude-token` and `anthropic-key` accounts are refused (P11-6);
-  - adds CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 and DISABLE_AUTOUPDATER=1;
+  - adds CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 and DISABLE_AUTOUPDATER=1, and
+    COUSIN_PANE_PID: its own pid, which the exec chain makes the pane's and
+    the CLI's (the pane hook writes only for that CLI, tmux_hook.from_pane);
   - on a fresh start (--fresh) appends `--append-system-prompt` with the
     text of data/run/tmux-context.md (R10), read here so it never passes
     through tmux's parser;
@@ -23,6 +25,7 @@ import os
 import sys
 from pathlib import Path
 
+from cousin_lib.runner.tmux_hook import PANE_PID_VAR
 from cousin_lib.runner.tmux_pane import DENY_PREFIXES, denied  # the hard deny, in one place
 
 BASE_ENV = ("HOME", "PATH", "USER", "LOGNAME", "SHELL", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR",
@@ -131,7 +134,8 @@ def main(argv=None):
     env = dict(os.environ)
     env.update(own)
     env.update(SWITCHES)
-    keep = set(own) | set(SWITCHES)
+    env[PANE_PID_VAR] = str(os.getpid())      # exec keeps it: the CLI's pid
+    keep = set(own) | set(SWITCHES) | {PANE_PID_VAR}
     env = {k: v for k, v in env.items() if k in keep or not denied(k)}
     if opts.fresh:
         try:

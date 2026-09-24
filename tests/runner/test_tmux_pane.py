@@ -10,6 +10,7 @@ import pathlib
 import stat
 import sys
 import tempfile
+import time
 import unittest
 
 from cousin_lib.runner import tmux_pane as tp
@@ -270,6 +271,40 @@ class TestTyping(PaneCase):
         self.assertEqual(self.calls()[-1][-1], "C-u")
         with self.assertRaises(ValueError):
             self.pane.key("y")
+
+
+class TestProcesses(unittest.TestCase):
+    """What the runner waits on after killing a refused pane (R24): a pid is
+    alive until it is gone or a zombie; a SIGKILL ends it. Only this test's
+    own children are signalled."""
+
+    def child(self):
+        import subprocess
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: (proc.kill(), proc.wait()))
+        return proc
+
+    def test_a_running_process_is_alive(self):
+        self.assertTrue(tp.process_alive(os.getpid()))
+        self.assertTrue(tp.process_alive(self.child().pid))
+
+    def test_a_sigkilled_child_is_gone_once_reaped_and_a_zombie_counts_as_gone(self):
+        proc = self.child()
+        tp.process_kill(proc.pid)
+        deadline = time.monotonic() + 5
+        while tp.process_alive(proc.pid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertFalse(tp.process_alive(proc.pid), "unreaped: a zombie is gone")
+        proc.wait()
+        self.assertFalse(tp.process_alive(proc.pid))
+
+    def test_a_pid_no_process_can_have_is_gone_and_quiet_to_kill(self):
+        try:
+            pid = int(pathlib.Path("/proc/sys/kernel/pid_max").read_text()) + 1
+        except OSError:
+            self.skipTest("no /proc/sys/kernel/pid_max")
+        self.assertFalse(tp.process_alive(pid))
+        tp.process_kill(pid)            # never a reaped child's pid: it could be reused
 
 
 if __name__ == "__main__":

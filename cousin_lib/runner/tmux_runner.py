@@ -28,7 +28,7 @@ import uuid
 from pathlib import Path
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import blocks, transcript, wake
+from cousin_lib.runner import blocks, transcript, tmux_hook, wake
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
@@ -41,6 +41,11 @@ LIMIT_RETRY_S = 300.0     # how long a usage limit holds the claim loop before t
 TURN_FINISH_S = 30.0      # after the handoff file lands, how long the handoff turn may take to end
 EXIT_WAIT_S = 10.0        # how long `/exit` gets to end the CLI before the pane is killed
 HOOKS_SILENT_S = 5.0      # after the first turn end, how long a pane hook's datagram may still take
+KILL_GRACE_S = 3.0        # a refused pane's CLI gets this long after the kill before a SIGKILL
+KILL_BOUND_S = 6.0        # and this long in all before the runner gives up on starting
+MAX_ID = 128              # a hook datagram's session_id; a CLI's is a 36-character uuid
+MAX_SOURCE = 32           # and its SessionStart source ("startup", "resume", "clear", "compact")
+CHANGES_KEPT = 32         # session ids a session_changed was said for, the newest kept
 LOGIN_SCREENS = ("trust", "onboarding", "login", "bypass", "mcp_approval")
 CLAIMS_FILE = "tmux-claims.json"
 CURSOR_FILE = "tmux-cursor.json"
@@ -111,8 +116,9 @@ class TmuxRunner:
         self._hook_heard = False         # a pane hook's datagram for this session arrived (M-a)
         self._first_end = None           # monotonic time of the first turn end
         self._hooks_silent_said = False
-        self._changes_said = set()       # session ids a SessionStart named that are not ours
-        self.hooks_silent_s = HOOKS_SILENT_S   # tests shorten it
+        self._changes_said = {}          # session ids a SessionStart named that are not ours
+        self.hooks_silent_s = HOOKS_SILENT_S   # tests shorten these three
+        self.kill_grace_s, self.kill_bound_s = KILL_GRACE_S, KILL_BOUND_S
         self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
 
     # -- small helpers ----------------------------------------------------
@@ -278,7 +284,13 @@ class TmuxRunner:
             else:
                 self.stream.append("system", dict({"subtype": "adopt_refused",
                                                    "session_id": self._session_id}, **refused))
+                old = self.pane.pid()
                 self.pane.kill()
+                if not self._gone(old):
+                    # a second CLI on the same session would write the same transcript
+                    raise RunnerError("the refused pane's CLI (pid %s) outlived its kill and a"
+                                      " SIGKILL; not starting a second one on session %s"
+                                      % (old, self._session_id))
         if how is None:
             self.pane.start(self._argv(self._fresh), cwd=str(self.home), env_base=self._env_base())
             how = "fresh" if self._fresh else "resumed"
@@ -286,6 +298,22 @@ class TmuxRunner:
         self.stream.append("session", {"pane_pid": self.pane.pid(), "session_id": self._session_id,
                                        "source": how})
         return how
+
+    def _gone(self, pid):
+        """Wait for a killed pane's CLI to be gone: SIGKILL after
+        kill_grace_s, False when it is still there at kill_bound_s."""
+        if pid is None:
+            return True
+        start, killed = time.monotonic(), False
+        while self.pane.process_alive(pid):
+            waited = time.monotonic() - start
+            if waited >= self.kill_bound_s:
+                return False
+            if not killed and waited >= self.kill_grace_s:
+                self.pane.process_kill(pid)
+                killed = True
+            time.sleep(POLL_S)
+        return True
 
     # -- claims ------------------------------------------------------------
     def _persist_claims(self):
@@ -394,40 +422,59 @@ class TmuxRunner:
                     self._fail_turn([], exc)
                     time.sleep(0.2)
                 listener.wait(timeout=POLL_S)
-                self._heard(listener.messages)
+                self._heard(listener)
 
-    def _heard(self, messages):
+    def _hook_message(self, raw):
+        """A pane hook's datagram as (event, session_id, source), or None for
+        anything else: a plain poke, or a shape no hook sends (review minor 5)."""
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(data, dict) or data.get("event") not in tmux_hook.EVENTS:
+            return None
+        sid, source = data.get("session_id"), data.get("source")
+        if sid is not None and not (isinstance(sid, str) and 0 < len(sid) <= MAX_ID):
+            return None
+        if source is not None and not (isinstance(source, str) and len(source) <= MAX_SOURCE):
+            return None
+        return data["event"], sid, source
+
+    def _heard(self, listener):
         """The pane hooks' datagrams (runner/tmux_hook.py). One is only a
         wake: it counts as heard when it names this session, and nothing
-        else is done on it (R19). No datagram by HOOKS_SILENT_S after the
-        first turn end is a `hooks_silent` event, once (M-a): the hooks
-        fail somewhere, and the runner keeps polling the transcript."""
-        for raw in messages:
-            try:
-                data = json.loads(raw)
-            except ValueError:
-                continue            # a plain poke from a producer
-            if not (isinstance(data, dict) and data.get("event")):
+        else is done on it (R19). No datagram within hooks_silent_s (5 s) of
+        the first turn end is a `hooks_silent` event, once (M-a). A runner
+        polling without its socket (wake.Poller) hears nothing by design and
+        already said why, so it says nothing more."""
+        for raw in listener.messages:
+            message = self._hook_message(raw)
+            if message is None:
                 continue
-            sid = data.get("session_id")
+            event, sid, source = message
             if sid == self._session_id:
                 self._hook_heard = True
-            if data["event"] == "SessionStart" and (sid != self._session_id
-                                                    or data.get("source") == "clear"):
-                self._session_changed(sid, data.get("source"))
+            if event == "SessionStart" and (sid != self._session_id or source == "clear"):
+                self._session_changed(sid, source)
         if (not self._hook_heard and not self._hooks_silent_said and self._first_end is not None
+                and listener.path is not None
                 and time.monotonic() - self._first_end >= self.hooks_silent_s):
             self._hooks_silent_said = True
-            self.stream.append("system", {"subtype": "hooks_silent", "session_id": self._session_id,
-                                          "detail": "no pane hook datagram by the first turn end;"
-                                                    " the runner polls the transcript instead"})
+            self.stream.append("system", {
+                "subtype": "hooks_silent", "session_id": self._session_id,
+                "detail": "no pane hook datagram for this session within %g s of the first"
+                          " turn end (a hook that does not import, or a CLI that is not the"
+                          " pane's); the runner polls the transcript instead" % self.hooks_silent_s})
 
     def _session_changed(self, sid, source):
         """A SessionStart for a session that is not the runner's (a /clear in
-        the pane): said once per id, never followed (a known gap)."""
+        the pane): said once per id, never followed (a known gap). The ids
+        said are bounded: the oldest is forgotten past CHANGES_KEPT."""
         if sid in self._changes_said:
             return
-        self._changes_said.add(sid)
+        self._changes_said[sid] = True
+        while len(self._changes_said) > CHANGES_KEPT:
+            self._changes_said.pop(next(iter(self._changes_said)))
         self.stream.append("system", {"subtype": "session_changed", "session_id": self._session_id,
                                       "new_session_id": sid, "source": source})
 

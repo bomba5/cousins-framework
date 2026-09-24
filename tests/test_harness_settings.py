@@ -217,6 +217,9 @@ class TestTmuxKindSettings(SettingsCase):
                 ["/usr/bin/python3", "-m", "cousin_lib.runner.tmux_hook", "--home",
                  str(self.home.resolve()), event])], event)
         self.assertTrue(self._commands(data, "PreToolUse"))       # the job hooks stay (parity)
+        for event in self.EVENTS:                                 # the CLI bounds the bridge hook too
+            self.assertEqual([h.get("timeout") for g in data["hooks"][event] for h in g["hooks"]
+                              if "cousin_lib.runner.tmux_hook" in h["command"]], [5], event)
 
     def test_an_sdk_or_legacy_home_gets_none_of_them(self):
         self._apply()

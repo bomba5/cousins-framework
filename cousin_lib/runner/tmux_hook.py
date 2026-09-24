@@ -16,6 +16,12 @@ with the hook's JSON on stdin. It does two things:
     (runner/wake.py). Hooks are wake-ups: the runner decides nothing on
     one, the transcript confirms (R19).
 
+Only the pane's own CLI does either (R24, review minor 4): the launcher
+exports its pid as COUSIN_PANE_PID, and the exec chain makes that the
+pane's pid and the CLI's. A hook whose CLI is not that pid (an operator's
+claude in the home, a claude the pane's model started) writes nothing and
+sends nothing.
+
 A hook must never block or fail the CLI: it always exits 0, prints
 nothing on stdout (SessionStart's and UserPromptSubmit's stdout reach
 the model's context), ignores input it cannot read, and bounds every
@@ -38,6 +44,7 @@ RECORD = ("run", "tmux-session.json")
 MAX_INPUT = 1 << 20        # a hook's JSON is small; more is not ours to read
 READ_S = 1.0               # stdin the CLI never closes is given up on after this
 HARD_S = 3.0               # the whole hook, whatever step it is in
+PANE_PID_VAR = "COUSIN_PANE_PID"   # set by tmux_launch: the pane's pid, which is the CLI's
 IGNORED_NOTIFICATIONS = ("idle_prompt",)
 SHELLS = ("sh", "bash", "dash", "zsh", "ash", "busybox")
 
@@ -99,6 +106,21 @@ def cli_pid():
     return pid
 
 
+def from_pane(environ=None):
+    """True when this hook's CLI is the pane's own: its pid is the one the
+    launcher exported. A CLI started inside the pane inherits the variable
+    but has a pid of its own; one started outside has none."""
+    value = (os.environ if environ is None else environ).get(PANE_PID_VAR, "")
+    try:
+        pane = int(value)
+    except ValueError:
+        return False
+    return pane > 1 and cli_pid() == pane
+
+
+_TEMP = []                 # the record's temp file while it is being written
+
+
 def _write_record(home, record):
     """The record at <home>/run/tmux-session.json: a temp file in the same
     directory (0600), then os.replace. `run/` is created 0700 when
@@ -109,16 +131,25 @@ def _write_record(home, record):
     except FileExistsError:
         pass
     fd, tmp = tempfile.mkstemp(dir=str(run), prefix="." + RECORD[-1] + ".", suffix=".tmp")
+    _TEMP.append(tmp)
     try:
         with os.fdopen(fd, "w") as fh:
             fh.write(json.dumps(record))
         os.replace(tmp, str(run / RECORD[-1]))
     except BaseException:
+        _remove_temp()
+        raise
+    finally:
+        _TEMP.clear()
+
+
+def _remove_temp():
+    for tmp in _TEMP:
         try:
             os.unlink(tmp)
         except OSError:
             pass
-        raise
+    _TEMP.clear()
 
 
 def session_start(home, data):
@@ -163,6 +194,8 @@ def main(argv=None, stdin=None):
         home, event = args
         if not Path(home).is_dir():
             return 0
+        if not from_pane():
+            return 0
         data = _parse(_read_stdin() if stdin is None else stdin)
         if data is None:
             return 0
@@ -177,9 +210,13 @@ def main(argv=None, stdin=None):
     return 0
 
 
+def _expired(_sig, _frame):
+    """HARD_S is up: leave no temp record behind, and exit 0."""
+    _remove_temp()
+    os._exit(0)
+
+
 def _run():
-    def _expired(_sig, _frame):
-        os._exit(0)
     try:
         signal.signal(signal.SIGALRM, _expired)
         signal.setitimer(signal.ITIMER_REAL, HARD_S)

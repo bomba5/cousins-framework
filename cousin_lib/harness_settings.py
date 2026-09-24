@@ -54,6 +54,7 @@ TMUX_KEYS = {"editorMode": "normal", "autoContinueAtUsageLimit": False,
              "remoteControlAtStartup": False}
 TMUX_HOOK_MODULE = "cousin_lib.runner.tmux_hook"
 TMUX_HOOK_EVENTS = ("UserPromptSubmit", "Stop", "Notification", "SessionStart")
+TMUX_HOOK_TIMEOUT = 5      # the hook bounds itself at 3 s (tmux_hook.HARD_S); the CLI's own bound
 # What the kind added, so remove_kind_settings undoes exactly that.
 TMUX_OWNED = pathlib.Path(".claude") / "cousin-tmux-owned.json"
 
@@ -161,7 +162,8 @@ def _tmux_hooks(home, python):
     home = pathlib.Path(os.path.abspath(home))
     python = python or sys.executable
     return {event: [{"hooks": [{"type": "command", "command": shlex.join(
-        [str(python), "-m", TMUX_HOOK_MODULE, "--home", str(home), event])}]}]
+        [str(python), "-m", TMUX_HOOK_MODULE, "--home", str(home), event]),
+        "timeout": TMUX_HOOK_TIMEOUT}]}]
         for event in TMUX_HOOK_EVENTS}
 
 

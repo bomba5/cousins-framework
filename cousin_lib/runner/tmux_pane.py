@@ -21,8 +21,10 @@ so an attached terminal cannot change what it parses.
 It never decides whether a prompt was received: that is the transcript's
 (runner/transcript.py)."""
 import enum
+import os
 import re
 import shlex
+import signal
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -85,6 +87,8 @@ class Pane(Protocol):
     def pid(self) -> int | None: ...
     def start(self, argv, *, cwd, env_base) -> None: ...
     def kill(self) -> None: ...
+    def process_alive(self, pid) -> bool: ...
+    def process_kill(self, pid) -> None: ...
     def capture(self) -> str: ...
     def box_text(self) -> str | None: ...
     def queued(self) -> bool: ...
@@ -92,6 +96,38 @@ class Pane(Protocol):
     def type_row(self, first_line, body) -> Outcome: ...
     def key(self, name) -> None: ...
     def clear(self) -> None: ...
+
+
+def process_alive(pid):
+    """True while `pid` is a process that can still run: /proc/<pid> is
+    there and not a zombie (a zombie writes nothing). Without /proc, a
+    signal 0 answers."""
+    if not os.path.isdir("/proc/self"):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    try:
+        stat = Path("/proc/%d/stat" % pid).read_text()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    try:
+        return stat.rsplit(")", 1)[1].split()[0] != "Z"
+    except IndexError:
+        return True
+
+
+def process_kill(pid):
+    """SIGKILL `pid`; one already gone, or not ours, is left as it is."""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 def attention_in(screen):
@@ -171,6 +207,12 @@ class TmuxPane:
 
     def kill(self):
         self._tmux("kill-session", "-t", self._session())
+
+    def process_alive(self, pid):
+        return process_alive(pid)
+
+    def process_kill(self, pid):
+        process_kill(pid)
 
     def capture(self):
         """The screen, or None when there is no pane to read."""

@@ -21,7 +21,7 @@ from cousin_lib.runner.tmux_pane import Outcome
 
 class FakePane:
     def __init__(self, transcript, *, slow=False, fail_first=False, turn_s=0.05, slow_s=3.0,
-                 attention=None, on_prompt=None, settle_s=0.0):
+                 attention=None, on_prompt=None, settle_s=0.0, linger=None):
         self.transcript = Path(transcript)
         self.slow, self.fail_first = slow, fail_first
         self.turn_s, self.slow_s = turn_s, slow_s
@@ -38,6 +38,8 @@ class FakePane:
         self.keys = []
         self.started = []          # (argv, cwd, env_base)
         self.kills = 0
+        self.linger = linger       # a killed CLI's pid stays: None, "until_sigkill" or "forever"
+        self.sigkills = []
 
     # -- the Pane protocol ------------------------------------------------
     def alive(self):
@@ -56,6 +58,16 @@ class FakePane:
         self.kills += 1
         self._alive = False
         self._escape.set()
+
+    def process_alive(self, pid):
+        """The killed CLI's process, as the runner sees it: gone at once
+        unless `linger` holds it (never a real pid on this host)."""
+        if self._alive and pid == self.pid():
+            return True
+        return self.linger == "forever" or (self.linger == "until_sigkill" and not self.sigkills)
+
+    def process_kill(self, pid):
+        self.sigkills.append(pid)
 
     def die(self):
         """The pane dies with its unit (KillMode=mixed): the CLI writes nothing more."""

@@ -413,3 +413,100 @@ cousin-spawn wren --start
 
 Only then retire the old one. I keep the old home and the archives for a week
 or two before deleting anything.
+
+## Remove the subscription bridge from a live install
+
+Some installs put a Claude-subscription bridge beside a hand-installed
+opencode: the `opencode-with-claude` plugin and the `@rynfar/meridian` proxy
+it starts, which let opencode reach Claude on a Claude login through a local
+port (3456). The framework ships nothing of it, and the opencode runner
+refuses every sign of it: an opencode cousin runs on a provider key or a
+local model. What an install already has stays until you delete it. This is
+how, run by the operator, never by the framework.
+
+The commands assume the install keeps its opencode under
+`$ROOT/local/opencode`: a `package.json` naming `opencode-ai` and
+`opencode-with-claude`, its `package-lock.json`, `node_modules/`, and a
+`vendor/` directory with the four tarballs. Stop every cousin that runs
+opencode first.
+
+```
+ROOT=/path/to/the/framework/root
+BRIDGE='opencode-with-claude|meridian|rynfar|claude-max-proxy|CLAUDE_PROXY_(PORT|HOST)|MERIDIAN_|x-meridian|127\.0\.0\.1:3456'
+tar -czf "$HOME/opencode-before-bridge-removal.tgz" -C "$ROOT/local" \
+    opencode/package.json opencode/package-lock.json opencode/vendor
+```
+
+**The packages.**
+
+```
+cd "$ROOT/local/opencode"
+npm uninstall --offline --ignore-scripts --no-audit --no-fund opencode-with-claude
+rm -f vendor/opencode-with-claude-*.tgz vendor/rynfar-meridian-*.tgz \
+      vendor/rynfar-meridian-plugin-opencode-scrub-*.tgz
+find node_modules -mindepth 1 -maxdepth 1 -type d -empty -delete
+npm pkg set description="Pinned opencode."
+```
+
+`npm uninstall` takes the plugin out of `package.json` and
+`package-lock.json` and prunes it, and everything only it needed (the proxy,
+its scrub plugin, the Agent SDK and Claude Code it pulled in), from
+`node_modules`; it works offline from the lock file (on a 1.18.31 install it
+removed 111 packages). `--ignore-scripts` keeps opencode's own postinstall
+from running again. `find` removes the scope directories npm leaves empty.
+`vendor/opencode-ai-*.tgz` stays: that is opencode itself. The last line
+replaces a `description` that named the bridge.
+
+**Cousin configs.** A cousin that ran opencode by hand may have an
+`opencode.json` with `"plugin": ["opencode-with-claude"]` and an `anthropic`
+provider whose `baseURL` is `http://127.0.0.1:3456`, and a `cousin.toml`
+comment or `NODE_PATH` that points opencode at the bridge in
+`local/opencode/node_modules`. List them:
+
+```
+grep -rlIiE "$BRIDGE" "$ROOT"/cousins/*/opencode.json "$ROOT"/cousins/*/.opencode \
+    "$ROOT"/cousins/*/cousin.toml "$ROOT/config" 2>/dev/null
+```
+
+In each `opencode.json` it lists, delete the `plugin` entry and the
+`anthropic` provider block, or the whole file for a cousin that moves to the
+opencode runner (the runner renders its own config and never reads a
+cousin's `opencode.json`). In a `cousin.toml`, delete the bridge's lines.
+
+**The environment and the proxy.**
+
+```
+env | grep -E '^(CLAUDE_PROXY_|MERIDIAN_)'
+systemctl --user show-environment | grep -E '^(CLAUDE_PROXY_|MERIDIAN_)'
+ss -ltnp | grep ':3456 '
+```
+
+Remove whichever variables print from where they are set (a shell profile, a
+unit's `Environment=`), stop the process listening on 3456, and delete the
+proxy's own settings and profiles, `~/.config/meridian`. Claude Code's own
+login is not the bridge's; it stays unless you want it gone too.
+
+**The check.** Each of these prints nothing:
+
+```
+grep -rlIiE "$BRIDGE" "$ROOT/local/opencode" "$ROOT/config" \
+    "$ROOT"/cousins/*/opencode.json "$ROOT"/cousins/*/.opencode \
+    "$ROOT"/cousins/*/cousin.toml 2>/dev/null
+ls "$ROOT/local/opencode/vendor" | grep -v '^opencode-ai-'
+(cd "$ROOT/local/opencode" && npm ls --all 2>/dev/null) \
+    | grep -iE 'meridian|rynfar|opencode-with-claude|@anthropic-ai'
+```
+
+and opencode still runs: `"$ROOT/local/opencode"/node_modules/.bin/opencode
+--version` prints its version. Keep the `-I`: opencode's own binary contains
+the word "meridian" in unrelated code, and `-I` skips binary files.
+
+**What it breaks.** Anything that reached Claude through the bridge. A cousin
+whose agent command runs opencode with such an `opencode.json` fails at start
+(the plugin no longer resolves) or on its first turn (nothing listens on
+3456). It was on a Claude subscription through third-party code; to keep it
+on opencode, move it to the opencode runner with an opencode account (a
+provider key or a local model, see [configuration](configuration.md)), or
+back to Claude Code. The framework loses nothing: no framework code, config,
+image or doc outside the design notes names the bridge, and
+`tests/test_no_bridge.py` keeps it that way.

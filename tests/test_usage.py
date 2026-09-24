@@ -12,7 +12,9 @@ from tests._hermetic import HermeticCase
 
 U = {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 100,
      "cache_creation_input_tokens": 0}
-TODAY = datetime.now(timezone.utc).date().isoformat()
+def _today():
+    # Evaluated per call: a module-level date goes stale when a suite crosses UTC midnight.
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _root(case):
@@ -33,7 +35,7 @@ def _result(cost, session="s-1"):
 
 
 def _transcript_line(mid, inp, out):
-    return json.dumps({"timestamp": TODAY + "T10:00:00Z",
+    return json.dumps({"timestamp": _today() + "T10:00:00Z",
                        "message": {"id": mid, "usage": {"input_tokens": inp,
                                                          "output_tokens": out}}}) + "\n"
 
@@ -77,10 +79,10 @@ class TestRecord(HermeticCase):
     def test_day_totals_sum_like_the_transcript_view(self):
         usage.record(self.home, client_id="x", session_id="s", result=_result(0.01), lane="key")
         usage.record(self.home, client_id="x", session_id="s", result=_result(0.03), lane="key")
-        totals = usage.day_totals(self.home)
-        self.assertEqual(totals[TODAY]["total"], 2 * 115)
-        self.assertEqual(totals[TODAY]["output"], 10)
-        self.assertAlmostEqual(totals[TODAY]["cost_usd"], 0.03)
+        totals = usage.day_totals(self.home)[_today()]
+        self.assertEqual(totals["total"], 2 * 115)
+        self.assertEqual(totals["output"], 10)
+        self.assertAlmostEqual(totals["cost_usd"], 0.03)
 
 
 class TestTokensView(HermeticCase):

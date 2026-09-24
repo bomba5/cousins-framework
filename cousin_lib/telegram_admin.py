@@ -12,6 +12,9 @@
 - The bridge process belongs to its cousin, like the chat server:
   started with the cousin when [telegram] enabled is true, stopped with
   it, its pid in data/telegram.pid and its output in data/telegram.log.
+  start_bridge is the tmux lane's launcher (spawn, the console); a
+  runner cousin's bridge is a cousin-supervisor child instead
+  (supervisor.telegram_spec), which writes the same pid file.
 """
 import json
 import os

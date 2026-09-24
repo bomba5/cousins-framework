@@ -65,7 +65,7 @@ Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"o
 
 ## Telegram
 
-Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it.
+Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. A runner cousin's bridge is a `cousin-supervisor` child (`telegram:<slug>`): these routes write `cousin.toml` and ask the supervisor to rescan, and never start a bridge themselves.
 
 A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last five people who wrote to the bot and were refused, so they can be added without looking up a numeric id. Anyone who messages the bot can appear there.
 
@@ -77,15 +77,15 @@ The status.
 
 ### `POST /api/cousins/<slug>/telegram/token`
 
-Body `{"token"}`. Stores it and checks it with Telegram (`getMe`); answers the status plus `check: {"ok", "bot"?, "error"?}`. `400` for something that is not a bot token. A running bridge restarts on the new token.
+Body `{"token"}`. Stores it and checks it with Telegram (`getMe`); answers the status plus `check: {"ok", "bot"?, "error"?}`. `400` for something that is not a bot token. A running bridge restarts on the new token; `bridge` says what happened to it, as in the `enabled` answer.
 
 ### `POST /api/cousins/<slug>/telegram/operators`
 
-Body `{"operators": [{"user_id", "name"}]}`, the whole list. `400` for a non-numeric or repeated id or a bad name.
+Body `{"operators": [{"user_id", "name"}]}`, the whole list. `400` for a non-numeric or repeated id or a bad name. A running bridge restarts on the new list; `bridge` says what happened to it, as in the `enabled` answer.
 
 ### `POST /api/cousins/<slug>/telegram/enabled`
 
-Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge: "started"`, or `"starts with the cousin"` when it is stopped), stops it when false.
+Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge: "started"`, or `"starts with the cousin"` when it is stopped), stops it when false. For a runner cousin the supervisor does it: `bridge: "supervised"` once it took the rescan, or a line saying no supervisor runs (the bridge starts with it) or why it refused.
 
 ### `POST /api/cousins/<slug>/telegram/check`
 

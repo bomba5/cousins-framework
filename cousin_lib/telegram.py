@@ -134,10 +134,12 @@ def _permanent(err):
             and 400 <= err.code < 500 and err.code != 429)
 
 
-def load_bridge_config(home):
+def load_bridge_config(home, root=None):
     """Load and validate the per-cousin bridge config, or raise.
     Validation is the perimeter: no partial-config path reaches the
-    network."""
+    network. `root` is the framework root (else FRAMEWORK_ROOT, else the
+    home's location): the supervisor passes its own, so its check and
+    its child agree."""
     home = Path(home)
     try:
         data = tomllib.loads((home / "cousin.toml").read_text())
@@ -149,7 +151,7 @@ def load_bridge_config(home):
             "no [telegram] section; the bridge is off for this cousin")
     if not section.get("enabled"):
         raise TelegramConfigError("[telegram] enabled is not true")
-    root = (os.environ.get("FRAMEWORK_ROOT")
+    root = (root or os.environ.get("FRAMEWORK_ROOT")
             or FrameworkConfig.root_from_home(home))
     if not root:
         raise TelegramConfigError(

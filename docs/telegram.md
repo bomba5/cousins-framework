@@ -186,11 +186,38 @@ The same routes are in the console API reference (`/api/cousins/<slug>/telegram`
 ### 6. When it runs
 
 The bridge belongs to its cousin, like the chat server: it starts when the
-cousin starts (a console start, `cousin-start@`, a flip) if `[telegram]` is
-enabled and complete, and stops when the cousin stops. Its pid is in
-`data/telegram.pid` and its output in `data/telegram.log`. A token or operator
-change from the console restarts it. There is no separate service unit: two
-bridges polling the same bot make Telegram answer 409 Conflict.
+cousin starts if `[telegram]` is enabled and complete, and stops when the
+cousin stops. Its pid is in `data/telegram.pid` and its output in
+`data/telegram.log`. A token or operator change from the console restarts it.
+There is no separate service unit: two bridges polling the same bot make
+Telegram answer 409 Conflict. Who starts it depends on the cousin's lane:
+
+- **A tmux cousin**: `cousin-spawn` starts it right after the chat server (a
+  console start, `cousin-start@`, a flip) and stops it with the cousin. The
+  console's switch starts or stops it while the cousin runs.
+- **A runner cousin** (`[agent] runner`): `cousin-supervisor` runs it as a
+  child, `telegram:<slug>`, beside `runner:<slug>`, started after the runner.
+  It is restarted when it crashes, with the same backoff as every other child,
+  and it comes back after a reboot or a supervisor restart. A stop of the
+  cousin (`cousin-supervisor stop <slug>`, the console's stop button) stops
+  the bridge and holds it with the runner; `start` brings both back. A config
+  that does not pass the bridge's own check (not enabled, no token, no
+  operator) gets no child, and the supervisor prints one line with the reason
+  (`supervisor: telegram:wren not started: no operators configured ...`).
+  `cousin-supervisor status` lists the child with the others. The console's
+  switch, token and operator changes write `cousin.toml` and ask the
+  supervisor to rescan (`reload`), which adds, removes or restarts the bridge;
+  the console never starts a runner cousin's bridge itself. After editing
+  `[telegram]` by hand, run `cousin-supervisor reload`. Its output goes to the
+  supervisor's output (`telegram:wren | ...`) and to `data/telegram.log`.
+  A bridge already running outside the supervisor (one started by hand, or
+  by an older console) is left alone while the config runs: the child waits
+  in `backoff`, says why in `status`, and starts once that bridge is gone.
+  When the config no longer runs (switched off, no operator left), the
+  supervisor's rescan stops that outside bridge too. To hand an old bridge to
+  the supervisor, switch it off and on in the console. With no supervisor
+  running, the console's switch still stops such a bridge; it never starts
+  one.
 
 To run it by hand, `--home` alone is enough on a standard install. The
 root comes from `FRAMEWORK_ROOT` or from the home's location:

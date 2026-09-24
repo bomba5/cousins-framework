@@ -10,11 +10,12 @@ units.
 
 **What runs.** One container, `framework`, whose main process is
 `cousin-supervisor` (the entrypoint prepares the volume, then hands over to
-it). The supervisor starts the console, the loops daemon and one
-`cousin-runner` per runner cousin, restarts a child that exits (backing off
-up to 60 seconds), and stops them in order when the container stops: the
-runners first, each given 35 seconds to finish its turn, then the loops daemon,
-then the console. compose waits 45 seconds before it kills anything
+it). The supervisor starts the console, the loops daemon, one
+`cousin-runner` per runner cousin and, for a cousin with `[telegram]` enabled,
+its Telegram bridge (`telegram:<slug>`), restarts a child that exits (backing
+off up to 60 seconds), and stops them in order when the container stops: the
+bridges, then the runners, each given 35 seconds to finish its turn, then the
+loops daemon, then the console. compose waits 45 seconds before it kills anything
 (`stop_grace_period`). Every cousin in the container is a runner cousin; tmux
 cousins need a bare host. See each child:
 
@@ -27,7 +28,10 @@ docker compose exec framework cousin-supervisor reload        # rescan cousins/
 ```
 
 A runner cousin starts with the container unless its `cousin.toml` says
-`[agent] auto_start = false` or a stop holds it. A stop of a runner cousin
+`[agent] auto_start = false` or a stop holds it. Its Telegram bridge, when
+`[telegram]` is enabled and complete, starts after it and is stopped and held
+with it; a config the bridge would refuse is one `supervisor:` line with the
+reason and no child, and `reload` picks up a change. A stop of a runner cousin
 (`cousin-supervisor stop` or the console's stop button) writes
 `cousins/<slug>/run/held`, with the time and who asked, and the hold lasts
 until `start`: across `docker compose restart`, `down` and `up`, an upgrade or
@@ -52,7 +56,7 @@ docker compose logs -f framework
 ```
 
 Each line starts with who wrote it: `console | `, `loops | `,
-`runner:wren | `, `supervisor: ` for the supervisor itself and `entrypoint: `
+`runner:wren | `, `telegram:wren | `, `supervisor: ` for the supervisor itself and `entrypoint: `
 for the start-up steps. `supervisor: runner:wren failing: ...` is the line
 to look for when a cousin stays down. The files the bare host keeps (the loops fire
 log, job logs) are in the same places under `/data`.

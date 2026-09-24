@@ -57,6 +57,23 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   is the operator's own flag.
 
 ### Fixed
+- A runner cousin's Telegram bridge is now a `cousin-supervisor` child,
+  `telegram:<slug>`, beside `runner:<slug>` (#101). It used to start only
+  from the console's switch, as a process nothing watched: nothing brought it
+  back after a reboot, a supervisor restart or a crash, and nothing stopped it
+  with the runner. Now it starts after its runner when `[telegram]` passes the
+  bridge's own check (a config that does not is one line with the reason, and
+  no child), is restarted with the usual backoff, and is stopped and held with
+  its runner. A rescan (`reload`, SIGHUP) adds or removes it as `[telegram]
+  enabled` changes and restarts it when its token or operators change.
+  `cousin-supervisor status` lists it. For a runner cousin the console's
+  Telegram switch, token and operator changes write `cousin.toml` and ask the
+  supervisor to rescan; they never start a bridge themselves. A bridge already
+  running outside the supervisor is left alone while its config runs (the
+  child starts once it is gone) and is stopped by the rescan once the config
+  no longer runs. Switching the bridge off and on again before the old one is
+  down keeps it. The token and operator routes report `bridge` like the
+  switch does. A tmux cousin's bridge is unchanged.
 - A cousin moved to the runner by `cousin-migrate apply` is handed its
   conversation from before the move (#103). The working conversation does not
   carry: the runner starts a new session from the state digest, the handoff

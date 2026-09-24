@@ -5,6 +5,26 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## Unreleased
 
+### Added
+- A runner cousin loads the MCP servers in its home's `.mcp.json` (Claude
+  Code's format: stdio, `http` and `sse`) beside its own `cousin` server; it
+  used to get `cousin` only. `cousin` is reserved, so the tmux lane's entry
+  that spawn writes is skipped, never started twice. `${VAR}` and
+  `${VAR:-default}` are passed through for the agent CLI to expand from the
+  runner's environment, so a secret is never on the CLI's command line; an
+  unset variable with no default skips that server, and so does any
+  reference to an account variable. A malformed file or entry is
+  skipped with its reason in one `mcp_config` stream event (names and types
+  only, never a value); the cousin still starts. The set is ordered by name,
+  the user servers' tools stay deferred (only `cousin` is always loaded),
+  side sessions get the same set, and `policy.toml` applies to their tools.
+  Read once per runner: restart it to pick up a change. `cousin-migrate plan`
+  lists the servers the runner will load, by name, in an `mcp` line.
+- The contract says, in one fixed sentence, that other MCP servers from the
+  home's `.mcp.json` may be present and how their tools are named. It
+  applies at each cousin's next rollover; a restart resumes the recorded
+  prompt.
+
 ### Fixed
 - A cousin moved to the runner by `cousin-migrate apply` is handed its
   conversation from before the move (#103). The working conversation does not

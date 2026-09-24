@@ -62,6 +62,16 @@ class TestContract(HermeticCase):
     def test_ascii_only(self):
         contract.render(_registry(TRACKER_TOML), "1.12.0").encode("ascii")
 
+    def test_other_mcp_servers_are_one_fixed_sentence_under_your_tools(self):
+        # a home's .mcp.json servers are never listed (the contract would
+        # change with the file); one sentence says they may be there
+        text = contract.render(_registry(), "1.12.0")
+        tools_section = text.split("## Your tools", 1)[1]
+        flat = " ".join(tools_section.split())
+        self.assertIn(".mcp.json", flat)
+        self.assertIn("mcp__<server>__<tool>", flat)
+        self.assertEqual(text.count(".mcp.json"), 1)
+
 
 class TestRunnerLaneDoctrine(HermeticCase):
     """#95: a runner cousin's identity and memories were written for the

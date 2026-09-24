@@ -277,6 +277,7 @@ cousin-migrate plan wren --account team --validate
 #   ok  supervisor a cousin-supervisor answers for /srv/fw
 #   ok  sdk        claude-agent-sdk is installed
 #   ok  import     3 auto-memory file(s) to fold in
+#   ok  mcp        the runner loads from .mcp.json: ha; skips cousin (reserved: the runner serves its own `cousin` tools in-process)
 # steps: close -> import -> toml -> start -> verify
 # wren: ready (run: cousin-migrate apply wren --validate --yes)
 ```
@@ -309,6 +310,14 @@ your shell: the account is its only credential. For a key account,
 `--validate` makes `data/accounts/<slug>-key`, the account's own config
 dir with no login in it (no secret is written there; the runner uses the
 same dir).
+
+The cousin's `.mcp.json` stays where it is. The runner reads it at its
+start and loads every server in it beside its own tools, except the
+`cousin` entry spawn wrote for the tmux lane's `cousin-mcp`, which the
+runner serves in-process instead. The `mcp` line lists the servers it will
+load, by name only, and what it will skip and why (see
+[configuration](configuration.md#mcpjson-the-runners-mcp-servers)). It is
+never a blocker.
 
 A key file already at `.secrets/accounts/<slug>-key` is used as it is when
 it holds the cousin's key, and never removed by a rollback; with another

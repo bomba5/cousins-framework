@@ -803,7 +803,8 @@ one directory per past generation (`gen-0001`, ...), each a copy of
 that rollover.
 
 A few other files in a cousin's home are configuration too:
-`mcp-registry.toml` (its MCP tools), `chat-hooks.json` (patterns the chat
+`mcp-registry.toml` (its MCP tools), `.mcp.json` (its other MCP servers,
+below), `chat-hooks.json` (patterns the chat
 server reacts to, see [chat](chat.md)), `policy.toml` (below) and
 `.secrets/api-key.env` (the key for `api_key` mode, written by `cousin-auth`).
 
@@ -853,6 +854,68 @@ never stopped for it. A side session is not interruptible from the console
 in this phase: an interrupt reaches the primary's live turn only. Each side
 session is one more agent CLI process: measured at 300 to 480 MB of
 resident memory per interactive CLI on the reference host.
+
+### .mcp.json (the runner's MCP servers)
+
+A runner cousin gets its own tools from the in-process `cousin` server, and
+the claude.ai connectors from its login. Any other MCP server (a local
+stdio server, an HTTP one such as Home Assistant's) goes in `<home>/.mcp.json`,
+in the format Claude Code uses:
+
+```json
+{
+  "mcpServers": {
+    "notes": {"command": "/opt/notes-mcp", "args": ["--root", "/srv/notes"],
+              "env": {"NOTES_TOKEN": "${NOTES_TOKEN}"}},
+    "ha": {"type": "http", "url": "${HA_URL:-http://ha.lan:8123}/api/mcp",
+           "headers": {"Authorization": "Bearer ${HA_TOKEN}"}}
+  }
+}
+```
+
+A stdio server takes `command`, `args` and `env` (`"type": "stdio"` may be
+left out); an `http` or `sse` server takes `url` and `headers`. A key the
+SDK's server config does not have (such as `headersHelper`) is dropped, and
+the event below names it. The runner starts its session with no settings
+files, so the CLI never reads this file itself: the runner reads it and
+passes each server beside `cousin`, ordered by name, so the same file gives
+the same tool list at every start.
+
+- **`cousin` is reserved.** An entry named `cousin` is skipped, never
+  started beside the runner's own server. That is the entry `cousin-spawn`
+  writes for the tmux lane's `cousin-mcp`, so a migrated cousin's file is
+  left as it is.
+- **`${VAR}` and `${VAR:-default}`** are expanded, as Claude Code does, in
+  `command`, `args`, `env` values, `url` and `headers` values, from the
+  runner's own environment (the supervisor's or `cousin-runner`'s, not your
+  shell's; the auth and provider variables are already removed from it). A
+  set variable wins, even when empty, then the default. A variable that is
+  unset and has no default skips that server, and the event names the
+  variable. Keep the secret in the environment and only its `${NAME}` in the
+  file: the expanded value is never written to a file, the event stream or a
+  log by the framework. It does reach the agent CLI's command line (the SDK
+  passes the servers as `--mcp-config`), where the host's own users can read
+  it.
+- **Never fatal.** A file that does not parse, or an entry that is not one of
+  the three shapes (an unknown `type`, a missing `command` or `url`, a
+  non-string value), is skipped; the cousin still starts with `cousin`.
+- **One event.** At the first connect the stream gets an `mcp_config` event
+  with each loaded server's name and type and each skipped entry's name and
+  reason; no event when there is no file.
+- **Deferred, not always loaded.** The `cousin` tools are always in the
+  prompt; a user server's tools are deferred behind the CLI's tool search,
+  so a large or changing tool list costs no prompt bytes (and moves no
+  cached prefix) until the model looks one up. The contract says only that
+  such servers may be present and that their tools are named
+  `mcp__<server>__<tool>`.
+- **policy.toml applies.** Their tools pass the same `PreToolUse` hook as
+  any other: `deny_tools = ["mcp__ha__*"]` denies a whole server,
+  `"mcp__ha__call_service"` one tool, and `ask` works the same way.
+  `deny_bash_patterns` looks at a user server's tool too, when its input
+  carries a `command` string.
+- **When a change lands.** The file is read once per runner; a reconnect or
+  a rollover offers the same set. Restart the runner (or wait for its next
+  start) to pick up a change.
 
 ### policy.toml
 

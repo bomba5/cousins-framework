@@ -357,6 +357,15 @@ class Portrait(ActionsCase):
         self.assertEqual(status, 403)
         self.assertFalse(self_portrait.committed_path(self.home).exists())
 
+    def test_a_candidate_linked_out_of_the_home_is_never_served(self):
+        outside = self.root / "outside.txt"
+        outside.write_text("not the cousin's")
+        self_portrait.candidate_path(self.home).symlink_to(outside)
+        self.serve()
+        status, body = self.get("/api/memory/wren/portrait")
+        self.assertEqual(status, 403)
+        self.assertNotIn("not the cousin's", json.dumps(body))
+
     def test_candidate_refusals(self):
         self.serve()
         for payload in ({}, {"text": 3}, {"text": "x" * 70000}):

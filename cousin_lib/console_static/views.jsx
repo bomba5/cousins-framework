@@ -355,6 +355,7 @@ function MemoryView() {
   const [status, setStatus] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [me, setMe] = React.useState(null);
+  const [reviewers, setReviewers] = React.useState(null);
 
   const refresh = React.useCallback(async () => {
     const [cs, sl, au, auth] = await Promise.all([
@@ -478,6 +479,7 @@ function MemoryView() {
                 {shared.canonical.length === 0 && <div style={{ padding: 10, color: "var(--fg-3)", fontFamily: "var(--mono)", fontSize: 11 }}>no canonical files yet</div>}
               </div>
             </div>
+            <SharedReviewersPanel onChange={setReviewers} />
           </>
       </div>
 
@@ -492,6 +494,9 @@ function MemoryView() {
             {selected?.scope === "shared" && selected.kind === "pending" && (
               <>
                 <span style={{ flex: 1 }} />
+                {reviewers && reviewers.you_review === false && (
+                  <span className="muted" data-not-reviewer style={{ marginRight: 8 }}>you are not in the reviewer list</span>
+                )}
                 <button className="btn" disabled={busy} onClick={() => act("approve")}>approve</button>
                 <button className="btn danger" disabled={busy} onClick={() => act("reject")} style={{ marginLeft: 6 }}>reject</button>
               </>

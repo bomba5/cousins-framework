@@ -499,7 +499,7 @@ Queues a fire request (`context-heartbeat` works too). `202 {"ok": true, "slug",
 
 The old flat view: `{"tree": {"shared/": {file: entry}, "<slug>/": {file: entry}}}`, entry `{"size", "updated" (seconds ago), "preview" (first 400 characters)}`. Lists `shared/*.md` and the first 50 `memory/*.md` of each cousin.
 
-The eight routes after it are the per-cousin memory explorer. Paths are relative to the cousin home. Absolute paths and `..` are `400`, a path that leads out of the home through a link is `403`, anything under `.secrets/` is `404`.
+The routes after it are the per-cousin memory explorer. Paths are relative to the cousin home. Absolute paths and `..` are `400`, a path that leads out of the home through a link is `403`, anything under `.secrets/` is `404`.
 
 ### `GET /api/memory/<slug>/overview`
 
@@ -561,6 +561,66 @@ Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` 
 
 Body `{"id": "..."}`. Files go back to their path, lines back into their file at their old position. `200 {"ok": true, "restored": manifest, "effects": {...}}` and a `memory-change` event. `409` if something is already back in the way, `404` unknown id. The CLI does the same with `cousin-memory trash restore <id>`.
 
+### Memory operator actions
+
+The routes below are the operator's side of `cousin-memory`, `cousin-self-portrait`, `cousin-reason` and `cousin-callback`, on one cousin. They call the same library functions the CLIs call. Three of them are a person's act and need a logged-in console user (`403` without logins or without a session): a review verdict, a self-portrait commit, and an operator-level write. The console has no roles, so the operator account is the logged-in user whose name is the cousin's `[operator] name`, case aside; with no `[operator] name` nobody is.
+
+### `GET /api/memory/<slug>/search`
+
+Query `q` (required, else `400`), `top` (default 10, at most 50), `collection` (`memory`, `notes`, `harness` or `raw`; anything else `400`). The library search (`cousin-memory search`): keyword always, meaning when `config/embedding.toml` sets it up, fused by rank. `{"query", "hits", "semantic": "on"|"off"|"broken", "notice"}`. Each hit is `{"collection", "rel", "score", "similarity", "snippet", "legs"}`: `rel` is relative to the home (to the harness directory for a harness hit, with `layer: "harness"`; a raw hit is `memory/raw/<file>#<line>` and carries `entry` with its topic, content, level, timestamp, cite and id), and `legs` says which search found it, `keyword`, `semantic` or both. `notice` is the degrade line when meaning was promised and could not serve. A console search is not recorded in the cousin's recall log.
+
+### `GET /api/memory/<slug>/writer`
+
+What the write forms may offer the current user: `{"user", "operator", "can_write_operator", "levels", "cite_preview"}`.
+
+### `POST /api/memory/<slug>/remember`
+
+Body `{"topic", "fact", "level"?, "note"?}`. One fact into raw memory (`cousin-memory remember`). `level` is `operator`, `tool`, `conclusion` (default) or `hypothesis`; `framework` and `obsolete` are `400` (the framework writes its own entries, and obsolete is the retire action). `operator` from anyone but the operator account is `403`. The cite is filled here, never taken from the body: `console user <name>, <UTC time>` (`console (no login), <time>` without logins), then `; <note>` when a note (at most 300 characters) is given. `200 {"ok": true, "line"}` and a `memory-change` event.
+
+### `POST /api/memory/<slug>/decide`
+
+Body `{"topic", "decision", "reasoning", "level"?, "note"?}`. Logs the decision in `data/decisions.jsonl` and its raw copy (`cousin-memory decide`), levels and cite as for remember. `200 {"ok": true, "line"}`.
+
+### `GET /api/memory/<slug>/history`
+
+Query `topic` (required). `{"topic", "claims"}`: the topic's claims, oldest first, each a raw entry with `id`, `valid_from`, `valid_to` (null while live) and `retired_by` (`cousin-memory history`).
+
+### `GET /api/memory/<slug>/review`
+
+What the review gate holds: `{"held": [claim, ...], "batch", "operator", "is_operator"}`, `batch` being `[memory] review_batch`.
+
+### `POST /api/memory/<slug>/review`
+
+Body `{"verdicts": {"<id>": "keep"|"drop"}, "why"?}`. The operator's verdicts (`cousin-memory review --keep/--drop`), recorded as by `console:<user>`; needs a logged-in user. A drop is an entry-level obsolete mark and has no undo, so an operator-level entry is dropped by the operator account only. Per id, an id that isn't held or may not be dropped is reported in `errors` and stays held. `200 {"ok": true, "done": {id: verdict}, "errors": {id: reason}, "effects": {"distilled"}}`, a rebuild of the distilled views when anything was settled, and a `memory-change` event. `400` when `verdicts` is not a non-empty map of ids to keep or drop.
+
+### `POST /api/memory/<slug>/maintain`
+
+Body `{"action": "distill"|"compact-raw"|"compact-index"|"reindex", "dry_run"?}`. Runs as the cousin's long operation of kind `memory-<action>` (`202 {"ok": true, "op"}`, `409` while another operation, a flip or a clean stop runs; follow it at [`GET /api/cousins/<slug>/op`](#get-apicousinsslugop)). `distill` rebuilds `memory/distilled/`, `compact-raw` folds old daily raw files (lossless), `compact-index` retires the oldest MEMORY.md pointers over the budget (`dry_run: true` only reports `would_retire`), `reindex` rebuilds the keyword index and, when configured, the semantic one. The op's result carries the library's report.
+
+### `GET /api/memory/<slug>/portrait`
+
+`{"candidate", "committed", "candidate_exists", "committed_exists", "backup_exists", "candidate_sha", "diff"}`: the reviewed identity layer (`self-portrait.md`), its candidate (`.self-portrait-candidate.md`) and the unified diff between them. `candidate_sha` is the first 16 hex characters of the candidate's SHA-256.
+
+### `POST /api/memory/<slug>/portrait/synthesize`
+
+Drafts a candidate from the cousin's own sources (no model call). A candidate that exists may hold edits: `409` unless the body says `{"replace": true}`. `200` with the portrait state.
+
+### `POST /api/memory/<slug>/portrait/candidate`
+
+Body `{"text"}` (at most 64 KiB). Replaces the candidate. `200` with the portrait state.
+
+### `POST /api/memory/<slug>/portrait/commit`
+
+Body `{"confirm": "<slug>", "sha": "<candidate_sha>"}`. Promotes the candidate (`cousin-self-portrait commit`; the previous portrait becomes `.self-portrait.md.bak`). The identity gate: a logged-in user (`403`), the slug typed back (`400`), and the candidate still the one read (`409` with the current `candidate_sha` when it changed). `404` no candidate.
+
+### `GET /api/memory/<slug>/callbacks`
+
+Query `limit` (default 200). `{"callbacks": [{"time", "cycle", "category", "moment"}]}`, newest first. Read-only.
+
+### `GET /api/memory/<slug>/capsules`
+
+Query `n` (default 50, at most 500). `{"capsules": [{"id", "timestamp", "topic", "conclusion", "evidence", "rejected", "confidence", "truth_level"}]}`, newest first. Read-only.
+
 ## Cousin files
 
 A read-only browser over one cousin home. Same path rules as the memory explorer: `400` absolute or `..`, `403` out of the home, `404` for `.secrets/` at any depth. A link that points out of the home is listed with `outside: true` and never followed.
@@ -606,6 +666,14 @@ Body `{"slug": "wren", "file": "house-rules.md", "by": "ana"}`. Promotes Wren's 
 Body `{"slug", "file", "reason"?, "by"?}`. Drops the proposal. `200 {"ok": true, "file"}`.
 
 For both: the reviewer is the logged-in user, and `by` is only read (and then required, `400` without it) when there's no users file. A reviewer who isn't in `config/shared-reviewers.json`, or who is the proposer, gets `403`. A missing proposal is `404`.
+
+### `GET /api/shared/reviewers`
+
+`{"configured", "reviewers", "error", "user", "you_review"}`: the list in `config/shared-reviewers.json`, whether the logged-in user is on it (resolved the way the promote check resolves names; null without a login), and `error` when the file is present but unreadable.
+
+### `POST /api/shared/reviewers`
+
+Body `{"reviewers": ["ana", ...]}`: replaces the list (at most 50 names of at most 64 printable characters; duplicates, case aside, are dropped), keeping the file's other keys. Who may promote is a perimeter, so this needs a logged-in user (`403`), and each change is a `reviewers` row in `shared/audit.jsonl`. `409` while the file is unreadable: fix or remove it by hand. `200` with the new state.
 
 ## Tracker
 

@@ -338,13 +338,18 @@ def _write_level(req, slug, body):
     return level
 
 
-def _rel(home, path):
-    """A hit path as the UI shows and opens it: relative to the home, or
-    the file's name when it lies elsewhere (the harness directory)."""
-    try:
-        return Path(path).relative_to(home).as_posix()
-    except ValueError:
-        return Path(path).name
+def _rel(home, path, base=None):
+    """A hit path as the UI shows and opens it: relative to the home (a
+    harness hit: to the harness directory, which the file route reads
+    with layer=harness), else the file's name."""
+    for b in (base, home):
+        if b is None:
+            continue
+        try:
+            return Path(path).relative_to(b).as_posix()
+        except ValueError:
+            continue
+    return Path(path).name
 
 
 def _search_hits(req, home, query, top, collection):
@@ -361,14 +366,16 @@ def _search_hits(req, home, query, top, collection):
     words = {h["path"] for h in memory_search._keyword_search(
         query, home, max(top, memory_search.FUSION_DEPTH_MIN),
         collection, root)}
+    harness = memory_explorer.harness_dir(home, root)
     out = []
     for hit in hits:
         legs = (["keyword"] if hit["path"] in words else []) + (
             ["semantic"] if hit.get("similarity") is not None else [])
         file, _, line = str(hit["path"]).rpartition("#") \
             if hit.get("collection") == "raw" else (hit["path"], "", "")
+        base = harness if hit.get("collection") == "harness" else None
         row = {"collection": hit.get("collection"),
-               "rel": _rel(home, file) + ("#" + line if line else ""),
+               "rel": _rel(home, file, base) + ("#" + line if line else ""),
                "score": hit.get("score"), "similarity": hit.get("similarity"),
                "snippet": hit.get("snippet") or "", "legs": legs}
         if hit.get("collection") == "raw":
@@ -393,13 +400,28 @@ def _sha(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:PORTRAIT_SHA_CHARS]
 
 
+def _confined(home, path):
+    """Refuse a fixed store path (the portrait, callbacks, capsules) that a
+    link planted at its name leads out of the home: never served."""
+    try:
+        home_files.resolve_in(home, Path(path).relative_to(home).as_posix())
+    except home_files.PathRefused as err:
+        raise refused(err)
+
+
+def _portrait_read(home, path):
+    from cousin_lib import self_portrait
+    _confined(home, path)
+    return self_portrait._read(path)
+
+
 def _portrait_state(home):
     import difflib
     from cousin_lib import self_portrait
     cand_path = self_portrait.candidate_path(home)
     comm_path = self_portrait.committed_path(home)
-    candidate = self_portrait._read(cand_path)
-    committed = self_portrait._read(comm_path)
+    candidate = _portrait_read(home, cand_path)
+    committed = _portrait_read(home, comm_path)
     diff = "".join(difflib.unified_diff(
         committed.splitlines(keepends=True),
         candidate.splitlines(keepends=True),
@@ -681,6 +703,7 @@ def _register_actions():
     def callbacks(req, slug):
         from cousin_lib import callback
         home = cousin_home(req.server, slug)
+        _confined(home, callback.library_path(home))
         rows = callback.list_all(home)
         rows.reverse()
         return 200, {"callbacks": rows[:max(1, req.int_query("limit", 200))]}
@@ -690,6 +713,7 @@ def _register_actions():
         from cousin_lib import capsule
         home = cousin_home(req.server, slug)
         n = max(1, min(500, req.int_query("n", 50)))
+        _confined(home, capsule.capsules_path(home))
         return 200, {"capsules": capsule.list_capsules(home, n)}
 
 

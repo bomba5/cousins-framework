@@ -32,6 +32,7 @@ SOURCE_PRIORITY = {
     "meeting": 2,
     "schedule": 4,
     "loop": 5,
+    "propose": 6,     # a memory proposal (extract.propose_turn) waits behind everything
 }
 
 

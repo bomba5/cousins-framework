@@ -3,7 +3,13 @@
 
 Every route names the cousin, resolves its `host`/`port` from the
 filesystem registry on that call, and forwards to the routes in
-docs/reference/chat-api.md. The console stores no message: the only files
+docs/reference/chat-api.md. A runner cousin (cousin.toml `[agent]
+runner`, its home on this machine) runs no chat server: for it the
+console answers the same routes itself, over the cousin's `chat.db`,
+through the library the chat server answers with (server/chat_api.py),
+so the body is the same on both lanes. A send then delivers through
+`delivery.deliver` (the cousin's inbox) and a reaction tells the cousin
+the same way; the console still keeps no store of its own. The console stores no message: the only files
 it touches under a cousin home are the inbox and the generated-media
 folders (`chat/images`, `chat/audio`, `chat/video`), served read-only,
 and the attachment annotation on history rows is one directory listing
@@ -33,6 +39,7 @@ import urllib.request
 
 from cousin_lib.config import FrameworkConfig
 from cousin_lib.console import router
+from cousin_lib.server import chat_api
 from cousin_lib.console.static import RawResponse  # noqa: F401 - re-exported
 
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
@@ -137,6 +144,26 @@ def _upstream(cousin, path, *, query=None, body=None, timeout=_READ_TIMEOUT):
         raise RouteError(502, {"ok": False,
                                "error": "chat server answered non-JSON"})
     return status, parsed
+
+
+def serves_locally(cousin):
+    """True for a runner cousin whose home is on this machine: the console
+    answers its chat routes over chat.db instead of proxying (a remote
+    node has no home here and is always proxied)."""
+    home = getattr(cousin, "home", None)
+    if home is None:
+        return False
+    from cousin_lib import delivery
+    return isinstance(delivery.backend_for(home), delivery.InboxBackend)
+
+
+def _local(fn, *args, **kw):
+    """(status, body) from a chat_api call: its 200, or the 400 the chat
+    server would have answered."""
+    try:
+        return 200, fn(*args, **kw)
+    except chat_api.BadRequest as err:
+        return 400, {"error": str(err)}
 
 
 def _require(mapping, *keys):
@@ -247,10 +274,14 @@ def register():
         q = req.query
         _require(q, "cousin", "user")
         cousin = find_cousin(req, q.get("cousin"))
-        status, body = _upstream(cousin, "/api/history", query={
-            "user": q.get("user"), "since": q.get("since"),
-            "before": q.get("before"), "limit": q.get("limit") or "200",
-            "archived": q.get("archived") or "0"})
+        query = {"user": q.get("user"), "since": q.get("since"),
+                 "before": q.get("before"), "limit": q.get("limit") or "200",
+                 "archived": q.get("archived") or "0"}
+        if serves_locally(cousin):
+            status, body = _local(chat_api.history, cousin.home,
+                                  {k: v for k, v in query.items() if v is not None})
+        else:
+            status, body = _upstream(cousin, "/api/history", query=query)
         if status == 200 and isinstance(body, dict):
             _annotate(cousin, body.get("messages") or [])
             body["cousin"] = cousin.slug
@@ -262,9 +293,13 @@ def register():
         q = req.query
         _require(q, "cousin")
         cousin = find_cousin(req, q.get("cousin"))
-        status, body = _upstream(cousin, "/api/search", query={
-            "q": q.get("q"), "user": q.get("user"),
-            "archived": q.get("archived") or "0"})
+        query = {"q": q.get("q"), "user": q.get("user"),
+                 "archived": q.get("archived") or "0"}
+        if serves_locally(cousin):
+            status, body = _local(chat_api.search, cousin.home,
+                                  {k: v for k, v in query.items() if v is not None})
+        else:
+            status, body = _upstream(cousin, "/api/search", query=query)
         if status == 200 and isinstance(body, dict):
             _annotate(cousin, body.get("messages") or [])
             body["cousin"] = cousin.slug
@@ -280,6 +315,10 @@ def register():
         for key in ("image", "reply_to"):
             if b.get(key) is not None:
                 forward[key] = b[key]
+        if serves_locally(cousin):
+            # no recall context: a runner recalls in its own prompt hook
+            return _local(chat_api.send, cousin, forward,
+                          deliver=chat_api.make_deliver(cousin))
         return _upstream(cousin, "/api/send", body=forward,
                          timeout=_SEND_TIMEOUT)
 
@@ -289,8 +328,10 @@ def register():
         b = req.body
         _require(b, "cousin", "user")
         cousin = find_cousin(req, b.get("cousin"))
-        return _upstream(cousin, "/api/archive", body={
-            "user": b.get("user"), "keep": b.get("keep", 0)})
+        forward = {"user": b.get("user"), "keep": b.get("keep", 0)}
+        if serves_locally(cousin):
+            return _local(chat_api.archive, cousin.home, forward)
+        return _upstream(cousin, "/api/archive", body=forward)
 
     @router.route("POST", "/api/chat/reactions")
     @guarded
@@ -298,9 +339,12 @@ def register():
         b = req.body
         _require(b, "cousin")
         cousin = find_cousin(req, b.get("cousin"))
-        return _upstream(cousin, "/api/reactions", body={
-            "message_id": b.get("message_id"), "user": b.get("user"),
-            "emoji": b.get("emoji"), "action": b.get("action") or "tap"})
+        forward = {"message_id": b.get("message_id"), "user": b.get("user"),
+                   "emoji": b.get("emoji"), "action": b.get("action") or "tap"}
+        if serves_locally(cousin):
+            return _local(chat_api.react, cousin.home, forward,
+                          notify=chat_api.make_notify(cousin))
+        return _upstream(cousin, "/api/reactions", body=forward)
 
     @router.route("GET", "/api/chat/inbound/{slug}/{name}")
     @guarded

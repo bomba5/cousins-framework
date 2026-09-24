@@ -267,6 +267,7 @@ class TestReset(SideCase):
         self.assertTrue(r.login_required())
         self.assertEqual(r.state(), "errored")
         self.assertEqual(r._resume_id, "s-1")        # the login retry resumes it
+        self.assertEqual(r._expect_session, "s-1")   # R12: a different session is resume-lost
         self.assertTrue(r.worker_alive())
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "queued"))
 

@@ -402,7 +402,7 @@ class TestOnceStallClockUnderTheRealBackoff(HermeticCase):
         """Final review: under the real backoff (1 s, doubling) each rebuild
         ended the stall for a moment and restarted `--once`'s clock, so exit
         3 came after about 26 s, not the documented 10. The clock now runs
-        on across rebuilds until a side stays up RESTART_RESET_S."""
+        on across rebuilds until one connects."""
         home = _install(self)
 
         def refuse(options):
@@ -435,6 +435,48 @@ class TestOnceStallClockUnderTheRealBackoff(HermeticCase):
         self.assertIn("a side session could not start", err.getvalue())
         self.assertGreaterEqual(took, runner_main.ERRORED_GIVE_UP_S)
         self.assertLess(took, 18.0)
+
+
+class TestOnceDrainsARebuiltSide(HermeticCase):
+    def test_once_exits_0_when_a_rebuilt_side_connects_and_serves_a_slow_row(self):
+        """Re-review: a side that gave up once and was rebuilt, connected and
+        serving is not stalled. Counting it stalled until it had been up
+        RESTART_RESET_S made `--once` exit 3 on a healthy cousin whenever a
+        turn outlasted the give-up time."""
+        home = _install(self)
+        made = []
+
+        def peer(options):
+            client = ScriptedClient(options, [[init_msg(session="s-peer"), ("SLOW", 4.0),
+                                               assistant(text="answered"),
+                                               result(session="s-peer")]])
+            made.append(client)
+            if len(made) == 1:              # the first CLI does not start
+                async def connect(prompt=None):
+                    raise OSError("the CLI did not start")
+                client.connect = connect
+            return client
+
+        s = sessions.Sessions(home, kinds=("peer",),
+                              factories={"primary": lambda o: ScriptedClient(o, []),
+                                         "peer": peer})
+        self.addCleanup(lambda: s.stop(timeout=5))
+        receipt = s.enqueue(Item("peer:testa", "chat", "hello?", sender="Testa"))
+        import threading
+        stop, out = threading.Event(), []
+        with mock.patch.object(runner_main, "ERRORED_GIVE_UP_S", 2.5), \
+                mock.patch.object(sessions, "RESTART_BASE_S", 0.05), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            s.start()
+            t = threading.Thread(target=lambda: out.append(runner_main._once(s, stop)))
+            t.start()
+            t.join(60)
+            stop.set()
+            t.join(5)
+        self.assertEqual(out, [0], err.getvalue())
+        self.assertEqual(len(made), 2)
+        self.assertEqual(s.inbox.get(receipt.inbox_id)["outcome"], "delivered")
+        self.assertFalse(s.side_stalled())
 
 
 class TestOneCachedPrefix(SessionsCase):

@@ -311,7 +311,7 @@ class SideSession(SdkRunner):
             # the fallback was refused for the login: a login is never fatal
             # (R15). Wait for it on the old session, as the fallback would
             # have been: the login retry resumes it.
-            self._resume_id = old
+            self._resume_id = self._expect_session = old   # R12, as _main does
             return True
         self._fail_connect("side session %s has no session after a reset: %s"
                            % (self.kind, self._last_connect_error))
@@ -507,11 +507,15 @@ class Sessions:
         return any(r.login_required() for r in self.sessions().values())
 
     def side_stalled(self):
-        """True from a side session's give-up until it has recovered: while
-        it waits for its rebuild, and after the rebuild until it has stayed
-        up RESTART_RESET_S (its attempts back at 0). `--once` exits 3 on it
-        after its give-up clock (round 2 review N2); counting only the wait
-        let every rebuild restart that clock, so under the real backoff the
-        exit came after about 26 s, not 10 (final review). The long-running
-        mode keeps rebuilding it (P8-1)."""
-        return bool(self._restart_at) or any(self._attempts.values())
+        """True from a side session's give-up until a rebuild of it has
+        CONNECTED once: while it waits for its rebuild, and while the
+        rebuilt side has not opened a client (`_opened`, which a failed
+        connect never sets). `--once` exits 3 on it after its give-up clock
+        (round 2 review N2). The clock runs on across failed rebuilds (each
+        rebuild once restarted it, so under the real backoff exit 3 came
+        after about 26 s, not 10: final review), and a rebuild that connects
+        clears it at once (re-review: a healthy side serving a slow row must
+        not make `--once` exit 3). The long-running mode keeps rebuilding it
+        (P8-1)."""
+        return bool(self._restart_at) or any(
+            self._attempts[kind] and not self.sides[kind]._opened for kind in self.kinds)

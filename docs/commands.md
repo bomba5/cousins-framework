@@ -175,7 +175,7 @@ it. An install script can gate on `cousin-runner --home H --check-auth`.
 |---|---|
 | 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox, or `--check-auth` found the account logged in (and `--validate`'s turn answered) |
 | 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler; or another runner holds the lock |
-| 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across its rebuilds: a rebuilt side session counts as recovered only once it has stayed up 5 minutes); the long-running mode keeps rebuilding a side session and never exits for one |
+| 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across rebuilds that fail to connect; a rebuild that connects ends it); the long-running mode keeps rebuilding a side session and never exits for one |
 | 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner, or any of its side sessions, waiting for a login. A supervisor must not restart on it |
 
 ```

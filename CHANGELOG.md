@@ -3,6 +3,26 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.18.1 - 2026-09-24
+
+### Fixed
+- The inbound gate refuses a sender named like one the framework writes
+  itself (`fw-hook`, `runner`, `framework`, `unknown`, `system`,
+  `schedule`; `delivery.FRAMEWORK_SENDERS`): a peer or node named
+  `fw-hook` was threaded on `system` as a framework hook. `403`.
+- `POST /peer/send` answers every refusal before the signature verifies
+  with the same `401 {"error": "unauthorized"}`: a known peer's slug no
+  longer answers a malformed body with `400` or an unusable entry with
+  `503`, so a caller cannot list the configured peers. The no-reach and
+  local-slug refusals come after the signature and keep their generic
+  `503`; the console's log says why in every case.
+- The shipped hive node logs `tell-home dropped` when the queen does not
+  take a tell-home or no home is configured; it never retries one, and
+  `docs/reference/hive-api.md` now says so.
+- `docs/reference/hive-api.md`: a tell-home is shown under the name the
+  operator minted the node's token with, and the node's `[tell-home: ...]`
+  goes to `POST /hive/tell-home` when `TELL_HOME=1`.
+
 ## 1.18.0 - 2026-09-24
 
 ### Added

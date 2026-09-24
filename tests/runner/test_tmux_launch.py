@@ -29,10 +29,15 @@ class TestEnvBase(unittest.TestCase):
                                "SSH_AUTH_SOCK": "/run/agent.sock", "KEEP_ME": "1"})
 
     def test_the_hard_deny_beats_env_allow(self):
-        env = tmux_launch.env_base(RUNNER_ENV, env_allow=("CLAUDE_EXTRA", "ANTHROPIC_API_KEY",
-                                                          "CLAUDECODE"))
-        for name in ("CLAUDE_EXTRA", "ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"):
+        env = tmux_launch.env_base(dict(RUNNER_ENV, DB_PASSWORD="x"), env_allow=(
+            "CLAUDE_EXTRA", "ANTHROPIC_API_KEY", "CLAUDECODE", "OPENAI_API_KEY", "DB_PASSWORD"))
+        for name in ("CLAUDE_EXTRA", "ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+                     "OPENAI_API_KEY", "DB_PASSWORD"):
             self.assertNotIn(name, env)
+
+    def test_the_deny_is_the_panes_one(self):
+        from cousin_lib.runner import tmux_pane
+        self.assertIs(tmux_launch.denied, tmux_pane.denied)
 
 
 class TestEnvAllow(unittest.TestCase):
@@ -40,7 +45,8 @@ class TestEnvAllow(unittest.TestCase):
         self.assertEqual(tmux_launch.env_allow_of({}), ())
         self.assertEqual(tmux_launch.env_allow_of({"env_allow": ["KEEP_ME", "GH_HOST"]}),
                          ("KEEP_ME", "GH_HOST"))
-        for bad in ("KEEP_ME", ["bad-name"], [3], ["CLAUDE_EXTRA"], ["ANTHROPIC_BASE_URL"]):
+        for bad in ("KEEP_ME", ["bad-name"], [3], ["CLAUDE_EXTRA"], ["ANTHROPIC_BASE_URL"],
+                    ["DB_PASSWORD"], ["GH_TOKEN"]):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError) as err:
                     tmux_launch.env_allow_of({"env_allow": bad})
@@ -51,7 +57,7 @@ class TestArgv(unittest.TestCase):
     def test_a_fresh_start_mints_the_session_and_asks_for_the_context(self):
         argv = tmux_launch.argv(launcher=pathlib.Path("cousin_lib/runner/tmux_launch.py"),
                                 home=pathlib.Path("/srv/fw/cousins/wren"),
-                                session=("new", "0f7c6a2e-1111-4222-8333-444455556666"),
+                                session=("--session-id", "0f7c6a2e-1111-4222-8333-444455556666"),
                                 model="opus", effort="high", fresh=True)
         self.assertEqual(argv[0], sys.executable)
         self.assertTrue(os.path.isabs(argv[1]))
@@ -61,16 +67,16 @@ class TestArgv(unittest.TestCase):
             "--dangerously-skip-permissions", "--setting-sources", "project,local"])
 
     def test_a_resume_without_a_model_or_effort_leaves_the_clis_defaults(self):
-        argv = tmux_launch.argv(launcher=pathlib.Path("/opt/l.py"), home=pathlib.Path("/h"),
-                                session=("resume", "s-1"), model=None, effort=None, fresh=False)
+        argv = tmux_launch.argv(home=pathlib.Path("/h"), session=("--resume", "s-1"),
+                                fresh=False)                     # TmuxRunner's call
+        self.assertEqual(argv[1], str(pathlib.Path(tmux_launch.__file__).resolve()))
         self.assertEqual(argv[2:], ["--home", "/h", "--", "claude", "--resume", "s-1",
                                     "--dangerously-skip-permissions", "--setting-sources",
                                     "project,local"])
         for flag in FORBIDDEN:
             self.assertNotIn(flag, argv)
         with self.assertRaises(ValueError):
-            tmux_launch.argv(launcher=pathlib.Path("/opt/l.py"), home=pathlib.Path("/h"),
-                             session=("adopt", "s-1"), model=None, effort=None, fresh=False)
+            tmux_launch.argv(home=pathlib.Path("/h"), session=("resume", "s-1"), fresh=False)
 
 
 class LaunchCase(HermeticCase):

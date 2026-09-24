@@ -124,23 +124,10 @@ def _default_factory(options):
 
 # A thinking block in the reasoning stream: its text, bounded as a tool
 # result's is (the whole block stays in the session store's transcript).
-THINKING_CHARS = 8000
-
-
-def _thinking_payload(text):
-    payload = {"length": len(text), "text": text[:THINKING_CHARS]}
-    if len(text) > THINKING_CHARS:
-        payload["truncated"] = True
-    return payload
-
-
-def _tool_result_text(content):
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(part.get("text", "") for part in content
-                         if isinstance(part, dict) and part.get("type") == "text")
-    return ""
+# the block helpers are shared with the tmux kind (phase 11, R7)
+from cousin_lib.runner.blocks import THINKING_CHARS  # noqa: E402,F401 - re-exported
+from cousin_lib.runner.blocks import thinking_payload as _thinking_payload  # noqa: E402
+from cousin_lib.runner.blocks import tool_result_text as _tool_result_text  # noqa: E402
 
 
 class SdkRunner:

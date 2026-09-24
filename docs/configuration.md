@@ -627,6 +627,7 @@ account = "metered"
 | `proactive_recall` | `true` | `false` stops the chat server adding recall lines to your messages |
 | `recall_keyword_only` | `false` | `true` lets keyword-only hits into recall lines when there's no embedding service |
 | `review_batch` | `3` | when more than this many entries on authored topics were written since the review gate last looked (on the runner lane, after every turn), they are held for review, out of the memory views until kept (`cousin-memory review`) |
+| `review_model` | the cousin's own model | the model the runner's review gate asks to keep or drop held entries (SDK lane) |
 
 `[lifecycle]`:
 

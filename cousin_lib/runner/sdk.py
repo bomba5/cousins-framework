@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import accounts, boot, session, usage
+from cousin_lib import accounts, boot, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import auth, envelope, extract, hooks, rollover, tools, wake
 from cousin_lib.runner.base import (FOLDED_KINDS, INTERRUPT, NO_TURN, Receipt, RunnerError,
@@ -149,6 +149,11 @@ class SdkRunner:
     # session's live turn (phase 5 ruling P5-2). A session class that must
     # never take it (phase 8's SideSession) sets this False.
     takes_interrupts = True
+    # Whether this session runs the review gate's start-up sweep: every held
+    # entry a reviewer has tried fewer than MAX_ATTEMPTS times. One session
+    # per home does, or each would review the same rows (phase 8's
+    # SideSession sets it False; phase 7b review round 2, N2).
+    sweeps_at_start = True
     # After this many consecutive failed turns the loop waits before its
     # next claim: backoff_base_s, doubling, capped; a good turn resets it.
     backoff_after = 3
@@ -164,7 +169,7 @@ class SdkRunner:
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
                  cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
-                 session=PRIMARY, claim_kinds=None, exclude_kinds=()):
+                 session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None):
         self.home = Path(home)
         # Which rows this session claims (phase 8): claim_kinds None is every
         # kind but exclude_kinds; a side session names its own kind.
@@ -266,6 +271,14 @@ class SdkRunner:
         self.handoff_box = rollover.HandoffBox()
         self.hysteresis = rollover.Hysteresis()
         self.tool_context.on_handoff = self.handoff_box.set
+        # The review gate (review_gate.py): after every turn, and once at
+        # start, entries over [memory] review_batch are held; a second model
+        # (_model_review, or the caller's reviewer: entries -> {id: verdict},
+        # sync or async) reviews them in ONE background task on this loop,
+        # batch by batch, never holding the next turn (_gate_hold).
+        self.memory_reviewer = memory_reviewer or self._model_review
+        self._review_queue = []
+        self._review_task = None
 
     def _identity(self):
         """(slug, name) from cousin.toml; the directory name when it lacks them."""
@@ -854,6 +867,9 @@ class SdkRunner:
                     self._fresh_pending = bool(saved) or has_state
                 else:
                     await self._start_fresh(with_digest=bool(saved) or has_state)
+            # the start-up sweep is the primary's alone (review round 2, N2): a
+            # side session only holds, and reviews what its own gate held
+            await self._gate_hold(sweep=self.sweeps_at_start)
             with self._doorbell() as listener:
                 while not self._stop.is_set() and self.fatal is None:
                     if self._login_blocked:
@@ -888,6 +904,7 @@ class SdkRunner:
                         # `[]`: its rows are already closed (FakeRunner._fail_turn)
                         self._fail_turn([], exc)
                         ok = False
+                    await self._gate_hold()          # after every turn, a result or an error
                     self._failures = 0 if ok else self._failures + 1
                     if self._resume_lost:
                         # The resume came back as a new session (R12). Known only
@@ -902,6 +919,7 @@ class SdkRunner:
                         elif self.fatal is None:
                             await self._start_fresh(with_digest=True)
         finally:
+            await self._stop_review()
             await self._flush_session()     # a stop never loses the last id
             await self._disconnect()
 
@@ -1419,7 +1437,8 @@ class SdkRunner:
         step runs off the loop (blocking sqlite and file work) and never
         raises into it: a failure is a `usage`, `extract` or `propose`
         event, never a broken turn, and a failed step does not stop the
-        next one. Last, the context pressure check (rollover.pressure_due,
+        next one. (The review gate runs after the whole turn, in `_main`,
+        whether it ended in a result or an error: `_gate_hold`.) Last, the context pressure check (rollover.pressure_due,
         held back by the hysteresis): a rollover is requested, never run
         here; the loop claims it at the boundary. First of all, the
         session id this result (or its init) named goes to
@@ -1489,6 +1508,119 @@ class SdkRunner:
         except Exception as exc:  # noqa: BLE001 - a proposal must never fail a turn
             payload.update(proposal=None, error="%s: %s" % (type(exc).__name__, exc))
         self.stream.append("propose", payload)
+
+    # -- the review gate (review_gate.py) ---------------------------------
+    async def _gate_hold(self, *, sweep=False):
+        """The gate's hold, off the loop: whatever was written on authored
+        topics since the per-home cursor, over the batch, is held and queued
+        for the reviewer. After every turn (a result or an error: a turn
+        that died after its writes is caught here, or at the next start),
+        and at start with `sweep`, which also offers the entries left held
+        (by a crash, a stop, a failed review) that a reviewer has tried
+        fewer than MAX_ATTEMPTS times. Never raises, never awaits a review."""
+        try:
+            if sweep:
+                await asyncio.to_thread(review_gate.begin, self.home)
+            held = await asyncio.to_thread(review_gate.hold_new, self.home)
+            if sweep:
+                held = await asyncio.to_thread(review_gate.to_offer, self.home)
+        except Exception as exc:  # noqa: BLE001 - the gate must never fail a turn
+            self.stream.append("review_gate", {"turn": self._turn_seq, "held": 0,
+                                               "error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+        if held:
+            # one review call per REVIEW_BATCH_MAX rows: a prompt stays bounded
+            n = review_gate.REVIEW_BATCH_MAX
+            self._review_queue.extend(held[i:i + n] for i in range(0, len(held), n))
+            if self._review_task is None or self._review_task.done():
+                self._review_task = asyncio.get_running_loop().create_task(self._review_worker())
+
+    async def _review_worker(self):
+        """One batch at a time: two reviews over the same held set would
+        race in `release`."""
+        while self._review_queue:
+            await self._review_batch(self._review_queue.pop(0))
+
+    async def _review_batch(self, rows):
+        """Review one held batch and settle it; a `review_gate` event when
+        it ends (`error` "cancelled" on a stop: the entries stay held)."""
+        payload = {"turn": self._turn_seq, "held": len(rows), "kept": 0, "dropped": 0,
+                   "pending": len(rows), "error": None}
+        try:
+            await asyncio.to_thread(review_gate.note_attempt, self.home, rows)
+            if asyncio.iscoroutinefunction(self.memory_reviewer):
+                verdicts = await self.memory_reviewer(rows)
+            else:
+                verdicts = await asyncio.to_thread(self.memory_reviewer, rows)
+            done, errors = await asyncio.to_thread(
+                review_gate.settle, self.home, rows, verdicts or {},
+                by="review-gate:%s" % self.session_id, why="the review gate's reviewer")
+            values = list(done.values())
+            payload.update(kept=values.count("keep"), dropped=values.count("drop"),
+                           pending=len(rows) - len(values))
+            if errors:
+                payload["error"] = "; ".join("%s %s" % kv for kv in errors.items())
+        except asyncio.CancelledError:
+            payload["error"] = "cancelled"
+            self.stream.append("review_gate", payload)
+            raise
+        except Exception as exc:  # noqa: BLE001 - a failed review leaves entries held
+            payload["error"] = "%s: %s" % (type(exc).__name__, exc)
+        self.stream.append("review_gate", payload)
+
+    async def _stop_review(self):
+        """Cancel the review on a stop: its entries stay held, which is safe."""
+        task, self._review_task = self._review_task, None
+        self._review_queue = []
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - recorded by the batch
+                pass
+
+    REVIEW_TIMEOUT_S = 180.0
+
+    async def _model_review(self, rows):
+        """The default reviewer: one tool-less, single-turn call to a fresh
+        client on the cousin's account (no MCP servers, no settings, no
+        session kept, a fixed cwd under data/), on `[memory] review_model`
+        or the cousin's own model, asking for review_gate.parse_verdicts'
+        JSON. It runs on this loop, so a stop cancels it and its client
+        disconnects; its usage is recorded like a turn's. A raise leaves
+        every entry held."""
+        return await asyncio.wait_for(self._review_once(rows), self.REVIEW_TIMEOUT_S)
+
+    async def _review_once(self, rows):
+        sdk = _sdk()
+        env = dict(accounts.account_env(self.account, self.root), **AUTO_MEMORY_OFF)
+        cwd = self.home / "data" / "review-cwd"
+        await asyncio.to_thread(cwd.mkdir, parents=True, exist_ok=True)
+        model = await asyncio.to_thread(review_gate.review_model, self.home) or self.model
+        options = sdk.ClaudeAgentOptions(cwd=str(cwd), model=model, env=env,
+                                         setting_sources=[], tools=[], mcp_servers={},
+                                         max_turns=1,
+                                         extra_args={"no-session-persistence": None})
+        client = self.client_factory(options)
+        await client.connect()
+        try:
+            await client.query(review_gate.review_prompt(rows))
+            text = []
+            async for msg in client.receive_response():
+                if isinstance(msg, sdk.AssistantMessage):
+                    text += [b.text for b in msg.content if isinstance(b, sdk.TextBlock)]
+                elif isinstance(msg, sdk.ResultMessage):
+                    await asyncio.to_thread(
+                        usage.record, self.home, client_id="review-gate",
+                        session_id=msg.session_id, lane=self._lane,
+                        result={"usage": msg.usage, "total_cost_usd": msg.total_cost_usd,
+                                "session_id": msg.session_id})
+                    if msg.is_error:
+                        raise RunnerError("the review turn failed: %s" % (msg.result,))
+                    break
+        finally:
+            await client.disconnect()
+        return review_gate.parse_verdicts("\n".join(text), [r["id"] for r in rows])
 
     async def _context_usage(self):
         """The client's context usage, or None when it cannot say."""

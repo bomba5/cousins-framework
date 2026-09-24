@@ -574,6 +574,24 @@ never falls back to silence: it surfaces as the `propose` event's own
 `error`, the same event a normal turn's proposal (or its absence) uses,
 and the turn still delivers.
 
+### The review gate on the SDK lane
+
+After every turn, whether it ended in an answer or an error, and once
+when it starts, the runner asks the review gate what was written on
+authored topics since it last looked (`cousin_lib/review_gate.py`). Over
+`[memory] review_batch`, the entries are held and a second model reviews
+them in the background, at most 20 entries per call: each call has no
+tools and keeps no session, and runs on
+the cousin's own account, on `[memory] review_model` or else the
+cousin's own model (`SdkRunner._model_review`). The next message does
+not wait for it. Its usage is recorded like a turn's. The outcome is a
+`review_gate` event in the runner's stream: how many were held, kept,
+dropped and still pending, and the error if the review failed (`cancelled`
+when the runner stopped first). Anything the review did not settle stays
+held for `cousin-memory review`; a later start of the runner offers it to
+the reviewer once more. On the tmux lane nothing runs the gate after a
+turn.
+
 ### Proactive recall in chat
 
 When you (the operator) send a cousin a message of at least 24

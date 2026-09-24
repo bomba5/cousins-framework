@@ -199,6 +199,42 @@ class TestEnsurePass(WatchdogCase):
                          [("testa", "error"), ("testb", "ok")])
 
 
+class TestTheRunnerLane(WatchdogCase):
+    """A runner cousin has no tmux session and the supervisor runs no chat
+    server: this pass is what brings its chat server back after a reboot
+    or a crash (phase 7b review round 2, C2)."""
+
+    def _fleet(self):
+        _make_fleet(self.root, {"testa": 8090, "testb": 8091})
+        for slug in ("testa", "testb"):
+            with open(self.root / "cousins" / slug / "cousin.toml", "a") as fh:
+                fh.write('\n[agent]\nrunner = "sdk"\n')
+
+    def test_a_running_runner_cousins_dead_chat_server_is_spawned(self):
+        self._fleet()
+        spawned, asked_tmux = [], []
+
+        def spawn(home):
+            spawned.append(home.name)
+            return True
+        results = self._pass(has_tmux=lambda s: asked_tmux.append(s) or False,
+                             runner_alive=lambda home: home.name == "testa",
+                             health=lambda port, slug: bool(spawned),
+                             port_in_use=lambda port: False, spawn=spawn)
+        self.assertEqual({r["slug"]: r["action"] for r in results},
+                         {"testa": "spawn", "testb": "skip"})    # testb's runner is stopped
+        self.assertEqual(spawned, ["testa"])
+        self.assertEqual(asked_tmux, [])                         # never tmux on this lane
+
+    def test_the_default_liveness_is_the_runners_lock(self):
+        self._fleet()
+        home = self.root / "cousins" / "testa"
+        self.assertTrue(W._default_runner_lane(home))
+        with mock.patch("cousin_lib.delivery.is_alive", return_value=True) as alive:
+            self.assertTrue(W._default_runner_alive(home))
+        alive.assert_called_once_with(home)
+
+
 class TestSpawnWait(WatchdogCase):
     def test_spawn_that_never_answers_within_the_wait_is_non_zero(self):
         _make_fleet(self.root, {"testa": 8090})

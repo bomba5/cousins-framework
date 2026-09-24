@@ -8,7 +8,13 @@ every cousin, act only on the one state that is safe to act on.
 
 The decision per cousin is a pure table (`ensure_action`):
 
-  no tmux session            -> skip   (a stopped cousin needs no server)
+  its agent is not running   -> skip   (a stopped cousin needs no server;
+                                        the agent is its tmux session, or on
+                                        the runner lane the runner holding
+                                        the cousin's lock: the supervisor
+                                        runs no chat server, so this pass is
+                                        what brings a runner cousin's back
+                                        after a reboot or a crash)
   no chat port configured    -> skip
   /health answers with slug  -> ok     (leave it alone)
   port occupied, health bad  -> alert  (log only: the process may be a
@@ -105,6 +111,16 @@ def _default_port_in_use(port):
         return False
 
 
+def _default_runner_lane(home):
+    from cousin_lib import spawn
+    return spawn.runner_lane(home)
+
+
+def _default_runner_alive(home):
+    from cousin_lib import delivery
+    return delivery.is_alive(home)
+
+
 def _default_spawn(home):
     """Start the chat server exactly as spawn and flip do: the module
     entry point under this interpreter, detached, stdout and stderr
@@ -140,7 +156,8 @@ def _wait_for_health(port, slug, *, health, sleep):
 
 def ensure_pass(root, *, dry_run=False, has_tmux=_default_has_tmux,
                 health=_default_health, port_in_use=_default_port_in_use,
-                spawn=_default_spawn, sleep=time.sleep):
+                spawn=_default_spawn, sleep=time.sleep,
+                runner_lane=_default_runner_lane, runner_alive=_default_runner_alive):
     """One result per cousin, in registry order:
     {slug, port, action, ok}. `ok` is False for an alert, a spawn that
     did not answer within SPAWN_WAIT_S, or a probe that raised; a
@@ -152,7 +169,8 @@ def ensure_pass(root, *, dry_run=False, has_tmux=_default_has_tmux,
         try:
             results.append(_ensure_one(
                 config, dry_run=dry_run, has_tmux=has_tmux, health=health,
-                port_in_use=port_in_use, spawn=spawn, sleep=sleep))
+                port_in_use=port_in_use, spawn=spawn, sleep=sleep,
+                runner_lane=runner_lane, runner_alive=runner_alive))
         except Exception as err:  # the pass outlives any one cousin
             print("[chat-watchdog] ERROR %s: %s: %s"
                   % (slug, type(err).__name__, err), file=sys.stderr)
@@ -162,9 +180,11 @@ def ensure_pass(root, *, dry_run=False, has_tmux=_default_has_tmux,
 
 
 def _ensure_one(config, *, dry_run, has_tmux, health, port_in_use, spawn,
-                sleep):
+                sleep, runner_lane=_default_runner_lane,
+                runner_alive=_default_runner_alive):
     slug, port, home = config.slug, config.chat_port, config.home
-    alive = has_tmux(config.tmux_session)
+    # the agent runs: its tmux session, or on the runner lane its runner
+    alive = runner_alive(home) if runner_lane(home) else has_tmux(config.tmux_session)
     probe = bool(alive and port)
     action = ensure_action(
         has_tmux=alive, port=port,

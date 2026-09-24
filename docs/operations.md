@@ -238,7 +238,11 @@ A chat server started by spawn or a flip has nobody watching it. The
 watchdog is that somebody. Each run it looks at every cousin and does one of
 four things:
 
-- **skip**: no tmux session (a stopped cousin needs no chat) or no chat port
+- **skip**: the cousin is not running (a stopped cousin needs no chat) or
+  has no chat port. Running means its tmux session is up, or, for a runner
+  cousin, that its runner holds its lock: the supervisor runs no chat
+  server, so this is what brings a runner cousin's back after a reboot or a
+  crash
 - **ok**: `/health` answers with the cousin's slug
 - **alert**: the port is taken but `/health` doesn't answer with this slug.
   It logs an alert, exits 1 and touches nothing, because the thing on the

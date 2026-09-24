@@ -254,6 +254,42 @@ cousin-supervisor stop wren && cousin-supervisor start wren
 cousin-supervisor start --name loops
 ```
 
+`cousin-migrate` moves one cousin from the tmux lane to the SDK runner, and
+back. Nothing else ever does: an upgrade or a merge leaves every cousin on the
+lane its `cousin.toml` names. `plan <slug> [--account NAME]` checks, writing
+nothing, that the cousin is running on the tmux lane (a stopped one would be
+started by the move), with no migration open, that its account is logged in,
+that a `cousin-supervisor` runs, that the SDK is installed and that its
+auto-memory imports without a conflict, then lists the steps; it exits 0
+ready, 1 not. `apply <slug> [--account NAME] --yes` runs them in order and
+stops at the first that fails: `close` (the console's clean stop: the
+handoff, the transcript mined), `import` (`cousin-memory import-auto
+--apply`), `toml` (`[agent] runner = "sdk"`, and the account, once the tmux
+session is still down), `start` (the review gate's cursor opens afresh, the
+supervisor starts the runner, and the cousin's chat server is started, since
+the supervisor runs none and peers reach the inbox through it; afterwards
+`cousin-chat-watchdog` keeps it up) and `verify` (the runner stays up and holds its
+lock for 10 seconds, and the chat server answers `/health`).
+`data/migration.json` keeps the prior `cousin.toml`, its bytes and mode,
+written before the first step, and each step's outcome. `rollback <slug>
+--yes` undoes what ran: it stops the runner and waits until it lets go of
+its lock, puts the file back, has the supervisor rescan, writes a fresh
+boot packet, starts the tmux session unless it already runs, and releases
+the supervisor's hold on the runner (`run/held`). It refuses a second rollback,
+inbox rows still waiting and an inbox it cannot read (`--force` rolls back
+anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]`
+is the week's measure, from the migration on by default: inbox rows not
+done after an hour, tool calls with no recorded result, recorder hooks that
+failed, an unreadable inbox, a chat server that does not answer; exit 0
+clean, 1 not.
+
+```
+cousin-migrate plan wren --account team
+cousin-migrate apply wren --account team --yes
+cousin-migrate check wren
+cousin-migrate rollback wren --yes
+```
+
 ## Memory
 
 `cousin-memory` is the cousin's memory tool. Subcommands:

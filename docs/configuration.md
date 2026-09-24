@@ -940,7 +940,7 @@ what this lane does not do yet are in [runners](reference/runners.md).
 | `small_model` | `model` | the model opencode uses for its own small calls (session titles); the same rules |
 | `opencode_bin` | `COUSIN_OPENCODE_BIN`, else `opencode` on `PATH` | the `opencode` binary |
 | `opencode_models_fetch` | `true` | `false` sets `OPENCODE_DISABLE_MODELS_FETCH=1`: opencode then does not fetch the models.dev catalog at start (an outbound request that carries no credential) |
-| `shell_env` | `[]` | variable names the model's shell gets from the runner's own environment (for example `["SSH_AUTH_SOCK"]`), beside `USER` and `LOGNAME`. Not `HOME`, `XDG_*`, `OPENCODE_*` or a credential (exit 2) |
+| `shell_env` | `[]` | variable names the model's shell gets from the runner's own environment (for example `["SSH_AUTH_SOCK"]`), beside `USER` and `LOGNAME`. Not `HOME`, `XDG_*`, `OPENCODE_*`, a known credential, or a name shaped like one (`*SECRET*`, `*_PASSWORD`, `*_KEY`, `*_TOKEN`): exit 2 |
 
 The runner starts one `opencode serve` on `127.0.0.1` with a fresh password,
 in the cousin's home, with `HOME` and the four XDG directories in the

@@ -119,13 +119,17 @@ class TestRenderedPolicy(OpencodeCase):
 
     def test_shell_env_names_what_the_runner_owns_or_a_secret_is_refused(self):
         for bad in ('"HOME"', '"XDG_DATA_HOME"', '"OPENCODE_SERVER_PASSWORD"', '"OPENCODE_X"',
-                    '"ANTHROPIC_API_KEY"', '"bad-name"', "3"):
+                    '"ANTHROPIC_API_KEY"', '"bad-name"', "3",
+                    # review round 2, minor 6: a secret by its name's shape
+                    '"DB_PASSWORD"', '"AWS_SECRET_ACCESS_KEY"', '"CLIENT_SECRET"',
+                    '"MY_SECRET_THING"', '"SIGNING_KEY"', '"GH_TOKEN"'):
             with self.subTest(bad=bad):
                 with self.assertRaises(opencode.RunnerError) as err:
                     self.runner(home=self.home(extra="shell_env = [%s]\n" % bad))
                 self.assertIn("shell_env", str(err.exception))
         with self.assertRaises(opencode.RunnerError):
             self.runner(home=self.home(extra='shell_env = "SSH_AUTH_SOCK"\n'))
+        self.runner(home=self.home(extra='shell_env = ["SSH_AUTH_SOCK", "KEYBOARD_LAYOUT"]\n'))
 
     def test_no_policy_file_renders_an_empty_policy(self):
         r = self.started(self.runner())

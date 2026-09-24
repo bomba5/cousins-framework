@@ -46,9 +46,10 @@ _PHASE6_NEEDLE = "cousin-supervisor"
 
 def _phase6_entry(text):
     """(version, body, the version of the entry right below it) of the
-    CHANGELOG entry whose body names cousin-supervisor."""
+    OLDEST CHANGELOG entry whose body names cousin-supervisor: the one phase
+    6 introduced it in. Later entries may name it too (1.21.0 does)."""
     heads = list(re.finditer(r"^## (\d+\.\d+\.\d+) - .*$", text, re.M))
-    for i, head in enumerate(heads):
+    for i, head in reversed(list(enumerate(heads))):
         end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
         body = text[head.end():end]
         if _PHASE6_NEEDLE in body:

@@ -110,6 +110,14 @@ class TestPlan(SwitchCase):
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
         self.assertFalse(p["ready"]); self.assertIn("session", " ".join(
             c["detail"] for c in p["checks"] if not c["ok"]))
+        # a tmux rollover's new id its CLI has not written yet (I5)
+        self.kind("tmux")
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-new", "lane": "login", "fresh": True}))
+        p = migrate.switch_plan(self.home, root=self.root, to="sdk", **self.live())
+        self.assertFalse(p["ready"]); self.assertIn("rollover in flight", " ".join(
+            c["detail"] for c in p["checks"] if not c["ok"]))
+        self.kind("sdk")
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login"}))
         # the legacy lane is migrate's own path, not a kind switch

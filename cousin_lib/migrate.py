@@ -1265,12 +1265,16 @@ def account_mcp_servers(account):
     return sorted(servers) if isinstance(servers, dict) else []
 
 
-def _recorded_session(home):
+def _session_record(home):
     try:
         data = json.loads((Path(home) / "data" / "runner-session.json").read_text())
     except (OSError, ValueError):
-        return None
-    sid = data.get("session_id") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _recorded_session(home):
+    sid = _session_record(home).get("session_id")
     return sid if isinstance(sid, str) and sid else None
 
 
@@ -1310,8 +1314,14 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
     else:
         checks.append(_check("account", True, "%s (%s)" % (account.name, account.kind)))
     sid = _recorded_session(home)
-    checks.append(_check("session", sid is not None,
-                         "session %s continues" % sid if sid else
+    # I5: "fresh" is a tmux rollover's new id whose CLI has not written the
+    # session yet; the other kind would resume a session nothing holds
+    fresh = sid is not None and _session_record(home).get("fresh") is True
+    checks.append(_check("session", sid is not None and not fresh,
+                         "session %s continues" % sid if sid and not fresh else
+                         "session %s is a rollover in flight (\"fresh\" in"
+                         " data/runner-session.json): nothing is written under it yet;"
+                         " let the cousin take one turn first" % sid if fresh else
                          "no recorded session in data/runner-session.json: nothing to continue;"
                          " start the cousin once first"))
     checks.append(_check("supervisor", supervisor_up(root),

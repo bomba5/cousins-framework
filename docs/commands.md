@@ -199,6 +199,7 @@ cousin-runner --home cousins/wren --check-auth --validate
 | `activity TEXT` | set the "what I'm doing now" line |
 | `distill [--max-lines N]` | rebuild `memory/distilled/` from raw |
 | `consolidate` | list recurring topics, then distill |
+| `import-auto [--apply] [--json]` | fold the agent CLI's own auto-memory into `memory/imported/auto/` with provenance: a dry run unless `--apply`, idempotent, an edited copy never overwritten, a removed copy never imported again |
 | `compact [--target index\|raw] [--budget B] [--hot-days D] [--dry-run]` | trim the MEMORY.md index, or fold old raw days into monthly archives |
 | `reindex` | rebuild the search indexes from scratch |
 | `propose-shared [--commit]` | nominate shareable memories for the shared tier |

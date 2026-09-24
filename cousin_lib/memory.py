@@ -854,6 +854,29 @@ def _cmd_propose_shared(args):
     return 0
 
 
+def _cmd_import_auto(args):
+    """Fold the agent CLI's own auto-memory into memory/imported/auto/
+    (memory_import). A dry run unless --apply."""
+    from cousin_lib import memory_import
+    from cousin_lib.config import FrameworkConfig, MissingConfigError
+    home = _home(args)
+    try:
+        root = FrameworkConfig.resolve().root
+    except MissingConfigError as err:
+        print("ERROR: import-auto reads config/harness.toml under the framework"
+              " root: %s" % err, file=sys.stderr)
+        return 2
+    if args.apply:
+        rows = memory_import.apply(home, root=root)
+    else:
+        rows = memory_import.plan(home, root=root)
+    if args.json:
+        print(json.dumps(rows, indent=1))
+    else:
+        print(memory_import.format_plan(rows, applied=args.apply))
+    return 0
+
+
 def _cmd_trash(args):
     from cousin_lib import memory_trash
 
@@ -946,6 +969,14 @@ def memory_main(argv=None):
              " restore <id>` puts one back")
     p.add_argument("rest", nargs=argparse.REMAINDER)
     p.set_defaults(func=_cmd_trash)
+    p = sub.add_parser(
+        "import-auto",
+        help="fold the agent CLI's own auto-memory into"
+             " memory/imported/auto/ with provenance (dry run unless"
+             " --apply; idempotent; an edited copy is never overwritten)")
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--json", action="store_true", help="print the plan's rows as JSON")
+    p.set_defaults(func=_cmd_import_auto)
     p = sub.add_parser(
         "consolidate",
         help="list recurring topics, then rebuild memory/distilled/"

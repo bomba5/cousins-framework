@@ -29,7 +29,8 @@ class Case(HermeticCase):
         panes = []
 
         def factory(path):
-            p = pane(path) if pane else FakePane(path, on_prompt=getattr(self, "on_prompt", None), **kw)
+            opts = dict({"context_home": self.home}, **kw)
+            p = pane(path) if pane else FakePane(path, on_prompt=getattr(self, "on_prompt", None), **opts)
             panes.append(p)
             return p
         deadline = kw.pop("handoff_deadline_s", None)
@@ -135,6 +136,71 @@ class TestTurns(Case):
         self.write(r, {"type": "user", "promptSource": "typed", "promptId": "pd",
                        "message": {"role": "user", "content": "[inbox:%s] again" % nonce}})
         self.assertTrue(_wait(lambda: "duplicate_delivery" in self.kinds(r)))
+
+
+class TestContext(Case):
+    """R10 (review C2, I2): the block the launcher appends on a fresh start,
+    the pointer a resumed session gets, the live turn for the stdio server."""
+
+    def context(self):
+        return self.home / "data" / "run" / "tmux-context.md"
+
+    def pointer(self):
+        return self.home / "data" / "run" / "tmux-resume.md"
+
+    def test_a_fresh_start_writes_the_block_before_the_pane_starts(self):
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].started))
+        self.assertTrue(_wait(lambda: self.panes[0].alive()))
+        self.assertEqual(self.panes[0].launch_refused, 0)
+        self.assertIn("You run on an interactive Claude Code pane", self.context().read_text())
+        self.assertNotIn("Framework law", self.pointer().read_text() if self.pointer().exists() else "")
+
+    def test_a_resume_gets_a_pointer_to_the_block_saying_what_changed(self):
+        sid = "5e55a000-0000-4000-8000-000000000002"
+        self.home = temp_home(self)
+        (self.home / "data" / "runner-session.json").write_text(json.dumps(
+            {"session_id": sid, "kind": "sdk"}))                 # born on the other kind
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertNotIn("--fresh", self.panes[0].started[0][0])
+        self.assertTrue(self.context().exists())
+        text = self.pointer().read_text()
+        self.assertIn(str(self.context()), text)
+        self.assertIn("did not start with it", text)
+        r.stop(timeout=5)
+        r2 = self.runner()
+        r2.start()                                                # still not born with it
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertIn("did not start with it", self.pointer().read_text())
+
+    def test_a_session_born_with_the_block_is_told_it_is_unchanged(self):
+        r = self.runner()
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "one turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+        r._stop.set()
+        r._thread.join(3)
+        self.panes[0].die()
+        r2 = self.runner()
+        r2.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertIn("unchanged since this session started", self.pointer().read_text())
+
+    def test_the_live_turn_is_written_for_the_stdio_server_and_cleared_at_its_end(self):
+        from cousin_lib.runner import tmux_turn
+        r = self.runner(slow=True)
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.hook_record(r, self.panes[0])
+        rec = r.enqueue(Item("operator:wren", "chat", "slow", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.assertEqual(tmux_turn.live(self.home), (True, ("operator:wren",)))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+        self.assertTrue(_wait(lambda: tmux_turn.live(self.home) == (False, ())))
+        self.assertFalse((self.home / "run" / "turn.json").exists())
 
 
 class TestStop(Case):
@@ -292,6 +358,8 @@ class TestRollover(Case):
         self.assertEqual((row["outcome"], detail["handoff"], detail["exit"]), ("delivered", "clean", "exit"))
         self.assertEqual(self.panes[0].exits, 1)
         self.assertEqual(self.panes[0].kills, 0, "the old CLI ended by /exit, not a kill")
+        self.assertTrue(self.panes[-1].alive(), "the new pane found its context block")
+        self.assertEqual(self.panes[-1].launch_refused, 0)
         new = r.session_id()
         self.assertNotEqual(new, old)
         self.assertEqual(self.panes[-1].started[-1][0], ["claude", new, "--fresh"])

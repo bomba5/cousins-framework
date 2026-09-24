@@ -21,7 +21,7 @@ from cousin_lib.runner.tmux_pane import Outcome
 
 class FakePane:
     def __init__(self, transcript, *, slow=False, fail_first=False, turn_s=0.05, slow_s=3.0,
-                 attention=None, on_prompt=None, settle_s=0.0, linger=None):
+                 attention=None, on_prompt=None, settle_s=0.0, linger=None, context_home=None):
         self.transcript = Path(transcript)
         self.slow, self.fail_first = slow, fail_first
         self.turn_s, self.slow_s = turn_s, slow_s
@@ -40,6 +40,10 @@ class FakePane:
         self.kills = 0
         self.linger = linger       # a killed CLI's pid stays: None, "until_sigkill" or "forever"
         self.sigkills = []
+        # the launcher's side (tmux_launch): a --fresh start with no
+        # data/run/tmux-context.md in this home exits 2, and the pane dies
+        self.context_home = Path(context_home) if context_home is not None else None
+        self.launch_refused = 0
 
     # -- the Pane protocol ------------------------------------------------
     def alive(self):
@@ -52,6 +56,12 @@ class FakePane:
         self.started.append((list(argv), cwd, sorted(env_base)))   # names only, as the real pane
         self.transcript.parent.mkdir(parents=True, exist_ok=True)
         self.transcript.touch()
+        if self.context_home is not None and "--fresh" in argv \
+                and not (self.context_home / "data" / "run" / "tmux-context.md").exists():
+            self.launch_refused += 1
+            self._alive = False
+            return
+        self._dead = False
         self._alive = True
 
     def kill(self):

@@ -19,6 +19,7 @@ turn; the pane is killed only when the stop is a hold (run/held, P11-10).
 The structure is FakeRunner's (the reference runner): one worker thread,
 the wake socket, the state machine, `_fail_turn` never silent, the
 rollover row's sequence."""
+import hashlib
 import json
 import os
 import secrets
@@ -28,7 +29,7 @@ import uuid
 from pathlib import Path
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import blocks, transcript, tmux_hook, wake
+from cousin_lib.runner import blocks, transcript, tmux_hook, tmux_turn, wake
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
@@ -51,6 +52,10 @@ CLAIMS_FILE = "tmux-claims.json"
 CURSOR_FILE = "tmux-cursor.json"
 SESSION_FILE = "runner-session.json"
 HOOK_RECORD = ("run", "tmux-session.json")    # written by the pane's SessionStart hook
+CONTEXT_FILE = ("data", "run", "tmux-context.md")     # R10: the launcher appends it on --fresh
+POINTER_FILE = ("data", "run", "tmux-resume.md")      # R10: the hook's SessionStart context on a resume
+ORIGINS_FILE = ("data", "run", "tmux-context-origin.json")   # session id -> the block it was born with
+ORIGINS_KEPT = 32
 
 
 def _atomic_write(path, data):
@@ -60,6 +65,16 @@ def _atomic_write(path, data):
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(json.dumps(data))
+    tmp.replace(path)
+
+
+def _atomic_write_text(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
     tmp.replace(path)
 
 
@@ -265,6 +280,71 @@ class TmuxRunner:
             return ("HOME", "PATH", "USER", "LOGNAME", "LANG")
         return tmux_launch.env_base(dict(os.environ), env_allow=self.env_allow)
 
+    def _write_context(self, fresh):
+        """R10, before every pane start: the block (law, the pane's contract,
+        operator rules; prompt.compose_context_block) to data/run/
+        tmux-context.md, which the launcher appends on a fresh start. A fresh
+        session's block is remembered by its digest; a resumed one gets
+        data/run/tmux-resume.md, the short pointer the pane's SessionStart
+        hook hands the model (S7: --append-system-prompt is dropped on a
+        resume): the file's path and whether it changed since the session
+        started with it."""
+        from cousin_lib.runner import prompt, tools
+        registry, _notice = tools.resolve_registry(self.home, self.root)
+        block = prompt.compose_context_block(self.home, root=self.root, registry=registry)
+        path = self.home.joinpath(*CONTEXT_FILE)
+        _atomic_write_text(path, block)
+        digest = hashlib.sha256(block.encode()).hexdigest()[:16]
+        origins_path = self.home.joinpath(*ORIGINS_FILE)
+        origins = _read_json(origins_path) or {}
+        if fresh:
+            origins.pop(self._session_id, None)
+            origins[self._session_id] = digest
+            while len(origins) > ORIGINS_KEPT:
+                origins.pop(next(iter(origins)))
+            _atomic_write(origins_path, origins)
+            return
+        born = origins.get(self._session_id)
+        if born == digest:
+            change = "it is unchanged since this session started with it in its system prompt"
+        elif born is None:
+            change = ("this session did not start with it (it began on another runner kind, or"
+                      " before this runner wrote it): read it now")
+        else:
+            change = ("it changed since this session started (a release, a registry or a"
+                      " shared-rule edit): read it again now")
+        _atomic_write_text(self.home.joinpath(*POINTER_FILE), (
+            "[runner] This session was resumed in an interactive Claude Code pane under the"
+            " cousins framework's tmux runner. The framework's block for this pane (the law,"
+            " the contract for this runner, the operator rules) is %s; %s. Where it and"
+            " instructions earlier in this session differ (another runner kind's), it wins.\n"
+            % (path, change)))
+
+    def _prepare_start(self, fresh):
+        """The context block before a pane starts: a fresh start cannot run
+        without it (the launcher refuses, exit 2); a resume only loses its
+        pointer, which is said."""
+        try:
+            self._write_context(fresh)
+        except Exception as exc:  # noqa: BLE001 - said, and fatal only for a fresh start
+            if fresh:
+                raise RunnerError("the context block for a fresh start: %s: %s"
+                                  % (type(exc).__name__, exc))
+            self.stream.append("error", {"error": "the resume pointer: %s: %s"
+                                         % (type(exc).__name__, exc)})
+
+    def _turn_file(self, threads=None, nonce=""):
+        """run/turn.json for the stdio server (I5, R11): the live turn's
+        threads, or cleared (None). Never fails a turn."""
+        try:
+            if threads is None:
+                tmux_turn.clear(self.home)
+            else:
+                tmux_turn.write(self.home, session_id=self._session_id, turn_nonce=nonce or "",
+                                threads=threads)
+        except OSError as exc:
+            self.stream.append("error", {"error": "run/turn.json: %s" % exc})
+
     def _open_session(self):
         """Adopt, else resume, else fresh (P11-2). Returns how."""
         recorded, fresh = self._recorded_session()
@@ -292,6 +372,7 @@ class TmuxRunner:
                                       " SIGKILL; not starting a second one on session %s"
                                       % (old, self._session_id))
         if how is None:
+            self._prepare_start(self._fresh)
             self.pane.start(self._argv(self._fresh), cwd=str(self.home), env_base=self._env_base())
             how = "fresh" if self._fresh else "resumed"
         self._save_session()
@@ -364,6 +445,7 @@ class TmuxRunner:
                                                          "at": time.time()},
                                                "typed_at": time.monotonic()}
                     self._live = {"rows": [row], "prompt_id": entries[start].prompt_id, "who": "row"}
+                    self._turn_file([row["thread_id"]], entries[start].nonce)
                     continue
                 self.inbox.done(row["id"], DELIVERED, "cut by restart")
                 cut.append(row["id"])
@@ -394,6 +476,7 @@ class TmuxRunner:
 
     def _run(self):
         try:
+            self._turn_file(None)                # a file a dead runner left names no live turn
             how = self._open_session()
             self._cursor = self._size() if how != "fresh" else 0
             self._recover(how)
@@ -545,6 +628,7 @@ class TmuxRunner:
             self._persist_claims()
             row = c["row"]
             self._live = {"rows": [row], "prompt_id": e.prompt_id, "who": "row"}
+            self._turn_file([row["thread_id"]], e.nonce)
             self._to("running", "turn")
             self.stream.append("turn_start", {"inbox_ids": [row["id"]], "bodies": [row["body"]],
                                               "thread_id": row["thread_id"]})
@@ -557,6 +641,7 @@ class TmuxRunner:
         if who == "foreign":
             self.stream.append("foreign_turn", {"prompt_id": e.prompt_id})
         self._live = {"rows": [], "prompt_id": e.prompt_id, "who": who}
+        self._turn_file(["system"] if who == "runner" else [], e.nonce or e.prompt_id)
         self._to("running", "%s turn" % who)
         self.stream.append("turn_start", {"inbox_ids": [], "bodies": [text.split("\n", 1)[0][:200]],
                                           "thread_id": "system"})
@@ -575,6 +660,7 @@ class TmuxRunner:
         ids = self._close_rows(DELIVERED, "turn %s%s" % (self._session_id, " (interrupted)" if interrupted else ""))
         self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted, "is_error": False})
         self._live, self._interrupting = None, False
+        self._turn_file(None)
         self._turn_seq += 1
         if self._first_end is None:
             self._first_end = time.monotonic()
@@ -602,6 +688,7 @@ class TmuxRunner:
         ids = self._close_rows(FAILED, message)
         self.stream.append("result", {"inbox_ids": ids, "interrupted": False, "is_error": True})
         self._live, self._interrupting = None, False
+        self._turn_file(None)
         self._to("idle", "recovered")
 
     def _limit_live(self):
@@ -610,6 +697,7 @@ class TmuxRunner:
             self._claims.pop(row["id"], None)
         self._persist_claims()
         self._live, self._interrupting = None, False
+        self._turn_file(None)
         self._limit_until = time.monotonic() + LIMIT_RETRY_S
         self._handoff_limited = self.machine.state == "rolling_over"
         self.stream.append("rate_limit", {"until_s": LIMIT_RETRY_S, "source": "transcript"})
@@ -879,6 +967,7 @@ class TmuxRunner:
             self._save_session()                       # the new id before its pane (N9)
             self._persist_claims()
             self.pane = self._make_pane(self._path)
+            self._prepare_start(True)
             self.pane.start(self._argv(True), cwd=str(self.home), env_base=self._env_base())
             self._persist_cursor()
         except Exception as exc:  # noqa: BLE001 - never a wedged machine

@@ -58,6 +58,37 @@ class Case(HermeticCase):
         return json.loads((self.home / "run" / "tmux-session.json").read_text())
 
 
+class TestResumePointer(Case):
+    """R10: a resumed session gets only a short pointer to the block, as
+    SessionStart's additionalContext (S7b); a fresh one gets nothing."""
+
+    def run_hook(self, source):
+        out = io.StringIO()
+        with mock.patch.object(sys, "stdout", out):
+            self.assertEqual(tmux_hook.main(["--home", str(self.home), "SessionStart"],
+                                            stdin=_start(source=source)), 0)
+        return out.getvalue()
+
+    def test_a_resume_prints_the_runners_pointer(self):
+        (self.home / "data" / "run").mkdir(parents=True)
+        (self.home / "data" / "run" / "tmux-resume.md").write_text("read the block at /x\n")
+        for source in ("resume", "compact"):
+            data = json.loads(self.run_hook(source))
+            self.assertEqual(data["hookSpecificOutput"], {
+                "hookEventName": "SessionStart", "additionalContext": "read the block at /x\n"})
+        self.assertEqual(self.run_hook("startup"), "")
+        self.assertEqual(self.run_hook("clear"), "")
+
+    def test_no_pointer_file_prints_nothing(self):
+        self.assertEqual(self.run_hook("resume"), "")
+
+    def test_a_cli_that_is_not_the_panes_gets_no_pointer(self):
+        (self.home / "data" / "run").mkdir(parents=True)
+        (self.home / "data" / "run" / "tmux-resume.md").write_text("pointer")
+        os.environ[tmux_hook.PANE_PID_VAR] = "1"
+        self.assertEqual(self.run_hook("resume"), "")
+
+
 class TestSessionStart(Case):
     def test_the_record_is_written_with_the_clis_pid(self):
         self.hook("SessionStart", _start(transcript="/p/s.jsonl", source="resume"))
@@ -438,6 +469,7 @@ class TestSessionChanged(Case):
         r = TestRunnerSide.runner(self)
         r.start()
         self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertTrue(_wait(lambda: (self.home / "run" / "runner.sock").exists()))
         for _ in range(2):
             self.hook("SessionStart", _start(sid="after-clear", source="clear"))
         changed = lambda: [e["payload"] for e in r.events() if e["kind"] == "system"
@@ -473,6 +505,9 @@ class TestSessionChanged(Case):
         r = TestRunnerSide.runner(self)
         r.start()
         self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        # the pane starts before the runner listens: a datagram sent in
+        # between is lost (hooks are wake-ups), so wait for the socket
+        self.assertTrue(_wait(lambda: (self.home / "run" / "runner.sock").exists()))
         for n in range(tmux_runner.CHANGES_KEPT + 10):
             wake.send(self.home, json.dumps({"event": "SessionStart", "session_id": "s-%d" % n,
                                              "source": "clear"}).encode())

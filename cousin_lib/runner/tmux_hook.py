@@ -22,10 +22,15 @@ pane's pid and the CLI's. A hook whose CLI is not that pid (an operator's
 claude in the home, a claude the pane's model started) writes nothing and
 sends nothing.
 
+On a SessionStart whose source is "resume" or "compact" it also prints
+the runner's pointer (<home>/data/run/tmux-resume.md, R10) as the
+hook's `additionalContext`: `--append-system-prompt` is dropped on a
+resume (S7), SessionStart context reaches a resumed session (S7b).
+
 A hook must never block or fail the CLI: it always exits 0, prints
-nothing on stdout (SessionStart's and UserPromptSubmit's stdout reach
-the model's context), ignores input it cannot read, and bounds every
-step; HARD_S ends the process whatever it is doing.
+nothing else on stdout (SessionStart's and UserPromptSubmit's stdout
+reach the model's context), ignores input it cannot read, and bounds
+every step; HARD_S ends the process whatever it is doing.
 
 It runs in the pane's `env -i` environment (tmux_launch), so it imports
 only the standard library at import time, and wake.py when it sends
@@ -46,6 +51,9 @@ READ_S = 1.0               # stdin the CLI never closes is given up on after thi
 HARD_S = 3.0               # the whole hook, whatever step it is in
 PANE_PID_VAR = "COUSIN_PANE_PID"   # set by tmux_launch: the pane's pid, which is the CLI's
 IGNORED_NOTIFICATIONS = ("idle_prompt",)
+POINTER = ("data", "run", "tmux-resume.md")   # written by the runner before a resume
+POINTER_SOURCES = ("resume", "compact")
+MAX_POINTER = 8192
 SHELLS = ("sh", "bash", "dash", "zsh", "ash", "busybox")
 
 
@@ -162,6 +170,21 @@ def session_start(home, data):
                          "pid": cli_pid()})
 
 
+def pointer(home, data):
+    """R10's resume pointer as SessionStart's hook output, or None."""
+    if data.get("source") not in POINTER_SOURCES:
+        return None
+    try:
+        with open(Path(home).joinpath(*POINTER), encoding="utf-8", errors="replace") as fh:
+            text = fh.read(MAX_POINTER + 1)
+    except OSError:
+        return None
+    if not text.strip() or len(text) > MAX_POINTER:
+        return None
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                              "additionalContext": text}})
+
+
 def wake_runner(home, event, data):
     """One datagram to the runner; False when nobody listens."""
     kind = data.get("notification_type")
@@ -204,6 +227,10 @@ def main(argv=None, stdin=None):
                 session_start(home, data)
             except (OSError, ValueError, TypeError):
                 pass            # no record: the runner locates the transcript itself
+            out = pointer(home, data)
+            if out is not None:
+                sys.stdout.write(out)
+                sys.stdout.flush()
         wake_runner(home, event, data)
     except Exception:  # noqa: BLE001 - a hook never fails the CLI
         pass

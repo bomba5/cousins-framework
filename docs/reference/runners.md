@@ -96,29 +96,29 @@ not DECLARED against every kind (`tests/runner/contract/test_<kind>.py`; the
 so an IMPLEMENTED or PLUGIN cell is one the suite enforces.
 
 <!-- contract-table:begin (python3 -m cousin_lib.runner.contract_table --write) -->
-| item | what the suite proves | `sdk` | `fake` | `opencode` |
-|---|---|---|---|---|
-| `enqueue_receipt` | `enqueue` answers a `Receipt` with an inbox id, outcome `queued` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `priority_order` | queued rows run in priority order: operator, then peer, then loop | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `consume_after_start` | a row put while the runner is stopped runs after `start()` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_ends_turn` | `interrupt()` ends the running turn; the runner is idle again | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `turn_events` | every turn emits `turn_start`, then `tool`, then `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `unsupported_list` | `unsupported()` names contract items only | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `midturn_fold` | an operator message put mid-turn is closed by the same `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `outcome_delivered` | a finished turn closes its row `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `outcome_failed` | a failed turn closes its row `failed`, the result an error | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `outcome_interrupted` | an interrupted turn's row is `delivered` (the model had it) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `failure_recovers` | after a failure (`errored`, then `idle`) the next row runs | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `stop_ends_turn` | `stop()` during a turn ends it within its timeout | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `peer_waits` | a peer message put mid-turn waits for a turn of its own | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `state_events` | every state transition is a `state` event, in order | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `events_after` | `events(after=n)` resumes exactly after event `n` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_idle_false` | `interrupt()` with no turn running answers False | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `enqueue_type_error` | `enqueue` refuses anything but an `Item` (TypeError) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `rollover_shape` | `rollover()` answers `{ok, reason}` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `rollover_generation` | a rollover moves the generation and loses no row | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_row` | an `interrupt` inbox row ends the live turn and is `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `interrupt_row_idle` | an `interrupt` row with no turn running is `failed`, never a turn | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| item | what the suite proves | `sdk` | `fake` | `opencode` | `tmux` |
+|---|---|---|---|---|---|
+| `enqueue_receipt` | `enqueue` answers a `Receipt` with an inbox id, outcome `queued` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `priority_order` | queued rows run in priority order: operator, then peer, then loop | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `consume_after_start` | a row put while the runner is stopped runs after `start()` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_ends_turn` | `interrupt()` ends the running turn; the runner is idle again | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `turn_events` | every turn emits `turn_start`, then `tool`, then `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `unsupported_list` | `unsupported()` names contract items only | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `midturn_fold` | an operator message put mid-turn is closed by the same `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | DECLARED |
+| `outcome_delivered` | a finished turn closes its row `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `outcome_failed` | a failed turn closes its row `failed`, the result an error | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `outcome_interrupted` | an interrupted turn's row is `delivered` (the model had it) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `failure_recovers` | after a failure (`errored`, then `idle`) the next row runs | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `stop_ends_turn` | `stop()` during a turn ends it within its timeout | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `peer_waits` | a peer message put mid-turn waits for a turn of its own | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `state_events` | every state transition is a `state` event, in order | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `events_after` | `events(after=n)` resumes exactly after event `n` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_idle_false` | `interrupt()` with no turn running answers False | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `enqueue_type_error` | `enqueue` refuses anything but an `Item` (TypeError) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `rollover_shape` | `rollover()` answers `{ok, reason}` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `rollover_generation` | a rollover moves the generation and loses no row | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_row` | an `interrupt` inbox row ends the live turn and is `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `interrupt_row_idle` | an `interrupt` row with no turn running is `failed`, never a turn | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 <!-- contract-table:end -->
 
 `midturn_fold` on `opencode` is measured, not assumed: a prompt sent while a

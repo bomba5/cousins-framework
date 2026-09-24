@@ -91,6 +91,8 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
+
 RECORD = "data/migration.json"
 STEPS = ("close", "handover", "import", "toml", "start", "verify")
 STALE_S = 3600.0          # an inbox row not done after this long is a lost message
@@ -591,9 +593,17 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     home, root = Path(home), Path(root)
     checks = []
     agent = _agent(home)
-    lane_ok = agent.get("runner") not in ("sdk", "fake")
-    checks.append(_check("lane", lane_ok, "on the tmux lane" if lane_ok else
-                         "already on the runner lane ([agent] runner = %r)" % agent.get("runner")))
+    runner = agent.get("runner")
+    lane_ok = runner not in RUNNER_KINDS
+    if lane_ok:
+        lane_detail = "on the tmux lane"
+    elif runner == "tmux":
+        lane_detail = ("[agent] runner = \"tmux\" is the tmux runner kind, not the legacy tmux"
+                       " lane: it is already on the runner lane; switch kinds with --to sdk"
+                       " (phase 11)")
+    else:
+        lane_detail = "already on the runner lane ([agent] runner = %r)" % runner
+    checks.append(_check("lane", lane_ok, lane_detail))
     running = lane_ok and tmux_alive(home)
     if lane_ok:
         checks.append(_check("running", running, "its tmux session is up" if running else

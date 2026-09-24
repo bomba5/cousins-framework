@@ -309,7 +309,7 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertEqual(data["agent"], {"runner": "fake", "account": "fleet"})
 
     def test_an_invalid_runner_is_refused_before_anything_is_written(self):
-        self.assertIn("runner must be one of sdk, fake", self.refused(runner="tmux"))
+        self.assertIn("runner must be one of sdk, fake", self.refused(runner="pane"))
         os.environ["COUSIN_DEFAULT_RUNNER"] = "docker"
         self.assertIn("COUSIN_DEFAULT_RUNNER", self.refused())
 

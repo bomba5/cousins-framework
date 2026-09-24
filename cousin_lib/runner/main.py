@@ -196,6 +196,19 @@ def runner_for(home, *, kind=None):
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)
+    if kind == "tmux":
+        if side:
+            raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
+                              " runner = \"sdk\"" % ", ".join(side))
+        if account.kind in ("claude-token", "anthropic-key"):
+            raise RunnerError("the tmux kind runs on a subscription login (host or a"
+                              " claude-login account); %s accounts are refused until a"
+                              " login-free config dir is shown to start with no menu"
+                              " (phase 11 P11-6; A4: onboarding is skippable by seeding,"
+                              " but a token's login screen is not measured)" % account.kind)
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        return TmuxRunner(home, account=account, model=agent.get("model"),
+                          effort=effort_of(agent), policy=policy)
     if kind == "opencode":
         if side:
             raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
@@ -434,7 +447,10 @@ def _serve(runner, once):
         previous_int = signal.signal(signal.SIGINT, _signal)
         # a claim from a runner that died is ours now (the lock says no
         # other runner is alive on this home)
-        runner.inbox.requeue_stale(older_than_s=0.0)
+        # A kind whose claims can be live in a pane that outlived its runner
+        # (tmux, recovers_claims) recovers them itself in start() (P11-9).
+        if not getattr(runner, "recovers_claims", False):
+            runner.inbox.requeue_stale(older_than_s=0.0)
         # Before start: the head of this process's stream says what runs
         # here, for a reader with no runner object (runner/status.py).
         runner.stream.append("runner", {"kind": getattr(runner, "kind", None),

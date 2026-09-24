@@ -335,7 +335,10 @@ def _memories(home, max_chars):
         try:
             history = memory._all_raw(home)
             hidden = memory.hidden_ids(history)
-            held = len(review_gate.pending_ids(history))
+            # held entries that exist: one removed from raw (the trash) is
+            # no longer held by anything, so it is not counted
+            waiting = review_gate.pending_ids(history)
+            held = len({memory.entry_id(e) for e in history} & waiting)
         except Exception:  # noqa: BLE001 - the packet still assembles
             hidden, held = set(), 0
         lines = []

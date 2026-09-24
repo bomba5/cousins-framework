@@ -323,6 +323,18 @@ class TestTheBootPacket(HermeticCase):
         review_gate.hold_new(home)
         self.assertIn("4 memory entries are held by the review gate", boot._memories(home, 20000))
 
+    def test_a_held_entry_that_is_gone_is_not_counted(self):
+        """Execution review: the count is of held entries that exist; one
+        removed from raw (the trash) leaves no ghost."""
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        for path in memory.raw_dir(home).glob("????-??-??.jsonl"):
+            lines = [l for l in path.read_text().splitlines()
+                     if json.loads(l).get("topic") != rows[0]["topic"]]
+            path.write_text("\n".join(lines) + "\n")
+        self.assertIn("3 memory entries are held by the review gate", boot._memories(home, 20000))
+
     def test_the_runner_digest_leaves_them_out_too(self):
         from cousin_lib.runner import prompt
         home = _home(self)

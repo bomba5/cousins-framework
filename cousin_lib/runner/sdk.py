@@ -845,6 +845,12 @@ class SdkRunner:
 
     async def _main(self):
         try:
+            # the start-up sweep first, before a resume or a fresh start: what
+            # a dead runner wrote and never held is held before this session's
+            # digest is built (execution review). It is the primary's alone
+            # (review round 2, N2): a side session only holds, and reviews
+            # what its own gate held.
+            await self._gate_hold(sweep=self.sweeps_at_start)
             on_file = await asyncio.to_thread(self._read_session_file)
             saved = on_file.get("session_id") or None
             self._saved, self._saved_lane = saved, on_file.get("lane") or "unknown"
@@ -867,9 +873,6 @@ class SdkRunner:
                     self._fresh_pending = bool(saved) or has_state
                 else:
                     await self._start_fresh(with_digest=bool(saved) or has_state)
-            # the start-up sweep is the primary's alone (review round 2, N2): a
-            # side session only holds, and reviews what its own gate held
-            await self._gate_hold(sweep=self.sweeps_at_start)
             with self._doorbell() as listener:
                 while not self._stop.is_set() and self.fatal is None:
                     if self._login_blocked:

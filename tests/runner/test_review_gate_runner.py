@@ -181,6 +181,27 @@ class TestTheGateFailsSafe(_Base):
         self.assertEqual(len(review_gate.pending(self.home)), 4)
 
 
+class TestTheSweepComesBeforeTheDigest(_Base):
+    """Execution review: entries a crash left un-held are held before the
+    new session's state digest is built (the sweep runs before the
+    resume or the fresh start)."""
+
+    def test_the_fresh_start_sees_them_held(self):
+        review_gate.begin(self.home, now=time.time() - 5)
+        self._writes(4)()                                     # a dead runner's writes
+        seen = []
+        original = SdkRunner._start_fresh
+
+        async def start_fresh(runner, **kw):
+            seen.append(len(review_gate.pending(self.home)))
+            return await original(runner, **kw)
+        with mock.patch.object(SdkRunner, "_start_fresh", start_fresh):
+            r = self._runner([], memory_reviewer=lambda rows: {})
+            r.start()
+            self.assertTrue(_wait(lambda: seen))
+        self.assertEqual(seen[0], 4)
+
+
 class TestOneReviewerPerHome(_Base):
     """Phase 7b review round 2, N2: a side session (phase 8) runs `_main`
     too; only the primary sweeps the held entries at start, or each

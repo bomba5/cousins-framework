@@ -1994,7 +1994,10 @@ class _ScrubbedAuthEnv:
     a config dir, a base URL or a provider switch inherited from the
     invoking shell would pick the credentials or the provider (cousin-runner
     removes them for good; a one-off caller such as cousin-migrate gets
-    them back afterwards)."""
+    them back afterwards). It edits the whole process's environment: call
+    it only from a one-shot process (cousin-migrate, cousin-runner
+    --check-auth), never from one with other threads or async work that
+    reads os.environ, such as the console or a serving runner."""
 
     def __enter__(self):
         import os

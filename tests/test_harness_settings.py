@@ -177,6 +177,85 @@ class TestMerge(SettingsCase):
             self._apply()
 
 
+class TestAttribution(SettingsCase):
+    """Tracker #112: config.commit_attribution decides whether the
+    settings file carries includeCoAuthoredBy: false and an empty
+    attribution object - the tmux lane's own reach for the same
+    outcome the SDK runner gets through --settings."""
+
+    def _cousin_agent(self, extra):
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "testa"\n\n[agent]\n' + extra)
+
+    def test_default_true_adds_nothing(self):
+        self._apply()
+        data = self._read()
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self.assertNotIn("attribution", data)
+
+    def test_cousin_override_false_adds_the_keys(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+
+    def test_install_default_false_adds_the_keys(self):
+        (self.root / "config").mkdir()
+        (self.root / "config" / "harness.toml").write_text(
+            "[agent]\ncommit_attribution = false\n")
+        self._apply()
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+
+    def test_cousin_override_true_wins_over_install_false(self):
+        (self.root / "config").mkdir()
+        (self.root / "config" / "harness.toml").write_text(
+            "[agent]\ncommit_attribution = false\n")
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        data = self._read()
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self.assertNotIn("attribution", data)
+
+    def test_a_second_run_off_changes_nothing(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        first = settings_path(self.home).read_text()
+        self._apply()
+        self.assertEqual(settings_path(self.home).read_text(), first)
+
+    def test_turning_it_back_on_removes_what_the_framework_added(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        data = self._read()
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self.assertNotIn("attribution", data)
+
+    def test_operators_own_keys_are_never_clobbered_turning_off(self):
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text(json.dumps({
+            "includeCoAuthoredBy": True,
+            "attribution": {"commit": "operator wrote this", "pr": "x"},
+        }))
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], True)
+        self.assertEqual(data["attribution"]["commit"], "operator wrote this")
+
+    def test_operators_own_keys_are_never_clobbered_turning_on(self):
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text(json.dumps({"includeCoAuthoredBy": True}))
+        self._apply()   # commit_attribution unset anywhere: True, nothing to remove
+        self.assertIs(self._read()["includeCoAuthoredBy"], True)
+
+
 class TestHooksDir(unittest.TestCase):
     def test_hooks_dir_is_the_checkout_hooks_whatever_the_cwd(self):
         self.assertEqual(harness_settings.hooks_dir(), _REPO_ROOT / "hooks")

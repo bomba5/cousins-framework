@@ -98,6 +98,24 @@ class TestClaims(SideCase):
         self.assertEqual(sdk.PRIMARY, sessions.PRIMARY)
 
 
+class TestCommitAttribution(SideCase):
+    """Tracker #112: a side session shares SdkRunner.options() (no
+    override in sessions.py), so it must resolve commit_attribution the
+    same way, from the same home, as the primary."""
+
+    def test_off_reaches_a_side_sessions_options_too(self):
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + "commit_attribution = false\n")
+        r = sessions.SideSession(self.home, kind="peer", client_factory=lambda o: None)
+        settings = json.loads(r.options().settings)
+        self.assertIs(settings["includeCoAuthoredBy"], False)
+        self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
+
+    def test_default_carries_no_settings(self):
+        r = sessions.SideSession(self.home, kind="peer", client_factory=lambda o: None)
+        self.assertIsNone(r.options().settings)
+
+
 class TestDigest(SideCase):
     def test_the_first_turn_carries_the_side_digest_and_only_the_first(self):
         r = self.side()

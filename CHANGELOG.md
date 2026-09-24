@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Added
+- `[agent] commit_attribution` (tracker #112): install-wide in
+  `config/harness.toml`, overridable per cousin in `cousin.toml`. `false`
+  turns off the harness's own injected commit/PR attribution (a
+  Co-Authored-By trailer, a "Generated with Claude Code" line); unset
+  anywhere, `true`, the harness's stock behaviour. The SDK runner composes
+  it into `options.settings` (and `validate_account`'s), side sessions get
+  the same, and the tmux lane's `apply_project_settings` writes
+  `includeCoAuthoredBy: false` and an empty `attribution` object into
+  `<home>/.claude/settings.json`, idempotently and without touching an
+  operator's own keys there. The resolved value rides the runner's head
+  `runner` stream event.
+
 ## 1.19.0 - 2026-09-24
 
 ### Added

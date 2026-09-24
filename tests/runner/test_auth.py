@@ -1,5 +1,6 @@
 """Detection kept apart from rate limits; the login file; the runner waits,
 spends no turn while it waits, and never dies for a login."""
+import json
 import os
 import threading
 import time
@@ -627,6 +628,39 @@ class TestValidate(HermeticCase):
         rc, line = validate_account(host, home.parent.parent, timeout=5,
                                     client_factory=lambda o: ScriptedClient(o, [turn]))
         self.assertEqual(rc, 0, line)
+
+
+@unittest.skipIf(AssistantMessage is None, "claude-agent-sdk not installed")
+class TestValidateAttribution(HermeticCase):
+    """Tracker #112: validate_account's own throwaway client composes the
+    same --settings, for consistency with the cousin's own runner."""
+
+    def test_default_carries_no_settings(self):
+        from cousin_lib.runner.sdk import validate_account
+        from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
+        home = temp_home(self)
+        seen = []
+        rc, line = validate_account(
+            accounts.Account("host", "claude-login", None, None, implicit=True), home.parent.parent,
+            client_factory=lambda o: seen.append(o) or ScriptedClient(
+                o, [[init_msg(), assistant(text="OK"), result()]]))
+        self.assertEqual(rc, 0, line)
+        self.assertIsNone(seen[0].settings)
+
+    def test_commit_attribution_false_composes_settings(self):
+        from cousin_lib.runner.sdk import validate_account
+        from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
+        home = temp_home(self)
+        seen = []
+        rc, line = validate_account(
+            accounts.Account("host", "claude-login", None, None, implicit=True), home.parent.parent,
+            commit_attribution=False,
+            client_factory=lambda o: seen.append(o) or ScriptedClient(
+                o, [[init_msg(), assistant(text="OK"), result()]]))
+        self.assertEqual(rc, 0, line)
+        settings = json.loads(seen[0].settings)
+        self.assertIs(settings["includeCoAuthoredBy"], False)
+        self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
 
 
 class TestPolicyGuardrail(HermeticCase):

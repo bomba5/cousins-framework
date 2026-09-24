@@ -18,7 +18,9 @@ import pathlib
 import shlex
 import sys
 import tempfile
+import tomllib
 
+from cousin_lib.config import commit_attribution as resolve_commit_attribution
 from cousin_lib.mcp_server import SERVER_NAME
 
 PROJECT_SETTINGS = pathlib.Path(".claude") / "settings.json"
@@ -43,6 +45,12 @@ JOB_HOOK_EVENTS = (("PreToolUse", JOB_HOOK_MATCHERS),
                    ("PostToolUseFailure", (None,)),
                    ("SubagentStop", (None,)))
 JOB_HOOK_TIMEOUT = 10
+
+# Tracker #112: what this module writes to turn Claude Code's own
+# injected attribution (a Co-Authored-By trailer, a "Generated with
+# Claude Code" line) off, for the tmux lane (the SDK runner reaches the
+# same outcome through options.settings, sdk.py's ATTRIBUTION_OFF_SETTINGS).
+ATTRIBUTION_OFF = {"commit": "", "pr": ""}
 
 
 class SettingsError(Exception):
@@ -107,6 +115,36 @@ def desired_hooks(home, *, root, python=None, hooks_root=None):
                 group = {"matcher": matcher, **group}
             wanted.setdefault(event, []).append(group)
     return wanted, missing
+
+
+def _cousin_agent_table(home):
+    """cousin.toml [agent], or {} when the file is missing or unreadable
+    (a home mid-spawn, or a thin toml): never raises, this is a read for
+    a default, not a required key."""
+    try:
+        data = tomllib.loads((pathlib.Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    return data.get("agent") or {}
+
+
+def _apply_attribution(data, commit_attribution):
+    """includeCoAuthoredBy / attribution, added when commit_attribution
+    is False, removed again when it is True - but only the shape this
+    module itself would write. A key already holding an operator's own
+    value, in either direction, is left exactly as it is: never
+    clobbered, per the module's own merge contract."""
+    if commit_attribution:
+        if data.get("includeCoAuthoredBy") is False:
+            del data["includeCoAuthoredBy"]
+        if data.get("attribution") == ATTRIBUTION_OFF:
+            del data["attribution"]
+        return data
+    if "includeCoAuthoredBy" not in data or data["includeCoAuthoredBy"] is False:
+        data["includeCoAuthoredBy"] = False
+    if "attribution" not in data or data["attribution"] == ATTRIBUTION_OFF:
+        data["attribution"] = dict(ATTRIBUTION_OFF)
+    return data
 
 
 def _load(path):
@@ -176,6 +214,12 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
                                 % (path, event))
         hooks[event] = current + groups
     data["hooks"] = hooks
+    # Tracker #112: the install's config/harness.toml [agent]
+    # commit_attribution, overridden by this cousin's own cousin.toml
+    # [agent] commit_attribution - the tmux lane's reach for the same
+    # outcome the SDK runner gets through options.settings.
+    data = _apply_attribution(data, resolve_commit_attribution(
+        root, _cousin_agent_table(home)))
     text = json.dumps(data, indent=2) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text() != text:

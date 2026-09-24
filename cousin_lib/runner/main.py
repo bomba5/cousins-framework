@@ -371,10 +371,12 @@ def _check_auth(home, *, validate=False):
     except (accounts.AccountsError, RunnerError) as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
+    from cousin_lib import config
     from cousin_lib.runner import sdk
     try:
-        rc, line = sdk.validate_account(account, root, model=agent.get("model"),
-                                        effort=effort)
+        rc, line = sdk.validate_account(
+            account, root, model=agent.get("model"), effort=effort,
+            commit_attribution=config.commit_attribution(root, agent))
     except RunnerError as err:        # the sdk extra is not installed
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
@@ -397,9 +399,16 @@ def _serve(runner, once):
         runner.inbox.requeue_stale(older_than_s=0.0)
         # Before start: the head of this process's stream says what runs
         # here, for a reader with no runner object (runner/status.py).
+        # commit_attribution (tracker #112) rides along so a reader can
+        # see whether this cousin's commits carry the CLI's own injected
+        # attribution without reading cousin.toml or config/harness.toml
+        # itself.
+        from cousin_lib import config
         runner.stream.append("runner", {"kind": getattr(runner, "kind", None),
                                         "pid": os.getpid(),
-                                        "unsupported": list(runner.unsupported())})
+                                        "unsupported": list(runner.unsupported()),
+                                        "commit_attribution": config.commit_attribution(
+                                            runner.root, _agent_table(runner.home))})
         runner.start()
         policy = getattr(runner, "policy", None)
         if policy is not None:

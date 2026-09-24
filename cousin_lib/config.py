@@ -315,6 +315,29 @@ def agent_config(root):
     }
 
 
+def commit_attribution(root, agent_table=None):
+    """Whether a commit or pull request this cousin makes carries Claude
+    Code's own injected attribution (a Co-Authored-By trailer, a
+    "Generated with Claude Code" line): config/harness.toml [agent]
+    commit_attribution sets the install default; a cousin's own
+    cousin.toml [agent] commit_attribution overrides it - pass that
+    table as `agent_table`, read the same way runner/main.py's
+    `_agent_table` and runner/sdk.py's `_agent_value` already read it.
+    Unset anywhere: True, which keeps the CLI's stock behaviour - the
+    framework is public and does not impose one operator's attribution
+    policy on every install."""
+    own = (agent_table or {}).get("commit_attribution")
+    if own is not None:
+        return bool(own)
+    data = _read_harness_toml(root) or {}
+    agent = data.get("agent") or {}
+    if not isinstance(agent, dict):
+        raise MissingConfigError(
+            "config/harness.toml [agent] must be a table")
+    install = agent.get("commit_attribution")
+    return True if install is None else bool(install)
+
+
 def harness_config(root):
     """config/harness.toml: where the agent harness keeps this install's
     session transcripts and its own auto-memory directory, and the

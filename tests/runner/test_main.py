@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import signal
 import subprocess
@@ -124,6 +125,29 @@ def _stream_says(home, text):
         if text in path.read_text():
             return True
     return False
+
+
+def _head_payload(home):
+    from cousin_lib.runner import status
+    path = status.primary_stream(home)
+    return json.loads(path.read_text().splitlines()[0])["payload"]
+
+
+class TestHeadEventAttribution(HermeticCase):
+    """Tracker #112: the head `runner` event says commit_attribution, so
+    it is observable without reading cousin.toml or config/harness.toml."""
+
+    def test_true_by_default(self):
+        home = temp_home(self, runner="fake")
+        self.assertEqual(runner_main.runner_main(["--home", str(home), "--once"]), 0)
+        self.assertIs(_head_payload(home)["commit_attribution"], True)
+
+    def test_false_reflects_a_cousin_override(self):
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + "commit_attribution = false\n")
+        self.assertEqual(runner_main.runner_main(["--home", str(home), "--once"]), 0)
+        self.assertIs(_head_payload(home)["commit_attribution"], False)
 
 
 class TestRunnerSelection(HermeticCase):

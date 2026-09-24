@@ -25,6 +25,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import memory_lock
+
 MAX_BONUS = 0.15
 HALF_LIFE_DAYS = 14.0
 LOG_ROTATE_BYTES = 1_000_000
@@ -129,22 +131,26 @@ def record(home, paths, *, query=None):
         now = time.time()
         log = _log_path(home)
         log.parent.mkdir(parents=True, exist_ok=True)
-        with open(log, "a") as out:
-            out.write(json.dumps({
-                "ts": _iso(now),
-                "query": (query or "")[:_QUERY_CHARS],
-                "paths": paths,
-            }) + "\n")
-        _rotate(log)
-        counts = load_counts(home)
-        for path in paths:
-            slot = counts.setdefault(path, {"count": 0, "last": ""})
-            slot["count"] += 1
-            slot["last"] = _iso(now)
-        target = _counts_path(home)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(json.dumps(counts, indent=0))
-        os.replace(tmp, target)
+        # the log's rotation and the counts are read-modify-write: one
+        # writer at a time per home (memory_lock), or a session loses the
+        # other's recall
+        with memory_lock.write_lock(home):
+            with open(log, "a") as out:
+                out.write(json.dumps({
+                    "ts": _iso(now),
+                    "query": (query or "")[:_QUERY_CHARS],
+                    "paths": paths,
+                }) + "\n")
+            _rotate(log)
+            counts = load_counts(home)
+            for path in paths:
+                slot = counts.setdefault(path, {"count": 0, "last": ""})
+                slot["count"] += 1
+                slot["last"] = _iso(now)
+            target = _counts_path(home)
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_text(json.dumps(counts, indent=0))
+            os.replace(tmp, target)
     except (OSError, TypeError, ValueError):
         return
 
@@ -155,22 +161,23 @@ def carry(home, moves):
     and the later timestamp of the two, so carrying twice changes nothing;
     the old entry is left as it is. Never raises, as record() does not."""
     try:
-        counts = load_counts(home)
-        changed = False
-        for old, new in moves.items():
-            slot = counts.get(str(old))
-            if not slot:
-                continue
-            have = counts.get(str(new)) or {"count": 0, "last": ""}
-            counts[str(new)] = {"count": max(have["count"], slot["count"]),
-                                "last": max(str(have.get("last") or ""),
-                                            str(slot.get("last") or ""))}
-            changed = True
-        if changed:
-            target = _counts_path(home)
-            tmp = target.with_name(target.name + ".tmp")
-            tmp.write_text(json.dumps(counts, indent=0))
-            os.replace(tmp, target)
+        with memory_lock.write_lock(home):
+            counts = load_counts(home)
+            changed = False
+            for old, new in moves.items():
+                slot = counts.get(str(old))
+                if not slot:
+                    continue
+                have = counts.get(str(new)) or {"count": 0, "last": ""}
+                counts[str(new)] = {"count": max(have["count"], slot["count"]),
+                                    "last": max(str(have.get("last") or ""),
+                                                str(slot.get("last") or ""))}
+                changed = True
+            if changed:
+                target = _counts_path(home)
+                tmp = target.with_name(target.name + ".tmp")
+                tmp.write_text(json.dumps(counts, indent=0))
+                os.replace(tmp, target)
     except (OSError, TypeError, ValueError):
         return
 

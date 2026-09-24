@@ -20,6 +20,7 @@ import zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from cousin_lib import memory_lock
 from cousin_lib.trace import traced_cli
 
 # decisions.jsonl grows monotonically; past the threshold the older
@@ -174,7 +175,7 @@ def _append_raw(home, entry):
         **entry,
     }
     path = raw_dir / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-    with open(path, "a") as fh:
+    with memory_lock.write_lock(home), open(path, "a") as fh:
         fh.write(json.dumps(entry) + "\n")
 
 
@@ -356,19 +357,23 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None):
              "topic": topic, "decision": decision, "reasoning": reasoning}
     decisions = home / "data" / "decisions.jsonl"
     decisions.parent.mkdir(parents=True, exist_ok=True)
-    with open(decisions, "a") as fh:
-        fh.write(json.dumps(entry) + "\n")
-    lines = ["Decision logged: [%s] %s" % (topic, decision)]
-    archive = _rotate_decisions_if_needed(decisions)
-    if archive:
-        lines.append("(decisions.jsonl rotated: older entries -> %s)" % archive.name)
-    try:
-        _append_raw(home, {"topic": topic,
-                           "content": "%s - why: %s" % (decision, reasoning),
-                           "truth_level": resolved, "source": "decision",
-                           **({"cite": cite} if cite else {})})
-    except OSError as err:
-        lines.append("warning: raw-memory bridge failed (%s); decision logged anyway" % err)
+    # One critical section: the append, the rotation (a read, then a
+    # replace) and the raw bridge. A decision appended by another session
+    # between the rotation's read and its replace would be lost.
+    with memory_lock.write_lock(home):
+        with open(decisions, "a") as fh:
+            fh.write(json.dumps(entry) + "\n")
+        lines = ["Decision logged: [%s] %s" % (topic, decision)]
+        archive = _rotate_decisions_if_needed(decisions)
+        if archive:
+            lines.append("(decisions.jsonl rotated: older entries -> %s)" % archive.name)
+        try:
+            _append_raw(home, {"topic": topic,
+                               "content": "%s - why: %s" % (decision, reasoning),
+                               "truth_level": resolved, "source": "decision",
+                               **({"cite": cite} if cite else {})})
+        except OSError as err:
+            lines.append("warning: raw-memory bridge failed (%s); decision logged anyway" % err)
     return "\n".join(lines)
 
 
@@ -464,6 +469,13 @@ def backfill_decisions(home, *, dry_run=False):
     Returns the number written, or with dry_run the number that would be
     (dry_run writes nothing)."""
     home = Path(home)
+    # the read of raw and the write are one section (memory_lock): a
+    # decision another session logs in between would be written twice
+    with memory_lock.write_lock(home):
+        return _backfill(home, dry_run)
+
+
+def _backfill(home, dry_run):
     # A raw line the cousin or its operator trashed is not an orphan: the
     # old log still holds it, and backfilling it would undo the removal.
     have = _raw_memories(home) | _trashed_memories(home)
@@ -604,7 +616,12 @@ def note_activity(home, text):
     text = text or "Idle"
     path = Path(home) / "data" / "last-activity.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("%s: %s\n" % (datetime.now().isoformat(), text))
+    # tmp + replace under the lock: a reader in another session (a side
+    # session's digest) never sees the file truncated mid-write
+    with memory_lock.write_lock(home):
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("%s: %s\n" % (datetime.now().isoformat(), text))
+        os.replace(tmp, path)
     return "Activity saved: %s" % text[:80]
 
 

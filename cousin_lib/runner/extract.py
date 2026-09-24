@@ -33,7 +33,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from cousin_lib import compact, memory, transcript_mine
+from cousin_lib import compact, memory, memory_lock, transcript_mine
 
 WINDOW_CAP = 24                          # R8: new raw entries per rolling window
 WINDOW_S = 86400
@@ -153,28 +153,31 @@ def propose_turn(home, session_id, *, store, turn_bodies=(), now=None):
     ._propose) is the one that must never fail a turn; it catches this
     and records the error on the `propose` event."""
     home = Path(home)
-    cursors = _load(home, _PROPOSE_CURSOR)
-    entries, cursor = store.entries_after(session_id, int(cursors.get(session_id, 0)))
-    cursors[session_id] = cursor
-    _save(home, cursors, _PROPOSE_CURSOR)
-    if any(str(b).startswith(PROPOSAL_MARK) for b in turn_bodies):
-        return None                  # a proposal's own turn: consumed, never proposed about
-    if not entries or _recorded_memory(entries):
-        return None
-    texts = list(transcript_mine.texts_from_entries(entries))
-    picked = [s for s in transcript_mine.candidates(texts, max_entries=10 ** 6)
-              if transcript_mine.level_for(s) == transcript_mine.TRUTH_LEVEL
-              and PROPOSAL_WORDS.search(s)]
-    if not picked:
-        return None
-    now = now or datetime.now(timezone.utc)
-    start = now - timedelta(seconds=WINDOW_S)
-    sent = [s for s in _load(home, _PROPOSALS).get("sent", [])
-            if (_when({"timestamp": s}) or start) > start]
-    if len(sent) >= PROPOSAL_CAP:
-        return None
-    _save(home, {"sent": sent + [now.isoformat()]}, _PROPOSALS)
-    return proposal_text(picked[:PROPOSAL_SENTENCES])
+    # the cursor and the window's file are read-modify-write: one writer at
+    # a time per home (memory_lock), whichever session asks
+    with memory_lock.write_lock(home):
+        cursors = _load(home, _PROPOSE_CURSOR)
+        entries, cursor = store.entries_after(session_id, int(cursors.get(session_id, 0)))
+        cursors[session_id] = cursor
+        _save(home, cursors, _PROPOSE_CURSOR)
+        if any(str(b).startswith(PROPOSAL_MARK) for b in turn_bodies):
+            return None                  # a proposal's own turn: consumed, never proposed about
+        if not entries or _recorded_memory(entries):
+            return None
+        texts = list(transcript_mine.texts_from_entries(entries))
+        picked = [s for s in transcript_mine.candidates(texts, max_entries=10 ** 6)
+                  if transcript_mine.level_for(s) == transcript_mine.TRUTH_LEVEL
+                  and PROPOSAL_WORDS.search(s)]
+        if not picked:
+            return None
+        now = now or datetime.now(timezone.utc)
+        start = now - timedelta(seconds=WINDOW_S)
+        sent = [s for s in _load(home, _PROPOSALS).get("sent", [])
+                if (_when({"timestamp": s}) or start) > start]
+        if len(sent) >= PROPOSAL_CAP:
+            return None
+        _save(home, {"sent": sent + [now.isoformat()]}, _PROPOSALS)
+        return proposal_text(picked[:PROPOSAL_SENTENCES])
 
 
 def mine_turn(home, session_id, turn_no, *, store, now=None):
@@ -184,29 +187,33 @@ def mine_turn(home, session_id, turn_no, *, store, now=None):
     -1 on any error: extraction never fails a turn."""
     try:
         home = Path(home)
-        state = _load(home)
-        entries, cursor = store.entries_after(session_id, int(state.get(session_id, 0)))
-        left = max(0, WINDOW_CAP - written_in_window(home, now))
-        kept = []
-        if entries and left:
-            seen = _recent(home)
-            texts = list(transcript_mine.texts_from_entries(entries))
-            for sentence in transcript_mine.candidates(texts, max_entries=10 ** 6):
-                key = transcript_mine.normalize(sentence)
-                if key in seen:
-                    continue
-                seen.add(key)
-                kept.append(sentence)
-                if len(kept) >= left:
-                    break
-        topic = "episode:%s" % session_id[:8]
-        for sentence in kept:
-            level = transcript_mine.level_for(sentence)
-            memory._append_raw(home, {
-                "topic": topic if level == transcript_mine.TRUTH_LEVEL else topic + ":hypothesis",
-                "content": sentence, "truth_level": level, "source": SOURCE, "turn": turn_no})
-        state[session_id] = cursor
-        _save(home, state)
-        return len(kept)
+        # one critical section per home (memory_lock): the cursor file holds
+        # every session's position and the window's cap is the cousin's, so a
+        # second session mining at the same moment must wait, not overwrite
+        with memory_lock.write_lock(home):
+            state = _load(home)
+            entries, cursor = store.entries_after(session_id, int(state.get(session_id, 0)))
+            left = max(0, WINDOW_CAP - written_in_window(home, now))
+            kept = []
+            if entries and left:
+                seen = _recent(home)
+                texts = list(transcript_mine.texts_from_entries(entries))
+                for sentence in transcript_mine.candidates(texts, max_entries=10 ** 6):
+                    key = transcript_mine.normalize(sentence)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    kept.append(sentence)
+                    if len(kept) >= left:
+                        break
+            topic = "episode:%s" % session_id[:8]
+            for sentence in kept:
+                level = transcript_mine.level_for(sentence)
+                memory._append_raw(home, {
+                    "topic": topic if level == transcript_mine.TRUTH_LEVEL else topic + ":hypothesis",
+                    "content": sentence, "truth_level": level, "source": SOURCE, "turn": turn_no})
+            state[session_id] = cursor
+            _save(home, state)
+            return len(kept)
     except Exception:  # noqa: BLE001 - extraction never fails a turn
         return -1

@@ -36,7 +36,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import memory
+from cousin_lib import memory, memory_lock
 
 DEFAULT_MAX_LINES = 40
 DEFAULT_SINCE_DAYS = 3650
@@ -156,8 +156,17 @@ def strip_auto_marker(text):
 def distill(home, *, max_lines=DEFAULT_MAX_LINES,
             since_days=DEFAULT_SINCE_DAYS):
     """Rebuild every distilled file from raw. Returns
-    {"files": {fname: n_lines}, "topics": int, "entries": int}."""
+    {"files": {fname: n_lines}, "topics": int, "entries": int}.
+    The read of raw and the writes of the views and the stamp are one
+    critical section per home (memory_lock): a distill that read raw
+    before another session's entry must not write its views, and a later
+    stamp, after the distill that saw it."""
     home = Path(home)
+    with memory_lock.write_lock(home):
+        return _distill(home, max_lines=max_lines, since_days=since_days)
+
+
+def _distill(home, *, max_lines, since_days):
     memory.ensure_layout(home)
     groups = defaultdict(list)
     total = 0

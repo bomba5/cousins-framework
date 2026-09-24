@@ -329,6 +329,15 @@ def _memories(home, max_chars):
         parts.append(capsules)
     raw_dir = Path(home) / "memory" / "raw"
     if raw_dir.is_dir():
+        # the same exclusions as the distilled views: a retired or held
+        # entry, an entry-level mark, the review gate's records
+        from cousin_lib import review_gate
+        try:
+            history = memory._all_raw(home)
+            hidden = memory.hidden_ids(history)
+            held = len(review_gate.pending_ids(history))
+        except Exception:  # noqa: BLE001 - the packet still assembles
+            hidden, held = set(), 0
         lines = []
         for path in sorted(raw_dir.glob("*.jsonl"))[-14:]:
             for line in _read(path).splitlines():
@@ -336,12 +345,20 @@ def _memories(home, max_chars):
                     entry = json.loads(line)
                 except ValueError:
                     continue
+                if not isinstance(entry, dict) or memory.view_noise(entry) \
+                        or memory.entry_id(entry) in hidden:
+                    continue
                 lines.append("- [%s] %s"
                              % (entry.get("topic", "?"),
                                 entry.get("content", "")[:200]))
         if lines:
             parts.append("### recent raw memory (newest last)")
             parts.append("\n".join(lines[-60:]))
+        if held:
+            parts.append("%d memory entr%s held by the review gate, out of this"
+                         " packet until the operator keeps or drops %s"
+                         " (`cousin-memory review`)." % (held, "y is" if held == 1 else "ies are",
+                                                         "it" if held == 1 else "them"))
     index = _read(Path(home) / "MEMORY.md").strip()
     if index:
         parts.append("### memory index (head)")

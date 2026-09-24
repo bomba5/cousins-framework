@@ -1,0 +1,309 @@
+"""The review gate for bulk memory writes (master plan phase 7 task 10):
+more than N new authored raw entries since the gate last looked are held,
+out of every memory view, until a reviewer (a second model on the runner
+lane, the operator with `cousin-memory review`) keeps or drops each. N
+comes from cousin.toml `[memory] review_batch` (default 3). raw stays
+append-only: a hold and a keep are raw records of their own (topic
+`framework:review-gate`), and a drop is one line that is both its
+release and an entry-level obsolete mark (valid time, task 9)."""
+import contextlib
+import io
+import json
+import os
+import pathlib
+import tempfile
+import time
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest import mock
+
+from cousin_lib import accounts, boot, distill, memory, raw_fold, review_gate
+from tests._hermetic import HermeticCase
+
+
+def _home(case, extra=""):
+    tmp = tempfile.TemporaryDirectory(); case.addCleanup(tmp.cleanup)
+    home = pathlib.Path(tmp.name) / "cousins" / "wren"
+    (home / "data").mkdir(parents=True)
+    (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n' + extra)
+    p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"})
+    p.start(); case.addCleanup(p.stop)
+    review_gate.begin(home, now=time.time() - 1)
+    return home
+
+
+def _write(home, n, topic="ledger fact %d"):
+    for i in range(n):
+        memory.remember(home, topic % i, "The quokka ledger fact number %d." % i)
+
+
+def _distilled(home):
+    distill.distill(home)
+    return "".join(p.read_text() for p in memory.distilled_dir(home).glob("*.md"))
+
+
+def _keep_all(entries):
+    return {e["id"]: "keep" for e in entries}
+
+
+class TestConfig(HermeticCase):
+    def test_n_defaults_to_3_and_comes_from_cousin_toml(self):
+        self.assertEqual(review_gate.batch_limit(_home(self)), 3)
+        self.assertEqual(review_gate.batch_limit(_home(self, '[memory]\nreview_batch = 5\n')), 5)
+
+
+class TestGate(HermeticCase):
+    def test_n_entries_pass_straight_through(self):
+        home = _home(self)
+        _write(home, 3)
+        out = review_gate.gate(home, reviewer=_keep_all)
+        self.assertEqual(out["held"], [])
+        self.assertEqual(review_gate.pending(home), [])
+        self.assertIn("ledger fact 2", _distilled(home))
+
+    def test_n_plus_1_are_held_and_reach_distilled_only_once_reviewed(self):
+        home = _home(self)
+        _write(home, 4)
+        seen = []
+
+        def reviewer(entries):
+            seen.extend(entries)
+            self.assertNotIn("ledger fact", _distilled(home))    # while held: out of the views
+            return {e["id"]: ("drop" if e["topic"] == "ledger fact 3" else "keep")
+                    for e in entries}
+        out = review_gate.gate(home, reviewer=reviewer)
+        self.assertEqual((len(out["held"]), len(seen)), (4, 4))
+        self.assertEqual(sorted(out["verdicts"].values()), ["drop", "keep", "keep", "keep"])
+        self.assertEqual(review_gate.pending(home), [])
+        text = _distilled(home)
+        self.assertIn("ledger fact 0", text)
+        self.assertNotIn("ledger fact 3", text)
+        [dropped] = [r for r in memory.validity(home) if r["topic"] == "ledger fact 3"]
+        self.assertIsNotNone(dropped["valid_to"])
+
+    def test_a_reviewer_that_fails_leaves_them_held(self):
+        home = _home(self)
+        _write(home, 4)
+
+        def broken(entries):
+            raise RuntimeError("the reviewer is down")
+        out = review_gate.gate(home, reviewer=broken)
+        self.assertIn("RuntimeError: the reviewer is down", out["error"])
+        self.assertEqual(len(review_gate.pending(home)), 4)
+        self.assertNotIn("ledger fact", _distilled(home))
+
+    def test_n_comes_from_configuration(self):
+        home = _home(self, '[memory]\nreview_batch = 5\n')
+        _write(home, 5)
+        self.assertEqual(review_gate.gate(home, reviewer=_keep_all)["held"], [])
+
+    def test_the_framework_log_and_mined_episodes_are_not_counted(self):
+        home = _home(self)
+        _write(home, 2)
+        for i in range(3):
+            memory.record_event(home, "framework", "framework:flip", "flipped %d" % i, "flip")
+            memory._append_raw(home, {"topic": "episode:abcd1234", "content": "mined %d" % i,
+                                      "truth_level": "L3_COUSIN_CONCLUSION",
+                                      "source": "turn-extract"})
+        self.assertEqual(review_gate.gate(home, reviewer=_keep_all)["held"], [])
+
+
+class TestTheCursor(HermeticCase):
+    """Review I2 and I4: the gate counts per home from a cursor on disk."""
+
+    def test_writes_nobody_gated_are_held_by_the_next_gate(self):
+        """A runner that died after the writes, or a turn that errored:
+        the next gate, whoever runs it, finds them."""
+        home = _home(self)
+        _write(home, 4)                                         # ...and no gate ran
+        self.assertEqual(len(review_gate.hold_new(home)), 4)
+
+    def test_a_second_gate_holds_nothing_the_first_counted(self):
+        home = _home(self)
+        _write(home, 4)
+        self.assertEqual(len(review_gate.hold_new(home)), 4)
+        self.assertEqual(review_gate.hold_new(home), [])
+        _write(home, 2, topic="pantry %d")
+        self.assertEqual(review_gate.hold_new(home), [])        # 2 new, not 6
+
+    def test_a_home_never_gated_opens_its_cursor_and_holds_nothing_old(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        home = pathlib.Path(tmp.name) / "cousins" / "wren"
+        (home / "data").mkdir(parents=True)
+        _write(home, 5)
+        self.assertEqual(review_gate.hold_new(home), [])
+        self.assertTrue(pathlib.Path(home, *review_gate.STATE).exists())
+
+    def test_one_id_that_is_no_longer_held_does_not_stop_the_rest(self):
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        review_gate.release(home, rows[0]["id"], "keep")         # another reviewer got there first
+        done, errors = review_gate.settle(home, rows, _keep_all(rows))
+        self.assertEqual((len(done), list(errors)), (3, [rows[0]["id"]]))
+        self.assertEqual(review_gate.pending(home), [])
+
+    def test_the_gate_reads_only_new_files_never_the_archives(self):
+        """Review M1: a gate after every result must not scan the history."""
+        home = _home(self)
+        _write(home, 4)
+        with mock.patch.object(memory, "_all_raw", side_effect=AssertionError("read history")):
+            self.assertEqual(len(review_gate.hold_new(home)), 4)
+
+
+class TestBegin(HermeticCase):
+    def test_what_was_written_just_before_the_cursor_opened_is_not_counted(self):
+        """Review m1: the clean stop's handoff memories, written seconds
+        before the runner starts, are not the gate's."""
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        home = pathlib.Path(tmp.name) / "cousins" / "wren"
+        (home / "data").mkdir(parents=True)
+        _write(home, 5)                                         # the handoff
+        review_gate.begin(home)
+        self.assertEqual(review_gate.hold_new(home), [])
+        _write(home, 4, topic="pantry %d")
+        self.assertEqual(len(review_gate.hold_new(home)), 4)
+
+    def test_a_reset_opens_the_cursor_again(self):
+        """Review N1: `cousin-migrate apply` resets it; what the cousin
+        wrote on the tmux lane since is not held."""
+        home = _home(self)
+        review_gate.begin(home, now=time.time() - 10 * 86400, reset=True)   # a stale cursor
+        _write(home, 5)
+        review_gate.begin(home, reset=True)
+        self.assertEqual(review_gate.hold_new(home), [])
+
+
+class TestADropIsOneLine(HermeticCase):
+    def test_the_release_and_the_mark_are_the_same_line(self):
+        """Review M5: no crash can leave a drop retired but still held."""
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        review_gate.release(home, rows[0]["id"], "drop", why="a duplicate")
+        lines = [json.loads(l) for p in memory.raw_dir(home).glob("*.jsonl")
+                 for l in p.read_text().splitlines()]
+        [line] = [l for l in lines if l.get("released") == rows[0]["id"]]
+        self.assertEqual((line["truth_level"], line["entry"], line["verdict"]),
+                         (memory.OBSOLETE_LEVEL, rows[0]["id"], "drop"))
+
+
+def _old(minutes=0):
+    return datetime.now(timezone.utc) - timedelta(days=60) + timedelta(minutes=minutes)
+
+
+class TestTheFoldKeepsAHold(HermeticCase):
+    """Review C1: the monthly fold must not let a held entry, or the gate's
+    records, into the views."""
+
+    def test_held_entries_stay_out_after_the_fold(self):
+        """Entries, their holds and a released record all 60 days old, so
+        the fold takes every one of them into the archive."""
+        home = _home(self)
+        rdir = memory.raw_dir(home); rdir.mkdir(parents=True, exist_ok=True)
+        claims = [{"timestamp": _old(i).isoformat(), "topic": "pantry %d" % i,
+                   "content": "Shelf %d holds the quokka tins." % i,
+                   "truth_level": "L3_COUSIN_CONCLUSION"} for i in range(4)]
+        with open(rdir / ("%s.jsonl" % _old().strftime("%Y-%m-%d")), "a") as fh:
+            for i, c in enumerate(claims):
+                fh.write(json.dumps(c) + "\n")
+                fh.write(json.dumps({"timestamp": _old(10 + i).isoformat(),
+                                     "topic": review_gate.TOPIC, "content": "held",
+                                     "truth_level": "L1_FRAMEWORK", "source": review_gate.SOURCE,
+                                     "held": memory.entry_id(c)}) + "\n")
+        self.assertNotIn("quokka tins", _distilled(home))
+        raw_fold.fold_raw(home)
+        self.assertEqual(list(memory.raw_dir(home).glob("????-??-??.jsonl")), [])
+        text = _distilled(home)
+        self.assertNotIn("quokka tins", text)
+        self.assertNotIn("review-gate", text)
+        self.assertEqual(len(review_gate.pending(home)), 4)
+        digests = "".join(p.read_text() for p in memory.raw_dir(home).glob("*-digest.jsonl"))
+        self.assertNotIn("quokka tins", digests)
+        self.assertNotIn(review_gate.TOPIC, digests)
+        for row in review_gate.pending(home):                # kept later: back from the archive
+            review_gate.release(home, row["id"], "keep")
+        self.assertIn("Shelf 3 holds the quokka tins", _distilled(home))
+
+
+class TestTheBootPacket(HermeticCase):
+    """Review I3: what the gate holds or drops never reaches a new session."""
+
+    def test_held_dropped_and_gate_lines_are_not_recent_raw_memory(self):
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        text = boot._memories(home, 20000)
+        self.assertNotIn("quokka ledger", text)
+        self.assertNotIn("review-gate", text)
+        review_gate.release(home, rows[0]["id"], "keep")
+        review_gate.release(home, rows[1]["id"], "drop")
+        text = boot._memories(home, 20000)
+        self.assertIn("fact number 0", text)
+        self.assertNotIn("fact number 1", text)
+        self.assertNotIn("review-gate", text)
+        self.assertNotIn("obsolete:", text)
+
+    def test_the_packet_says_how_many_are_held(self):
+        """Review m7: held entries are not silent at boot."""
+        home = _home(self)
+        _write(home, 4)
+        review_gate.hold_new(home)
+        self.assertIn("4 memory entries are held by the review gate", boot._memories(home, 20000))
+
+    def test_the_runner_digest_leaves_them_out_too(self):
+        from cousin_lib.runner import prompt
+        home = _home(self)
+        _write(home, 4)
+        review_gate.hold_new(home)
+        digest = prompt.state_digest(home, root=home.parent.parent, slug="wren")
+        self.assertNotIn("quokka ledger", str(digest))
+
+
+class TestCli(HermeticCase):
+    def _main(self, home, *argv, ancestry=None):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                mock.patch.object(accounts, "_inside_cousin_ancestry", return_value=ancestry):
+            rc = memory.memory_main(["--home", str(home), *argv])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_the_operator_reviews_what_the_gate_held(self):
+        home = _home(self)
+        _write(home, 4)
+        review_gate.gate(home, reviewer=None)                   # no reviewer: held for a person
+        rc, out, _ = self._main(home, "review")
+        self.assertEqual(rc, 0)
+        ids = [r["id"] for r in review_gate.pending(home)]
+        self.assertTrue(all(i in out for i in ids))
+        rc, out, err = self._main(home, "review", "--keep", ids[0], ids[1], ids[2])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("by operator:", out)
+        rc, out, err = self._main(home, "review", "--drop", ids[3], "--why", "a duplicate")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(review_gate.pending(home), [])
+        rc, out, _ = self._main(home, "review")
+        self.assertEqual(out.strip(), "nothing held for review")
+
+    def test_the_cousin_cannot_release_its_own_writes(self):
+        """Review I5: a verdict from inside a cousin's process tree."""
+        home = _home(self)
+        _write(home, 4)
+        review_gate.hold_new(home)
+        ids = [r["id"] for r in review_gate.pending(home)]
+        rc, out, err = self._main(home, "review", "--keep", *ids, ancestry=4242)
+        self.assertEqual(rc, 2)
+        self.assertIn("the operator's", err)
+        self.assertEqual(len(review_gate.pending(home)), 4)
+        rc, out, _ = self._main(home, "review", ancestry=4242)    # listing is fine
+        self.assertEqual(rc, 0)
+
+    def test_an_unknown_id_is_refused(self):
+        home = _home(self)
+        rc, _out, err = self._main(home, "review", "--keep", "000000000000")
+        self.assertEqual(rc, 2)
+        self.assertIn("not held", err)
+
+
+if __name__ == "__main__":
+    unittest.main()

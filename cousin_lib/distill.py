@@ -176,12 +176,14 @@ def _distill(home, *, max_lines, since_days):
     # monthly fold keeps one digest line per topic, and a digest neither
     # carries a mark's `entry` nor knows its month's lines were retired
     # (it copies its newest line's text, so its id can equal a retired
-    # one). A topic with hidden entries is therefore built from the whole
-    # history instead of its digests.
+    # one), and the fold leaves a held entry out of its digest. A topic
+    # with such entries (memory.digest_unsafe_ids) is therefore built from
+    # the whole history instead of its digests.
     truth = memory._all_raw(home)
     hidden = memory.hidden_ids(truth)
+    unsafe = memory.digest_unsafe_ids(truth)
     rebuild = {str(e.get("topic") or "").strip() for e in truth
-               if memory.view_noise(e) or memory.entry_id(e) in hidden}
+               if memory.view_noise(e) or memory.entry_id(e) in unsafe}
     cutoff = datetime.now(timezone.utc).timestamp() - since_days * 86400
     source = [e for e in raw if str(e.get("topic") or "").strip() not in rebuild]
     source += [e for e in truth if str(e.get("topic") or "").strip() in rebuild

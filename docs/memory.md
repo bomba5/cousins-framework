@@ -235,6 +235,52 @@ fill themselves in:
   console explorer has the same thing as a "mark obsolete" button on
   each raw entry, and the MCP memory tool has an `obsolete` command.
 
+## Valid time, tensions and the review gate
+
+Raw memory is append-only, so when a claim was true is worked out from
+raw rather than written into it. Every entry is valid from when it was
+written (or its own `valid_from`) until an obsolete mark covers it (or
+its own `valid_to`). `cousin-memory history <topic>` lists a topic's
+claims with an id each and `live` or `valid to <time>`. To retire one
+claim and keep the topic, pass its id:
+
+```
+cousin-memory obsolete "spare keys" --why "the tin moved to the shed" --entry 3f9a1c0b27de
+```
+
+`cousin-memory tensions` lists the authored topics that have two or
+more live claims saying different things, such as a correction written
+beside the claim it corrects. It does not judge which one is right: you
+settle a tension by retiring the claim that is no longer true. The
+console has the same list at `GET /api/memory/{slug}/tensions`.
+
+When more than `[memory] review_batch` new entries on authored topics
+(default 3) have been written since the review gate last looked, the gate
+holds all of them. On the runner lane it looks after every turn; the
+count is per cousin, so entries from a turn that crashed or ended in an
+error are caught at the next look. A held entry stays in raw and search
+still finds it, but it stays out of the distilled views and out of the
+recent memory a new session starts with, until it is kept or dropped. On
+the runner lane a second model reviews the batch in the background after
+the turn. Anything it does not settle, or everything if the review fails,
+waits for you:
+
+```
+cousin-memory review                       # what is held
+cousin-memory review --keep 3f9a1c0b27de 81d2e4f09a3c
+cousin-memory review --drop 5c7e9b1d2a40 --why "a duplicate of the backups topic"
+```
+
+Run the verdicts from your own shell: `--keep` and `--drop` refuse to run
+inside a cousin's own process tree, so a cousin cannot release what it
+wrote itself. That guard is best effort: it looks at the process's
+ancestors, so a process detached from the tree (`setsid`, `nohup`) is not
+recognised, and any raw line that records a release releases the entry.
+A new session's boot packet says how many entries are held. Each verdict records who gave it. A drop retires the entry
+the same way `obsolete --entry` does. The framework's own log
+(`episode:`, `job:`, `framework:`) is not gated: its writers already cap
+how much they write.
+
 ## The distilled views
 
 `memory/distilled/` holds six files the boot packet reads as the

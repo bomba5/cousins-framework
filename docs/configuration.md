@@ -626,6 +626,7 @@ account = "metered"
 | `scope` | `"private"` | `private` or `shared`: whether the cousin may propose memories to the shared tier. Every cousin reads the shared tier and keeps its private memory either way. The retired `both` is read as `shared` |
 | `proactive_recall` | `true` | `false` stops the chat server adding recall lines to your messages |
 | `recall_keyword_only` | `false` | `true` lets keyword-only hits into recall lines when there's no embedding service |
+| `review_batch` | `3` | when more than this many entries on authored topics were written since the review gate last looked (on the runner lane, after every turn), they are held for review, out of the memory views until kept (`cousin-memory review`) |
 
 `[lifecycle]`:
 

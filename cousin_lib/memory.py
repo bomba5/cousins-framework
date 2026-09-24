@@ -293,15 +293,28 @@ def is_entry_mark(entry):
 def hidden_ids(entries):
     """The ids the memory views (distilled, the boot packet) leave out,
     from `entries` (the whole history, `_all_raw`): every entry an
-    entry-level mark retired."""
-    return {e["entry"] for e in entries if is_entry_mark(e)}
+    entry-level mark retired, and every entry the review gate holds."""
+    from cousin_lib import review_gate
+    entries = list(entries)
+    return {e["entry"] for e in entries if is_entry_mark(e)} | review_gate.pending_ids(entries)
+
+
+def digest_unsafe_ids(entries):
+    """The ids whose topics the views must read from the whole history,
+    never from a monthly digest: a hidden entry (a digest may carry its
+    text) and any entry the review gate ever held (the fold left it out
+    of its digest while it was held; kept later, only the history has it)."""
+    from cousin_lib import review_gate
+    entries = list(entries)
+    return hidden_ids(entries) | review_gate.held_ever(entries)
 
 
 def view_noise(entry):
     """A raw line that is bookkeeping, never a line of the views: an
     entry-level mark (a topic-level mark is the topic's newest word and
-    stays)."""
-    return is_entry_mark(entry)
+    stays) and the review gate's records."""
+    from cousin_lib import review_gate
+    return is_entry_mark(entry) or review_gate.is_record(entry)
 
 
 def validity(home):
@@ -888,6 +901,44 @@ def _cmd_tensions(args):
     return 0
 
 
+def _cmd_review(args):
+    """What the review gate holds, or the operator's verdict on some of it.
+    A verdict from inside a cousin's own process tree is refused: the
+    model under review must not release its own writes."""
+    import getpass
+    from cousin_lib import accounts, review_gate
+    home = _home(args)
+    ids, verdict = (args.keep, "keep") if args.keep else (args.drop, "drop")
+    if not ids:
+        rows = review_gate.pending(home)
+        if not rows:
+            print("nothing held for review")
+            return 0
+        for r in rows:
+            print("%s [%s] %s: %s" % (r["id"], str(r["valid_from"] or "?")[:16], r["topic"],
+                                      " ".join(str(r.get("content", "")).split())[:200]))
+        print("settle: cousin-memory review --keep <id>... | --drop <id>... --why \"...\""
+              " (from your own shell)")
+        return 0
+    ancestor = accounts._inside_cousin_ancestry()
+    if ancestor:
+        print("error: a review verdict is the operator's: this runs inside a cousin's"
+              " process tree (pid %d). Run it from your own shell." % ancestor, file=sys.stderr)
+        return 2
+    by = "operator:%s" % getpass.getuser()
+    code = 0
+    for entry_id in ids:
+        try:
+            row = review_gate.release(home, entry_id, verdict, why=args.why, by=by)
+        except ObsoleteRefused as err:
+            print("error: %s" % err, file=sys.stderr)
+            code = 2
+            continue
+        print("%s %s [%s] by %s" % ("Kept" if verdict == "keep" else "Dropped", entry_id,
+                                    row["topic"], by))
+    return _run_distill(home) or code
+
+
 def _cmd_recall(args):
     home = _home(args)
     keyword = (args.keyword or "").lower()
@@ -1195,6 +1246,15 @@ def memory_main(argv=None):
              " (live, or valid to when an obsolete mark retired it)")
     p.add_argument("topic")
     p.set_defaults(func=_cmd_history)
+    p = sub.add_parser(
+        "review",
+        help="the entries the review gate holds (a turn wrote more than"
+             " [memory] review_batch), or a verdict: --keep or --drop ids")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--keep", nargs="+", metavar="ID", default=None)
+    g.add_argument("--drop", nargs="+", metavar="ID", default=None)
+    p.add_argument("--why", default="", help="the reason, recorded with the verdict")
+    p.set_defaults(func=_cmd_review)
     p = sub.add_parser("recall")
     p.add_argument("keyword", nargs="?", default="")
     p.add_argument("--last", type=int, default=20)

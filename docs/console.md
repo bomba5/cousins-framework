@@ -195,6 +195,13 @@ Click a card to open the inspector drawer. From top to bottom:
   added": whoever pressed Start on the bot and was refused, with an add
   button, so nobody has to look up a Telegram id. The bridge starts and
   stops with the cousin. See [chat](chat.md).
+- **Account** (a runner cousin). The account it runs on, "check auth"
+  (`cousin-runner --check-auth`: is it logged in, no model call) and, on the
+  `sdk` lane, "validate", which spends one smallest model turn on a
+  throwaway client and asks first. Both run as the cousin's long operation
+  with their steps shown. While `data/login-required.json` stands, the
+  panel shows its action line and "log in here", the account's login from
+  the Accounts page. See [Accounts](#accounts).
 - **Tokens today.**
 - **Files.** "browse home" opens a read-only file explorer over the cousin's
   home: a tree on the left (dotfiles behind a checkbox), a viewer on the
@@ -560,6 +567,48 @@ takes a topic and participants (a sidebar group, all running cousins, or one
 by one), an optional facilitator and a timeout; the meeting view shows the
 transcript, whose turn it is, and lets you post, skip the speaker or close.
 See [meetings](meetings.md).
+
+## Accounts
+
+The accounts runner cousins run on: `host` (the host's own `~/.claude`) and
+every entry in `config/accounts.toml`, with its kind, where it lives, the
+lanes it runs on and the cousins on it. No secret is ever shown: a key or
+token file reads "set (ends WXYZ)" at most.
+
+- **check**: is the account logged in, with no model call (`claude auth
+  status` under it; an opencode account's auth.json). When it is not, the
+  line that fixes it.
+- **add account / edit / remove**: the entry's kind and keys, written by the
+  validated writer (every other line of the file kept, checked by the rules
+  the runner reads it by). An edit a cousin on the account could not run
+  with is refused; remove asks you to type the name and is refused while a
+  cousin names the account.
+- **log in / keys**: per kind. A claude-login account: "log in" (the host's
+  own login asks you to tick that you mean it). A claude-token account:
+  "mint a token", or paste one. An anthropic-key account: paste the key. An
+  opencode account: per provider, paste its API key, or name an OAuth
+  method by its opencode label and "sign in". Anthropic and Claude are
+  refused on opencode.
+
+A login runs in the background with its steps shown. The sign-in URL appears
+as a link; open it and sign in. For a Claude login or token the page then
+shows a code (`code#state`): paste the whole of it into the code box that
+appears. That box is write-only, the code goes to the console once and only
+to that login, never into a chat, and a second code is refused. An opencode
+OAuth method has nothing to paste back: opencode finishes by itself, and a
+browser method only completes on the console's host (its callback goes to
+localhost), so prefer a headless or device method from elsewhere. "cancel
+login" ends it. A login belongs to the console session that started it:
+another session sees that it runs, but not its URL, and cannot send its
+code or cancel it. Editing, removing or setting a key on the account waits
+until the login ends.
+
+The logins, keys and entry changes need a logged-in console user, even on
+a console with no users file (add one with `cousin-console adduser`), and
+refuse when the console itself was started inside a cousin: a cousin never
+obtains credentials. Who started a login or wrote a key is kept in
+`data/accounts/audit.jsonl` (the name and the account, never the value).
+The page refreshes when another session changes an account.
 
 ## Settings
 

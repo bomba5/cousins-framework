@@ -91,6 +91,73 @@ Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge:
 
 `getMe` with the stored token: `{"ok", "bot"?, "error"?}`.
 
+## Accounts
+
+The accounts runner cousins run on (`config/accounts.toml`, [configuration](../configuration.md#accountstoml)), and the implicit `host` login. This is the operator's console, so the operator entering a credential here is fine; nothing in the framework obtains one on its own. No answer, log line or event ever carries a key, a token or a sign-in code: a secret file is described as `{"set", "last4", "error"}` only (`last4` for a value of 16 characters or more), as in the auth key box.
+
+An `<name>` matches `^[a-z0-9][a-z0-9_-]{0,31}$`, otherwise `400 bad account name`; `host` is the host's own `~/.claude` login, with no entry.
+
+The routes that write an entry or take, mint or cancel a credential (add, edit, remove, `key`, `login`, `token`, `code`, `cancel`) want a logged-in console user: on a console with no users file they are `403` (add one with `cousin-console adduser <name>`), though the reads stay open. `key`, `login`, `token` and `code` are also `403` when the console itself runs inside a cousin (`COUSIN_HOME` or `COUSIN_SLUG` in its environment or an ancestor's), the guardrail `cousin-account` applies. Who started a login, cancelled one, wrote a key or changed an entry is appended to `data/accounts/audit.jsonl` (`{"ts", "kind": "login-start" | "login-cancel" | "key" | "entry-added" | "entry-edited" | "entry-removed", "actor", "account", "flow"?, "provider"?}`), never a value.
+
+A login is the account's long operation: `console/longop.py` under the key `account:<name>`, one at a time per account, with its stages and `cousin-op` events (slug `account:<name>`, never the URL). Its state is `GET /api/accounts/<name>/op`, the same shape as a cousin's op. A login belongs to the console session that started it: only that session is shown its URL and may post its code or cancel it (`403` for any other). While it runs, the account's edit, remove and `key` are `409`.
+
+### `GET /api/accounts`
+
+`{"ok": true, "error": null | "<why config/accounts.toml cannot be read>", "accounts": [row], "kinds": [...], "fields": {"<kind>": ["<key>", ...]}, "timeout": 600}`. A row: `{"name", "kind", "implicit", "where" (the config dir, secret file or data dir, relative to the root), "lanes" (the runner kinds it runs on, accounts.check_lane), "cousins" (the runner cousins that name it), "entry" (its table in accounts.toml, which holds no secret; null for host), "secret" (`{set, last4, error}` for claude-token and anthropic-key, else null)}`. With a broken file the list is `host` alone. `fields` names the keys each kind's entry takes.
+
+### `GET /api/accounts/<name>/status`
+
+Is it logged in, with no model call: `claude auth status --json` under the account, or for opencode the account's auth.json read (no process). One check per account at a time: `409` while one runs. `{"ok", "name", "kind", "loggedIn", "method", "error", "action"}`: `ok` is logged in with the method the kind wants; `action` (null when ok) is the line that fixes it. opencode adds `providers`, `missing` or `endpoint`. Never the email or organisation the CLI reports. `404` unknown account.
+
+### `POST /api/accounts`
+
+Add an entry. Body `{"name", "entry": {"kind", ...}}`, the entry's keys as in accounts.toml (a list of strings for `providers`, whole numbers for `endpoint_context` and `endpoint_output`; left out means the default). Written by `accounts.write_entry`: every other line of the file kept, the result checked by the same rules the runner reads it by (paths under the root, one of providers or endpoint, no credentials in an endpoint, no provider or endpoint model naming Claude, ruling P9-1) before the atomic rename. The console keeps an entry's paths where the framework puts them: `secret_file` and `data_dir` under `.secrets/`, `config_dir` under `data/accounts/` (another place is a hand edit of the file), and an `endpoint` whose query or fragment names a credential-like parameter (`key`, `token`, `secret`, `pass`, `auth`, `sig`, `cred`, `session`) is refused. `201 {"ok": true, "account": row}`. `400` refused (the reason), `409` the name exists. An `accounts-change` event follows; the page re-reads the list on it.
+
+### `POST /api/accounts/<name>`
+
+Replace an entry whole. Body `{"entry"}`. Refused (`400`, naming the cousin) when a cousin on the account could not run with the new entry on its lane. `200 {"ok": true, "account": row}`, `404` no such entry, `400` for `host`.
+
+### `POST /api/accounts/<name>/remove`
+
+Body `{"confirm": "<name>"}`, the name typed again. `200 {"ok": true, "removed"}`. `400` without the confirmation, `409` while a cousin names the account, `404` no such entry.
+
+### `POST /api/accounts/<name>/key`
+
+A write-only key. Body `{"key"}` for claude-token (a token you minted elsewhere) and anthropic-key: written through `console/secrets.py` to the account's secret file (0600, its directory 0700, read back as the runner reads it), which must be under `.secrets/` (otherwise `400`: write it by hand); `.secrets/` is made, or tightened to, 0700. A list row shows a secret file's last four only when it is under `.secrets/`. `200 {"ok": true, "name", "secret": {set, last4, error}}`. For opencode, body `{"provider", "key"}`: merged into the account's auth.json as an API key (`accounts.store_api_key`); a provider the account does not name, `opencode`, or one naming Claude or Anthropic is `400`. `200 {"ok": true, "name", "provider", "status"}` (the status above). `400` for a claude-login account (log it in), a key that is not one line of printable characters, or a local-endpoint account.
+
+### `POST /api/accounts/<name>/login`
+
+Start a login, `202 {"ok": true, "op"}` (`409` while one runs on the account). Body `{"timeout"?}` (seconds, 30 to 1800, default 600).
+
+- claude-login: `claude auth login --claudeai` under the account's config dir (`accounts.login_flow`). The sign-in URL shows at `GET .../flow`; the code the page shows goes to `POST .../code`. `claude auth status`, not the screen, decides. `host` needs `{"confirm_host": true}`: it re-logs `~/.claude`, which every cousin without an account and your own `claude` use.
+- opencode: body `{"provider", "method", "timeout"?}`, an OAuth method by its opencode label (`accounts.opencode_login_flow`). The URL and opencode's instruction line show at `GET .../flow`; nothing is pasted back, and the account's auth.json holding the provider decides. A browser method's callback goes to localhost on the console's host, so it completes only there; a headless or device method completes anywhere. A provider or method naming Claude or Anthropic is `400`, as is a missing method (an API key goes to `.../key`).
+
+`400` for another kind (a claude-token account uses `token`).
+
+### `POST /api/accounts/<name>/token`
+
+Mint a long-lived token for a claude-token account: `claude setup-token` in a throwaway config dir (`accounts.token_flow`), the URL and code as for a login; the token is read from the CLI's screen, verified (`claude auth status` reads `oauth_token`) and saved 0600 to the secret file. It is never served. `202 {"ok": true, "op"}`, `400` another kind.
+
+### `GET /api/accounts/<name>/flow`
+
+The running login beside its op: `{"ok", "name", "op", "kind": "login" | "token" | "opencode-login" | null, "provider", "mine", "url", "url_is_https", "instructions", "awaiting_code"}`. `mine` says the login belongs to this session; `url` and `instructions` are set only for that session, while the op runs and once the CLI has shown them; `url_is_https` says whether the page may make it a link (it does only for `https://`). `awaiting_code` is true while the CLI waits for the code.
+
+### `GET /api/accounts/<name>/op`
+
+The account's long operation (a login), running or the last one: `{"ok": true, "op": null | {...}}`, the shape of `GET /api/cousins/<slug>/op`.
+
+### `POST /api/accounts/<name>/code`
+
+The code the sign-in page shows, write-only, from the session that started the login (`403` from another). Body `{"code": "<code>#<state>"}`. `200 {"ok": true, "taken": true}`. It is handed to the waiting CLI in memory, once: the window closes for good after the first code, a timeout or a cancel, and a second or late code is `409` and never delivered. It is never written, logged, echoed or sent as an event, and never goes through a chat. `400` for something that is not the whole `code#state` (the window stays open), `409` when no login waits for a code.
+
+### `POST /api/accounts/<name>/cancel`
+
+End the running login, from the session that started it (`403` from another): the code window closes and the CLI is sent SIGTERM (only while its pty is open). The op fails with `cancelled by the operator`. `200 {"ok": true, "cancelled": true}`, `409` when none runs.
+
+### `POST /api/cousins/<slug>/check-auth`
+
+Body `{"validate"?: bool}`. The cousin's long operation (`202 {"ok": true, "op"}`, kind `check-auth` or `validate`, `409` while one runs): `cousin-runner --home <home> --check-auth`, run in a child process without any auth variable, is its `status` stage (no model call). With `validate: true` the one child runs `--check-auth --validate`, which checks the status once and then spends one smallest model turn on a throwaway client (never the cousin's own session): the second stage, `one model turn`, skipped when the status failed. Each stage's detail is the runner's own line; a failure is the op's `error`. `400` for a tmux cousin, or `validate` off the `sdk` lane.
+
 ## Meetings
 
 A chat shared by the signed-in user and several running cousins, in rounds ([meetings](../meetings.md)). The store is `data/meetings.db`; cousins speak through `cousin-meeting`, so changes also arrive from outside the console and the event stream reports them as `meeting-change` (`{"id", "op"}`). A refusal (not your floor, a stopped or remote participant, a closed meeting) is `400` with the reason in `error`; an unknown id is `404`. The user's entries carry the signed-in user name.
@@ -741,6 +808,7 @@ The events come from two places: route handlers announce what they just did, and
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
 | `memory-change` | `{"slug", "action": "trash" \| "restore" \| "obsolete", ...}` | a memory delete, restore or obsolete mark through the console |
+| `accounts-change` | `{"name", "what": "added" \| "edited" \| "removed" \| "key"}` | an account entry or key changed through the console (never the key) |
 
 `cousin-flip` phases: `scheduled` (with `fire_at`, and `delay_seconds` or `request_id`), `started`, `complete` (with `ok: true`, and `new_generation`, `boot_packet_tokens`, `degraded_sections` when the console ran it), `failed` (with `ok: false` and `error`), `cancelled`. Timed flips the daemon runs show up through the poller: a request that turns `done` is `complete`, `failed` or `expired` is `failed`.
 

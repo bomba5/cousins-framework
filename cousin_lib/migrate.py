@@ -15,8 +15,13 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
                        the handoff, the transcript mined, the generation bumped)
               import   the agent CLI's own auto-memory folded in
                        (memory_import.apply: idempotent, a baseline first)
-              toml     cousin.toml [agent] runner = "sdk" (and the account),
-                       only once the tmux session is still down
+              toml     cousin.toml [agent] runner = "sdk", the account, and
+                       what the tmux lane's [runtime] carries (#96: the
+                       runner reads only [agent]): model and effort, and
+                       for `auth = "api_key"` an anthropic-key account
+                       <slug>-key made from the cousin's own key file
+                       (an existing [agent] key wins); only once the tmux
+                       session is still down
               start    the migration-day boot packet archived (the runner
                        boots on its own digest), the review gate's cursor
                        opened afresh (what the cousin wrote on the tmux lane
@@ -36,7 +41,9 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             that cannot be read (both unless --force), a runner that is not
             down after its stop. When `toml` ran: stop the runner, wait
             until it is down, put the saved bytes and mode back, have the
-            supervisor rescan. Then a fresh boot packet (the cousin's state
+            supervisor rescan. A key account the migration made is
+            removed with its secret when no other cousin names it (else
+            kept, and why). Then a fresh boot packet (the cousin's state
             now, not the migration day's) and the tmux session started,
             since the cousin was running when `apply` began, unless it
             already runs; last, the supervisor's hold on the runner
@@ -45,7 +52,9 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
   check     the exit criterion over the runner's own records since the
             migration (or --since): inbox rows that never reached done,
             tool calls with no recorded result, recorder hooks that failed,
-            and whether the chat server answers
+            the runner's model, effort and account against the cousin's
+            [runtime] (a MISMATCH is not ok), and whether the chat server
+            answers
 
 The supervisor interface assumed (phase 6, round 2 as its drafter stated
 it, 9fcf52a): a stop through spawn.stop_cousin waits until the child is
@@ -58,6 +67,7 @@ Every live action is a keyword argument (the tests inject all of them);
 _live() gives the real ones."""
 import argparse
 import base64
+import contextlib
 import importlib.util
 import json
 import os
@@ -117,9 +127,320 @@ def _check(name, ok, detail):
     return {"check": name, "ok": bool(ok), "detail": detail}
 
 
+# ------------------------------------------------------------ what [runtime] carries (#96)
+
+CARRIED = ("model", "effort")      # [runtime] key -> the same [agent] key
+KEY_SUFFIX = "-key"                # the per-cousin key account: <slug>-key
+
+
+def _cousin_toml(home):
+    try:
+        return tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        raise MigrateError("cannot read %s/cousin.toml: %s" % (home, err))
+
+
+def tmux_values(home, root):
+    """{key: (value, source)} for model and effort: what the tmux lane
+    runs the cousin on. [runtime] first; else config/harness.toml [agent]
+    default_<key>, but only when config/agent-cmd renders the {<key>}
+    placeholder (spawn.render_agent_cmd's rule). None when neither: the
+    tmux lane ran the CLI's own default too."""
+    from cousin_lib import flip
+    from cousin_lib.config import MissingConfigError, agent_config
+    runtime = _cousin_toml(home).get("runtime") or {}
+    try:
+        defaults = agent_config(root)
+    except MissingConfigError as err:
+        raise MigrateError(str(err))
+    template = flip._read_agent_cmd_template(Path(root))
+    out = {}
+    for key in CARRIED:
+        if runtime.get(key) is not None:
+            out[key] = (str(runtime[key]), "[runtime] %s" % key)
+        elif "{%s}" % key in template and defaults.get("default_%s" % key):
+            out[key] = (defaults["default_%s" % key],
+                        "config/harness.toml [agent] default_%s" % key)
+        else:
+            out[key] = (None, None)
+    return out
+
+
+def _key_env(root):
+    """The variable the tmux lane's key file names (config/harness.toml
+    [auth.api_key] key_env), else ANTHROPIC_API_KEY."""
+    from cousin_lib import agent_auth
+    cfg = agent_auth.api_key_config(root)
+    return cfg["key_env"] if cfg else "ANTHROPIC_API_KEY"
+
+
+def _cousin_key(home, root):
+    """The key from the cousin's own <home>/.secrets/api-key.env, read by
+    agent_auth.read_key (every check it makes). MigrateError naming the
+    file and the problem, never the content."""
+    from cousin_lib import agent_auth
+    try:
+        return agent_auth.read_key(home, _key_env(root))
+    except agent_auth.AuthError as err:
+        raise MigrateError(str(err))
+
+
+def carry(home, root, account=None):
+    """What `apply`'s toml step carries from the tmux lane's [runtime] into
+    the runner lane's [agent] (the runner reads only [agent]):
+
+      values   {key: value} to write: model, effort, account
+      rows     [{key, action (carry, kept, create, reuse, none), detail}]
+      create   the key account to make, {name, secret_file (root-relative),
+               write_secret, add_table}, or None
+      error    why the carry cannot be done (a blocker), or None
+
+    An existing [agent] key wins and is reported, as does an explicit
+    --account. `[runtime] auth = "api_key"` becomes the anthropic-key
+    account <slug>-key, made from the cousin's own key file; a key file
+    that is missing or malformed is an error, never the host login. The
+    key itself is never in what this returns."""
+    from cousin_lib import accounts, agent_auth
+    home, root = Path(home), Path(root)
+    agent = _agent(home)
+    values, rows = {}, []
+    out = {"values": values, "rows": rows, "create": None, "error": None}
+    try:
+        effective = tmux_values(home, root)
+    except MigrateError as err:
+        out["error"] = str(err)
+        return out
+    for key in CARRIED:
+        value, source = effective[key]
+        if agent.get(key) is not None:
+            rows.append({"key": key, "action": "kept", "detail": "[agent] %s %r kept%s" % (
+                key, agent[key], "" if value is None or value == agent[key] else
+                " over %s %r" % (source, value))})
+        elif value is not None:
+            values[key] = value
+            rows.append({"key": key, "action": "carry",
+                         "detail": "%s %r -> [agent] %s" % (source, value, key)})
+        else:
+            rows.append({"key": key, "action": "none",
+                         "detail": "no %s configured: the CLI's default, as on the tmux lane"
+                                   % key})
+    try:
+        mode = agent_auth.read_mode(home)
+    except agent_auth.AuthError as err:
+        out["error"] = str(err)
+        return out
+    if mode != agent_auth.MODE_API_KEY:
+        rows.append({"key": "account", "action": "none", "detail":
+                     "[runtime] auth %r: %s" % (mode, "--account %s" % account if account else
+                                                "[agent] account %r kept" % agent["account"]
+                                                if agent.get("account") else "the host login")})
+        return out
+    auth = "[runtime] auth %r" % mode
+    if account:
+        rows.append({"key": "account", "action": "kept", "detail":
+                     "--account %s given: %s not carried (the operator's choice)" % (account, auth)})
+        return out
+    for existing in ("account", "api_key_file"):
+        if agent.get(existing):
+            rows.append({"key": "account", "action": "kept", "detail":
+                         "[agent] %s %r kept over %s" % (existing, agent[existing], auth)})
+            return out
+    slug = home.name
+    name = slug + KEY_SUFFIX
+    no_host = " (never the host login in its place)"
+    if not accounts._NAME.match(name):
+        out["error"] = ("%s: the account name %r does not match %s; add one to"
+                        " config/accounts.toml and pass --account%s"
+                        % (auth, name, accounts._NAME.pattern, no_host))
+        return out
+    try:
+        key = _cousin_key(home, root)
+        known = accounts.load(root)
+    except (MigrateError, accounts.AccountsError) as err:
+        out["error"] = "%s: %s%s" % (auth, err, no_host)
+        return out
+    rel = "%s/%s" % (accounts.SECRETS_DIR, name)
+    create = {"name": name, "secret_file": rel, "write_secret": True, "add_table": True}
+    if name in known:
+        acct = known[name]
+        if acct.kind != "anthropic-key":
+            out["error"] = ("%s: config/accounts.toml already has %s of kind %s, not"
+                            " anthropic-key%s" % (auth, name, acct.kind, no_host))
+            return out
+        create.update(add_table=False, secret_file=os.path.relpath(acct.secret_file, root))
+        try:
+            held = accounts._read_secret(acct)
+        except accounts.SecretMissing:
+            held = None
+        except accounts.AccountsError as err:
+            out["error"] = "%s: %s%s" % (auth, err, no_host)
+            return out
+        if held is not None and held != key:
+            out["error"] = ("%s: account %s already holds a different key than %s%s"
+                            % (auth, name, agent_auth.key_file(home), no_host))
+            return out
+        create["write_secret"] = held is None
+    values["account"] = name
+    if create["add_table"] or create["write_secret"]:
+        out["create"] = create
+        rows.append({"key": "account", "action": "create", "detail":
+                     "%s -> [agent] account %r, an anthropic-key account made from %s"
+                     " (secret %s, 0600)" % (auth, name, agent_auth.key_file(home), rel)})
+    else:
+        rows.append({"key": "account", "action": "reuse", "detail":
+                     "%s -> [agent] account %r (already in config/accounts.toml with this"
+                     " key)" % (auth, name)})
+    return out
+
+
+def _append_account(root, name, secret_rel):
+    """config/accounts.toml gains [accounts.<name>], appended (the rest of
+    the file untouched), written atomically; the result must load."""
+    from cousin_lib import accounts
+    path = Path(root) / "config" / "accounts.toml"
+    try:
+        text = path.read_text()
+        mode = path.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        text, mode = "", 0o644
+    block = '[accounts.%s]\nkind = "anthropic-key"\nsecret_file = %s\n' % (
+        name, json.dumps(secret_rel))
+    new = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block
+    tomllib.loads(new)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".toml.tmp")
+    tmp.write_text(new)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+    if name not in accounts.load(root):
+        raise MigrateError("config/accounts.toml does not load %s after the write" % name)
+    return block
+
+
+def make_account(home, root, create):
+    """The key account `carry` planned: the secret (the cousin's key, one
+    line, 0600 in a 0700 directory, through accounts' private writer) and
+    the config/accounts.toml table. What it did, never the key."""
+    from cousin_lib import accounts
+    root = Path(root)
+    done = {"name": create["name"], "secret_file": create["secret_file"],
+            "secret_written": False, "table": None}
+    if create["write_secret"]:
+        accounts._write_secret(root / create["secret_file"], _cousin_key(home, root))
+        done["secret_written"] = True
+    if create["add_table"]:
+        done["table"] = _append_account(root, create["name"], create["secret_file"])
+    return done
+
+
+def _users_of(root, name, but):
+    """The cousins under <root>/cousins whose cousin.toml names account
+    `name`, except `but`."""
+    out = []
+    for toml in sorted((Path(root) / "cousins").glob("*/cousin.toml")):
+        if toml.parent.name == but:
+            continue
+        try:
+            agent = tomllib.loads(toml.read_text()).get("agent") or {}
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        if agent.get("account") == name:
+            out.append(toml.parent.name)
+    return out
+
+
+def drop_account(home, root, made):
+    """Rollback's half of make_account: the table and the secret this
+    migration made are removed when no other cousin names the account
+    and the table is still exactly what was appended; else kept, and
+    why. The cousin's own key file is never touched."""
+    root = Path(root)
+    name = made["name"]
+    users = _users_of(root, name, Path(home).name)
+    if users:
+        return "account %s kept: %s use it" % (name, ", ".join(users))
+    parts = []
+    if made.get("table"):
+        path = root / "config" / "accounts.toml"
+        text = path.read_text()
+        if made["table"] not in text:
+            return ("account %s kept: its table in config/accounts.toml changed since the"
+                    " migration" % name)
+        new = text.replace(made["table"], "", 1).rstrip("\n")
+        new = new + "\n" if new else ""
+        tomllib.loads(new)
+        tmp = path.with_suffix(".toml.tmp")
+        tmp.write_text(new)
+        os.chmod(tmp, path.stat().st_mode & 0o7777)
+        os.replace(tmp, path)
+        parts.append("its table")
+    if made.get("secret_written"):
+        with contextlib.suppress(FileNotFoundError):
+            (root / made["secret_file"]).unlink()
+        parts.append("its secret")
+    return "account %s: %s removed (no other cousin uses it)" % (
+        name, " and ".join(parts) or "nothing")
+
+
+NEVER_UNRUN = "a model the runner's CLI can't run is never written"
+
+
+def runner_cli():
+    """The CLI the runner's SDK starts, read without running anything: the
+    SDK prefers its bundled binary, whose version it records. A model the
+    bundled CLI is too old for fails every turn with an API 400 (#96)."""
+    spec = importlib.util.find_spec("claude_agent_sdk")
+    if spec is None or not spec.origin:
+        return "no claude-agent-sdk installed: the runner has no CLI"
+    try:
+        from claude_agent_sdk._cli_version import __cli_version__ as cli
+    except ImportError:
+        cli = None
+    try:
+        from claude_agent_sdk._version import __version__ as sdk_version
+    except ImportError:
+        sdk_version = "?"
+    if (Path(spec.origin).parent / "_bundled" / "claude").is_file():
+        return "Claude Code %s (bundled with claude-agent-sdk %s)" % (cli or "?", sdk_version)
+    return ("`claude` on PATH, version not read (claude-agent-sdk %s bundles none)"
+            % sdk_version)
+
+
+def _validate_account(home, root, name, moved):
+    """The Account the runner will run on, for one validating turn before
+    it exists: the key account `carry` will make holds the key in memory
+    only (never written by a plan)."""
+    from cousin_lib import accounts
+    home, root = Path(home), Path(root)
+    if moved["create"] is not None:
+        return accounts.Account(name, "anthropic-key", None,
+                                root / moved["create"]["secret_file"], implicit=True,
+                                secret_value=_cousin_key(home, root))
+    if name == accounts.HOST:
+        return accounts.for_cousin(home, root)       # the host, or [agent] api_key_file
+    return accounts.load(root)[name]
+
+
+def _validate(validator, account, root, model, effort):
+    """(ok, detail) of ONE smallest model turn on a throwaway client
+    (sdk.validate_account): the model, effort and account the runner
+    will run, the API's own words on a failure."""
+    if validator is None:
+        from cousin_lib.runner.sdk import validate_account as validator
+    what = "model %s, effort %s, account %s" % (model or "the CLI's default",
+                                                effort or "the CLI's default", account.name)
+    try:
+        rc, line = validator(account, root, model=model, effort=effort)
+    except Exception as err:  # noqa: BLE001 - a validation that cannot run did not pass
+        rc, line = 2, "validate: %s: %s" % (type(err).__name__, err)
+    return rc == 0, "%s (%s)" % (line, what)
+
+
 def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_alive,
-         **_unused):
-    """{"slug", "checks": [...], "steps", "ready"}; writes nothing."""
+         validate=False, validator=None, cli_version=None, **_unused):
+    """{"slug", "checks": [...], "steps", "ready", "carry", "cli"}; writes
+    nothing. A model to be written makes the plan not ready until
+    `validate` ran one model turn with it and passed (NEVER_UNRUN)."""
     from cousin_lib import accounts, memory_import
     home, root = Path(home), Path(root)
     checks = []
@@ -136,15 +457,43 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     open_rec = rec is not None and rec.get("state") in ("applying", "failed", "migrated")
     checks.append(_check("record", not open_rec, "no migration in progress" if not open_rec else
                          "%s says %s: `cousin-migrate rollback` first" % (RECORD, rec.get("state"))))
-    name = account or agent.get("account") or accounts.HOST
-    try:
-        known = accounts.load(root)
-        if name != accounts.HOST and name not in known:
-            raise accounts.AccountsError("account %r is not in config/accounts.toml" % name)
-        code, line = auth_check(home, root, name)
-        checks.append(_check("account", code == 0, line))
-    except accounts.AccountsError as err:
-        checks.append(_check("account", False, str(err)))
+    moved = carry(home, root, account)
+    checks.append(_check("carry", moved["error"] is None, moved["error"] or "; ".join(
+        r["detail"] for r in moved["rows"])))
+    name = (account or moved["values"].get("account") or agent.get("account")
+            or accounts.HOST)
+    if moved["create"] is not None:
+        checks.append(_check("account", True, (
+            "account %r is made at apply from the cousin's key file; the auth check runs"
+            " after it (`cousin-runner --home %s --check-auth`)" % (name, home))))
+    else:
+        try:
+            known = accounts.load(root)
+            if name != accounts.HOST and name not in known:
+                raise accounts.AccountsError("account %r is not in config/accounts.toml" % name)
+            code, line = auth_check(home, root, name)
+            checks.append(_check("account", code == 0, line))
+        except accounts.AccountsError as err:
+            checks.append(_check("account", False, str(err)))
+    cli = (cli_version or runner_cli)()
+    checks.append(_check("cli", True, "the runner's CLI: %s" % cli))
+    model = moved["values"].get("model") or agent.get("model")
+    effort = moved["values"].get("effort") or agent.get("effort")
+    blocked = [c["check"] for c in checks if not c["ok"]]
+    if validate and blocked:
+        checks.append(_check("validate", False, "not run: fix %s first; %s"
+                             % (", ".join(blocked), NEVER_UNRUN)))
+    elif validate:
+        try:
+            ok, line = _validate(validator, _validate_account(home, root, name, moved), root,
+                                 model, effort)
+        except (MigrateError, accounts.AccountsError, KeyError) as err:
+            ok, line = False, "validate: %s" % err
+        checks.append(_check("validate", ok, "%s; %s" % (line, NEVER_UNRUN)))
+    elif "model" in moved["values"]:
+        checks.append(_check("validate", False, (
+            "[agent] model %r would be written unvalidated: run with --validate (one smallest"
+            " model turn on %s); %s" % (model, cli, NEVER_UNRUN))))
     up = supervisor_up(root)
     checks.append(_check("supervisor", up, "a cousin-supervisor answers for %s" % root if up else
                          "no cousin-supervisor runs for %s: start it (`cousin-supervisor run`,"
@@ -165,7 +514,7 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     # what 2.0.0 will reject (removed_keys): a warning, never a blocker on 1.x
     from cousin_lib import removed_keys
     return {"slug": home.name, "account": name, "checks": checks, "steps": list(STEPS),
-            "ready": all(c["ok"] for c in checks),
+            "ready": all(c["ok"] for c in checks), "carry": moved, "cli": cli,
             "warnings": removed_keys.scan(root, home)}
 
 
@@ -205,12 +554,15 @@ def _write_toml(home, data, mode):
 
 
 def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_alive,
-          **checks):
+          validate=False, **checks):
     """Run the steps; the record, with state `migrated` or `failed`.
-    MigrateError when the plan is not ready (nothing is written then)."""
+    MigrateError when the plan is not ready (nothing is written then):
+    among others, a model to be written that `validate` did not pass in
+    this very run (NEVER_UNRUN)."""
     from cousin_lib import accounts
     home, root = Path(home), Path(root)
-    p = plan(home, root=root, account=account, tmux_alive=tmux_alive, **checks)
+    p = plan(home, root=root, account=account, tmux_alive=tmux_alive, validate=validate,
+             **checks)
     if not p["ready"]:
         raise MigrateError("not ready: %s" % "; ".join(
             c["detail"] for c in p["checks"] if not c["ok"]))
@@ -219,9 +571,15 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
     mode = path.stat().st_mode & 0o7777
     rec = {"slug": home.name, "state": "applying", "started_at": _now(), "account": p["account"],
            "was_running": True, "prior_toml_b64": base64.b64encode(prior).decode("ascii"),
-           "prior_mode": mode, "steps": []}
+           "prior_mode": mode, "steps": [], "cli": p["cli"],
+           "validated": next((c["detail"] for c in p["checks"] if c["check"] == "validate"),
+                             None)}
     _write_record(home, rec)
     values = {"runner": "sdk"}
+    # [runtime] model/effort/auth, carried (#96): the runner reads only [agent]
+    for key in CARRIED:
+        if key in p["carry"]["values"]:
+            values[key] = p["carry"]["values"][key]
     if p["account"] != accounts.HOST:
         values["account"] = p["account"]
 
@@ -238,9 +596,20 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
             return True, json.dumps(import_auto(home, root))
         if step == "toml":
             still_down()
+            made = ""
+            if p["carry"]["create"] is not None:
+                # before cousin.toml names it: a runner never starts on an
+                # account that is not there yet
+                rec["account_created"] = make_account(home, root, p["carry"]["create"])
+                _write_record(home, rec)
+                made = "; account %s made (secret %s, 0600)" % (
+                    rec["account_created"]["name"], rec["account_created"]["secret_file"])
             text = set_agent_keys(prior.decode("utf-8"), values)
             _write_toml(home, text.encode("utf-8"), mode)
-            return True, "[agent] %s" % ", ".join("%s = %r" % kv for kv in values.items())
+            kept = [r["detail"] for r in p["carry"]["rows"] if r["action"] == "kept"]
+            return True, "[agent] %s%s%s" % (
+                ", ".join("%s = %r" % kv for kv in values.items()), made,
+                "; " + "; ".join(kept) if kept else "")
         if step == "start":
             still_down()
             boot_file = home / "data" / "pending-boot.json"
@@ -399,6 +768,8 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
     if differs:
         step("restore", lambda: _write_toml(home, prior, int(rec["prior_mode"])),
              lambda _: "cousin.toml as it was, byte for byte", once=False)
+    if rec.get("account_created"):
+        step("account", lambda: drop_account(home, root, rec["account_created"]), str)
     if flipped:
         step("reload", lambda: reload(root))
     if "close" in ran or flipped:
@@ -430,15 +801,74 @@ def _stamp(value):
         return None
 
 
-def check(home, *, since=None, now=None, health=None):
+def config_mismatches(home, root):
+    """({"runner": ..., "tmux": ...}, [mismatch lines]): the model, effort
+    and account the runner would run this cousin on ([agent], the only
+    table it reads) against what its [runtime] runs it on on the tmux lane
+    (tmux_values; `[runtime] auth` api_key means a key account). Only
+    for a cousin on the runner lane: a tmux cousin has nothing to compare."""
+    from cousin_lib import accounts, agent_auth
+    home, root = Path(home), Path(root)
+    try:
+        agent = _agent(home)
+    except MigrateError as err:
+        return {}, [str(err)]
+    if agent.get("runner") != "sdk":
+        return {}, []
+    wrong = []
+    try:
+        effective = tmux_values(home, root)
+    except MigrateError as err:
+        effective = {k: (None, None) for k in CARRIED}
+        wrong.append(str(err))
+    runner = {k: agent.get(k) for k in CARRIED}
+    tmux = {k: effective[k][0] for k in CARRIED}
+    for key in CARRIED:
+        value, source = effective[key]
+        if value is not None and runner[key] != value:
+            wrong.append("%s: the runner runs %s, %s says %r" % (
+                key, "%r" % runner[key] if runner[key] is not None else "the CLI's default",
+                source, value))
+    try:
+        acct = accounts.for_cousin(home, root)
+        runner.update(account=acct.name, kind=acct.kind)
+    except accounts.AccountsError as err:
+        acct = None
+        wrong.append("account: %s" % err)
+    try:
+        mode = agent_auth.read_mode(home)
+    except agent_auth.AuthError as err:
+        mode = None
+        wrong.append("auth: %s" % err)
+    tmux["auth"] = mode
+    if acct is not None and mode is not None:
+        keyed = acct.kind == "anthropic-key"
+        if mode == agent_auth.MODE_API_KEY and not keyed:
+            wrong.append("account: [runtime] auth %r bills its API key, the runner bills"
+                         " %s (%s)" % (mode, "the host login" if acct.name == accounts.HOST
+                                       else "account %r" % acct.name, acct.kind))
+        elif mode != agent_auth.MODE_API_KEY and keyed:
+            wrong.append("account: [runtime] auth %r runs on a login, the runner bills the"
+                         " API key of account %r" % (mode, acct.name))
+    return {"runner": runner, "tmux": tmux}, wrong
+
+
+def check(home, *, since=None, now=None, health=None, root=None, validate=False,
+          validator=None, cli_version=None):
     """The exit criterion, from the runner's own records since `since`
     (epoch seconds; default: the migration's end, else everything):
     every inbox row reached done (`stale`: open longer than STALE_S),
     every tool call has a recorded result (`unrecorded`: none after
     TOOL_GRACE_S), no recorder hook failed (`hook_errors`, the jobs rows a
-    failed recorder never wrote), an inbox that can be read, and, with
-    `health`, a chat server that answers."""
+    failed recorder never wrote), an inbox that can be read, the runner's
+    model, effort and account agree with the cousin's [runtime]
+    (`mismatches`, config_mismatches), with `validate` one smallest model
+    turn on the runner's model, effort and account (`validate`), and,
+    with `health`, a chat server that answers. `cli` names the runner's
+    CLI and its version."""
+    from cousin_lib import accounts
     home = Path(home)
+    root = Path(root) if root is not None else accounts.root_of(home)
     now = time.time() if now is None else now
     if since is None:
         rec = read_record(home) or {}
@@ -482,7 +912,19 @@ def check(home, *, since=None, now=None, health=None):
                         if i not in results and now - ts > TOOL_GRACE_S)
     out = {"since": since, "inbox": inbox, "inbox_readable": rows is not None,
            "tool_calls": len(calls), "unrecorded": unrecorded, "hook_errors": hook_errors}
-    ok = rows is not None and inbox["stale"] == 0 and not unrecorded and not hook_errors
+    out["config"], out["mismatches"] = config_mismatches(home, root)
+    out["cli"] = (cli_version or runner_cli)()
+    ok = rows is not None and inbox["stale"] == 0 and not unrecorded and not hook_errors \
+        and not out["mismatches"]
+    if validate:
+        try:
+            agent = _agent(home)
+            out["validate_ok"], out["validate"] = _validate(
+                validator, accounts.for_cousin(home, root), root, agent.get("model"),
+                agent.get("effort"))
+        except (MigrateError, accounts.AccountsError) as err:
+            out["validate_ok"], out["validate"] = False, "validate: %s" % err
+        ok = ok and out["validate_ok"]
     if health is not None:
         out["chat_ok"], out["chat"] = health(home)
         ok = ok and out["chat_ok"]
@@ -539,8 +981,13 @@ def _live():
         except supervisor.SupervisorUnavailable:
             pass
 
+    def validator(account, root, *, model=None, effort=None):
+        from cousin_lib.runner import sdk
+        return sdk.validate_account(account, root, model=model, effort=effort)
+
     return dict(
         auth_check=auth_check,
+        validator=validator,
         supervisor_up=lambda root: supervisor.snapshot(root) is not None,
         sdk_ok=lambda: importlib.util.find_spec("claude_agent_sdk") is not None,
         tmux_alive=tmux_alive,
@@ -561,12 +1008,18 @@ def _live():
 
 def _print_plan(p):
     for c in p["checks"]:
+        if c["check"] == "carry" and c["ok"]:
+            print("  ok  carry")
+            for r in p["carry"]["rows"]:
+                print("        %-7s %s" % (r["action"], r["detail"]))
+            continue
         print("  %s %-10s %s" % ("ok " if c["ok"] else "NO ", c["check"], c["detail"]))
     for w in p.get("warnings") or ():
         print("  warn 2.0.0 %s %s: %s" % (w["where"], w["key"], w["line"]))
     print("steps: %s" % " -> ".join(p["steps"]))
-    print("%s: %s" % (p["slug"], "ready (run: cousin-migrate apply %s --yes)" % p["slug"]
-                      if p["ready"] else "not ready"))
+    print("%s: %s" % (p["slug"], "ready (run: cousin-migrate apply %s%s --yes)" % (
+        p["slug"], " --validate" if any(c["check"] == "validate" for c in p["checks"]) else "")
+        if p["ready"] else "not ready"))
 
 
 def migrate_main(argv=None):
@@ -580,6 +1033,9 @@ def migrate_main(argv=None):
         p.add_argument("slug")
         p.add_argument("--account", default=None,
                        help="the config/accounts.toml account it runs on (default: the host login)")
+        p.add_argument("--validate", action="store_true",
+                       help="one smallest model turn with the model, effort and account the"
+                            " runner will run (needed when a model is carried: %s)" % NEVER_UNRUN)
         if name == "apply":
             p.add_argument("--yes", action="store_true", help="really run the steps")
     p = sub.add_parser("rollback")
@@ -592,6 +1048,8 @@ def migrate_main(argv=None):
     p.add_argument("--since", default=None,
                    help="an ISO time (default: when the migration finished)")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--validate", action="store_true",
+                   help="one smallest model turn with the runner's model, effort and account")
     args = parser.parse_args(argv)
     root = FrameworkConfig.resolve().root
     home = root / "cousins" / args.slug
@@ -603,7 +1061,7 @@ def migrate_main(argv=None):
         if args.since and since is None:
             print("error: --since %r is not an ISO time" % args.since, file=sys.stderr)
             return 2
-        c = check(home, since=since, health=chat_health)
+        c = check(home, since=since, health=chat_health, root=root, validate=args.validate)
         if args.json:
             print(json.dumps(c, indent=1))
         else:
@@ -615,6 +1073,14 @@ def migrate_main(argv=None):
                                                       ", ".join(c["unrecorded"]) or "none"))
             print("recorder hook errors: %s" % ("; ".join(c["hook_errors"]) or "none"))
             print("chat server: %s" % c["chat"])
+            print("runner CLI: %s" % c["cli"])
+            if "validate" in c:
+                print("%s %s" % ("validate:" if c["validate_ok"] else "NOT VALID:", c["validate"]))
+            if c["config"]:
+                print("runner config: %s" % ", ".join(
+                    "%s=%s" % kv for kv in c["config"]["runner"].items()))
+            for line in c["mismatches"]:
+                print("MISMATCH %s" % line)
             print("ok" if c["ok"] else "NOT ok")
         return 0 if c["ok"] else 1
     if args.cmd in ("apply", "rollback") and not args.yes:
@@ -624,11 +1090,11 @@ def migrate_main(argv=None):
     live = _live()
     try:
         if args.cmd == "plan":
-            p = plan(home, root=root, account=args.account, **live)
+            p = plan(home, root=root, account=args.account, validate=args.validate, **live)
             _print_plan(p)
             return 0 if p["ready"] else 1
         if args.cmd == "apply":
-            rec = apply(home, root=root, account=args.account, **live)
+            rec = apply(home, root=root, account=args.account, validate=args.validate, **live)
         else:
             rec = rollback(home, root=root, force=args.force, **live)
     except MigrateError as err:

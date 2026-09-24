@@ -263,20 +263,47 @@ cousin is running on the tmux lane: migrating a stopped cousin would start
 it, so start it first or leave it for later. The plan checks all of that:
 
 ```
-cousin-migrate plan wren --account team
+cousin-migrate plan wren --account team --validate
 #   ok  lane       on the tmux lane
 #   ok  running    its tmux session is up
 #   ok  record     no migration in progress
+#   ok  carry
+#         carry   [runtime] model 'claude-opus-5' -> [agent] model
+#         carry   [runtime] effort 'high' -> [agent] effort
+#         none    [runtime] auth 'claude': --account team
 #   ok  account    account=team kind=claude-login loggedIn=True method=claude.ai
+#   ok  cli        the runner's CLI: Claude Code 2.1.277 (bundled with claude-agent-sdk 0.2.157)
+#   ok  validate   validate: ok (one model turn answered) (model claude-opus-5, effort high, account team); a model the runner's CLI can't run is never written
 #   ok  supervisor a cousin-supervisor answers for /srv/fw
 #   ok  sdk        claude-agent-sdk is installed
 #   ok  import     3 auto-memory file(s) to fold in
 # steps: close -> import -> toml -> start -> verify
-# wren: ready (run: cousin-migrate apply wren --yes)
+# wren: ready (run: cousin-migrate apply wren --validate --yes)
 ```
 
 `plan` writes nothing. Leave out `--account` and the cousin runs on the
-host's own login. It also lists, as `warn 2.0.0` lines, every key the cousin
+host's own login, unless its `[runtime] auth` is `"api_key"`.
+
+The runner reads only `[agent]`, so the `carry` lines say what of the tmux
+lane's `[runtime]` moves there: `model` and `effort` (or, when `[runtime]`
+sets none and `config/agent-cmd` renders the placeholder, the
+`config/harness.toml [agent]` default the tmux lane ran on), and for
+`auth = "api_key"` an `anthropic-key` account named `<slug>-key`, made at
+`apply` from the cousin's own `.secrets/api-key.env` (the key copied to
+`.secrets/accounts/<slug>-key`, mode 0600; `config/accounts.toml` gains its
+table). A key already in `[agent]`, or `--account`, wins and is listed as
+`kept`. An api_key cousin whose key file is missing or malformed makes the
+plan say `NO carry`: it never falls back to the host login.
+
+A model the runner's CLI can't run is never written. The runner runs the
+CLI bundled with `claude-agent-sdk` (the `cli` line names its version), and
+a model newer than that CLI fails every turn with an API 400. So when a
+model is carried, `plan` and `apply` say `NO validate` unless you pass
+`--validate`: one smallest model turn, on a throwaway client, with the
+model, effort and account the runner will run, and the API's own words when
+it fails. `apply --validate` runs it again itself, before anything changes.
+`cousin-migrate check wren --validate` does the same for a cousin already
+on the runner. It also lists, as `warn 2.0.0` lines, every key the cousin
 or the install still carries that 2.0.0 will reject (a `[chat] port`, a
 `config/agent-cmd`, the harness's tmux patterns), with what to do: they
 are warnings, not blockers, and the cleanup belongs to the upgrade, after
@@ -284,7 +311,7 @@ the fleet's week. When the plan says ready, and at a moment the cousin is
 between tasks:
 
 ```
-cousin-migrate apply wren --account team --yes
+cousin-migrate apply wren --account team --validate --yes
 ```
 
 It saves the current `cousin.toml` (its exact bytes and mode) in
@@ -294,7 +321,7 @@ It saves the current `cousin.toml` (its exact bytes and mode) in
 |---|---|
 | `close` | a clean stop of the tmux session: the cousin writes its handoff, the transcript is mined, the generation moves on |
 | `import` | Claude Code's own memory for the cousin is folded into `memory/imported/auto/` (`cousin-memory import-auto --apply`), with a recall baseline first |
-| `toml` | `[agent] runner = "sdk"`, and `account` when you named one; nothing else in the file changes. Refused if the tmux session came back meanwhile (a scheduled flip, a console start) |
+| `toml` | `[agent] runner = "sdk"`, `account` when you named one, and what the plan's `carry` lines listed (the key account is made first); nothing else in the file changes. Refused if the tmux session came back meanwhile (a scheduled flip, a console start) |
 | `start` | the migration day's boot packet is set aside (the runner starts on its own digest), the supervisor starts the cousin's runner, and the cousin's chat server is started: the supervisor runs none, and other cousins' messages reach the inbox through it |
 | `verify` | the runner stays up and holds its lock for 10 seconds, and the chat server answers `/health` for the cousin |
 
@@ -310,7 +337,10 @@ Then check it, the same day and each day after:
    recall that got worse.
 4. `cousin-migrate check wren` says `ok`: since the migration, no inbox
    row open for more than an hour, every tool call has a recorded result,
-   no recorder hook failed, and the chat server answers. The supervisor
+   no recorder hook failed, the runner's model, effort and account agree
+   with the cousin's `[runtime]` (a `MISMATCH` line says where not: a
+   console model or effort change still writes `[runtime]`), and the chat
+   server answers. The supervisor
    runs no chat server: `cousin-chat-watchdog` (its timer) brings a runner
    cousin's back after a reboot or a crash, so keep that timer on.
 
@@ -322,7 +352,9 @@ cousin-migrate rollback wren --yes
 
 It undoes the steps `apply` got through, and only those. It stops the
 runner and waits until it has let go of its lock, puts the saved
-`cousin.toml` back byte for byte, has the supervisor rescan, writes a fresh
+`cousin.toml` back byte for byte, removes the key account it made (its
+table and its secret copy) unless another cousin names it (then it is kept
+and the step says who), has the supervisor rescan, writes a fresh
 boot packet from the cousin's state now, starts the tmux session (unless it
 is already up) and releases the supervisor's hold on the runner. If
 `apply` failed before `toml`, it changes nothing but the record. A step

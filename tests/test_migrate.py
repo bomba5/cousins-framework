@@ -8,6 +8,7 @@ account check, the chat server) is injected here: this test touches no
 live home, no tmux, no supervisor and no model."""
 import base64
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -56,7 +57,8 @@ class Live:
         self.runner_up = False
 
     def kw(self):
-        return dict(auth_check=self.auth_check, supervisor_up=lambda root: self.supervisor,
+        return dict(auth_check=self.auth_check, validator=self.validator,
+                    cli_version=lambda: "Claude Code 9.9.9 (bundled with claude-agent-sdk 0.0.1)", supervisor_up=lambda root: self.supervisor,
                     sdk_ok=lambda: True, tmux_alive=lambda home: self.tmux, close=self.close,
                     import_auto=self.import_auto, start=self.start, verify=self.verify,
                     stop=self.stop, runner_alive=self.runner_alive, reload=self.reload,
@@ -71,6 +73,10 @@ class Live:
         self.calls.append(("auth", account))
         return (0, "account=%s loggedIn=True" % account) if self.logged_in \
             else (4, "account=%s loggedIn=False -> run cousin-account login" % account)
+
+    def validator(self, account, root, *, model=None, effort=None):
+        self.calls.append(("validate", model, effort, account))
+        return 0, "validate: ok (one model turn answered)"
 
     def close(self, slug, root):
         self.calls.append(("close", slug))
@@ -127,7 +133,7 @@ def _tree(path):
 
 
 def _names(live):
-    return [c[0] for c in live.calls if c[0] != "auth"]
+    return [c[0] for c in live.calls if c[0] not in ("auth", "validate")]
 
 
 class TestPlan(HermeticCase):
@@ -135,7 +141,7 @@ class TestPlan(HermeticCase):
         root, home = _root(self)
         before = _tree(root)
         live = Live()
-        p = migrate.plan(home, root=root, account="team", **live.kw())
+        p = migrate.plan(home, root=root, validate=True, account="team", **live.kw())
         self.assertTrue(p["ready"], p)
         self.assertEqual(p["steps"], list(migrate.STEPS))
         self.assertEqual(_tree(root), before)
@@ -147,24 +153,24 @@ class TestPlan(HermeticCase):
         for live, needle in ((Live(logged_in=False), "cousin-account login"),
                              (Live(supervisor=False), "cousin-supervisor"),
                              (Live(tmux=False), "it is stopped")):
-            p = migrate.plan(home, root=root, account="team", **live.kw())
+            p = migrate.plan(home, root=root, validate=True, account="team", **live.kw())
             self.assertFalse(p["ready"])
             self.assertIn(needle, json.dumps(p["checks"]))
             with self.assertRaisesRegex(migrate.MigrateError, "not ready"):
-                migrate.apply(home, root=root, account="team", **live.kw())
+                migrate.apply(home, root=root, validate=True, account="team", **live.kw())
             self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
             self.assertFalse((home / migrate.RECORD).exists())
 
     def test_an_unknown_account_is_a_blocker(self):
         root, home = _root(self)
-        p = migrate.plan(home, root=root, account="nobody", **Live().kw())
+        p = migrate.plan(home, root=root, validate=True, account="nobody", **Live().kw())
         self.assertFalse(p["ready"])
         self.assertIn("not in config/accounts.toml", json.dumps(p["checks"]))
 
     def test_a_runner_cousin_has_nothing_to_migrate(self):
         root, home = _root(self)
         (home / "cousin.toml").write_text(TOML + '\n[agent]\nrunner = "sdk"\n')
-        p = migrate.plan(home, root=root, **Live().kw())
+        p = migrate.plan(home, root=root, validate=True, **Live().kw())
         self.assertFalse(p["ready"])
         self.assertIn("already on the runner lane", json.dumps(p["checks"]))
 
@@ -174,10 +180,11 @@ class TestApply(HermeticCase):
         root, home = _root(self)
         (home / "data" / "pending-boot.json").write_text('{"generation": 3}')
         live = Live()
-        rec = migrate.apply(home, root=root, account="team", **live.kw())
+        rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual(rec["state"], "migrated")
         self.assertEqual(_names(live), ["close", "import", "start", "verify"])
-        self.assertEqual(live.calls[-2][1], {"runner": "sdk", "account": "team"})
+        # [runtime] model is carried into [agent], where the runner reads it (#96)
+        self.assertEqual(live.calls[-2][1], {"runner": "sdk", "model": "opus", "account": "team"})
         text = (home / "cousin.toml").read_bytes().decode()
         self.assertEqual(tomllib.loads(text)["runtime"]["model"], "opus")
         self.assertIn("# the operator's own comment stays\r\n", text)
@@ -199,7 +206,7 @@ class TestApply(HermeticCase):
             live.tmux = True                                  # something started it again
             return orig(home_, root_)
         live.import_auto = import_and_restart
-        rec = migrate.apply(home, root=root, account="team", **live.kw())
+        rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual((rec["state"], rec["steps"][-1]["step"]), ("failed", "toml"))
         self.assertIn("up again", rec["steps"][-1]["detail"])
         self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
@@ -207,7 +214,7 @@ class TestApply(HermeticCase):
     def test_a_failed_clean_stop_stops_before_anything_changes(self):
         root, home = _root(self)
         live = Live(close_ok=False)
-        rec = migrate.apply(home, root=root, account="team", **live.kw())
+        rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual(rec["state"], "failed")
         self.assertIn("refusing a concurrent one", rec["steps"][-1]["detail"])
         self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
@@ -216,9 +223,9 @@ class TestApply(HermeticCase):
     def test_a_second_apply_is_refused_until_a_rollback(self):
         root, home = _root(self)
         live = Live(start_error="no child")
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         with self.assertRaisesRegex(migrate.MigrateError, "rollback"):
-            migrate.apply(home, root=root, account="team", **live.kw())
+            migrate.apply(home, root=root, validate=True, account="team", **live.kw())
 
 
 class TestVerify(HermeticCase):
@@ -270,7 +277,7 @@ class TestRollback(HermeticCase):
     def test_a_failed_start_is_rolled_back_to_the_exact_file_on_a_fresh_packet(self):
         root, home = _root(self)
         live = Live(start_error="no child")
-        rec = migrate.apply(home, root=root, account="team", **live.kw())
+        rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual((rec["state"], rec["steps"][-1]["step"]), ("failed", "start"))
         back = migrate.rollback(home, root=root, **live.kw())
         self.assertEqual(back["state"], "rolled_back")
@@ -283,7 +290,7 @@ class TestRollback(HermeticCase):
         """Review I6(a): a stop that returns before the runner is down."""
         root, home = _root(self)
         live = Live(stop_answer="stopping", runner_down_after=3)
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertTrue(live.runner_up)
         migrate.rollback(home, root=root, **live.kw())
         self.assertFalse(live.runner_up)
@@ -292,7 +299,7 @@ class TestRollback(HermeticCase):
     def test_a_runner_that_never_lets_go_is_refused_and_nothing_restored(self):
         root, home = _root(self)
         live = Live(stop_answer="stopping", runner_down_after=10 ** 6)
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         with self.assertRaisesRegex(migrate.MigrateError, "still holds its lock"):
             migrate.rollback(home, root=root, **live.kw())
         self.assertIn(b'runner = "sdk"', (home / "cousin.toml").read_bytes())
@@ -302,7 +309,7 @@ class TestRollback(HermeticCase):
         """Review I6(b): it would stop the live tmux session with no handoff."""
         root, home = _root(self)
         live = Live(start_error="no child")
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         migrate.rollback(home, root=root, **live.kw())
         calls = len(live.calls)
         with self.assertRaisesRegex(migrate.MigrateError, "already rolled back"):
@@ -313,7 +320,7 @@ class TestRollback(HermeticCase):
         """Review I6(c): the refused close left a flip running; nothing to undo."""
         root, home = _root(self)
         live = Live(close_ok=False)
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         calls = len(live.calls)
         back = migrate.rollback(home, root=root, **live.kw())
         self.assertEqual(back["state"], "rolled_back")
@@ -329,7 +336,7 @@ class TestRollback(HermeticCase):
             live.tmux = True
             return orig(home_, root_)
         live.import_auto = import_and_restart
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         back = migrate.rollback(home, root=root, **live.kw())
         self.assertEqual(back["state"], "rolled_back")
         self.assertNotIn("start_tmux", _names(live))
@@ -337,7 +344,7 @@ class TestRollback(HermeticCase):
     def test_a_failing_step_is_recorded_and_reported_not_a_traceback(self):
         root, home = _root(self)
         live = Live(start_error="no child")
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
 
         def broken(home_, root_):
             raise RuntimeError("tmux new-session: duplicate session")
@@ -353,7 +360,7 @@ class TestRollback(HermeticCase):
         and kill the live session with no handoff."""
         root, home = _root(self)
         live = Live(start_error="no child")
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         good_start = live.start_tmux
 
         def broken(home_, root_):
@@ -374,7 +381,7 @@ class TestRollback(HermeticCase):
         """Review round 2 m2: a Ctrl-C between the write and the record."""
         root, home = _root(self)
         live = Live(start_error="no child")
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         rec = json.loads((home / migrate.RECORD).read_text())
         rec["steps"] = [s for s in rec["steps"] if s["step"] not in ("toml", "start")]
         (home / migrate.RECORD).write_text(json.dumps(rec))
@@ -385,7 +392,7 @@ class TestRollback(HermeticCase):
     def test_a_rollback_releases_the_runner_hold(self):
         root, home = _root(self)
         live = Live()
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         migrate.rollback(home, root=root, **live.kw())
         self.assertEqual(_names(live)[-1], "release")
 
@@ -397,14 +404,14 @@ class TestReMigration(HermeticCase):
         from cousin_lib import memory, review_gate
         root, home = _root(self)
         live = Live()
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         migrate.rollback(home, root=root, **live.kw())
         with open(pathlib.Path(home, *review_gate.STATE), "w") as fh:     # days pass on tmux
             json.dump({"cursor": time.time() - 5 * 86400, "seen": []}, fh)
         for i in range(5):
             memory.remember(home, "pantry %d" % i, "Shelf %d holds the quokka tins." % i)
         live.tmux = True
-        rec = migrate.apply(home, root=root, account="team", **live.kw())
+        rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual(rec["state"], "migrated")
         review_gate.begin(home)                                 # the runner's start sweep
         self.assertEqual(review_gate.hold_new(home), [])
@@ -412,7 +419,7 @@ class TestReMigration(HermeticCase):
     def test_rollback_refuses_while_rows_wait_or_the_inbox_is_unreadable(self):
         root, home = _root(self)
         live = Live()
-        migrate.apply(home, root=root, account="team", **live.kw())
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         _inbox(home, [("queued", None, 5)])
         with self.assertRaisesRegex(migrate.MigrateError, "1 inbox row"):
             migrate.rollback(home, root=root, **live.kw())
@@ -460,6 +467,375 @@ class TestCheck(HermeticCase):
         self.assertTrue(migrate.check(home, since=0.0, health=lambda h: (True, "answers"))["ok"])
 
 
+# ------------------------------------------------------------ #96: [runtime] carried
+KEY = "sk-ant-fixture-quokka-0123456789"
+CARRY_TOML = ('[cousin]\nslug = "wren"\nname = "Wren"\n\n'
+              '[runtime]\nmodel = "opus"\neffort = "high"\nauth = "api_key"\n')
+
+
+def _key_cousin(case, *, key_line="ANTHROPIC_API_KEY=%s\n" % KEY, toml=CARRY_TOML):
+    """wren on the tmux lane with [runtime] auth = "api_key" and its key
+    in <home>/.secrets/api-key.env (0600 in a 0700 directory), as
+    agent_auth.write_key leaves it; key_line None writes no key file."""
+    root, home = _root(case)
+    (home / "cousin.toml").write_text(toml)
+    if key_line is not None:
+        (home / ".secrets").mkdir(mode=0o700)
+        os.chmod(home / ".secrets", 0o700)
+        (home / ".secrets" / "api-key.env").write_text(key_line)
+        os.chmod(home / ".secrets" / "api-key.env", 0o600)
+    return root, home
+
+
+def _files_holding(root, needle):
+    out = []
+    for path in root.rglob("*"):
+        if path.is_file() and needle.encode() in path.read_bytes():
+            out.append(str(path.relative_to(root)))
+    return sorted(out)
+
+
+class TestCarryRuntime(HermeticCase):
+    """#96: the runner reads only [agent]; the tmux lane's [runtime]
+    model, effort and auth must be carried or the cousin silently runs
+    the CLI's default model and bills the host login."""
+
+    def test_the_plan_lists_the_carried_keys_and_writes_nothing(self):
+        root, home = _key_cousin(self)
+        before = _tree(root)
+        p = migrate.plan(home, root=root, validate=True, **Live().kw())
+        self.assertTrue(p["ready"], p)
+        self.assertEqual(p["carry"]["values"],
+                         {"model": "opus", "effort": "high", "account": "wren-key"})
+        self.assertEqual(p["account"], "wren-key")
+        text = json.dumps(p)
+        self.assertIn("[runtime] model", text)
+        self.assertIn("[agent] effort", text)
+        self.assertIn("wren-key", text)
+        self.assertNotIn(KEY, text)
+        self.assertEqual(_tree(root), before)
+
+    def test_an_existing_agent_key_wins_and_is_reported(self):
+        root, home = _root(self)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n\n[runtime]\nmodel = "opus"\neffort = "low"\n\n'
+            '[agent]\nmodel = "sonnet"\n')
+        p = migrate.plan(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertTrue(p["ready"], p)
+        self.assertEqual(p["carry"]["values"], {"effort": "low"})
+        kept = [r for r in p["carry"]["rows"] if r["key"] == "model"][0]
+        self.assertEqual(kept["action"], "kept")
+        self.assertIn("sonnet", kept["detail"])
+        self.assertIn("opus", kept["detail"])
+
+    def test_the_harness_default_is_carried_when_the_agent_command_renders_it(self):
+        root, home = _root(self)
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n')
+        (root / "config" / "agent-cmd").write_text("claude --model {model} --effort {effort}\n")
+        (root / "config" / "harness.toml").write_text(
+            '[agent]\ndefault_model = "haiku"\ndefault_effort = "medium"\n')
+        p = migrate.plan(home, root=root, validate=True, **Live().kw())
+        self.assertEqual(p["carry"]["values"], {"model": "haiku", "effort": "medium"})
+        self.assertIn("default_model", json.dumps(p["carry"]))
+
+    def test_apply_writes_model_effort_and_a_key_account_from_the_key_file(self):
+        root, home = _key_cousin(self)
+        (root / "config" / "accounts.toml").write_text(
+            '# the operator\'s accounts\n[accounts.team]\nkind = "claude-login"\n')
+        live = Live()
+        p = migrate.plan(home, root=root, validate=True, **live.kw())
+        rec = migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        agent = tomllib.loads((home / "cousin.toml").read_text())["agent"]
+        self.assertEqual(agent, {"runner": "sdk", "model": "opus", "effort": "high",
+                                 "account": "wren-key"})
+        from cousin_lib import accounts
+        acct = accounts.load(root)["wren-key"]
+        self.assertEqual(acct.kind, "anthropic-key")
+        self.assertIn("team", accounts.load(root))                 # nothing else lost
+        self.assertIn("# the operator's accounts", (root / "config" / "accounts.toml").read_text())
+        secret = root / ".secrets" / "accounts" / "wren-key"
+        self.assertEqual(acct.secret_file, secret)
+        self.assertEqual(secret.read_text(), KEY + "\n")
+        self.assertEqual(stat.S_IMODE(secret.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(secret.parent.stat().st_mode), 0o700)
+        # the runner resolves it to the key, never the host login
+        cousin_acct = accounts.for_cousin(home, root)
+        self.assertEqual(accounts.account_env(cousin_acct, root)["ANTHROPIC_API_KEY"], KEY)
+        # the key lives in exactly its two files: never in a record, a plan or a toml
+        self.assertEqual(_files_holding(root, KEY),
+                         [".secrets/accounts/wren-key", "cousins/wren/.secrets/api-key.env"])
+        self.assertNotIn(KEY, json.dumps(p) + json.dumps(rec))
+        self.assertEqual(rec["account_created"]["name"], "wren-key")
+        self.assertIn("the auth check", json.dumps([c for c in p["checks"]
+                                                    if c["check"] == "account"]))
+
+    def test_an_account_already_made_by_hand_with_the_same_key_is_reused(self):
+        root, home = _key_cousin(self)
+        (root / "config" / "accounts.toml").write_text(
+            '[accounts.wren-key]\nkind = "anthropic-key"\n')
+        (root / ".secrets" / "accounts").mkdir(parents=True, mode=0o700)
+        os.chmod(root / ".secrets", 0o700); os.chmod(root / ".secrets" / "accounts", 0o700)
+        (root / ".secrets" / "accounts" / "wren-key").write_text(KEY + "\n")
+        os.chmod(root / ".secrets" / "accounts" / "wren-key", 0o600)
+        before = (root / "config" / "accounts.toml").read_bytes()
+        live = Live()
+        rec = migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        self.assertEqual((root / "config" / "accounts.toml").read_bytes(), before)
+        self.assertIn(("auth", "wren-key"), live.calls)          # an existing account is checked
+        self.assertNotIn("account_created", rec)
+
+    def test_an_account_of_that_name_with_another_key_is_a_blocker(self):
+        root, home = _key_cousin(self)
+        (root / "config" / "accounts.toml").write_text(
+            '[accounts.wren-key]\nkind = "anthropic-key"\n')
+        (root / ".secrets" / "accounts").mkdir(parents=True, mode=0o700)
+        os.chmod(root / ".secrets", 0o700)
+        (root / ".secrets" / "accounts" / "wren-key").write_text("sk-ant-someone-else\n")
+        os.chmod(root / ".secrets" / "accounts" / "wren-key", 0o600)
+        p = migrate.plan(home, root=root, validate=True, **Live().kw())
+        self.assertFalse(p["ready"])
+        self.assertIn("different key", json.dumps(p["checks"]))
+
+    def test_a_missing_or_malformed_key_file_makes_the_plan_not_ready(self):
+        for key_line, needle in ((None, "does not exist"),
+                                 ("OTHER_VAR=%s\n" % KEY, "names a variable other than"),
+                                 ("ANTHROPIC_API_KEY=\n", "empty")):
+            with self.subTest(key_line=key_line):
+                root, home = _key_cousin(self, key_line=key_line)
+                before = _tree(root)
+                p = migrate.plan(home, root=root, validate=True, **Live().kw())
+                self.assertFalse(p["ready"])
+                row = [c for c in p["checks"] if c["check"] == "carry"][0]
+                self.assertFalse(row["ok"])
+                self.assertIn(needle, row["detail"])
+                self.assertIn("host login", row["detail"])
+                self.assertNotIn(KEY, json.dumps(p))
+                with self.assertRaisesRegex(migrate.MigrateError, "not ready"):
+                    migrate.apply(home, root=root, validate=True, **Live().kw())
+                self.assertEqual(_tree(root), before)
+
+    def test_an_explicit_account_wins_over_the_key_and_is_reported(self):
+        root, home = _key_cousin(self)
+        p = migrate.plan(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertTrue(p["ready"], p)
+        self.assertEqual(p["account"], "team")
+        self.assertNotIn("account", p["carry"]["values"])
+        row = [r for r in p["carry"]["rows"] if r["key"] == "account"][0]
+        self.assertEqual(row["action"], "kept")
+        self.assertIn("--account team", row["detail"])
+
+    def test_rollback_restores_the_bytes_and_removes_the_account_nothing_else_uses(self):
+        root, home = _key_cousin(self)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, **live.kw())
+        back = migrate.rollback(home, root=root, **live.kw())
+        self.assertEqual(back["state"], "rolled_back")
+        self.assertEqual((home / "cousin.toml").read_text(), CARRY_TOML)
+        from cousin_lib import accounts
+        self.assertNotIn("wren-key", accounts.load(root))
+        self.assertFalse((root / ".secrets" / "accounts" / "wren-key").exists())
+        self.assertIn("removed", json.dumps(back["rollback_steps"]))
+        self.assertEqual(_files_holding(root, KEY), ["cousins/wren/.secrets/api-key.env"])
+
+    def test_rollback_keeps_the_account_another_cousin_uses(self):
+        root, home = _key_cousin(self)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, **live.kw())
+        other = root / "cousins" / "moss"
+        other.mkdir()
+        (other / "cousin.toml").write_text('[cousin]\nslug = "moss"\n\n[agent]\n'
+                                           'runner = "sdk"\naccount = "wren-key"\n')
+        back = migrate.rollback(home, root=root, **live.kw())
+        from cousin_lib import accounts
+        self.assertIn("wren-key", accounts.load(root))
+        self.assertTrue((root / ".secrets" / "accounts" / "wren-key").exists())
+        self.assertIn("moss", json.dumps(back["rollback_steps"]))
+
+    def test_the_cli_plan_prints_what_it_carries_and_never_the_key(self):
+        root, home = _key_cousin(self)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = migrate.migrate_main(["plan", "wren", "--validate"])
+            rc2 = migrate.migrate_main(["apply", "wren", "--validate", "--yes"])
+        self.assertEqual((rc, rc2), (0, 0), err.getvalue())
+        text = out.getvalue()
+        self.assertIn("[runtime] model 'opus' -> [agent] model", text)
+        self.assertIn("[runtime] effort 'high' -> [agent] effort", text)
+        self.assertIn("wren-key", text)
+        self.assertNotIn(KEY, text + err.getvalue())
+
+
+class TestCheckConfig(HermeticCase):
+    """#96: check says loudly when the runner would run another model,
+    effort or billing than the cousin's [runtime]."""
+
+    def _migrated(self, case_toml):
+        root, home = _root(self)
+        (home / "cousin.toml").write_text(case_toml)
+        return root, home
+
+    def test_a_runner_on_the_cli_default_model_and_the_host_login_is_a_mismatch(self):
+        root, home = self._migrated(CARRY_TOML + '\n[agent]\nrunner = "sdk"\n')
+        c = migrate.check(home, root=root, since=0.0)
+        self.assertFalse(c["ok"])
+        text = " ".join(c["mismatches"])
+        self.assertIn("model", text)
+        self.assertIn("opus", text)
+        self.assertIn("effort", text)
+        self.assertIn("host", text)
+        self.assertIn("api_key", text)
+
+    def test_a_carried_config_matches(self):
+        root, home = _key_cousin(self)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, **live.kw())
+        c = migrate.check(home, root=root, since=0.0)
+        self.assertEqual(c["mismatches"], [])
+        self.assertTrue(c["ok"], c)
+        self.assertEqual(c["config"]["runner"],
+                         {"model": "opus", "effort": "high", "account": "wren-key",
+                          "kind": "anthropic-key"})
+
+    def test_a_key_account_under_a_login_runtime_is_a_mismatch(self):
+        root, home = _root(self)
+        (root / "config" / "accounts.toml").write_text(
+            '[accounts.paid]\nkind = "anthropic-key"\n')
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n\n[agent]\n'
+                                          'runner = "sdk"\naccount = "paid"\n')
+        c = migrate.check(home, root=root, since=0.0)
+        self.assertFalse(c["ok"])
+        self.assertIn("paid", " ".join(c["mismatches"]))
+
+    def test_the_cli_says_mismatch_loudly(self):
+        root, home = self._migrated(CARRY_TOML + '\n[agent]\nrunner = "sdk"\n')
+        out = io.StringIO()
+        with mock.patch.object(migrate, "chat_health", return_value=(True, "answers")), \
+                contextlib.redirect_stdout(out):
+            rc = migrate.migrate_main(["check", "wren", "--since", "2000-01-01T00:00:00+00:00"])
+        self.assertEqual(rc, 1)
+        self.assertIn("MISMATCH", out.getvalue())
+
+
+TOO_NEW = ("API Error: 400 Claude Code 2.1.277 does not support this model; version 2.1.280"
+           " or newer is required")
+
+
+def _too_new_validator(seen):
+    """The real sdk.validate_account on a scripted client that answers as
+    the live incident did: an invalid_request 400 in the turn, with a
+    result that is not flagged is_error."""
+    from claude_agent_sdk import AssistantMessage, TextBlock
+    from cousin_lib.runner import sdk
+    from tests.runner.test_sdk import ScriptedClient, init_msg, result
+
+    def validator(account, root, *, model=None, effort=None):
+        turn = [init_msg(), AssistantMessage(content=[TextBlock(text=TOO_NEW)], model="<synthetic>",
+                                             error="invalid_request"), result()]
+        return sdk.validate_account(account, root, model=model, effort=effort, timeout=5,
+                                    client_factory=lambda o: seen.append(o) or ScriptedClient(o, [turn]))
+    return validator
+
+
+class TestValidateTheModel(HermeticCase):
+    """#96, live: a carried model the SDK's bundled CLI is too old for
+    failed every turn. A model the runner's CLI can't run is never written."""
+
+    def test_a_carried_model_without_validate_is_not_ready_and_never_written(self):
+        root, home = _key_cousin(self)
+        before = _tree(root)
+        live = Live()
+        p = migrate.plan(home, root=root, **live.kw())
+        self.assertFalse(p["ready"])
+        row = [c for c in p["checks"] if c["check"] == "validate"][0]
+        self.assertFalse(row["ok"])
+        self.assertIn(migrate.NEVER_UNRUN, row["detail"])
+        self.assertIn("--validate", row["detail"])
+        with self.assertRaisesRegex(migrate.MigrateError, "never written"):
+            migrate.apply(home, root=root, **live.kw())
+        self.assertEqual(_tree(root), before)
+        self.assertNotIn("validate", [c[0] for c in live.calls])
+
+    def test_nothing_carried_needs_no_validate(self):
+        root, home = _root(self)
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n')
+        p = migrate.plan(home, root=root, account="team", **Live().kw())
+        self.assertTrue(p["ready"], p)
+
+    @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "needs the sdk extra")
+    def test_a_model_the_cli_cannot_run_fails_validate_with_the_apis_words(self):
+        root, home = _key_cousin(self)
+        seen = []
+        live = Live()
+        live.validator = _too_new_validator(seen)
+        p = migrate.plan(home, root=root, validate=True, **live.kw())
+        self.assertFalse(p["ready"])
+        row = [c for c in p["checks"] if c["check"] == "validate"][0]
+        self.assertFalse(row["ok"])
+        self.assertIn("version 2.1.280 or newer is required", row["detail"])
+        self.assertIn(migrate.NEVER_UNRUN, row["detail"])
+        # the turn ran on what the runner would run: the model, the effort, the key
+        self.assertEqual((seen[0].model, seen[0].effort), ("opus", "high"))
+        self.assertEqual(seen[0].env["ANTHROPIC_API_KEY"], KEY)
+        self.assertNotIn(KEY, json.dumps(p))
+        with self.assertRaisesRegex(migrate.MigrateError, "2.1.280"):
+            migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual((home / "cousin.toml").read_text(), CARRY_TOML)
+        self.assertFalse((home / migrate.RECORD).exists())
+        self.assertFalse((root / ".secrets").exists())
+        self.assertNotIn("close", [c[0] for c in live.calls])
+
+    def test_a_passing_validate_runs_the_model_effort_and_account_then_writes_them(self):
+        root, home = _key_cousin(self)
+        live = Live()
+        rec = migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        (_v, model, effort, acct), = [c for c in live.calls if c[0] == "validate"]
+        self.assertEqual((model, effort, acct.name, acct.kind), ("opus", "high", "wren-key",
+                                                                 "anthropic-key"))
+        self.assertIn("one model turn answered", rec["validated"])
+        self.assertIn("9.9.9", rec["cli"])
+        self.assertNotIn(KEY, json.dumps(rec))
+
+    def test_check_validate_runs_the_runners_config_and_fails_loudly(self):
+        root, home = _key_cousin(self)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, **live.kw())
+        calls = []
+
+        def failing(account, root_, *, model=None, effort=None):
+            calls.append((model, effort, account.name))
+            return 4, "validate: " + TOO_NEW
+        c = migrate.check(home, root=root, since=0.0, validate=True, validator=failing,
+                          cli_version=lambda: "Claude Code 2.1.277 (bundled)")
+        self.assertEqual(calls, [("opus", "high", "wren-key")])
+        self.assertFalse(c["ok"])
+        self.assertFalse(c["validate_ok"])
+        self.assertIn("2.1.280", c["validate"])
+        self.assertEqual(c["cli"], "Claude Code 2.1.277 (bundled)")
+
+    def test_plan_and_check_print_the_runners_cli(self):
+        root, home = _key_cousin(self)
+        out = io.StringIO()
+        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
+                mock.patch.object(migrate, "chat_health", return_value=(True, "answers")), \
+                mock.patch.object(migrate, "runner_cli", return_value="Claude Code 2.1.277 (b)"), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            migrate.migrate_main(["plan", "wren"])
+            migrate.migrate_main(["check", "wren"])
+        text = out.getvalue()
+        self.assertIn("the runner's CLI: Claude Code 9.9.9", text)      # plan: the injected one
+        self.assertIn(migrate.NEVER_UNRUN, text)
+        self.assertIn("runner CLI: Claude Code 2.1.277 (b)", text)      # check
+
+    @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "needs the sdk extra")
+    def test_the_runner_cli_is_the_sdks_bundled_version(self):
+        from claude_agent_sdk._cli_version import __cli_version__
+        self.assertIn("Claude Code %s" % __cli_version__, migrate.runner_cli())
+
+
 class TestFreshPacket(HermeticCase):
     def test_the_rollback_packet_is_the_cousins_state_now(self):
         """Review I7: tmux must not boot on the migration day's packet."""
@@ -484,10 +860,10 @@ class TestCli(HermeticCase):
             self.assertEqual(rc, 2)
             self.assertIn("--yes", err)
             self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
-            rc, out, err = self._main("plan", "wren", "--account", "team")
+            rc, out, err = self._main("plan", "wren", "--account", "team", "--validate")
             self.assertEqual(rc, 0, err)
             self.assertIn("ready", out)
-            rc, out, err = self._main("apply", "wren", "--account", "team", "--yes")
+            rc, out, err = self._main("apply", "wren", "--account", "team", "--validate", "--yes")
             self.assertEqual(rc, 0, err)
             self.assertIn("migrated", out)
 

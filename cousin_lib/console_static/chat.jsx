@@ -1222,7 +1222,34 @@ function runnerEventLine(ev) {
     case "tool_call": return (p.tool || "") + " " + (p.command || "") + (p.is_error ? " error" : "") + " (" + p.ms + " ms)";
     case "result": return "rows " + JSON.stringify(p.inbox_ids || []) + (p.interrupted ? " interrupted" : "") + (p.is_error ? " is_error" : "");
     case "error": return String(p.error || "");
+    case "session": return String(p.session || "");
     default: return cut(JSON.stringify(p), 300);
+  }
+}
+
+// The pane's liveness/state follow the stream it already reads, with the
+// fleet row (the 15s `cousins-refresh` poll) as the fallback before any
+// stream evidence: a `session` frame (the runner started or restarted) or a
+// `state` event marks it alive and records the state; a `state` event to
+// the runner's one terminal state ("stopped", cousin_lib/runner/state.py)
+// marks it not alive. A `fleet` event is called whenever the cousins prop
+// actually refreshes, so whichever event this function sees LAST is by
+// construction the freshest evidence - a fleet update landing after the
+// last stream evidence wins, exactly because it is newer.
+function paneLiveness(prev, event, fleetRunner) {
+  const p = prev || { alive: null, state: null };
+  if (!event) return p;
+  switch (event.kind) {
+    case "session":
+      return { alive: true, state: p.state };
+    case "state": {
+      const to = event.payload && event.payload.to;
+      return { alive: to !== "stopped", state: to };
+    }
+    case "fleet":
+      return { alive: fleetRunner ? fleetRunner.alive !== false : p.alive, state: p.state };
+    default:
+      return p;
   }
 }
 
@@ -1231,11 +1258,24 @@ function RunnerPaneView({ cousin, onClose }) {
   const runner = (cousin && cousin.runner) || {};
   const [events, setEvents] = React.useState([]);
   const [status, setStatus] = React.useState("connecting");
-  const [state, setState] = React.useState(runner.state || null);
+  // Liveness/state follow the stream (paneLiveness), with the fleet row as
+  // the fallback before any stream evidence and the tiebreaker whenever it
+  // refreshes after the last stream evidence (review 3b: the fleet row's
+  // own 15s poll otherwise left the header and the interrupt button lagging
+  // a runner restart or stop by up to 15s).
+  const [live, setLive] = React.useState(() => paneLiveness(null, { kind: "fleet" }, runner));
   const [said, setSaid] = React.useState("");
   const [note, setNote] = React.useState(null);
   const listRef = React.useRef(null);
-  const alive = runner.alive !== false;
+  const runnerRef = React.useRef(runner);
+  runnerRef.current = runner;
+
+  // The fleet row only actually changes (a new `cousin` reference) when the
+  // cousins-refresh poll lands, not on every render, so this fires once per
+  // poll: a fresh, authoritative snapshot that outranks stale stream state.
+  React.useEffect(() => {
+    setLive(prev => paneLiveness(prev, { kind: "fleet" }, runnerRef.current));
+  }, [cousin]);
 
   React.useEffect(() => {
     if (!slug) return undefined;
@@ -1261,10 +1301,15 @@ function RunnerPaneView({ cousin, onClose }) {
     es.addEventListener("runner-event", (m) => {
       let ev;
       try { ev = JSON.parse(m.data); } catch (e) { return; }
-      if (ev.kind === "state" && ev.payload) setState(ev.payload.to);
+      if (ev.kind === "state" && ev.payload) setLive(prev => paneLiveness(prev, ev, runnerRef.current));
       push(ev);
     });
-    es.addEventListener("session", () => push({ kind: "session", payload: {} }));
+    es.addEventListener("session", (m) => {
+      let payload = {};
+      try { payload = JSON.parse(m.data) || {}; } catch (e) {}
+      setLive(prev => paneLiveness(prev, { kind: "session" }, runnerRef.current));
+      push({ kind: "session", payload });
+    });
     return () => { es.close(); if (frame !== null) window.cancelAnimationFrame(frame); };
   }, [slug]);
 
@@ -1306,12 +1351,12 @@ function RunnerPaneView({ cousin, onClose }) {
       }}>
         <span>runner {runner.kind || "?"} &middot; </span>
         <span style={{ color: status === "live" ? "var(--green)" : "var(--amber)" }}>{status}</span>
-        <span style={{ marginLeft: 10, color: "var(--fg-2)" }}>{!alive ? "not running (last: " + (state || "none") + ")" : (state || "no state yet")}</span>
+        <span style={{ marginLeft: 10, color: "var(--fg-2)" }}>{!live.alive ? "not running (last: " + (live.state || "none") + ")" : (live.state || "no state yet")}</span>
         {unsupported.length > 0 && <span style={{ marginLeft: 10 }}>unsupported: {unsupported.join(", ")}</span>}
         {note && <span style={{ marginLeft: 10 }}>{note}</span>}
         <span style={{ flex: 1 }} />
         <button className="btn ghost" onClick={interrupt} title="interrupt the running turn"
-                disabled={!alive || (state !== "running" && state !== "waiting_permission")}
+                disabled={!live.alive || (live.state !== "running" && live.state !== "waiting_permission")}
                 style={{ padding: "0 6px", minHeight: 20, marginRight: 6 }}>interrupt</button>
         {onClose && <button className="btn ghost" onClick={onClose} title="collapse the pane" style={{ padding: "0 6px", minHeight: 20 }}>x</button>}
       </div>
@@ -1739,4 +1784,4 @@ function fmtShortTime(ts) {
   } catch (e) { return ""; }
 }
 
-Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, renderMarkdown, resolveChatUser, groupReactions });
+Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, paneLiveness, renderMarkdown, resolveChatUser, groupReactions });

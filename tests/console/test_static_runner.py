@@ -42,11 +42,18 @@ class TestRunnerPane(unittest.TestCase):
 
     def test_a_dead_runner_is_not_running_and_cannot_be_interrupted(self):
         """Review M2: after the runner is gone its last recorded state stays
-        in the stream; the pane says it is not running."""
+        in the stream; the pane says it is not running. Review 3b: the
+        fleet row is only the fallback/tiebreaker (paneLiveness), read
+        through `runner.alive`, not the pane's only source of truth."""
         pane = self.chat[self.chat.index("function RunnerPaneView("):]
         pane = pane[:pane.index("\n}\n")]
-        self.assertIn("runner.alive", pane)
+        self.assertIn("paneLiveness(", pane)
+        self.assertIn("live.alive", pane)
         self.assertIn("not running", pane)
+        fn = self.chat[self.chat.index("function paneLiveness("):
+                       self.chat.index("function RunnerPaneView(")]
+        self.assertIn("fleetRunner", fn)
+        self.assertIn(".alive", fn)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_every_kind_reads_as_a_line(self):
@@ -61,13 +68,54 @@ process.stdout.write(JSON.stringify([
   ev("tool", {name: "Bash", input: {command: "ls"}}),
   ev("result", {inbox_ids: [3], interrupted: true}),
   ev("rate_limit", {status: "rejected"}),
+  ev("session", {session: "fake-1c035576"}),
 ]));
 """
         out = subprocess.run(["node", "-e", probe], capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(json.loads(out.stdout), [
             "idle -> running (turn)", "hmm.. [truncated]", "(5 chars, not recorded)",
-            'Bash {"command":"ls"}', "rows [3] interrupted", '{"status":"rejected"}'])
+            'Bash {"command":"ls"}', "rows [3] interrupted", '{"status":"rejected"}',
+            "fake-1c035576"])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_pane_liveness_follows_the_stream_not_the_15s_fleet_poll(self):
+        """Review 3b: the header and the interrupt button used to read
+        straight off the fleet row (`cousin.runner.alive`), which only
+        refreshes on the 15s `cousins-refresh` poll, so a restart or a stop
+        lagged by up to 15s while the stream already had the truth. The
+        fleet row is now only the fallback before any stream evidence, and
+        the tiebreaker whenever it refreshes after the last stream event."""
+        src = self.chat[self.chat.index("function runnerEventLine("):
+                        self.chat.index("function RunnerPaneView(")]
+        self.assertIn("function paneLiveness(", src)
+        probe = src + """
+const alive = (fr) => ({ alive: fr.alive !== false, state: null });
+let s = paneLiveness(null, {kind: "fleet"}, {alive: false});   // fallback before any stream evidence
+const results = {};
+results.fallback = s;
+s = paneLiveness(s, {kind: "session"}, {alive: false});        // a restart's session frame: alive
+results.session = s;
+s = paneLiveness(s, {kind: "state", payload: {from: "idle", to: "running"}}, {alive: false});
+results.running = s;                                            // a state event: alive + the state
+s = paneLiveness(s, {kind: "state", payload: {from: "running", to: "stopped"}}, {alive: true});
+results.stopped = s;                                             // the terminal state: not alive
+s = paneLiveness(s, {kind: "fleet"}, {alive: true});               // a newer fleet row wins
+results.fleet_after_stopped = s;
+process.stdout.write(JSON.stringify(results));
+"""
+        out = subprocess.run(["node", "-e", probe], capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        results = json.loads(out.stdout)
+        self.assertEqual(results["fallback"], {"alive": False, "state": None})
+        self.assertEqual(results["session"], {"alive": True, "state": None})
+        self.assertEqual(results["running"], {"alive": True, "state": "running"})
+        self.assertEqual(results["stopped"], {"alive": False, "state": "stopped"})
+        # A fresh fleet row landing after the stopped-state evidence is
+        # fresher; here it says the runner is alive again (e.g. a restart
+        # the stream connection missed), and it wins over the stale
+        # stopped-state evidence even though it contradicts it.
+        self.assertEqual(results["fleet_after_stopped"], {"alive": True, "state": "stopped"})
 
 
 class TestFleetAndTokens(unittest.TestCase):

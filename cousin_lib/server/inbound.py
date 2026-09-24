@@ -13,11 +13,22 @@ Before any of that, `divert_login_code` runs FIRST on every send path: a
 message that is a login code (R18) is never stored as written and never
 delivered.
 """
+import re
 import sys
 from pathlib import Path
 
 from cousin_lib import corrections
 from cousin_lib.server.storage import is_operator
+
+# C0 controls except tab and newline, DEL, and C1: typed into a terminal
+# they are keystrokes (Ctrl-C interrupts, Ctrl-D ends, ESC clears), never
+# text a message may carry (phase 10a review I5).
+_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def strip_controls(text):
+    """`text` without control characters (tab and newline kept)."""
+    return _CONTROLS.sub("", str(text))
 
 
 def after_inbound_stored(config, user, message):

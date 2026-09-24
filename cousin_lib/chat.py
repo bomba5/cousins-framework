@@ -233,6 +233,12 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
             from cousin_lib.server.netguard import NetGuard
             guard = NetGuard.from_config(fw.root)
         return _post_external(target, payload, guard)
+    return deliver_to(target, payload)
+
+
+def deliver_to(target, payload):
+    """One /api/send body to a local cousin: in-process for a runner
+    cousin (deliver_local), through its chat server for a tmux one."""
     if is_local_runner(target):
         return deliver_local(target, payload)
     url = "http://%s:%d/api/send" % (

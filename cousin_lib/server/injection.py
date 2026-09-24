@@ -51,7 +51,11 @@ def compose_delivery(name, message, *, marker_path, attachments=(),
     except OSError:
         pass
     prefix += "]"
-    text = " ".join(message.split())
+    # control characters would be typed as keystrokes (review I5); the
+    # name gets the same, and no newline, so it cannot open a second line
+    from cousin_lib.server.inbound import strip_controls
+    name = " ".join(strip_controls(name).split())
+    text = " ".join(strip_controls(message).split())
     text = " ".join(filter(None, [text, *attachments]))
     if suffix_provider is not None:
         try:

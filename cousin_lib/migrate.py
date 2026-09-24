@@ -1453,16 +1453,38 @@ def _trust_detail(home, root, account):
             " operator to accept it in %s" % (TRUST_WAIT_S, pane_hint(home, root)))
 
 
+NOTICE_RANK = 0          # ahead of every queued row (base.SOURCE_PRIORITY's lowest)
+
+
 def _switch_notice(home, old, new):
-    """R10's notice: one runner line at the first idle after the switch, as
-    the framework's start-up line (a system `boot` row), which is also the
-    turn verify reads."""
+    """R10's notice: one runner line, as the framework's start-up line (a
+    system `boot` row), which is also the turn verify reads. Put before the
+    target starts and ranked ahead of every queued row, so it is the first
+    turn after the switch: a row queued before the switch is answered by a
+    model that already knows its kind (live proofs 09-25, finding 4). The
+    row's id."""
     from cousin_lib.delivery import Item
     from cousin_lib.runner.inbox import Inbox
-    Inbox(home).put(Item(thread_id="system", source="boot", sender="runner", body=(
+    return Inbox(home).put(Item(thread_id="system", source="boot", sender="runner", body=(
         "[runner] this cousin moved from the %s kind to the %s kind; the session goes on."
         " Instructions written for the %s kind are superseded by this kind's contract."
-        % (old, new, old))))
+        % (old, new, old))), rank=NOTICE_RANK)
+
+
+def _drop_notice(home, rec):
+    """A rollback's: the switch's notice, if nobody took it, would tell the
+    restored kind it is the other one. Closed while still queued only."""
+    from cousin_lib.delivery import FAILED
+    from cousin_lib.runner.inbox import Inbox
+    notice_id = rec.get("notice_id")
+    if notice_id is None:
+        return False
+    inbox = Inbox(home)
+    row = inbox.get(notice_id)
+    if row is None or row["state"] != "queued":
+        return False
+    return inbox.done_if_queued(notice_id, FAILED, "the kind switch was rolled back",
+                                body=row["body"])
 
 
 def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor_up,
@@ -1509,11 +1531,12 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
     # mines from here, never from an offset in the other kind's record
     extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
     step("cursor", "the mining cursor at the end of the %s kind's record" % to)
+    # the notice before the start, ahead of the queue: the target's first turn
+    rec["notice_id"] = _switch_notice(home, p["from"], to)
+    step("notice", "inbox row %d, the first turn after the switch" % rec["notice_id"])
     since = clock()
     start(home, root)
     step("start", "the %s runner resumes %s" % (to, sid))
-    _switch_notice(home, p["from"], to)
-    step("notice")
     ok, detail = verify(home, root, sid, to, since)
     if not ok:
         rec.update(state="failed", failed="verify", error=detail)
@@ -1552,6 +1575,8 @@ def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
 
     close(home, root)
     step("close", "the %s runner stopped" % rec.get("to"))
+    if _drop_notice(home, rec):
+        step("notice", "the switch's notice, never taken, dropped")
     _write_toml(home, base64.b64decode(rec["prior_toml_b64"]), int(rec["prior_mode"]))
     if to == "tmux":
         settings_out = harness_settings.apply_project_settings(home, root=root, kind="tmux")

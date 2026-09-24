@@ -76,7 +76,11 @@ the cousin's card and its chat header. Nothing is skipped silently.
 
 A cousin moves between `sdk` and `tmux` with `cousin-migrate --to <kind>`,
 keeping its session (`data/runner-session.json`, resumed with `claude
---resume`).
+--resume`). The source stops held, claiming nothing new once the stop is
+asked for. The switch's notice (a `system` `boot` row telling the model its
+new kind) is queued before the target starts and ranked ahead of every row,
+so it is the first turn after the switch, before any row queued earlier; a
+rollback drops it if nobody took it.
 
 No step is needed before `--to tmux`. Whether the account's CLI has trusted
 the cousin's home is not known in advance: `~/.claude.json` (or the account's

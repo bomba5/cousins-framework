@@ -161,7 +161,7 @@ class TestApply(SwitchCase):
         self.assertEqual(rec["state"], "switched")
         self.assertEqual(rec["warnings"], [])
         self.assertEqual([s["step"] for s in rec["steps"]],
-                         ["trust", "close", "toml", "cursor", "start", "notice", "verify"])
+                         ["trust", "close", "toml", "cursor", "notice", "start", "verify"])
         self.assertEqual(self.agent()["runner"], "tmux")
         self.assertEqual(json.loads(settings_path(self.home).read_text())["editorMode"], "normal")
         # the cursor before the start (review minor): the target's first
@@ -194,7 +194,7 @@ class TestApply(SwitchCase):
         migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
         rec = migrate.switch_apply(self.home, root=self.root, to="sdk", **self.live())
         self.assertEqual([s["step"] for s in rec["steps"]],
-                         ["close", "toml", "cursor", "start", "notice", "verify"])
+                         ["close", "toml", "cursor", "notice", "start", "verify"])
         self.assertEqual(self.agent()["runner"], "sdk")
         self.assertNotIn("editorMode", json.loads(settings_path(self.home).read_text()))
 
@@ -369,6 +369,72 @@ class TestRollback(SwitchCase):
         with self.assertRaises(migrate.MigrateError) as err:
             migrate.switch_rollback(self.home, root=self.root, to="tmux", **self.live())
         self.assertIn("came from sdk", str(err.exception))
+
+
+class TestTheNoticeGoesFirst(SwitchCase):
+    """Live proofs 09-25, finding 4: the kind-switch notice reached the model
+    after rows queued before the switch, so one question was answered by a
+    model that still believed the old kind. The notice is put before the
+    target starts and ahead of every queued row: the first turn after the
+    switch is the notice."""
+
+    def queue_before_the_switch(self):
+        from cousin_lib.delivery import Item
+        inbox = Inbox(self.home)
+        return [inbox.put(Item("operator:wren", "chat", "asked before the switch %d" % i,
+                               sender="Wren")) for i in range(2)]
+
+    def test_the_notice_is_queued_before_the_start_and_claimed_first(self):
+        self.queue_before_the_switch()
+        seen = {}
+
+        def start(home, root):
+            rows = Inbox(home).claim(limit=1, claimant="the-target")
+            seen["first"] = rows[0] if rows else None
+            Inbox(home).requeue(rows[0]["id"])
+        migrate.switch_apply(self.home, root=self.root, to="tmux",
+                             **dict(self.live(), start=start))
+        self.assertIsNotNone(seen["first"], "no notice queued at the start")
+        self.assertIn("sdk kind to the tmux kind", seen["first"]["body"])
+        rec = migrate.read_switch_record(self.home)
+        self.assertEqual(rec["notice_id"], seen["first"]["id"])
+
+    def test_on_the_tmux_kind_the_notice_is_the_first_row_typed(self):
+        import time
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        from tests.runner._fake_pane import FakePane
+        self.queue_before_the_switch()
+        panes, runners = [], []
+
+        def factory(path):
+            panes.append(FakePane(path, context_home=self.home))
+            return panes[-1]
+
+        def start(home, root):
+            r = TmuxRunner(home, account=None, pane_factory=factory, config_dir=self.config_dir,
+                           launch_argv=lambda sid, fresh: ["claude", sid] + (["--fresh"] if fresh else []))
+            runners.append(r)
+            self.addCleanup(lambda: r.stop(timeout=5))
+            r.start()
+        migrate.switch_apply(self.home, root=self.root, to="tmux", **dict(self.live(), start=start))
+        t = time.monotonic()
+        while time.monotonic() - t < 10 and len(panes[0].typed if panes else ()) < 3:
+            time.sleep(0.02)
+        bodies = [b for _first, b in panes[0].typed]
+        self.assertEqual(len(bodies), 3, bodies)
+        self.assertIn("sdk kind to the tmux kind", bodies[0])
+        self.assertIn("asked before the switch 0", bodies[1])
+
+    def test_a_rollback_drops_a_notice_nobody_took(self):
+        self.verified = (False, "no turn start under s-live within 90s")
+        with self.assertRaises(migrate.MigrateError):
+            migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        notice_id = migrate.read_switch_record(self.home)["notice_id"]
+        self.assertEqual(Inbox(self.home).get(notice_id)["state"], "queued")
+        migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        row = Inbox(self.home).get(notice_id)
+        self.assertEqual(row["state"], "done")
+        self.assertIn("rolled back", row["detail"])
 
 
 class TestSwitchMidTurn(SwitchCase):

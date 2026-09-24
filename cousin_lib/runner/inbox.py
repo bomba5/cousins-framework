@@ -83,7 +83,10 @@ class Inbox:
         finally:
             conn.close()
 
-    def put(self, item):
+    def put(self, item, *, rank=None):
+        """Queue `item`; its priority is base.priority's for its source and
+        thread unless `rank` is given (a lower rank is claimed first: the
+        kind switch's notice goes ahead of every row queued before it)."""
         if not isinstance(item, Item):
             raise TypeError("put() takes a delivery.Item")
         with self._db() as conn:
@@ -93,7 +96,8 @@ class Inbox:
                 " created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (item.thread_id, item.source, item.sender, item.body,
                  json.dumps(list(item.attachments)), item.context,
-                 item.message_id, priority(item.source, item.thread_id),
+                 item.message_id,
+                 priority(item.source, item.thread_id) if rank is None else int(rank),
                  QUEUED, time.time()))
             return cur.lastrowid
 

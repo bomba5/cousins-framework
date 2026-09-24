@@ -298,6 +298,17 @@ class WriteFile(unittest.TestCase):
         self.assertEqual(parsed, {"ask": ["Agent"]})
         self.assertTrue(path.read_text().startswith("# new\n"))
 
+    def test_fresh_starts_from_initial_over_a_file_that_does_not_parse(self):
+        path = self.dir / "policy.toml"
+        path.write_text("broken = = 1\n")
+        os.chmod(path, 0o600)
+        with self.assertRaises(ValueError):
+            toml_edit.write_file(path, [("", "ask", [])])
+        parsed = toml_edit.write_file(path, [("", "ask", [])], initial="# new\n", fresh=True)
+        self.assertEqual(parsed, {"ask": []})
+        self.assertNotIn("broken", path.read_text())
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

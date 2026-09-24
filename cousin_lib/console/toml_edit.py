@@ -261,17 +261,26 @@ def write_keys(home, changes, *, validate=None):
     return write_file(Path(home) / "cousin.toml", changes, validate=validate)
 
 
-def write_file(path, changes, *, validate=None, validate_text=None, initial=None):
+def write_file(path, changes, *, validate=None, validate_text=None, initial=None,
+               fresh=False):
     """write_keys for any TOML file at `path`. `validate_text(text)` sees
     the new text before `validate(parsed)` (a parser that takes text, such
     as the MCP registry's). An absent file is FileNotFoundError, unless
-    `initial` gives the text to start from (created 0644)."""
+    `initial` gives the text to start from (created 0644). `fresh` starts
+    from `initial` whatever the file holds (one that does not parse,
+    replaced on the operator's word), its mode kept."""
     path = Path(path)
-    if path.exists() or initial is None:
+    if fresh and initial is None:
+        raise ValueError("fresh needs the initial text")
+    if path.exists() and not fresh:
         text = path.read_text()
         mode = path.stat().st_mode & 0o7777
-    else:
+    elif path.exists():
+        text, mode = initial, path.stat().st_mode & 0o7777
+    elif initial is not None:
         text, mode = initial, 0o644
+    else:
+        raise FileNotFoundError(str(path))
     items = _changes(changes)
     for table, key, value in items:
         text = set_key(text, table, key, value)

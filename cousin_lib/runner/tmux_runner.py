@@ -71,7 +71,7 @@ class TmuxRunner:
 
     def __init__(self, home, *, account=None, model=None, effort=None, policy=None,
                  pane_factory=None, config_dir=None, launch_argv=None, socket=None,
-                 handoff_deadline_s=None):
+                 handoff_deadline_s=None, env_allow=()):
         from cousin_lib.runner import rollover as _rollover
         self.home = Path(home)
         self.account = account
@@ -80,6 +80,7 @@ class TmuxRunner:
         self.config_dir = config_dir if config_dir is not None else getattr(account, "config_dir", None)
         self._pane_factory = pane_factory
         self._launch_argv = launch_argv
+        self.env_allow = tuple(env_allow)     # [agent] env_allow, checked by tmux_launch.env_allow_of
         self._socket = socket
         self.runner_id = "tmux-" + uuid.uuid4().hex[:8]
         self.inbox = Inbox(self.home)
@@ -231,7 +232,7 @@ class TmuxRunner:
             from cousin_lib.runner import tmux_launch
         except ImportError:          # names only: the pane's login shell supplies the values
             return ("HOME", "PATH", "USER", "LOGNAME", "LANG")
-        return tmux_launch.env_base(dict(os.environ))
+        return tmux_launch.env_base(dict(os.environ), env_allow=self.env_allow)
 
     def _open_session(self):
         """Adopt, else resume, else fresh (P11-2). Returns how."""

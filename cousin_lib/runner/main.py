@@ -206,9 +206,14 @@ def runner_for(home, *, kind=None):
                               " login-free config dir is shown to start with no menu"
                               " (phase 11 P11-6; A4: onboarding is skippable by seeding,"
                               " but a token's login screen is not measured)" % account.kind)
+        from cousin_lib.runner.tmux_launch import env_allow_of
         from cousin_lib.runner.tmux_runner import TmuxRunner
+        try:
+            env_allow = env_allow_of(agent)
+        except ValueError as exc:
+            raise RunnerError(str(exc))
         return TmuxRunner(home, account=account, model=agent.get("model"),
-                          effort=effort_of(agent), policy=policy)
+                          effort=effort_of(agent), policy=policy, env_allow=env_allow)
     if kind == "opencode":
         if side:
             raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"

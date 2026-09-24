@@ -39,6 +39,22 @@ class TestTheKind(HermeticCase):
         self.assertTrue(r.recovers_claims)
         self.assertFalse(r.worker_alive())                     # built, not started
 
+    def test_agent_env_allow_reaches_the_pane_allowlist_and_a_credential_is_refused(self):
+        home = temp_home(self, runner="tmux")
+        with open(home / "cousin.toml", "a") as f:
+            f.write('env_allow = ["PGHOST"]\n')
+        r = runner_main.runner_for(home)
+        self.assertEqual(r.env_allow, ("PGHOST",))
+        os.environ["PGHOST"] = "db.local"
+        self.addCleanup(os.environ.pop, "PGHOST", None)
+        self.assertIn("PGHOST", r._env_base())
+        bad = temp_home(self, runner="tmux")
+        with open(bad / "cousin.toml", "a") as f:
+            f.write('env_allow = ["GH_TOKEN"]\n')
+        with self.assertRaises(RunnerError) as err:
+            runner_main.runner_for(bad)
+        self.assertIn("env_allow", str(err.exception))
+
     def test_the_tmux_kind_refuses_side_sessions(self):
         home = temp_home(self, runner="tmux")
         with open(home / "cousin.toml", "a") as f:

@@ -3,6 +3,50 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.23.0 - 2026-09-25
+
+### Added
+- The console maps the rest of the framework (the operator's rule: every
+  function has a UI path):
+  - **Accounts**: every account with its kind, where it lives, its lanes
+    and its cousins, never a secret. Check (no model call), validate (one
+    turn, asked first), add, edit and remove entries through a validated
+    writer, and log in per kind: a Claude login or token (the sign-in URL
+    as a link, the code into a write-only box bound to the console session
+    that started the login), an Anthropic key, opencode keys and OAuth per
+    provider (Anthropic and Claude refused on opencode). Credential actions
+    need a logged-in console user and are recorded in
+    `data/accounts/audit.jsonl` (who and which account, never a value).
+  - **MCP and policy**, per cousin and install-wide: the tool registry
+    (toggles and limits), the home's `.mcp.json` servers (stdio, http, sse;
+    a secret-looking value must be a `${VAR}` reference), selftest,
+    last connection and approve (only on the lanes whose harness reads
+    `.mcp.json`, with a typed confirm), and `policy.toml` (a removed deny
+    asks first; `mcp__cousin__handoff` can never be denied; patterns are
+    checked the way both runners compile them).
+  - **Memory actions**: tensions and "retire this claim", search, remember,
+    decide and history (the cite is the console user and the time; only the
+    operator writes or retires an operator-level claim), the review queue,
+    distill, compact and reindex as background operations, and the
+    self-portrait (a person commits it, typing the slug back).
+  - **System**: the supervisor's children (start, stop, reload), every
+    cousin's one-shot schedules, console users (add, reset, remove; never
+    the last one or yourself), backup now into a checked destination
+    (owner-only files), `harness.toml [agent]` defaults with where each
+    value comes from, and editors for media, embedding, hive,
+    external-peers, outbound-filter, law and allowlist, each checked by its
+    own loader before it is written.
+- `toml_edit.write_file_keys` edits any TOML file byte for byte: root keys,
+  table removal, a validate hook on the text and the parsed document.
+- `backup.snapshot` takes an explicit target directory.
+
+### Changed
+- `mcp_server.approve_registration` keeps the settings file's mode, leaves
+  no temp file behind, and writes through a symlinked settings path.
+- `review_gate.settle` reads the held entries once under one lock.
+- The self-portrait candidate is written through a fresh temp file and a
+  rename, never through a link.
+
 ## 1.22.0 - 2026-09-24
 
 ### Added

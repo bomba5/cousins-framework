@@ -35,6 +35,24 @@ _COMPOSE_KEY = _REPO / "compose.api-key.yml"
 _UNIT = _REPO / "systemd" / "cousin-supervisor.service"
 _SIZE = _REPO / "docker" / "image-size.sh"
 _WORKFLOW = _REPO / ".github" / "workflows" / "image.yml"
+_COMPOSE_OPENCODE = _REPO / "compose.opencode.yml"
+# The opencode variant (phase 9 R17): the npm registry's platform package
+# of the pinned release, checked twice (the tarball the build downloads,
+# then the binary it copies). The binary's sha256 is the live install's
+# pinned copy's; the tarball's was computed once from the registry's file,
+# whose sha512 matched the registry's dist.integrity.
+_OPENCODE_VERSION = "1.18.31"
+_OPENCODE_TGZ = ("https://registry.npmjs.org/opencode-linux-x64/-/"
+                 "opencode-linux-x64-%s.tgz" % _OPENCODE_VERSION)
+_OPENCODE_TGZ_SHA256 = "6d89da252a8b030d923e728396dc34465cf6095101b78222b0ee337b68140dea"
+_OPENCODE_BIN_SHA256 = "f9dab32248695e9ebd56b16a1921798fd85112cf5a69c7dfd0cabc1e17be4a11"
+_OPENCODE_BIN = "/opt/opencode/bin/opencode"
+# The default image's budget plus the pinned tarball (60.2 MB): measured
+# 222.8 MB against the default's 162.2 MB.
+_OPENCODE_BUDGET = 240000000
+# Executables of a JS runtime or its package manager, as words: the
+# registry's host name (registry.npmjs.org) is not one.
+_JS_TOOLS = re.compile(r"\b(node|nodejs|npm|npx|bun|bunx|yarn|pnpm)\b")
 # R5': a runner gets runner.main.STOP_TIMEOUT_S + 5 = 35 s after SIGTERM;
 # then the loops daemon and the console get 10 s each, one after the
 # other; each step adds the supervisor's KILL_GRACE_S after a SIGKILL.
@@ -246,6 +264,18 @@ class TestEntrypointFile(unittest.TestCase):
             self.assertFalse(bashism in text, "bashism %r" % bashism)
 
 
+def _stages(ins):
+    """[(base, name, [(INSTRUCTION, argument), ...])] per FROM, in order."""
+    out = []
+    for word, arg in ins:
+        if word == "FROM":
+            base, _, name = arg.partition(" AS ")
+            out.append((base.strip(), name.strip() or None, []))
+        elif out:
+            out[-1][2].append((word, arg))
+    return out
+
+
 def _instructions(text):
     """(INSTRUCTION, argument) per Dockerfile line, continuations joined."""
     joined = re.sub(r"\\\n", " ", text)
@@ -270,11 +300,19 @@ class TestDockerfile(unittest.TestCase):
         self.assertNotIn("/home/", self.text)
         self.text.encode("ascii")
 
+    def _stage(self, name):
+        found = [s for s in _stages(self.ins) if s[1] == name]
+        self.assertEqual(len(found), 1, name)
+        return found[0]
+
     def test_two_stages_on_the_slim_base(self):
-        froms = self._args("FROM")
-        self.assertEqual(len(froms), 2, froms)
-        self.assertTrue(all(f.startswith("python:3.13-slim") for f in froms), froms)
-        self.assertTrue(froms[0].endswith(" AS builder"), froms[0])
+        # The default image is builder then final; the stages after final
+        # are the opencode variant's and the default alias (below).
+        stages = _stages(self.ins)
+        self.assertEqual([(b, n) for b, n, _ in stages[:2]],
+                         [("python:3.13-slim", "builder"), ("python:3.13-slim", "final")])
+        self.assertTrue(all(b.startswith("python:3.13-slim") or b == "final"
+                            for b, _, _ in stages), stages)
 
     def test_the_source_is_installed_in_place_with_the_sdk_extra(self):
         run = " ".join(self._args("RUN"))
@@ -286,10 +324,9 @@ class TestDockerfile(unittest.TestCase):
     def test_pip_is_removed_from_the_image(self):
         # The venv's pip in the builder, the base image's own in the final
         # stage, as root: before the one USER line.
-        final_from = max(i for i, (w, _) in enumerate(self.ins) if w == "FROM")
-        builder = " ".join(a for w, a in self.ins[:final_from] if w == "RUN")
+        builder = " ".join(a for w, a in self._stage("builder")[2] if w == "RUN")
         self.assertIn("/opt/venv/bin/pip uninstall -y pip", builder)
-        final = self.ins[final_from:]
+        final = self._stage("final")[2]
         user_at = [i for i, (w, _) in enumerate(final) if w == "USER"][0]
         before_user = " ".join(a for w, a in final[:user_at] if w == "RUN")
         self.assertIn("python3 -m pip uninstall -y pip", before_user)
@@ -316,6 +353,84 @@ class TestDockerfile(unittest.TestCase):
         self.assertEqual([json.loads(a) for a in self._args("ENTRYPOINT")],
                          [["/opt/framework/docker/entrypoint.sh"]])
         self.assertEqual([json.loads(a) for a in self._args("CMD")], [_CMD])
+
+
+class TestDockerfileOpencode(unittest.TestCase):
+    """R17: `--target opencode` is the default image plus the pinned
+    binary; `docker build .` (no target) is still the default image."""
+
+    def setUp(self):
+        self.ins = _instructions(_DOCKERFILE.read_text())
+        self.stages = _stages(self.ins)
+        self.by_name = {n: (b, body) for b, n, body in self.stages}
+
+    def test_the_stages_in_order(self):
+        self.assertEqual([(b, n) for b, n, _ in self.stages],
+                         [("python:3.13-slim", "builder"), ("python:3.13-slim", "final"),
+                          ("python:3.13-slim", "opencode-fetch"), ("final", "opencode"),
+                          ("final", "default")])
+
+    def test_a_build_without_a_target_is_the_default_image(self):
+        # The last stage is what `docker build .` builds: final, unchanged.
+        base, name, body = self.stages[-1]
+        self.assertEqual((base, name, body), ("final", "default", []))
+
+    def test_the_default_image_names_no_opencode_and_no_js_runtime(self):
+        for stage in ("builder", "final"):
+            text = " ".join("%s %s" % pair for pair in self.by_name[stage][1])
+            with self.subTest(stage=stage):
+                self.assertNotIn("opencode", text.lower())
+                self.assertIsNone(_JS_TOOLS.search(text), text)
+
+    def test_the_opencode_stage_adds_the_binary_and_nothing_else(self):
+        base, body = self.by_name["opencode"]
+        self.assertEqual(base, "final")
+        self.assertEqual([w for w, _ in body], ["COPY", "ENV"])
+        self.assertEqual(body[0][1], "--from=opencode-fetch /opt/opencode /opt/opencode")
+        env = body[1][1].split()
+        self.assertEqual(env, ["COUSIN_OPENCODE_BIN=%s" % _OPENCODE_BIN,
+                               "PATH=/opt/opencode/bin:$PATH"])
+
+    def test_the_download_is_the_pinned_platform_package_checked_twice(self):
+        base, body = self.by_name["opencode-fetch"]
+        self.assertEqual(body[0], ("ARG", "TARGETARCH"))
+        self.assertEqual([w for w, _ in body], ["ARG", "RUN"])
+        run = body[1][1]
+        pkg, version = "opencode-linux-x64", _OPENCODE_VERSION
+        self.assertEqual(_OPENCODE_TGZ, "https://registry.npmjs.org/%s/-/%s-%s.tgz"
+                         % (pkg, pkg, version))
+        self.assertIn("pkg=%s" % pkg, run)
+        self.assertIn("version=%s" % version, run)
+        self.assertIn('url="https://registry.npmjs.org/$pkg/-/$pkg-$version.tgz"', run)
+        self.assertIn("tgz_sha256=%s" % _OPENCODE_TGZ_SHA256, run)
+        self.assertIn("bin_sha256=%s" % _OPENCODE_BIN_SHA256, run)
+        # Both checks are sha256sum -c, and each comes before its file is used.
+        checks = [m.start() for m in re.finditer(r"sha256sum -c", run)]
+        self.assertEqual(len(checks), 2, run)
+        self.assertLess(run.index("urllib.request"), checks[0])
+        self.assertLess(checks[0], run.index("tar -xzf"))
+        self.assertLess(run.index("tar -xzf"), checks[1])
+        self.assertLess(checks[1], run.index("install -D -m 0755"))
+        self.assertIn("/opt/opencode/bin/opencode", run)
+        # Only amd64 is pinned: any other architecture stops the build.
+        self.assertIn("amd64)", run)
+        self.assertIn("*)", run)
+        self.assertIsNone(_JS_TOOLS.search(run), run)
+        self.assertNotIn("curl", run)
+
+    def test_every_sha_is_a_full_sha256(self):
+        run = [a for w, a in self.by_name["opencode-fetch"][1] if w == "RUN"][0]
+        shas = re.findall(r"_sha256=(\S+?);", run)
+        self.assertEqual(shas, [_OPENCODE_TGZ_SHA256, _OPENCODE_BIN_SHA256])
+        for sha in shas:
+            self.assertRegex(sha, r"^[0-9a-f]{64}$")
+
+    def test_no_stage_installs_a_js_runtime(self):
+        for base, name, body in self.stages:
+            for word, arg in body:
+                if word == "RUN":
+                    with self.subTest(stage=name):
+                        self.assertIsNone(_JS_TOOLS.search(arg), arg)
 
 
 def _dockerignored(path, patterns):
@@ -529,6 +644,100 @@ class TestImage(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+# Probes both images: which names resolve on PATH, what COUSIN_OPENCODE_BIN
+# says, whether /opt/opencode exists.
+_PROBE = ("import os, shutil\n"
+          "print([shutil.which(n) for n in %r])\n"
+          "print(shutil.which('opencode'), os.environ.get('COUSIN_OPENCODE_BIN'),"
+          " os.path.exists('/opt/opencode'))\n"
+          % (("node", "nodejs", "npm", "npx", "bun", "bunx", "yarn", "pnpm"),))
+
+
+@unittest.skipUnless(_docker_enabled(), "opt-in: COUSIN_DOCKER=1 and docker on PATH")
+class TestOpencodeImage(unittest.TestCase):
+    """R17 against built images: the default target and `--target opencode`.
+    COUSIN_DOCKER_IMAGE and COUSIN_DOCKER_OPENCODE_IMAGE name images
+    already built from this checkout; otherwise both are built here."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.built = []
+        cls.default = os.environ.get("COUSIN_DOCKER_IMAGE")
+        cls.opencode = os.environ.get("COUSIN_DOCKER_OPENCODE_IMAGE")
+        tag = uuid.uuid4().hex[:8]
+        if not cls.default:
+            cls.default = "cousins-framework:test-%s" % tag
+            _docker("build", "-t", cls.default, str(_REPO), timeout=1800)
+            cls.built.append(cls.default)
+        if not cls.opencode:
+            cls.opencode = "cousins-framework:test-%s-opencode" % tag
+            _docker("build", "--target", "opencode", "-t", cls.opencode, str(_REPO),
+                    timeout=1800)
+            cls.built.append(cls.opencode)
+
+    @classmethod
+    def tearDownClass(cls):
+        for image in cls.built:
+            _docker("image", "rm", "-f", image, check=False)
+
+    def probe(self, image):
+        out = _docker("run", "--rm", "--network", "none", image, "python", "-c", _PROBE,
+                      timeout=300).stdout.splitlines()
+        return ast.literal_eval(out[0]), out[1].split()
+
+    def test_the_default_image_has_no_opencode(self):
+        js, (which, env, opt) = self.probe(self.default)
+        self.assertEqual(js, [None] * 8)
+        self.assertEqual((which, env, opt), ("None", "None", "False"))
+
+    def test_the_opencode_image_runs_the_pinned_binary_offline(self):
+        js, (which, env, opt) = self.probe(self.opencode)
+        self.assertEqual(js, [None] * 8, "no node, npm or bun in the opencode image")
+        self.assertEqual((which, env, opt), (_OPENCODE_BIN, _OPENCODE_BIN, "True"))
+        for argv in (["opencode", "--version"], [_OPENCODE_BIN, "--version"]):
+            with self.subTest(argv=argv):
+                out = _docker(*(["run", "--rm", "--network", "none", self.opencode] + argv),
+                              timeout=300).stdout
+                self.assertEqual(out.strip(), _OPENCODE_VERSION)
+
+    def test_the_binary_is_the_pinned_file_owned_by_root(self):
+        script = ("import hashlib, os\n"
+                  "p = %r\n"
+                  "st = os.stat(p)\n"
+                  "print(hashlib.sha256(open(p, 'rb').read()).hexdigest(), st.st_uid,"
+                  " oct(st.st_mode & 0o7777), os.access(p, os.W_OK))\n" % _OPENCODE_BIN)
+        out = _docker("run", "--rm", "--network", "none", self.opencode, "python", "-c",
+                      script, timeout=300).stdout.split()
+        self.assertEqual(out, [_OPENCODE_BIN_SHA256, "0", "0o755", "False"])
+
+    def test_the_opencode_image_is_the_default_image_plus_one_layer(self):
+        def inspect(image, field):
+            return json.loads(_docker("image", "inspect", "-f", "{{json %s}}" % field,
+                                      image).stdout)
+        base = inspect(self.default, ".RootFS.Layers")
+        variant = inspect(self.opencode, ".RootFS.Layers")
+        self.assertEqual(variant[:len(base)], base)
+        self.assertEqual(len(variant), len(base) + 1)
+        a, b = inspect(self.default, ".Config"), inspect(self.opencode, ".Config")
+        for key in ("Entrypoint", "Cmd", "User", "Healthcheck", "WorkingDir", "Volumes",
+                    "ExposedPorts"):
+            self.assertEqual(a[key], b[key], key)
+        self.assertEqual(sorted(set(b["Env"]) - set(a["Env"])),
+                         ["COUSIN_OPENCODE_BIN=%s" % _OPENCODE_BIN,
+                          [e for e in b["Env"] if e.startswith("PATH=")][0]])
+        path = [e for e in b["Env"] if e.startswith("PATH=")][0]
+        old = [e for e in a["Env"] if e.startswith("PATH=")][0]
+        self.assertEqual(path, "PATH=/opt/opencode/bin:" + old[len("PATH="):])
+
+    def test_both_images_are_measured_within_their_budgets(self):
+        for image, budget in ((self.default, 180000000),
+                              (self.opencode, _OPENCODE_BUDGET)):
+            with self.subTest(image=image):
+                r = subprocess.run(["sh", str(_SIZE), image, str(budget)],
+                                   capture_output=True, text=True, timeout=600)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertRegex(r.stdout, r"^compressed: \d+\.\d MB")
+
 
 def _live_lines(path):
     """The file's lines without comment lines and blank lines."""
@@ -618,6 +827,47 @@ class TestCompose(unittest.TestCase):
             text = path.read_text()
             text.encode("ascii")
             self.assertNotIn("/home/", text, path.name)
+
+
+class TestComposeOpencode(unittest.TestCase):
+    """R17: the opencode variant is an override of the one framework
+    service (its image), never a second service on the same volume."""
+
+    def test_the_override_changes_the_build_target_and_the_tag_only(self):
+        services = _services(_COMPOSE_OPENCODE)
+        self.assertEqual(sorted(services), ["framework"])
+        self.assertEqual(services["framework"],
+                         ["build:", "context: .", "target: opencode",
+                          "image: cousins-framework:opencode"])
+        live = _live_lines(_COMPOSE_OPENCODE)
+        self.assertEqual([l for l in live if not l.startswith(" ")], ["services:"])
+
+    def test_the_default_compose_file_names_no_opencode_and_points_at_the_override(self):
+        self.assertNotIn("opencode", "\n".join(_live_lines(_COMPOSE)))
+        text = _COMPOSE.read_text()
+        # assertTrue, not assertIn: a miss would print the whole file.
+        self.assertTrue("docker compose -f compose.yml -f compose.opencode.yml up -d --build"
+                        in text)
+        self.assertFalse("arrives with that runner" in text)
+
+    def test_the_override_file_is_ascii_without_a_home_path_and_not_in_the_image(self):
+        text = _COMPOSE_OPENCODE.read_text()
+        text.encode("ascii")
+        self.assertNotIn("/home/", text)
+        patterns = [l.strip() for l in _DOCKERIGNORE.read_text().splitlines()
+                    if l.strip() and not l.strip().startswith("#")]
+        self.assertTrue(_dockerignored("compose.opencode.yml", patterns))
+
+    def test_the_install_page_documents_the_variant(self):
+        text = " ".join((_REPO / "docs" / "install.md").read_text().split())
+        for needle in ("compose.opencode.yml",
+                       "docker compose -f compose.yml -f compose.opencode.yml up -d --build",
+                       "--target opencode", "no node", _OPENCODE_VERSION):
+            self.assertTrue(needle in text, "%r not in install.md" % needle)
+        conf = (_REPO / "docs" / "configuration.md").read_text()
+        row = [l for l in conf.splitlines() if l.startswith("| `COUSIN_OPENCODE_BIN` |")]
+        self.assertEqual(len(row), 1)
+        self.assertIn(_OPENCODE_BIN, row[0])
 
 
 def _unit():
@@ -728,6 +978,39 @@ class TestComposeConfig(unittest.TestCase):
         self.assertEqual(fw["environment"]["COUSIN_DEFAULT_RUNNER"], "sdk")
         self.assertTrue(cfg["secrets"]["anthropic_api_key"]["file"].endswith(
             "/secrets/anthropic_api_key"))
+
+
+@unittest.skipUnless(_docker_enabled(), "opt-in: COUSIN_DOCKER=1 and docker on PATH")
+class TestComposeOpencodeConfig(unittest.TestCase):
+    def config(self, *files):
+        args = []
+        for f in files:
+            args += ["-f", str(f)]
+        r = _compose(*(args + ["config", "--format", "json"]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_the_default_builds_no_target(self):
+        fw = self.config(_COMPOSE)["services"]["framework"]
+        self.assertNotIn("target", fw["build"])
+        self.assertEqual(fw["image"], "cousins-framework:local")
+
+    def test_the_override_runs_the_same_service_on_the_opencode_target(self):
+        base = self.config(_COMPOSE)["services"]["framework"]
+        cfg = self.config(_COMPOSE, _COMPOSE_OPENCODE)
+        self.assertEqual(sorted(cfg["services"]), ["framework"])
+        fw = cfg["services"]["framework"]
+        self.assertEqual(fw["build"]["target"], "opencode")
+        self.assertEqual(fw["build"]["context"], base["build"]["context"])
+        self.assertEqual(fw["image"], "cousins-framework:opencode")
+        for key in ("ports", "volumes", "environment", "stop_grace_period", "restart"):
+            self.assertEqual(fw[key], base[key], key)
+
+    def test_it_combines_with_the_key_override(self):
+        cfg = self.config(_COMPOSE, _COMPOSE_KEY, _COMPOSE_OPENCODE)
+        fw = cfg["services"]["framework"]
+        self.assertEqual(fw["build"]["target"], "opencode")
+        self.assertEqual([s["source"] for s in fw["secrets"]], ["anthropic_api_key"])
 
 
 

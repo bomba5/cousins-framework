@@ -18,7 +18,8 @@ compose 5 on Linux.
 The image is 162 MB compressed and about 400 MB on disk. The first `up`
 builds it from the checkout: it pulls the `python:3.13-slim` base and
 downloads the Agent SDK, whose bundled Claude Code CLI is most of the size.
-Nothing else is pulled unless you turn on a profile (below).
+Nothing else is pulled unless you turn on a profile or the opencode variant
+(below).
 
 ```
 git clone https://github.com/bomba5/cousins-framework.git
@@ -112,6 +113,23 @@ That is plain HTTP; the notes in
 embeddings up -d`, then the steps in the comment in `compose.yml` (pull the
 model once, write `config/embedding.toml`). It pulls the Ollama image, several
 GB.
+
+**The opencode variant** is the image with the opencode binary added, for
+cousins on the opencode runner. It is the Dockerfile's `--target opencode`:
+the default image plus opencode 1.18.31, one self-contained binary at
+`/opt/opencode/bin/opencode` (on `PATH`, and in `COUSIN_OPENCODE_BIN`), with
+no node, no bun and no npm. The build downloads the pinned package from the
+npm registry and checks its sha256; only x86-64 is pinned. The image is
+223 MB compressed and about 580 MB on disk. The default image never carries
+it. Run the framework service on it with the override file:
+
+```
+docker compose -f compose.yml -f compose.opencode.yml up -d --build
+```
+
+Add `-f compose.api-key.yml` before the last file to keep the key lane, or
+copy `compose.opencode.yml` to `compose.override.yml` when it is your only
+override. SDK cousins run on it unchanged.
 
 Stop and start with `docker compose down` and `docker compose up -d`: every
 cousin, message and session is on the `framework-data` volume and survives,

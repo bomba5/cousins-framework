@@ -3,6 +3,9 @@
 # sdk extra in /opt/venv, pip removed from the image (the venv's and the base
 # image's own), and all state on one volume at /data.
 # Build: docker build -t cousins-framework .   Run: docker compose up
+# The opencode variant is the target of that name (at the end); a build
+# without --target is the default image, which carries no opencode, node
+# or bun.
 
 FROM python:3.13-slim AS builder
 COPY . /opt/framework
@@ -10,7 +13,7 @@ RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir -e "/opt/framework[sdk]" \
  && /opt/venv/bin/pip uninstall -y pip
 
-FROM python:3.13-slim
+FROM python:3.13-slim AS final
 # One unprivileged user; its home is on the volume, where a fresh agent
 # session writes its transcript (a cache the framework never reads). The
 # base image's own pip goes too: nothing at run time installs packages
@@ -33,3 +36,41 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8600/api/version', timeout=4)"]
 ENTRYPOINT ["/opt/framework/docker/entrypoint.sh"]
 CMD ["cousin-supervisor", "run", "--console-host", "0.0.0.0"]
+
+# The opencode variant: docker build --target opencode (compose.opencode.yml).
+# The pinned opencode release is one self-contained binary (a compiled Bun
+# executable: no node, no bun, no npm at run time). It comes from the npm
+# registry's platform package, downloaded by this throwaway stage and
+# checked twice: the tarball's sha256, then the binary's. The pins were
+# computed once from the registry's file, whose sha512 matched the
+# registry's dist.integrity. Only amd64 is pinned; another architecture
+# needs its own package name and shas here.
+FROM python:3.13-slim AS opencode-fetch
+ARG TARGETARCH
+RUN set -eu; \
+    version=1.18.31; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+      amd64) pkg=opencode-linux-x64; \
+             tgz_sha256=6d89da252a8b030d923e728396dc34465cf6095101b78222b0ee337b68140dea; \
+             bin_sha256=f9dab32248695e9ebd56b16a1921798fd85112cf5a69c7dfd0cabc1e17be4a11; ;; \
+      *) echo "opencode: no pinned build for $arch" >&2; exit 1 ;; \
+    esac; \
+    url="https://registry.npmjs.org/$pkg/-/$pkg-$version.tgz"; \
+    python3 -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \
+      "$url" /tmp/opencode.tgz; \
+    echo "$tgz_sha256  /tmp/opencode.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode; \
+    echo "$bin_sha256  /tmp/package/bin/opencode" | sha256sum -c -; \
+    install -D -m 0755 /tmp/package/bin/opencode /opt/opencode/bin/opencode; \
+    rm -rf /tmp/opencode.tgz /tmp/package
+
+# The default image plus the binary, owned by root (the cousin user cannot
+# replace it). The runner finds it on PATH or through COUSIN_OPENCODE_BIN.
+FROM final AS opencode
+COPY --from=opencode-fetch /opt/opencode /opt/opencode
+ENV COUSIN_OPENCODE_BIN=/opt/opencode/bin/opencode PATH=/opt/opencode/bin:$PATH
+
+# The default target: docker build (no --target) builds the last stage,
+# and this one is final, unchanged.
+FROM final AS default

@@ -56,8 +56,10 @@ services:
     volumes:
       - embeddings-models:/root/.ollama
 
-  # Profile "opencode" (the OpencodeRunner lane) arrives with that runner;
-  # the default image stays free of node and bun.
+  # The opencode lane is not a profile but an override of the framework
+  # service's image (compose.opencode.yml, the image's `opencode` target):
+  #   docker compose -f compose.yml -f compose.opencode.yml up -d --build
+  # The default image stays free of opencode, node and bun.
 
 volumes:
   framework-data:

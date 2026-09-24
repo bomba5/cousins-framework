@@ -626,7 +626,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
 | `COUSIN_DEFAULT_RUNNER` | `sdk`, `fake` or `opencode`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
-| `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set (the `opencode` image sets it); unset: `opencode` on `PATH` |
+| `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The image's `opencode` target sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the default image, a bare host): `opencode` on `PATH` |
 | `COUSIN_POLICY_FILE` | set by an opencode cousin's runner for its `opencode serve`, not by you: the rendered policy file the plugin pack reads (`<data_dir>/cousin-policy.json`) |
 
 ## cousin.toml

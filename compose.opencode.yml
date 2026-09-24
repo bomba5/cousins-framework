@@ -1,0 +1,17 @@
+# The opencode variant, as a compose override: the one framework service
+# builds and runs the image's `opencode` target, the default image plus
+# the pinned opencode binary (no node, no bun). Everything else (the
+# volume, the port, the environment) is compose.yml's. Use it with:
+#
+#   docker compose -f compose.yml -f compose.opencode.yml up -d --build
+#
+# (add -f compose.api-key.yml before it for the key lane too), or copy it
+# to compose.override.yml when it is your only override. It is an
+# override, not a profile: a profile adds a service, and a second
+# supervisor on the same volume is refused by the root's lock.
+services:
+  framework:
+    build:
+      context: .
+      target: opencode
+    image: cousins-framework:opencode

@@ -325,6 +325,8 @@ def runner_main(argv=None):
     parser = argparse.ArgumentParser(prog="cousin-runner")
     parser.add_argument("--home", required=True)
     parser.add_argument("--runner", choices=KINDS)
+    parser.add_argument("--reap-pane", action="store_true",
+                        help="the tmux kind: kill this cousin's pane while no runner holds its lock")
     parser.add_argument("--once", action="store_true",
                         help="drain the inbox, then exit")
     parser.add_argument("--check-auth", action="store_true",
@@ -333,6 +335,9 @@ def runner_main(argv=None):
                         help="with --check-auth: one smallest model turn on a throwaway client")
     args = parser.parse_args(argv)
     args.home = os.path.abspath(args.home)
+    if args.reap_pane:
+        from cousin_lib.runner.tmux_runner import reap_pane
+        return reap_pane(args.home)
     if args.validate and not args.check_auth:
         parser.error("--validate goes with --check-auth")
     if args.check_auth:

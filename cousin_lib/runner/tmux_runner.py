@@ -627,3 +627,36 @@ class TmuxRunner:
                 self.machine.to("idle", "rolled over")
         self.inbox.done(row["id"], DELIVERED, json.dumps(detail))
         self.stream.append("rollover", dict(detail, phase="done"))
+
+
+REAP_EXIT_OK, REAP_EXIT_NO_PANE = 0, 0
+
+
+def pane_for(home, *, socket=None):
+    """The pane a tmux-kind cousin runs in: the framework socket, the
+    cousin's session name (the runner's own choice, interfaces I3)."""
+    from cousin_lib.config import FrameworkConfig
+    home = Path(home)
+    root = FrameworkConfig.root_from_home(home) or home.parent.parent
+    return TmuxPane(socket or (Path(root) / "run" / "tmux.sock"), "tmux-%s" % home.name)
+
+
+def reap_pane(home, *, pane=None):
+    """`cousin-runner --home H --reap-pane` (R21, P11-10): kill the pane of a
+    cousin whose runner is down, holding the runner lock while it does, so
+    no starting runner adopts a pane being killed. Exit 0 whether or not a
+    pane was there; LOCK_HELD_EXIT when a runner holds the lock (stop the
+    runner instead: its stop ends the turn and, when held, kills the pane)."""
+    from cousin_lib.runner.main import LOCK_HELD_EXIT, LockHeld, hold_lock
+    try:
+        with hold_lock(home):
+            pane = pane or pane_for(home)
+            if pane.alive():
+                pane.kill()
+                print("reaped the pane of %s" % Path(home).name)
+            else:
+                print("no pane for %s" % Path(home).name)
+            return REAP_EXIT_OK
+    except LockHeld as err:
+        print("cousin-runner: %s; stop the runner instead" % err)
+        return LOCK_HELD_EXIT

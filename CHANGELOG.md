@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 1.21.0 - 2026-09-24
 
 ### Added
 - A runner cousin loads the MCP servers in its home's `.mcp.json` (Claude

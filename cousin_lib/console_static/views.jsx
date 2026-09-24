@@ -1676,13 +1676,202 @@ function RestartPanel({ auth, setAuth }) {
 
 
 // ============ HOST (overview) ============
-function HostView() {
+// The fleet at a glance: one sentence of health, the numbers that are
+// compared (running, tokens, jobs, loops), every cousin in one table with
+// what needs the operator first, and a rail of what happened (jobs, loop
+// fires, flips seen while the page is open) beside the host's meters.
+// Every value comes from a route the console already serves; a column
+// the fleet rows do not carry is left out rather than guessed.
+
+// ---- fleet helpers (pure: no React, no fetch; tests run them in node) ----
+const FLEET_RUNNER_WORDS = {
+  idle: "idle", running: "working", waiting_permission: "needs you",
+  rate_limited: "rate limited", rolling_over: "rolling over",
+  errored: "errored", stopped: "stopped",
+};
+const FLIP_NEVER = ["never", "off", "none", "no"];
+
+// The lane a row runs on, read from the row: the runner's own kind (the
+// head of its stream names it), a hive node, a worker, or the tmux lane
+// when the row names a tmux session and has no runner.
+function fleetRunnerKind(c) {
+  if (!c) return "-";
+  if (c.remote || c.type === "remote") return "remote";
+  if (c.runner) return c.runner.kind || "runner";
+  if (c.type === "worker") return "worker";
+  return c.tmuxSession ? "tmux" : "-";
+}
+
+// What asks for the operator: null, or {level, why}. "needs" is a cousin
+// waiting on a person; "warn" is worth a look but not blocked. A stopped
+// cousin is never flagged: stopping is the operator's decision.
+function fleetAttention(c) {
+  if (!c || c.status !== "running") return null;
+  if (c.attention) return { level: "needs", why: "the pane shows \"" + c.attention + "\"" };
+  const r = c.runner;
+  if (r && r.alive) {
+    if (r.state === "waiting_permission") return { level: "needs", why: "waiting for a permission" };
+    if (r.state === "errored") return { level: "needs", why: "the runner errored" };
+    if (r.state === "rate_limited") return { level: "warn", why: "rate limited" };
+  }
+  if (c.chat === "down") return { level: "warn", why: "chat server down" };
+  return null;
+}
+
+// The row's state in words, with the colour that goes with them.
+function fleetState(c) {
+  if (!c) return { word: "-", tone: "gray", pulse: false };
+  if (c.remote) {
+    const s = c.remoteState || (c.online ? "online" : "offline");
+    return { word: s, tone: s === "online" ? "green" : s === "revoked" ? "red" : s === "pending" ? "amber" : "gray", pulse: false };
+  }
+  if (c.status !== "running") return { word: "stopped", tone: "gray", pulse: false };
+  const att = fleetAttention(c);
+  if (att && att.level === "needs") {
+    return { word: c.runner && c.runner.state === "errored" ? "errored" : "needs you",
+             tone: c.runner && c.runner.state === "errored" ? "red" : "amber", pulse: false };
+  }
+  if (c.runner) {
+    const st = c.runner.state;
+    return { word: FLEET_RUNNER_WORDS[st] || st || "starting",
+             tone: st === "rate_limited" ? "amber" : "green",
+             pulse: st === "running" || st === "rolling_over" };
+  }
+  if (c.type === "worker") return { word: "enrolled", tone: "green", pulse: false };
+  return c.active ? { word: "working", tone: "green", pulse: true } : { word: "idle", tone: "green", pulse: false };
+}
+
+// Needs-you first, then warnings, then the running, then the rest; the
+// server's order within each group.
+function fleetRank(c) {
+  const a = fleetAttention(c);
+  if (a) return a.level === "needs" ? 0 : 1;
+  return c && c.status === "running" ? 2 : 3;
+}
+function fleetOrder(cousins) {
+  return (cousins || []).map((c, i) => [c, i])
+    .sort((x, y) => fleetRank(x[0]) - fleetRank(y[0]) || x[1] - y[1])
+    .map(p => p[0]);
+}
+
+function fleetPad2(n) { return String(n).padStart(2, "0"); }
+
+// "7h 24m", "12m", "40s": how far away a moment is.
+function fleetIn(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return sec + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m";
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return m ? h + "h " + m + "m" : h + "h";
+}
+
+// "30m", "1h", "2h 30m": a cadence in seconds, read at a glance.
+function fleetEvery(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return "-";
+  if (n < 60) return n + "s";
+  if (n < 3600) return Math.round(n / 60) + "m";
+  const h = Math.floor(n / 3600), m = Math.round((n % 3600) / 60);
+  return m ? h + "h " + m + "m" : h + "h";
+}
+
+// A row's flip_at ("HH:MM", the cousin's own [lifecycle] value) as the
+// next time it comes round on this browser's clock: {at, ts, inSec};
+// {never: true} for an explicit opt-out; null when the row carries none
+// (the cousin then flips at the install default, which no route serves).
+function nextFlip(flipAt, now) {
+  if (flipAt == null) return null;
+  const v = String(flipAt).trim().toLowerCase();
+  if (!v) return null;
+  if (FLIP_NEVER.includes(v)) return { never: true };
+  const m = /^(\d{1,2}):(\d{2})$/.exec(v);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  const d = new Date(now);
+  d.setHours(h, mi, 0, 0);
+  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+  return { at: fleetPad2(h) + ":" + fleetPad2(mi), ts: d.getTime(), inSec: Math.round((d.getTime() - now) / 1000) };
+}
+
+// The fleet's next flip among the running cousins that set one:
+// {at, inSec, slugs, onDefault}, or null when none sets a time.
+// onDefault counts the running cousins that take the install default.
+function fleetNextFlip(cousins, now) {
+  let best = null, onDefault = 0;
+  for (const c of cousins || []) {
+    if (c.remote || c.type === "worker" || c.status !== "running") continue;
+    const f = nextFlip(c.flipAt, now);
+    if (!f) { if (c.flipAt == null || String(c.flipAt).trim() === "") onDefault += 1; continue; }
+    if (f.never) continue;
+    if (!best || f.ts < best.ts) best = { at: f.at, ts: f.ts, inSec: f.inSec, slugs: [c.slug] };
+    else if (f.ts === best.ts) best.slugs.push(c.slug);
+  }
+  if (best) best.onDefault = onDefault;
+  return best;
+}
+
+// One sentence of fleet health, and the counts behind it.
+function fleetHealth(cousins, now) {
+  const local = (cousins || []).filter(c => !c.remote);
+  const running = local.filter(c => c.status === "running");
+  const needs = running.filter(c => (fleetAttention(c) || {}).level === "needs");
+  const warn = running.filter(c => (fleetAttention(c) || {}).level === "warn");
+  const parts = [running.length + " of " + local.length + " running"];
+  parts.push(needs.length ? needs.length + (needs.length === 1 ? " needs" : " need") + " you" : "nothing needs you");
+  if (warn.length) parts.push(warn.length + (warn.length === 1 ? " warning" : " warnings"));
+  const flip = fleetNextFlip(local, now);
+  if (flip) parts.push("next flip " + flip.at + ", in " + fleetIn(flip.inSec));
+  return { text: parts.join(" · "), running: running.length, total: local.length,
+           needs: needs.length, warn: warn.length, nextFlip: flip };
+}
+// ---- end fleet helpers ----
+
+// Flips seen while the page is open: the shell re-dispatches the SSE
+// `cousin-flip` event on window; the overview keeps the last few for its
+// activity rail. Nothing is stored anywhere else.
+const FLEET_FLIPS = [];
+window.addEventListener("fw-cousin-flip", (e) => {
+  const d = e.detail || {};
+  if (!d.slug || !["scheduled", "started", "complete", "failed", "cancelled"].includes(d.phase)) return;
+  FLEET_FLIPS.unshift({ ts: Date.now(), slug: d.slug, phase: d.phase, gen: d.new_generation, error: d.error });
+  FLEET_FLIPS.length = Math.min(FLEET_FLIPS.length, 20);
+});
+
+function fleetEvents(jobs, fires, flips, now) {
+  const out = [];
+  for (const j of jobs || []) {
+    const at = Date.parse(j.finished_at || j.started_at || "");
+    if (!Number.isFinite(at)) continue;
+    const tone = j.status === "failed" ? "red" : j.status === "running" ? "accent" : j.status === "done" ? "green" : "gray";
+    out.push({ key: "j" + j.id, ts: at, who: j.spawned_by, text: j.title, word: j.status === "running" ? "job started" : "job " + j.status, tone });
+  }
+  for (const [i, f] of (fires || []).entries()) {
+    out.push({ key: "f" + i + f.cousin + f.loop, ts: now - (Number(f.ago) || 0) * 1000, who: f.cousin,
+               text: f.loop === "context-heartbeat" ? "context heartbeat" : f.loop, word: "fired", tone: "gray" });
+  }
+  for (const [i, f] of (flips || []).entries()) {
+    out.push({ key: "p" + i + f.ts, ts: f.ts, who: f.slug,
+               text: f.phase === "complete" && f.gen != null ? "flipped to generation " + f.gen : "flip " + f.phase,
+               word: "flip", tone: f.phase === "failed" ? "red" : f.phase === "complete" ? "green" : "accent" });
+  }
+  return out.sort((a, b) => b.ts - a.ts).slice(0, 16);
+}
+
+function fmtClock(ts) {
+  const d = new Date(ts);
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function HostView({ onOpen }) {
   const showHidden = (window.useSetting && window.useSetting("showHidden")) || false;
   const [h, setH] = React.useState(HOST_SEED);
   const [allCousins, setAllCousins] = React.useState([]);
   const [allFires, setAllFires] = React.useState([]);
   const [allLoops, setAllLoops] = React.useState([]);
   const [daemon, setDaemon] = React.useState(null);
+  const [jobs, setJobs] = React.useState([]);
+  const [now, setNow] = React.useState(Date.now());
   const cousins = React.useMemo(
     () => (allCousins || []).filter(c => showHidden || !c.hidden),
     [allCousins, showHidden]);
@@ -1695,15 +1884,19 @@ function HostView() {
   const fires = React.useMemo(
     () => (allFires || []).filter(f => showHidden || !hiddenCousinSlugs.has(f.cousin)),
     [allFires, showHidden, hiddenCousinSlugs]);
+  const visibleJobs = React.useMemo(
+    () => (jobs || []).filter(j => showHidden || !hiddenCousinSlugs.has(j.spawned_by)),
+    [jobs, showHidden, hiddenCousinSlugs]);
 
   React.useEffect(() => {
     let cancelled = false;
     async function pull() {
-      const [host, cs, loopsData, recent] = await Promise.all([
+      const [host, cs, loopsData, recent, jobsData] = await Promise.all([
         fetchHost(),
         fetchCousins(),
         fetchLoopsFull(),
         apiGet("/api/loops/recent"),
+        apiGet("/api/jobs?since_hours=24"),
       ]);
       if (cancelled) return;
       if (host) setH(host);
@@ -1711,6 +1904,8 @@ function HostView() {
       setAllLoops(loopsData.loops || []);
       setDaemon(loopsData.daemon || (recent && recent.daemon) || null);
       setAllFires((recent && recent.fires) || []);
+      if (jobsData) setJobs(jobsData.jobs || []);
+      setNow(Date.now());
     }
     pull();
     const id = setInterval(pull, 5000);
@@ -1722,147 +1917,179 @@ function HostView() {
   const diskPct = h.disk?.total ? (h.disk.used / h.disk.total) * 100 : 0;
   const running = cousins.filter(c => c.status === "running");
   const totalTokensToday = cousins.reduce((s, c) => s + (c.tokensSpent || 0), 0);
+  const health = fleetHealth(cousins, now);
+  const ordered = fleetOrder(cousins);
+  const jobsRunning = visibleJobs.filter(j => j.status === "running").length;
+  const jobsFailed = visibleJobs.filter(j => j.status === "failed").length;
+  const events = fleetEvents(visibleJobs, fires, FLEET_FLIPS, now);
 
   return (
-    <div className="wrap-pad">
-      {/* top row: host metrics */}
-      <div className="panel" style={{ marginBottom: 14 }}>
-        <div className="panel-hdr">
-          <span className="title">{h.host || "host"}</span>
-          <span style={{ color: "var(--fg-3)", fontSize: 11 }}>{h.kernel}</span>
-          <span style={{ flex: 1 }} />
-          {h.console_uptime != null && <span style={{ color: "var(--fg-3)", fontSize: 11, marginRight: 8 }}>console up {fmtDuration(h.console_uptime)}</span>}
-          <Pill tone="green"><Led state="running" pulse /> up {fmtDuration(h.uptime || 0)}</Pill>
+    <div className="wrap-pad ov">
+      <div className="ov-health" data-fleet-health>
+        <span className={"led " + (health.needs ? "amber" : health.warn ? "amber" : "green")} />
+        <span>{health.text}</span>
+      </div>
+
+      <div className="ov-stats" data-fleet-stats>
+        <div className="ov-stat">
+          <div className="eyebrow">running</div>
+          <div className="ov-stat-v"><span className="ov-big">{running.length}</span><span className="ov-of">of {cousins.length} cousins</span></div>
+          <div className={"ov-stat-s" + (health.needs ? " amber" : "")}>{health.needs ? `${health.needs} need${health.needs === 1 ? "s" : ""} you` : "nothing needs you"}</div>
         </div>
-        <div className="panel-body">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-            <MetricCard
-              label={"cpu · load " + num(h.cpu?.load1).toFixed(2)}
-              value={num(cpuPct).toFixed(1) + "%"}
-              sub={`load ${num(h.cpu?.load1).toFixed(2)} ${num(h.cpu?.load5).toFixed(2)} ${num(h.cpu?.load15).toFixed(2)}`}
-              pct={num(cpuPct)}
-            />
-            <MetricCard
-              label="memory"
-              value={h.mem?.total ? (num(h.mem.used).toFixed(1) + " / " + h.mem.total + " GB") : "-"}
-              sub={h.mem ? `cached ${num(h.mem.cached).toFixed(1)} GB` : "-"}
-              pct={num(memPct)}
-            />
-            <MetricCard
-              label="disk · /"
-              value={h.disk?.total ? (num(h.disk.used).toFixed(0) + " / " + h.disk.total + " GB") : "-"}
-              sub={h.disk?.total ? `free ${(num(h.disk.total) - num(h.disk.used)).toFixed(0)} GB` : "-"}
-              pct={num(diskPct)}
-            />
-            <MetricCard
-              label="net"
-              value={num(h.net?.rx).toFixed(2) + " MB/s rx"}
-              sub={num(h.net?.tx).toFixed(2) + " MB/s tx" + (h.net?.rx_total_gb != null ? ` · ${num(h.net.rx_total_gb).toFixed(1)}/${num(h.net.tx_total_gb).toFixed(1)} GB life` : "")}
-              pct={Math.min(100, Math.max(num(h.net?.rx), num(h.net?.tx)) * 10)}
-            />
+        <div className="ov-stat">
+          <div className="eyebrow">tokens today</div>
+          <div className="ov-stat-v"><span className="ov-big">{fmtTokens(totalTokensToday)}</span></div>
+          <div className="ov-stat-s">all cousins</div>
+        </div>
+        <div className="ov-stat">
+          <div className="eyebrow">jobs, 24h</div>
+          <div className="ov-stat-v"><span className="ov-big">{jobsRunning}</span><span className="ov-of">running</span></div>
+          <div className={"ov-stat-s" + (jobsFailed ? " red" : "")}>{jobsFailed} failed · {visibleJobs.length} in all</div>
+        </div>
+        <div className="ov-stat">
+          <div className="eyebrow">loops</div>
+          <div className="ov-stat-v"><span className="ov-big">{loops.length}</span><span className="ov-of">loops</span></div>
+          <div className={"ov-stat-s" + (daemon && daemon.ok === false ? " amber" : "")}>
+            {daemon && daemon.ok === false ? daemon.message : `${fires.length} recent fires`}
           </div>
         </div>
       </div>
 
-      {/* second row: cousins overview + totals */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 14, marginBottom: 14 }}>
-        <div className="panel">
+      <div className="ov-grid">
+        <section className="panel ov-fleet">
           <div className="panel-hdr">
-            <span className="title">cousins</span>
-            <span style={{ color: "var(--fg-3)" }}>{running.length}/{cousins.length} running</span>
+            <span className="title">Fleet</span>
+            <span>{running.length}/{cousins.length} running</span>
+            <span style={{ flex: 1 }} />
+            <span title="the order: needs you, warnings, running, stopped">needs you first</span>
           </div>
-          <div className="panel-body" style={{ padding: 0 }}>
-            <table className="data">
+          <div className="table-scroll">
+            <table className="data fleet-table">
               <thead>
                 <tr>
+                  <th>state</th>
                   <th>cousin</th>
-                  <th>status</th>
-                  <th>chat</th>
-                  <th>operator</th>
+                  <th>runner</th>
+                  <th>model</th>
+                  <th>next flip</th>
                   <th>beat</th>
+                  <th>operator</th>
                   <th className="num">tokens today</th>
                 </tr>
               </thead>
               <tbody>
-                {cousins.map(c => (
-                  <tr key={c.slug}>
-                    <td><CousinTag slug={c.slug} /> {c.name}{c.type === "worker" ? <span className="muted"> (worker)</span> : null}</td>
-                    <td><StatePill state={c.status} /></td>
-                    <td className="muted">{c.chat}</td>
-                    <td className="muted">{c.operator || "-"}</td>
-                    <td className="muted">{c.heartbeat != null ? `${c.heartbeat}s` : "-"}</td>
-                    <td className="num">{fmtTokens(c.tokensSpent || 0)}</td>
-                  </tr>
-                ))}
+                {ordered.map(c => {
+                  const st = fleetState(c);
+                  const att = fleetAttention(c);
+                  const kind = fleetRunnerKind(c);
+                  const flip = nextFlip(c.flipAt, now);
+                  const openable = onOpen && c.status === "running" && c.type !== "worker" && !c.remote;
+                  return (
+                    <tr key={c.slug} data-fleet-row={c.slug}
+                        className={"fleet-row" + (c.status !== "running" ? " off" : "") + (openable ? " link" : "")}
+                        onClick={openable ? () => onOpen(c.slug) : undefined}
+                        title={openable ? `open the chat with @${c.slug}` : undefined}>
+                      <td data-label="state">
+                        <span className={"fleet-state tone-" + st.tone}>
+                          <span className={"led " + st.tone + (st.pulse ? " pulse" : "")} />
+                          {st.word}
+                        </span>
+                      </td>
+                      <td data-label="cousin" className="fleet-who">
+                        <div><span className="fleet-name">{c.name || c.slug}</span> <span className="fleet-slug">@{c.slug}</span>{c.hidden ? <span className="fleet-slug"> · hidden</span> : null}</div>
+                        {att ? <div className="fleet-why" title={att.why}>{att.why}</div>
+                          : c.role ? <div className="fleet-role" title={c.role}>{c.role}</div> : null}
+                      </td>
+                      <td data-label="runner">
+                        <div className="mono">{kind}</div>
+                        <div className="fleet-sub">{c.runner ? (c.runner.alive ? "" : "(not running)") : c.chat === "ok" ? `chat :${c.port}` : c.chat === "down" ? "chat down" : c.chat === "none" ? "no chat server" : (c.chat || "")}</div>
+                      </td>
+                      <td data-label="model">
+                        <div className="mono">{c.model || "-"}</div>
+                        {c.effort && <div className="fleet-sub">{c.effort}</div>}
+                      </td>
+                      <td data-label="next flip" title={flip ? (flip.never ? "flip_at = never" : `[lifecycle] flip_at = ${c.flipAt}`) : "no flip_at of its own: the install default applies (config/harness.toml default_flip_at)"}>
+                        {flip && !flip.never ? (
+                          <>
+                            <div className="mono">{flip.at}</div>
+                            <div className="fleet-sub">in {fleetIn(flip.inSec)}</div>
+                          </>
+                        ) : flip && flip.never ? <span className="muted">never</span>
+                          : <span className="muted">{c.type === "worker" || c.remote ? "-" : "default"}</span>}
+                      </td>
+                      <td data-label="beat" className="mono" title={c.heartbeat != null ? `${c.heartbeat}s` : ""}>{c.heartbeat != null ? fleetEvery(c.heartbeat) : "-"}</td>
+                      <td data-label="operator" className="muted">{c.operator || "-"}</td>
+                      <td data-label="tokens today" className="num">{fmtTokens(c.tokensSpent || 0)}</td>
+                    </tr>
+                  );
+                })}
                 {cousins.length === 0 && (
-                  <tr><td colSpan={6} className="muted" style={{ textAlign: "center", padding: 20 }}>no cousins registered</td></tr>
+                  <tr><td colSpan={8} className="muted" style={{ textAlign: "center", padding: 24 }}>no cousins registered</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        <div className="panel">
-          <div className="panel-hdr">
-            <span className="title">today's totals</span>
-            {daemon && daemon.ok === false && <span style={{ color: "var(--amber)", fontSize: 11 }}>{daemon.message}</span>}
-          </div>
-          <div className="panel-body">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <Stat label="tokens (all cousins)" value={fmtTokens(totalTokensToday)} />
-              <Stat label="running cousins" value={String(running.length)} />
-              <Stat label="loops" value={String(loops.length)} />
-              <Stat label="recent fires" value={String(fires.length)} />
+        <aside className="ov-rail">
+          <section className="panel">
+            <div className="panel-hdr">
+              <span className="title">{h.host || "host"}</span>
+              <span className="mono">{h.kernel}</span>
+              <span style={{ flex: 1 }} />
+              <span className="fleet-state tone-green" title="host uptime"><span className="led green" /> up {fmtDuration(h.uptime || 0)}</span>
             </div>
-          </div>
-        </div>
-      </div>
+            <div className="panel-body ov-meters">
+              <Meter label="cpu" value={num(cpuPct).toFixed(1) + "%"}
+                     sub={`load ${num(h.cpu?.load1).toFixed(2)} ${num(h.cpu?.load5).toFixed(2)} ${num(h.cpu?.load15).toFixed(2)}`}
+                     pct={num(cpuPct)} />
+              <Meter label="memory" value={h.mem?.total ? (num(h.mem.used).toFixed(1) + " / " + h.mem.total + " GB") : "-"}
+                     sub={h.mem ? `cached ${num(h.mem.cached).toFixed(1)} GB` : "-"} pct={num(memPct)} />
+              <Meter label="disk /" value={h.disk?.total ? (num(h.disk.used).toFixed(0) + " / " + h.disk.total + " GB") : "-"}
+                     sub={h.disk?.total ? `free ${(num(h.disk.total) - num(h.disk.used)).toFixed(0)} GB` : "-"} pct={num(diskPct)} />
+              <Meter label="net" value={num(h.net?.rx).toFixed(2) + " MB/s rx"}
+                     sub={num(h.net?.tx).toFixed(2) + " MB/s tx" + (h.net?.rx_total_gb != null ? ` · ${num(h.net.rx_total_gb).toFixed(1)}/${num(h.net.tx_total_gb).toFixed(1)} GB life` : "")}
+                     pct={Math.min(100, Math.max(num(h.net?.rx), num(h.net?.tx)) * 10)} />
+              {h.console_uptime != null && <div className="ov-note">console up {fmtDuration(h.console_uptime)}</div>}
+            </div>
+          </section>
 
-      {/* third row: recent loop / heartbeat fires */}
-      <div className="panel">
-        <div className="panel-hdr">
-          <span className="title">recent loop + heartbeat fires</span>
-          <span style={{ color: "var(--fg-3)" }}>newest first</span>
-        </div>
-        <div className="panel-body" style={{ padding: 0 }}>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>cousin</th>
-                <th>loop</th>
-                <th>fired</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fires.map((f, i) => (
-                <tr key={i}>
-                  <td><CousinTag slug={f.cousin} /></td>
-                  <td className="accent">{f.loop}</td>
-                  <td className="muted">{fmtAgo(f.ago)}</td>
-                </tr>
+          <section className="panel ov-activity">
+            <div className="panel-hdr">
+              <span className="title">Activity</span>
+              <span>jobs, loop fires, flips</span>
+            </div>
+            <div className="ov-events" data-fleet-events>
+              {events.map(ev => (
+                <div key={ev.key} className="ov-event">
+                  <span className="ov-event-t mono" title={new Date(ev.ts).toLocaleString()}>{fmtClock(ev.ts)}</span>
+                  <span className={"ov-event-dot tone-" + ev.tone} />
+                  <div className="ov-event-b">
+                    <span className="ov-event-who">{ev.who}</span> <span className="ov-event-w">{ev.word}</span>
+                    <div className="ov-event-x" title={ev.text}>{ev.text}</div>
+                  </div>
+                </div>
               ))}
-              {fires.length === 0 && (
-                <tr><td colSpan={3} className="muted" style={{ textAlign: "center", padding: 20 }}>no fires yet - the loops daemon fires loops at their configured schedule</td></tr>
+              {events.length === 0 && (
+                <div className="ov-note" style={{ padding: "14px 16px" }}>nothing yet: no jobs in the last 24 hours and no loop fires; the loops daemon fires loops at their configured schedule</div>
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
 }
 
-function MetricCard({ label, value, sub, pct, spark }) {
+// A host meter: the label and number on one line, the sub-line and a
+// thin bar under them. No box of its own: it sits on the panel.
+function Meter({ label, value, sub, pct }) {
   const tone = pct > 88 ? "crit" : pct > 70 ? "warn" : "";
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 3, padding: 12, background: "var(--bg-0)" }}>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 6 }}>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 18, color: "var(--fg-0)", fontWeight: 600 }}>{value}</div>
-        {spark && <Spark data={spark} width={60} height={22} tone={tone} />}
-      </div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", marginTop: 2 }}>{sub}</div>
-      <div style={{ marginTop: 10 }}><Bar pct={pct} tone={tone} /></div>
+    <div className="ov-meter">
+      <div className="ov-meter-h"><span className="eyebrow">{label}</span><span className="ov-meter-v">{value}</span></div>
+      <Bar pct={pct} tone={tone} />
+      <div className="ov-meter-s">{sub}</div>
     </div>
   );
 }
@@ -1870,4 +2097,5 @@ function MetricCard({ label, value, sub, pct, spark }) {
 Object.assign(window, {
   JobsView, MemoryView, LoopsView, TokensView, TrackerView, SettingsView, AccountPanel, RestartPanel,
   HostView, CousinTag, Field, Stat, TRACKER_STATES,
+  fleetRunnerKind, fleetAttention, fleetState, fleetOrder, fleetHealth, fleetNextFlip, nextFlip, fleetIn,
 });

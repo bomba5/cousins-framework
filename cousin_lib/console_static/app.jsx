@@ -537,6 +537,13 @@ function App() {
     return () => window.removeEventListener("fw-restart", onRestart);
   }, []);
 
+  // One reading of the fleet for the sidebar: how many cousins wait on a
+  // person (the Overview entry's count) and when the next daily flip is
+  // (the card at the sidebar's foot). Both from the rows the SSE keeps.
+  const health = window.fleetHealth
+    ? fleetHealth(cousins.filter(c => showHidden || !c.hidden), clock.getTime()) : null;
+  const nextFlipAt = health && health.nextFlip;
+
   if (auth === null) {
     return <div style={{ padding: 20, fontFamily: "var(--mono)", color: "var(--fg-3)" }}>connecting...</div>;
   }
@@ -579,6 +586,9 @@ function App() {
                title={`ctrl/cmd + ${n.kbd}`}>
             <span className="icon">{n.icon}</span>
             <span>{n.label}</span>
+            {n.id === "overview" && health && health.needs > 0 && (
+              <span className="nav-count" title={`${health.needs} cousin${health.needs === 1 ? "" : "s"} waiting on a person`}>{health.needs}</span>
+            )}
           </div>
         ))}
         <SidebarGroups
@@ -591,6 +601,17 @@ function App() {
         />
 
         <div style={{ flex: 1 }} />
+        {nextFlipAt && (
+          <div className="flip-card" data-next-flip
+               title="the earliest [lifecycle] flip_at among the running cousins, on this browser's clock">
+            <div className="fc-label">next flip</div>
+            <div className="fc-time">{nextFlipAt.at}<span className="fc-in">in {fleetIn(nextFlipAt.inSec)}</span></div>
+            <div className="fc-sub">
+              {nextFlipAt.slugs.map(s => "@" + s).join(", ")}
+              {nextFlipAt.onDefault ? ` · ${nextFlipAt.onDefault} on the install default` : ""}
+            </div>
+          </div>
+        )}
       </nav>
 
       <main className="main">
@@ -605,7 +626,7 @@ function App() {
           {view === "tracker"  && <TrackerView cousins={cousins} />}
           {view === "meetings" && window.MeetingsView && <MeetingsView cousins={cousins} sessionUser={sessionUser} initialMeeting={initialMeeting} />}
           {view === "settings" && <SettingsView auth={auth} setAuth={setAuth} />}
-          {view === "overview" && <HostView />}
+          {view === "overview" && <HostView onOpen={(slug) => { setActiveCousin(slug); pickView("chat"); }} />}
         </div>
       </main>
 

@@ -70,7 +70,8 @@ characters; your other sessions stay valid) and log out.
 
 ## Layout
 
-The top bar has a button that collapses the sidebar, the brand, and the
+The top bar has a button that collapses the sidebar, the console's icon and
+brand, and the
 version the console is running: `v0.1.0 0a119f6`. In a git checkout with a
 browsable `origin` remote, the version links to the repository and the
 commit hash to that commit. The version is read when the console starts, so
@@ -79,7 +80,10 @@ are an eye toggle that shows or hides hidden cousins and loops, the logged-in
 user, and a clock.
 
 The sidebar lists the pages (Ctrl/Cmd + 1 to 7, 0 for Settings) and below
-them your cousins. Click a cousin to open its chat. A stopped cousin is
+them your cousins. The Overview entry carries a count when cousins are
+waiting on a person, and the foot of the sidebar shows the next daily flip:
+the earliest `flip_at` among the running cousins, how far away it is, and
+who flips then. Click a cousin to open its chat. A stopped cousin is
 greyed out and can't be clicked; start it from Cousins first. A dot next to
 a name means it has replied since you last looked at its chat. You can group
 cousins: right-click one to move it to a group or make a new group, drag
@@ -101,10 +105,40 @@ A few URL parameters are handy for bookmarks and embedding:
 
 ## Overview
 
-The landing page. Host stats (hostname, kernel, uptime, CPU and load, memory,
-disk for `/`, network rate and totals, how long the console has been up), a
-table of cousins with status, chat state, operator, heartbeat and tokens
-today, today's totals, and the most recent loop and heartbeat fires.
+The landing page. It opens with one sentence of fleet health: how many
+cousins are running, how many need you, and when the next daily flip is
+("5 of 6 running · 1 needs you · next flip 04:00, in 8h 28m"). Under it a
+strip of the numbers you compare: cousins running, tokens today, jobs in the
+last 24 hours (running and failed), and loops with their recent fires or the
+loops daemon's complaint.
+
+The fleet table has one row per cousin, what needs you first, then
+warnings, then the running ones, then the stopped ones. The columns:
+
+- **state**, in words beside its dot: `working`, `idle`, `needs you`,
+  `rate limited`, `errored`, `enrolled` (a worker) or `stopped`. A cousin
+  "needs you" when its pane shows one of the `attention_patterns` or its
+  runner waits for a permission; the reason replaces the role line in the
+  cousin column. A running cousin whose chat server is down is a warning.
+  A stopped cousin is never flagged: stopping it was your decision.
+- **cousin**: name, slug and role.
+- **runner**: the lane, read from the row: the runner's own kind (`sdk`,
+  `opencode`, ...), `tmux`, `worker` or `remote`, with the chat server's
+  state under a tmux cousin.
+- **model** and effort, what the next start renders.
+- **next flip**: the cousin's own `[lifecycle] flip_at` and how far away it
+  is on your browser's clock; `default` when it takes the install default
+  (the route does not say which time that is), `never` for an opt-out.
+- **beat**, **operator** and **tokens today**.
+
+Click a running cousin's row to open its chat. The fleet rows carry no
+generation or context fill, so the table shows neither.
+
+Beside the table (under it on narrower screens) sit the host (hostname,
+kernel, uptime, CPU and load, memory, disk for `/`, network rate and totals,
+how long the console has been up) and an activity rail: jobs from the last
+24 hours, loop and heartbeat fires, and any flip the console saw while the
+page was open, newest first.
 
 ## Cousins
 

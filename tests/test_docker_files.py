@@ -33,6 +33,8 @@ _TIMEOUT = 60
 _COMPOSE = _REPO / "compose.yml"
 _COMPOSE_KEY = _REPO / "compose.api-key.yml"
 _UNIT = _REPO / "systemd" / "cousin-supervisor.service"
+_SIZE = _REPO / "docker" / "image-size.sh"
+_WORKFLOW = _REPO / ".github" / "workflows" / "image.yml"
 # R5': a runner gets runner.main.STOP_TIMEOUT_S + 5 = 35 s after SIGTERM;
 # then the loops daemon and the console get 10 s each, one after the
 # other; each step adds the supervisor's KILL_GRACE_S after a SIGKILL.
@@ -726,6 +728,112 @@ class TestComposeConfig(unittest.TestCase):
         self.assertEqual(fw["environment"]["COUSIN_DEFAULT_RUNNER"], "sdk")
         self.assertTrue(cfg["secrets"]["anthropic_api_key"]["file"].endswith(
             "/secrets/anthropic_api_key"))
+
+
+
+_FAKE_DOCKER = """#!/bin/sh
+# A stand-in docker: `save` writes FAKE_SAVE_BYTES random bytes (random
+# data does not compress, so the gzip size is about the same), or fails.
+case "$1" in
+  image) [ -z "${FAKE_MISSING:-}" ] || exit 1; exit 0 ;;
+  save) [ -z "${FAKE_SAVE_FAIL:-}" ] || { echo "save failed" >&2; exit 1; }
+        head -c "$FAKE_SAVE_BYTES" /dev/urandom ;;
+  *) exit 64 ;;
+esac
+"""
+
+
+class TestImageSizeScript(HermeticCase):
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bin_dir = pathlib.Path(tmp.name)
+        fake = bin_dir / "docker"
+        fake.write_text(_FAKE_DOCKER)
+        fake.chmod(0o755)
+        self.env = dict(os.environ, PATH="%s:%s" % (bin_dir, os.environ["PATH"]),
+                        FAKE_SAVE_BYTES="300000")
+
+    def size(self, *args, **env):
+        return subprocess.run(["sh", str(_SIZE)] + list(args),
+                              env=dict(self.env, **env), capture_output=True,
+                              text=True, timeout=_TIMEOUT)
+
+    def test_under_budget_passes_and_prints_both_sizes(self):
+        r = self.size("cousins-framework:ci", "1000000")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"^compressed: 0\.3 MB \(budget 1\.0 MB\)\n$")
+
+    def test_over_budget_fails(self):
+        r = self.size("cousins-framework:ci", "200000")
+        self.assertEqual(r.returncode, 1)
+        self.assertRegex(r.stdout, r"^compressed: 0\.3 MB \(budget 0\.2 MB\)\n$")
+        self.assertIn("over budget", r.stderr)
+
+    def test_the_default_budget_is_180_mb(self):
+        r = self.size("cousins-framework:ci")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(budget 180.0 MB)", r.stdout)
+
+    def test_usage_errors_exit_2(self):
+        for args in ([], ["a", "1", "extra"], ["cousins-framework:ci", "180MB"],
+                     ["cousins-framework:ci", ""]):
+            with self.subTest(args=args):
+                r = self.size(*args)
+                self.assertEqual(r.returncode, 2)
+                self.assertIn("usage", r.stderr)
+
+    def test_an_image_that_cannot_be_saved_is_never_under_budget(self):
+        # Without pipefail, gzip of an empty stream is 20 bytes: a failed
+        # save must not read as a tiny image.
+        for env in ({"FAKE_MISSING": "1"}, {"FAKE_SAVE_FAIL": "1"}):
+            with self.subTest(env=env):
+                r = self.size("cousins-framework:ci", **env)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertNotIn("compressed:", r.stdout)
+
+    def test_it_is_an_executable_posix_sh_script(self):
+        text = _SIZE.read_text()
+        self.assertTrue(text.startswith("#!/bin/sh\n"))
+        self.assertTrue(os.access(_SIZE, os.X_OK))
+        self.assertIn("gzip -6", text)
+        for bashism in ("[[ ", "function ", "pipefail", "$'", "<<<", "local "):
+            self.assertFalse(bashism in text, "bashism %r" % bashism)
+
+
+class TestImageWorkflow(unittest.TestCase):
+    def setUp(self):
+        self.text = _WORKFLOW.read_text()
+        self.flat = " ".join(self.text.split())
+
+    def test_it_runs_on_every_push_and_pull_request(self):
+        self.assertIn("on:\n  push:\n  pull_request:\n", self.text)
+
+    def test_it_builds_the_image_from_the_checkout(self):
+        self.assertIn('docker build -t "$IMAGE" .', self.flat)
+
+    def test_the_contract_suite_runs_inside_the_image_with_tests_mounted_read_only(self):
+        self.assertIn('docker run --rm -v "$PWD/tests:/opt/framework/tests:ro"'
+                      ' -w /opt/framework "$IMAGE"'
+                      " python -m unittest discover -s tests/runner/contract -t .",
+                      self.flat)
+
+    def test_the_image_tests_run_on_the_host_against_that_image(self):
+        self.assertIn('COUSIN_DOCKER: "1"', self.text)
+        self.assertIn("COUSIN_DOCKER_IMAGE: ${{ env.IMAGE }}", self.text)
+        self.assertIn("python -m unittest tests.test_docker_files -v", self.flat)
+
+    def test_the_size_budget_is_checked_last(self):
+        self.assertIn('sh docker/image-size.sh "$IMAGE" 180000000', self.flat)
+        steps = [self.flat.index(s) for s in (
+            "docker build", "tests/runner/contract", "tests.test_docker_files",
+            "docker/image-size.sh")]
+        self.assertEqual(steps, sorted(steps))
+
+    def test_ascii_and_no_home_path(self):
+        self.text.encode("ascii")
+        self.assertNotIn("/home/", self.text)
 
 
 if __name__ == "__main__":

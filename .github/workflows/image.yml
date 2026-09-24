@@ -1,0 +1,35 @@
+# The image job: build the image from this checkout, run the runner
+# contract suite inside it (tests/ is never in the image, so it is
+# mounted read-only for the run), run the opt-in image and compose tests
+# on the runner host against that image, then hold the compressed size
+# to its budget (180 MB, phase 0 finding 6).
+name: image
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: cousins-framework:ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t "$IMAGE" .
+      - name: The contract suite inside the image
+        run: >-
+          docker run --rm -v "$PWD/tests:/opt/framework/tests:ro"
+          -w /opt/framework "$IMAGE"
+          python -m unittest discover -s tests/runner/contract -t .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: The image and compose tests, on the host
+        env:
+          COUSIN_DOCKER: "1"
+          COUSIN_DOCKER_IMAGE: ${{ env.IMAGE }}
+        run: python -m unittest tests.test_docker_files -v
+      - name: The compressed size is within budget
+        run: sh docker/image-size.sh "$IMAGE" 180000000

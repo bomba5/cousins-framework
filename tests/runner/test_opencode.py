@@ -748,16 +748,35 @@ class TestTurns(OpencodeCase):
         self.assertEqual((self.outcome(r, a), self.outcome(r, b)), ("delivered", "delivered"))
         self.assertEqual(r.turn.active, False)
 
-    def test_a_peer_message_mid_turn_waits_for_its_own_turn(self):
+    def test_a_peer_message_mid_turn_is_folded_into_the_run(self):
+        """#118: a peer folds as an operator does, its thread in the header."""
+        r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))
+        a = r.enqueue(_op("first"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        peer = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
+        text = self.prompts()[1]["body"]["parts"][0]["text"]
+        self.assertTrue(text.startswith("[peer:testa] chat from Testa"), text)
+        self.assertTrue(_wait(lambda: self.settled(r, peer) is not None, 8))
+        time.sleep(0.3)
+        results = self.payloads(r, "result")
+        self.assertEqual(len(results), 1, "one idle closes both (R14')")
+        self.assertEqual(sorted(results[0]["inbox_ids"]), sorted([a.inbox_id, peer.inbox_id]))
+        self.assertEqual((self.outcome(r, a), self.outcome(r, peer)), ("delivered", "delivered"))
+
+    def test_meeting_loop_and_schedule_rows_mid_turn_wait_for_their_own_turns(self):
         r = self.started(self.runner([[("SLOW", 0.8)]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
-        peer = r.enqueue(Item("peer:testa", "chat", "from a peer", sender="Testa"))
+        # each its own turn, in priority order: meeting, schedule, loop
+        waiting = [r.enqueue(Item("meeting:7", "meeting", "your turn", sender="")),
+                   r.enqueue(Item("schedule", "schedule", "timer", sender="")),
+                   r.enqueue(Item("loop:heartbeat", "loop", "beat", sender=""))]
         time.sleep(0.4)
         self.assertEqual(len(self.prompts()), 1, "held, not sent into the busy run")
-        self.assertTrue(_wait(lambda: len(self.payloads(r, "result")) == 2, 8))
+        self.assertTrue(_wait(lambda: len(self.payloads(r, "result")) == 4, 10))
         self.assertEqual([x["inbox_ids"] for x in self.payloads(r, "result")],
-                         [[a.inbox_id], [peer.inbox_id]])
+                         [[a.inbox_id]] + [[w.inbox_id] for w in waiting])
 
     def test_an_interrupt_aborts_and_requeues_what_the_abort_dropped(self):
         """R14': an abort drops the prompt queued behind the running one;

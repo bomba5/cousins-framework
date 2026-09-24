@@ -172,6 +172,32 @@ class TestReply(HermeticCase):
         self.assertFalse(err, text)
         self.assertEqual(self._rows(ctx.home)[0][0], "sam")
 
+    def test_with_a_peer_folded_an_unnamed_reply_is_refused_never_guessed(self):
+        """#118: operator:priya with peer:testa folded in is two live
+        threads. A bare reply is refused (a model answering the peer must
+        never land on the operator's surface); the refusal names the
+        thread= for the operator and send for the peer. Named, the peer
+        thread is refused too; named, the operator's goes through."""
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
+        turn.add({"id": 2, "thread_id": "peer:testa", "sender": "Testa"})
+        ctx = _ctx(self, turn)
+        text, err = tools.call(ctx, "reply", {"text": "hi"})
+        self.assertTrue(err, text)
+        self.assertIn("thread=operator:priya", text)
+        self.assertIn("peer:testa", text); self.assertIn("send", text)
+        text, err = tools.call(ctx, "reply", {"text": "hi", "thread": "peer:testa"})
+        self.assertTrue(err); self.assertIn("send", text)
+        self.assertEqual(self._rows(ctx.home), [])
+        text, err = tools.call(ctx, "reply", {"text": "hi", "thread": "operator:priya"})
+        self.assertFalse(err, text)
+        self.assertEqual([(r[0], r[2]) for r in self._rows(ctx.home)], [("priya", "hi")])
+
+    def test_a_peer_turn_with_another_peer_folded_still_refuses_an_unnamed_reply(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "peer:testa", "sender": "Testa"})
+        turn.add({"id": 2, "thread_id": "peer:sam", "sender": "Sam"})
+        text, err = tools.call(_ctx(self, turn), "reply", {"text": "hi"})
+        self.assertTrue(err); self.assertIn("send", text)
+
     def test_reply_outside_a_turn_is_refused(self):
         ctx = _ctx(self)
         text, err = tools.call(ctx, "reply", {"text": "hi"})

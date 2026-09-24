@@ -34,6 +34,33 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   for a tracked shell command, with `cousin-job start shell` through Bash
   named only as the fallback when the tool is missing; `examples/wren`
   regenerated to match.
+- A peer's message (another cousin, thread `peer:<slug>`) that arrives while
+  a turn runs is folded into that turn, as an operator's or a person's is,
+  on the `sdk`, `opencode` and `fake` runners (#118). It used to wait for the
+  turn to end, and a turn has no length bound: a coordinator's 13 messages,
+  two of them STOP, sat queued behind one 60-minute turn while the peer
+  duplicated finished work. Meeting, loop and schedule rows still wait for a
+  turn of their own, and a peer already queued when one of those turns
+  starts folds into it. The claim order at a turn boundary is unchanged.
+  `reply` still never answers a peer thread, and with a peer folded into an
+  operator's turn a `reply` that names no thread is refused, never guessed:
+  the refusal names the operator's `thread=` and the peer's `send`. The
+  contract item `peer_waits` is now `loop_waits`, and `midturn_fold` covers a
+  peer message too.
+- On the `sdk` runner a mid-turn write (a folded message, an interrupt row)
+  no longer stops the turn's reader. It used to be awaited on the path that
+  reads the CLI's output: once that output was full and unread, the CLI
+  stopped reading its input, the write blocked, the reader waiting on it
+  never drained the output, and hook replies queued behind the transport's
+  write lock timed out, the 18-39 minute stalls (#104). Each turn now has one
+  writer task that takes those writes in order (a fold taken before an
+  interrupt is written before it) while the reader keeps reading. A folded
+  row still counts as delivered only when the CLI echoes it; a write that
+  wrote nothing still requeues its row and fails the turn; a write never
+  begun when the turn ends goes back to the queue; an interrupt whose control
+  write the turn's end cut off is closed delivered ("written as the turn
+  ended"), never left claimed; a result counts as interrupted only when the
+  interrupt reached the client; no writer outlives its turn.
 
 ## 1.21.0 - 2026-09-24
 

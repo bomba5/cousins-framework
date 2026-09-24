@@ -18,6 +18,40 @@ stream (`data/stream/`), which the console's pane and `cousin-watch` read. The
 framework's tools (`reply`, `handoff`, memory, jobs, ...) run inside the
 runner's process against the live turn, whatever the kind.
 
+## What folds into a running turn
+
+A row that arrives while a turn runs is either folded into that turn (written
+into it at once and closed by the same result) or kept for a turn of its own.
+The rule is `base.FOLDED_KINDS`, the same on every runner that folds (`sdk`,
+`opencode`, `fake`):
+
+| row | while a turn runs |
+|---|---|
+| chat on an `operator:`, `person:` or `peer:` thread | folded into the running turn |
+| a meeting line | its own turn: it is the cousin's turn in a round, answered once |
+| a loop or a schedule | its own turn: the cousin's own timers, nobody waits on them |
+| a flip, an interrupt, a reaction, a hook or a boot row | never folded: a flip is the handoff turn, an interrupt has its own path |
+
+A peer folds like an operator: a turn has no length bound, and a peer's
+message (a coordinator's STOP) that waited for the turn to end would arrive
+after the work it meant to stop. The model knows who it answers from the
+envelope header, `[peer:<slug>] chat from <Name> at ...`. `reply` never
+answers a peer thread: named, it is refused with the hint to use `send`. A
+peer folded into an operator's turn makes two live threads, and a `reply`
+that names no thread is refused, never guessed; the refusal says which thread
+takes `thread=` and which peer takes `send`. Folding changes nothing in the
+claim order at a turn boundary: operator and person chat first, then a
+meeting, then a peer. A peer row already queued when a meeting, loop or
+memory-proposal turn starts folds into that turn, as operator and person rows
+do.
+
+On the `sdk` lane a fold is never written by the reader of the turn: each
+turn has one writer task, and the fold's write (and an interrupt row's
+control write) is handed to it in order while the reader goes on reading the
+CLI's output. A reader that waited on the write could deadlock the turn: a
+CLI whose output is full and unread stops reading its input. The turn's first
+row is still written before anything is read, while the CLI is idle.
+
 Every kind implements one protocol, `cousin_lib/runner/base.py` `Runner`
 (`start`, `stop`, `state`, `enqueue`, `interrupt`, `rollover`, `events`,
 `unsupported`), and one contract suite, `tests/runner/contract/suite.py`,
@@ -96,18 +130,18 @@ so an IMPLEMENTED or PLUGIN cell is one the suite enforces.
 | item | what the suite proves | `sdk` | `fake` | `opencode` |
 |---|---|---|---|---|
 | `enqueue_receipt` | `enqueue` answers a `Receipt` with an inbox id, outcome `queued` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `priority_order` | queued rows run in priority order: operator, then peer, then loop | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `priority_order` | queued rows run in priority order: operator, then schedule, then loop | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `consume_after_start` | a row put while the runner is stopped runs after `start()` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `interrupt_ends_turn` | `interrupt()` ends the running turn; the runner is idle again | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `turn_events` | every turn emits `turn_start`, then `tool`, then `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `unsupported_list` | `unsupported()` names contract items only | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `midturn_fold` | an operator message put mid-turn is closed by the same `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `midturn_fold` | an operator or peer message put mid-turn is closed by the same `result` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `outcome_delivered` | a finished turn closes its row `delivered` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `outcome_failed` | a failed turn closes its row `failed`, the result an error | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `outcome_interrupted` | an interrupted turn's row is `delivered` (the model had it) | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `failure_recovers` | after a failure (`errored`, then `idle`) the next row runs | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `stop_ends_turn` | `stop()` during a turn ends it within its timeout | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
-| `peer_waits` | a peer message put mid-turn waits for a turn of its own | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
+| `loop_waits` | a loop row put mid-turn waits for a turn of its own | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `state_events` | every state transition is a `state` event, in order | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `events_after` | `events(after=n)` resumes exactly after event `n` | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |
 | `interrupt_idle_false` | `interrupt()` with no turn running answers False | IMPLEMENTED | IMPLEMENTED | IMPLEMENTED |

@@ -29,7 +29,7 @@ from pathlib import Path
 
 from cousin_lib import mcp_server
 from cousin_lib.delivery import parse_thread, thread_for_chat
-from cousin_lib.runner.base import RunnerError
+from cousin_lib.runner.base import SURFACE_KINDS, RunnerError
 
 
 @dataclass
@@ -491,7 +491,10 @@ def _pick_thread(ctx, thread):
     able to reach its operator, as `cousin-reply --user` can; the live
     thread's spelling is used when one matches. The live
     turn decides only the implicit default: one live thread, that one;
-    two, refused with the list; none, refused."""
+    two, refused with the list, never guessed; none, refused. A peer
+    folded into an operator's turn (#118) is a second live thread: a bare
+    reply is refused, never sent to the operator's surface, and the
+    refusal says which thread takes thread= and which takes send."""
     turn = ctx.turn
     if turn is None:
         active, live = False, ()
@@ -514,9 +517,26 @@ def _pick_thread(ctx, thread):
         raise ValueError("no turn is live; name the thread (thread=operator:<name>"
                          " or person:<name>)")
     if len(live) > 1:
-        raise ValueError("%d threads are live in this turn; name one with thread: %s"
-                         % (len(live), ", ".join(live)))
+        raise ValueError(_two_live(live))
     return live[0]
+
+
+def _two_live(live):
+    """The refusal of a bare reply with several live threads: each
+    surface thread with its thread=, each peer with its send."""
+    ways = []
+    for t in live:
+        try:
+            kind, key = parse_thread(t)
+        except Exception:  # noqa: BLE001 - a malformed live id is named as it is
+            kind, key = None, t
+        if kind in SURFACE_KINDS:
+            ways.append("reply to %s with thread=%s" % (t, t))
+        elif kind == "peer":
+            ways.append("answer %s with send (to=%s)" % (t, key))
+        else:
+            ways.append("%s is not a chat thread" % t)
+    return "%d live threads, reply never guesses: %s" % (len(live), "; ".join(ways))
 
 
 def _check_attachment(kind, value):

@@ -31,7 +31,7 @@ class TestContractItems(HermeticCase):
             def make_runner(self, home, *, slow=False, fail_first=False):
                 return Declares(home, turn_seconds=3.0 if slow else 0.0)
 
-        fold = "test_a_midturn_operator_message_is_closed_by_the_same_result"
+        fold = "test_a_midturn_operator_or_peer_message_is_closed_by_the_same_result"
         other = "test_enqueue_returns_a_receipt"
         outcome = unittest.TestResult()
         unittest.TestSuite([Case(fold), Case(other)]).run(outcome)

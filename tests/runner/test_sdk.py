@@ -1016,6 +1016,203 @@ class TestSdkRunner(HermeticCase):
         self.assertFalse(r.turn.active)
 
 
+class BackpressureClient(ScriptedClient):
+    """The bundled CLI once its stdout is full (#104, measured on SDK
+    0.2.159): while more than `cap` messages sit unread (the SDK's
+    100-message buffer, then the pipe), the CLI stops reading stdin, so a
+    write (a query, or a control request such as interrupt) does not
+    return until the reader drains below `cap`. A reader that waits on
+    that write never drains it. `give_up_s` bounds the wait so a test of
+    the old code fails on its own timeout instead of hanging. `writes`
+    is the order writes reached the CLI."""
+
+    def __init__(self, options, scripts, cap=100, give_up_s=15.0, **kw):
+        super().__init__(options, scripts, **kw)
+        self.cap, self.give_up_s = cap, give_up_s
+        self.writes = []
+        self.blocked = 0          # writes that had to wait for the reader
+
+    async def _stdin_intake(self):
+        deadline = time.monotonic() + self.give_up_s
+        if len(self.stream) > self.cap:
+            self.blocked += 1
+        while len(self.stream) > self.cap and not self.ended and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+
+    async def query(self, prompt, session_id="default"):
+        if not isinstance(prompt, str):
+            taken = [m async for m in prompt]      # the message leaves the runner now
+
+            async def again():
+                for m in taken:
+                    yield m
+            prompt = again()
+        await self._stdin_intake()
+        await super().query(prompt, session_id)
+        self.writes.append("query")
+
+    async def interrupt(self):
+        await self._stdin_intake()
+        await super().interrupt()
+        self.writes.append("interrupt")
+
+
+def _long_turn(n=150):
+    """A turn that streams `n` messages after a PAUSE: a fold made during
+    the PAUSE meets a full stdout."""
+    return [init_msg(), assistant(tool="Bash"), "PAUSE"] + \
+        [assistant(text="line %d" % i) for i in range(n)] + [result()]
+
+
+class TestFoldWriteNeverBlocksTheReader(HermeticCase):
+    """#118 follow-up to #104: the fold's write must never be awaited on the
+    path that reads the CLI's output, or a full stdout deadlocks the turn
+    (the 18-39 min stalls)."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = temp_home(self)
+
+    def _runner(self, scripts):
+        made = {}
+
+        def factory(options):
+            made["client"] = BackpressureClient(options, scripts)
+            return made["client"]
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r, made
+
+    def test_a_fold_into_a_full_stdout_keeps_the_reader_reading(self):
+        r, made = self._runner([_long_turn()])
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "claimed"))
+        self.assertTrue(_wait(lambda: made["client"].blocked == 1))
+        made["client"].resume()
+        # the reader drains the stdout, the write goes through, its echo is read
+        self.assertTrue(_wait(lambda: _results(r), timeout=5.0),
+                        "the turn stalled: the fold's write blocked the reader")
+        res = _results(r)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(sorted(res[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
+        self.assertEqual(made["client"].writes, ["query", "query"])
+
+    def test_a_fold_write_that_wrote_nothing_fails_the_turn_and_requeues_the_row(self):
+        """As before the writer: a fold whose query() raised before a byte
+        was written goes back to the queue, and the turn fails."""
+        class Refuses(ScriptedClient):
+            refused = False
+
+            async def query(self, prompt, session_id="default"):
+                if self.queries and not Refuses.refused:     # the fold, once
+                    Refuses.refused = True
+                    raise CLIConnectionError("ProcessTransport is not ready for writing")
+                await super().query(prompt, session_id)
+        made = {}
+
+        def factory(options):
+            made.setdefault("clients", []).append(Refuses(options, [
+                [init_msg(), assistant(tool="Bash"), "PAUSE", assistant(text="x"), result()]]))
+            return made["clients"][-1]
+        r = SdkRunner(self.home, client_factory=factory, drain_timeout_s=1.0)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: made.get("clients") and made["clients"][0].paused))
+        b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: [x for x in _results(r) if x["is_error"]]))
+        self.assertTrue(any("not ready for writing" in e for e in _errors(r)))
+        failed = [x for x in _results(r) if x["is_error"]][0]
+        self.assertEqual((failed["inbox_ids"], failed["requeued"]), ([a.inbox_id], [b.inbox_id]))
+        self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
+        made["clients"][0].resume()      # the drain may still be reading it
+        # requeued, never failed: a later turn runs it
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
+
+    def test_an_interrupt_row_behind_a_blocked_fold_is_written_after_it(self):
+        """One writer, in order: the fold that was taken first reaches the
+        CLI first, then the interrupt; the reader never waits on either."""
+        r, made = self._runner([_long_turn()])
+        r.start()
+        a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        b = r.enqueue(Item("operator:priya", "chat", "second", sender="Priya"))
+        self.assertTrue(_wait(lambda: made["client"].blocked == 1))
+        stop = r.enqueue(Item("system", "interrupt", "stop", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "claimed"))
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: _results(r), timeout=5.0),
+                        "the turn stalled: a write blocked the reader")
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(stop.inbox_id)["outcome"], "delivered")
+        self.assertEqual(made["client"].writes, ["query", "query", "interrupt"])
+        res = _results(r)
+        self.assertEqual(sorted(res[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
+        self.assertTrue(res[0]["interrupted"])
+
+
+class TestTurnWriter(HermeticCase):
+    """The writer itself: FIFO, one task, a clean close."""
+
+    def test_writes_run_in_order_and_close_drops_the_rest_with_no_task_left(self):
+        from cousin_lib.runner.base import RunnerError
+        from cousin_lib.runner.sdk import _Job, _Writer
+        order, dropped, reports = [], [], []
+
+        async def go():
+            gate = asyncio.Event()
+            w = _Writer(reports.append)
+
+            def job(name, wait=False):
+                async def fn():
+                    order.append(name)
+                    if wait:
+                        await gate.wait()
+                    return name
+                return _Job(fn, on_dropped=lambda: dropped.append(name))
+            first = w.submit(job("a"))
+            w.submit(job("b", wait=True))       # blocks: c and d wait behind it
+            w.submit(job("c")); w.submit(job("d"))
+            self.assertEqual(await first.future, "a")
+            await asyncio.sleep(0.05)
+            self.assertEqual(order, ["a", "b"])
+            await w.close()
+            self.assertTrue(w._task.done())
+            self.assertEqual(dropped, ["c", "d"])
+            with self.assertRaises(RunnerError):
+                w.submit(job("e"))
+            others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            self.assertEqual(others, [])
+        asyncio.run(go())
+        self.assertEqual(reports, [])
+
+    def test_a_raising_handler_is_reported_and_the_writer_goes_on(self):
+        from cousin_lib.runner.sdk import _Job, _Writer
+        reports, done = [], []
+
+        async def go():
+            w = _Writer(reports.append)
+
+            async def one():
+                return 1
+
+            def bad(_value):
+                raise ValueError("inbox gone")
+            w.submit(_Job(one, on_ok=bad))
+            last = w.submit(_Job(one, on_ok=done.append))
+            await last.future
+            await asyncio.sleep(0)
+            await w.close()
+        asyncio.run(go())
+        self.assertEqual(done, [1])
+        self.assertEqual(reports, ["writer: ValueError: inbox gone"])
+
+
 class TestMirrorError(HermeticCase):
     def test_a_mirror_error_is_an_error_event_and_the_turn_still_lands(self):
         from claude_agent_sdk.types import MirrorErrorMessage

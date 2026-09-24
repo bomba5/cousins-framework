@@ -42,6 +42,13 @@ peer folded into an operator's turn leaves the operator's thread as the
 default. Folding changes nothing in the claim order at a turn boundary:
 operator and person chat first, then a meeting, then a peer.
 
+On the `sdk` lane a fold is never written by the reader of the turn: each
+turn has one writer task, and the fold's write (and an interrupt row's
+control write) is handed to it in order while the reader goes on reading the
+CLI's output. A reader that waited on the write could deadlock the turn: a
+CLI whose output is full and unread stops reading its input. The turn's first
+row is still written before anything is read, while the CLI is idle.
+
 Every kind implements one protocol, `cousin_lib/runner/base.py` `Runner`
 (`start`, `stop`, `state`, `enqueue`, `interrupt`, `rollover`, `events`,
 `unsupported`), and one contract suite, `tests/runner/contract/suite.py`,

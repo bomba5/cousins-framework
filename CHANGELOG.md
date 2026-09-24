@@ -17,6 +17,18 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   turn, an unnamed `reply` goes to the operator's thread (a peer thread is no
   candidate). The contract item `peer_waits` is now `loop_waits`, and
   `midturn_fold` covers a peer message too.
+- On the `sdk` runner a mid-turn write (a folded message, an interrupt row)
+  no longer stops the turn's reader. It used to be awaited on the path that
+  reads the CLI's output: once that output was full and unread, the CLI
+  stopped reading its input, the write blocked, the reader waiting on it
+  never drained the output, and hook replies queued behind the transport's
+  write lock timed out, the 18-39 minute stalls (#104). Each turn now has one
+  writer task that takes those writes in order (a fold taken before an
+  interrupt is written before it) while the reader keeps reading. A folded
+  row still counts as delivered only when the CLI echoes it; a write that
+  wrote nothing still requeues its row and fails the turn; a write never
+  begun when the turn ends goes back to the queue; no writer outlives its
+  turn.
 
 ## 1.21.0 - 2026-09-24
 

@@ -22,6 +22,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - `docs/reference/hive-api.md`: a tell-home is shown under the name the
   operator minted the node's token with, and the node's `[tell-home: ...]`
   goes to `POST /hive/tell-home` when `TELL_HOME=1`.
+- A runner cousin gets a chat image over 3.7 MB (4.9 MB once encoded,
+  under the API's 5 MB cap) as a text block with its full path for the
+  model's Read tool, which downsizes it, instead of an inline image the
+  API refused (a phone photo failed its turn).
+- A runner cousin's own tools (memory, send, reply, job, schedule,
+  meeting, handoff) are always loaded: the CLI had deferred them behind
+  its tool search, so a cousin had to search before its first call.
 
 ## 1.18.0 - 2026-09-24
 

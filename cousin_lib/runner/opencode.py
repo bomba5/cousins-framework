@@ -945,7 +945,7 @@ class OpencodeRunner:
         saved = on_file.get("session_id") if on_file.get("lane") == LANE else None
         if saved:
             try:
-                self._client.messages(saved)
+                self._client.session(saved)      # held or not; never the whole history
             except OpencodeError as err:
                 self.stream.append("system", {"subtype": "resume_failed", "session_id": saved,
                                               "error": str(err)})

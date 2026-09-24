@@ -373,6 +373,11 @@ class OpencodeClient:
     def abort(self, session_id):
         return self.request("POST", "/session/%s/abort" % quote(session_id, safe=""))
 
+    def session(self, session_id):
+        """One session's record (GET /session/{id}); a 404 when opencode no
+        longer holds it. The resume probe: never the whole history."""
+        return self.request("GET", "/session/%s" % quote(session_id, safe=""))
+
     def messages(self, session_id):
         return self.request("GET", "/session/%s/message" % quote(session_id, safe=""))
 

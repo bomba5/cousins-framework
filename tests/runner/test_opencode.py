@@ -811,6 +811,10 @@ class TestSession(OpencodeCase):
         self.assertEqual([q for q in shared.fake.requests if q["path"] == "/session"
                           and q["method"] == "POST"].__len__(), 1)
         self.assertEqual(self.prompts(), [], "a resumed session gets no digest")
+        # review minor: the probe is GET /session/{id}, never the whole history
+        probes = [q["path"] for q in shared.fake.requests if q["method"] == "GET"
+                  and q["path"].startswith("/session/%s" % sid)]
+        self.assertEqual(probes, ["/session/%s" % sid])
 
     def test_a_session_on_file_that_is_gone_or_not_opencodes_starts_fresh(self):
         home = self.home()

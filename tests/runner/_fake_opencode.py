@@ -10,6 +10,7 @@ queue and abort measurements recorded with Task 2):
   POST /session                  a Session, `id` "ses_..."; session.created
   POST /session/{id}/prompt_async  204; the turn runs on a thread, on SSE
   POST /session/{id}/abort       true (also when idle or unknown)
+  GET  /session/{id}             the session record (404 when unknown)
   GET  /session/{id}/message     [{info, parts}]
   GET  /event                    SSE `data: {...}\\n\\n`, server.connected
                                  first, server.heartbeat every `heartbeat` s
@@ -99,6 +100,7 @@ _ROUTES = [
     ("POST", re.compile(r"^/session$"), "create"),
     ("POST", re.compile(r"^/session/([^/]+)/prompt_async$"), "prompt"),
     ("POST", re.compile(r"^/session/([^/]+)/abort$"), "abort"),
+    ("GET", re.compile(r"^/session/([^/]+)$"), "session"),
     ("GET", re.compile(r"^/session/([^/]+)/message$"), "messages"),
     ("GET", re.compile(r"^/event$"), "event"),
     ("POST", re.compile(r"^/permission/([^/]+)/reply$"), "reply"),
@@ -635,6 +637,14 @@ class FakeOpencode:
             elif state is not None:
                 self._idle(sid)
         return 200, True
+
+    def _route_session(self, req, match, body):
+        sid = match.group(1)
+        with self._lock:
+            if sid not in self._sessions:
+                return 404, {"name": "NotFoundError",
+                             "data": {"message": "Session not found: %s" % sid}}
+            return 200, _copy(self._sessions[sid].info)
 
     def _route_messages(self, req, match, body):
         sid = match.group(1)

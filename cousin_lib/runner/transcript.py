@@ -22,12 +22,12 @@ The shapes are the ones measured on Claude Code 2.1.281 in a tmux pane
 A reader resumes from a byte offset and never passes a partial last line,
 so a torn write (a SIGKILL mid-line) is read once it is complete. A torn
 line the CLI then appends to merges with the next entry into one line
-that does not parse: the complete entry at its end is recovered and
-classified as any other (`recover_tail`); the torn head was never an entry
-and is dropped. Only when no tail parses does `turn_nonce` look for a KNOWN
-nonce in the raw text, and only inside a user entry that holds no tool
-result (R7, P11-9), so a row is neither typed twice nor taken by a tool's
-output."""
+that does not parse: every complete entry at its end is recovered and
+classified as any other (`recover_line`; two tears in a row can leave
+more than one), and the torn head, never an entry, is kept as an `other`
+entry marked `fragments_dropped`. `turn_nonce` looks for a KNOWN nonce in
+such raw text only inside a user entry that holds no tool result (R7,
+P11-9), so a row is neither typed twice nor taken by a tool's output."""
 import json
 import re
 from dataclasses import dataclass, field
@@ -112,24 +112,48 @@ def classify(obj, offset, end):
     return Entry(offset, end, "other", prompt_id=prompt_id, raw=obj)
 
 
-def recover_tail(text):
-    """The complete entry a torn line ends with: the object starting at a
-    '{' (tried from the end) that parses to exactly the end of the line and
-    is a transcript entry (a dict with a `type`); None when there is none."""
+BLOCK_TYPES = ("text", "tool_use", "tool_result", "thinking", "redacted_thinking", "image")
+
+
+def _is_entry(obj):
+    """A transcript entry, not a content block embedded in a torn head."""
+    return isinstance(obj, dict) and isinstance(obj.get("type"), str) and obj["type"] not in BLOCK_TYPES
+
+
+def recover_tail(text, end=None):
+    """(entry, start): the complete entry that ends exactly at `end` (the
+    line's end by default): the object starting at a '{', tried from the
+    end, that parses to exactly there and is a transcript entry; (None,
+    None) when there is none. Start 0 is never tried: that is the whole
+    line, which did not parse."""
     decoder = json.JSONDecoder()
-    end = len(text.rstrip())
+    end = len(text.rstrip()) if end is None else end
     pos = end
     for _ in range(TAIL_TRIES):
         pos = text.rfind("{", 0, pos)
-        if pos <= 0:            # 0 is the whole line, which did not parse
-            return None
+        if pos <= 0:
+            return None, None
         try:
             obj, stop = decoder.raw_decode(text, pos)
         except ValueError:
             continue
-        if stop == end and isinstance(obj, dict) and isinstance(obj.get("type"), str):
-            return obj
-    return None
+        if stop == end and _is_entry(obj):
+            return obj, pos
+    return None, None
+
+
+def recover_line(text):
+    """(entries, head): every complete entry a merged line ends with, in
+    order (two tears in a row leave more than one), and the head before
+    them that is no complete entry ("" when none is left)."""
+    found, end = [], len(text.rstrip())
+    while True:
+        obj, pos = recover_tail(text, end)
+        if obj is None:
+            break
+        found.insert(0, obj)
+        end = pos
+    return found, text[:end]
 
 
 def raw_nonces(entry, known):
@@ -184,11 +208,16 @@ def read_from(path, offset):
         try:
             obj = json.loads(text)
         except ValueError:
-            tail = recover_tail(text)
-            if tail is None:
+            found, head = recover_line(text)
+            if not found:
                 entries.append(Entry(start, end, "other", raw={"_unparsed": text}))
-            else:
-                entries.append(classify(tail, start, end))   # the torn head is dropped
+                pos = nl + 1
+                continue
+            if head.strip():
+                # the torn fragments, kept for the nonce fallback (user-only), never silently lost
+                entries.append(Entry(start, end, "other", raw={"_unparsed": head,
+                                                               "fragments_dropped": True}))
+            entries.extend(classify(obj, start, end) for obj in found)
         else:
             entries.append(classify(obj, start, end))
         pos = nl + 1

@@ -168,22 +168,46 @@ class TestTornLines(unittest.TestCase):
         with self.path.open("a") as fh:
             fh.write(json.dumps(typed("[inbox:%s] hello" % NONCE)) + "\n")
         entries, _ = tr.read_from(self.path, 0)
-        self.assertEqual(kinds(entries), ["turn_start"])
-        self.assertEqual(tr.turn_nonce(entries[0], {NONCE}), NONCE)
-        self.assertIsNone(tr.turn_nonce(entries[0], {"0" * 12}), "only a known nonce counts")
+        self.assertEqual(kinds(entries), ["other", "turn_start"])
+        self.assertEqual(tr.turn_nonce(entries[1], {NONCE}), NONCE)
+        self.assertIsNone(tr.turn_nonce(entries[1], {"0" * 12}), "only a known nonce counts")
 
     def test_a_torn_head_before_a_complete_turn_start_is_recovered_and_classified(self):
         self.path.write_text('{"type": "assistant", "mess' + json.dumps(typed("[inbox:%s] hi" % NONCE)) + "\n")
         entries, _ = tr.read_from(self.path, 0)
-        self.assertEqual([(e.kind, e.nonce) for e in entries], [("turn_start", NONCE)])
+        self.assertEqual([(e.kind, e.nonce) for e in entries], [("other", None), ("turn_start", NONCE)])
+        self.assertTrue(entries[0].raw["fragments_dropped"])
 
     def test_a_torn_head_before_a_tool_result_opening_with_the_nonce_is_no_turn_start(self):
         # a tmux cousin reading this repo's fixtures gets a tool result that opens with a nonce
         self.path.write_text('{"type": "assistant", "mess'
                              + json.dumps(tool_result("[inbox:%s] from a fixture" % NONCE)) + "\n")
         entries, _ = tr.read_from(self.path, 0)
-        self.assertEqual([e.kind for e in entries], ["tool_result"])
-        self.assertIsNone(tr.turn_nonce(entries[0], {NONCE}))
+        self.assertEqual([e.kind for e in entries], ["other", "tool_result"])
+        self.assertEqual([tr.turn_nonce(e, {NONCE}) for e in entries], [None, None])
+
+    def test_two_tears_in_a_row_keep_every_complete_entry(self):
+        middle = typed("[inbox:%s] the middle" % NONCE, prompt_id="p2")
+        self.path.write_text('{"type": "assistant", "mess' + json.dumps(middle)
+                             + json.dumps(turn_duration()) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual([(e.kind, e.nonce) for e in entries],
+                         [("other", None), ("turn_start", NONCE), ("turn_end", None)])
+        self.assertTrue(entries[0].raw["fragments_dropped"])
+
+    def test_a_torn_middle_is_kept_as_fragments_and_its_nonce_still_found(self):
+        middle = json.dumps(typed("[inbox:%s] torn too" % NONCE, prompt_id="p2"))[:-7]
+        self.path.write_text('{"type": "assistant", "mess' + middle + json.dumps(turn_duration()) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual([e.kind for e in entries], ["other", "turn_end"])
+        self.assertTrue(entries[0].raw["fragments_dropped"])
+        self.assertEqual(tr.turn_nonce(entries[0], {NONCE}), NONCE)
+
+    def test_a_content_block_ending_a_torn_head_is_no_entry(self):
+        head = '{"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}'
+        self.path.write_text(head + json.dumps(turn_duration()) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual([e.kind for e in entries], ["other", "turn_end"])
 
     def test_the_raw_fallback_needs_a_user_entry_without_a_tool_result(self):
         # neither tail parses (the complete entry is itself cut): only the raw search is left

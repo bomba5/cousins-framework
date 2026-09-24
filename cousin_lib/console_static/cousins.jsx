@@ -184,6 +184,12 @@ function CousinCard({ c, onClick, onAct, onChat }) {
           needs attention · the pane shows "{c.attention}"
         </div>
       )}
+      {c.supervisor && c.supervisor.state === "failing" && (
+        <div className="card-attention" data-runner-failing
+             title="the supervisor left the runner down: start it again once the reason is fixed">
+          runner failing · {c.supervisor.reason || "left down by the supervisor"}
+        </div>
+      )}
       {c.loginRequired && (
         <div className="card-attention" data-login-required
              title={c.loginRequired.since ? `data/login-required.json since ${c.loginRequired.since}` : "data/login-required.json"}>

@@ -1701,6 +1701,10 @@ function fleetRunnerKind(c) {
 // waiting on a person; "warn" is worth a look but not blocked. A stopped
 // cousin is never flagged: stopping is the operator's decision.
 function fleetAttention(c) {
+  // a runner the supervisor left down `failing` was not stopped by anyone:
+  // it waits on a person, with the supervisor's reason
+  if (c && c.supervisor && c.supervisor.state === "failing" && !c.remote)
+    return { level: "needs", why: "failing: " + (c.supervisor.reason || "left down by the supervisor") };
   if (!c || c.status !== "running") return null;
   if (c.loginRequired && !c.remote) return { level: "needs", why: fleetLoginWhy(c.loginRequired) };
   if (c.attention) return { level: "needs", why: "the pane shows \"" + c.attention + "\"" };

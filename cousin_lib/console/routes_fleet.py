@@ -241,15 +241,16 @@ _UNREAD = object()
 
 
 def supervisor_state(snap, slug):
-    """The supervisor's view of a cousin's runner: {"state": ...} from its
-    snapshot (run/supervisor.json), or None when there is no live
+    """The supervisor's view of a cousin's runner: {"state", "reason"} from
+    its snapshot (run/supervisor.json), or None when there is no live
     snapshot or no `runner:<slug>` child in it. Unknown is null, never
-    "stopped" (R7)."""
+    "stopped" (R7). The reason says why a child is `failing` (a tmux
+    runner that gave up on its pane names what it saw)."""
     children = (snap or {}).get("children")
     row = children.get("runner:%s" % slug) if isinstance(children, dict) else None
     if not isinstance(row, dict) or not row.get("state"):
         return None
-    return {"state": row["state"]}
+    return {"state": row["state"], "reason": row.get("reason")}
 
 
 def lane_fields(home):

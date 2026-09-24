@@ -358,9 +358,22 @@ above. Each is stated, none is hidden, and none is a contract item except
   kind's start sweep requeues the claimed rows without reading the pane's
   transcript, and a row the pane had already taken can be delivered twice.
   `cousin-migrate --to sdk` stops held, which settles them first.
-- **The retry budget is per runner restart.** A pane that dies before it
-  has stayed up 20 s is a failed start, retried after 1 s, doubling to
-  60 s; after 5 failed starts in a row, or more than 5 pane losses within
-  10 minutes, the runner gives up: `errored`, a `pane_failing` event, exit 3.
-  The supervisor then restarts the runner, and each restart gets 5 more
-  starts, until the supervisor's own exit limit marks the cousin `failing`.
+- **A give-up holds for an hour, then the budget starts over.** A pane
+  that dies before it has stayed up 20 s is a failed start, retried after
+  1 s, doubling to 60 s; after 5 failed starts in a row, or more than 5 pane
+  losses within 10 minutes, the runner gives up: `errored`, a
+  `pane_failing` event, exit 2, which the supervisor leaves down as
+  `failing` with the runner's reason (the console shows it), never
+  restarted. The reason is kept in `data/run/tmux-giving-up.json`; a start
+  within the hour (a supervisor or container restart) exits 2 again at once
+  with no pane, and `cousin-supervisor start <slug>` or the console's start
+  clears it. A start after the hour drops it and gets 5 more starts.
+- **A pane whose pid was not read at its start has no second check.**
+  Two failed `has-session` calls settle a pane as lost only when its CLI's
+  pid is gone too; when tmux answered no pid right after the start
+  (`_pane_pid` None), that check is skipped and a tmux hiccup is taken as
+  a loss (the reopen then adopts the live pane).
+- **A live turn found again by that adopt has already closed its rows.**
+  The loss closed them `delivered`, cut by pane loss, before the adopt
+  showed the turn still running; the turn goes on and ends normally, and
+  the rows say "cut" although the model finished them.

@@ -162,6 +162,21 @@ process.stdout.write(JSON.stringify({
         # a stopped cousin still waits for its login; a remote row has no file
         self.assertEqual(got["waits"], ["a", "b", "c"])
 
+    def test_a_failing_runner_needs_you_and_says_why(self):
+        """Round 4: a runner the supervisor left down `failing` is not an
+        operator's stop: it asks for a person, with the supervisor's reason."""
+        got = self.run_node("""
+const rows = [
+  {slug: "a", status: "stopped", supervisor: {state: "failing",
+   reason: "the runner gave up on its pane: 5 starts in a row"}},
+  {slug: "b", status: "stopped", supervisor: {state: "stopped", reason: "stopped"}},
+  {slug: "c", status: "stopped", supervisor: null},
+];
+process.stdout.write(JSON.stringify(rows.map(r => fleetAttention(r))));""")
+        self.assertEqual(got[0]["level"], "needs")
+        self.assertIn("gave up on its pane", got[0]["why"])
+        self.assertEqual(got[1:], [None, None])
+
     def test_needs_you_first_then_warnings_then_running_then_stopped(self):
         got = self.run_node("""
 const rows = [

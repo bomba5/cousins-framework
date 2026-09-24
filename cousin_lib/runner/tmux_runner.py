@@ -70,6 +70,13 @@ POINTER_FILE = ("data", "run", "tmux-resume.md")      # R10: the hook's SessionS
 ORIGINS_FILE = ("data", "run", "tmux-context-origin.json")   # session id -> the block it was born with
 ORIGINS_KEPT = 32
 LAUNCH_EXIT = ("data", "run", "tmux-launch-exit.txt")   # tmux_launch's last refusal
+GIVING_UP = ("data", "run", "tmux-giving-up.json")      # a give-up the next start honours
+GIVE_UP_HOLD_S = 3600.0   # for this long, or until `cousin-supervisor start` clears it
+GAVE_UP_EXIT = 2          # cousin-runner's exit on a give-up: the supervisor's CONFIG_EXIT,
+                          # `failing` and left down, never restarted (supervisor.classify_exit)
+UNREACHABLE_MAX_S = 5.0   # while tmux does not answer, the check backs off to this
+UNREACHABLE_LOST_S = 120.0   # and after this long the pane is taken as lost
+ENDS = ("turn_end", "interrupt", "api_error", "limit")
 
 
 def _atomic_write(path, data):
@@ -98,6 +105,17 @@ def _read_json(path):
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def read_giving_up(home):
+    """The give-up marker ({"reason", "at"}), or None."""
+    data = _read_json(Path(home).joinpath(*GIVING_UP))
+    return data if data and isinstance(data.get("at"), (int, float)) else None
+
+
+def clear_giving_up(home):
+    """An explicit start (supervisor.start_child) clears it, as it releases the hold."""
+    Path(home).joinpath(*GIVING_UP).unlink(missing_ok=True)
 
 
 class TmuxRunner:
@@ -157,8 +175,11 @@ class TmuxRunner:
         self._probation = None           # {"since"} until a started pane has stayed up probation_s
         self._reopen_fails = 0           # consecutive starts that failed or died unproven (N1)
         self._gave_up = False
-        self.fatal = None                # why the worker gave up (main prints it, exit 3)
-        self._unreachable_said = False
+        self.fatal = None                # why the worker gave up (main prints it)
+        self.exit_code = None            # cousin-runner's exit then (GAVE_UP_EXIT)
+        self._unreachable = None         # {"since", "delay", "next"} while tmux does not answer
+        self.unreachable_lost_s = UNREACHABLE_LOST_S
+        self._line_done = None           # (line end, entries handled) of a line half handled
         self._lost_turn = None           # the turn live at a loss: an adopt may find it still live
         self._turn_offset = 0
         self._line_fails = {}            # a line's end -> how often its handling raised
@@ -517,21 +538,33 @@ class TmuxRunner:
         tmux that does not answer is said once and settled never. A pane
         found gone is settled here. False whenever the pane is not usable."""
         now = time.monotonic()
-        if not force and now < self._next_alive:
+        u = self._unreachable
+        if u is not None and now < u["next"]:
+            return False                         # asked again only after its backoff
+        if u is None and not force and now < self._next_alive:
             return True
         self._next_alive = now + ALIVE_CHECK_S
         if self.pane is not None and (self.pane.alive() or self.pane.alive()):
-            self._unreachable_said = False
+            self._unreachable = None
             return True
         pid = self._pane_pid
         if self.pane is not None and pid is not None and self.pane.process_alive(pid):
-            if not self._unreachable_said:
-                self._unreachable_said = True
+            if u is None:
+                u = self._unreachable = {"since": now, "delay": ALIVE_CHECK_S}
                 self.stream.append("system", {"subtype": "pane_unreachable", "pid": pid,
                                               "session_id": self._session_id,
                                               "detail": "tmux does not answer for the pane but"
-                                                        " its CLI runs; nothing is settled"})
-            return False
+                                                        " its CLI runs; nothing is settled for"
+                                                        " %.0f s" % self.unreachable_lost_s})
+            else:
+                u["delay"] = min(UNREACHABLE_MAX_S, u["delay"] * 2)
+            if now - u["since"] < self.unreachable_lost_s:
+                u["next"] = now + u["delay"]
+                return False
+            self.stream.append("error", {"error": "tmux has not answered for the pane for %.0f s"
+                                                  " while its CLI (pid %s) runs: taken as lost"
+                                                  % (now - u["since"], pid)})
+        self._unreachable = None
         self._pane_lost()
         return False
 
@@ -582,7 +615,8 @@ class TmuxRunner:
         if len(self._losses) > self.loss_max:
             # a CLI that outlives its proof and dies, over and over (round 3)
             self._give_up("%d pane losses within %.0f s" % (len(self._losses), self.loss_window_s),
-                          fatal="the runner gave up on its pane")
+                          fatal="the runner gave up on its pane",
+                          counts={"losses": len(self._losses), "window_s": self.loss_window_s})
             return
         if booting is not None:
             self._failed_start("the pane's CLI exited %.1f s after its start, before it proved"
@@ -605,14 +639,25 @@ class TmuxRunner:
         self.stream.append("error", {"error": "the pane did not come back (try %d): %s; next try"
                                               " in %.1fs" % (self._reopen_fails, why, delay)})
 
-    def _give_up(self, why, fatal=None):
-        """errored, said, and the worker ends: cousin-runner exits 3 and the
-        supervisor counts it (MAX_EXITS makes the cousin `failing`)."""
+    def _give_up(self, why, fatal=None, counts=None):
+        """errored, said, and the worker ends: cousin-runner exits
+        GAVE_UP_EXIT (2), which the supervisor leaves down as `failing`,
+        never restarted, with the reason read from the give-up marker; the
+        marker also holds the next start down for GIVE_UP_HOLD_S, until an
+        explicit `cousin-supervisor start` (or the console's start) clears
+        it. `counts` is what the pane_failing event names (the failed starts
+        by default, the losses and the window for the loss cap)."""
         self.fatal = ("%s: %s" % (fatal, why) if fatal else
                       "the pane failed %d starts in a row: %s" % (self._reopen_fails, why))
         self._lost, self._gave_up = None, True
-        self.stream.append("system", {"subtype": "pane_failing", "session_id": self._session_id,
-                                      "tries": self._reopen_fails, "reason": why})
+        self.exit_code = GAVE_UP_EXIT
+        try:
+            _atomic_write(self.home.joinpath(*GIVING_UP), {"reason": self.fatal, "at": time.time()})
+        except OSError as exc:
+            self.stream.append("error", {"error": "the give-up marker: %s" % exc})
+        self.stream.append("system", dict({"subtype": "pane_failing", "session_id": self._session_id,
+                                           "reason": why},
+                                          **(counts or {"tries": self._reopen_fails})))
         self.stream.append("error", {"error": self.fatal})
         with self._lock:
             if self.machine.state not in ("errored", "stopped", "rolling_over"):
@@ -656,6 +701,7 @@ class TmuxRunner:
             if at is not None and not any(e.kind in ("turn_end", "interrupt", "api_error", "limit",
                                                      "turn_start") for e in entries[at + 1:]):
                 self._live = {"rows": [], "prompt_id": t["prompt_id"], "who": t["who"]}
+                self._turn_offset = entries[at].offset
                 self._notice = None
         if self._live is not None:
             self._to("running", "adopted mid-turn")
@@ -853,7 +899,31 @@ class TmuxRunner:
     def _wake_error(self, message):
         self.stream.append("error", {"error": message})
 
+    def _held_by_give_up(self):
+        """A give-up younger than GIVE_UP_HOLD_S holds this start down (the
+        supervisor restarted, a container came back): errored, exit 2 again,
+        no pane. An older one is dropped."""
+        mark = read_giving_up(self.home)
+        if mark is None:
+            return False
+        age = time.time() - mark["at"]
+        if age >= GIVE_UP_HOLD_S:
+            clear_giving_up(self.home)
+            return False
+        self.fatal = ("gave up on its pane %.0f s ago (%s); held down for %.0f s, or until"
+                      " `cousin-supervisor start %s`" % (age, mark.get("reason") or "no reason",
+                                                         GIVE_UP_HOLD_S, self.home.name))
+        self.exit_code = GAVE_UP_EXIT
+        self.stream.append("system", {"subtype": "pane_failing", "held": True,
+                                      "reason": mark.get("reason"), "age_s": round(age)})
+        self.stream.append("error", {"error": self.fatal})
+        with self._lock:
+            self.machine.to("errored", self.fatal)
+        return True
+
     def _run(self):
+        if self._held_by_give_up():
+            return
         try:
             self._turn_file(None)                # a file a dead runner left names no live turn
             how = self._open_session()
@@ -951,29 +1021,66 @@ class TmuxRunner:
     # -- the transcript ------------------------------------------------------
     def _pump(self):
         """The new transcript lines, handled in order; the cursor is saved
-        after each LINE (the entries a torn line held share its end), so an
-        entry that raises replays only its own line, never the ones before."""
+        after each LINE (the entries a torn line held share its end), and
+        the entries of a line already handled are not handled again when a
+        later one on the same line raises. An entry that raises is replayed
+        LINE_REPLAYS times, then skipped with one error naming its offset;
+        a skipped entry that ended the live turn closes it (_close_skipped)."""
         entries, cursor = transcript.read_from(self._path, self._cursor)
+        k = 0
         for i, e in enumerate(entries):
+            k = k + 1 if i and entries[i - 1].end == e.end else 0      # its index on its line
+            done = self._line_done
+            if done is not None and done[0] == e.end and k < done[1]:
+                continue                                  # handled before a later entry raised
+            key = (e.end, k)
             try:
                 self._handle(e)
                 if self._line_fails:
-                    self._line_fails.pop(e.end, None)
+                    self._line_fails.pop(key, None)
             except Exception as exc:  # noqa: BLE001 - replayed, then skipped
-                fails = self._line_fails.get(e.end, 0) + 1
-                self._line_fails[e.end] = fails
+                fails = self._line_fails.get(key, 0) + 1
+                self._line_fails[key] = fails
                 if fails <= LINE_REPLAYS:
                     raise
-                del self._line_fails[e.end]
+                del self._line_fails[key]
                 self.stream.append("error", {"error": "skipped the transcript line at offset %d"
-                                                      " after %d failures: %s: %s"
-                                                      % (e.offset, fails, type(exc).__name__, exc)})
+                                                      " (%s) after %d failures: %s: %s"
+                                                      % (e.offset, e.kind, fails,
+                                                         type(exc).__name__, exc)})
+                self._close_skipped(e, fails, exc)
             if i + 1 == len(entries) or entries[i + 1].offset >= e.end:
+                self._line_done = None
                 self._cursor = e.end
                 self._persist_cursor()
+            else:
+                self._line_done = (e.end, k + 1)
         if cursor != self._cursor:
             self._cursor = cursor
             self._persist_cursor()
+
+    def _close_skipped(self, e, fails, exc):
+        """A skipped turn end (a turn_duration, an interrupt, an API error
+        or a limit) while a turn is live: the turn is closed here, its rows
+        `delivered`, or `failed` for an API error or a limit (an API-error
+        entry either way), with the skip as the reason, and the runner goes
+        idle; otherwise the live turn would hold the claim loop forever."""
+        if self._live is None or e.kind not in ENDS:
+            return
+        outcome = FAILED if e.kind in ("api_error", "limit") else DELIVERED
+        detail = ("skipped: the turn's %s line at offset %d failed %d times (%s: %s)"
+                  % (e.kind, e.offset, fails, type(exc).__name__, exc))
+        ids = [row["id"] for row in self._live["rows"]]
+        try:
+            self._close_rows(outcome, detail)
+        except Exception as err:  # noqa: BLE001 - the rows stay claimed; a start's sweep settles them
+            self.stream.append("error", {"error": "closing the skipped turn's rows: %s: %s"
+                                                  % (type(err).__name__, err)})
+        self.stream.append("result", {"inbox_ids": ids, "interrupted": e.kind == "interrupt",
+                                      "is_error": outcome == FAILED})
+        self._live, self._interrupting = None, False
+        self._turn_file(None)
+        self._to("idle", "turn closed by a skipped line")
 
     def _known_nonces(self):
         known = set(self._runner_nonces)

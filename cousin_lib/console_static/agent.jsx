@@ -374,7 +374,7 @@ function AgentSettingsPanel({ cousin }) {
                     {row.set && !row.readonly && !(key in draft && draft[key] === null) && key !== "sessions" && (
                       <button className="btn ghost" style={{ ...agentSmall, alignSelf: "flex-start" }} disabled={busy}
                               onClick={() => set(key, null)}
-                              title="remove the key from cousin.toml: the default applies">unset (default {row.default == null ? "none" : String(row.default)})</button>
+                              title="remove the key from cousin.toml: the default applies">unset (default {row.default == null || (Array.isArray(row.default) && !row.default.length) ? "none" : String(row.default)})</button>
                     )}
                     {err && <span style={agentErr}>{err}</span>}
                   </dd>

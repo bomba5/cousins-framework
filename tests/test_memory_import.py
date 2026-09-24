@@ -233,6 +233,32 @@ class TestManifestIsTheRecord(ImportCase):
         self.assertEqual(self._target("feedback_ledgers.md").read_text(), "Wren's own correction.\n")
 
 
+class TestLoggedQueriesDedupe(ImportCase):
+    """Item 3 (final fix wave): _logged_queries did not dedupe query text,
+    so a repeated query filled the replay sample and double-counted kept
+    or lost in the exit measurement. Keep the newest event per query
+    text, skip later (older, since the log is read newest-first) repeats."""
+
+    def test_a_repeated_query_gives_one_row_the_newest(self):
+        from cousin_lib import reinforce
+        reinforce.record(self.home, [str(self.auto / "feedback_ledgers.md")],
+                         query="quokka ledgers Monday")
+        reinforce.record(self.home, [str(self.auto / "reference_keys.md")],
+                         query="quokka ledgers Monday")
+        reinforce.record(self.home, [str(self.auto / "feedback_ledgers.md"),
+                                     str(self.auto / "reference_keys.md")],
+                         query="quokka ledgers Monday")
+        reinforce.record(self.home, [str(self.auto / "feedback_ledgers.md")],
+                         query="spare keys blue tin")
+        rows = memory_import._logged_queries(self.home, self.auto, sample=50)
+        matches = [r for r in rows if r[0] == "quokka ledgers Monday"]
+        self.assertEqual(len(matches), 1, rows)
+        self.assertEqual(matches[0][1], ["feedback_ledgers.md", "reference_keys.md"])
+        self.assertEqual(matches[0][2], 2)
+        self.assertEqual(sorted(r[0] for r in rows),
+                         ["quokka ledgers Monday", "spare keys blue tin"])
+
+
 class TestReplay(ImportCase):
     """The recall regression test over the cousin's REAL queries, before
     against after: the queries come from memory/.recall-log.jsonl

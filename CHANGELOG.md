@@ -3,6 +3,75 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.13.0 - 2026-09-24
+
+### Added
+- `cousin-memory import-auto`: folds the agent CLI's own auto-memory,
+  its `MEMORY.md` index included, into `memory/imported/auto/` with its
+  provenance (`imported_from`, `imported_sha256`, `imported_at` in each
+  file's frontmatter). A dry run unless `--apply`; idempotent through a
+  manifest; a copy edited since the import is never overwritten, a copy
+  removed is never brought back. A manifest that exists but cannot be
+  read or parsed refuses instead of guessing: one `ERROR:` line on
+  stderr naming the path, nothing written, exit 2; `search` stays
+  tolerant of the same manifest (reads it as empty). A copy on disk with
+  no row in the manifest is a conflict to merge by hand, unless it is
+  exactly what this import would have written, which converges instead
+  of blocking on a run that died between copying and saving the
+  manifest. `--apply` first replays the cousin's own logged queries that
+  reached that memory as a baseline; `--verify` replays them again and
+  exits 1 on a lost memory, 2 when nothing was compared, including a
+  manifest it cannot read (no comparison is attempted). Both bring the
+  search indexes fully current first. An imported copy inherits its
+  original's recall weighting.
+- On the SDK lane, after a turn in which the cousin reached a decision
+  and recorded none, the runner queues one `propose` row asking whether
+  to keep it: the lowest priority, never about its own turn, at most
+  `PROPOSAL_CAP` a rolling day. A `propose` event records each outcome;
+  a step that fails while building the proposal (a broken store, a
+  corrupt cursor or cap file) surfaces on that same event's `error`
+  field instead of silently producing no proposal, and the turn still
+  delivers.
+
+### Changed
+- `cousin-memory recall` (and the runner's `memory recall` tool) reads raw
+  memory through the search index: a fact written by `remember` is
+  recallable, not only a decision. With an embedding service, a hit must
+  match the keyword or clear `[recall] min_score`. Without a keyword it
+  lists the newest entries the cousin wrote, the framework's own log left
+  out. A decision prints as before, a digested one too; times are now
+  the raw entry's own (UTC for new decisions, where `decisions.jsonl`
+  had local time); the empty result reads `No memories found`. Recall
+  no longer counts as a search in the recall weighting.
+- The first `recall` or search in a home copies every decision that only
+  `data/decisions.jsonl` or its rotated archives hold into raw, once,
+  with its original timestamp (marked in `data/.decisions-backfilled`);
+  the log is still written but no longer recalled from, and
+  `consolidate` counts raw only, so a decision is counted once. A raw
+  line removed through the console's trash is never brought back by the
+  backfill: a trashed twin counts as already handled.
+- The distilled views rank the framework's own log (topics starting
+  `episode:`, `job:`, `framework:`) after every authored topic.
+- The SDK lane starts the agent CLI with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+- A search finds a harness auto-memory file whose imported copy is current
+  as the copy only.
+- The `memory` tool's description in `config/mcp-registry.toml.example`
+  says what recall now does. It reaches new homes; an existing home reads
+  its own `mcp-registry.toml` (copied at spawn, never rewritten by a
+  template sync) and keeps the old wording until that file is updated,
+  which is also when its cached prompt re-creates once.
+
+### Fixed
+- The runner's proactive recall and memory tool read the runner's own
+  framework root instead of whatever `FRAMEWORK_ROOT` names, and so
+  does `refresh_if_stale` for its keyword index.
+- A raw memory in the `[fw-recall]` line is named by its topic, not by the
+  date of the file it sits in.
+- A failing decisions backfill (a read-only or full `data/`, a bad byte
+  in the log) no longer silences `search` or `recall`: it prints one
+  stderr line and writes no mark, so the next read retries; `consolidate`
+  keeps the unguarded, loud failure, since it is a command a person runs.
+
 ## 1.12.0 - 2026-09-24
 
 ### Added

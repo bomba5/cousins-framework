@@ -282,7 +282,7 @@ class TmuxPane:
         (it would submit early), or tmux fails; any failure from the first
         key onward clears the box (C-u), so the next row is not blocked by
         the leftovers."""
-        first_line, body = printable(first_line), printable(body or "")
+        first_line, body = printable(first_line).replace("\t", " "), printable(body or "")
         if "\n" in first_line:
             return Outcome.FAILED
         screen = self.capture()

@@ -310,6 +310,11 @@ class TestTyping(PaneCase):
         for ch in ("\x1b", "\r", "\x07", "\x00", "\x08"):
             self.assertNotIn(ch, body + first)
 
+    def test_a_tab_in_the_first_line_is_a_space(self):
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab]\tfrom W", ""), tp.Outcome.TYPED)
+        first = next(c for c in self.calls() if "send-keys" in c and "-l" in c)[-1]
+        self.assertEqual(first, "[inbox:0123456789ab] from W")
+
     def test_the_box_is_read_again_after_the_first_line(self):
         """Review minor (check-then-type): a dialog that takes the box while
         the first line goes in gets nothing more: no paste, no Enter, no C-u."""

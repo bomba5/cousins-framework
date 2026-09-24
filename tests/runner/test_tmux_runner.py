@@ -3,6 +3,7 @@ R6c, R21, R23): what closes a row and when, what a turn start nobody typed
 is, what a restart does with rows already typed, and the screens the runner
 never types into."""
 import json
+import threading
 import time
 import unittest
 
@@ -177,8 +178,17 @@ class TestCursor(Case):
                            "message": {"role": "user", "content": "someone %s" % pid}})
         self.assertTrue(_wait(lambda: handled.count("p2") >= 3))
         self.assertEqual(handled.count("p1"), 1, "the line before the failing one is not replayed")
-        saved = json.loads((self.home / "data" / "tmux-cursor.json").read_text())["offset"]
-        self.assertEqual(saved, len(r._path.read_text().splitlines()[0]) + 1)
+        # round 2: after three replays (four failures) the line is skipped, said once
+        offset = len(r._path.read_text().splitlines()[0]) + 1
+        skipped = lambda: [e["payload"]["error"] for e in r.events() if e["kind"] == "error"
+                           and "skipped" in e["payload"]["error"]]
+        self.assertTrue(_wait(skipped))
+        self.assertIn("offset %d" % offset, skipped()[0])
+        self.write(r, {"type": "user", "promptSource": "typed", "promptId": "p3",
+                       "message": {"role": "user", "content": "someone p3"}})
+        self.assertTrue(_wait(lambda: "p3" in handled))
+        self.assertEqual(handled.count("p2"), 4)
+        self.assertEqual(len(skipped()), 1)
 
 
 class TestContext(Case):
@@ -322,6 +332,243 @@ class TestPaneLoss(Case):
         blocked = [e for e in r.events() if e["kind"] == "system"
                    and e["payload"].get("subtype") == "typing_blocked"]
         self.assertEqual(len(blocked), 1)
+
+
+class DiesAtBoot(FakePane):
+    """A CLI that exits 0.4 s after every start, before it draws its box (a
+    resume the CLI refuses at boot); `why` is what its launcher left."""
+    why = None
+
+    def start(self, argv, *, cwd, env_base):
+        super().start(argv, cwd=cwd, env_base=env_base)
+        if self.why and self.context_home is not None:
+            (self.context_home / "data" / "run" / "tmux-launch-exit.txt").write_text(self.why)
+        if self._alive:
+            threading.Timer(0.4, self.die).start()
+
+
+class TestBootLoop(Case):
+    """Round 2 N1 (probe D): a pane that dies at boot is not restarted every
+    second forever; after five failed starts the runner gives up, errored,
+    naming why, and its worker ends (exit 3: the supervisor sees it)."""
+
+    def starts(self):
+        return sum(len(p.started) for p in self.panes)
+
+    def failing(self, r):
+        return [e["payload"] for e in r.events() if e["kind"] == "system"
+                and e["payload"].get("subtype") == "pane_failing"]
+
+    def test_a_pane_that_dies_at_boot_is_given_up_on(self):
+        r = self.runner(pane=lambda path: DiesAtBoot(path, boot_s=1.0, context_home=self.home))
+        r.reopen_base_s = 0.1
+        r.start()
+        self.assertTrue(_wait(lambda: not r.worker_alive(), timeout=15))
+        self.assertEqual(self.starts(), 5)
+        self.assertEqual(r.state(), "errored")
+        self.assertEqual(len(self.failing(r)), 1)
+        self.assertIn("5", r.fatal)
+        time.sleep(1.0)
+        self.assertEqual(self.starts(), 5, "nothing started after giving up")
+
+    def test_the_launchers_refusal_is_named(self):
+        class Refused(DiesAtBoot):
+            why = "tmux-launch: refused, a claude-token account (P11-6)"
+        r = self.runner(pane=lambda path: Refused(path, boot_s=1.0, context_home=self.home))
+        r.reopen_base_s = 0.05
+        r.start()
+        self.assertTrue(_wait(lambda: not r.worker_alive(), timeout=15))
+        self.assertIn("claude-token account (P11-6)", self.failing(r)[0]["reason"])
+        self.assertIn("claude-token account (P11-6)", r.fatal)
+
+    def test_the_backoff_grows_across_boot_deaths(self):
+        r = self.runner(pane=lambda path: DiesAtBoot(path, boot_s=1.0, context_home=self.home))
+        r.reopen_base_s = 1.0
+        r.start()
+        time.sleep(5.0)
+        self.assertLessEqual(self.starts(), 4, "was 19 in 10 s on the round-1 code")
+
+    def test_a_pane_that_stays_up_is_proven_and_the_count_starts_over(self):
+        lives = []
+
+        class Proves(DiesAtBoot):
+            def start(self, argv, *, cwd, env_base):
+                lives.append(1)
+                if len(lives) == 3:                        # this one boots and stays
+                    return FakePane.start(self, argv, cwd=cwd, env_base=env_base)
+                return super().start(argv, cwd=cwd, env_base=env_base)
+        r = self.runner(pane=lambda path: Proves(path, boot_s=1.0, context_home=self.home))
+        r.reopen_base_s = 0.05
+        r.probation_s = 1.5
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "after the boot loop", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered", timeout=10))
+        self.assertTrue(r.worker_alive())
+        self.assertTrue(_wait(lambda: r._reopen_fails == 0, timeout=4))
+
+    def test_a_pane_that_draws_its_box_and_dies_at_once_is_still_a_failed_start(self):
+        """The re-review's probe D as it was run: the box shows at once."""
+        r = self.runner(pane=lambda path: DiesAtBoot(path, context_home=self.home))
+        r.reopen_base_s = 0.1
+        r.start()
+        self.assertTrue(_wait(lambda: not r.worker_alive(), timeout=15))
+        self.assertEqual(self.starts(), 5)
+
+
+class TestUnreachable(Case):
+    """Round 2 N2 (probe G): one failed has-session is not a dead pane."""
+
+    def test_one_failed_has_session_mid_turn_settles_nothing(self):
+        class Flaky(FakePane):
+            lie = False
+
+            def alive(self):
+                if self.lie:
+                    self.lie = False
+                    return False
+                return super().alive()
+        r = self.runner(pane=lambda path: Flaky(path, slow=True, slow_s=2.0, context_home=self.home))
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "slow", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0].lie = True
+        r._next_alive = 0.0
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered", timeout=6))
+        self.assertIn("turn", self.outcome(r, rec)[2])
+        subs = [e["payload"].get("subtype") for e in r.events() if e["kind"] == "system"]
+        self.assertNotIn("pane_lost", subs)
+        self.assertEqual(len(self.panes), 1)
+
+    def test_tmux_silent_while_the_cli_runs_settles_nothing(self):
+        class Deaf(FakePane):
+            deaf = False
+
+            def alive(self):
+                return False if self.deaf else super().alive()
+
+            def process_alive(self, pid):
+                return True if self.deaf else super().process_alive(pid)
+        r = self.runner(pane=lambda path: Deaf(path, slow=True, slow_s=2.5, context_home=self.home))
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "slow", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0].deaf = True
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered", timeout=6))
+        self.assertIn("turn", self.outcome(r, rec)[2])
+        subs = [e["payload"].get("subtype") for e in r.events() if e["kind"] == "system"]
+        self.assertNotIn("pane_lost", subs)
+        self.assertEqual(subs.count("pane_unreachable"), 1)
+
+    def test_a_reopen_that_finds_the_pane_alive_recovers_its_live_turn(self):
+        shared = []
+
+        class Liar(FakePane):
+            lies = 0
+
+            def alive(self):
+                if self.lies:
+                    self.lies -= 1
+                    return False
+                return super().alive()
+
+            def process_alive(self, pid):
+                if self.lies_proc:
+                    self.lies_proc -= 1
+                    return False
+                return super().process_alive(pid)
+            lies_proc = 0
+
+        def one_pane(path):
+            if not shared:
+                shared.append(Liar(path, slow=True, slow_s=2.5, context_home=self.home))
+            return shared[0]
+        r = self.runner(pane=one_pane)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "slow", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.hook_record(r, shared[0])
+        shared[0].lies, shared[0].lies_proc = 2, 1          # read as lost, then adopted
+        r._next_alive = 0.0
+        self.assertTrue(_wait(lambda: any(e["kind"] == "system" and e["payload"].get("subtype")
+                                          == "pane_reopened" for e in r.events())))
+        reopened = [e["payload"] for e in r.events() if e["kind"] == "system"
+                    and e["payload"].get("subtype") == "pane_reopened"][0]
+        self.assertEqual(reopened["source"], "adopted")
+        self.assertEqual(r.state(), "running", "the live turn is known again")
+        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=6))
+        time.sleep(0.5)
+        self.assertEqual(len(shared[0].typed), 1, "nothing typed into the live turn")
+
+    def test_the_old_cli_is_gone_before_a_reopen(self):
+        class Lingers(FakePane):
+            answers = []
+
+            def process_alive(self, pid):
+                if self.answers:
+                    return self.answers.pop(0)
+                return super().process_alive(pid)
+        r = self.runner(pane=lambda path: Lingers(path, context_home=self.home))
+        r.kill_grace_s, r.kill_bound_s = 0.1, 0.3
+        r.reopen_base_s = 0.05
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.panes[0].answers = [False, True, True, True, True, True, True, True]
+        self.panes[0].die()                  # lost, then the old pid is seen again at the reopen
+        self.assertTrue(_wait(lambda: len(self.panes) >= 2 and self.panes[-1].alive(), timeout=6))
+        self.assertTrue(self.panes[0].sigkills, "the old CLI was killed before the new pane")
+        errors = [e["payload"]["error"] for e in r.events() if e["kind"] == "error"]
+        self.assertTrue(any("still running" in e for e in errors), errors)
+
+
+class TestRound2Minors(Case):
+    def test_a_fresh_start_removes_a_stale_resume_pointer(self):
+        self.home = temp_home(self)
+        (self.home / "data" / "run").mkdir(parents=True)
+        (self.home / "data" / "run" / "tmux-resume.md").write_text("an old session's pointer")
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertFalse((self.home / "data" / "run" / "tmux-resume.md").exists())
+
+    def test_the_notice_clock_waits_out_a_login_screen(self):
+        r = self.runner(slow=True, slow_s=5.0)
+        r.reopen_base_s = 0.1
+        r.notice_wait_s = 0.8
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0].die()
+        self.assertTrue(_wait(lambda: len(self.panes) == 2 and self.panes[1].alive()))
+        self.panes[1]._attention = "login"
+        time.sleep(1.5)                       # past the notice's bound, all of it a login wait
+        self.panes[1]._attention = None
+        self.assertTrue(_wait(lambda: any("cut short" in b for _f, b in self.panes[1].typed)))
+        self.assertEqual(self.outcome(r, rec)[1], "delivered")
+
+    def test_a_notice_that_expires_untyped_rides_on_the_next_row(self):
+        r = self.runner(slow=True, slow_s=5.0)
+        r.reopen_base_s = 0.1
+        r.notice_wait_s = 0.3
+        r.start()
+        first = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        booting = []
+
+        def slow_boot(path):
+            p = FakePane(path, boot_s=1.5, context_home=self.home)
+            booting.append(p)
+            return p
+        r._pane_factory = slow_boot
+        self.panes[0].die()
+        self.assertTrue(_wait(lambda: any(e["kind"] == "system" and e["payload"].get("subtype")
+                                          == "notice_not_typed" for e in r.events()), timeout=5))
+        rec = r.enqueue(Item("operator:wren", "chat", "the next row", sender="Wren"))
+        self.assertTrue(_wait(lambda: booting and booting[-1].typed, timeout=5))
+        body = booting[-1].typed[0][1]
+        self.assertTrue(body.startswith("[runner] "), body)
+        self.assertIn("cut short", body.splitlines()[0])
+        self.assertIn("the next row", body)
+        self.assertEqual(self.outcome(r, first)[1], "delivered")
 
 
 class TestStop(Case):
@@ -661,7 +908,7 @@ class TestRollover(Case):
     def test_the_fresh_mark_is_dropped_once_the_cli_has_written_the_session(self):
         r = self.runner()
         r.start()
-        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertTrue(_wait(lambda: (self.home / "data" / "runner-session.json").exists()))
         saved = lambda: json.loads((self.home / "data" / "runner-session.json").read_text())
         self.assertTrue(saved().get("fresh"))
         rec = r.enqueue(Item("operator:priya", "chat", "hello", sender="priya"))

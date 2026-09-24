@@ -36,6 +36,7 @@ SWITCHES = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "DISABLE_AUTOUPDATER": "1"}
 CONTEXT = ("data", "run", "tmux-context.md")
 SESSION_FLAGS = ("--session-id", "--resume")    # a fresh session's id, or the one to resume
 REFUSED_KINDS = ("claude-token", "anthropic-key")
+EXIT_NOTE = ("data", "run", "tmux-launch-exit.txt")   # the last refusal, for the runner (its pane dies)
 
 
 def env_base(shell_env, *, env_allow=()):
@@ -93,6 +94,19 @@ def _say(message):
     print("tmux-launch: %s" % message, file=sys.stderr, flush=True)
 
 
+def _refuse(home, message):
+    """Say it, and leave it in the home: the pane dies with this process,
+    so the runner reads why from EXIT_NOTE when it gives up."""
+    _say(message)
+    try:
+        path = Path(home).joinpath(*EXIT_NOTE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("tmux-launch: %s\n" % message)
+    except OSError:
+        pass
+    return 2
+
+
 def main(argv=None):
     """Exec the CLI with the account, the switches and the deny applied;
     2 (never an exec) on a refused account or argv."""
@@ -118,19 +132,16 @@ def main(argv=None):
     try:
         account = accounts.for_cousin(home, root)
     except accounts.AccountsError as err:
-        _say(str(err))
-        return 2
+        return _refuse(home, str(err))
     if account.kind in REFUSED_KINDS:
-        _say("the tmux kind runs on a subscription login (host or a claude-login account);"
-             " %s accounts are refused until a login-free config dir is shown to start with"
-             " no menu (phase 11 P11-6; A4: onboarding is skippable by seeding, but a"
-             " token's login screen is not measured)" % account.kind)
-        return 2
+        return _refuse(home, "the tmux kind runs on a subscription login (host or a claude-login"
+                       " account); %s accounts are refused until a login-free config dir is shown"
+                       " to start with no menu (phase 11 P11-6; A4: onboarding is skippable by"
+                       " seeding, but a token's login screen is not measured)" % account.kind)
     try:
         own = accounts.account_env(account, root)
     except accounts.AccountsError as err:
-        _say(str(err))
-        return 2
+        return _refuse(home, str(err))
     env = dict(os.environ)
     env.update(own)
     env.update(SWITCHES)
@@ -141,10 +152,13 @@ def main(argv=None):
         try:
             context = home.joinpath(*CONTEXT).read_text()
         except OSError as err:
-            _say("fresh start without its context block %s: %s"
-                 % (home.joinpath(*CONTEXT), err))
-            return 2
+            return _refuse(home, "fresh start without its context block %s: %s"
+                           % (home.joinpath(*CONTEXT), err))
         cli += ["--append-system-prompt", context]
+    try:
+        home.joinpath(*EXIT_NOTE).unlink()     # an older refusal is not this start's
+    except OSError:
+        pass
     os.execvpe(cli[0], cli, env)
     return 0   # not reached
 

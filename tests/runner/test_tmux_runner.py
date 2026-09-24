@@ -1172,6 +1172,29 @@ class TestRollover(Case):
         finals = [e["payload"] for e in r.events() if e["kind"] == "extract" and e["payload"].get("final")]
         self.assertEqual([e["session_id"] for e in finals], [old], "a final mine of the old session")
 
+    def test_the_session_record_names_the_rollovers_generation(self):
+        """Live proofs 09-25, finding 6: runner-session.json kept the old
+        generation (written before the bump) until the new session's first
+        turn; a kind switch or a reader in that window saw 0 against the
+        rollover's 1. It is the rollover's generation when the row closes."""
+        from cousin_lib import boot
+        self.on_prompt = _handoff_tool
+        r = self.runner(handoff_deadline_s=5, settle_s=0.5)
+        at_done = {}
+        real_append = r.stream.append
+
+        def append(kind, payload):
+            if kind == "rollover" and payload.get("phase") == "done":
+                at_done.update(json.loads((self.home / "data" / "runner-session.json").read_text()))
+            return real_append(kind, payload)
+        r.stream.append = append
+        before = boot.read_generation(self.home)
+        _old, row, detail = self.roll(r)
+        self.assertEqual(detail["generation"], before + 1)
+        self.assertEqual(at_done["generation"], detail["generation"])
+        self.assertEqual(at_done["session_id"], detail["session_id"])
+        self.assertTrue(at_done.get("fresh"), "still fresh until the CLI writes the session")
+
     def test_a_turn_without_the_handoff_writes_an_emergency_handoff(self):
         r = self.runner(handoff_deadline_s=5)
         _old, row, detail = self.roll(r)

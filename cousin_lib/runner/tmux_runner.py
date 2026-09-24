@@ -1579,6 +1579,14 @@ class TmuxRunner:
             generation = boot.bump_generation(self.home)
         except Exception as exc:  # noqa: BLE001 - named in the detail
             problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
+        else:
+            try:
+                # the record was written before the bump (N9): it names the
+                # new generation now, not only from the new session's first
+                # turn (live proofs 09-25, finding 6)
+                self._save_session()
+            except Exception as exc:  # noqa: BLE001 - named in the detail
+                problems.append("runner-session.json: %s: %s" % (type(exc).__name__, exc))
         try:
             session.run_phase(self.home, "start")
         except Exception as exc:  # noqa: BLE001 - named in the detail

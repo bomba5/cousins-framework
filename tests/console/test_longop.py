@@ -159,6 +159,63 @@ class FleetRefusesDuringAnOp(LongOpCase):
         self.wait_done()
 
 
+class Exclusive(LongOpCase):
+    """Fix round 2, Important: routes_fleet's five routes (dismiss, start,
+    stop, restart, set_auth) used to read op_running() unlocked and then
+    do their own unlocked work, marking the cousin busy nowhere - a
+    longop.start() (a migrate, a login) could start beside them. exclusive()
+    is the fix: under the same lock, refuse as op_running's callers
+    already do, else occupy the same table start() reads."""
+
+    def test_marks_busy_so_a_longop_refuses(self):
+        hold = longop.exclusive(self.server, "wren", "dismiss")
+        with self.assertRaises(longop.Busy) as cm:
+            longop.start(self.server, "wren", "migrate", lambda op: {})
+        self.assertIn("dismiss", str(cm.exception))
+        self.assertIn("wren", str(cm.exception))
+        hold.release()
+        longop.start(self.server, "wren", "migrate", lambda op: {})   # released: fine
+        self.wait_done()
+
+    def test_release_is_idempotent_and_works_as_a_context_manager(self):
+        with longop.exclusive(self.server, "wren", "start") as hold:
+            self.assertEqual(longop.op_running(self.server, "wren"), "start")
+        self.assertIsNone(longop.op_running(self.server, "wren"))
+        hold.release()          # a second release is a no-op, not an error
+
+    def test_releases_on_the_callers_error_path(self):
+        with self.assertRaises(ValueError):
+            with longop.exclusive(self.server, "wren", "dismiss"):
+                raise ValueError("boom")
+        self.assertIsNone(longop.op_running(self.server, "wren"))
+        longop.start(self.server, "wren", "migrate", lambda op: {})    # not left held
+        self.wait_done()
+
+    def test_refuses_beside_a_flip(self):
+        self.server.state.setdefault("flips", {})["wren"] = {
+            "status": "running", "started_at": time.time()}
+        with self.assertRaises(longop.Busy) as cm:
+            longop.exclusive(self.server, "wren", "start")
+        self.assertIn("flip", str(cm.exception))
+
+    def test_refuses_beside_a_running_op(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        longop.start(self.server, "wren", "migrate", lambda op: gate.wait(5) and {})
+        with self.assertRaises(longop.Busy) as cm:
+            longop.exclusive(self.server, "wren", "start")
+        self.assertIn("migrate", str(cm.exception))
+        gate.set()
+        self.wait_done()
+
+    def test_two_holds_on_one_slug_the_second_refuses(self):
+        first = longop.exclusive(self.server, "wren", "start")
+        with self.assertRaises(longop.Busy):
+            longop.exclusive(self.server, "wren", "stop")
+        first.release()
+        longop.exclusive(self.server, "wren", "stop").release()   # released: fine
+
+
 class Route(LongOpCase):
     def test_get_is_null_before_any_op_then_the_op(self):
         status, body = self.get("/api/cousins/wren/op")

@@ -173,6 +173,55 @@ def start(server, slug, kind, work, *, params=None):
     return started
 
 
+class Hold:
+    """An exclusive mark a route holds on a cousin for the length of its
+    own work (dismiss, start, stop, restart, set_auth in routes_fleet.py):
+    it sits in the same table start() reads, so a migrate, a login or
+    another route's own hold all refuse while it stands. release() clears
+    it; calling it more than once is a no-op, so a route that hands the
+    mark to a background thread (a restart's start-when-down) can leave
+    its own `finally` releasing it too without a race."""
+
+    def __init__(self, server, slug):
+        self._server = server
+        self.slug = slug
+        self._released = False
+
+    def release(self):
+        if self._released:
+            return
+        self._released = True
+        with _lock(self._server):
+            entry = _ops(self._server).get(self.slug)
+            if entry is not None and entry.get("held"):
+                del _ops(self._server)[self.slug]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.release()
+
+
+def exclusive(server, slug, what):
+    """Occupy `slug` for a route's own work: Busy (op_running's callers'
+    own words: "a %s is running on %s") when a flip, a clean stop or an
+    op already runs on it; else marks it busy as `what`, under the same
+    lock, in the same table start() checks, and returns a Hold to
+    release() (or `with`) once the work is done."""
+    with _lock(server):
+        busy = running(server, slug)
+        if busy:
+            raise Busy("a %s is running on %s" % (busy, slug))
+        _ops(server)[slug] = {
+            "id": uuid.uuid4().hex[:12], "slug": slug, "kind": str(what),
+            "status": "running", "started_at": time.time(), "finished_at": None,
+            "params": {}, "stages": [], "result": None, "error": None,
+            "held": True,
+        }
+    return Hold(server, slug)
+
+
 def status(server, slug):
     """The cousin's current or last operation's public state, or None."""
     entry = _ops(server).get(slug)

@@ -491,28 +491,35 @@ def _stop(server, slug):
     return {"ok": True, "slug": slug, "status": "stopped", **result}
 
 
-def _start_when_down(server, slug, poll=0.2):
+def _start_when_down(server, slug, hold, poll=0.2):
     """The second half of a runner-lane restart: wait (bounded by the
     runner's stop budget) until the supervisor's child for this cousin
-    has no pid, then start it. The outcome is a cousin-status event."""
-    name = "runner:%s" % slug
-    deadline = time.monotonic() + supervisor.STOP_TIMEOUTS["runner"] + supervisor.KILL_GRACE_S + 5
-    while time.monotonic() < deadline:
-        try:
-            row = supervisor.request(server.root, "status", timeout=5.0)["children"].get(name)
-        except (supervisor.SupervisorUnavailable, KeyError, AttributeError):
-            row = None
-        if row is None or row.get("pid") is None:
-            break
-        time.sleep(poll)
+    has no pid, then start it. The outcome is a cousin-status event.
+    `hold` is the restart route's own exclusive mark, handed off to this
+    thread since the route itself already answered 202: it stays held
+    for this whole wait-then-start, and is released here, once, whatever
+    happens."""
     try:
-        _start(server, slug)
-    except HttpError as err:
-        server.emit("cousin-status", {"slug": slug, "status": "start failed",
-                                      "error": (err.body or {}).get("error")})
-    else:
-        server.emit("cousin-status", {"slug": slug, "status": "started"})
-    server.emit("cousins-refresh", fleet_rows(server))
+        name = "runner:%s" % slug
+        deadline = time.monotonic() + supervisor.STOP_TIMEOUTS["runner"] + supervisor.KILL_GRACE_S + 5
+        while time.monotonic() < deadline:
+            try:
+                row = supervisor.request(server.root, "status", timeout=5.0)["children"].get(name)
+            except (supervisor.SupervisorUnavailable, KeyError, AttributeError):
+                row = None
+            if row is None or row.get("pid") is None:
+                break
+            time.sleep(poll)
+        try:
+            _start(server, slug)
+        except HttpError as err:
+            server.emit("cousin-status", {"slug": slug, "status": "start failed",
+                                          "error": (err.body or {}).get("error")})
+        else:
+            server.emit("cousin-status", {"slug": slug, "status": "started"})
+        server.emit("cousins-refresh", fleet_rows(server))
+    finally:
+        hold.release()
 
 
 def _pending_flip(slug):
@@ -531,13 +538,21 @@ def _flip_state(server, slug):
     return server.state.setdefault("flips", {}).get(slug)
 
 
-def _refuse_during_op(server, slug):
-    """409 while a long operation (console/longop.py) runs on the cousin:
-    a start, stop, restart or dismiss under it would race its own steps,
-    as a flip would."""
-    kind = longop.op_running(server, slug)
-    if kind:
-        raise HttpError(409, "a %s is running on %s" % (kind, slug), busy=True)
+def _exclusive(server, slug, what):
+    """Occupy the cousin for the length of a route's own work (dismiss,
+    start, stop, restart, set_auth): 409 (the same message as before) when
+    a long operation (console/longop.py), a flip or a clean stop already
+    runs on it, else a longop.Hold that marks it busy as `what` in the
+    same table longop.start() reads - so nothing, a flip, a migrate, a
+    login op or another one of these five, can start underneath it. A
+    context manager: `with` releases it when the route's own work ends;
+    a route whose work outlives itself (restart's background
+    start-when-down) instead calls the Hold's release() itself, once,
+    whenever that later work ends."""
+    try:
+        return longop.exclusive(server, slug, what)
+    except longop.Busy as err:
+        raise HttpError(409, str(err), busy=True)
 
 
 def register():
@@ -599,16 +614,16 @@ def register():
     @router.route("DELETE", "/api/cousins/{slug}")
     def dismiss(req, slug):
         cousin_home(req.server, slug)
-        _refuse_during_op(req.server, slug)
-        req.server.emit("cousin-status", {"slug": slug, "status": "stopping"})
-        try:
-            out = spawn.dismiss_cousin(req.server.root, slug=slug,
-                                       tmux_bin=req.server.tmux_bin,
-                                       tmux_socket=req.server.tmux_socket)
-        except spawn.DismissRefused as err:
-            raise HttpError(500, str(err))
-        except spawn.SpawnError as err:
-            raise HttpError(404, str(err))
+        with _exclusive(req.server, slug, "dismiss"):
+            req.server.emit("cousin-status", {"slug": slug, "status": "stopping"})
+            try:
+                out = spawn.dismiss_cousin(req.server.root, slug=slug,
+                                           tmux_bin=req.server.tmux_bin,
+                                           tmux_socket=req.server.tmux_socket)
+            except spawn.DismissRefused as err:
+                raise HttpError(500, str(err))
+            except spawn.SpawnError as err:
+                raise HttpError(404, str(err))
         req.server.state.setdefault("flips", {}).pop(slug, None)
         longop.forget(req.server, slug)
         return 200, {"ok": True, **out}
@@ -616,8 +631,8 @@ def register():
     @router.route("POST", "/api/cousins/{slug}/start")
     def start(req, slug):
         cousin_home(req.server, slug)
-        _refuse_during_op(req.server, slug)
-        return 200, _start(req.server, slug)
+        with _exclusive(req.server, slug, "start"):
+            return 200, _start(req.server, slug)
 
     @router.route("POST", "/api/cousins/{slug}/stop")
     def stop(req, slug):
@@ -632,50 +647,59 @@ def register():
         when there was nothing to stop)."""
         server = req.server
         config = load_cousin(server, slug)
-        _refuse_during_op(server, slug)
-        clean = req.body.get("clean", True)
-        if not isinstance(clean, bool):
-            raise HttpError(400, "clean must be a boolean")
-        if spawn.runner_lane(config.home):
-            out = _stop(server, slug)
-            return (202 if out["status"] == "stopping" else 200), out
-        if not clean or not session_alive(server, config):
-            return 200, _stop(server, slug)
-        lock = server.state.setdefault("flip_lock", threading.Lock())
-        flips = server.state.setdefault("flips", {})
-        with lock:
-            current = flips.get(slug)
-            if current and current["status"] == "running":
-                raise HttpError(409, "a flip or clean stop is already"
-                                     " running")
-            if longop.op_running(server, slug):
-                raise HttpError(409, "a %s is running on %s"
-                                % (longop.op_running(server, slug), slug))
-            entry = {"status": "running", "started_at": time.time(),
-                     "kind": "stop"}
-            flips[slug] = entry
-        run_close = server.close_fn or _default_close
+        hold = _exclusive(server, slug, "stop")
+        try:
+            clean = req.body.get("clean", True)
+            if not isinstance(clean, bool):
+                raise HttpError(400, "clean must be a boolean")
+            if spawn.runner_lane(config.home):
+                out = _stop(server, slug)
+                return (202 if out["status"] == "stopping" else 200), out
+            if not clean or not session_alive(server, config):
+                return 200, _stop(server, slug)
+            # A clean stop runs in the background and marks itself busy in
+            # `flips` for as long as it runs (the correct pattern already,
+            # below): release this route's own mark first, under the same
+            # lock, so the two checks that follow see each other and not
+            # themselves; a race in the gap is still caught by that recheck.
+            hold.release()
+            lock = server.state.setdefault("flip_lock", threading.Lock())
+            flips = server.state.setdefault("flips", {})
+            with lock:
+                current = flips.get(slug)
+                if current and current["status"] == "running":
+                    raise HttpError(409, "a flip or clean stop is already"
+                                         " running")
+                if longop.op_running(server, slug):
+                    raise HttpError(409, "a %s is running on %s"
+                                    % (longop.op_running(server, slug), slug))
+                entry = {"status": "running", "started_at": time.time(),
+                         "kind": "stop"}
+                flips[slug] = entry
+            run_close = server.close_fn or _default_close
 
-        def run():
-            try:
-                result = run_close(slug, tmux_bin=server.tmux_bin,
-                                   tmux_socket=server.tmux_socket)
-            except Exception as err:  # noqa: BLE001 - reported on the row
-                result = {"slug": slug, "ok": False, "error": str(err),
-                          "stages": []}
-            entry["result"] = result
-            entry["stages"] = result.get("stages", [])
-            entry["status"] = "done" if result.get("ok") else "failed"
-            server.emit("cousin-status", {
-                "slug": slug,
-                "status": "stopped" if result.get("ok") else "stop failed"})
-            server.emit("cousins-refresh", fleet_rows(server))
+            def run():
+                try:
+                    result = run_close(slug, tmux_bin=server.tmux_bin,
+                                       tmux_socket=server.tmux_socket)
+                except Exception as err:  # noqa: BLE001 - reported on the row
+                    result = {"slug": slug, "ok": False, "error": str(err),
+                              "stages": []}
+                entry["result"] = result
+                entry["stages"] = result.get("stages", [])
+                entry["status"] = "done" if result.get("ok") else "failed"
+                server.emit("cousin-status", {
+                    "slug": slug,
+                    "status": "stopped" if result.get("ok") else "stop failed"})
+                server.emit("cousins-refresh", fleet_rows(server))
 
-        server.emit("cousin-status", {"slug": slug, "status": "closing"})
-        threading.Thread(target=run, daemon=True,
-                         name="console-close-%s" % slug).start()
-        return 202, {"ok": True, "slug": slug, "status": "closing",
-                     "started_at": entry["started_at"]}
+            server.emit("cousin-status", {"slug": slug, "status": "closing"})
+            threading.Thread(target=run, daemon=True,
+                             name="console-close-%s" % slug).start()
+            return 202, {"ok": True, "slug": slug, "status": "closing",
+                         "started_at": entry["started_at"]}
+        finally:
+            hold.release()
 
     @router.route("POST", "/api/cousins/{slug}/restart")
     def restart(req, slug):
@@ -686,34 +710,42 @@ def register():
         # background once the supervisor reports it down.
         server = req.server
         home = cousin_home(server, slug)
-        _refuse_during_op(server, slug)
-        # an earlier stop's hold is the operator's decision: remember it, so
-        # a refused start below puts it back as it was instead of dropping it
-        held_path = supervisor.held_path(home)
-        earlier_hold = held_path.read_text() if held_path.is_file() else None
-        stopped = _stop(server, slug)
-        if stopped["status"] == "stopping":          # the runner lane only
-            threading.Thread(target=_start_when_down, args=(server, slug),
-                             daemon=True, name="console-restart-%s" % slug).start()
-            return 202, dict(stopped, target="cousin/%s" % slug)
-        time.sleep(server.settle_seconds)
+        hold = _exclusive(server, slug, "restart")
+        handed_off = False
         try:
-            started = _start(server, slug)
-        except HttpError as err:
-            if stopped.get("held"):
-                # the stop half held a cousin no supervisor ran (O9); a
-                # restart asked for it running, so a refused start leaves no
-                # hold of its own - but an earlier hold stays, word for word
-                if earlier_hold is None:
-                    supervisor.release(home)
-                else:
-                    tmp = held_path.with_name(held_path.name + ".tmp")
-                    tmp.write_text(earlier_hold)
-                    os.replace(tmp, held_path)
-            return err.status, {"ok": False, "target": "cousin/%s" % slug,
-                                "stop": stopped, "start": err.body}
-        return 200, {"ok": True, "target": "cousin/%s" % slug,
-                     "stop": stopped, "start": started}
+            # an earlier stop's hold is the operator's decision: remember it,
+            # so a refused start below puts it back instead of dropping it
+            held_path = supervisor.held_path(home)
+            earlier_hold = held_path.read_text() if held_path.is_file() else None
+            stopped = _stop(server, slug)
+            if stopped["status"] == "stopping":          # the runner lane only
+                # the second half runs after this route has answered: the
+                # mark stays held, released by that thread, not by us
+                handed_off = True
+                threading.Thread(target=_start_when_down, args=(server, slug, hold),
+                                 daemon=True, name="console-restart-%s" % slug).start()
+                return 202, dict(stopped, target="cousin/%s" % slug)
+            time.sleep(server.settle_seconds)
+            try:
+                started = _start(server, slug)
+            except HttpError as err:
+                if stopped.get("held"):
+                    # the stop half held a cousin no supervisor ran (O9); a
+                    # restart asked for it running, so a refused start leaves no
+                    # hold of its own - but an earlier hold stays, word for word
+                    if earlier_hold is None:
+                        supervisor.release(home)
+                    else:
+                        tmp = held_path.with_name(held_path.name + ".tmp")
+                        tmp.write_text(earlier_hold)
+                        os.replace(tmp, held_path)
+                return err.status, {"ok": False, "target": "cousin/%s" % slug,
+                                    "stop": stopped, "start": err.body}
+            return 200, {"ok": True, "target": "cousin/%s" % slug,
+                         "stop": stopped, "start": started}
+        finally:
+            if not handed_off:
+                hold.release()
 
     @router.route("GET", "/api/cousins/{slug}/auth")
     def get_auth(req, slug):
@@ -726,26 +758,26 @@ def register():
         overrides) or a long operation runs on it, 400 when the mode
         cannot be used."""
         cousin_home(req.server, slug)
-        _refuse_during_op(req.server, slug)
-        mode = req.body.get("mode")
-        if mode not in agent_auth.AUTH_MODES:
-            raise HttpError(400, "mode must be one of %s"
-                                 % ", ".join(agent_auth.AUTH_MODES))
-        force = req.body.get("force", False)
-        restart = req.body.get("restart", True)
-        if not isinstance(force, bool) or not isinstance(restart, bool):
-            raise HttpError(400, "force and restart must be booleans")
-        req.server.emit("cousin-status", {"slug": slug,
-                                          "status": "switching auth"})
-        try:
-            out = agent_auth.switch(
-                req.server.root, slug, mode, restart=restart, force=force,
-                tmux_bin=req.server.tmux_bin,
-                tmux_socket=req.server.tmux_socket)
-        except agent_auth.AgentBusy as err:
-            raise HttpError(409, str(err), busy=True)
-        except agent_auth.AuthError as err:
-            raise HttpError(400, str(err))
+        with _exclusive(req.server, slug, "auth switch"):
+            mode = req.body.get("mode")
+            if mode not in agent_auth.AUTH_MODES:
+                raise HttpError(400, "mode must be one of %s"
+                                     % ", ".join(agent_auth.AUTH_MODES))
+            force = req.body.get("force", False)
+            restart = req.body.get("restart", True)
+            if not isinstance(force, bool) or not isinstance(restart, bool):
+                raise HttpError(400, "force and restart must be booleans")
+            req.server.emit("cousin-status", {"slug": slug,
+                                              "status": "switching auth"})
+            try:
+                out = agent_auth.switch(
+                    req.server.root, slug, mode, restart=restart, force=force,
+                    tmux_bin=req.server.tmux_bin,
+                    tmux_socket=req.server.tmux_socket)
+            except agent_auth.AgentBusy as err:
+                raise HttpError(409, str(err), busy=True)
+            except agent_auth.AuthError as err:
+                raise HttpError(400, str(err))
         req.server.emit("cousins-refresh", fleet_rows(req.server))
         return 200, {"ok": True, **out,
                      "auth": auth_status(req.server, slug)}

@@ -6,10 +6,12 @@ test_routes_fleet."""
 import os
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from unittest import mock
 
+from cousin_lib.console import longop
 from tests._stub_supervisor import StubSupervisor
 from tests.console._harness import ConsoleCase
 
@@ -205,6 +207,39 @@ class TestRunnerLaneStartStop(_Case):
             time.sleep(0.05)
         self.assertEqual(stub.ops(), [("stop", "wren"), ("status", None), ("start", "wren")])
         self.assertEqual(self.tmux_calls(), "")
+
+    def test_restart_holds_the_mark_until_start_when_down_finishes(self):
+        # fix round 2: the route answers 202 and returns, but its own
+        # background half (_start_when_down) is still waiting on the
+        # supervisor - the exclusive mark must stay held for that whole
+        # window, released only once that half is done, not when the
+        # route itself returns.
+        self.cousin("wren", extra=RUNNER)
+        gate = threading.Event()
+
+        def status(req):
+            gate.wait(5)
+            return {"ok": True, "children": {}}
+
+        stub = self.stub(status=status)
+        server = self.serve()
+        server.settle_seconds = 0
+        status_code, body = self.post("/api/cousins/wren/restart")
+        self.assertEqual(status_code, 202, body)
+        deadline = time.monotonic() + 5
+        while longop.op_running(server, "wren") != "restart" \
+                and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(longop.op_running(server, "wren"), "restart")
+        with self.assertRaises(longop.Busy):
+            longop.start(server, "wren", "migrate", lambda op: {})
+        gate.set()
+        deadline = time.monotonic() + 5
+        while longop.op_running(server, "wren") is not None \
+                and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertIsNone(longop.op_running(server, "wren"))
+        self.assertEqual(stub.ops(), [("stop", "wren"), ("status", None), ("start", "wren")])
 
     def test_restart_with_nothing_to_stop_starts_at_once(self):
         self.cousin("wren", extra=RUNNER)

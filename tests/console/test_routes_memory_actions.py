@@ -400,6 +400,28 @@ class Portrait(ActionsCase):
             self.assertEqual(status, 403, path)
         self.assertEqual(outside.read_text(), "mine")
 
+    def test_a_link_planted_after_the_check_is_not_written_through(self):
+        # the route's check passes, then a link lands at the candidate path
+        # before synthesize writes: the library's own write must hold
+        from unittest import mock
+        from cousin_lib.console import routes_memory
+        outside = self.root.parent / (self.root.name + "-victim.md")
+        self.addCleanup(lambda: outside.unlink() if outside.exists() else None)
+        cand = self_portrait.candidate_path(self.home)
+        real = self_portrait.synthesize_candidate
+
+        def planted(home, slug):
+            cand.symlink_to(outside)
+            return real(home, slug)
+        self.serve()
+        with mock.patch.object(routes_memory, "_no_link", lambda home, path: None), \
+                mock.patch.object(self_portrait, "synthesize_candidate", planted):
+            status, body = self.post("/api/memory/wren/portrait/synthesize",
+                                     {"replace": True})
+        self.assertEqual(status, 200, body)
+        self.assertFalse(outside.exists(), "written outside the home")
+        self.assertFalse(cand.is_symlink())
+
     def test_a_link_inside_the_home_is_refused_too(self):
         inside = self.home / "notes.md"
         inside.write_text("a note")

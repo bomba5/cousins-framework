@@ -146,8 +146,31 @@ def synthesize_candidate(home, slug):
     lines.append("<!-- Drafted by synthesize; review and edit, then"
                  " commit. -->")
     path = candidate_path(home)
-    path.write_text("\n".join(lines))
+    write_candidate_text(path, "\n".join(lines))
     return path
+
+
+def write_candidate_text(path, text):
+    """Write `text` to `path` without ever following a link there: a
+    fresh temp file in the same directory (O_CREAT|O_EXCL|O_NOFOLLOW, so
+    nothing planted at its name is opened), then os.replace onto the
+    path, which replaces a symlink instead of writing through it."""
+    import os
+    import secrets
+    path = Path(path)
+    tmp = path.with_name("%s.%s.tmp" % (path.name, secrets.token_hex(6)))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o644)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def commit_candidate(home):

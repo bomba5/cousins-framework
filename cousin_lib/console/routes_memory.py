@@ -480,21 +480,8 @@ def _no_link(home, path):
 
 
 def _write_candidate(home, text):
-    import os
-    import tempfile
     from cousin_lib import self_portrait
-    path = self_portrait.candidate_path(home)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    self_portrait.write_candidate_text(self_portrait.candidate_path(home), text)
 
 
 def _maintain_work(server, slug, home, action, dry_run):

@@ -178,5 +178,60 @@ class TestCli(ImportCase):
         self.assertTrue(self._target("feedback_ledgers.md").exists())
 
 
+class TestManifestIsTheRecord(ImportCase):
+    """Review fix round 1: the manifest is what keeps an edited copy from
+    being overwritten and a removed one from coming back (R8). A manifest
+    that will not parse must stop an import, not reset it; and a copy that
+    exists with no manifest row is an import only when it is exactly what
+    the import would write."""
+
+    def _manifest(self):
+        return self._target(memory_import.MANIFEST)
+
+    def test_a_corrupt_manifest_refuses_and_writes_nothing(self):
+        memory_import.apply(self.home, root=self.root)
+        self._target("feedback_ledgers.md").write_text("Wren's own correction.\n")
+        self._target("reference_keys.md").unlink()                       # dropped
+        self._manifest().write_text("{not json")
+        with self.assertRaises(memory_import.ManifestError):
+            memory_import.apply(self.home, root=self.root)
+        with self.assertRaises(memory_import.ManifestError):
+            memory_import.plan(self.home, root=self.root)
+        self.assertEqual(self._target("feedback_ledgers.md").read_text(), "Wren's own correction.\n")
+        self.assertFalse(self._target("reference_keys.md").exists())
+        self.assertEqual(self._manifest().read_text(), "{not json")
+
+    def test_the_cli_says_so_and_exits_2(self):
+        memory_import.apply(self.home, root=self.root)
+        self._manifest().write_text("{not json")
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = memory.memory_main(["--home", str(self.home), "import-auto", "--apply"])
+        self.assertEqual(rc, 2)
+        self.assertIn(memory_import.MANIFEST, err.getvalue())
+        self.assertEqual(out.getvalue(), "")
+
+    def _forget(self, name):
+        manifest = json.loads(self._manifest().read_text())
+        del manifest[name]
+        self._manifest().write_text(json.dumps(manifest))
+
+    def test_a_copy_without_a_row_that_is_exactly_the_import_is_imported(self):
+        """A run that died after writing the copy and before the manifest:
+        the next run converges."""
+        memory_import.apply(self.home, root=self.root)
+        self._forget("feedback_ledgers.md")
+        rows = memory_import.plan(self.home, root=self.root)
+        self.assertEqual(self._actions(rows)["feedback_ledgers.md"], "import")
+
+    def test_a_copy_without_a_row_that_was_edited_is_a_conflict(self):
+        memory_import.apply(self.home, root=self.root)
+        self._forget("feedback_ledgers.md")
+        self._target("feedback_ledgers.md").write_text("Wren's own correction.\n")
+        rows = memory_import.apply(self.home, root=self.root)
+        self.assertEqual(self._actions(rows)["feedback_ledgers.md"], "conflict")
+        self.assertEqual(self._target("feedback_ledgers.md").read_text(), "Wren's own correction.\n")
+
+
 if __name__ == "__main__":
     unittest.main()

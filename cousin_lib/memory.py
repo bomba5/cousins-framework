@@ -866,10 +866,14 @@ def _cmd_import_auto(args):
         print("ERROR: import-auto reads config/harness.toml under the framework"
               " root: %s" % err, file=sys.stderr)
         return 2
-    if args.apply:
-        rows = memory_import.apply(home, root=root)
-    else:
-        rows = memory_import.plan(home, root=root)
+    try:
+        if args.apply:
+            rows = memory_import.apply(home, root=root)
+        else:
+            rows = memory_import.plan(home, root=root)
+    except memory_import.ManifestError as err:
+        print("ERROR: import-auto: %s" % err, file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(rows, indent=1))
     else:

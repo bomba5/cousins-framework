@@ -55,13 +55,34 @@ def target_dir(home):
     return Path(home).joinpath(*TARGET)
 
 
-def load_manifest(home):
-    """{name: {"source": sha256, "written": sha256}}; {} when absent or unreadable."""
+class ManifestError(ValueError):
+    """The manifest exists and cannot be read as one: an import refuses,
+    because without it an edited copy looks new and a removed one looks
+    never imported."""
+
+
+def load_manifest(home, *, strict=False):
+    """{name: {"source": sha256, "written": sha256}}; {} when absent.
+    A manifest that exists but will not parse (or is not a JSON object)
+    is {} for a reader that only needs a hint (search's dedupe) and a
+    ManifestError with strict=True (plan and apply: the manifest is the
+    record that protects an edit or a removal)."""
+    path = target_dir(home) / MANIFEST
     try:
-        data = json.loads((target_dir(home) / MANIFEST).read_text())
-    except (OSError, ValueError):
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
         return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, ValueError) as err:
+        if strict:
+            raise ManifestError("%s cannot be read (%s); fix or remove it by hand, nothing"
+                                " was imported" % (path, err))
+        return {}
+    if not isinstance(data, dict):
+        if strict:
+            raise ManifestError("%s is not a JSON object; fix or remove it by hand, nothing"
+                                " was imported" % path)
+        return {}
+    return data
 
 
 def render(name, text, *, imported_at):
@@ -76,14 +97,33 @@ def render(name, text, *, imported_at):
     return "---\n" + provenance + "\n---\n" + text
 
 
+_IMPORTED_AT = re.compile(r"^imported_at: (.*)$", re.M)
+
+
+def _is_its_import(name, text, target):
+    """True when `target` holds exactly what importing `text` wrote: the
+    source rendered again with the copy's own imported_at. A copy with no
+    manifest row is then the work of a run that died before its manifest
+    write, and importing it again is safe; anything else is a copy
+    someone edited."""
+    try:
+        written = target.read_text(errors="replace")
+    except OSError:
+        return False
+    front = _FRONT.match(written)
+    stamp = _IMPORTED_AT.search(front.group(1)) if front else None
+    return bool(stamp) and render(name, text, imported_at=stamp.group(1)) == written
+
+
 def plan(home, *, root):
     """One row per file in the harness directory, {"name", "action",
-    "reason"}, action one of ACTIONS. Writes nothing."""
+    "reason"}, action one of ACTIONS. Writes nothing. ManifestError when
+    the manifest exists and will not parse."""
     home = Path(home)
     src = source_dir(home, root=root)
     if src is None:
         return []
-    manifest = load_manifest(home)
+    manifest = load_manifest(home, strict=True)
     rows = []
     for path in sorted(p for p in src.iterdir() if p.is_file()):
         name = path.name
@@ -91,9 +131,15 @@ def plan(home, *, root):
             rows.append({"name": name, "action": "ignore", "reason": "not a memory file"})
             continue
         seen = manifest.get(name)
-        current = sha256(path.read_text(errors="replace"))
+        text = path.read_text(errors="replace")
+        current = sha256(text)
         target = target_dir(home) / name
-        if not isinstance(seen, dict):
+        if not isinstance(seen, dict) and target.exists() \
+                and not _is_its_import(name, text, target):
+            rows.append({"name": name, "action": "conflict",
+                         "reason": "a copy exists that the manifest does not record;"
+                                   " merge by hand"})
+        elif not isinstance(seen, dict):
             rows.append({"name": name, "action": "import", "reason": "new"})
         elif not target.exists():
             rows.append({"name": name, "action": "dropped",
@@ -120,7 +166,7 @@ def apply(home, *, root, now=None):
     src = source_dir(home, root=root)
     tdir = target_dir(home)
     tdir.mkdir(parents=True, exist_ok=True)
-    manifest = load_manifest(home)
+    manifest = load_manifest(home, strict=True)
     when = (now or datetime.now(timezone.utc)).isoformat()
     for row in todo:
         text = (src / row["name"]).read_text(errors="replace")

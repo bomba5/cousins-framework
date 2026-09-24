@@ -332,6 +332,17 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertTrue(spawn.runner_lane(self.home))
         self.assertEqual([c.slug for c in supervisor.runner_cousins(self.root)], ["wren"])
 
+    def test_a_runner_that_is_not_a_runner_kind_is_not_the_runner_lane(self):
+        """#100 review: a second runner_lane returned the raw string, so
+        `runner = "tmux"` read as the runner lane everywhere."""
+        self.create()
+        text = self.toml()
+        for runner, lane in (("tmux", False), ("", False), ("sdk", True),
+                             ("fake", True), ("opencode", True)):
+            (self.home / "cousin.toml").write_text(
+                text + '\n[agent]\nrunner = "%s"\n' % runner)
+            self.assertIs(spawn.runner_lane(self.home), lane, runner)
+
 
 class TestSpawnCliOnTheRunnerLane(_CreateCase):
     ARGS = ("wren", "--name", "Wren", "--role", "example cousin",

@@ -712,19 +712,6 @@ def persist_runtime(home, key, value):
                                      value))
 
 
-
-
-def runner_lane(home):
-    """The cousin's [agent] runner (sdk, fake, opencode), or None for a
-    tmux cousin."""
-    try:
-        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
-    except (OSError, tomllib.TOMLDecodeError):
-        return None
-    runner = (data.get("agent") or {}).get("runner")
-    return runner if isinstance(runner, str) and runner else None
-
-
 def persist_agent_value(home, key, value, *, root=None):
     """Set a runner-lane cousin's [agent] model or effort, the keys its
     runner reads (#100; [runtime] is the tmux lane's and the runner never
@@ -734,13 +721,13 @@ def persist_agent_value(home, key, value, *, root=None):
     validate_account: NEVER_UNRUN), an opencode model the lane's own checks
     (ruling P9-1, "<provider>/<model>", a provider the account holds). A
     refusal is a SpawnError with the reason; nothing is written then."""
-    from cousin_lib import accounts, migrate
+    from cousin_lib import accounts, delivery, migrate
     from cousin_lib.config import FrameworkConfig
     home = Path(home)
     check_runtime_value(key, value)
-    lane = runner_lane(home)
-    if lane is None:
+    if not runner_lane(home):
         raise SpawnError("%s is a tmux cousin: its %s is [runtime]'s" % (home.name, key))
+    lane = delivery._runner_kind(home)
     data = tomllib.loads((home / "cousin.toml").read_text())
     agent = data.get("agent") or {}
     root = Path(root) if root is not None else FrameworkConfig.root_from_home(home)

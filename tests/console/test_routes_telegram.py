@@ -125,6 +125,26 @@ class TestRunnerLaneToggle(ConsoleCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(len(stops), 1)
 
+    def test_a_slow_supervisor_is_not_a_missing_one(self):
+        """#113: only no supervisor at all runs the console's own stop; a
+        live one slower than the timeout does its rescan when it answers,
+        and a second stop from the console would race it."""
+        from cousin_lib import supervisor
+        self.runner_cousin()
+        self.serve()
+        stops = []
+
+        def slow(root, op, **kw):
+            raise supervisor.SupervisorUnavailable(
+                "the cousin-supervisor on %s did not answer within 10s" % root)
+        with mock.patch.object(supervisor, "request", slow), \
+                mock.patch.object(telegram_admin, "stop_bridge",
+                                  lambda home, **kw: stops.append(home) or "stopped"):
+            status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": False})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(stops, [])
+        self.assertIn("did not answer", body["bridge"])
+
     def test_token_and_operator_changes_report_the_bridge(self):
         self.runner_cousin()
         stub = StubSupervisor(self.root).start()

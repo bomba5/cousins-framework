@@ -184,3 +184,50 @@ class TestApply(SwitchCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRollback(SwitchCase):
+    """Phase 11 Task 11b (R17): the way back from a kind switch, keeping the
+    session: the runner stopped, cousin.toml and the kind's settings as they
+    were, the runner started again on the same session id."""
+
+    def test_a_switch_is_rolled_back_to_the_bytes_and_settings_it_left(self):
+        self.trust()
+        before = (self.home / "cousin.toml").read_bytes()
+        session = (self.home / "data" / "runner-session.json").read_bytes()
+        migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        self.calls.clear()
+        rec = migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertEqual(rec["state"], "rolled_back")
+        self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
+        self.assertNotIn("editorMode", json.loads(settings_path(self.home).read_text()))
+        self.assertEqual((self.home / "data" / "runner-session.json").read_bytes(), session)
+        self.assertEqual(self.calls, ["close", "start", ("cursor", "s-live", "sdk")])
+        with self.assertRaises(migrate.MigrateError) as err:
+            migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertIn("already", str(err.exception))
+
+    def test_a_failed_switch_rolls_back_too_and_the_tmux_way_restores_its_settings(self):
+        self.trust()
+        self.kind("tmux")
+        from cousin_lib import harness_settings
+        harness_settings.apply_project_settings(self.home, root=self.root, kind="tmux")
+        before = (self.home / "cousin.toml").read_bytes()
+        self.verified = (False, "no session_init under s-live within 90s")
+        with self.assertRaises(migrate.MigrateError):
+            migrate.switch_apply(self.home, root=self.root, to="sdk", **self.live())
+        self.assertNotIn("editorMode", json.loads(settings_path(self.home).read_text()))
+        rec = migrate.switch_rollback(self.home, root=self.root, to="tmux", **self.live())
+        self.assertEqual(rec["state"], "rolled_back")
+        self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
+        self.assertEqual(json.loads(settings_path(self.home).read_text())["editorMode"], "normal")
+
+    def test_what_cannot_be_rolled_back_is_refused(self):
+        with self.assertRaises(migrate.MigrateError) as err:
+            migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertIn("no kind switch", str(err.exception))
+        self.trust()
+        migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        with self.assertRaises(migrate.MigrateError) as err:
+            migrate.switch_rollback(self.home, root=self.root, to="tmux", **self.live())
+        self.assertIn("came from sdk", str(err.exception))

@@ -1403,6 +1403,49 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
     return rec
 
 
+def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
+    """Back from a kind switch (R17, Task 11b), switched or failed: the
+    runner stopped, cousin.toml restored byte for byte, the kind's settings
+    as the restored kind wants them, the runner started again; the session
+    id is never touched, so the restored kind resumes it. `to` must name
+    the kind the switch came from."""
+    from cousin_lib import harness_settings
+    from cousin_lib.runner import extract
+    home, root = Path(home), Path(root)
+    rec = read_switch_record(home)
+    if rec is None or "prior_toml_b64" not in rec:
+        raise MigrateError("no kind switch recorded in %s: nothing to roll back" % SWITCH_RECORD)
+    if rec.get("state") == "rolled_back":
+        raise MigrateError("already rolled back at %s" % rec.get("rolled_back_at"))
+    if to != rec.get("from"):
+        raise MigrateError("the switch came from %s: roll back with --to %s"
+                           % (rec.get("from"), rec.get("from")))
+    steps = []
+
+    def step(name, detail="done"):
+        steps.append({"step": name, "detail": detail, "at": _now()})
+        rec["rollback_steps"] = steps
+        _write_switch_record(home, rec)
+
+    close(home, root)
+    step("close", "the %s runner stopped" % rec.get("to"))
+    _write_toml(home, base64.b64decode(rec["prior_toml_b64"]), int(rec["prior_mode"]))
+    if to == "tmux":
+        harness_settings.apply_project_settings(home, root=root, kind="tmux")
+    else:
+        harness_settings.remove_kind_settings(home)
+    step("restore", "cousin.toml as it was, byte for byte; the %s kind's settings" % to)
+    start(home, root)
+    step("start", "the %s runner resumes %s" % (to, rec.get("session_id")))
+    sid = rec.get("session_id")
+    if sid:
+        extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
+        step("cursor", "the mining cursor at the end of the %s kind's record" % to)
+    rec.update(state="rolled_back", rolled_back_at=_now())
+    _write_switch_record(home, rec)
+    return rec
+
+
 def _switch_live():
     """The kind switch's live actions: the supervisor stops and starts the
     runner; verify reads the target kind's own record of the resumed session."""
@@ -1500,6 +1543,12 @@ def _switch_cli(args, home, root):
                 print("  warn %s" % w)
             print("ready" if p["ready"] else "NOT ready")
             return 0 if p["ready"] else 1
+        if args.cmd == "rollback":
+            rec = switch_rollback(home, root=root, to=args.to, **live)
+            for s in rec["rollback_steps"]:
+                print("  ok  %-10s %s" % (s["step"], s["detail"]))
+            print(rec["state"])
+            return 0
         rec = switch_apply(home, root=root, to=args.to, **live)
     except MigrateError as err:
         print("error: %s" % err, file=sys.stderr)
@@ -1531,6 +1580,8 @@ def migrate_main(argv=None):
     p = sub.add_parser("rollback")
     p.add_argument("slug")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--to", choices=SWITCH_KINDS, default=None,
+                   help="roll a kind switch back to the kind it came from (phase 11)")
     p.add_argument("--force", action="store_true",
                    help="roll back with inbox rows waiting, or an inbox that cannot be read")
     p = sub.add_parser("check")

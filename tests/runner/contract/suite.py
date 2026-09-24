@@ -178,6 +178,9 @@ class RunnerContract:
         self.assertTrue(r.interrupt())
         self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None, timeout=3.0))
         self.assertEqual(self._row_outcome(r, a), "delivered", "the model received it")
+        # The runner closes the row before it appends the turn's `result`
+        # event: wait for the event too, or a loaded host lands in the gap.
+        self.assertTrue(_wait(lambda: _results(r), timeout=3.0))
         self.assertTrue(_results(r)[-1]["interrupted"])
 
     @item("interrupt_idle_false")

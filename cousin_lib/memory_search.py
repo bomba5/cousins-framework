@@ -155,6 +155,7 @@ def _sources(home, root=None):
     harness = _harness_dir(home, root)
     if harness is not None:
         bases.append(("harness", harness))
+    imported = _imported(home) if harness is not None else {}
     out = []
     for collection, base in bases:
         if base.is_dir():
@@ -164,8 +165,31 @@ def _sources(home, root=None):
                 # removed files for restore; removed is not recalled.
                 if _TRASH_DIR in rel.parts:
                     continue
+                if collection == "harness" and _imported_current(path, imported):
+                    continue
                 out.append((collection, path, rel.as_posix()))
     return out
+
+
+def _imported(home):
+    """{name: sha256 of the source copied} from memory_import's manifest;
+    {} when nothing was imported."""
+    from cousin_lib import memory_import
+    return {name: (row or {}).get("source")
+            for name, row in memory_import.load_manifest(home).items()
+            if isinstance(row, dict)}
+
+
+def _imported_current(path, imported):
+    """True when a harness file's imported copy is current: one memory is
+    one hit, found as the copy. A file changed since the import stays
+    searchable here until it is imported again (R9). Hashed only for the
+    names the manifest holds."""
+    if path.name not in imported:
+        return False
+    from cousin_lib import memory_import
+    text = _read(path)
+    return text is not None and memory_import.sha256(text) == imported[path.name]
 
 
 # The raw store is JSONL, one entry per line, and it is where

@@ -149,6 +149,32 @@ def record(home, paths, *, query=None):
         return
 
 
+def carry(home, moves):
+    """Give each new path the usage history of its old one ({old: new}):
+    a file that moved keeps its bonus. The new entry takes the larger count
+    and the later timestamp of the two, so carrying twice changes nothing;
+    the old entry is left as it is. Never raises, as record() does not."""
+    try:
+        counts = load_counts(home)
+        changed = False
+        for old, new in moves.items():
+            slot = counts.get(str(old))
+            if not slot:
+                continue
+            have = counts.get(str(new)) or {"count": 0, "last": ""}
+            counts[str(new)] = {"count": max(have["count"], slot["count"]),
+                                "last": max(str(have.get("last") or ""),
+                                            str(slot.get("last") or ""))}
+            changed = True
+        if changed:
+            target = _counts_path(home)
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_text(json.dumps(counts, indent=0))
+            os.replace(tmp, target)
+    except (OSError, TypeError, ValueError):
+        return
+
+
 def top_used(home, n=10):
     """The n most-recalled files as (path, count, last), most used
     first, ties by path: consolidation's promotion candidates."""

@@ -431,7 +431,11 @@ can't approve their own proposal. The audit table underneath shows the
 recent proposals, promotions and rejections.
 
 **@wren** (a cousin tab) opens the memory explorer for that cousin. The left
-column lists the layers, grouped:
+column starts with the truth levels, each with its colour and its count:
+operator, framework, tool, conclusion, hypothesis, obsolete. Click one to
+filter the raw entries to it (click more to add levels, "all levels" to
+clear); the counts follow the list's other filters while a raw list is
+open, and count the live entries otherwise. Under them the layers, grouped:
 
 | group | layers |
 |---|---|
@@ -447,8 +451,11 @@ be folded, distilled views behind raw), sources and the busiest topics, raw
 entries per month, and the state of the keyword and semantic indexes.
 
 Raw entries can be filtered by truth level (L0 operator down to L5 obsolete),
-topic, text, source and date range. Each entry shows its level, topic,
-content, source and time. Decisions show what was decided and why. File
+topic, text, source and date range, and are grouped by level (operator
+first, obsolete last; "newest first" lists them in time order instead).
+Each entry shows its level in words and colour, topic, content, source and
+time. An operator-stated entry shows where it was cited (or says none was
+stored); an obsolete one is struck through and dimmed, never hidden. Decisions show what was decided and why. File
 layers show a list and a viewer. The levels themselves are explained in
 [memory](memory.md).
 

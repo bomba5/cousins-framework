@@ -452,7 +452,7 @@ function MemoryView() {
   }
 
   return (
-    <div className="wrap-pad" data-memory-grid style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 14, height: "calc(100vh - 50px)" }}>
+    <div className="wrap-pad" data-memory-grid style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 18, height: "calc(100dvh - 94px)" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 0 }}>
         {scopeBar}
 

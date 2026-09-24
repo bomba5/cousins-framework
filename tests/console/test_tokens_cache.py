@@ -85,6 +85,40 @@ class TestTmuxLane(Fleet):
         self.assertEqual(tokens.cache(self.server, home)["rate"], 90 / 200)
 
 
+class TestTmuxKind(Fleet):
+    """Phase 11 Task 9 (R16): a runner = "tmux" cousin's usage is its pane
+    CLI's transcripts, under its account's config dir (R13), whether or
+    not the install has a harness seam."""
+
+    def _transcript(self, projects, home):
+        from cousin_lib.config import expand_harness_path
+        d = expand_harness_path(str(projects / "{home_encoded}"), home)
+        d.mkdir(parents=True)
+        lines = [{"timestamp": _today() + "T10:00:00Z",
+                  "message": {"id": "m1", "usage": _usage(10, 90, 0)}},
+                 {"timestamp": _today() + "T10:01:00Z",
+                  "message": {"id": "m2", "usage": _usage(20, 0, 80)}}]
+        (d / "s-1.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+
+    def test_a_named_login_reads_its_own_config_dir_without_a_seam(self):
+        (self.root / "config" / "accounts.toml").write_text(
+            '[accounts.team]\nkind = "claude-login"\nconfig_dir = "accounts/team"\n')
+        home = self._cousin("wren", "tmux")
+        with open(home / "cousin.toml", "a") as f:
+            f.write('account = "team"\n')
+        self._transcript(self.root / "accounts" / "team" / "projects", home)
+        self.assertEqual(tokens.availability(self.root)[0], True)   # no harness.toml at all
+        today = tokens.cache_days(self.server, home)[_today()]
+        self.assertEqual((today["read"], today["creation"], today["input"]), (90, 80, 30))
+
+    def test_the_host_login_reads_the_hosts_claude_dir(self):
+        fake_home = self.root / "userhome"
+        with mock.patch.dict(os.environ, {"HOME": str(fake_home)}):
+            home = self._cousin("wren", "tmux")
+            self._transcript(fake_home / ".claude" / "projects", home)
+            self.assertEqual(tokens.cache_days(self.server, home)[_today()]["rate"], 90 / 200)
+
+
 class TestRoute(Fleet):
     def test_the_route_carries_the_rate_beside_an_unchanged_series(self):
         from types import SimpleNamespace

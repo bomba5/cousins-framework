@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from cousin_lib.config import (MissingConfigError, expand_harness_path,
                                harness_config)
@@ -34,13 +35,33 @@ def _seam(root):
     return True, ""
 
 
+# The kinds whose usage needs no harness seam: the SDK's usage.db, and the
+# tmux kind's own transcripts under its account's config dir (phase 11 R16).
+OWN_USAGE_KINDS = ("sdk", "tmux")
+
+
 def _any_sdk(root):
     from cousin_lib.config import FrameworkConfig
     from cousin_lib.delivery import _runner_kind
     try:
-        return any(_runner_kind(c.home) == "sdk" for c in FrameworkConfig(root).list_cousins())
-    except Exception:  # noqa: BLE001 - an unreadable fleet is "no sdk cousin"
+        return any(_runner_kind(c.home) in OWN_USAGE_KINDS
+                   for c in FrameworkConfig(root).list_cousins())
+    except Exception:  # noqa: BLE001 - an unreadable fleet is "no such cousin"
         return False
+
+
+def _pane_transcripts_dir(root, home):
+    """Where a tmux-kind cousin's pane CLI keeps its transcripts (R13): its
+    account's config dir (a named claude-login), else the host's ~/.claude;
+    projects/<the home, encoded as the harness names it>. None when the
+    account cannot be read."""
+    from cousin_lib import accounts
+    try:
+        account = accounts.for_cousin(home, root)
+    except accounts.AccountsError:
+        return None
+    base = account.config_dir if account.config_dir is not None else Path.home() / ".claude"
+    return expand_harness_path(str(Path(base) / "projects" / "{home_encoded}"), home)
 
 
 def availability(root):
@@ -102,9 +123,10 @@ def _add_line(days, line, seen=None):
             bucket[name] = bucket.get(name, 0) + int(value)
 
 
-def _transcripts(root, home, since):
-    cfg = harness_config(root)
-    base = expand_harness_path(cfg["transcripts_dir"], home)
+def _transcripts(root, home, since, base=None):
+    if base is None:
+        cfg = harness_config(root)
+        base = expand_harness_path(cfg["transcripts_dir"], home)
     try:
         return [p for p in base.rglob("*.jsonl")
                 if p.stat().st_mtime >= since]
@@ -151,15 +173,22 @@ def _day_buckets(server, home, *, days=SERIES_DAYS):
                 for day, b in usage.day_totals(home, days=days).items()}
     state = server.state.setdefault("tokens", {})
     files = state.setdefault(str(home), {})
-    try:
-        ok, _reason = _seam(server.root)
-    except Exception:
-        ok = False
-    if not ok:
-        return {}
+    base = None
+    if _runner_kind(home) == "tmux":
+        # the pane CLI's own transcripts, seam or no seam (phase 11 R16)
+        base = _pane_transcripts_dir(server.root, home)
+        if base is None:
+            return {}
+    else:
+        try:
+            ok, _reason = _seam(server.root)
+        except Exception:
+            ok = False
+        if not ok:
+            return {}
     since = (datetime.now(timezone.utc) - timedelta(days=days + 1)).timestamp()
     out = {}
-    for path in _transcripts(server.root, home, since):
+    for path in _transcripts(server.root, home, since, base):
         entry = files.setdefault(str(path), {"offset": 0, "days": {},
                                              "seen": set()})
         _scan(entry, path)

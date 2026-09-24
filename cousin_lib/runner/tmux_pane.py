@@ -137,6 +137,44 @@ def process_kill(pid):
         pass
 
 
+_SGR = re.compile("\x1b\\[([0-9;:]*)m")
+_ESCAPES = re.compile("\x1b\\[[0-9;:?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)|\x1b[@-Z\\\\-_]")
+
+
+def plain(text):
+    """`text` with every escape sequence removed: what `capture-pane -p`
+    without `-e` gives. The screen checks read this."""
+    return _ESCAPES.sub("", text)
+
+
+def undim(line):
+    """`line` (from `capture-pane -p -e`) without the text drawn dim (SGR 2),
+    and without its escapes: the CLI draws a placeholder suggestion in the
+    empty box dim (`❯ Try "fix typecheck errors"`, measured on 2.1.282), and
+    dim text is never input. SGR 0 and 22 end a dim span; the extended
+    colour forms (38/48/58;5;n and ;2;r;g;b) are skipped whole, so their 2
+    is not read as dim."""
+    out, dim, pos = [], False, 0
+    for m in _SGR.finditer(line):
+        if not dim:
+            out.append(line[pos:m.start()])
+        pos = m.end()
+        params = [p for p in re.split("[;:]", m.group(1))] or [""]
+        i = 0
+        while i < len(params):
+            p = params[i]
+            if p in ("", "0", "22"):
+                dim = False
+            elif p == "2":
+                dim = True
+            elif p in ("38", "48", "58") and i + 1 < len(params):
+                i += 2 if params[i + 1] == "5" else 4 if params[i + 1] == "2" else 0
+            i += 1
+    if not dim:
+        out.append(line[pos:])
+    return plain("".join(out))
+
+
 def printable(text):
     """`text` without ESC, the C0 controls but \\n and \\t, DEL and C1."""
     return _CONTROLS.sub("", text)
@@ -159,12 +197,13 @@ def _box_at(lines):
 
 
 def attention_in(screen):
-    """The attention screen showing, matched OUTSIDE the conversation
+    """The attention screen showing (a plain or an escaped capture), matched OUTSIDE the conversation
     (review I3): from the input box's top rule down when a box shows (the
     box, and what the CLI draws under it), the whole screen when none does
     (a dialog replaces the box). The model's own words above the box, a
     usage limit or the rewind selector's footer quoted, never match: a limit
     inside a turn is the transcript's to say (R6)."""
+    screen = plain(screen)
     lines = screen.splitlines()
     top = _box_at(lines)
     region = "\n".join(lines[top:]) if top is not None else screen
@@ -176,16 +215,20 @@ def attention_in(screen):
 
 def box_in(screen):
     """The input box's text: the prompt line between the last two rules;
-    "" when empty, None when no box is on screen."""
-    lines = screen.splitlines()
+    "" when empty, None when no box is on screen. `screen` is best an
+    escaped capture (`capture-pane -p -e`): dim text on the prompt line is
+    the CLI's placeholder, never input (undim); the rules and the prompt
+    are found on the plain text."""
+    raw = screen.splitlines()
+    lines = [plain(l) for l in raw]
     top = _box_at(lines)
     if top is None:
         return None
     end = _rules(lines)[-1]
-    for line in lines[top + 1:end]:
-        s = line.lstrip()
-        if s.startswith(PROMPT.rstrip()):
-            return s[len(PROMPT.rstrip()):].strip()
+    for i in range(top + 1, end):
+        if lines[i].lstrip().startswith(PROMPT.rstrip()):
+            s = undim(raw[i]).lstrip()
+            return s[len(PROMPT.rstrip()):].strip() if s.startswith(PROMPT.rstrip()) else ""
     return None
 
 
@@ -253,17 +296,19 @@ class TmuxPane:
     def process_kill(self, pid):
         process_kill(pid)
 
-    def capture(self):
-        """The screen, or None when there is no pane to read."""
-        r = self._tmux("capture-pane", "-p", "-t", self._target())
+    def capture(self, escapes=False):
+        """The screen, or None when there is no pane to read; `escapes`
+        keeps the SGR sequences (`-e`), which the box needs (undim)."""
+        args = ("capture-pane", "-p", "-e") if escapes else ("capture-pane", "-p")
+        r = self._tmux(*args, "-t", self._target())
         return (r.stdout or "") if r.returncode == 0 else None
 
     def box_text(self):
-        screen = self.capture()
+        screen = self.capture(escapes=True)
         return None if screen is None else box_in(screen)
 
     def queued(self):
-        return QUEUED_HINT in (self.capture() or "")
+        return QUEUED_HINT in plain(self.capture() or "")
 
     def attention(self):
         """The attention screen showing, None for none, NO_PANE when the
@@ -285,24 +330,24 @@ class TmuxPane:
         first_line, body = printable(first_line).replace("\t", " "), printable(body or "")
         if "\n" in first_line:
             return Outcome.FAILED
-        screen = self.capture()
+        screen = self.capture(escapes=True)       # the box reads the escapes, the rest plain text
         if screen is None:
             return Outcome.FAILED
         box = box_in(screen)
         if box and self._residue and self._residue.startswith(box) \
-                and not attention_in(screen) and QUEUED_HINT not in screen:
+                and not attention_in(screen) and QUEUED_HINT not in plain(screen):
             self.clear()                  # our own first line, left by a blocked row
-            screen = self.capture()
+            screen = self.capture(escapes=True)
             if screen is None:
                 return Outcome.FAILED
             box = box_in(screen)
         self._residue = None
-        if attention_in(screen) or box != "" or QUEUED_HINT in screen:
+        if attention_in(screen) or box != "" or QUEUED_HINT in plain(screen):
             return Outcome.BLOCKED
         if self._tmux("send-keys", "-t", self._target(), "-l", first_line).returncode != 0:
             self.clear()
             return Outcome.FAILED
-        screen = self.capture()
+        screen = self.capture(escapes=True)
         if screen is None:
             return Outcome.FAILED
         if attention_in(screen) or box_in(screen) is None:

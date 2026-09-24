@@ -72,7 +72,11 @@ if sub == "has-session":
 if sub == "display-message":
     print(os.environ.get("FAKE_TMUX_PID", "4242"))
 if sub == "capture-pane":
-    sys.stdout.write(open(os.environ["FAKE_TMUX_SCREEN"]).read())
+    screen = open(os.environ["FAKE_TMUX_SCREEN"]).read()
+    if "-e" not in args:           # tmux: escapes only with -e
+        import re
+        screen = re.sub(chr(27) + r"\\[[0-9;:]*m", "", screen)
+    sys.stdout.write(screen)
 if sub == "load-buffer":
     open(os.environ["FAKE_TMUX_LOG"] + ".buffer", "w").write(sys.stdin.read())
 if sub == "send-keys" and args[-1] == "C-u":       # C-u empties the box (Z8)
@@ -225,6 +229,52 @@ class TestScreen(PaneCase):
     def test_enter_to_continue_alone_is_not_the_rewind_selector(self):
         self.show("  Enter to continue")
         self.assertIsNone(self.pane.attention())
+
+
+ESC = "\x1b"
+# measured on the real CLI 2.1.282 (round 4 live proof): a fresh session's
+# box holds a DIM placeholder suggestion, `capture-pane -p -e` of that line
+PLACEHOLDER = (ESC + "[39m❯ " + ESC + "[2mTry" + ESC + "[0m " + ESC + '[2m"fix' + ESC + "[0m "
+               + ESC + "[2mtypecheck" + ESC + "[0m " + ESC + '[2merrors"' + ESC + "[0m")
+
+
+def _boxed(line, above="● done"):
+    return "\n".join([above, RULE, line, RULE, "  ⏵⏵ bypass permissions on"])
+
+
+class TestPlaceholder(PaneCase):
+    """Round 4 live finding: a dim suggestion in the box is not input."""
+
+    def test_the_measured_placeholder_line_is_an_empty_box(self):
+        self.assertEqual(tp.box_in(_boxed(PLACEHOLDER)), "")
+
+    def test_typed_text_is_still_text(self):
+        self.assertEqual(tp.box_in(_boxed(ESC + "[39m❯ stranded paste" + ESC + "[0m")), "stranded paste")
+        self.assertEqual(tp.box_in(_boxed("❯ plain text")), "plain text")
+
+    def test_typed_text_with_a_dim_tail_reads_as_the_typed_part(self):
+        line = ESC + "[39m❯ fix the " + ESC + "[2mtypecheck errors" + ESC + "[0m"
+        self.assertEqual(tp.box_in(_boxed(line)), "fix the")
+        # 22 (normal intensity) ends the dim span as 0 does
+        line = "❯ " + ESC + "[2mghost" + ESC + "[22m typed"
+        self.assertEqual(tp.box_in(_boxed(line)), "typed")
+
+    def test_a_truecolor_2_is_not_dim(self):
+        line = "❯ " + ESC + "[38;2;255;0;0mred text" + ESC + "[0m"
+        self.assertEqual(tp.box_in(_boxed(line)), "red text")
+
+    def test_the_pane_types_over_the_placeholder(self):
+        self.screen.write_text(_boxed(PLACEHOLDER))
+        self.assertEqual(self.pane.box_text(), "")
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.TYPED)
+        self.assertTrue(any("capture-pane" in c and "-e" in c for c in self.calls()))
+
+    def test_screens_and_queued_input_still_read_with_escapes(self):
+        dim_trust = ESC + "[1m" + TRUST.replace("\n", ESC + "[0m\n", 1)
+        self.assertEqual(tp.attention_in(dim_trust), "trust")
+        self.screen.write_text(ESC + "[2m" + QUEUED + ESC + "[0m")
+        self.assertTrue(self.pane.queued())
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", ""), tp.Outcome.BLOCKED)
 
 
 class TestTyping(PaneCase):

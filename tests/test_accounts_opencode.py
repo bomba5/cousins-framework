@@ -185,6 +185,28 @@ class TestEnvironment(OpencodeCase):
         self.auth_json("oc", {"anthropic": {"type": "api", "key": "fake-anthropic-key"}})
         accounts.preflight(acc, self.root)                    # a metered key is a key
 
+    def test_auth_json_holds_api_keys_and_non_anthropic_oauth_only(self):
+        """Review Critical 1: opencode reads every auth.json entry live, and
+        a `wellknown` entry (or any type it may add) brings in a config or a
+        token source the guard never sees. Only `api`, and `oauth` on a
+        provider other than Anthropic, start; the refusal names the provider
+        and the type, never a value."""
+        self.write('[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
+        acc = accounts.load(self.root)["oc"]
+        for entry in ({"type": "wellknown", "key": "fake-wk", "token": "fake-wt"},
+                      {"key": "fake-untyped"}, "fake-not-an-object"):
+            with self.subTest(entry=entry):
+                self.auth_json("oc", {"openai": {"type": "api", "key": "fake-openai"},
+                                      "https://corp.example": entry})
+                with self.assertRaises(accounts.AccountsError) as cm:
+                    accounts.preflight(acc, self.root)
+                self.assertIn("https://corp.example", str(cm.exception))
+                self.assertNotIn("fake-", str(cm.exception))
+        self.auth_json("oc", {"openai": {"type": "api", "key": "fake-openai"},
+                              "github-copilot": {"type": "oauth", "refresh": "fake-r",
+                                                 "access": "fake-a", "expires": 0}})
+        accounts.preflight(acc, self.root)                    # another vendor's OAuth: P9-2
+
     def test_scrub_then_set(self):
         self.write(TOML)
         base = {"PATH": "/bin", "HOME": "/srv/elsewhere", "ANTHROPIC_API_KEY": "stray",

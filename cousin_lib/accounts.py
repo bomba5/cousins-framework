@@ -381,12 +381,25 @@ def _auth_entries(account):
     return _entry_types(_read_auth_json(path), path)
 
 
+# The auth.json entry types an opencode account may hold: a provider's API
+# key, or another vendor's OAuth login (ruling P9-2). opencode reads every
+# entry live, and any other type (`wellknown` fetches a config and a token
+# from a URL) is a source the bridge guard never sees.
+AUTH_TYPES = ("api", "oauth")
+
+
 def _entry_types(data, path):
     entries = {str(k): (v.get("type") if isinstance(v, dict) else None) for k, v in data.items()}
     if entries.get("anthropic") == "oauth":
         raise AccountsError("%s holds an Anthropic OAuth login, a Claude subscription; the"
                             " opencode lane never carries subscription traffic: remove it and"
                             " use an API key" % path)
+    for provider, kind in sorted(entries.items()):
+        if kind not in AUTH_TYPES:
+            raise AccountsError("%s entry %s is of type %s; an opencode account holds only %s"
+                                " entries (a key, or another vendor's OAuth login): remove it"
+                                % (path, provider, kind if isinstance(kind, str) else "none",
+                                   " or ".join(AUTH_TYPES)))
     return entries
 
 

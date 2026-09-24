@@ -12,10 +12,16 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   server per cousin on `127.0.0.1` with a fresh password per start, its
   `HOME` and XDG directories in the account's data dir, an allowlisted
   environment (no `OPENCODE_*` of the shell, no `*_API_KEY`), and a config
-  rendered at every start with nothing merged in: opencode's own hosted
+  rendered at every start: opencode's own hosted
   provider disabled, the model named (`[agent] model = "<provider>/<model>"`
   is required, no default; `small_model`), permission allow-all, the plugin
-  pack, and one MCP server. The framework's tools reach opencode as a
+  pack, and one MCP server. opencode merges other sources over that config
+  (its global config dir and `.opencode` under the account's `HOME`, with
+  their plugin and tool dirs): the runner refuses to start while any is
+  there, and runs no turn unless the config opencode actually runs with
+  (`GET /config`) holds exactly the plugin pack, the one MCP server, the
+  account's providers and the named models. An `auth.json` holds only `api`
+  entries and other vendors' `oauth` logins. The framework's tools reach opencode as a
   remote MCP server the runner itself serves on loopback behind a per-start
   token, so every call runs in the runner against the live turn; the model
   sees them as `cousin_<tool>` and the contract in the system prompt names

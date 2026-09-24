@@ -936,11 +936,28 @@ account's data dir. Its environment is an allowlist: `PATH`, `LANG`,
 file), and the runner's own switches; nothing
 else (no `OPENCODE_*` of the shell, no `*_API_KEY`) reaches it. The config
 it reads is rendered at every start into `<data_dir>/opencode.runner.json`
-(mode 0600) and nothing else is merged in: opencode's own hosted provider
+(mode 0600): opencode's own hosted provider
 disabled, the model and small model above, `permission` allow-all (the
 cousin's `policy.toml` is the policy), the plugin pack, and one MCP server,
 the runner's own on loopback behind a per-start token, through which the
-model reaches the framework's tools as `cousin_<tool>`. With any plugin
+model reaches the framework's tools as `cousin_<tool>`.
+
+opencode merges other config sources over that file. Measured on 1.18.31,
+with the project config switched off: it merges `opencode.json` from its
+global config dir, `<data_dir>/config/opencode/`, and from
+`<data_dir>/.opencode/` (the account's `HOME`), and it loads plugins and
+custom tools from the `plugin(s)/` and `tool(s)/` dirs there; it does not
+read `.opencode/` or `opencode.json` in the cousin's home. So a runner
+refuses to start (exit 2 when found at start-up, exit 3 at a restart) while
+any of these exist: anything in `<data_dir>/config/opencode/` other than
+opencode's own `.gitignore` and the plugin library below, `<data_dir>/.opencode`,
+or `<home>/.opencode`. The message names each path: remove it. After the
+server starts, the runner reads the config opencode actually runs with
+(`GET /config`) and runs no turn unless it holds exactly the plugin pack,
+exactly the one MCP server, no provider beyond the account's, the models
+`cousin.toml` names, and nothing the bridge guard refuses. A system-wide
+managed config opencode may also read is outside the cousin's reach and is
+checked the same way, through that effective config. With any plugin
 configured, opencode would first install its plugin library from npm into
 its config dir and load no plugin until that ends (a network fetch, and a
 start that hangs offline); the pack imports nothing, so the runner marks

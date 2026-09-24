@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import secrets
+import shutil
 import stat
 import sys
 import tempfile
@@ -66,7 +67,10 @@ class FakeServer:
     the config the runner rendered, its /mcp the result of a real MCP
     handshake with the runner's server (unless `mcp` is forced), standing
     in for the policy plugin as the factory's `plugin` mode says ("load",
-    "fatal", "absent"; "unlisted" serves a config without the plugin)."""
+    "fatal", "absent"; "unlisted" serves a config without the plugin).
+    The factory's `merge` is deep-merged into the config the fake serves,
+    as opencode merges a global file or a plugin dir over the rendered
+    one (measured on 1.18.31: arrays concatenate, objects merge)."""
 
     def __init__(self, factory, kwargs):
         self.factory, self.kwargs = factory, kwargs
@@ -76,6 +80,8 @@ class FakeServer:
 
     def start(self):
         config = json.loads(Path(self.kwargs["config_path"]).read_text())
+        if self.factory.merge:
+            config = _merged(config, self.factory.merge)
         mode = self.factory.plugin
         if mode == "unlisted":
             config.pop("plugin", None)
@@ -106,10 +112,25 @@ class FakeServer:
             self.fake.close()
 
 
+def _merged(base, extra):
+    """opencode's merge of a config source over another: objects merge key
+    by key, arrays concatenate, anything else is replaced."""
+    out = dict(base)
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merged(out[key], value)
+        elif isinstance(value, list) and isinstance(out.get(key), list):
+            out[key] = out[key] + value
+        else:
+            out[key] = value
+    return out
+
+
 class Factory:
-    def __init__(self, scripts=(), *, mcp=None, shared=None, providers=None, plugin="load"):
+    def __init__(self, scripts=(), *, mcp=None, shared=None, providers=None, plugin="load",
+                 merge=None):
         self.scripts, self.mcp, self.shared = list(scripts), mcp, shared
-        self.providers, self.plugin = providers, plugin
+        self.providers, self.plugin, self.merge = providers, plugin, merge
         self.calls, self.servers = [], []
 
     def __call__(self, **kwargs):
@@ -365,6 +386,77 @@ class TestGuards(OpencodeCase):
         self.assertEqual(self.factory.calls, [])            # no server was started
         self.assertEqual(r.state(), "errored")
         self.assertTrue(_wait(lambda: not r.worker_alive()))
+
+    def foreign_sources(self, home, data):
+        """Every config source opencode 1.18.31 merges or loads over the
+        rendered file (measured), plus the cousin home's .opencode."""
+        g = data / "config" / "opencode"
+        return [(g / "opencode.json", "file"), (g / "opencode.jsonc", "file"),
+                (g / "config.json", "file"), (g / "plugin", "dir"), (g / "plugins", "dir"),
+                (g / "tool", "dir"), (g / "tools", "dir"), (g / "agent", "dir"),
+                (data / ".opencode", "dir"), (home / ".opencode", "dir")]
+
+    def test_a_config_source_opencode_would_merge_refuses_the_runner(self):
+        """Review Critical 1: opencode merges its global config file and
+        loads its plugin and tool dirs over the one the runner renders, so
+        any of them refuses the runner (exit 2), named; opencode's own and
+        the seed's files in its config dir do not."""
+        home = self.home()
+        data = self.root / ".secrets" / "accounts" / "lab.opencode"
+        g = data / "config" / "opencode"
+        g.mkdir(parents=True)
+        for own in (".gitignore", "package-lock.json"):
+            (g / own).write_text("{}")
+        (g / "node_modules").mkdir()
+        self.runner(home=home)                                # the own files start
+        for path, kind in self.foreign_sources(home, data):
+            with self.subTest(path=str(path)):
+                path.mkdir(parents=True) if kind == "dir" else path.write_text("{}")
+                with self.assertRaises(RunnerError) as err:
+                    self.runner(home=home)
+                self.assertIn(str(path), str(err.exception))
+                self.assertIn("merged", str(err.exception))
+                shutil.rmtree(path) if kind == "dir" else path.unlink()
+
+    def test_a_config_source_written_after_construction_refuses_the_start(self):
+        """The model can write one (its shell's HOME was the data dir): the
+        start looks again, before any server runs."""
+        r = self.runner()
+        g = self.root / ".secrets" / "accounts" / "lab.opencode" / "config" / "opencode"
+        g.mkdir(parents=True, exist_ok=True)
+        (g / "opencode.json").write_text('{"plugin": ["x"]}')
+        r.start()
+        self.assertTrue(_wait(lambda: r.fatal is not None))
+        self.assertIn("opencode.json", r.fatal)
+        self.assertEqual(self.factory.calls, [])            # no server was started
+
+    def test_the_effective_config_is_checked_not_only_the_rendered_one(self):
+        """Review Critical 1: after the server starts, GET /config (what
+        opencode runs with, every source merged) must hold exactly the
+        policy plugin, exactly the cousin MCP server, the account's
+        providers only, the named models, and no bridge marker."""
+        cases = (
+            ({"plugin": ["file:///elsewhere/other.js"]}, "plugins"),
+            ({"mcp": {"extra": {"type": "local", "command": ["x"]}}}, "MCP servers"),
+            ({"provider": {"openai": {"options": {"apiKey": "fake-k"}}}}, "providers"),
+            ({"provider": {"local": {"options": {"baseURL": "http://127.0.0.1:3456/v1"}}}},
+             "Claude-subscription bridge"),
+            ({"model": "local/other"}, "model"),
+            ({"small_model": "local/other"}, "small_model"),
+        )
+        for merge, needle in cases:
+            with self.subTest(merge=merge):
+                r = self.runner(factory=Factory(merge=merge))
+                a = r.enqueue(_op("hello"))
+                r.start()
+                self.assertTrue(_wait(lambda: r.fatal is not None))
+                self.assertIn("effective config", r.fatal)
+                self.assertIn(needle, r.fatal)
+                self.assertNotIn("fake-k", r.fatal)
+                self.assertTrue(_wait(lambda: not r.worker_alive()))
+                self.assertEqual(r.inbox.get(a.inbox_id)["state"], "queued")
+                self.assertEqual(self.prompts(), [])
+                r.stop(timeout=5)
 
     def test_an_mcp_server_opencode_cannot_reach_refuses_every_turn(self):
         r = self.runner(factory=Factory(mcp={"cousin": {"status": "needs_auth"}}))

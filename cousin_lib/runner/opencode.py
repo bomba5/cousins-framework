@@ -104,6 +104,14 @@ SDK_NAMES = {"bash": "Bash", "read": "Read", "write": "Write", "edit": "Edit",
 OWN_PREFIX = "cousin_"
 # The largest output opencode asks of any model (its OUTPUT_TOKEN_MAX, 1.18.31)
 OPENCODE_OUTPUT_MAX = 32000
+# What may sit in opencode's global config dir (<XDG_CONFIG_HOME>/opencode):
+# opencode's own .gitignore, and the plugin dependency seed_plugin_dependency
+# writes (or an online install would). Measured on 1.18.31, opencode MERGES
+# opencode.json there over the rendered config and LOADS plugin(s)/ and
+# tool(s)/ (code in the server, which GET /config does not list), so the dir
+# is an allowlist: anything else there refuses the start.
+CONFIG_DIR_OWN = frozenset((".gitignore", "node_modules", "package.json", "package-lock.json",
+                            "bun.lock", "bun.lockb"))
 
 
 def tool_name(name):
@@ -183,7 +191,11 @@ def plugin_entry(plugin=PLUGIN):
 
 
 def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLUGIN):
-    """The one config the server reads (R5); nothing else is merged in."""
+    """The config the runner renders (R5). opencode merges other sources
+    over it (its global config dir, `$HOME/.opencode`, a managed config):
+    `foreign_config_sources` refuses those the runner can see, and the
+    effective config is checked after the server starts
+    (`check_effective_config`)."""
     config = {
         "$schema": SCHEMA,
         "model": model,
@@ -224,6 +236,54 @@ def server_env(account, root, *, home, environ=None, models_fetch=True):
     if not models_fetch:
         env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"          # R21
     return env
+
+
+def foreign_config_sources(account, root, home):
+    """The config sources opencode would merge or load over the rendered
+    file: anything in its global config dir but CONFIG_DIR_OWN, and
+    `<data_dir>/.opencode` (the account's HOME; measured merged on 1.18.31),
+    and `<home>/.opencode` (the server's cwd; measured NOT merged under
+    OPENCODE_DISABLE_PROJECT_CONFIG, refused all the same: a leftover from
+    running opencode by hand). A list of paths, sorted."""
+    env = accounts.account_env(account, root)
+    config_dir = Path(env["XDG_CONFIG_HOME"]) / "opencode"
+    try:
+        names = os.listdir(config_dir)
+    except (FileNotFoundError, NotADirectoryError):
+        names = []
+    found = [config_dir / n for n in names if n not in CONFIG_DIR_OWN]
+    found += [p for p in (Path(env["HOME"]) / ".opencode", Path(home) / ".opencode")
+              if os.path.lexists(p)]
+    return sorted(found)
+
+
+def check_effective_config(config, env, *, account, model, small_model, plugin=PLUGIN):
+    """opencode's effective config (GET /config, every source merged) holds
+    what the runner rendered and nothing more: the bridge guard over all of
+    it, exactly the policy plugin, exactly the cousin MCP server, providers
+    within the account's, the named models. RunnerError naming what, never
+    a value (a value may be a key)."""
+    def refuse(what):
+        raise RunnerError("opencode's effective config %s: another config source was merged"
+                          " over the one the runner rendered, so no turn runs" % what)
+    try:
+        opencode_guard.refuse_bridge(config, env)
+    except opencode_guard.BridgeRefused as err:
+        refuse("fails the bridge guard (%s)" % err.reason)
+    names = [p if isinstance(p, str) else (p[0] if isinstance(p, list) and p else None)
+             for p in config.get("plugin") or []]
+    if names != [plugin_entry(plugin)]:
+        refuse("lists plugins %s, not only the policy plugin" % names)
+    mcp = sorted(config.get("mcp") or {})
+    if mcp != ["cousin"]:
+        refuse("lists MCP servers %s, not only the cousin's" % mcp)
+    allowed = set(account.providers or ()) | ({ENDPOINT_PROVIDER} if account.endpoint else set())
+    extra = sorted(set(config.get("provider") or {}) - allowed)
+    if extra:
+        refuse("configures providers %s beyond the account's %s" % (extra, sorted(allowed)))
+    for key, want in (("model", model), ("small_model", small_model)):
+        if config.get(key) != want:
+            refuse("names %s %r, not the %r cousin.toml names" % (key, config.get(key), want))
 
 
 def seed_plugin_dependency(config_dir):
@@ -365,6 +425,7 @@ class OpencodeRunner:
         # config as it will be rendered and the environment it will get
         self._render(mcp_url="http://127.0.0.1:0/mcp", mcp_token="-")
         self._check_models()
+        self._refuse_foreign_config()
         self.session_id = "opencode-" + uuid.uuid4().hex[:8]    # the stream's, the claimant
         self.opencode_session = None                             # the server's session id
         self.inbox = Inbox(self.home)
@@ -436,6 +497,18 @@ class OpencodeRunner:
         except opencode_guard.BridgeRefused as err:
             raise RunnerError(err.reason)
         return config, env
+
+    def _refuse_foreign_config(self):
+        """Review Critical 1: a config source opencode would merge over the
+        rendered one refuses the start, named (the model could have written
+        it: its shell's HOME is the account's data dir)."""
+        found = foreign_config_sources(self.account, self.root, self.home)
+        if found:
+            raise RunnerError("%s would be merged into opencode's config over the one the"
+                              " runner renders (a plugin, a tool, a provider or a model could"
+                              " come back that way): remove %s"
+                              % (", ".join(str(p) for p in found),
+                                 "it" if len(found) == 1 else "them"))
 
     def _check_models(self):
         """Both models well formed, on a provider this account reaches."""
@@ -570,7 +643,7 @@ class OpencodeRunner:
         return self._write_config(render_policy(self.policy, nonce=self._policy_nonce, ack=ack),
                                   POLICY_NAME)
 
-    def _check_plugin_listed(self):
+    def _check_plugin_listed(self, env):
         """The veto's first half (R9, Review Focus 3): opencode's config
         lists the plugin pack. This is also the instance's first request,
         on which opencode bootstraps the instance and loads its plugins, so
@@ -580,17 +653,20 @@ class OpencodeRunner:
         alone proves nothing: see `_await_plugin_ack`."""
         entry = plugin_entry(PLUGIN)
         try:
-            listed = (self._client.request("GET", "/config", timeout=self.plugin_timeout_s)
-                      or {}).get("plugin") or []
+            effective = self._client.request("GET", "/config",
+                                             timeout=self.plugin_timeout_s) or {}
         except OpencodeError as err:
             raise RunnerError("GET /config: %s: the policy plugin cannot be checked, so no turn"
                               " runs" % err)
+        listed = effective.get("plugin") or []
         names = [p if isinstance(p, str) else (p[0] if isinstance(p, list) and p else None)
                  for p in listed]
         if entry not in names:
             raise RunnerError("opencode's config does not list the policy plugin %s (it lists %s):"
                               " policy.toml would not apply, so no turn runs"
                               % (entry, names or "none"))
+        check_effective_config(effective, env, account=self.account, model=self.model,
+                               small_model=self.small_model)
 
     def _await_plugin_ack(self):
         """The veto's second half: the plugin acknowledged THIS start's
@@ -637,6 +713,7 @@ class OpencodeRunner:
         try:
             self._start_mcp()
             config, env = self._render(mcp_url=self._mcp.url, mcp_token=self._mcp.token)
+            self._refuse_foreign_config()
             path = self._write_config(config)
             seed_plugin_dependency(Path(env["XDG_CONFIG_HOME"]) / "opencode")
             self._write_policy()
@@ -652,7 +729,7 @@ class OpencodeRunner:
                 return False
             self._client = OpencodeClient(self._server.url, self._server.password)
             self._limit = None
-            self._check_plugin_listed()
+            self._check_plugin_listed(env)
             self._reader = EventReader(self._server.url, self._server.password, self._events.put,
                                        stop_event=self._reader_stop,
                                        backoff=self.reader_backoff_s)

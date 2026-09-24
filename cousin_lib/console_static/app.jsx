@@ -553,6 +553,7 @@ function App() {
           title={sidebarCollapsed ? "expand sidebar" : "collapse sidebar"}
           style={{ minHeight: 24, padding: "0 6px", fontSize: 12, marginRight: 4 }}
         >{sidebarCollapsed ? "›" : "‹"}</button>
+        <img className="brand-icon" src="favicon.svg" alt="" aria-hidden="true" />
         <span className="brand">cousins<span className="dim">//</span>console</span>
         {build && <span className="build">{build.repo_url ? <a href={build.repo_url} title={build.repo_url} target="_blank" rel="noopener noreferrer">v{build.version}</a> : `v${build.version}`}{build.commit ? " " : ""}{build.commit ? (build.commit_url ? <a href={build.commit_url} title={build.commit_url} target="_blank" rel="noopener noreferrer">{build.commit}</a> : build.commit) : ""}</span>}
         <span className="spacer" />
@@ -636,16 +637,16 @@ function App() {
 function MainHeader({ view, cousins, activeCousin }) {
   const c = cousins.find(x => x.slug === activeCousin);
   const titles = {
-    chat: "chat." + (activeCousin || "-"),
-    cousins: "cousins",
-    jobs: "jobs",
-    memory: "memory.explorer",
-    loops: "loops.status",
-    tokens: "tokens.meter",
-    tracker: "tracker",
-    meetings: "meetings",
-    settings: "settings",
-    overview: "host.stats",
+    chat: c ? (c.name || c.slug) : "Chat",
+    cousins: "Cousins",
+    jobs: "Jobs",
+    memory: "Memory",
+    loops: "Loops",
+    tokens: "Tokens",
+    tracker: "Tracker",
+    meetings: "Meetings",
+    settings: "Settings",
+    overview: "Overview",
   };
   const paths = {
     chat: "/console/chat/@" + (activeCousin || "-"),
@@ -665,9 +666,9 @@ function MainHeader({ view, cousins, activeCousin }) {
       <span className="path">{paths[view] || ""}</span>
       <span className="spacer" />
       {view === "chat" && c && (
-        <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-2)" }}>
+        <span className="hdr-meta">
           <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
-          {" "}{c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
+          {c.status === "running" ? "running" : "stopped"} · {c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
         </span>
       )}
     </div>

@@ -801,7 +801,7 @@ function LoopEditModal({ cousin, loop, onClose, onSaved }) {
 function Field({ label, children }) {
   return (
     <div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>{label}</div>
       {children}
     </div>
   );
@@ -1098,9 +1098,9 @@ function TokensView({ cousins: allCousins }) {
 
 function Stat({ label, value, small }) {
   return (
-    <div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-      <div style={{ fontFamily: "var(--mono)", fontSize: small ? 14 : 20, color: "var(--fg-0)", fontWeight: 600, marginTop: 2 }}>{value}</div>
+    <div className="stat-cell">
+      <div className="eyebrow">{label}</div>
+      <div className="stat-value" style={{ fontSize: small ? 15 : 22 }}>{value}</div>
     </div>
   );
 }

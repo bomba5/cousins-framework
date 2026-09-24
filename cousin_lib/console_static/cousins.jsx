@@ -1201,18 +1201,16 @@ function LoopsEditor({ cousin }) {
 }
 
 const inputStyle = {
-  fontFamily: "var(--mono)", fontSize: 11,
-  background: "var(--bg-1)", color: "var(--fg-0)",
-  border: "1px solid var(--line)", borderRadius: 2,
-  padding: "3px 6px", outline: "none",
+  fontFamily: "var(--sans)", fontSize: 12,
+  background: "var(--bg-0)", color: "var(--fg-0)",
+  border: "1px solid var(--line)", borderRadius: 6,
+  padding: "4px 8px", outline: "none",
 };
 
 function SectionLabel({ children, style }) {
   return (
-    <div style={{
-      fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)",
-      textTransform: "uppercase", letterSpacing: "0.1em",
-      borderTop: "1px solid var(--line-soft)", paddingTop: 10, marginBottom: 10,
+    <div className="eyebrow" style={{
+      borderTop: "1px solid var(--hair)", paddingTop: 14, marginBottom: 10,
       ...(style || {}),
     }}>{children}</div>
   );

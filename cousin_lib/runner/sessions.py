@@ -499,7 +499,11 @@ class Sessions:
         return any(r.login_required() for r in self.sessions().values())
 
     def side_stalled(self):
-        """True while a side session that gave up waits for its rebuild:
-        `--once` exits 3 on it after its give-up clock (round 2 review N2);
-        the long-running mode keeps rebuilding it (P8-1)."""
-        return bool(self._restart_at)
+        """True from a side session's give-up until it has recovered: while
+        it waits for its rebuild, and after the rebuild until it has stayed
+        up RESTART_RESET_S (its attempts back at 0). `--once` exits 3 on it
+        after its give-up clock (round 2 review N2); counting only the wait
+        let every rebuild restart that clock, so under the real backoff the
+        exit came after about 26 s, not 10 (final review). The long-running
+        mode keeps rebuilding it (P8-1)."""
+        return bool(self._restart_at) or any(self._attempts.values())

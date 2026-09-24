@@ -397,6 +397,46 @@ class TestOnceGivesUpOnASideThatNeverStarts(HermeticCase):
         self.assertTrue(s.primary.worker_alive())
 
 
+class TestOnceStallClockUnderTheRealBackoff(HermeticCase):
+    def test_once_exits_3_about_the_give_up_time_after_a_side_first_gives_up(self):
+        """Final review: under the real backoff (1 s, doubling) each rebuild
+        ended the stall for a moment and restarted `--once`'s clock, so exit
+        3 came after about 26 s, not the documented 10. The clock now runs
+        on across rebuilds until a side stays up RESTART_RESET_S."""
+        home = _install(self)
+
+        def refuse(options):
+            client = ScriptedClient(options, [])
+
+            async def connect(prompt=None):
+                raise OSError("the CLI did not start")
+            client.connect = connect
+            return client
+
+        s = sessions.Sessions(home, kinds=("peer",),
+                              factories={"primary": lambda o: ScriptedClient(o, []),
+                                         "peer": refuse})
+        self.addCleanup(lambda: s.stop(timeout=5))
+        s.enqueue(Item("peer:testa", "chat", "hello?", sender="Testa"))
+        import threading
+        stop, out = threading.Event(), []
+        self.assertEqual(sessions.RESTART_BASE_S, 1.0)
+        self.assertEqual(runner_main.ERRORED_GIVE_UP_S, 10.0)
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            s.start()
+            t0 = time.monotonic()
+            t = threading.Thread(target=lambda: out.append(runner_main._once(s, stop)))
+            t.start()
+            t.join(60)
+            took = time.monotonic() - t0
+            stop.set()
+            t.join(5)
+        self.assertEqual(out, [3])
+        self.assertIn("a side session could not start", err.getvalue())
+        self.assertGreaterEqual(took, runner_main.ERRORED_GIVE_UP_S)
+        self.assertLess(took, 18.0)
+
+
 class TestOneCachedPrefix(SessionsCase):
     """Review I2 (a): every input to the cached prefix is the same bytes in
     the primary and a side session: the preset prompt, the tools, the cwd,

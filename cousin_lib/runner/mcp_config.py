@@ -11,17 +11,27 @@ Claude Code uses, and maps each entry onto the SDK's McpServerConfig:
 A stdio entry's `type` may be left out. `cousin` is reserved: the
 runner serves its own tools in-process, so an entry of that name (the
 tmux lane's cousin-mcp, which spawn writes) is skipped, never started
-beside it. `${VAR}` and `${VAR:-default}` are expanded, as Claude Code
-does, in command, args, env values, url and header values, against the
-runner's own environment; a variable that is unset and has no default
-skips its entry. A file that does not parse, or an entry that is not
-one of the three shapes, is skipped with the reason: never fatal, the
-cousin still starts with `cousin`.
+beside it. A file that does not parse, or an entry that is not one of
+the three shapes, is skipped with the reason: never fatal, the cousin
+still starts with `cousin`.
 
-Nothing expanded leaves this module but the configs themselves: the
-event (`Loaded.event`) carries server names, types, ignored key names
-and reasons, never a value. The set is ordered by name, so the same
-file gives the same bytes at every start."""
+`${VAR}` and `${VAR:-default}` are passed through UNEXPANDED: the agent
+CLI expands them itself, in command, args, env, url and headers, from
+its own environment (measured on the bundled CLI 2.1.281), and the SDK
+hands it the servers as a `--mcp-config` command-line argument, which
+the host's users can read. So a secret travels as its `${NAME}` only,
+and its value reaches the server through the CLI's environment. Two
+checks stay here, reading only whether a variable is set: a reference
+with no default to a variable unset in the runner's environment skips
+its entry (Claude Code refuses such a config), and a reference to one
+of the account variables (accounts.AUTH_VARS) skips its entry whatever
+it holds: the CLI's environment carries the cousin's own credential
+there, and a .mcp.json the model can edit must not route it to a
+server.
+
+The event (`Loaded.event`) carries server names, types, ignored key
+names and reasons, never a value. The set is ordered by name, so the
+same file gives the same bytes at every start."""
 import json
 import os
 import re
@@ -115,52 +125,63 @@ def read(home):
     return True, entries, skipped
 
 
-def expand(value, environ, missing):
-    """`${VAR}` and `${VAR:-default}` in one string, as Claude Code
-    expands them: a set variable wins (even empty), then the default; an
-    unset one with no default is added to `missing` and left as is."""
-    def one(match):
-        name, sep, default = match.group(1).partition(":-")
-        if name in environ:
-            return environ[name]
-        if sep:
-            return default
-        missing.append(name)
-        return match.group(0)
-    return _VAR.sub(one, value)
-
-
-def _config(kind, entry, environ, missing):
-    def x(value):
-        return expand(value, environ, missing)
-    if kind == "stdio":
-        out = {"type": "stdio", "command": x(entry["command"])}
-        if "args" in entry:
-            out["args"] = [x(a) for a in entry["args"]]
-        if "env" in entry:
-            out["env"] = {k: x(v) for k, v in entry["env"].items()}
-        return out
-    out = {"type": kind, "url": x(entry["url"])}
-    if "headers" in entry:
-        out["headers"] = {k: x(v) for k, v in entry["headers"].items()}
+def references(value):
+    """[(name, has_default)] for every `${NAME}` / `${NAME:-default}` in
+    one string, parsed as Claude Code parses them."""
+    out = []
+    for match in _VAR.finditer(value):
+        name, sep, _ = match.group(1).partition(":-")
+        out.append((name, bool(sep)))
     return out
 
 
+def _strings(kind, entry):
+    """Every string the CLI expands in this entry."""
+    if kind == "stdio":
+        return ([entry["command"]] + list(entry.get("args", []))
+                + list(entry.get("env", {}).values()))
+    return [entry["url"]] + list(entry.get("headers", {}).values())
+
+
+def _config(kind, entry):
+    """The SDK config: the declared keys only, every value as written."""
+    out = {"type": kind}
+    for key in KEYS[kind]:
+        if key in entry:
+            value = entry[key]
+            out[key] = list(value) if isinstance(value, list) else \
+                dict(value) if isinstance(value, dict) else value
+    return out
+
+
+def _refusal(kind, entry, environ):
+    """Why this entry's variables skip it, or None."""
+    from cousin_lib.accounts import AUTH_VARS
+    refs = [r for v in _strings(kind, entry) for r in references(v)]
+    auth = sorted({name for name, _ in refs if name in AUTH_VARS})
+    if auth:
+        return "names an account variable, never passed to a server: %s" % ", ".join(auth)
+    missing = sorted({name for name, has_default in refs
+                      if not has_default and name not in environ})
+    if missing:
+        return "unset variable%s with no default: %s" % ("s" if len(missing) > 1 else "",
+                                                         ", ".join(missing))
+    return None
+
+
 def load(home, environ=None):
-    """The servers to merge beside `cousin`, expanded against `environ`
-    (default: this process's environment)."""
+    """The servers to merge beside `cousin`, `${VAR}` left for the CLI;
+    `environ` (default: this process's environment, which the SDK hands
+    the CLI) is read only for whether a variable is set."""
     environ = os.environ if environ is None else environ
     present, entries, skipped = read(home)
     loaded = Loaded(present, skipped=list(skipped))
     for name, kind, entry in entries:
-        missing = []
-        config = _config(kind, entry, environ, missing)
-        if missing:
-            loaded.skipped.append({"name": name, "reason": "unset variable%s with no default: %s"
-                                   % ("s" if len(set(missing)) > 1 else "",
-                                      ", ".join(sorted(set(missing))))})
+        why = _refusal(kind, entry, environ)
+        if why:
+            loaded.skipped.append({"name": name, "reason": why})
             continue
-        loaded.servers[name] = config
+        loaded.servers[name] = _config(kind, entry)
         row = {"name": name, "type": kind}
         ignored = sorted(k for k in entry if k != "type" and k not in KEYS[kind])
         if ignored:
@@ -186,5 +207,5 @@ def describe(home):
             "%s (%s)" % (s["name"] if s["name"] is not None else FILE, s["reason"])
             for s in skipped)
     if any("${" in json.dumps(e) for _, _, e in entries):
-        line += "; ${VAR} is expanded at the runner's start, from its own environment"
+        line += "; ${VAR} is expanded by the runner's CLI, from the runner's environment"
     return line

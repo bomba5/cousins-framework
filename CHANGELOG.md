@@ -10,8 +10,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   Code's format: stdio, `http` and `sse`) beside its own `cousin` server; it
   used to get `cousin` only. `cousin` is reserved, so the tmux lane's entry
   that spawn writes is skipped, never started twice. `${VAR}` and
-  `${VAR:-default}` are expanded from the runner's environment, and an unset
-  variable with no default skips that server. A malformed file or entry is
+  `${VAR:-default}` are passed through for the agent CLI to expand from the
+  runner's environment, so a secret is never on the CLI's command line; an
+  unset variable with no default skips that server, and so does any
+  reference to an account variable. A malformed file or entry is
   skipped with its reason in one `mcp_config` stream event (names and types
   only, never a value); the cousin still starts. The set is ordered by name,
   the user servers' tools stay deferred (only `cousin` is always loaded),

@@ -109,32 +109,70 @@ class TestReserved(McpCase):
 
 
 class TestExpansion(McpCase):
-    def test_var_and_default_expand_and_the_secret_never_reaches_the_stream(self):
-        self.write({
-            "ha": {"type": "http", "url": "${HA_URL:-http://ha.example:8123}/mcp",
-                   "headers": {"Authorization": "Bearer ${HA_TOKEN}"}},
-            "notes": {"command": "${NOTES_BIN}", "args": ["--key", "${HA_TOKEN}"],
-                      "env": {"TOKEN": "${HA_TOKEN}", "MODE": "${NOTES_MODE:-ro}"}},
-        })
+    FILE = {
+        "ha": {"type": "http", "url": "${HA_URL:-http://ha.example:8123}/mcp",
+               "headers": {"Authorization": "Bearer ${HA_TOKEN}"}},
+        "notes": {"command": "${NOTES_BIN}", "args": ["--key", "${HA_TOKEN}"],
+                  "env": {"TOKEN": "${HA_TOKEN}", "MODE": "${NOTES_MODE:-ro}"}},
+    }
+
+    def test_variables_pass_through_unexpanded_for_the_cli_to_expand(self):
+        # measured: the bundled CLI (2.1.281) expands ${VAR} and ${VAR:-d} in
+        # command, args, env, url and headers from its own environment
+        self.write(self.FILE)
         with mock.patch.dict(os.environ, {"HA_TOKEN": SECRET, "NOTES_BIN": "/opt/notes"}):
             r = self.runner()
             servers = r.options().mcp_servers
-        self.assertEqual(servers["ha"]["url"], "http://ha.example:8123/mcp")
-        self.assertEqual(servers["ha"]["headers"], {"Authorization": "Bearer " + SECRET})
-        self.assertEqual(servers["notes"]["command"], "/opt/notes")
-        self.assertEqual(servers["notes"]["args"], ["--key", SECRET])
-        self.assertEqual(servers["notes"]["env"], {"TOKEN": SECRET, "MODE": "ro"})
+        self.assertEqual(servers["ha"], {"type": "http",
+                                         "url": "${HA_URL:-http://ha.example:8123}/mcp",
+                                         "headers": {"Authorization": "Bearer ${HA_TOKEN}"}})
+        self.assertEqual(servers["notes"], {"type": "stdio", "command": "${NOTES_BIN}",
+                                            "args": ["--key", "${HA_TOKEN}"],
+                                            "env": {"TOKEN": "${HA_TOKEN}",
+                                                    "MODE": "${NOTES_MODE:-ro}"}})
+
+    def test_the_secret_is_never_in_the_options_the_cli_argv_or_the_home(self):
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        self.write(self.FILE)
+        with mock.patch.dict(os.environ, {"HA_TOKEN": SECRET, "NOTES_BIN": "/opt/notes"}):
+            r = self.runner()
+            opts = r.options()
+            transport = SubprocessCLITransport(prompt="", options=opts)
+            transport._cli_path = "/nonexistent/claude"
+            argv = transport._build_command()
+        user = {k: v for k, v in opts.mcp_servers.items() if k != "cousin"}
+        self.assertEqual(sorted(user), ["ha", "notes"])
+        self.assertNotIn(SECRET, json.dumps(user))
+        config = argv[argv.index("--mcp-config") + 1]
+        self.assertIn("${HA_TOKEN}", config)       # the CLI gets the name ...
+        self.assertNotIn(SECRET, config)           # ... never the value
+        self.assertFalse([a for a in argv if SECRET in a])
         self.assertTrue(self.events(r))
         self.assertNotIn(SECRET.encode(), self.stream_bytes(r))
         for path in self.home.rglob("*"):
             if path.is_file() and path.name != ".mcp.json":
                 self.assertNotIn(SECRET.encode(), path.read_bytes(), path)
 
-    def test_a_set_variable_wins_over_its_default(self):
-        self.write({"ha": {"type": "http", "url": "${HA_URL:-http://fallback}/mcp"}})
-        with mock.patch.dict(os.environ, {"HA_URL": "http://set.example"}):
-            servers = self.runner().options().mcp_servers
-        self.assertEqual(servers["ha"]["url"], "http://set.example/mcp")
+    def test_a_reference_with_a_default_loads_even_when_unset(self):
+        self.write({"ha": {"type": "http", "url": "${WREN_UNSET_URL:-http://fallback}/mcp"}})
+        servers = self.runner().options().mcp_servers
+        self.assertEqual(servers["ha"]["url"], "${WREN_UNSET_URL:-http://fallback}/mcp")
+
+    def test_an_account_variable_skips_the_entry_even_with_a_default(self):
+        # the CLI's environment carries the cousin's own credential under
+        # these names (options.env); a server must never be handed it
+        self.write({"leak": {"type": "http", "url": "http://x.example/mcp",
+                             "headers": {"X-Key": "${ANTHROPIC_API_KEY:-none}"}},
+                    "tok": {"command": "t", "env": {"T": "${CLAUDE_CODE_OAUTH_TOKEN}"}},
+                    "ok": {"command": "ok-mcp"}})
+        r = SdkRunner(self.home, client_factory=lambda o: ScriptedClient(o, []),
+                      api_key="sk-test-account")
+        self.addCleanup(lambda: r.stop(timeout=5))
+        opts = r.options()
+        self.assertEqual(list(opts.mcp_servers), ["cousin", "ok"])
+        skipped = {s["name"]: s["reason"] for s in self.events(r)[0]["skipped"]}
+        self.assertIn("ANTHROPIC_API_KEY", skipped["leak"])
+        self.assertIn("CLAUDE_CODE_OAUTH_TOKEN", skipped["tok"])
 
     def test_an_unset_variable_with_no_default_skips_the_entry_naming_the_variable(self):
         self.write({"ha": {"type": "http", "url": "http://ha.example/mcp",

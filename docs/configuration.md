@@ -885,17 +885,22 @@ the same tool list at every start.
   started beside the runner's own server. That is the entry `cousin-spawn`
   writes for the tmux lane's `cousin-mcp`, so a migrated cousin's file is
   left as it is.
-- **`${VAR}` and `${VAR:-default}`** are expanded, as Claude Code does, in
-  `command`, `args`, `env` values, `url` and `headers` values, from the
-  runner's own environment (the supervisor's or `cousin-runner`'s, not your
-  shell's; the auth and provider variables are already removed from it). A
-  set variable wins, even when empty, then the default. A variable that is
-  unset and has no default skips that server, and the event names the
-  variable. Keep the secret in the environment and only its `${NAME}` in the
-  file: the expanded value is never written to a file, the event stream or a
-  log by the framework. It does reach the agent CLI's command line (the SDK
-  passes the servers as `--mcp-config`), where the host's own users can read
-  it.
+- **`${VAR}` and `${VAR:-default}`** work as in Claude Code, in `command`,
+  `args`, `env` values, `url` and `headers` values. The runner passes them
+  through unexpanded and the agent CLI expands them from its own
+  environment, which is the runner's (the supervisor's or `cousin-runner`'s,
+  not your shell's). This is on purpose: the SDK hands the servers to the CLI
+  as a `--mcp-config` command-line argument, which the host's users can
+  read, so only the `${NAME}` is on the command line and the value reaches
+  the server through the CLI's environment. Keep the secret in the runner's
+  environment and only its `${NAME}` in the file; a value written literally
+  in the file is on the command line too. A variable that is unset and has
+  no default skips that server, and the event names the variable. A
+  reference to an account variable (`ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN` and the rest of the list under
+  [accounts.toml](#accountstoml)) skips its server even with a default: the
+  CLI's environment holds the cousin's own credential under those names,
+  and a server is never handed it.
 - **Never fatal.** A file that does not parse, or an entry that is not one of
   the three shapes (an unknown `type`, a missing `command` or `url`, a
   non-string value), is skipped; the cousin still starts with `cousin`.

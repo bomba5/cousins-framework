@@ -160,12 +160,11 @@ class InspectorAuthField(unittest.TestCase):
         self.assertNotIn('"api_key"', self.src)
 
     def test_the_key_is_a_password_field_sent_once(self):
-        self.assertIn('type="password"', self.src)
+        # the box is ui.jsx's SecretField, which clears its draft before
+        # onSubmit runs (pinned in test_static_seams)
+        self.assertIn("<SecretField", self.src)
+        self.assertIn("onSubmit={sendKey}", self.src)
         self.assertIn("/auth/key`", self.src)
-        # the draft is emptied before the request goes out
-        send = self.src[self.src.index("const sendKey"):]
-        self.assertLess(send.index('setKeyDraft("")'),
-                        send.index("apiSend("))
         self.assertIn("last4", self.src)
 
     def test_a_busy_refusal_offers_a_forced_restart(self):
@@ -358,13 +357,13 @@ class TelegramPanel(unittest.TestCase):
             self.assertIn(path, self.src, path)
 
     def test_the_token_is_write_only(self):
-        self.assertIn('type="password"', self.src)
-        self.assertIn('autoComplete="off"', self.src)
-        # The draft is cleared before the send, and only token_set shows.
+        # ui.jsx's SecretField: a password box cleared before onSubmit
+        # (pinned in test_static_seams); only token_set shows.
+        self.assertIn("<SecretField", self.src)
+        self.assertIn("onSubmit={saveToken}", self.src)
         body = self.src[self.src.index("const saveToken"):]
         body = body[:body.index("};")]
-        self.assertLess(body.index('setTokenDraft("")'),
-                        body.index('post("/token"'))
+        self.assertIn('post("/token", { token })', body)
         self.assertIn("st.token_set", self.src)
         self.assertIn("never shown again", self.src)
 

@@ -322,11 +322,16 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>model</dt><dd><IdentityField cousin={c} field="model" options={options} /></dd>
           <dt>effort</dt><dd><IdentityField cousin={c} field="effort" options={options} /></dd>
           <dt>auth</dt><dd><AuthField cousin={c} /></dd>
+          <dt>lane</dt><dd>{c.lane || "-"}{c.account ? ` · account ${c.account}` : ""}{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</dd>
           <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>uptime</dt><dd>{c.uptime_seconds == null ? <span style={{ color: "var(--fg-3)" }}>-</span> : fmtDuration(c.uptime_seconds)}</dd>
           <dt>flip at</dt><dd>{c.flipAt || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>activity</dt><dd>{c.activity || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
         </dl>
+        {/* Package seams (ui.jsx registerSlot): a package fills these from
+            its own jsx file, props { cousin }; this file is never edited
+            for it. inspector.lane: the lane's settings, under identity. */}
+        <Slot name="inspector.lane" cousin={c} />
 
         <SectionLabel style={{ marginTop: 20 }}>tokens · today</SectionLabel>
         <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--fg-1)", marginTop: 6 }}>
@@ -350,6 +355,9 @@ function Inspector({ cousin: c, onClose, onAct }) {
 
         <FlipStatus cousin={c} />
 
+        {/* inspector.panels: a package's own panels, after the built-in ones */}
+        <Slot name="inspector.panels" cousin={c} />
+
         <div style={{ display: "flex", gap: 8, marginTop: 20, flexWrap: "wrap" }}>
           {c.status === "running"
             ? <button className="btn" onClick={() => onAct(c, "stop")}>{I.stop} stop</button>
@@ -368,6 +376,8 @@ function Inspector({ cousin: c, onClose, onAct }) {
             </button>
           )}
           <HideCousinButton cousin={c} />
+          {/* inspector.actions: a package's buttons in this row */}
+          <Slot name="inspector.actions" cousin={c} />
         </div>
       </div>
     </div>
@@ -516,14 +526,13 @@ function AuthField({ cousin }) {
   const [err, setErr] = React.useState(null);
   const [needForce, setNeedForce] = React.useState(null);
   const [keyOpen, setKeyOpen] = React.useState(false);
-  const [keyDraft, setKeyDraft] = React.useState("");
   const [note, setNote] = React.useState(null);
   const load = React.useCallback(async () => {
     const d = await apiGet(`/api/cousins/${cousin.slug}/auth`);
     if (d) setSt(d);
   }, [cousin.slug]);
   React.useEffect(() => {
-    setSt(null); setErr(null); setNeedForce(null); setKeyOpen(false); setKeyDraft(""); setNote(null);
+    setSt(null); setErr(null); setNeedForce(null); setKeyOpen(false); setNote(null);
     load();
   }, [cousin.slug, load]);
 
@@ -544,10 +553,9 @@ function AuthField({ cousin }) {
     }
   };
 
-  const sendKey = async () => {
-    if (busy || !keyDraft.trim()) return;
-    const key = keyDraft;
-    setKeyDraft("");
+  // SecretField (ui.jsx) clears its box before this is called
+  const sendKey = async (key) => {
+    if (busy) return;
     setBusy(true); setErr(null); setNote(null);
     try {
       const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/auth/key`, { key });
@@ -589,15 +597,8 @@ function AuthField({ cousin }) {
         )}
       </div>
       {keyOpen && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input className="txt" type="password" autoComplete="off" spellCheck={false}
-                 value={keyDraft} placeholder="paste the key" autoFocus style={{ flex: 1 }}
-                 onChange={e => setKeyDraft(e.target.value)}
-                 onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sendKey(); }
-                                   if (e.key === "Escape") { e.stopPropagation(); setKeyOpen(false); setKeyDraft(""); } }} />
-          <button className="btn" style={small} disabled={busy} onClick={() => { setKeyOpen(false); setKeyDraft(""); }}>cancel</button>
-          <button className="btn primary" style={small} disabled={busy || !keyDraft.trim()} onClick={sendKey}>save</button>
-        </div>
+        <SecretField placeholder="paste the key" autoFocus busy={busy}
+                     onSubmit={sendKey} onCancel={() => setKeyOpen(false)} />
       )}
       {!st.configured && (
         <span style={{ fontSize: 10, color: "var(--fg-3)" }}>key mode not configured (config/harness.toml [auth.api_key])</span>
@@ -631,7 +632,6 @@ function TelegramPanel({ cousin }) {
   const [err, setErr] = React.useState(null);
   const [note, setNote] = React.useState(null);
   const [bot, setBot] = React.useState(null);
-  const [tokenDraft, setTokenDraft] = React.useState("");
   const [newId, setNewId] = React.useState("");
   const [newName, setNewName] = React.useState("");
   const url = `/api/cousins/${cousin.slug}/telegram`;
@@ -642,7 +642,7 @@ function TelegramPanel({ cousin }) {
   }, [url]);
   React.useEffect(() => {
     setSt(null); setLoadErr(false); setErr(null); setNote(null); setBot(null);
-    setTokenDraft(""); setNewId(""); setNewName("");
+    setNewId(""); setNewName("");
     load();
     // Poll so a person who just pressed Start shows up without a click.
     const id = setInterval(load, 10000);
@@ -671,10 +671,8 @@ function TelegramPanel({ cousin }) {
     else { setBot(null); setErr("check failed: " + (c.error || "unknown error")); }
   };
 
-  const saveToken = async () => {
-    if (busy || !tokenDraft.trim()) return;
-    const token = tokenDraft;
-    setTokenDraft("");
+  // SecretField (ui.jsx) clears its box before this is called
+  const saveToken = async (token) => {
     const d = await post("/token", { token });
     if (d) applyCheck(d.check);
   };
@@ -774,17 +772,8 @@ function TelegramPanel({ cousin }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <input className="txt" type="password" autoComplete="off" spellCheck={false}
-                   value={tokenDraft} placeholder={st.token_set ? "paste a new bot token" : "paste the bot token"}
-                   style={{ flex: "1 1 180px", minWidth: 0 }}
-                   onChange={e => setTokenDraft(e.target.value)}
-                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); saveToken(); }
-                                     if (e.key === "Escape") { e.stopPropagation(); setTokenDraft(""); } }} />
-            <button className="btn primary" style={small} disabled={busy || !tokenDraft.trim()} onClick={saveToken}>
-              save token
-            </button>
-          </div>
+          <SecretField placeholder={st.token_set ? "paste a new bot token" : "paste the bot token"}
+                       submitLabel="save token" busy={busy} onSubmit={saveToken} />
           <span style={hintStyle}>From @BotFather: /newbot or /mybots &gt; API Token. Stored on the server only (0600); never shown again.</span>
         </div>
 

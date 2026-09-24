@@ -1576,6 +1576,10 @@ function SettingsView({ auth, setAuth }) {
       </div>
 
       <RestartPanel auth={auth} setAuth={setAuth} />
+
+      {/* settings.panels: a package's own settings panels (ui.jsx
+          registerSlot from its jsx file), props { auth, setAuth } */}
+      <Slot name="settings.panels" auth={auth} setAuth={setAuth} />
     </div>
   );
 }

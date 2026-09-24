@@ -13,6 +13,15 @@ const NAV = [
   { id: "settings", label: "Settings", icon: I.host,    kbd: "0" },
 ];
 
+// The NAV a package adds to: the built-in entries, then the views the
+// package files registered through ui.jsx's registerView (index.html's
+// package block). A package never edits this list.
+function navEntries() {
+  const extra = (window.registeredViews ? registeredViews() : [])
+    .map(v => ({ id: v.id, label: v.label, icon: v.icon || I.list, kbd: v.kbd || "" }));
+  return NAV.concat(extra);
+}
+
 // Sidebar groups ({groups, assignments}) are a per-user preference kept on
 // the server (/api/prefs/sidebar), so every browser and the phone's
 // home-screen app show the same layout. Local storage under this key is
@@ -459,6 +468,10 @@ function App() {
         // Re-dispatch as a DOM CustomEvent so FlipModal in cousins.jsx
         // can subscribe without taking a SSE handle of its own.
         window.dispatchEvent(new CustomEvent("fw-cousin-flip", { detail: data }));
+      } else if (kind === "cousin-op") {
+        // A long operation's step (console/longop.py): ui.jsx useLongOp
+        // listens for the re-dispatched window event.
+        window.dispatchEvent(new CustomEvent("fw-cousin-op", { detail: data }));
       } else if (kind === "meeting-change") {
         // Re-dispatched like cousin-flip: the Meetings view refetches
         // its list and the open thread without a SSE handle of its own.
@@ -500,7 +513,7 @@ function App() {
     const onKey = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey) {
-        const hit = NAV.find(n => n.kbd === e.key);
+        const hit = navEntries().find(n => n.kbd && n.kbd === e.key);
         if (hit) { e.preventDefault(); setView(hit.id); }
       }
     };
@@ -582,9 +595,9 @@ function App() {
 
       <nav className="sidebar">
         <div className="section-label">framework</div>
-        {NAV.map(n => (
+        {navEntries().map(n => (
           <div key={n.id} className={`navitem ${view === n.id ? "active" : ""}`} onClick={() => pickView(n.id)}
-               title={`ctrl/cmd + ${n.kbd}`}>
+               title={n.kbd ? `ctrl/cmd + ${n.kbd}` : n.label}>
             <span className="icon">{n.icon}</span>
             <span>{n.label}</span>
             {n.id === "overview" && health && health.needs > 0 && (
@@ -628,6 +641,12 @@ function App() {
           {view === "meetings" && window.MeetingsView && <MeetingsView cousins={cousins} sessionUser={sessionUser} initialMeeting={initialMeeting} />}
           {view === "settings" && <SettingsView auth={auth} setAuth={setAuth} />}
           {view === "overview" && <HostView onOpen={(slug) => { setActiveCousin(slug); pickView("chat"); }} />}
+          {registeredView(view) && (
+            <SlotBoundary label={"view/" + view}>
+              <SlotEntry entry={registeredView(view)}
+                         props={{ cousins, sessionUser, onOpen: (slug) => { setActiveCousin(slug); pickView("chat"); } }} />
+            </SlotBoundary>
+          )}
         </div>
       </main>
 
@@ -684,10 +703,11 @@ function MainHeader({ view, cousins, activeCousin }) {
     settings: "/console/settings",
     overview: "/console/host",
   };
+  const extra = window.registeredView ? registeredView(view) : null;
   return (
     <div className="main-header">
-      <h1>{titles[view] || view}</h1>
-      <span className="path">{paths[view] || ""}</span>
+      <h1>{titles[view] || (extra && extra.label) || view}</h1>
+      <span className="path">{paths[view] || (extra ? "/console/" + view : "")}</span>
       <span className="spacer" />
       {view === "chat" && c && (
         <span className="hdr-meta">

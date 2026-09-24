@@ -174,7 +174,7 @@ function AccountStatusCell({ name }) {
           {st.method ? ` ${st.method}` : ""}
           {st.missing && st.missing.length ? ` · missing ${st.missing.join(", ")}` : ""}
           {st.error && <div style={{ color: "var(--red)" }}>{st.error}</div>}
-          {!st.ok && st.action && <div style={{ color: "var(--fg-2)" }}>fix: <code>{st.action}</code></div>}
+          {!st.ok && st.action && <div style={{ color: "var(--fg-2)" }}>fix: <code>{st.action.replace(/`/g, "")}</code></div>}
         </span>
       )}
     </div>
@@ -295,7 +295,15 @@ function AccountForm({ initial, kinds, fields, onClose, onSaved }) {
   const [values, setValues] = React.useState(start);
   const [err, setErr] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
-  const keys = (fields && fields[kind]) || [];
+  // the allowed keys in the order the hints list them, then any other
+  const allowed = (fields && fields[kind]) || [];
+  const keys = Object.keys(ACCOUNT_FIELD_HINTS).filter(k => allowed.includes(k))
+    .concat(allowed.filter(k => !(k in ACCOUNT_FIELD_HINTS)));
+  React.useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const save = async () => {
     setBusy(true); setErr(null);
     const picked = {};
@@ -335,6 +343,11 @@ function AccountForm({ initial, kinds, fields, onClose, onSaved }) {
               </FormField>
             </div>
           ))}
+          {kind === "opencode" && (
+            <div style={{ ...ACCOUNT_HINT, marginTop: 12 }}>
+              opencode: fill providers, or endpoint with endpoint_model, not both.
+            </div>
+          )}
           <div style={{ ...ACCOUNT_HINT, marginTop: 12 }}>
             No secret goes in this file: a key or token is set from the account's row, write-only.
           </div>
@@ -358,7 +371,7 @@ function AccountRemove({ account, onRemoved }) {
   const [err, setErr] = React.useState(null);
   if (account.implicit) return null;
   if (!open) {
-    return <button className="btn ghost danger-text" style={ACCOUNT_SMALL} onClick={() => setOpen(true)}>remove</button>;
+    return <div><button className="btn ghost danger-text" style={ACCOUNT_SMALL} onClick={() => setOpen(true)}>remove</button></div>;
   }
   const remove = async () => {
     setErr(null);

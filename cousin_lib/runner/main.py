@@ -131,17 +131,25 @@ def runner_for(home, *, kind=None):
     if kind not in KINDS:
         raise RunnerError("cousin.toml [agent] runner must be one of %s, got %r"
                           % (", ".join(KINDS), kind))
+    from cousin_lib.runner import sessions
     from cousin_lib.runner.policy import Policy
     policy = Policy.load(home)
+    # [agent.sessions] (phase 8): a SessionsError is a RunnerError, exit 2
+    side = sessions.side_kinds(home)
     if kind == "fake":
+        if side:
+            raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
+                              " runner = \"sdk\"" % ", ".join(side))
         from cousin_lib.runner.fake import FakeRunner
         return FakeRunner(home, policy=policy)
     if kind == "sdk":
         from cousin_lib.runner import tools
         from cousin_lib.runner.sdk import SdkRunner
         tools.validate_registry(Path(home), root_for(home))
-        return SdkRunner(home, account=account_for(home),
-                         model=agent.get("model"), policy=policy)
+        common = dict(account=account_for(home), model=agent.get("model"), policy=policy)
+        if side:
+            return sessions.Sessions(home, kinds=side, **common)
+        return SdkRunner(home, **common)
 
 
 @contextlib.contextmanager
@@ -211,13 +219,23 @@ def _once(runner, stop):
         state = runner.state()
         if runner.inbox.unfinished() == 0 and state != "running":
             return 0
-        if state == "errored":
+        # a login is looked at on its own: with side sessions (phase 8) the
+        # session waiting for one may not be the one state() reports
+        login = getattr(runner, "login_required", lambda: False)()
+        # a side session that gave up and waits for its rebuild (phase 8):
+        # the batch mode gives up on it as on an errored runner
+        stalled = getattr(runner, "side_stalled", lambda: False)()
+        if state == "errored" or login or stalled:
             errored_since = errored_since or time.monotonic()
             if time.monotonic() - errored_since > ERRORED_GIVE_UP_S:
-                if getattr(runner, "login_required", lambda: False)():
+                if login:
                     print("cousin-runner: the account needs a login (see"
                           " data/login-required.json)", file=sys.stderr)
                     return 4                     # R15: never 3, a restart cannot log in
+                if stalled:
+                    print("cousin-runner: a side session could not start for %.0fs"
+                          % ERRORED_GIVE_UP_S, file=sys.stderr)
+                    return 3
                 print("cousin-runner: the runner stayed errored for %.0fs"
                       % ERRORED_GIVE_UP_S, file=sys.stderr)
                 return 3

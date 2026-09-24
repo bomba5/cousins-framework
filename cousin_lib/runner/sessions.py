@@ -318,3 +318,170 @@ class SideSession(SdkRunner):
         if ok:
             self._digest_due = False
         return ok
+
+
+# ------------------------------------------------------ the set of sessions
+
+# A side session that gave up is rebuilt after RESTART_BASE_S, doubling per
+# attempt, capped at RESTART_CAP_S; one that stays up RESTART_RESET_S is a
+# recovery, and the next failure starts the backoff over (ruling P8-1).
+RESTART_BASE_S = 1.0
+RESTART_CAP_S = 300.0
+RESTART_RESET_S = 300.0
+
+
+class Sessions:
+    """What cousin-runner serves when [agent.sessions] maps a kind to "own":
+    the primary SdkRunner (every kind but the side ones) and one
+    SideSession per side kind, in one process, over one inbox, under one
+    runner lock. The Runner protocol answers for the primary (state,
+    interrupt, rollover, events: the cousin's generation); `sessions()`
+    names every session, for the views. `factories` maps a session name
+    to its client factory (tests); `client_factory` is the default.
+
+    A side session that gives up never ends the process (ruling P8-1): a
+    watcher thread records it on the primary's stream, puts the rows it had
+    claimed back, and rebuilds it after a backoff. The primary and its
+    running turn are never touched by a side session's failure."""
+
+    kind = "sdk"          # what the `runner` head event reports (phase 5)
+    watch_s = 0.2
+
+    def __init__(self, home, *, kinds, client_factory=None, factories=None, **kw):
+        import threading
+        self._factories = dict(factories or {})
+        self._client_factory = client_factory
+        self._kw = kw
+        self.home = Path(home)
+        self.kinds = tuple(kinds)
+        if not self.kinds:
+            raise SessionsError("Sessions needs at least one side kind")
+        self.primary = SdkRunner(home, client_factory=self._factories.get(PRIMARY, client_factory),
+                                 exclude_kinds=self.kinds, **kw)
+        self.sides = {kind: self._build_side(kind) for kind in self.kinds}
+        # main.py's conveniences read these off the runner it serves
+        self.inbox = self.primary.inbox
+        self.stream = self.primary.stream
+        self.policy = self.primary.policy
+        self._stopping = threading.Event()
+        self._watcher = None
+        self._attempts = {kind: 0 for kind in self.kinds}
+        self._started_at = {}
+        self._restart_at = {}
+
+    def _build_side(self, kind):
+        return SideSession(self.home, kind=kind, primary_activity=self.primary.activity,
+                           client_factory=self._factories.get(kind, self._client_factory),
+                           **self._kw)
+
+    def sessions(self):
+        """{name: runner}: "primary" first, then each side kind."""
+        return dict({PRIMARY: self.primary}, **self.sides)
+
+    # -- the side sessions' supervisor (ruling P8-1) -------------------------
+    def _watch(self):
+        while not self._stopping.wait(self.watch_s):
+            for kind in self.kinds:
+                try:
+                    self._look_after(kind)
+                except Exception as exc:  # noqa: BLE001 - the watcher never dies
+                    self.primary.stream.append("error", {"error": "watching side session %s:"
+                                                         " %s: %s" % (kind, type(exc).__name__,
+                                                                      exc), "session": kind})
+
+    def _look_after(self, kind):
+        side, now = self.sides[kind], time.monotonic()
+        if kind in self._restart_at:
+            if now >= self._restart_at[kind] and not self._stopping.is_set():
+                del self._restart_at[kind]
+                fresh = self._build_side(kind)
+                self.sides[kind] = fresh
+                self._started_at[kind] = now
+                fresh.start()
+                self.primary.stream.append("system", {"subtype": "side_restarted",
+                                                      "session": kind,
+                                                      "attempt": self._attempts[kind]})
+            return
+        if side.worker_alive():
+            if now - self._started_at.get(kind, now) >= RESTART_RESET_S:
+                self._attempts[kind] = 0          # it stayed up: a recovery
+            return
+        why = side.fatal or "its worker ended"
+        side.stop(timeout=1.0)
+        requeued = self.inbox.requeue_claimant(side.session_id)
+        delay = min(RESTART_BASE_S * 2 ** self._attempts[kind], RESTART_CAP_S)
+        self._attempts[kind] += 1
+        self._restart_at[kind] = now + delay
+        self.primary.stream.append("error", {"error": "side session %s gave up: %s" % (kind, why),
+                                             "session": kind, "requeued": requeued,
+                                             "restart_in_s": delay})
+
+    # -- the Runner protocol -----------------------------------------------
+    def start(self):
+        import threading
+        self.primary.start()
+        now = time.monotonic()
+        for kind, side in self.sides.items():
+            self._started_at[kind] = now
+            side.start()
+        if self._watcher is None:
+            self._watcher = threading.Thread(target=self._watch, daemon=True)
+            self._watcher.start()
+
+    def stop(self, *, timeout=30.0):
+        """The watcher first (nothing is rebuilt during a stop), then every
+        session at once, each within `timeout`."""
+        import threading
+        self._stopping.set()
+        if self._watcher is not None:
+            self._watcher.join(timeout)
+        threads = [threading.Thread(target=r.stop, kwargs={"timeout": timeout}, daemon=True)
+                   for r in self.sessions().values()]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout + 5)
+
+    def state(self):
+        return self.primary.state()
+
+    def states(self):
+        return {name: r.state() for name, r in self.sessions().items()}
+
+    def enqueue(self, item):
+        return self.primary.enqueue(item)   # one inbox; the session of its kind claims it
+
+    def interrupt(self):
+        return self.primary.interrupt()     # a side session is not interruptible in this phase
+
+    def rollover(self, reason):
+        return self.primary.rollover(reason)
+
+    def events(self, after=None):
+        return self.primary.events(after)
+
+    def unsupported(self):
+        return self.primary.unsupported()
+
+    def activity(self):
+        return self.primary.activity()
+
+    # -- cousin-runner's conveniences --------------------------------------
+    def worker_alive(self):
+        """The primary's: a side session that gave up is restarted here, never
+        a reason for the process to exit (ruling P8-1)."""
+        return self.primary.worker_alive()
+
+    @property
+    def fatal(self):
+        return self.primary.fatal
+
+    def login_required(self):
+        """Any session waiting for a login: `--once` exits 4 on it (review I4)."""
+        return any(r.login_required() for r in self.sessions().values())
+
+    def side_stalled(self):
+        """True while a side session that gave up waits for its rebuild:
+        `--once` exits 3 on it after its give-up clock (round 2 review N2);
+        the long-running mode keeps rebuilding it (P8-1)."""
+        return bool(self._restart_at)

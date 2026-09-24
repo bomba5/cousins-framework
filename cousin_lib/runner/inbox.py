@@ -193,6 +193,15 @@ class Inbox:
                 " claimed_at=NULL, done_at=NULL WHERE id=?",
                 (QUEUED, inbox_id))
 
+    def requeue_claimant(self, claimant):
+        """Every row still claimed by `claimant` back to queued (phase 8: a
+        side session that gave up). Returns how many."""
+        with self._db() as conn:
+            cur = conn.execute(
+                "UPDATE inbox SET state=?, claimant='', claimed_at=NULL"
+                " WHERE state=? AND claimant=?", (QUEUED, CLAIMED, claimant))
+            return cur.rowcount
+
     def requeue_stale(self, older_than_s):
         cutoff = time.time() - float(older_than_s)
         with self._db() as conn:

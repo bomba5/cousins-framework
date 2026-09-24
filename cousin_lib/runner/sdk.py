@@ -469,7 +469,10 @@ class SdkRunner:
                                          % (type(exc).__name__, exc)})
             return
         if handed:
-            handover.consume(self.home)     # the row is durable: it carries the paragraph now
+            # The row is durable: it carries the paragraph now. A crash between
+            # the put and this rename hands the paragraph twice at the next
+            # fresh start (never zero times): safe, and accepted.
+            handover.consume(self.home)
         await self._wait_rate_limit()   # a claim by id skips the loop's wait
         if self._stop.is_set():
             return      # the row stays queued (durable): the next start runs it

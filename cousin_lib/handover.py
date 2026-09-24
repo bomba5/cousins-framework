@@ -99,7 +99,9 @@ def read(home):
     return rec if isinstance(rec, dict) else None
 
 
-_WHICH = {"last": "the last session", "before": "the one before it"}
+# "before" is the newest other transcript by mtime, a guess (the tmux lane
+# keeps no history of session ids), so the paragraph says so.
+_WHICH = {"last": "the last session", "before": "likely the one before it"}
 
 
 def paragraph(rec):

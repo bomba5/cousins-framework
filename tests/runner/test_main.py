@@ -191,6 +191,7 @@ class TestAuthLane(HermeticCase):
             def __init__(self, options):
                 seen["options_env"] = dict(options.env)
                 seen["environ"] = {k: os.environ.get(k) for k in AUTH}
+                seen["model"], seen["effort"] = options.model, options.effort
 
             async def connect(self, prompt=None):
                 pass
@@ -261,6 +262,36 @@ class TestAuthLane(HermeticCase):
             "CLAUDE_CONFIG_DIR": str(root / "data" / "accounts" / "wren"),
             "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
+
+    def test_agent_model_effort_and_account_reach_the_options(self):
+        """#96: what cousin-migrate carries from [runtime] into [agent]
+        reaches the CLI: the model, the effort (ClaudeAgentOptions.effort,
+        the CLI's --effort) and the key account's key."""
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "config" / "accounts.toml").write_text(
+            '[accounts.wren-key]\nkind = "anthropic-key"\n')
+        secrets = root / ".secrets" / "accounts"
+        secrets.mkdir(parents=True); os.chmod(root / ".secrets", 0o700); os.chmod(secrets, 0o700)
+        (secrets / "wren-key").write_text("sk-ant-fixture-wren\n"); os.chmod(secrets / "wren-key", 0o600)
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text()
+                                          + 'model = "opus"\neffort = "xhigh"\naccount = "wren-key"\n')
+        seen = self._capture(home)
+        self.assertEqual((seen["model"], seen["effort"]), ("opus", "xhigh"))
+        self.assertEqual(seen["options_env"]["ANTHROPIC_API_KEY"], "sk-ant-fixture-wren")
+
+    def test_no_effort_leaves_the_cli_its_own(self):
+        home = temp_home(self, runner="sdk")
+        seen = self._capture(home)
+        self.assertEqual((seen["model"], seen["effort"]), (None, None))
+
+    def test_an_effort_the_cli_would_refuse_is_a_configuration_error(self):
+        home = temp_home(self, runner="sdk")
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text() + 'effort = "ludicrous"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("effort", err)
 
 
 class TestAccountBeforeTheLock(HermeticCase):

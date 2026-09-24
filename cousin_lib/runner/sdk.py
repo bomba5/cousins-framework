@@ -167,7 +167,7 @@ class SdkRunner:
     poll_s = 0.2
 
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
-                 cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
+                 effort=None, cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
                  session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None):
         self.home = Path(home)
@@ -193,6 +193,8 @@ class SdkRunner:
                                                         implicit=True))
         self.account = account
         self.model = model
+        # [agent] effort (runner_for checked the level): the CLI's --effort
+        self.effort = effort
         self.cwd = Path(cwd) if cwd else self.home
         self.idle_timeout_s = float(idle_timeout_s)
         self.turn_timeout_s = None if turn_timeout_s is None else float(turn_timeout_s)
@@ -339,6 +341,7 @@ class SdkRunner:
             extra["resume"] = resume
             store_resume = None
         return sdk.ClaudeAgentOptions(cwd=str(self.cwd), model=self.model, env=env,
+                                      effort=self.effort,
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
                                       system_prompt=system_prompt, session_store=self.session_store,
@@ -1984,7 +1987,8 @@ class SdkRunner:
             self.stream.append("other", {"type": type(msg).__name__})
 
 
-def validate_account(account, root, *, model=None, timeout=90.0, client_factory=None):
+def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
+                     client_factory=None):
     """`cousin-runner --check-auth --validate` (R13): ONE smallest model
     turn on a bare, throwaway client under the account's environment:
     setting_sources=[], no session store, no tools, no MCP server, no
@@ -2003,8 +2007,8 @@ def validate_account(account, root, *, model=None, timeout=90.0, client_factory=
         return 2, "validate: %s" % err
     cwd = tempfile.mkdtemp(prefix="cousin-validate-")
     # no-session-persistence: no transcript under the account's config dir
-    options = sdk.ClaudeAgentOptions(cwd=cwd, model=model, env=env, setting_sources=[],
-                                     tools=[], mcp_servers={}, max_turns=1,
+    options = sdk.ClaudeAgentOptions(cwd=cwd, model=model, effort=effort, env=env,
+                                     setting_sources=[], tools=[], mcp_servers={}, max_turns=1,
                                      extra_args={"no-session-persistence": None})
     factory = client_factory or (lambda o: sdk.ClaudeSDKClient(options=o))
 
@@ -2013,10 +2017,16 @@ def validate_account(account, root, *, model=None, timeout=90.0, client_factory=
         await client.connect()
         try:
             await client.query("Reply only OK.")
-            signal = None
+            signal = failed = None
             async for msg in client.receive_response():
                 if isinstance(msg, sdk.AssistantMessage):
-                    signal = signal or auth.assistant_signal(getattr(msg, "error", None))
+                    error = getattr(msg, "error", None)
+                    signal = signal or auth.assistant_signal(error)
+                    if error and failed is None:
+                        # any typed error fails the turn, not only auth: a model
+                        # the CLI cannot run is an invalid_request 400 (#96)
+                        said = " ".join(getattr(b, "text", "") for b in msg.content or ()).strip()
+                        failed = "%s: %s" % (error, said[:300] or error)
                 elif isinstance(msg, sdk.SystemMessage) and msg.subtype == "api_retry":
                     retry = auth.retry_signal(msg.data)
                     # a key or token's 401 now is a 401 in 3 minutes; a login
@@ -2027,8 +2037,8 @@ def validate_account(account, root, *, model=None, timeout=90.0, client_factory=
                     signal = signal or auth.result_signal(
                         bool(msg.is_error), getattr(msg, "api_error_status", None),
                         getattr(msg, "result", None), getattr(msg, "errors", None))
-                    if signal or msg.is_error:
-                        return 4, "validate: %s" % ((signal or {}).get("detail")
+                    if signal or failed or msg.is_error:
+                        return 4, "validate: %s" % ((signal or {}).get("detail") or failed
                                                     or msg.result or "an error result")
                     return 0, "validate: ok (one model turn answered)"
             return 4, "validate: the stream ended with no result"

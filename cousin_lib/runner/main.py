@@ -12,7 +12,8 @@ inbox, or when `--check-auth` found the account logged in; 2 for a
 configuration problem (no or a bad `[agent] runner`, an unknown account,
 or a secret file that is open to others or malformed, all checked before
 the lock; a malformed policy.toml, an MCP registry that does not parse or
-names a command with no in-process handler); 3 when the runner gave up
+names a command with no in-process handler, an [agent] effort outside the
+levels); 3 when the runner gave up
 (its worker ended, e.g. it could not connect, or `--once` found it
 `errored` for longer than ERRORED_GIVE_UP_S), so a supervisor restarts
 it; 4 when `--check-auth`
@@ -161,7 +162,16 @@ def runner_for(home, *, kind=None):
         from cousin_lib.runner import tools
         from cousin_lib.runner.sdk import SdkRunner
         tools.validate_registry(Path(home), root_for(home))
-        common = dict(account=account_for(home), model=agent.get("model"), policy=policy)
+        # [agent] effort reaches the CLI as ClaudeAgentOptions.effort (its
+        # --effort); a level the CLI would refuse is configuration (exit 2),
+        # not a connect that fails forever
+        from cousin_lib.config import EFFORT_LEVELS
+        effort = agent.get("effort")
+        if effort is not None and effort not in EFFORT_LEVELS:
+            raise RunnerError("cousin.toml [agent] effort must be one of %s, got %r"
+                              % (", ".join(EFFORT_LEVELS), effort))
+        common = dict(account=account_for(home), model=agent.get("model"), effort=effort,
+                      policy=policy)
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)
@@ -351,13 +361,14 @@ def _check_auth(home, *, validate=False):
         os.environ.pop(name, None)
     try:
         account = accounts.for_cousin(home, root)
-        model = _agent_table(home).get("model")
+        agent = _agent_table(home)
     except (accounts.AccountsError, RunnerError) as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
     from cousin_lib.runner import sdk
     try:
-        rc, line = sdk.validate_account(account, root, model=model)
+        rc, line = sdk.validate_account(account, root, model=agent.get("model"),
+                                        effort=agent.get("effort"))
     except RunnerError as err:        # the sdk extra is not installed
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2

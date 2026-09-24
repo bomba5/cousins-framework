@@ -546,6 +546,25 @@ class TestValidate(HermeticCase):
                                         client_factory=lambda o: ScriptedClient(o, [turn]))
             self.assertEqual(rc, 4, line)
 
+    def test_a_typed_turn_error_fails_validate_with_its_words_and_carries_the_effort(self):
+        """#96: a model the bundled CLI is too old for answers with an
+        invalid_request 400 in the turn, and a result not flagged is_error."""
+        from claude_agent_sdk import TextBlock
+        from cousin_lib.runner.sdk import validate_account
+        from tests.runner.test_sdk import ScriptedClient, init_msg, result
+        home = temp_home(self)
+        host = accounts.Account("host", "claude-login", None, None, implicit=True)
+        said = "API Error: 400 Claude Code 2.1.277 does not support this model"
+        turn = [init_msg(), AssistantMessage(content=[TextBlock(text=said)], model="<synthetic>",
+                                             error="invalid_request"), result()]
+        seen = []
+        rc, line = validate_account(host, home.parent.parent, model="opus", effort="max",
+                                    timeout=5, client_factory=lambda o: seen.append(o)
+                                    or ScriptedClient(o, [turn]))
+        self.assertEqual(rc, 4, line)
+        self.assertIn("invalid_request", line); self.assertIn("does not support this model", line)
+        self.assertEqual((seen[0].model, seen[0].effort), ("opus", "max"))
+
     def test_a_login_accounts_401_retry_waits_for_the_refresh(self):
         # W11-1: the CLI refreshes a login's token at its next attempt
         from cousin_lib.runner.sdk import validate_account

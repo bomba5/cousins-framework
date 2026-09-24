@@ -113,6 +113,23 @@ class Users:
         data[name] = {"salt": salt.hex(),
                       "hash": hash_password(password, salt, ITERATIONS),
                       "iterations": ITERATIONS}
+        self._write(data)
+
+    def remove(self, name):
+        """Drop one user; False when there is no such user. The last user
+        is never removed (an empty file reads as broken, closing the
+        console): ValueError. Their sessions drop at their next lookup,
+        their stamp now being None."""
+        data = self.load()
+        if name not in data:
+            return False
+        if len(data) == 1:
+            raise ValueError("%s is the last console user" % name)
+        del data[name]
+        self._write(data)
+        return True
+
+    def _write(self, data):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         try:

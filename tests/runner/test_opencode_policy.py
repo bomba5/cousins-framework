@@ -544,7 +544,10 @@ class TestLivePlugin(HermeticCase):
                         tool_msgs)
         result = kinds("result")[-1]
         self.assertFalse(result["is_error"])
-        self.assertEqual([p for p in kinds("system") if p.get("subtype") == "pressure_off"], [])
+        # the limit is read after the turn (after its row closed): wait for it
+        self.assertTrue(_wait(lambda: r._limit is not None, 30), "no context limit read")
+        self.assertEqual([p["payload"] for p in r.events() if p["kind"] == "system"
+                          and p["payload"].get("subtype") == "pressure_off"], [])
         self.assertEqual(r._limit, ("local/m1", 32768))
         self.assertEqual(provider.chats()[0]["body"].get("max_tokens"), 8192)
         self.assertEqual(kinds("text")[-1]["text"], "after the denial")

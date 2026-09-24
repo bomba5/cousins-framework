@@ -17,7 +17,7 @@ from pathlib import Path
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import wake
-from cousin_lib.runner.base import Receipt, folds_into_turn
+from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
@@ -120,6 +120,10 @@ class FakeRunner:
                 if not rows:
                     listener.wait(timeout=0.2)
                     continue
+                if rows[0]["source"] == INTERRUPT:
+                    # between turns: nothing to interrupt, and never a turn
+                    self.inbox.done(rows[0]["id"], FAILED, NO_TURN)
+                    continue
                 try:
                     (self._rollover_row if rows[0]["source"] == "flip" else self._turn)(rows[0])
                 except Exception as exc:  # noqa: BLE001 - the success tail can still raise
@@ -137,11 +141,26 @@ class FakeRunner:
                 return
             rows = self.inbox.claim(limit=10, claimant=self.session_id)
         for row in rows:
-            if folds_into_turn(row["source"], row["thread_id"]):
+            if row["source"] != INTERRUPT and folds_into_turn(row["source"], row["thread_id"]) \
+                    and not self._interrupt.is_set():
                 consumed.append(row)
                 self.turn.add(row)
-            else:
+            else:                  # an interrupt row is _take_interrupts'
                 self.inbox.requeue(row["id"])
+
+    def _take_interrupts(self):
+        """Interrupt rows (phase 5) on their own path, every poll of the
+        live turn, as SdkRunner takes them: the first interrupts, and every
+        one closes `delivered`."""
+        for row in self.inbox.open_rows(INTERRUPT):
+            if row["state"] != "queued" or \
+                    self.inbox.claim_id(row["id"], claimant=self.session_id) is None:
+                continue
+            with self._lock:
+                already = self._interrupt.is_set()
+                self._interrupt.set()
+            self.inbox.done(row["id"], DELIVERED, "the live turn was already being interrupted"
+                            if already else "interrupted the live turn")
 
     def _fail_turn(self, consumed, exc):
         """A turn's failure path: never silence (global constraint).
@@ -196,6 +215,7 @@ class FakeRunner:
                 name = "Bash" if step in ("tool", "fail_once") else step
                 self.stream.append("tool", {"name": name, "input": {"command": "true"}})
                 while time.monotonic() < deadline:
+                    self._take_interrupts()
                     if self._interrupt.is_set():
                         interrupted = True
                         break

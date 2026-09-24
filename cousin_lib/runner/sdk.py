@@ -36,7 +36,8 @@ from pathlib import Path
 from cousin_lib import accounts, boot, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import auth, envelope, extract, hooks, rollover, tools, wake
-from cousin_lib.runner.base import FOLDED_KINDS, Receipt, RunnerError, folds_into_turn
+from cousin_lib.runner.base import (FOLDED_KINDS, INTERRUPT, NO_TURN, Receipt, RunnerError,
+                                     folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.policy import Policy
 from cousin_lib.runner.state import StateMachine
@@ -520,9 +521,10 @@ class SdkRunner:
         if seq != self._turn_seq or self.machine.state not in LIVE_STATES or not self._live:
             self.stream.append("system", {"subtype": "interrupt_dropped",
                                           "turn": seq, "current": self._turn_seq})
-            return
+            return False
         self._interrupt_requested = True
         await self._client.interrupt()
+        return True
 
     def _interrupt_done(self, fut):
         if fut.cancelled():
@@ -804,6 +806,10 @@ class SdkRunner:
                         await asyncio.get_running_loop().run_in_executor(
                             None, listener.wait, self.poll_s)
                         continue
+                    if rows[0]["source"] == INTERRUPT:
+                        # between turns: nothing to interrupt, and never a turn
+                        self.inbox.done(rows[0]["id"], FAILED, NO_TURN)
+                        continue
                     try:
                         if rows[0]["source"] == "flip":
                             ok = await self._rollover_row(rows[0])
@@ -967,7 +973,9 @@ class SdkRunner:
         written into it (finding 1); anything else goes back to the queue."""
         rows = self.inbox.claim(limit=10, claimant=self.session_id)
         for i, row in enumerate(rows):
-            if not folds_into_turn(row["source"], row["thread_id"]):
+            if row["source"] == INTERRUPT or self._interrupt_requested \
+                    or not folds_into_turn(row["source"], row["thread_id"]):
+                # an interrupt row is _take_interrupts' (it runs every poll)
                 self.inbox.requeue(row["id"])
                 continue
             try:
@@ -977,17 +985,54 @@ class SdkRunner:
                     self.inbox.requeue(rest["id"])
                 raise
 
-    async def _next(self, it, started, fold):
+    async def _take_interrupts(self):
+        """Interrupt rows (phase 5), taken on every poll of a live turn
+        whatever the fold's gates: after the first result a folded
+        follow-up can start a CLI turn of its own, and only this path can
+        stop it. Taken only while the CLI is generating (`_live`): one that
+        lands between a result and the next echo waits queued, and one no
+        live turn takes is closed NO_TURN at the turn boundary. A refused
+        interrupt (the CLI raised) fails its own row and never the turn,
+        as the in-process path records it and goes on; the turn is then
+        not marked interrupted."""
+        if not self._live or self.machine.state not in LIVE_STATES:
+            return
+        for row in self.inbox.open_rows(INTERRUPT):
+            if row["state"] != "queued" or \
+                    self.inbox.claim_id(row["id"], claimant=self.session_id) is None:
+                continue
+            if self._interrupt_requested:
+                self.inbox.done(row["id"], DELIVERED, "the live turn was already being interrupted")
+                continue
+            try:
+                done = await self._interrupt_turn(self._turn_seq)
+            except Exception as exc:  # noqa: BLE001 - a refused interrupt is reported, not fatal
+                self._interrupt_requested = False
+                message = "interrupt: %s: %s" % (type(exc).__name__, exc)
+                self.stream.append("error", {"error": message})
+                self.inbox.done(row["id"], FAILED, message)
+                continue
+            if done:
+                self.inbox.done(row["id"], DELIVERED, "interrupted the live turn")
+            else:
+                self.inbox.requeue(row["id"])
+
+    async def _next(self, it, started, fold, control=None):
         """The next message, or `_END` when the stream stops. The idle
         timeout bounds the wait for THIS message (a stream gone silent);
         the optional turn timeout bounds the whole turn. While waiting,
-        `fold` (None once folding is over) runs every `poll_s`, so a row
-        that lands during a long generation is written when it lands, not
-        when the next message happens to arrive."""
+        `control` (the interrupt rows) and then `fold` (None once folding
+        is over) run every `poll_s`, so a row that lands during a long
+        generation is acted on when it lands, not when the next message
+        happens to arrive."""
         task = asyncio.ensure_future(it.__anext__())
         idle_deadline = time.monotonic() + self.idle_timeout_s
+        last_control = 0.0
         try:
             while True:
+                if control is not None and time.monotonic() - last_control >= self.poll_s:
+                    last_control = time.monotonic()
+                    await control()
                 if fold is not None and time.monotonic() - self._last_fold >= self.poll_s:
                     self._last_fold = time.monotonic()
                     await fold()
@@ -999,7 +1044,7 @@ class SdkRunner:
                         wait, overrun = left, "turn exceeded %.1fs" % self.turn_timeout_s
                 if wait <= 0:
                     raise RunnerError(overrun)
-                if fold is not None:
+                if fold is not None or control is not None:
                     wait = min(wait, self.poll_s)
                 done, _ = await asyncio.wait({task}, timeout=wait)
                 if done:
@@ -1164,7 +1209,8 @@ class SdkRunner:
                 it = responses.__aiter__()
                 try:
                     while True:
-                        msg = await self._next(it, started, fold if results == 0 else None)
+                        msg = await self._next(it, started, fold if results == 0 else None,
+                                               control=self._take_interrupts)
                         if msg is _END:
                             # the CLI died: the SDK ends the stream on {"type": "end"}
                             raise RunnerError("stream ended without a result")

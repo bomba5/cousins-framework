@@ -25,6 +25,7 @@ class Receipt:
 # is the bus"). A flip's handoff goes ahead of everything.
 SOURCE_PRIORITY = {
     "flip": 0,
+    "interrupt": 0,   # phase 5: the out-of-process interrupt, ahead of everything
     "chat": 3,        # the peer case; operator/person chat is 1, below
     "reaction": 1,
     "hook": 1,
@@ -37,6 +38,13 @@ SOURCE_PRIORITY = {
 
 
 FOLDED_KINDS = ("operator", "person")
+
+# Phase 5: the interrupt a process without the runner object asks for
+# (the console, cousin-watch): an inbox row, claimed by the live turn's
+# fold, which interrupts and closes it `delivered`; claimed at a turn
+# boundary, it is closed `failed` with NO_TURN and never runs as a turn.
+INTERRUPT = "interrupt"
+NO_TURN = "no turn was running"
 
 
 def folds_into_turn(source, thread_id):

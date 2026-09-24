@@ -22,7 +22,7 @@ THREAD_KINDS = ("operator", "person", "peer", "meeting", "loop",
                 "schedule", "system")
 _BARE_KINDS = ("schedule", "system")
 SOURCES = ("chat", "reaction", "hook", "loop", "schedule", "meeting",
-           "flip", "boot", "propose")
+           "flip", "boot", "propose", "interrupt")
 DELIVERED, QUEUED, FAILED = "delivered", "queued", "failed"
 
 
@@ -92,6 +92,10 @@ class TmuxBackend:
     def send(self, home, item, *, wait=True, **opts):
         """Render and type. `opts` are TmuxInjector's keyword arguments
         (tmux_bin, socket, settle, verify_delay, log, root, ...)."""
+        if item.source == "interrupt":
+            # an interrupt is a runner's inbox row; typed into a pane it
+            # would be a message. A tmux cousin is stopped in its pane.
+            return FAILED
         from cousin_lib.config import CousinConfig, MissingConfigError
         from cousin_lib.server.injection import TmuxInjector
         try:

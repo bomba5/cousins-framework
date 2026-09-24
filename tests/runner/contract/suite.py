@@ -23,7 +23,7 @@ CONTRACT_ITEMS = ("enqueue_receipt", "priority_order", "consume_after_start",
                   "outcome_interrupted", "failure_recovers", "stop_ends_turn",
                   "peer_waits", "state_events", "events_after",
                   "interrupt_idle_false", "enqueue_type_error", "rollover_shape",
-                  "rollover_generation")
+                  "rollover_generation", "interrupt_row", "interrupt_row_idle")
 
 
 def item(name):
@@ -60,6 +60,10 @@ def _results(runner):
 
 def _op(body):
     return Item("operator:priya", "chat", body, sender="Priya")
+
+
+def _interrupt():
+    return Item("system", "interrupt", "interrupt asked from the console", sender="Priya")
 
 
 class RunnerContract:
@@ -184,6 +188,34 @@ class RunnerContract:
         time.sleep(0.1)
         self.assertEqual(r.state(), "idle")
         self.assertFalse(r.interrupt())
+
+    @item("interrupt_row")
+    def test_an_interrupt_row_ends_the_live_turn_and_is_delivered(self):
+        """The out-of-process interrupt (phase 5): a process that holds no
+        runner object puts an `interrupt` row; the live turn ends, its own
+        row is still delivered, and the interrupt row says it landed."""
+        r = self._runner(slow=True)
+        r.start()
+        a = r.enqueue(_op("slow"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        stop = r.enqueue(_interrupt())
+        self.assertTrue(_wait(lambda: self._row_outcome(r, stop) is not None, timeout=3.0))
+        self.assertEqual(self._row_outcome(r, stop), "delivered")
+        self.assertTrue(_wait(lambda: r.state() == "idle", timeout=3.0))
+        self.assertTrue(_results(r)[-1]["interrupted"])
+        self.assertEqual(self._row_outcome(r, a), "delivered")
+        self.assertNotIn(stop.inbox_id, _results(r)[-1]["inbox_ids"])
+
+    @item("interrupt_row_idle")
+    def test_an_interrupt_row_with_no_turn_running_is_failed_not_a_turn(self):
+        r = self._runner()
+        r.start()
+        stop = r.enqueue(_interrupt())
+        self.assertTrue(_wait(lambda: self._row_outcome(r, stop) is not None, timeout=3.0))
+        self.assertEqual(self._row_outcome(r, stop), "failed")
+        self.assertEqual(r.inbox.get(stop.inbox_id)["detail"], "no turn was running")
+        self.assertEqual(_results(r), [])
+        self.assertEqual(r.state(), "idle")
 
     @item("stop_ends_turn")
     def test_stop_during_a_turn_returns_within_its_timeout(self):

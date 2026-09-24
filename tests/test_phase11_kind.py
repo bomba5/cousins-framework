@@ -107,6 +107,23 @@ class TestSpawn(_CreateCase):
         self.create(runner="tmux")
         self.assertIn('runner = "tmux"', self.toml())
 
+    def test_a_tmux_born_cousin_gets_the_kinds_settings_and_bridge_hooks(self):
+        import json
+        from cousin_lib.harness_settings import TMUX_HOOK_EVENTS, TMUX_HOOK_MODULE, TMUX_KEYS
+        self.create(runner="tmux")
+        data = json.loads((self.home / ".claude" / "settings.json").read_text())
+        for key, value in TMUX_KEYS.items():
+            self.assertEqual(data.get(key), value, key)
+        for event in TMUX_HOOK_EVENTS:
+            self.assertIn(TMUX_HOOK_MODULE, json.dumps(data["hooks"].get(event)), event)
+
+    def test_an_sdk_born_cousin_gets_none_of_them(self):
+        import json
+        from cousin_lib.harness_settings import TMUX_KEYS
+        self.create(runner="sdk")
+        data = json.loads((self.home / ".claude" / "settings.json").read_text())
+        self.assertFalse(set(TMUX_KEYS) & set(data))
+
 
 class TestMigratePlan(HermeticCase):
     def test_a_runner_kind_is_never_read_as_the_legacy_lane(self):

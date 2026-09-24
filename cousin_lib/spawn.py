@@ -305,7 +305,7 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         # absolute path with the home in each command, and the approval
         # of its `cousin` server. Without them a session inherits
         # whatever hooks the user-wide settings carry.
-        apply_project_settings(home, root=root)
+        apply_project_settings(home, root=root, kind=_settings_kind(home))
     except Exception as err:
         # The partial state is the one that squats a slug; a failed
         # create leaves nothing.
@@ -1165,6 +1165,18 @@ def _start_existing_runner(root, slug):
     return 0
 
 
+def _settings_kind(home):
+    """"tmux" when the home's [agent] runner is the tmux kind (its settings
+    carry the kind's keys and bridge hooks, harness_settings.TMUX_KEYS), else
+    None. An unreadable cousin.toml is None: the file's own error is the
+    caller's to report."""
+    try:
+        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return "tmux" if (data.get("agent") or {}).get("runner") == "tmux" else None
+
+
 def _repair_settings(root, slug):
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
@@ -1172,7 +1184,7 @@ def _repair_settings(root, slug):
               % (slug, root / "cousins"), file=sys.stderr)
         return 2
     try:
-        out = apply_project_settings(home, root=root)
+        out = apply_project_settings(home, root=root, kind=_settings_kind(home))
         reg = refresh_mcp_json(home, root=root, slug=slug)
     except (SettingsError, RegistrationError) as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)

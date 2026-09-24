@@ -4,7 +4,9 @@ never each runner. A real `cousin-supervisor run` over one `fake` runner
 cousin: a one-shot and a `[[loops]]` entry land in the runner's inbox on
 time, with only the supervisor and its two children running. Invented
 cast only; every wait has a deadline and every process is killed in
-cleanup."""
+cleanup. A stray loops daemon beside it is refused (exit 5), and one that
+held the lock first is waited for: the supervisor's loops child stays in
+`backoff`, never `failing`, and ticks once the stray is gone."""
 import os
 import pathlib
 import re
@@ -74,8 +76,10 @@ def _rows(db, sql):
         return []                       # the table is not created yet
 
 
-@unittest.skipUnless(os.path.isdir("/proc/self"), "reads the process table from /proc")
-class TestTheClock(HermeticCase):
+class _ClockCase(HermeticCase):
+    """A root with one `fake` runner cousin, Wren, whose one `[[loops]]`
+    entry is due at once; supervise() starts a real supervisor on it."""
+
     def setUp(self):
         super().setUp()
         tmp = tempfile.TemporaryDirectory()
@@ -97,13 +101,6 @@ class TestTheClock(HermeticCase):
             'prompt = "%s"\n' % LOOP_PROMPT)
         self.inbox_db = self.home / "data" / "inbox.db"
         self.sched_db = self.root / "data" / "scheduled.db"
-        env = dict(os.environ, FRAMEWORK_ROOT=str(self.root), COUSIN_HOME=str(self.home))
-        added = subprocess.run([sys.executable, "-m", "cousin_lib.schedule", "add",
-                                "in 3s", ONE_SHOT], env=env, cwd=REPO,
-                               capture_output=True, text=True, timeout=30)
-        self.assertEqual(added.returncode, 0, added.stderr)
-        self.started = time.time()
-        self.proc = self.supervise()
 
     def supervise(self):
         log = open(self.dir / "supervisor.log", "w")
@@ -140,6 +137,19 @@ class TestTheClock(HermeticCase):
     def inbox(self):
         return _rows(self.inbox_db, "SELECT thread_id, source, body, created_at FROM inbox"
                                     " ORDER BY id")
+
+
+@unittest.skipUnless(os.path.isdir("/proc/self"), "reads the process table from /proc")
+class TestTheClock(_ClockCase):
+    def setUp(self):
+        super().setUp()
+        env = dict(os.environ, FRAMEWORK_ROOT=str(self.root), COUSIN_HOME=str(self.home))
+        added = subprocess.run([sys.executable, "-m", "cousin_lib.schedule", "add",
+                                "in 3s", ONE_SHOT], env=env, cwd=REPO,
+                               capture_output=True, text=True, timeout=30)
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.started = time.time()
+        self.proc = self.supervise()
 
     def both_landed(self):
         if self.proc.poll() is not None:
@@ -194,7 +204,7 @@ class TestTheClock(HermeticCase):
         # one clock by construction, not by instruction: the supervisor's
         # loops child holds run/loops.lock, so a stray `cousin-loops run`
         # on the same root (a leftover systemd unit, a hand-started one)
-        # exits 2 instead of firing every beat, loop and one-shot twice
+        # exits 5 (busy) instead of firing every beat, loop and one-shot twice
         self.assertTrue(_wait_for(self.both_landed),
                         "inbox: %r\n%s" % (self.inbox(), self.log()))
         env = dict(os.environ, FRAMEWORK_ROOT=str(self.root))
@@ -219,6 +229,76 @@ class TestTheClock(HermeticCase):
         self.assertEqual(len(children), 2, children)
         for pid in children:            # reaped by the supervisor before it exited
             self.assertFalse(_alive(pid), "child %d outlived the supervisor" % pid)
+
+
+@unittest.skipUnless(os.path.isdir("/proc/self"), "reads the process table from /proc")
+class TestABusyClock(_ClockCase):
+    """Review round 2, N1: a stray `cousin-loops run` (an orphan of a
+    SIGKILLed supervisor, a hand-started one, a unit still enabled)
+    holds run/loops.lock BEFORE the supervisor starts. The supervisor's
+    loops child exits 5, busy: it waits in `backoff`, never `failing`,
+    and becomes the clock once the stray is gone. Before the fix it was
+    `failing` after five exits (about 15 s) and nothing ticked again."""
+
+    BUSY = "another loops daemon holds its lock (exit 5)"
+    COUNTED_EXITS = 5            # supervisor.MAX_EXITS: what used to mark it failing
+
+    def loops_row(self):
+        from cousin_lib import supervisor
+        try:
+            return supervisor.request(self.root, "status", timeout=5.0)["children"]["loops"]
+        except (supervisor.SupervisorUnavailable, KeyError):
+            return None
+
+    def test_a_busy_clock_waits_for_the_holder_and_ticks_when_it_is_gone(self):
+        from cousin_lib import supervisor
+        self.assertEqual(supervisor.MAX_EXITS, self.COUNTED_EXITS)
+        env = dict(os.environ, FRAMEWORK_ROOT=str(self.root), PYTHONUNBUFFERED="1")
+        # the stray ticks once at its start (Wren's runner is not up, so
+        # nothing is delivered), then sleeps an hour holding the lock
+        stray = subprocess.Popen([sys.executable, "-m", "cousin_lib.loops", "run",
+                                  "--interval", "3600"], env=env, cwd=REPO,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+        self.addCleanup(stray.wait, 10)
+        self.addCleanup(stray.kill)
+        state = self.root / "data" / "loops-state.json"
+        self.assertTrue(_wait_for(lambda: state.exists()), "the stray never ticked")
+        self.assertIsNone(stray.poll())
+
+        self.proc = self.supervise()
+        busy = _wait_for(lambda: (self.loops_row() or {}).get("reason") == self.BUSY
+                         and self.loops_row())
+        self.assertTrue(busy, self.log())
+        self.assertEqual(busy["state"], "backoff", busy)
+
+        # past the exit that used to mark it failing, sampled over the socket
+        states = set()
+
+        def _busy_exits():
+            row = self.loops_row()
+            if row:
+                states.add(row["state"])
+            return self.log().count("supervisor: loops busy: %s" % self.BUSY) \
+                >= self.COUNTED_EXITS
+        self.assertTrue(_wait_for(_busy_exits, timeout=40), self.log())
+        self.assertNotIn("failing", states, self.log())
+        row = self.loops_row()
+        self.assertEqual((row["state"], row["reason"]), ("backoff", self.BUSY), row)
+        self.assertNotIn("supervisor: loops failing", self.log())
+        self.assertEqual([r for r in self.inbox() if r[2] == LOOP_PROMPT], [],
+                         "nothing ticks while the stray holds the lock")
+
+        stray.kill()
+        stray.wait(10)
+        # the next retry (at most 60 s away; about 16 s here) takes the lock and ticks
+        self.assertTrue(_wait_for(lambda: (self.loops_row() or {}).get("state") == "running",
+                                  timeout=45), self.log())
+        self.assertTrue(_wait_for(lambda: any(r[2] == LOOP_PROMPT for r in self.inbox()),
+                                  timeout=DEADLINE_S), "inbox: %r\n%s" % (self.inbox(), self.log()))
+        (loop,) = [r for r in self.inbox() if r[2] == LOOP_PROMPT]
+        self.assertEqual((loop[0], loop[1]), ("loop:daemon", "loop"))
+        self.assertIsNone(self.proc.poll(), self.log())
 
 
 class TestTheRunnerHasNoClock(HermeticCase):

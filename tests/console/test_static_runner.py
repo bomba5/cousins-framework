@@ -23,6 +23,13 @@ class TestRunnerPane(unittest.TestCase):
         self.assertIn("function RunnerPaneView(", self.chat)
         self.assertIn("RunnerPaneView", self.chat.split("Object.assign(window")[-1])
 
+    def test_the_pane_is_keyed_per_cousin(self):
+        """Switching from runner cousin A to runner cousin B must remount
+        the pane (fresh state, note and typed text), never carry A's into
+        B: `<RunnerPaneView>` needs a `key` on the cousin's slug, not just
+        `cousin={c}`."""
+        self.assertRegex(self.chat, r"<RunnerPaneView\s+key=\{c\.slug\}")
+
     def test_it_streams_interrupts_and_says(self):
         pane = self.chat[self.chat.index("function RunnerPaneView("):]
         pane = pane[:pane.index("\n}\n")]

@@ -172,7 +172,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
           }}
         >
           {paneShown && (c.runner
-            ? <RunnerPaneView cousin={c} onClose={() => setPaneOpen(false)} />
+            ? <RunnerPaneView key={c.slug} cousin={c} onClose={() => setPaneOpen(false)} />
             : <PaneView cousin={c} onClose={() => setPaneOpen(false)} />)}
         </div>
       </div>

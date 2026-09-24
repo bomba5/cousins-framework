@@ -40,9 +40,12 @@ SOURCE_PRIORITY = {
 FOLDED_KINDS = ("operator", "person")
 
 # Phase 5: the interrupt a process without the runner object asks for
-# (the console, cousin-watch): an inbox row, claimed by the live turn's
-# fold, which interrupts and closes it `delivered`; claimed at a turn
-# boundary, it is closed `failed` with NO_TURN and never runs as a turn.
+# (the console's interrupt route, and any process that enqueues one; not
+# cousin-watch): an inbox row the fold hands back (requeue) rather than
+# folding, and that SdkRunner._take_interrupts() takes during a live turn
+# (gated by the class attribute `takes_interrupts`), closing it
+# `delivered`; claimed at a turn boundary with no live turn running, it
+# is closed `failed` with NO_TURN and never runs as a turn.
 INTERRUPT = "interrupt"
 NO_TURN = "no turn was running"
 

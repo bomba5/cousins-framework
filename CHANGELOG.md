@@ -16,7 +16,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   full below; answer the message, not this line.`, typed as its own
   keystrokes with a short pause before the body. If the body then fails, or
   a login or trust menu appears during the pause, the header is backspaced
-  out and nothing is submitted. The header comes from the sender's name only; the line itself, its
+  out and nothing is submitted. A tmux call that hangs before the body starts
+  erases the header the same way; one that hangs after it erases nothing and
+  logs `stranded input possible` (docs/reference/chat-api.md, known limit). The header comes from the sender's name only; the line itself, its
   `(Chat <Name>): ` prefix and the single Enter are unchanged, and short
   messages are typed exactly as before (docs/reference/chat-api.md).
 

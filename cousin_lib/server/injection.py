@@ -204,6 +204,9 @@ class TmuxInjector:
     environment names; a list pins them.
     """
 
+    # seconds before one tmux call counts as hung (TimeoutExpired)
+    tmux_timeout = 3
+
     def __init__(self, session, *, tmux_bin="tmux", socket=None,
                  settle=default_settle, verify_delay=0.2, log=None,
                  attention_patterns=None, root=None, input_mode=None,
@@ -227,7 +230,8 @@ class TmuxInjector:
             cmd += ["-S", self.socket]
         cmd += list(args)
         return subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=3, check=False, input=input)
+                              timeout=self.tmux_timeout, check=False,
+                              input=input)
 
     def _paste(self, text):
         """Put the text in the input box. A short line goes as literal
@@ -259,7 +263,10 @@ class TmuxInjector:
     def _erase(self, header):
         """Take a typed header back out of the input box: one BSpace per
         character, in one call, so a failed or skipped body never leaves
-        it to prefix the next delivery. Never Escape (a double Escape
+        it to prefix the next delivery. One BSpace per code point: sender
+        names are expected to be ASCII-ish, but _clean_name keeps other
+        characters, and a name whose characters the input box deletes
+        several code points at a time would be over-erased. Never Escape (a double Escape
         opens the CLI's rewind, which can roll back the conversation and
         files) and never C-u (unmeasured in the CLI's input). A failed
         erase is logged; nothing else is typed."""
@@ -338,6 +345,9 @@ class TmuxInjector:
         failed. `sender` names who a chat line is from: a line that may
         be read as a paste gets paste_header(sender) typed first."""
         with _INJECT_LOCK:
+            # progress, for the exception path: a header typed with no
+            # body started is erased; once the body started, nothing is
+            header, header_typed, body_started = None, False, False
             try:
                 blocked = self._blocked_by()
                 if blocked is not None:
@@ -351,7 +361,6 @@ class TmuxInjector:
                         # text as commands; put it back in typing mode.
                         self._tmux("send-keys", "-t", self.session, "-l",
                                    mode["insert_keys"])
-                header = None
                 if sender and self._may_read_as_paste(text):
                     # typed on its own, no newline, trailing space as a
                     # separator: keystrokes, not part of the paste below
@@ -361,6 +370,7 @@ class TmuxInjector:
                     if r.returncode != 0:
                         self._failed(r)
                         return False
+                    header_typed = True
                     time.sleep(self.header_settle)
                     blocked = self._blocked_by()
                     if blocked is not None:
@@ -370,13 +380,14 @@ class TmuxInjector:
                         self._skipped(blocked, "header erased, body not"
                                       " typed")
                         return False
+                body_started = True
                 r = self._paste(text)
                 if r.returncode != 0:
                     # Nothing was pasted, so there is nothing to submit:
                     # stop here rather than pressing Enter into the void,
                     # and take back a header typed ahead of it.
                     self._failed(r)
-                    if header is not None:
+                    if header_typed:
                         self._erase(header)
                     return False
                 time.sleep(self.settle(len(text)))
@@ -392,6 +403,31 @@ class TmuxInjector:
                     % (self.session, type(err).__name__, err),
                     file=self.log, flush=True,
                 )
+                if header_typed and not body_started:
+                    try:
+                        self._erase(header)
+                    except (subprocess.TimeoutExpired, FileNotFoundError,
+                            OSError) as erase_err:
+                        print(
+                            "[chat-server] tmux header erase FAILED"
+                            " target=%r: %s: %s; the header may still be"
+                            " in the input box"
+                            % (self.session, type(erase_err).__name__,
+                               erase_err),
+                            file=self.log, flush=True,
+                        )
+                elif header_typed:
+                    # The body may be partly typed: erasing the header's
+                    # length would eat the end of the body, and Escape or
+                    # C-u are unmeasured (Escape twice opens the rewind).
+                    # The next delivery's Enter submits whatever is left
+                    # in front of it; _submitted cannot see this.
+                    print(
+                        "[chat-server] stranded input possible in %r:"
+                        " header + partial body, not erased"
+                        % (self.session,),
+                        file=self.log, flush=True,
+                    )
                 return False
 
     def inject_async(self, text, *, sender=None):

@@ -32,6 +32,8 @@ if [ "$1" = load-buffer ]; then cat > "${FAKE_TMUX_STDIN:-/dev/null}"; fi
 # FAKE_TMUX_FAIL_NTH: fail these 1-based call indexes (space separated)
 if [ -n "${FAKE_TMUX_FAIL_CALL:-}" ] && [ "$1" = "$FAKE_TMUX_FAIL_CALL" ]; then exit 1; fi
 case " ${FAKE_TMUX_FAIL_NTH:-} " in *" $n "*) exit 1;; esac
+# FAKE_TMUX_HANG_NTH: these call indexes hang until the caller times out
+case " ${FAKE_TMUX_HANG_NTH:-} " in *" $n "*) exec sleep 10;; esac
 # FAKE_TMUX_PANE2 replaces the pane from call FAKE_TMUX_PANE_AFTER + 1 on
 pane="$FAKE_TMUX_PANE"
 if [ -n "${FAKE_TMUX_PANE_AFTER:-}" ] && [ "$n" -gt "$FAKE_TMUX_PANE_AFTER" ]; then pane="$FAKE_TMUX_PANE2"; fi
@@ -604,3 +606,58 @@ class TestPasteHeader(InjectorCase):
         self.assertEqual(self._calls()[:4], [
             "capture-pane -p -t wren", self.HEADER,
             "capture-pane -p -t wren", "send-keys -t wren -l " + "b" * 1500])
+
+    def _timing_out(self, patterns=()):
+        inj = TmuxInjector("wren", tmux_bin=str(self.tmux),
+                           settle=lambda n: 0, verify_delay=0,
+                           header_settle=0, log=self.errors,
+                           attention_patterns=list(patterns), input_mode={})
+        inj.tmux_timeout = 1.0
+        return inj
+
+    def test_a_timeout_on_the_recheck_erases_the_header(self):
+        # The most realistic strand: tmux stalls on the capture after the
+        # header. The body was never started, so the header comes out.
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_HANG_NTH": "3"}):
+            ok = self._timing_out(["Select login method"]).inject(
+                "b" * 1500, sender="Sam")
+        self.assertFalse(ok)
+        self.assertEqual(self._calls(), [
+            "capture-pane -p -t wren", self.HEADER,
+            "capture-pane -p -t wren", self.ERASE])
+        self._no_enter()
+        self.assertIn("TimeoutExpired", self.errors.getvalue())
+
+    def test_a_timeout_in_the_erase_after_a_timeout_is_logged_and_stops(self):
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_HANG_NTH": "3 4"}):
+            ok = self._timing_out(["Select login method"]).inject(
+                "b" * 1500, sender="Sam")
+        self.assertFalse(ok)
+        self.assertEqual(len(self._calls()), 4)
+        self.assertEqual(self._calls()[3], self.ERASE)
+        self._no_enter()
+        self.assertIn("erase", self.errors.getvalue())
+
+    def test_a_timeout_while_typing_the_body_erases_nothing(self):
+        # The body may be partly typed: erasing the header's length would
+        # eat the end of the body instead. Nothing is erased; the strand
+        # is logged loudly.
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_HANG_NTH": "2"}):
+            ok = self._timing_out().inject("b" * 1500, sender="Sam")
+        self.assertFalse(ok)
+        self.assertEqual(self._calls(), [
+            self.HEADER, "send-keys -t wren -l " + "b" * 1500])
+        self._no_enter()
+        self.assertIn("stranded input possible in 'wren': header + partial"
+                      " body, not erased", self.errors.getvalue())
+
+    def test_a_timeout_in_the_buffer_paste_erases_nothing(self):
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_HANG_NTH": "3"}):
+            ok = self._timing_out().inject("y" * (SEND_KEYS_MAX_BYTES + 1),
+                                           sender="Sam")
+        self.assertFalse(ok)
+        self.assertEqual(self._calls(), [
+            self.HEADER, "load-buffer -b cf-inject-wren -",
+            "paste-buffer -b cf-inject-wren -d -t wren"])
+        self._no_enter()
+        self.assertIn("stranded input possible", self.errors.getvalue())

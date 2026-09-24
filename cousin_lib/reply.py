@@ -1,7 +1,8 @@
 """Post a reply to this cousin's own chat surface.
 
-The reply path is cousin -> own chat-server; it never reaches another
-cousin's surface. Two contract rules: a process without cousin context is
+The reply is written into the cousin's own chat store
+(`chat_api.reply`, in this process: no chat server has to run); it
+never reaches another cousin's surface. Two contract rules: a process without cousin context is
 refused rather than guessed, because a reply on the wrong surface is a
 disclosure; and the body travels as JSON so newlines survive shell
 quoting.
@@ -11,13 +12,10 @@ exactly as cousin-chat and the media captions do: a blocked reply exits
 3 and nothing is posted (no message, no attachment).
 """
 import argparse
-import json
 import os
 import pathlib
 import shutil
 import sys
-import urllib.error
-import urllib.request
 import uuid
 
 from cousin_lib.config import CousinConfig, MissingConfigError
@@ -61,10 +59,10 @@ def framework_root_for(home):
 
 def send_reply(cfg, body, user=None, reply_to=None, policy=None,
                attachment=None):
-    """Post one reply. `attachment` is (kind, source path): the file is
-    staged into the home's media folder only after the filter passed
-    and the recipient is known, and removed again when the server
-    refused the reply. A timeout keeps it: the row may have landed."""
+    """Store one reply (chat_api.reply). `attachment` is (kind, source
+    path): the file is staged into the home's media folder only after
+    the filter passed and the recipient is known, and removed again when
+    the store refused the reply."""
     body = body.rstrip("\n")
     if not body.strip():
         raise ValueError("empty message body")
@@ -82,31 +80,17 @@ def send_reply(cfg, body, user=None, reply_to=None, policy=None,
     payload = {"message": body, "reply_to_user": recipient}
     if reply_to is not None:
         payload["reply_to"] = {"id": reply_to}
+    from cousin_lib.server import chat_api
     if attachment is not None:
         kind, source = attachment
         staged = stage_attachment(cfg.home, kind, source)
         payload["attachment"] = {"kind": kind, "path": str(staged)}
         try:
-            result = _post(cfg, payload)
-        except urllib.error.HTTPError:
+            return chat_api.reply(cfg, payload)
+        except BaseException:
             staged.unlink(missing_ok=True)
             raise
-        if not result.get("ok"):
-            staged.unlink(missing_ok=True)
-        return result
-    return _post(cfg, payload)
-
-
-def _post(cfg, payload):
-    url = "http://localhost:%d/api/%s_reply" % (cfg.require_chat_port(), cfg.slug)
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=8) as r:
-        return json.loads(r.read() or b"{}")
+    return chat_api.reply(cfg, payload)
 
 
 @traced_cli("cousin-reply")
@@ -162,15 +146,9 @@ def reply_main(argv=None):
     except (MissingConfigError, ValueError) as e:
         print("cousin-reply: %s" % e, file=sys.stderr)
         return 2
-    except urllib.error.URLError as e:
-        print("cousin-reply: %s" % e, file=sys.stderr)
-        return 1
     except OSError as e:
-        print("cousin-reply: the attachment could not be staged: %s" % e,
+        print("cousin-reply: the reply could not be stored: %s" % e,
               file=sys.stderr)
-        return 1
-    if not result.get("ok"):
-        print("cousin-reply: server returned %s" % result, file=sys.stderr)
         return 1
     print("reply posted (id=%s)" % result.get("id"))
     return 0

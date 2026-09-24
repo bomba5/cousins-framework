@@ -1,7 +1,7 @@
 """The chat API as library calls: one implementation of what
-`/api/send`, `/api/history`, `/api/search`, `/api/archive` and
-`/api/reactions` do (docs/reference/chat-api.md), over a cousin home's
-`data/chat.db`.
+`/api/send`, `/api/<slug>_reply`, `/api/history`, `/api/search`,
+`/api/archive` and `/api/reactions` do (docs/reference/chat-api.md),
+over a cousin home's `data/chat.db`.
 
 Two transports call it. The cousin's own chat server (server/app.py), a
 tmux cousin's, answers HTTP with it; the console calls it in-process for
@@ -150,6 +150,33 @@ def send(config, body, *, deliver=None, context=None):
     after_inbound_stored(config, user, message)
     chat_hooks.on_message(home, user=user, message=message, message_id=row["id"],
                           slug=config.slug, deliver=deliver)
+    return {"ok": True, "id": row["id"], "timestamp": row["timestamp"]}
+
+
+def reply(config, body):
+    """The cousin's own outbound (`/api/<slug>_reply`): one row stored
+    under the recipient's thread, never delivered back to the cousin.
+    `message` or an attachment (`{"kind", "path"}`, a file already staged
+    under the home's chat/ folder), and `reply_to_user`, which has no
+    default. Every caller runs in the cousin's own context (cousin-reply,
+    the media `chat` commands, the chat server's route), so this is an
+    in-process write, not a request to a server that may not run."""
+    message = body.get("message") or ""
+    reply_to_user = body.get("reply_to_user")
+    attachment = body.get("attachment") or {}
+    kind = attachment.get("kind")
+    path = attachment.get("path")
+    # A caption-less attachment is a valid reply: message OR attachment.
+    if not message and not (kind and path):
+        raise BadRequest("a reply needs a non-empty message or an attachment")
+    if not reply_to_user:
+        raise BadRequest("reply_to_user is required: there is no default recipient")
+    reply_to = body.get("reply_to")
+    row = _with_store(config.home, lambda store: store.add_message(
+        chat_user=normalize_chat_user(reply_to_user), user=config.name,
+        message=message, msg_type=config.slug,
+        reply_to=json.dumps(reply_to) if reply_to is not None else None,
+        reply_to_user=reply_to_user, attachment_kind=kind, attachment_path=path))
     return {"ok": True, "id": row["id"], "timestamp": row["timestamp"]}
 
 

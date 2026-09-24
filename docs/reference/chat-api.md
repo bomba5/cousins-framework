@@ -9,7 +9,7 @@ cousin-chat-server --home cousins/wren
 cousin-chat-server --home cousins/wren --no-terminal-delivery   # store only, never type into tmux
 ```
 
-It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge are all plain HTTP clients of this server; for a runner cousin (`[agent] runner`) the bridge stores and delivers an inbound message itself instead of calling `/api/send`, and still reads replies through `/api/history`.
+It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat` and the Telegram bridge are plain HTTP clients of this server (`cousin-reply` and the media `chat` commands write the reply route's row themselves, `chat_api.reply`); for a runner cousin (`[agent] runner`) the bridge stores and delivers an inbound message itself instead of calling `/api/send`, and still reads replies through `/api/history`.
 
 ## Who can call it
 
@@ -85,7 +85,7 @@ What happens on an ordinary (non-diverted) send, in order:
 
 ## `POST /api/<slug>_reply`
 
-The cousin's own outbound message. The slug is in the path so a reply sent to the wrong cousin's server gets a `404` instead of landing in someone else's history. `cousin-reply` is the normal way to call it.
+The cousin's own outbound message. The slug is in the path so a reply sent to the wrong cousin's server gets a `404` instead of landing in someone else's history. `cousin-reply` stores the same row without the server (`chat_api.reply`, the one implementation both use).
 
 ```sh
 echo "backups are fine" | cousin-reply --user ana

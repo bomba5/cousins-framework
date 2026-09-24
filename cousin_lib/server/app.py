@@ -24,8 +24,7 @@ from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError)
 from cousin_lib.server import chat_api
 from cousin_lib.server.netguard import NetGuard
-from cousin_lib.server.storage import (ChatStore, is_operator,
-                                       normalize_chat_user)
+from cousin_lib.server.storage import ChatStore, is_operator
 
 
 class _BadRequest(Exception):
@@ -310,36 +309,7 @@ class _ChatHandler(BaseHTTPRequestHandler):
         # The cousin's own outbound: stored under the recipient's thread,
         # never delivered back into its own pane. The slug-bound path that
         # routed here already rejected misroutes with a 404.
-        body = self._read_json()
-        message = body.get("message") or ""
-        reply_to_user = body.get("reply_to_user")
-        attachment = body.get("attachment") or {}
-        kind = attachment.get("kind")
-        path = attachment.get("path")
-        # A caption-less attachment is a valid reply: message OR
-        # attachment, not message required.
-        if not message and not (kind and path):
-            raise _BadRequest(
-                "a reply needs a non-empty message or an attachment")
-        if not reply_to_user:
-            raise _BadRequest(
-                "reply_to_user is required: there is no default recipient"
-            )
-        reply_to = body.get("reply_to")
-        config = self.chat_server.config
-        row = self._with_store(lambda store: store.add_message(
-            chat_user=normalize_chat_user(reply_to_user),
-            user=config.name,
-            message=message,
-            msg_type=config.slug,
-            reply_to=json.dumps(reply_to) if reply_to is not None else None,
-            reply_to_user=reply_to_user,
-            attachment_kind=kind,
-            attachment_path=path,
-        ))
-        self._send_json(200, {
-            "ok": True, "id": row["id"], "timestamp": row["timestamp"],
-        })
+        self._send_json(200, chat_api.reply(self.chat_server.config, self._read_json()))
 
     def _handle_history(self, query):
         self._send_json(200, chat_api.history(self.chat_server.config.home,

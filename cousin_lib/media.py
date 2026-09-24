@@ -109,19 +109,13 @@ def generate_tracked(kind, prompt, *, home=None, **params):
     return path
 
 
-def _post_reply(*, slug, port, user, message, attachment):
-    """Post a generated asset to the cousin's own chat surface via its
-    slug-bound reply endpoint - the same path cousin-reply uses. The
-    bytes stay on disk; the reply carries the path."""
-    body = json.dumps({
-        "message": message,
-        "reply_to_user": user,
-        "attachment": attachment,
-    }).encode()
-    request = urllib.request.Request(
-        "http://127.0.0.1:%d/api/%s_reply" % (port, slug),
-        data=body, headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(request, timeout=10)
+def _post_reply(config, *, user, message, attachment):
+    """Store a generated asset as a reply on the cousin's own chat
+    surface (chat_api.reply, in this process: the same path cousin-reply
+    uses). The bytes stay on disk; the reply carries the path."""
+    from cousin_lib.server import chat_api
+    chat_api.reply(config, {"message": message, "reply_to_user": user,
+                            "attachment": attachment})
 
 
 def _run_cli(kind, argv):
@@ -166,8 +160,7 @@ def _run_cli(kind, argv):
         except FilterBlocked as err:
             print("cousin-%s: %s" % (kind, err), file=sys.stderr)
             return 3
-    _post_reply(slug=config.slug, port=config.require_chat_port(),
-                user=args.user, message=caption,
+    _post_reply(config, user=args.user, message=caption,
                 attachment={"kind": kind, "path": str(path)})
     print("posted %s to %s" % (path.name, args.user))
     return 0

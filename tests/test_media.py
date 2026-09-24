@@ -137,22 +137,25 @@ class TestCli(MediaCase):
         self._configure(self._serve())
         posted = []
         with mock.patch("cousin_lib.media._post_reply",
-                        side_effect=lambda **kw: posted.append(kw)):
+                        side_effect=lambda config, **kw: posted.append(kw)):
             rc, out, _ = self._main(["gen", "a cat"])
         self.assertEqual(rc, 0)
         self.assertEqual(posted, [])
         self.assertIn("chat/images", out)
 
     def test_chat_generates_and_posts_with_the_attachment(self):
+        """The reply is stored in the cousin's own chat.db, in this
+        process: no chat server runs here (phase 10a)."""
+        import sqlite3
         self._configure(self._serve())
-        posted = []
-        with mock.patch("cousin_lib.media._post_reply",
-                        side_effect=lambda **kw: posted.append(kw)):
-            rc, _, _ = self._main(["chat", "a cat", "--user", "Sam"])
-        self.assertEqual(rc, 0)
-        self.assertEqual(len(posted), 1)
-        self.assertEqual(posted[0]["attachment"]["kind"], "image")
-        self.assertIn("chat/images", posted[0]["attachment"]["path"])
+        rc, _, err = self._main(["chat", "a cat", "--user", "Sam"])
+        self.assertEqual(rc, 0, err)
+        with sqlite3.connect(self.home / "data" / "chat.db") as db:
+            rows = db.execute("SELECT reply_to_user, attachment_kind, attachment_path"
+                              " FROM messages").fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][:2], ("Sam", "image"))
+        self.assertIn("chat/images", rows[0][2])
 
     def test_unconfigured_cli_refuses_with_exit_2(self):
         rc, _, err = self._main(["gen", "a cat"])

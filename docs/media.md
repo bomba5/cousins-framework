@@ -103,8 +103,8 @@ framework root. Files land in the cousin home, named
 
 Nothing cleans these up; they're the cousin's to manage.
 
-`chat` posts the file as a reply from the cousin to `--user`, through the
-cousin's own chat server, the same way `cousin-reply` does. The caption
+`chat` stores the file as a reply from the cousin to `--user` in the
+cousin's own chat history, the same way `cousin-reply` does. The caption
 is optional and goes through the outbound filter first
 ([configuration](configuration.md)). Posting only happens when you ask
 for it with `chat`; `gen` never posts anything. The cousin isn't sent a

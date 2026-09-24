@@ -220,9 +220,10 @@ cousin-reply --user ana --video run.mp4 -m "the bench run"
 - Exit codes: 0 posted, 1 the server said no or couldn't be reached, 2
   missing config or bad arguments, 3 blocked by the outbound filter.
 
-`cousin-reply` needs `COUSIN_HOME` and posts to its own server's
-`/api/<slug>_reply` route. The reply goes into the history for that
-person's thread. It's never typed back into the cousin's own pane.
+`cousin-reply` needs `COUSIN_HOME` and writes the reply into the
+cousin's own chat store itself, the same thing the `/api/<slug>_reply`
+route does, so it works whether or not a chat server runs. The reply
+goes into the history for that person's thread. It's never typed back into the cousin's own pane.
 
 If the install has an outbound filter (`config/outbound-filter.json`,
 see [configuration](configuration.md)), replies and cousin-to-cousin

@@ -57,13 +57,22 @@ class _CliCase(unittest.TestCase):
         }
 
 
+def _reply_rows(home):
+    """cousin-reply stores the reply in the cousin's own chat store
+    (chat_api.reply, phase 10a): no request reaches a server."""
+    import sqlite3
+    with sqlite3.connect(pathlib.Path(home) / "data" / "chat.db") as db:
+        return db.execute("SELECT message, reply_to_user FROM messages ORDER BY id").fetchall()
+
+
 class TestReplyCli(_CliCase):
     def test_message_flag_posts_and_exits_zero(self):
         with mock.patch.dict("os.environ", self.env):
             with contextlib.redirect_stdout(io.StringIO()):
                 code = reply_main(["--message", "hi there"])
         self.assertEqual(code, 0)
-        self.assertEqual(_Ok.received["payload"]["reply_to_user"], "Sam")
+        self.assertEqual(_reply_rows(self.root / "cousins" / "wren"), [("hi there", "Sam")])
+        self.assertIsNone(_Ok.received)
 
     def test_stdin_body_preserves_newlines(self):
         with mock.patch.dict("os.environ", self.env):
@@ -71,7 +80,8 @@ class TestReplyCli(_CliCase):
                 with contextlib.redirect_stdout(io.StringIO()):
                     code = reply_main([])
         self.assertEqual(code, 0)
-        self.assertEqual(_Ok.received["payload"]["message"], "line one\nline two")
+        self.assertEqual(_reply_rows(self.root / "cousins" / "wren"),
+                         [("line one\nline two", "Sam")])
 
     def test_missing_cousin_home_is_a_config_error(self):
         err = io.StringIO()

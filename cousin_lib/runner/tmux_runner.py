@@ -38,6 +38,7 @@ CONSUME_S = 60.0          # a typed row not taken by then, at a turn end with an
 LIMIT_RETRY_S = 300.0     # how long a usage limit holds the claim loop before trying again
 TURN_FINISH_S = 30.0      # after the handoff file lands, how long the handoff turn may take to end
 EXIT_WAIT_S = 10.0        # how long `/exit` gets to end the CLI before the pane is killed
+HOOKS_SILENT_S = 5.0      # after the first turn end, how long a pane hook's datagram may still take
 LOGIN_SCREENS = ("trust", "onboarding", "login", "bypass", "mcp_approval")
 CLAIMS_FILE = "tmux-claims.json"
 CURSOR_FILE = "tmux-cursor.json"
@@ -104,6 +105,10 @@ class TmuxRunner:
         self._handoff_limited = False
         self._turn_seq = 0
         self._runner_turn_seen = False   # a runner-nonce turn started since the flag was cleared
+        self._hook_heard = False         # a pane hook's datagram for this session arrived (M-a)
+        self._first_end = None           # monotonic time of the first turn end
+        self._hooks_silent_said = False
+        self.hooks_silent_s = HOOKS_SILENT_S   # tests shorten it
         self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
 
     # -- small helpers ----------------------------------------------------
@@ -360,6 +365,28 @@ class TmuxRunner:
                     self._fail_turn([], exc)
                     time.sleep(0.2)
                 listener.wait(timeout=POLL_S)
+                self._heard(listener.messages)
+
+    def _heard(self, messages):
+        """The pane hooks' datagrams (runner/tmux_hook.py). One is only a
+        wake: it counts as heard when it names this session, and nothing
+        else is done on it (R19). No datagram by HOOKS_SILENT_S after the
+        first turn end is a `hooks_silent` event, once (M-a): the hooks
+        fail somewhere, and the runner keeps polling the transcript."""
+        for raw in messages:
+            try:
+                data = json.loads(raw)
+            except ValueError:
+                continue            # a plain poke from a producer
+            if isinstance(data, dict) and data.get("event") and \
+                    data.get("session_id") == self._session_id:
+                self._hook_heard = True
+        if (not self._hook_heard and not self._hooks_silent_said and self._first_end is not None
+                and time.monotonic() - self._first_end >= self.hooks_silent_s):
+            self._hooks_silent_said = True
+            self.stream.append("system", {"subtype": "hooks_silent", "session_id": self._session_id,
+                                          "detail": "no pane hook datagram by the first turn end;"
+                                                    " the runner polls the transcript instead"})
 
     # -- the transcript ------------------------------------------------------
     def _pump(self):
@@ -459,6 +486,8 @@ class TmuxRunner:
         self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted, "is_error": False})
         self._live, self._interrupting = None, False
         self._turn_seq += 1
+        if self._first_end is None:
+            self._first_end = time.monotonic()
         if not interrupted:
             self._mine()
         self._to("idle", "turn done")

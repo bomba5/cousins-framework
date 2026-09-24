@@ -15,6 +15,7 @@ import re
 import stat
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from dataclasses import dataclass, field
@@ -124,13 +125,27 @@ def _under(root, rel, what, where):
     return Path(path)
 
 
+def _accounts_path(root):
+    return Path(root) / "config" / "accounts.toml"
+
+
 def load(root):
-    path = Path(root) / "config" / "accounts.toml"
+    path = _accounts_path(root)
     try:
-        data = tomllib.loads(path.read_text())
+        text = path.read_text()
     except FileNotFoundError:
         return {}
-    except (OSError, tomllib.TOMLDecodeError) as err:
+    except OSError as err:
+        raise AccountsError("cannot read %s: %s" % (path, err))
+    return _parse(root, text, path)
+
+
+def _parse(root, text, path):
+    """load()'s rules over the text of accounts.toml (write_entry checks a
+    new text by them before it is written)."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as err:
         raise AccountsError("cannot read %s: %s" % (path, err))
     tables = data.get("accounts") or {}
     if not isinstance(tables, dict):
@@ -271,6 +286,148 @@ def check_lane(account, runner_kind):
         raise AccountsError(
             "account %s is kind opencode: it runs with runner = \"opencode\" only, not"
             " runner = \"%s\"" % (account.name, runner_kind))
+
+
+# ------------------------------------------------------------ the accounts.toml writer
+
+_WRITE_LOCK = threading.Lock()
+
+
+def write_entry(root, name, entry, *, expect=None):
+    """Add or replace [accounts.<name>] in config/accounts.toml with
+    `entry` (a table of load()'s keys; the entry is replaced whole), or
+    remove it when `entry` is None. `expect` "absent" refuses a name that
+    exists, "present" one that does not. Every other line of the file is
+    kept byte for byte (console/toml_edit.set_key); the new text must read
+    back with only this entry changed and pass load()'s rules as a whole,
+    and an opencode entry must not name Claude (ruling P9-1), before the
+    atomic rename that keeps the file's mode. Nothing is written on a
+    refusal (AccountsError, whose message never repeats a value). No
+    secret lives in this file. Returns the Account, or None on removal."""
+    from cousin_lib.console import toml_edit
+    if not isinstance(name, str) or not _NAME.match(name) or name == HOST:
+        raise AccountsError("an account name must match %s and not be %r" % (_NAME.pattern, HOST))
+    if entry is not None:
+        _check_entry(name, entry)
+    path = _accounts_path(root)
+    table = "accounts.%s" % name
+    with _WRITE_LOCK:
+        try:
+            text = path.read_text()
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            text, mode = "", 0o644
+        except OSError as err:
+            raise AccountsError("cannot read %s: %s" % (path, err))
+        try:
+            before = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as err:
+            raise AccountsError("%s does not parse (%s): fix it by hand first" % (path, err))
+        tables = before.get("accounts") or {}
+        if not isinstance(tables, dict):
+            raise AccountsError("%s: [accounts] must be a table of accounts: fix it by hand"
+                                % path)
+        present = name in tables
+        if expect == "absent" and present:
+            raise AccountsError("account %s is already in %s" % (name, path))
+        if (expect == "present" or entry is None) and not present:
+            raise AccountsError("no account %r in %s" % (name, path))
+        try:
+            if entry is None:
+                new = _drop_table(text, table)
+            else:
+                new = text
+                old = tables.get(name)
+                for key in (old if isinstance(old, dict) else {}):
+                    if key not in entry:
+                        new = toml_edit.set_key(new, table, key, None)
+                for key in ["kind"] + [k for k in entry if k != "kind"]:
+                    new = toml_edit.set_key(new, table, key, entry[key])
+        except ValueError as err:
+            raise AccountsError("cannot edit %s in place (%s): edit it by hand" % (path, err))
+        after = tomllib.loads(new)
+        want = dict(tables)
+        if entry is None:
+            want.pop(name, None)
+        else:
+            want[name] = dict(entry)
+        rest = {k: v for k, v in after.items() if k != "accounts"}
+        if (after.get("accounts") or {}) != want \
+                or rest != {k: v for k, v in before.items() if k != "accounts"}:
+            raise AccountsError("editing %s would change more than account %s: edit it by hand"
+                                % (path, name))
+        known = _parse(root, new, path)
+        _write_config_text(path, new, mode)
+    return None if entry is None else known[name]
+
+
+def _check_entry(name, entry):
+    """The entry's shape before any text is touched: a table, a known kind,
+    only that kind's keys, TOML-able values, and on an opencode entry no
+    provider or endpoint model that names Claude (P9-1: such an account
+    could never run on its only lane)."""
+    where = "account %s" % name
+    if not isinstance(entry, dict):
+        raise AccountsError("%s must be a table of keys" % where)
+    kind = entry.get("kind")
+    if kind not in KINDS:
+        raise AccountsError("%s kind must be one of %s" % (where, ", ".join(KINDS)))
+    unknown = set(entry) - _ALLOWED[kind]
+    if unknown:
+        raise AccountsError("%s: %s not allowed for kind %s"
+                            % (where, ", ".join(sorted(map(str, unknown))), kind))
+    for key, value in entry.items():
+        ok = (isinstance(value, str) and "\n" not in value) \
+            or (isinstance(value, int) and not isinstance(value, bool)) \
+            or (isinstance(value, list) and all(isinstance(v, str) for v in value))
+        if not ok:
+            raise AccountsError("%s %s must be a line of text, a whole number or a list of"
+                                " names" % (where, key))
+    if kind == "opencode":
+        for provider in entry.get("providers") or ():
+            refuse_claude_name("%s's provider" % where, provider)
+        refuse_claude_name("%s's endpoint_model" % where, entry.get("endpoint_model"))
+
+
+def _drop_table(text, table):
+    """The text without the `[table]` header and its keys; the comments
+    and blank lines after its last key stay (they usually belong to the
+    next table). ValueError when the entry is not a `[table]` of its own."""
+    from cousin_lib.console import toml_edit
+    lines = text.splitlines(keepends=True)
+    statements = toml_edit._statements(lines)
+    found = toml_edit._table_body(statements, table) if statements else None
+    if found is None:
+        raise ValueError("%s is not a [%s] table of its own" % (table, table))
+    (hi, hj, _h), body = found
+    end = hj
+    for i, j, _ in body:
+        stripped = lines[i].strip()
+        if stripped and not stripped.startswith("#"):
+            end = j
+    del lines[hi:end]
+    # one blank line left where two were
+    if 0 < hi < len(lines) and not lines[hi].strip() and not lines[hi - 1].strip():
+        del lines[hi]
+    return "".join(lines)
+
+
+def _write_config_text(path, text, mode):
+    """Atomic: a tmp in the same directory, the mode set, then the rename."""
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".accounts.", suffix=".toml.tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def for_cousin(home, root):

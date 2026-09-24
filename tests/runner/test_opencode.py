@@ -517,6 +517,36 @@ class TestLeftoverServer(OpencodeCase):
         self.assertFalse(pidfile.exists())
 
 
+class TestOneCousinPerAccount(OpencodeCase):
+    """Review Important 3: the per-start files (the rendered config with the
+    MCP token, the policy file and its acknowledgement) and opencode's own
+    store live in the account's data dir, so two cousins on one opencode
+    account overwrite each other. The account is held for the runner's life;
+    a second cousin on it is refused at its start (exit 2), naming the first."""
+
+    def test_a_second_cousin_on_the_account_is_refused_until_the_first_stops(self):
+        first_home = self.home()
+        shared = self.account()                       # one account, both cousins
+        first = self.started(self.runner(home=first_home, account=shared))
+        second = self.runner(home=self.home(), account=shared)
+        self.assertEqual(second.account.data_dir, first.account.data_dir)
+        with self.assertRaises(RunnerError) as err:
+            second.start()
+        self.assertIn("lab", str(err.exception))
+        self.assertIn(str(first_home), str(err.exception))
+        self.assertIn("one cousin", str(err.exception))
+        self.assertEqual(second.state(), "idle")
+        self.assertFalse(second.worker_alive())
+        first.stop(timeout=5)
+        self.started(second)                          # released at stop
+
+    def test_the_same_runner_can_start_again_after_its_stop(self):
+        r = self.started(self.runner())
+        r.stop(timeout=5)
+        r2 = self.runner(home=r.home, factory=Factory(), account=r.account)
+        self.started(r2)
+
+
 class TestTurns(OpencodeCase):
     def test_a_turn_emits_its_events_and_closes_its_row(self):
         r = self.started(self.runner([[("reasoning", "let me look"),

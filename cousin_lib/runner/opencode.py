@@ -37,6 +37,7 @@ payloads, the tool named in the SDK form (`bash` -> `Bash`, `cousin_reply`
 -> `mcp__cousin__reply`), the one form policy.toml and the recorder use.
 
 Stdlib and cousin_lib only."""
+import fcntl
 import hashlib
 import json
 import os
@@ -94,6 +95,8 @@ PLUGIN_DEPENDENCY = "@opencode-ai/plugin"
 POLICY_NAME = "cousin-policy.json"
 POLICY_ACK = "cousin-policy.ack.json"
 POLICY_ENV = "COUSIN_POLICY_FILE"
+ACCOUNT_HOLDER = "account.holder"   # the home of the runner holding the account (its flock)
+ACCOUNT_TAKE_S = 1.0                # a restarting runner's predecessor may still be exiting
 PLUGIN_TIMEOUT_S = 30.0         # GET /config (the instance's bootstrap), then the plugin's word
 DENIED = "denied by policy: "   # what the plugin's throw reads as, to the model
 # opencode's built-in tools in the SDK lane's names: the ONE form policy.toml
@@ -477,6 +480,7 @@ class OpencodeRunner:
         self._login_mark = None
         self._login_file_seen = False
         self._restore_pending = False
+        self._account_fd = None
 
     # -- construction helpers ------------------------------------------------
     def _identity(self):
@@ -537,6 +541,7 @@ class OpencodeRunner:
     def start(self):
         if self._thread is not None:
             return
+        self._hold_account()
         self._thread = threading.Thread(target=self._main, name="opencode-runner", daemon=True)
         self._thread.start()
 
@@ -549,6 +554,7 @@ class OpencodeRunner:
         if self._thread is not None:
             self._thread.join(timeout)
         self._teardown()
+        self._release_account()
         self.turn.end()
         with self._lock:
             if self.machine.state != "stopped":
@@ -605,6 +611,55 @@ class OpencodeRunner:
         return self._login_blocked
 
     # -- start and teardown --------------------------------------------------
+    def _hold_account(self):
+        """Review Important 3: one opencode account serves one cousin. Its
+        data dir holds this start's rendered config (the MCP token), the
+        policy file and its acknowledgement, and opencode's own store and
+        session, so a second runner on it would overwrite the first's. An
+        exclusive flock on the data dir, held until stop (the kernel drops
+        it when the process dies); busy is a RunnerError, exit 2 at start,
+        naming the cousin that holds it."""
+        path = Path(self.account.data_dir)
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        except OSError as err:
+            raise RunnerError("cannot open the opencode account's data dir %s: %s" % (path, err))
+        deadline = time.monotonic() + ACCOUNT_TAKE_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() < deadline:
+                    time.sleep(0.02)
+                    continue
+                os.close(fd)
+                try:
+                    holder = (path / ACCOUNT_HOLDER).read_text().strip() or "another runner"
+                except OSError:
+                    holder = "another runner"
+                raise RunnerError("opencode account %s (%s) is in use by the runner of %s: an"
+                                  " opencode account serves one cousin (its data dir holds that"
+                                  " cousin's config, MCP token, policy files and opencode's"
+                                  " session store); give this cousin its own account in"
+                                  " config/accounts.toml" % (self.account.name, path, holder))
+        self._account_fd = fd
+        tmp = path / (ACCOUNT_HOLDER + ".tmp")
+        tmp.write_text(str(self.home) + "\n")
+        tmp.replace(path / ACCOUNT_HOLDER)
+
+    def _release_account(self):
+        fd, self._account_fd = self._account_fd, None
+        if fd is None:
+            return
+        holder = Path(self.account.data_dir) / ACCOUNT_HOLDER
+        try:
+            if holder.read_text().strip() == str(self.home):
+                holder.unlink()
+        except OSError:
+            pass
+        os.close(fd)
+
     def _fail_start(self, message):
         """The worker gives up (cousin-runner exits 3): `errored`, `fatal`,
         an `error` event. Queued rows stay queued."""

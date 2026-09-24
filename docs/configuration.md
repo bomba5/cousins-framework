@@ -220,6 +220,13 @@ a `claude-login`, `claude-token` or `anthropic-key` account or an `[agent]
 api_key_file`, and an `sdk` or `fake` cousin never runs on an `opencode`
 account. Either mismatch refuses the start (exit 2).
 
+One opencode account serves one cousin. Its data dir holds that cousin's
+rendered config (with its MCP token), its policy files and opencode's own
+session store, so the runner holds the account (a lock on the data dir) for
+as long as it runs, and a second cousin on the same account is refused at
+its start (exit 2, naming the cousin that holds it). Give each opencode
+cousin its own account; two accounts may name the same provider keys.
+
 Resume per kind: a `claude-login` account refreshes its own token, so a
 restarted runner resumes its session through the CLI's own `--resume`; a
 `claude-token` or `anthropic-key` account never refreshes, so it resumes from

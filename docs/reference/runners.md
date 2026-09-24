@@ -178,6 +178,17 @@ none is a contract item:
   writes `auth.json` atomically but takes no lock against a running
   `opencode serve` refreshing an OAuth token in the same file.
 - **Only x86-64 is pinned** in the image's opencode variant.
+- **A subagent's events do not reset the turn's idle clock.** A `task`
+  subagent runs in a child session whose events the runner drops before it
+  notes the turn's last event; a long subagent relies on opencode updating
+  the parent's tool part to stay inside the 600 s idle bound. Not measured
+  for a subagent that runs longer than that.
+- **The server's port is picked before the server binds it** (bind, close,
+  hand the number over). A collision fails closed: the server exits or its
+  password answers 401, and the runner restarts.
+- **The runner's reads from its own server are unbounded** (the event
+  stream's frames, a response body); the server is its own loopback child.
+  The MCP side caps a request at 4 MB.
 - **The model's shell keeps part of the server's environment.** opencode
   merges the plugin's `shell.env` answer over its own environment, so a
   variable can be overridden (the plugin sets `HOME` to the cousin's home and

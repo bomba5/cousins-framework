@@ -1011,7 +1011,10 @@ records from opencode's event stream what the SDK lane's hooks record: each
 tool call, with its arguments, as an activity line, a `task` call (opencode's
 subagent tool) as a `subagent` job, a session checkpoint at the end of every
 turn, and on `session.compacted` the pre-compact checkpoint and a rollover
-at the next turn boundary. A subagent's own tool calls (in its child
+at the next turn boundary. opencode sends `session.compacted` once the
+compaction is done, so that checkpoint is taken after it, where the SDK's
+`PreCompact` hook fires before: it records the state the compaction left, not
+the transcript it summarised. A subagent's own tool calls (in its child
 session) are vetoed by the plugin but not recorded.
 
 A restart resumes the session

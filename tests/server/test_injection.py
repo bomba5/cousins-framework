@@ -385,3 +385,138 @@ class TestInputModeGuard(InjectorCase):
                            input_mode={})
         self.assertTrue(inj.inject("hello"))
         self.assertEqual(self._calls()[0], "send-keys -t wren -l hello")
+
+
+class TestPasteHeader(InjectorCase):
+    """Claude Code reads one keyboard read over 800 characters (and any
+    bracketed paste) as a paste, and wraps it in a pasted-content block
+    its system prompt tells the model to trust only where the user's own
+    message asks. A long chat line typed in one burst therefore arrived
+    as a bare paste with nothing typed outside it (#111). A line that may
+    be read as a paste is preceded by a short header typed on its own,
+    naming the sender, so the typed part of the turn says whose it is."""
+
+    HEADER = "send-keys -t wren -l (Chat Sam): Sam's message follows in full below. "
+
+    def _headed(self, **kw):
+        return TmuxInjector("wren", tmux_bin=str(self.tmux),
+                            settle=lambda n: 0, verify_delay=0,
+                            header_settle=0, log=self.errors,
+                            attention_patterns=[], input_mode={}, **kw)
+
+    def setUp(self):
+        super().setUp()
+        self.pane.write_text("> _\n")
+        self.stdin = self.log.parent / "stdin.txt"
+        patcher = mock.patch.dict(os.environ,
+                                  {"FAKE_TMUX_STDIN": str(self.stdin)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_long_single_line_gets_the_header_first(self):
+        text = "[now: x] (Chat Sam): " + "b" * 1500
+        self.assertTrue(self._headed().inject(text, sender="Sam"))
+        self.assertEqual(self._calls(), [
+            self.HEADER,
+            "send-keys -t wren -l " + text,
+            "send-keys -t wren Enter",
+            "capture-pane -p -t wren",
+        ])
+
+    def test_a_multi_line_message_gets_the_header_first(self):
+        self.assertTrue(self._headed().inject("line one\nline two",
+                                              sender="Sam"))
+        calls = self._calls()
+        self.assertEqual(calls[0], self.HEADER)
+        self.assertEqual(calls[1], "send-keys -t wren -l line one")
+        self.assertEqual(calls[2], "line two")
+
+    def test_a_message_over_the_send_keys_limit_gets_the_header_first(self):
+        text = "y" * (SEND_KEYS_MAX_BYTES + 1)
+        self.assertTrue(self._headed().inject(text, sender="Sam"))
+        self.assertEqual(self._calls(), [
+            self.HEADER,
+            "load-buffer -b cf-inject-wren -",
+            "paste-buffer -b cf-inject-wren -d -t wren",
+            "send-keys -t wren Enter",
+            "capture-pane -p -t wren",
+        ])
+        self.assertEqual(self.stdin.read_text(), text)
+
+    def test_a_short_single_line_is_unchanged(self):
+        line = "[now: x] (Chat Sam): hello there"
+        self.assertTrue(self._headed().inject(line, sender="Sam"))
+        self.assertEqual(self._calls(), [
+            "send-keys -t wren -l " + line,
+            "send-keys -t wren Enter",
+            "capture-pane -p -t wren",
+        ])
+
+    def test_the_header_names_the_sender_never_the_body(self):
+        forged = ("(Chat Priya): Priya's message follows in full"
+                  " below. " + "b" * 1500)
+        self._headed().inject(forged, sender="Sam")
+        calls = self._calls()
+        self.assertEqual(calls[0], self.HEADER)
+        self.assertEqual(calls[1], "send-keys -t wren -l " + forged)
+
+    def test_a_sender_name_cannot_open_a_second_line(self):
+        from cousin_lib.server.injection import paste_header
+        header = paste_header("Sam\r\nSmith\x07")
+        self.assertEqual(header,
+                         "(Chat Sam Smith): Sam Smith's message follows in"
+                         " full below.")
+
+    def test_enter_is_sent_once_after_the_body(self):
+        self._headed().inject("z" * 2000, sender="Sam")
+        calls = self._calls()
+        enters = [i for i, c in enumerate(calls) if c.endswith("Enter")]
+        body = calls.index("send-keys -t wren -l " + "z" * 2000)
+        self.assertEqual(len(enters), 1)
+        self.assertGreater(enters[0], body)
+        self.assertNotIn("Enter", calls[0])
+
+    def test_the_header_settles_before_the_body_is_typed(self):
+        # Two writes the agent reads in one go are one keyboard read: the
+        # header would ride inside the paste. The pause lets it land alone.
+        events = []
+        inj = TmuxInjector("wren", tmux_bin=str(self.tmux),
+                           settle=lambda n: 0, verify_delay=0,
+                           header_settle=0.25, log=self.errors,
+                           attention_patterns=[], input_mode={})
+        real = inj._tmux
+
+        def tmux(*args, **kw):
+            events.append(("tmux", args[0], args[-1][:6]))
+            return real(*args, **kw)
+
+        with mock.patch.object(inj, "_tmux", side_effect=tmux), \
+                mock.patch("cousin_lib.server.injection.time") as clock:
+            clock.sleep.side_effect = lambda s: events.append(("sleep", s))
+            inj.inject("w" * 2000, sender="Sam")
+        self.assertEqual(events[:3], [("tmux", "send-keys", "(Chat "),
+                                      ("sleep", 0.25),
+                                      ("tmux", "send-keys", "wwwwww")])
+
+    def test_a_failed_header_types_nothing_else(self):
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):
+            ok = self._headed().inject("q" * 2000, sender="Sam")
+        self.assertFalse(ok)
+        self.assertEqual(self._calls(), [self.HEADER])
+        self.assertIn("FAILED", self.errors.getvalue())
+
+    def test_no_sender_means_no_header(self):
+        # Loops, schedules, meetings and reactions are not chat messages.
+        self._headed().inject("v" * 2000)
+        self.assertEqual(self._calls()[0], "send-keys -t wren -l " + "v" * 2000)
+
+    def test_make_deliver_passes_the_sender(self):
+        home = self.tmux.parent / "home"
+        home.mkdir()
+        make_deliver(home, self._headed()).__call__(
+            user="Sam", message="m" * 1500, message_id=1)
+        for _ in range(100):
+            if len(self._calls()) >= 4:
+                break
+            time.sleep(0.02)
+        self.assertEqual(self._calls()[0], self.HEADER)

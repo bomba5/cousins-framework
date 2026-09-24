@@ -9,6 +9,7 @@ works is the easiest failure to ignore.
 """
 import json
 import pathlib
+import re
 import tempfile
 import unittest
 
@@ -38,7 +39,7 @@ class TestLastConnection(unittest.TestCase):
         self.home = self.root / "cousins" / "wren"
         self.home.mkdir(parents=True)
         (self.root / "config").mkdir()
-        self.logs = self.root / "cache" / (str(self.home).replace("/", "-")
+        self.logs = self.root / "cache" / (re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
                                            ) / "mcp-logs-cousin"
         self.logs.mkdir(parents=True)
         (self.root / "config" / "harness.toml").write_text(
@@ -109,7 +110,7 @@ class TestBootWarning(unittest.TestCase):
         self.home = self.root / "cousins" / "wren"
         self.home.mkdir(parents=True)
         (self.root / "config").mkdir()
-        self.logs = self.root / "cache" / (str(self.home).replace("/", "-")
+        self.logs = self.root / "cache" / (re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
                                            ) / "mcp-logs-cousin"
         self.logs.mkdir(parents=True)
         (self.root / "config" / "harness.toml").write_text(
@@ -211,7 +212,7 @@ class TestWarningSaysWhatItKnows(unittest.TestCase):
         self.home = self.root / "cousins" / "wren"
         self.home.mkdir(parents=True)
         (self.root / "config").mkdir()
-        self.logs = self.root / "cache" / (str(self.home).replace("/", "-")
+        self.logs = self.root / "cache" / (re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
                                            ) / "mcp-logs-cousin"
         self.logs.mkdir(parents=True)
         (self.root / "config" / "harness.toml").write_text(
@@ -262,7 +263,7 @@ class TestLastConnectionCLI(unittest.TestCase):
         self.home = self.root / "cousins" / "wren"
         self.home.mkdir(parents=True)
         (self.root / "config").mkdir()
-        self.logs = self.root / "cache" / (str(self.home).replace("/", "-")
+        self.logs = self.root / "cache" / (re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
                                            ) / "mcp-logs-cousin"
         self.logs.mkdir(parents=True)
         (self.root / "config" / "harness.toml").write_text(

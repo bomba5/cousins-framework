@@ -8,6 +8,7 @@ real files.
 import json
 import os
 import pathlib
+import re
 import tempfile
 import time
 import unittest
@@ -190,7 +191,7 @@ class TestCollections(SearchCase):
     def test_harness_collection_when_configured_and_present(self):
         root = self._root_with_harness(
             str(self.home.parent.parent / "harness") + "/{home_encoded}/memory")
-        encoded = str(self.home).replace("/", "-")
+        encoded = re.sub(r"[^A-Za-z0-9]", "-", str(self.home))
         harness = root / "harness" / encoded / "memory"
         harness.mkdir(parents=True)
         (harness / "feedback_terse.md").write_text(

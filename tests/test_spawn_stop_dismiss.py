@@ -9,6 +9,7 @@ silent loss.
 """
 import os
 import pathlib
+import re
 import stat
 import subprocess
 import sys
@@ -180,7 +181,7 @@ class TestDismissCousin(StopCase):
             'transcripts_dir = "/nonexistent/projects/{home_encoded}"\n')
         out = dismiss_cousin(self.root, slug="wren", tmux_bin=str(self.tmux))
         self.assertEqual(len(out["left_in_place"]), 1)
-        self.assertIn(str(home).replace("/", "-"), out["left_in_place"][0])
+        self.assertIn(re.sub(r"[^A-Za-z0-9]", "-", str(home)), out["left_in_place"][0])
 
 
 if __name__ == "__main__":

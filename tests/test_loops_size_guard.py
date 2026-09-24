@@ -8,6 +8,7 @@ same path an operator's timed flip takes, with the same warning ladder
 - for at most one cousin per tick, and never a second while one is
 pending for that cousin.
 """
+import re
 import time
 import unittest
 from pathlib import Path
@@ -32,7 +33,7 @@ class GuardCase(LoopsCase):
         toml = (home / "cousin.toml").read_text()
         (home / "cousin.toml").write_text(
             toml + '[runtime]\nsession_id = "%s"\n' % session_id)
-        encoded = str(home).replace("/", "-")
+        encoded = re.sub(r"[^A-Za-z0-9]", "-", str(home))
         transcript = (self.root / "transcripts" / encoded
                       / ("%s.jsonl" % session_id))
         transcript.parent.mkdir(parents=True, exist_ok=True)

@@ -376,4 +376,8 @@ above. Each is stated, none is hidden, and none is a contract item except
 - **A live turn found again by that adopt has already closed its rows.**
   The loss closed them `delivered`, cut by pane loss, before the adopt
   showed the turn still running; the turn goes on and ends normally, and
-  the rows say "cut" although the model finished them.
+  the rows say "cut" although the model finished them. An untaken row that
+  was really sitting in the CLI's queue was requeued by the loss and is
+  typed again; when the CLI takes the copy under the old nonce, the runner
+  says so as a `duplicate_delivery` event. Both need a pane whose pid read
+  as none.

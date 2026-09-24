@@ -234,6 +234,27 @@ class TestSkippedLines(Case):
         self.assertEqual(calls["n"], 4)
         self.assertTrue(_wait(lambda: r.state() == "idle"))
 
+    def test_a_skipped_limit_requeues_the_rows_and_waits_as_a_limit_does(self):
+        """R6's limit end, even when its line is skipped: the taken row is
+        requeued, never failed, and the runner is rate_limited."""
+        self.on_prompt = lambda pane, first, body: "limit"
+        r = self.runner()
+        real, calls = r._limit_live, {"n": 0}
+
+        def limit_live():
+            calls["n"] += 1
+            if calls["n"] <= 4:
+                raise RuntimeError("scripted")
+            real()
+        r._limit_live = limit_live
+        r.start()
+        a = r.enqueue(Item("operator:wren", "chat", "over the limit", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "rate_limited", timeout=6))
+        self.assertEqual(self.outcome(r, a)[0], "queued", "requeued, never failed")
+        self.assertIsNone(r._live)
+        self.assertTrue(any("skipped" in e["payload"]["error"] for e in r.events()
+                            if e["kind"] == "error"))
+
     def test_the_entries_before_a_failing_one_on_a_torn_line_are_handled_once(self):
         r = self.runner()
         r.start()
@@ -254,6 +275,48 @@ class TestSkippedLines(Case):
         time.sleep(0.5)
         self.assertEqual(seen.count("other"), 1, "the torn fragment is handled once")
         self.assertEqual(seen.count("turn_start"), 4, "replayed three times, then skipped")
+
+
+class TestCutPrefix(Case):
+    """Round 4 minor 4: the expired notice's prefix stays until its row is
+    TAKEN (a row retyped after it was not taken still carries it), and a
+    rollover drops it (a new session had no turn cut)."""
+
+    def test_the_prefix_stays_until_its_row_is_taken(self):
+        class Deaf(FakePane):
+            def _play(self, first_line, body, n):
+                with self._lock:
+                    self._busy = False
+        r = self.runner(pane=lambda path: Deaf(path, context_home=self.home))
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        r._cut_prefix = {"text": "[runner] the previous turn was cut short", "clears_note": False}
+        rec = r.enqueue(Item("operator:wren", "chat", "carries it", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.panes[0].typed))
+        first, body = self.panes[0].typed[0]
+        self.assertTrue(body.startswith("[runner] the previous turn was cut short"))
+        time.sleep(0.3)
+        self.assertIsNotNone(r._cut_prefix, "typed is not taken")
+        self.write(r, {"type": "user", "promptSource": "typed", "promptId": "pt",
+                       "message": {"role": "user", "content": first}})
+        self.assertTrue(_wait(lambda: r._cut_prefix is None))
+        self.write(r, {"type": "system", "subtype": "turn_duration", "durationMs": 1})
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+
+    def test_a_rollover_drops_the_prefix(self):
+        self.home = temp_home(self)
+        (self.home / ".cfg").mkdir()
+        self.on_prompt = _handoff_tool
+        r = self.runner(handoff_deadline_s=5)
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        r._cut_prefix = {"text": "[runner] the previous turn was cut short", "clears_note": False}
+        out = r.rollover("contract")
+        self.assertTrue(out["ok"], out)
+        self.assertIsNone(r._cut_prefix)
+        self.assertTrue(_wait(lambda: self.panes[-1].typed))    # the new session's digest
+        self.assertFalse(any(b.startswith("[runner] the previous turn") for p in self.panes
+                             for _f, b in p.typed))
 
 
 class TestGiveUpHold(Case):

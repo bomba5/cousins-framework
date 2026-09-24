@@ -764,6 +764,11 @@ class TmuxRunner:
                 or now < self._limit_until or now < self._hold_until):
             n["until"] += now - last
 
+    def _drop_cut_prefix(self):
+        if self._cut_prefix is not None and self._cut_prefix["clears_note"]:
+            restart_note.clear(self.home)
+        self._cut_prefix = None
+
     def _maybe_notice(self):
         """A runner line owed at the first idle (a cut turn, R23), typed
         before any row once the pane takes input (review I1: a pane still
@@ -1062,12 +1067,16 @@ class TmuxRunner:
     def _close_skipped(self, e, fails, exc):
         """A skipped turn end (a turn_duration, an interrupt, an API error
         or a limit) while a turn is live: the turn is closed here, its rows
-        `delivered`, or `failed` for an API error or a limit (an API-error
-        entry either way), with the skip as the reason, and the runner goes
-        idle; otherwise the live turn would hold the claim loop forever."""
+        `delivered`, or `failed` for an API error that is not a limit, with
+        the skip as the reason, and the runner goes idle; a limit is R6's
+        limit end (_skipped_limit). Otherwise the live turn would hold the
+        claim loop forever."""
         if self._live is None or e.kind not in ENDS:
             return
-        outcome = FAILED if e.kind in ("api_error", "limit") else DELIVERED
+        if e.kind == "limit":
+            self._skipped_limit(e, fails, exc)
+            return
+        outcome = FAILED if e.kind == "api_error" else DELIVERED
         detail = ("skipped: the turn's %s line at offset %d failed %d times (%s: %s)"
                   % (e.kind, e.offset, fails, type(exc).__name__, exc))
         ids = [row["id"] for row in self._live["rows"]]
@@ -1081,6 +1090,27 @@ class TmuxRunner:
         self._live, self._interrupting = None, False
         self._turn_file(None)
         self._to("idle", "turn closed by a skipped line")
+
+    def _skipped_limit(self, e, fails, exc):
+        """R6's limit end for a skipped limit line: the taken rows requeued,
+        never failed, and `rate_limited` (_limit_live); if that raises too,
+        the same by hand, row by row."""
+        try:
+            self._limit_live()
+            return
+        except Exception as err:  # noqa: BLE001 - the same end, by hand
+            self.stream.append("error", {"error": "the skipped limit line's end: %s: %s"
+                                                  % (type(err).__name__, err)})
+        for row in (self._live or {}).get("rows", []):
+            try:
+                self.inbox.requeue(row["id"])
+            except Exception:  # noqa: BLE001 - a start's sweep requeues it
+                pass
+            self._claims.pop(row["id"], None)
+        self._live, self._interrupting = None, False
+        self._turn_file(None)
+        self._limit_until = time.monotonic() + LIMIT_RETRY_S
+        self._to("rate_limited", "usage limit (its line skipped)")
 
     def _known_nonces(self):
         known = set(self._runner_nonces)
@@ -1138,6 +1168,8 @@ class TmuxRunner:
         if inbox_id is not None and self._claims[inbox_id]["taken"] is None:
             c = self._claims[inbox_id]
             c["taken"] = {"prompt_id": e.prompt_id, "at": time.time()}
+            if c.get("prefix") and self._cut_prefix is not None:
+                self._drop_cut_prefix()           # the model has read it
             self._persist_claims()
             row = c["row"]
             self._live = {"rows": [row], "prompt_id": e.prompt_id, "who": "row"}
@@ -1333,13 +1365,12 @@ class TmuxRunner:
                                    "taken": None, "typed_at": time.monotonic()}
         self._persist_claims()                      # before any key (P11-9)
         first, body = self._render(row, nonce)
+        # the expired notice rides on this row until the row is TAKEN
+        # (_begin_turn): a row retyped after it was not taken carries it again
+        self._claims[row["id"]]["prefix"] = self._cut_prefix is not None
         out = self.pane.type_row(first, body)
         if out is Outcome.TYPED:
             self._blocked = None
-            if self._cut_prefix is not None:
-                if self._cut_prefix["clears_note"]:
-                    restart_note.clear(self.home)
-                self._cut_prefix = None
             return
         if out is Outcome.FAILED and not self._check_alive(force=True):
             if row["id"] in self._claims:            # tmux unreachable: nothing settled, row back
@@ -1499,6 +1530,9 @@ class TmuxRunner:
             self._mine(final=True)                     # nothing of the old session arrives after this
             exited = self._exit_pane()
             self._session_id, self._fresh = str(uuid.uuid4()), True
+            # a new session had no turn cut: what was owed about the old one is dropped
+            self._drop_cut_prefix()
+            self._notice = None
             self._path = self._transcript_path()
             self._claims, self._cursor, self._runner_nonces = {}, 0, set()
             self._save_session()                       # the new id before its pane (N9)

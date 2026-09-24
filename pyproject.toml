@@ -61,7 +61,7 @@ cousin-migrate = "cousin_lib.migrate:migrate_main"
 # (registry, schemas, argv assembly, provisioning, approval) is stdlib.
 mcp = ["mcp>=1.2,<2"]
 # The runner's SDK lane. Imported lazily in cousin_lib/runner/sdk.py only.
-sdk = ["claude-agent-sdk>=0.2.157,<0.3"]
+sdk = ["claude-agent-sdk>=0.2.159,<0.3"]
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

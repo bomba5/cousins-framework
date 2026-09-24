@@ -154,10 +154,17 @@ def _read_owned_attribution(home):
     return data if isinstance(data, dict) else {}
 
 
-def _write_owned_attribution(home, owned):
-    """The sidecar recording exactly what _apply_attribution wrote this
-    run; removed (not left as `{}`) when nothing is owned any more, so
-    its mere presence answers "does this module own anything here"."""
+def _write_owned_attribution(home, owned, *, previous):
+    """The sidecar recording exactly what _compute_attribution decided
+    this run; removed (not left as `{}`) when nothing is owned any
+    more, so its mere presence answers "does this module own anything
+    here". Skipped entirely when `owned` already matches `previous`
+    (round 2 review, Minor): settings.json already short-circuits its
+    own unchanged write, and the marker deserves the same - it is
+    called after every apply_project_settings, not only when something
+    moved."""
+    if owned == previous:
+        return
     path = _marker_path(home)
     if not owned:
         try:
@@ -172,33 +179,44 @@ def _write_owned_attribution(home, owned):
     os.replace(tmp, path)
 
 
-def _apply_attribution(home, data, commit_attribution):
-    """includeCoAuthoredBy / attribution, added when commit_attribution
-    is False, removed again when it is True - but ownership is never
-    decided by matching the framework's own shape (Critical 1, review
-    round 1: an operator who happens to write includeCoAuthoredBy:
-    false by hand is not this module). A sidecar under data/
-    (_read_owned_attribution) records the exact key/value pairs this
-    module itself wrote last time; turning on removes a key only when
-    it is still in that record AND still holds the recorded value. A
-    key an operator wrote, or edited after this module wrote it, is
-    left exactly as it is, whichever direction commit_attribution
-    moves, and drops out of the record either way."""
-    owned = _read_owned_attribution(home)
+def _compute_attribution(data, owned, commit_attribution):
+    """(data, new_owned): includeCoAuthoredBy / attribution, added to
+    `data` when commit_attribution is False, removed again when it is
+    True - pure, no I/O, so the caller controls write order (round 2
+    review, Important: settings.json must land on disk before the
+    marker, so a crash between them heals instead of stranding a key
+    forever; see apply_project_settings). Ownership is never decided by
+    matching the framework's own shape alone (Critical 1, round 1
+    review): turning on removes a key only when `owned` (the marker
+    read BEFORE this call) already recorded it with the same value.
+    Turning off is different on purpose: since commit_attribution is
+    false right now, a key already holding exactly the off value -
+    whether this module wrote it before (including a crash-recovery
+    case: the marker never caught up) or an operator happened to type
+    the identical value by hand - is claimed going forward. That known
+    limit (an operator who retypes the framework's exact value can have
+    it deleted on a later turn-on) is accepted, not fixed: telling the
+    two cases apart needs more than a value to compare, and the safer
+    direction (never delete without a marker) already covers the
+    turn-on side, which is where an untouched operator key actually
+    lives."""
+    data = dict(data)
     if commit_attribution:
         for key, written in owned.items():
             if data.get(key) == written:
                 del data[key]
-        _write_owned_attribution(home, {})
-        return data
+        return data, {}
     to_write = {"includeCoAuthoredBy": False, "attribution": dict(ATTRIBUTION_OFF)}
     new_owned = {}
     for key, value in to_write.items():
-        if key not in data or (key in owned and data[key] == owned[key]):
+        # Claims an already-matching value with no marker entry too (not
+        # just `key in owned`): crash recovery needs that, and it is the
+        # accepted limit - an operator who independently types the exact
+        # off value can have it deleted on a later turn-on.
+        if key not in data or data[key] == value:
             data[key] = value
             new_owned[key] = value
-    _write_owned_attribution(home, new_owned)
-    return data
+    return data, new_owned
 
 
 def _load(path):
@@ -281,7 +299,8 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
         commit_attribution = resolve_commit_attribution(root, _cousin_agent_table(home))
     except MissingConfigError as err:
         raise SettingsError(str(err))
-    data = _apply_attribution(home, data, commit_attribution)
+    owned = _read_owned_attribution(home)
+    data, new_owned = _compute_attribution(data, owned, commit_attribution)
     text = json.dumps(data, indent=2) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text() != text:
@@ -289,4 +308,10 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
         with os.fdopen(fd, "w") as fh:
             fh.write(text)
         os.replace(tmp, path)
+    # The marker lands only AFTER settings.json is durably written (round
+    # 2 review, Important): a crash between the two leaves settings.json
+    # already correct and the marker stale, and a stale marker heals on
+    # the next apply_project_settings call (_compute_attribution's own
+    # docstring says how) rather than stranding a key forever.
+    _write_owned_attribution(home, new_owned, previous=owned)
     return {"path": path, "events": sorted(wanted), "missing": missing}

@@ -11,6 +11,7 @@ import pathlib
 import shlex
 import tempfile
 import unittest
+from unittest import mock
 
 from cousin_lib import harness_settings
 from cousin_lib.harness_settings import (
@@ -301,6 +302,93 @@ class TestAttribution(SettingsCase):
         self._apply()
         data = self._read()
         self.assertTrue(all(not str(k).startswith("_cousin") for k in data))
+
+
+class TestAttributionCrashSafety(SettingsCase):
+    """Round 2 review. Important: settings.json must land before the
+    marker, so a crash in the gap heals on the next run instead of
+    stranding a key forever. Minor: the marker's write is skipped when
+    its content did not change, same as settings.json's own
+    short-circuit."""
+
+    def _cousin_agent(self, extra):
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "testa"\n\n[agent]\n' + extra)
+
+    def _marker_path(self):
+        return harness_settings._marker_path(self.home)
+
+    def test_settings_json_lands_before_the_marker_even_on_a_failed_write(self):
+        # the order itself: a marker write that raises must never have
+        # stopped settings.json from reaching disk first.
+        self._cousin_agent("commit_attribution = false\n")
+        with mock.patch.object(harness_settings, "_write_owned_attribution",
+                               side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self._apply()
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
+        self.assertFalse(self._marker_path().exists())   # never reached
+
+    def test_a_crash_between_the_two_writes_heals_on_the_next_turn_on(self):
+        # simulates the crash directly: settings.json already holds the
+        # off values (as apply_project_settings would have left them),
+        # but the marker was never written (the process died first).
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text(json.dumps({
+            "includeCoAuthoredBy": False,
+            "attribution": {"commit": "", "pr": ""},
+        }, indent=2) + "\n")
+        self.assertFalse(self._marker_path().exists())
+        # commit_attribution is still false: one more run must adopt
+        # (not strand) the values already on disk.
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        self.assertTrue(self._marker_path().exists())
+        # proof the heal actually recorded ownership, not just a no-op:
+        # turning on now removes what it adopted.
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        data = self._read()
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self.assertNotIn("attribution", data)
+
+    def test_a_crash_before_any_write_leaves_both_files_as_they_were(self):
+        # the reverse order: nothing this module touches happens before
+        # settings.json's own read+merge step, so a failure while
+        # building `data` (here: an unreadable settings.json) leaves the
+        # marker untouched too - there is nothing to roll back.
+        path = settings_path(self.home)
+        path.parent.mkdir()
+        path.write_text("{not json")
+        marker = self._marker_path()
+        marker.write_text(json.dumps({"includeCoAuthoredBy": False}))
+        before = marker.read_text()
+        self._cousin_agent("commit_attribution = true\n")
+        with self.assertRaises(SettingsError):
+            self._apply()
+        self.assertEqual(path.read_text(), "{not json")
+        self.assertEqual(marker.read_text(), before)
+
+    def test_the_marker_write_is_skipped_when_unchanged(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        before_mtime = self._marker_path().stat().st_mtime_ns
+        before_bytes = self._marker_path().read_bytes()
+        with mock.patch("tempfile.mkstemp") as mkstemp:
+            self._apply()
+        mkstemp.assert_not_called()
+        self.assertEqual(self._marker_path().stat().st_mtime_ns, before_mtime)
+        self.assertEqual(self._marker_path().read_bytes(), before_bytes)
+
+    def test_the_marker_write_still_happens_when_it_changed(self):
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        self.assertFalse(self._marker_path().exists())
 
 
 class TestHooksDir(unittest.TestCase):

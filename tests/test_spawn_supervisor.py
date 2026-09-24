@@ -117,11 +117,26 @@ class TestRunnerLaneStop(_Case):
         from cousin_lib import delivery
         self.assertIs(spawn.RUNNER_KINDS, delivery.RUNNER_KINDS)     # M6
 
-    def test_no_supervisor_is_not_running_on_both_halves(self):
+    def test_no_supervisor_is_not_running_on_both_halves_and_still_holds(self):
+        # O9: the stop is the operator's decision whether or not a
+        # supervisor happens to be up: the hold is written here, so the
+        # next supervisor does not start the cousin until `start`
         home = runner_home(self.root, "wren")
-        out = spawn.stop_cousin(home, tmux_bin=str(self.tmux), root=self.root)
-        self.assertEqual(out, {"runner": "not running", "supervisor": "not running"})
+        self.assertFalse(supervisor.is_held(home))
+        out = spawn.stop_cousin(home, tmux_bin=str(self.tmux), root=self.root, by="Testa")
+        self.assertEqual(out, {"runner": "not running", "supervisor": "not running",
+                               "held": True})
         self.assertEqual(self.tmux_calls(), "")
+        self.assertTrue(supervisor.is_held(home))
+        self.assertTrue(supervisor.held_path(home).read_text().rstrip().endswith(" Testa"))
+        self.assertNotIn(home, supervisor.runner_cousins(self.root))   # a new supervisor skips it
+
+    def test_a_hold_that_cannot_be_written_says_so(self):
+        home = runner_home(self.root, "wren")
+        with mock.patch("cousin_lib.supervisor.hold", side_effect=PermissionError("read-only")):
+            out = spawn.stop_cousin(home, root=self.root)
+        self.assertEqual(out, {"runner": "not running", "supervisor": "not running",
+                               "held": False, "error": "cannot hold: read-only"})
 
     def test_a_runner_the_supervisor_does_not_hold_is_not_running(self):
         home = runner_home(self.root, "wren")

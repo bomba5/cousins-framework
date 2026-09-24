@@ -106,6 +106,54 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual(status, 200, body)
         self.assertEqual((body["status"], body["runner"]), ("stopped", "stopped"))
 
+    def test_a_refused_stop_is_502_with_the_error_never_stopped(self):
+        # N7: only `stopping` and stopped/not running are outcomes; a
+        # supervisor that refused the stop is a bad gateway, with its reason
+        self.cousin("wren", extra=RUNNER)
+        self.stub(stop={"ok": False, "error": "the supervisor is stopping"})
+        self.serve()
+        status, body = self.post("/api/cousins/wren/stop")
+        self.assertEqual(status, 502, body)
+        self.assertEqual(body, {"ok": False, "slug": "wren",
+                                "error": "cousin-supervisor refused the stop:"
+                                         " the supervisor is stopping",
+                                "runner": "unknown", "supervisor": "running"})
+        self.assertNotIn("status", body)
+
+    def test_a_refused_stop_fails_a_restart_before_its_start(self):
+        self.cousin("wren", extra=RUNNER)
+        stub = self.stub(stop={"ok": False, "error": "the supervisor is stopping"})
+        server = self.serve()
+        server.settle_seconds = 0
+        status, body = self.post("/api/cousins/wren/restart")
+        self.assertEqual(status, 502, body)
+        self.assertIn("the supervisor is stopping", body["error"])
+        self.assertEqual(stub.ops(), [("stop", "wren")])
+
+    def test_a_stop_with_no_supervisor_is_200_stopped_and_held(self):
+        # O9 through the console: nothing ran, the hold is written
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        self.serve()
+        status, body = self.post("/api/cousins/wren/stop")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body, {"ok": True, "slug": "wren", "status": "stopped",
+                                "runner": "not running", "supervisor": "not running",
+                                "held": True})
+        self.assertTrue(supervisor.is_held(home))
+
+    def test_a_restart_with_no_supervisor_leaves_no_hold(self):
+        # the restart's stop half holds, its start half is refused (503):
+        # a restart asked for a running cousin, so the hold is released
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        server = self.serve()
+        server.settle_seconds = 0
+        status, body = self.post("/api/cousins/wren/restart")
+        self.assertEqual(status, 503, body)
+        self.assertTrue(body["stop"]["held"])
+        self.assertFalse(supervisor.is_held(home))
+
     def test_restart_on_the_runner_lane_is_202_then_started_when_down(self):
         self.cousin("wren", extra=RUNNER)
         stub = self.stub()                     # status: no child left, so down at once

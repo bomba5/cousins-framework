@@ -405,12 +405,25 @@ def _stop(server, slug):
     """Stop at once. On the runner lane the supervisor is asked with
     wait false (R6'): the answer comes once the runner is signalled,
     `status: "stopping"`, and the fleet row's `supervisor.state` shows
-    when it is down; a turn in hand can take up to 35 s."""
+    when it is down; a turn in hand can take up to 35 s. Only `stopping`
+    and stopped or not running are outcomes: anything else (the
+    supervisor refused, `runner: "unknown"`) is a 502 with its error,
+    never `status: "stopped"` (N7)."""
     home = cousin_home(server, slug)
     server.emit("cousin-status", {"slug": slug, "status": "stopping"})
     if spawn.runner_lane(home):
         result = spawn.stop_cousin(home, root=server.root, wait=False, by="console")
-        status = "stopping" if result.get("runner") == "stopping" else "stopped"
+        runner = result.get("runner")
+        if runner == "stopping":
+            status = "stopping"
+        elif runner in ("stopped", "not running"):
+            status = "stopped"
+        else:
+            server.emit("cousin-status", {"slug": slug, "status": "stop failed"})
+            extra = {k: v for k, v in result.items() if k != "error"}
+            raise HttpError(502, "cousin-supervisor refused the stop: %s"
+                            % (result.get("error") or "no reason given"),
+                            slug=slug, **extra)
         return {"ok": True, "slug": slug, "status": status, **result}
     result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
                                tmux_socket=server.tmux_socket)
@@ -602,6 +615,10 @@ def register():
         try:
             started = _start(server, slug)
         except HttpError as err:
+            if stopped.get("held"):
+                # the stop half held a cousin no supervisor ran (O9); a
+                # restart asked for it running, so a refused start leaves no hold
+                supervisor.release(cousin_home(server, slug))
             return err.status, {"ok": False, "target": "cousin/%s" % slug,
                                 "stop": stopped, "start": err.body}
         return 200, {"ok": True, "target": "cousin/%s" % slug,

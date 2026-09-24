@@ -456,7 +456,10 @@ def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):
     down (it writes <home>/run/held; the next start removes it). With
     wait the answer comes once it is down; without, once it is signalled
     (`stopping`). A timeout while the supervisor is still up reads as
-    `stopping`, never as stopped."""
+    `stopping`, never as stopped. With no supervisor running nothing
+    runs to stop, but the stop still holds (O9): the hold is written
+    here, `"held": true`, so a supervisor started later leaves the cousin
+    down until `start`, as it would had it been up to take the stop."""
     from cousin_lib import supervisor
     root = _supervisor_root(home, root)
     try:
@@ -465,7 +468,12 @@ def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):
                                     timeout=SUPERVISOR_STOP_TIMEOUT)
     except supervisor.SupervisorUnavailable:
         if supervisor.snapshot(root) is None:
-            return {"runner": "not running", "supervisor": "not running"}
+            out = {"runner": "not running", "supervisor": "not running"}
+            try:
+                supervisor.hold(home, by)
+            except OSError as err:
+                return dict(out, held=False, error="cannot hold: %s" % err)
+            return dict(out, held=True)
         return {"runner": "stopping", "supervisor": "running"}
     if answer.get("ok"):
         return {"runner": answer.get("state") or "stopped",
@@ -486,7 +494,8 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
     On the runner lane the cousin-supervisor stops the runner (the
     runner finishes its turn on SIGTERM) and holds it down, across a
     supervisor restart too, until the next start; the result is
-    {"runner": <child state>, "supervisor": "running" | "not running"};
+    {"runner": <child state>, "supervisor": "running" | "not running"}
+    (with no supervisor, also `"held": true`: the hold is written here);
     root locates the supervisor (else derived from the home). wait
     (default) answers once the runner is down; wait=False once it is
     signalled, `"runner": "stopping"`. by is who asked, for the hold

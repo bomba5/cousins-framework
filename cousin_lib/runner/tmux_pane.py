@@ -142,9 +142,34 @@ def printable(text):
     return _CONTROLS.sub("", text)
 
 
+def _rules(lines):
+    return [i for i, l in enumerate(lines) if l.strip().startswith(RULE_CHAR * 3)]
+
+
+def _box_at(lines):
+    """The index of the input box's top rule, or None when no box shows:
+    the last two rules with the prompt line between them."""
+    rules = _rules(lines)
+    if len(rules) < 2:
+        return None
+    for line in lines[rules[-2] + 1:rules[-1]]:
+        if line.lstrip().startswith(PROMPT.rstrip()):
+            return rules[-2]
+    return None
+
+
 def attention_in(screen):
+    """The attention screen showing, matched OUTSIDE the conversation
+    (review I3): from the input box's top rule down when a box shows (the
+    box, and what the CLI draws under it), the whole screen when none does
+    (a dialog replaces the box). The model's own words above the box, a
+    usage limit or the rewind selector's footer quoted, never match: a limit
+    inside a turn is the transcript's to say (R6)."""
+    lines = screen.splitlines()
+    top = _box_at(lines)
+    region = "\n".join(lines[top:]) if top is not None else screen
     for ident, needles in ATTENTION:
-        if all(n in screen for n in needles):
+        if all(n in region for n in needles):
             return ident
     return None
 
@@ -153,10 +178,11 @@ def box_in(screen):
     """The input box's text: the prompt line between the last two rules;
     "" when empty, None when no box is on screen."""
     lines = screen.splitlines()
-    rules = [i for i, l in enumerate(lines) if l.strip().startswith(RULE_CHAR * 3)]
-    if len(rules) < 2:
+    top = _box_at(lines)
+    if top is None:
         return None
-    for line in lines[rules[-2] + 1:rules[-1]]:
+    end = _rules(lines)[-1]
+    for line in lines[top + 1:end]:
         s = line.lstrip()
         if s.startswith(PROMPT.rstrip()):
             return s[len(PROMPT.rstrip()):].strip()

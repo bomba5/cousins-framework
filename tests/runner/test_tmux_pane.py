@@ -205,6 +205,23 @@ class TestScreen(PaneCase):
             self.show(text)
             self.assertEqual(self.pane.attention(), want, want)
 
+    def test_the_models_own_words_in_the_conversation_trigger_nothing(self):
+        """Review I3: the screens are matched outside the conversation; a
+        model that writes about a usage limit, or quotes the rewind
+        selector's footer, is text above the box."""
+        said = "\n".join([
+            "● You've hit your usage limit on that API; the quota resets at 5pm.",
+            "  The rewind selector says: Enter to continue · Esc to cancel, ❯ (current)",
+            "  Quick safety check: Select login method is what the login menu shows"])
+        self.show(said + "\n" + IDLE)
+        self.assertIsNone(self.pane.attention())
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.TYPED)
+        self.assertFalse(any(c[-1] == "Escape" for c in self.calls()))
+
+    def test_a_screen_below_the_box_is_still_seen(self):
+        self.show(IDLE + "\n" + LIMIT)
+        self.assertEqual(self.pane.attention(), "limit")
+
     def test_enter_to_continue_alone_is_not_the_rewind_selector(self):
         self.show("  Enter to continue")
         self.assertIsNone(self.pane.attention())

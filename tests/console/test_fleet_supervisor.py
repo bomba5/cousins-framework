@@ -295,7 +295,9 @@ class TestFleetRowSupervisor(_Case):
                                              "reason": "configuration (exit 2)",
                                              "last_exit": "exit 2"}})
         self.serve()
-        self.assertEqual(self.row("wren")["supervisor"], {"state": "failing"})
+        # round 4: the reason rides along, so the console can say why
+        self.assertEqual(self.row("wren")["supervisor"],
+                         {"state": "failing", "reason": "configuration (exit 2)"})
         self.assertIn("supervisor", self.row("sam"))
         self.assertIsNone(self.row("sam")["supervisor"])
 

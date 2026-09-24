@@ -367,6 +367,21 @@ class TestSnapshot(_Case):
             reader.wait(10)
 
 
+class TestStartClearsTheGiveUp(_Case):
+    def test_an_explicit_start_clears_a_tmux_give_up_like_the_hold(self):
+        home = _cousin(self.root, "wren", "tmux")
+        (home / "data" / "run").mkdir(parents=True, exist_ok=True)
+        marker = home / "data" / "run" / "tmux-giving-up.json"
+        marker.write_text('{"reason": "x", "at": 1}')
+        supervisor.hold(home, "Priya")
+        sup = supervisor.Supervisor(self.root, [])
+        sup._start = lambda child: None
+        sup._sync_bridges = lambda *a, **k: None
+        sup.start_child("runner:wren")
+        self.assertFalse(supervisor.is_held(home))
+        self.assertFalse(marker.exists())
+
+
 class TestRescan(_Case):
     def test_runner_cousins_honours_auto_start_false_and_skips_tmux_cousins(self):
         _cousin(self.root, "wren", "fake")

@@ -21,7 +21,9 @@ are PID 1, and reaped so it never stays a zombie.
 
 Exits, by the child's documented exit codes (classify_exit):
   - 2 is configuration, for every kind: `failing` at once, left down;
-    restarting it would only bury the line that says what is wrong;
+    restarting it would only bury the line that says what is wrong. A
+    tmux runner that gave up on its pane exits 2 too, and its reason
+    (data/run/tmux-giving-up.json) is the child's; `start` clears it;
   - a runner's 4 is a login to do: `stopped`, never restarted
     (runner/main.py: "a supervisor must NOT restart on 4");
   - 5 is busy, for a runner (another runner holds the home's lock) and
@@ -595,6 +597,10 @@ class Supervisor:
             self._settle(child)
             return
         action, reason = classify_exit(child.spec.kind, code)
+        if action == "failing" and child.spec.kind == "runner" and child.spec.home is not None:
+            gave_up = _runner_give_up(child.spec.home)
+            if gave_up:
+                reason = "the runner gave up on its pane (exit %d): %s" % (code, gave_up)
         if action == "failing":
             child.set_state("failing", reason)
             self.say("%s failing: %s, left down; fix it, then `cousin-supervisor start %s`"
@@ -944,6 +950,7 @@ class Supervisor:
                     "error": "%s is still stopping; start it once it is down" % child.name}
         if home is not None:
             release(home)
+            _clear_runner_give_up(home)          # an explicit start tries the pane again
         if not child.alive:
             child.policy.reset()
             self._start(child)
@@ -1236,6 +1243,18 @@ def hold(home, by):
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text("%s %s\n" % (_now_iso(), by))
     os.replace(tmp, path)
+
+
+def _runner_give_up(home):
+    """A tmux runner's give-up reason (runner/tmux_runner.py GIVING_UP), or None."""
+    from cousin_lib.runner.tmux_runner import read_giving_up
+    mark = read_giving_up(home)
+    return (mark.get("reason") or "no reason recorded") if mark else None
+
+
+def _clear_runner_give_up(home):
+    from cousin_lib.runner.tmux_runner import clear_giving_up
+    clear_giving_up(home)
 
 
 def release(home):

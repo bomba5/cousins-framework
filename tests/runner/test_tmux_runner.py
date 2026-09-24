@@ -8,7 +8,7 @@ import time
 import unittest
 
 from cousin_lib.delivery import Item
-from cousin_lib.runner.tmux_pane import Outcome
+from cousin_lib.runner.tmux_pane import NO_PANE, Outcome
 from cousin_lib.runner.tmux_runner import TmuxRunner
 from tests._hermetic import HermeticCase
 from tests.runner._fake_pane import FakePane
@@ -189,6 +189,107 @@ class TestCursor(Case):
         self.assertTrue(_wait(lambda: "p3" in handled))
         self.assertEqual(handled.count("p2"), 4)
         self.assertEqual(len(skipped()), 1)
+
+
+class TestSkippedLines(Case):
+    """Round 4: a line whose handling keeps raising is skipped; if it ended
+    the live turn, the turn is closed with the skip as the reason (Q5)."""
+
+    def test_a_skipped_turn_end_closes_the_live_turn(self):
+        r = self.runner()
+        orig = r.inbox.done
+        fails = {"n": 0}
+
+        def flaky_done(inbox_id, outcome, detail=""):
+            if detail.startswith("turn ") and fails["n"] < 4:
+                fails["n"] += 1
+                raise OSError("transient: disk full")
+            return orig(inbox_id, outcome, detail)
+        r.inbox.done = flaky_done
+        r.start()
+        a = r.enqueue(Item("operator:wren", "chat", "first", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, a)[0] == "done", timeout=6))
+        self.assertEqual(self.outcome(r, a)[1], "delivered")
+        self.assertIn("skipped", self.outcome(r, a)[2])
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertIsNone(r._live)
+        b = r.enqueue(Item("operator:wren", "chat", "second", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, b)[1] == "delivered", timeout=6))
+        self.assertEqual(len(self.panes[0].typed), 2)
+
+    def test_a_skipped_api_error_fails_the_rows(self):
+        r = self.runner(fail_first=True)
+        real = r._fail_live
+        calls = {"n": 0}
+
+        def failing(message):
+            calls["n"] += 1
+            raise RuntimeError("scripted")
+        r._fail_live = failing
+        r.start()
+        a = r.enqueue(Item("operator:wren", "chat", "first", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, a)[0] == "done", timeout=6))
+        self.assertEqual(self.outcome(r, a)[1], "failed")
+        self.assertIn("skipped", self.outcome(r, a)[2])
+        self.assertEqual(calls["n"], 4)
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+
+    def test_the_entries_before_a_failing_one_on_a_torn_line_are_handled_once(self):
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: r._path is not None and r._path.exists()))
+        seen, real = [], r._handle
+
+        def handle(e):
+            seen.append(e.kind)
+            if e.kind == "turn_start" and e.prompt_id == "p1":
+                raise RuntimeError("scripted")
+            real(e)
+        r._handle = handle
+        start = json.dumps({"type": "user", "promptSource": "typed", "promptId": "p1",
+                            "message": {"role": "user", "content": "someone p1"}})
+        with r._path.open("a") as fh:
+            fh.write('{"type": "assistant", "mess' + start + "\n")
+        self.assertTrue(_wait(lambda: seen.count("turn_start") >= 4))
+        time.sleep(0.5)
+        self.assertEqual(seen.count("other"), 1, "the torn fragment is handled once")
+        self.assertEqual(seen.count("turn_start"), 4, "replayed three times, then skipped")
+
+
+class TestGiveUpHold(Case):
+    """Round 4: a give-up survives the supervisor: exit 2 (never
+    restarted), and a marker the next start honours for an hour, or until
+    an explicit start clears it."""
+
+    def marker(self):
+        return self.home / "data" / "run" / "tmux-giving-up.json"
+
+    def test_a_give_up_exits_2_and_the_next_start_honours_it(self):
+        from cousin_lib.runner import main as runner_main
+        r = self.runner(pane=lambda path: DiesAtBoot(path, boot_s=1.0, context_home=self.home))
+        r.reopen_base_s = 0.05
+        self.assertEqual(runner_main._serve(r, False), 2)
+        data = json.loads(self.marker().read_text())
+        self.assertIn("5 starts in a row", data["reason"])
+        self.assertLess(time.time() - data["at"], 60)
+        started = sum(len(p.started) for p in self.panes)
+        r2 = self.runner(pane=lambda path: DiesAtBoot(path, boot_s=1.0, context_home=self.home))
+        t = time.monotonic()
+        self.assertEqual(runner_main._serve(r2, False), 2)
+        self.assertLess(time.monotonic() - t, 3.0)
+        self.assertEqual(self.panes, [], "no pane started under a give-up")
+        self.assertIn("cousin-supervisor start", r2.fatal)
+        self.assertEqual(r2.state(), "stopped")
+        self.assertGreater(started, 0)
+
+    def test_a_give_up_older_than_an_hour_is_dropped(self):
+        self.home = temp_home(self)
+        (self.home / "data" / "run").mkdir(parents=True)
+        self.marker().write_text(json.dumps({"reason": "old", "at": time.time() - 3700}))
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertFalse(self.marker().exists())
 
 
 class TestContext(Case):
@@ -424,6 +525,8 @@ class TestBootLoop(Case):
         failing = self.failing(r)
         self.assertEqual(len(failing), 1)
         self.assertIn("6 pane losses within 600 s", failing[0]["reason"])
+        self.assertEqual((failing[0]["losses"], failing[0]["window_s"]), (6, 600.0))
+        self.assertNotIn("tries", failing[0], "not a count of failed starts (minor 6)")
         self.assertIn("6 pane losses", r.fatal)
 
     def test_a_pane_that_draws_its_box_and_dies_at_once_is_still_a_failed_start(self):
@@ -518,6 +621,47 @@ class TestUnreachable(Case):
         self.assertTrue(_wait(lambda: r.state() == "idle", timeout=6))
         time.sleep(0.5)
         self.assertEqual(len(shared[0].typed), 1, "nothing typed into the live turn")
+
+    def test_an_unreachable_pane_is_asked_less_often_and_lost_after_a_bound(self):
+        """Round 4 minor 1 (probe_unreach): tmux stops answering for good
+        while the CLI's pid runs on. The check backs off to 5 s, nothing is
+        typed meanwhile, and after the bound the pane is lost and reopened."""
+        calls = {"n": 0}
+
+        class Gone(FakePane):
+            cut = False
+
+            def alive(self):
+                if self.cut:
+                    calls["n"] += 1
+                    return False
+                return super().alive()
+
+            def attention(self):
+                if self.cut:
+                    calls["n"] += 1
+                    return NO_PANE
+                return super().attention()
+
+            def process_alive(self, pid):
+                if self.cut:
+                    return not self.sigkills          # the CLI runs until it is SIGKILLed
+                return super().process_alive(pid)
+        r = self.runner(pane=lambda path: Gone(path, context_home=self.home))
+        r.kill_grace_s, r.kill_bound_s = 0.1, 1.0
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        time.sleep(0.3)
+        self.panes[0].cut = True
+        rec = r.enqueue(Item("operator:wren", "chat", "hi", sender="Wren"))
+        time.sleep(5.0)
+        self.assertLess(calls["n"], 15, "was 150 tmux calls in 5 s")
+        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        r.unreachable_lost_s = 0.0
+        self.assertTrue(_wait(lambda: len(self.panes) == 2 and self.panes[1].alive(), timeout=8),
+                        [(e["kind"], e["payload"]) for e in r.events() if e["kind"] in ("error", "system")])
+        self.assertTrue(self.panes[0].sigkills, "the old CLI is killed before the new pane")
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered", timeout=6))
 
     def test_the_old_cli_is_gone_before_a_reopen(self):
         class Lingers(FakePane):

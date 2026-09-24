@@ -152,6 +152,26 @@ class TestRestarts(_Case):
                          "configuration (exit 2)")
         self.assertIn("supervisor: runner:wren failing: configuration (exit 2)", out.getvalue())
 
+    def test_a_tmux_runner_that_gave_up_is_failing_with_its_own_reason(self):
+        """Round 4: a tmux runner that gives up on its pane exits 2 and
+        leaves data/run/tmux-giving-up.json; the failing row names why."""
+        home = self.root / "cousins" / "wren"
+        (home / "data" / "run").mkdir(parents=True)
+        (home / "data" / "run" / "tmux-giving-up.json").write_text(json.dumps(
+            {"reason": "the pane failed 5 starts in a row: exited at boot", "at": time.time()}))
+        starts = self.dir / "starts"
+        spec = ChildSpec("runner:wren", "runner",
+                         [sys.executable, "-c", textwrap.dedent(_EXIT_WITH), str(starts), "2"],
+                         stop_timeout=5.0, slug="wren", home=home)
+        sup, out = self.supervise([spec])
+        self.assertTrue(_wait_for(
+            lambda: sup.status()["children"]["runner:wren"]["state"] == "failing", step=sup.step))
+        _wait_for(lambda: False, timeout=0.4, step=sup.step)
+        self.assertEqual(len(_lines(starts)), 1, "never restarted")
+        reason = sup.status()["children"]["runner:wren"]["reason"]
+        self.assertIn("gave up on its pane", reason)
+        self.assertIn("5 starts in a row", reason)
+
     def test_exit_4_is_never_restarted(self):
         starts = self.dir / "starts"
         sup, out = self.supervise([_stub("runner:wren", "runner", _EXIT_WITH, starts, 4)])

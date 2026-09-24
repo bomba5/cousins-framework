@@ -15,7 +15,10 @@ the lock; an account on the other lane, an opencode cousin with no
 `[agent] model` or one whose config names the subscription bridge; a
 malformed policy.toml, an MCP registry that does not parse or names a
 command with no in-process handler, an [agent] effort outside the
-levels); 3 when the runner gave up
+levels), and a tmux runner that gave up on its pane (five failed starts
+in a row or too many pane losses; its reason in
+data/run/tmux-giving-up.json): the supervisor leaves 2 down, never
+restarted; 3 when the runner gave up
 (its worker ended, e.g. it could not connect, or `--once` found it
 `errored` for longer than ERRORED_GIVE_UP_S), so a supervisor restarts
 it; 4 when `--check-auth`
@@ -303,7 +306,8 @@ def is_running(home):
 
 
 def _gone(runner):
-    """The exit-3 line when the runner's worker has ended, else None."""
+    """The give-up line when the runner's worker has ended, else None; the
+    exit is the runner's own `exit_code` when it set one, else 3."""
     if runner.worker_alive():
         return None
     return "cousin-runner: the runner gave up: %s" % (
@@ -319,7 +323,7 @@ def _once(runner, stop):
         why = _gone(runner)
         if why:
             print(why, file=sys.stderr)
-            return 3
+            return getattr(runner, "exit_code", None) or 3
         state = runner.state()
         if runner.inbox.unfinished() == 0 and state != "running":
             return 0
@@ -354,7 +358,7 @@ def _forever(runner, stop):
         why = _gone(runner)
         if why:
             print(why, file=sys.stderr)
-            return 3
+            return getattr(runner, "exit_code", None) or 3
         time.sleep(0.2)
     return 0
 

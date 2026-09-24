@@ -176,7 +176,10 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         return {}
 
     async def on_precompact(payload):
-        path = await asyncio.to_thread(cp.write_pre_compact_checkpoint, home, slug=slug)
+        # this session's own stream only: a side session's checkpoint must
+        # not carry the primary's operator rows, nor the reverse
+        path = await asyncio.to_thread(cp.write_pre_compact_checkpoint, home, slug=slug,
+                                       stream_path=getattr(stream, "path", None))
         stream.append("checkpoint", {"kind": "pre_compact", "path": str(path)})
         if request_rollover is not None:
             await asyncio.to_thread(request_rollover, "pre-compact")

@@ -220,7 +220,7 @@ class TestOffTheLoop(HooksCase):
                 return home / "data" / "session-checkpoint.md"
 
             @staticmethod
-            def write_pre_compact_checkpoint(home, *, slug):
+            def write_pre_compact_checkpoint(home, *, slug, stream_path=None):
                 seen["precompact"] = threading.get_ident()
                 return home / "data" / "pre-compact-checkpoint.md"
 
@@ -252,6 +252,40 @@ class TestCheckpointsAndState(HooksCase):
         self.assertIn("checkpoint", out.get("systemMessage", "").lower())
         self.assertTrue((self.home / "data" / "pre-compact-checkpoint.md").exists())
         self.assertEqual(sum(e["kind"] == "checkpoint" for e in self.stream.tail()), 2)
+
+    def test_a_side_sessions_precompact_reads_its_own_stream_never_the_primarys(self):
+        """Privacy between sessions: the pre-compact checkpoint's stream tail
+        is the calling session's own file, not the newest one: a side
+        session's checkpoint (its systemMessage points the side model at it)
+        must not carry the primary's operator rows, nor the reverse."""
+        side = EventStream(self.home, "sdk-peer-side1")
+        side.append("side_session", {"kind": "peer", "id": "sdk-peer-side1", "thread": "peer:*"})
+        side.append("text", {"text": "Testa asked about the build"})
+        primary = EventStream(self.home, "sdk-primary-main1")
+        primary.append("runner", {"kind": "sdk"})
+        primary.append("turn_start", {"inbox_ids": [7], "threads": ["operator:priya"],
+                                      "bodies": ["Priya: the ledger key is in the blue folder"]})
+        primary.append("text", {"text": "Noted, Priya: blue folder."})
+        os.utime(side.path, (1000, 1000))              # the primary's is the newest
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=side)
+        out = _run(cbs["PreCompact"](self._base("PreCompact", trigger="auto",
+                                                custom_instructions=None), None, {}))
+        self.assertIn("pre-compact-checkpoint.md", out.get("systemMessage", ""))
+        text = (self.home / "data" / "pre-compact-checkpoint.md").read_text()
+        self.assertIn("(sdk-peer-side1.jsonl)", text)
+        self.assertIn("Testa asked about the build", text)
+        self.assertNotIn("blue folder", text)
+        self.assertNotIn("sdk-primary-main1", text)
+        # and the reverse: the primary's checkpoint never shows the side's rows
+        os.utime(primary.path, (900, 900))             # now the side's is the newest
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=primary)
+        _run(cbs["PreCompact"](self._base("PreCompact", trigger="auto",
+                                          custom_instructions=None), None, {}))
+        text = (self.home / "data" / "pre-compact-checkpoint.md").read_text()
+        self.assertIn("(sdk-primary-main1.jsonl)", text)
+        self.assertNotIn("Testa asked about the build", text)
 
     def test_permission_request_moves_a_running_machine_to_waiting(self):
         self.machine.to("running")

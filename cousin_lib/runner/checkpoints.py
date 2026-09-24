@@ -2,8 +2,9 @@
 hooks `hooks/session_checkpoint.sh` (Stop) and `hooks/pre_compact.sh`
 (PreCompact), same files and headings. Open work comes from
 `data/state.json` when present, else STATUS.md's current `## Open loops`
-block, else its open checkboxes; the pre-compact file adds the newest
-event stream's tail, the SDK lane's terminal capture. Writes only under
+block, else its open checkboxes; the pre-compact file adds the tail of
+the calling session's event stream (the newest one when no session names
+its own), the SDK lane's terminal capture. Writes only under
 <home>/data/; an empty home gets a file naming what was missing."""
 import json
 import os
@@ -96,12 +97,23 @@ def _tail_lines(path):
     return lines[1:] if size > STREAM_TAIL_BYTES else lines
 
 
-def _stream_tail(data):
-    files = sorted((data / "stream").glob("*.jsonl"), key=_mtime)
-    if not files:
-        return "No event stream."
+def _stream_tail(data, path=None):
+    """The tail of `path`, the calling session's own stream: with side
+    sessions the newest file may be another session's, and its rows (an
+    operator's words in the primary's) must not reach this session's
+    checkpoint. Without a path (a caller outside the runner), the newest
+    stream file."""
+    if path is not None:
+        path = Path(path)
+        if not path.is_file():
+            return "No event stream."
+    else:
+        files = sorted((data / "stream").glob("*.jsonl"), key=_mtime)
+        if not files:
+            return "No event stream."
+        path = files[-1]
     out = []
-    for line in _tail_lines(files[-1])[-STREAM_EVENTS:]:
+    for line in _tail_lines(path)[-STREAM_EVENTS:]:
         try:
             e = json.loads(line)
         except ValueError:
@@ -110,7 +122,7 @@ def _stream_tail(data):
             continue
         text = " ".join(_event_text(e.get("payload")).split())[:EVENT_CHARS]
         out.append("- %s: %s" % (e.get("kind", "?"), text))
-    return "(%s)\n%s" % (files[-1].name, "\n".join(out) or "No events.")
+    return "(%s)\n%s" % (path.name, "\n".join(out) or "No events.")
 
 
 def _files_on_disk(home):
@@ -143,11 +155,13 @@ def write_session_checkpoint(home, *, slug=None, now=None):
         ("Last decisions", _decisions(data))])
 
 
-def write_pre_compact_checkpoint(home, *, slug=None, now=None):
+def write_pre_compact_checkpoint(home, *, slug=None, now=None, stream_path=None):
+    """stream_path: the calling session's own event stream (the runner's
+    PreCompact hook passes it), the only one whose tail is read."""
     home, data = Path(home), Path(home) / "data"
     return _write(home, "pre-compact-checkpoint.md", "Pre-compaction checkpoint", slug, now, [
         ("Current activity", _read(data / "last-activity.txt") or "Unknown."),
         ("Recent decisions", _decisions(data)),
         ("Open loops", _open_work(home)),
-        ("Recent events (event stream tail)", _stream_tail(data)),
+        ("Recent events (event stream tail)", _stream_tail(data, stream_path)),
         ("Files on disk", _files_on_disk(home))])

@@ -43,6 +43,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   never sees it empty mid-write; a side session's note reads
   `[<kind> session] ...`.
 - `data/generation.txt` is bumped through a temporary file and a rename.
+- The SDK lane's pre-compact checkpoint shows the tail of the calling
+  session's own event stream, not the newest stream file: with side
+  sessions that file could be another session's, and a side session's
+  checkpoint would have carried the primary's operator rows (and the
+  reverse).
 - `cousin-runner --once` exits 4 when any session waits for a login, not
   only when the primary does, and 3 when a side session cannot start.
 

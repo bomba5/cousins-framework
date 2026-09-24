@@ -1404,7 +1404,8 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
     sid = _recorded_session(home)
     rec = {"state": "switching", "from": p["from"], "to": to, "session_id": sid,
            "started_at": _now(), "prior_toml_b64": base64.b64encode(prior).decode(),
-           "prior_mode": path.stat().st_mode & 0o777, "steps": []}
+           "prior_mode": path.stat().st_mode & 0o777, "steps": [],
+           "warnings": list(p["warnings"])}
 
     def step(name, detail="done"):
         rec["steps"].append({"step": name, "detail": detail, "at": _now()})
@@ -1418,7 +1419,8 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
     text = set_agent_keys(prior.decode("utf-8"), {"runner": to})
     _write_toml(home, text.encode("utf-8"), rec["prior_mode"])
     if to == "tmux":
-        harness_settings.apply_project_settings(home, root=root, kind="tmux")
+        settings_out = harness_settings.apply_project_settings(home, root=root, kind="tmux")
+        rec["warnings"].extend(settings_out.get("warnings") or ())
     else:
         harness_settings.remove_kind_settings(home)
     step("toml", "[agent] runner = %r, the kind's settings %s"
@@ -1472,7 +1474,8 @@ def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
     step("close", "the %s runner stopped" % rec.get("to"))
     _write_toml(home, base64.b64decode(rec["prior_toml_b64"]), int(rec["prior_mode"]))
     if to == "tmux":
-        harness_settings.apply_project_settings(home, root=root, kind="tmux")
+        settings_out = harness_settings.apply_project_settings(home, root=root, kind="tmux")
+        rec.setdefault("warnings", []).extend(settings_out.get("warnings") or ())
     else:
         harness_settings.remove_kind_settings(home)
     step("restore", "cousin.toml as it was, byte for byte; the %s kind's settings" % to)
@@ -1588,6 +1591,8 @@ def _switch_cli(args, home, root):
             rec = switch_rollback(home, root=root, to=args.to, **live)
             for s in rec["rollback_steps"]:
                 print("  ok  %-10s %s" % (s["step"], s["detail"]))
+            for w in rec.get("warnings") or ():
+                print("  warn %s" % w)
             print(rec["state"])
             return 0
         rec = switch_apply(home, root=root, to=args.to, **live)
@@ -1596,6 +1601,8 @@ def _switch_cli(args, home, root):
         return 2
     for s in rec["steps"]:
         print("  ok  %-10s %s" % (s["step"], s["detail"]))
+    for w in rec.get("warnings") or ():
+        print("  warn %s" % w)
     print(rec["state"])
     return 0
 

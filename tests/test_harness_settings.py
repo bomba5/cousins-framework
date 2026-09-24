@@ -468,6 +468,34 @@ class TestTmuxKindSettings(SettingsCase):
             self.assertEqual([h.get("timeout") for g in data["hooks"][event] for h in g["hooks"]
                               if "cousin_lib.runner.tmux_hook" in h["command"]], [5], event)
 
+    def test_deny_tools_only_policy_warns_nothing(self):
+        out = self._apply(kind="tmux")
+        self.assertEqual(out["warnings"], [])
+
+    def test_ask_and_deny_bash_patterns_are_warned_not_silently_dropped(self):
+        """I5: neither reaches the pane under --dangerously-skip-permissions
+        (only deny_tools does); the gap is declared to whoever writes the
+        settings, not just to docs/reference/runners.md."""
+        (self.home / "policy.toml").write_text(
+            'deny_tools = ["WebFetch"]\n'
+            'deny_bash_patterns = ["rm -rf"]\n'
+            'ask = ["Bash"]\n')
+        out = self._apply(kind="tmux")
+        self.assertEqual(len(out["warnings"]), 2)
+        bash_warning = next(w for w in out["warnings"] if "deny_bash_patterns" in w)
+        ask_warning = next(w for w in out["warnings"] if "ask" in w)
+        self.assertIn("do not reach the tmux pane", bash_warning)
+        self.assertIn("do not reach the tmux pane", ask_warning)
+        # deny_tools itself still reaches permissions.deny, unaffected
+        data = self._read()
+        self.assertEqual(data["permissions"]["deny"], ["WebFetch"])
+
+    def test_an_sdk_home_is_never_warned(self):
+        (self.home / "policy.toml").write_text(
+            'deny_bash_patterns = ["rm -rf"]\nask = ["Bash"]\n')
+        out = self._apply()
+        self.assertEqual(out["warnings"], [])
+
     def test_an_sdk_or_legacy_home_gets_none_of_them(self):
         self._apply()
         data = self._read()

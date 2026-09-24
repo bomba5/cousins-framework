@@ -156,6 +156,7 @@ class TestApply(SwitchCase):
         self.trust()
         rec = migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
         self.assertEqual(rec["state"], "switched")
+        self.assertEqual(rec["warnings"], [])
         self.assertEqual([s["step"] for s in rec["steps"]],
                          ["trust", "close", "toml", "cursor", "start", "notice", "verify"])
         self.assertEqual(self.agent()["runner"], "tmux")
@@ -173,6 +174,17 @@ class TestApply(SwitchCase):
         rec2 = migrate.read_switch_record(self.home)
         self.assertEqual((rec2["from"], rec2["to"], rec2["session_id"]), ("sdk", "tmux", "s-live"))
         self.assertIn("prior_toml_b64", rec2)
+
+    def test_to_tmux_warns_on_a_policy_gap_deny_tools_cannot_close(self):
+        """I5: deny_bash_patterns and ask never reach the pane; the switch
+        itself surfaces that, not only a plan run before it."""
+        self.trust()
+        (self.home / "policy.toml").write_text('ask = ["Bash"]\n')
+        rec = migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        self.assertEqual(rec["state"], "switched")
+        self.assertEqual(len(rec["warnings"]), 1)
+        self.assertIn("ask", rec["warnings"][0])
+        self.assertIn("do not reach the tmux pane", rec["warnings"][0])
 
     def test_to_sdk_removes_the_kinds_settings(self):
         self.trust()

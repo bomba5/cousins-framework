@@ -132,6 +132,23 @@ class Edit(WriteCase):
         self.assertEqual(accounts.load(self.root)["broken"].kind, "claude-login")
 
 
+class Check(WriteCase):
+    def test_the_check_sees_the_new_account_and_can_refuse(self):
+        self.seed()
+        seen = []
+
+        def refuse(account):
+            seen.append(account)
+            raise accounts.AccountsError("a cousin runs on it")
+        with self.assertRaisesRegex(accounts.AccountsError, "a cousin runs on it"):
+            accounts.write_entry(self.root, "fleet", {"kind": "claude-token"}, check=refuse)
+        self.assertEqual(seen[0].kind, "claude-token")
+        with self.assertRaises(accounts.AccountsError):
+            accounts.write_entry(self.root, "fleet", None, check=refuse)
+        self.assertIsNone(seen[1])
+        self.assertEqual(self.text(), START)
+
+
 class Remove(WriteCase):
     def test_removes_the_table_and_nothing_else(self):
         self.seed()

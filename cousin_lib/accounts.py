@@ -293,7 +293,7 @@ def check_lane(account, runner_kind):
 _WRITE_LOCK = threading.Lock()
 
 
-def write_entry(root, name, entry, *, expect=None):
+def write_entry(root, name, entry, *, expect=None, check=None):
     """Add or replace [accounts.<name>] in config/accounts.toml with
     `entry` (a table of load()'s keys; the entry is replaced whole), or
     remove it when `entry` is None. `expect` "absent" refuses a name that
@@ -301,9 +301,12 @@ def write_entry(root, name, entry, *, expect=None):
     kept byte for byte (console/toml_edit.set_key); the new text must read
     back with only this entry changed and pass load()'s rules as a whole,
     and an opencode entry must not name Claude (ruling P9-1), before the
-    atomic rename that keeps the file's mode. Nothing is written on a
-    refusal (AccountsError, whose message never repeats a value). No
-    secret lives in this file. Returns the Account, or None on removal."""
+    atomic rename that keeps the file's mode. `check(account)` (the new
+    Account, None on removal) runs last, under the same lock: raise
+    AccountsError there to refuse (the console refuses a change a cousin
+    on the account could not run with). Nothing is written on a refusal
+    (AccountsError, whose message never repeats a value). No secret
+    lives in this file. Returns the Account, or None on removal."""
     from cousin_lib.console import toml_edit
     if not isinstance(name, str) or not _NAME.match(name) or name == HOST:
         raise AccountsError("an account name must match %s and not be %r" % (_NAME.pattern, HOST))
@@ -357,6 +360,8 @@ def write_entry(root, name, entry, *, expect=None):
             raise AccountsError("editing %s would change more than account %s: edit it by hand"
                                 % (path, name))
         known = _parse(root, new, path)
+        if check is not None:
+            check(None if entry is None else known[name])
         _write_config_text(path, new, mode)
     return None if entry is None else known[name]
 

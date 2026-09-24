@@ -333,7 +333,7 @@ class TestChildren(_Case):
 
     def test_runner_kinds_have_one_source(self):
         # M6: delivery's list is the one the supervisor and the runner read
-        self.assertEqual(delivery.RUNNER_KINDS, ("sdk", "fake", "opencode"))
+        self.assertEqual(delivery.RUNNER_KINDS, ("sdk", "fake", "opencode", "tmux"))
         self.assertIs(supervisor.RUNNER_KINDS, delivery.RUNNER_KINDS)
         self.assertIs(runner_main.KINDS, delivery.RUNNER_KINDS)
 

@@ -125,8 +125,12 @@ def _snapshot_stream(src, dst):
 
 
 def _copy_plain(src, dst):
-    """A file its writer replaces whole (write a temp, rename it in), so
-    a plain copy is never torn."""
+    """A plain copy of a small state file. Most are replaced whole by
+    their writers (a temp renamed in: runner-session*.json, the mining
+    and proposal cursors and window), so their copy is never torn.
+    generation.txt is not: boot.bump_generation rewrites it in place
+    with one write_text of a few bytes, so a copy racing that write
+    could at worst read it empty, which read_generation takes as 0."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
 

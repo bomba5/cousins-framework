@@ -90,6 +90,19 @@ class TestRunnerLaneDoctrine(HermeticCase):
                 flat = " ".join(chunk.split()).lower()
                 self.assertTrue(any(w in flat for w in ("never", "fallback", "not ")), chunk)
 
+    def test_being_told_to_keep_something_is_a_remember_call_in_the_same_turn(self):
+        """A person saying 'remember this' or stating a preference got a
+        reply and no memory write: the doctrine named the tool, not when."""
+        self.assertIn("told you to keep something", self.flat)
+        self.assertIn("`remember` command at level `operator`", self.flat)
+        self.assertIn("in that same turn, before you reply", self.flat)
+
+    def test_being_asked_what_you_remember_searches_memory_first(self):
+        """Asked 'what do you remember about me', a cousin read its memory
+        files with sed instead of searching (09-24)."""
+        self.assertIn("asked what you know or remember", self.flat)
+        self.assertIn("`search` or `recall` first", self.flat)
+
     def test_the_fallback_is_only_for_a_missing_or_erroring_tool(self):
         self.assertIn("fallback only", self.flat)
         self.assertIn("missing", self.flat)

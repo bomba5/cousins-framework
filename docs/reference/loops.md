@@ -73,7 +73,7 @@ Every tick does this, in this order:
 1. **Flips.** Walk the pending timed flips: send the warnings that are due, run the ones whose time has come. Then, if no timed flip ran this tick, at most one daily `flip_at` flip. See [Flips](#flips).
 2. **Cousins.** For each cousin, one at a time:
    - a worker cousin runs its due loops as jobs (see [Workers](#worker-cousins)) and that's all;
-   - a cousin that isn't alive is skipped. Alive means its chat server accepts a connection on `127.0.0.1:<port>`. A tmux pane whose chat server is dead gets nothing;
+   - a cousin that isn't alive is skipped. A tmux cousin is alive when its chat server accepts a connection on `127.0.0.1:<port>`, so a tmux pane whose chat server is dead gets nothing. A runner cousin (`[agent] runner`) is alive when its runner holds `run/runner.lock`;
    - its trigger files are delivered, one delivery each;
    - the context heartbeat (if due) and every due loop are collected and delivered together, as one message.
 3. **Requests.** Consume pending manual fires.
@@ -85,7 +85,9 @@ A failure inside one cousin (an exception, a bad file) is reported and the walk 
 
 ## Delivery
 
-Everything is typed into the cousin's tmux session through the same injector the chat server uses (paste, wait, Enter, check, one retry; see [the chat API](chat-api.md#what-the-cousin-sees)). That includes its guard: if the pane shows one of `attention_patterns` from `config/harness.toml`, nothing is typed and the delivery counts as failed.
+A tmux cousin gets everything typed into its tmux session through the same injector the chat server uses (paste, wait, Enter, check, one retry; see [the chat API](chat-api.md#what-the-cousin-sees)). That includes its guard: if the pane shows one of `attention_patterns` from `config/harness.toml`, nothing is typed and the delivery counts as failed.
+
+A runner cousin gets each delivery as one row in its inbox (`data/inbox.db`), on thread `loop:daemon` with source `loop`. The row is kept before the daemon moves on, so the put is the delivery: the daemon never waits for the turn.
 
 What the cousin gets:
 

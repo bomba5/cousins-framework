@@ -587,7 +587,9 @@ cousin's own model (`SdkRunner._model_review`). The next message does
 not wait for it. Its usage is recorded like a turn's. The outcome is a
 `review_gate` event in the runner's stream: how many were held, kept,
 dropped and still pending, and the error if the review failed (`cancelled`
-when the runner stopped first). Anything the review did not settle stays
+when the runner stopped first). The reviewing model may keep an entry recorded at
+operator level but never drop one: a drop cannot be undone, so that
+drop is yours, and the entry stays held until you give it. Anything the review did not settle stays
 held for `cousin-memory review`; a later start of the runner offers it to
 the reviewer once more. On the tmux lane nothing runs the gate after a
 turn.

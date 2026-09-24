@@ -174,6 +174,48 @@ class TestBegin(HermeticCase):
         self.assertEqual(review_gate.hold_new(home), [])
 
 
+class TestTheModelMayOnlyKeepAnOperatorFact(HermeticCase):
+    """Ruling P7b-1 (execution review): a drop is an entry-level mark with
+    no undo, so the reviewing model may keep an operator-level entry but
+    never drop one; that drop stays the operator's (`review --drop`)."""
+
+    def test_a_model_drop_of_an_operator_fact_leaves_it_held(self):
+        home = _home(self)
+        memory.remember(home, "bins", "The bins go out on Thursday.", level="operator",
+                        cite="chat 2026-09-24")
+        _write(home, 3)
+        rows = review_gate.hold_new(home)
+        verdicts = {r["id"]: "drop" for r in rows}
+        done, errors = review_gate.settle(home, rows, verdicts, model=True)
+        pending = review_gate.pending(home)
+        self.assertEqual([r["topic"] for r in pending], ["bins"])
+        self.assertEqual(len(done), 3)
+        self.assertIn("operator", errors[pending[0]["id"]])
+
+    def test_a_model_may_keep_one_and_the_operator_may_drop_one(self):
+        home = _home(self)
+        memory.remember(home, "bins", "The bins go out on Thursday.", level="operator",
+                        cite="chat 2026-09-24")
+        memory.remember(home, "keys", "Toki keeps the keys.", level="operator",
+                        cite="chat 2026-09-24")
+        _write(home, 2)
+        rows = review_gate.hold_new(home)
+        by_topic = {r["topic"]: r["id"] for r in rows}
+        done, _ = review_gate.settle(home, rows, {by_topic["bins"]: "keep"}, model=True)
+        self.assertEqual(done, {by_topic["bins"]: "keep"})
+        review_gate.release(home, by_topic["keys"], "drop", why="moved")   # the operator's drop
+        self.assertNotIn("keys", [r["topic"] for r in review_gate.pending(home)])
+
+    def test_the_gate_s_own_reviewer_is_a_model(self):
+        home = _home(self)
+        memory.remember(home, "bins", "The bins go out on Thursday.", level="operator",
+                        cite="chat 2026-09-24")
+        _write(home, 3)
+        out = review_gate.gate(home, reviewer=lambda rows: {r["id"]: "drop" for r in rows})
+        self.assertEqual([r["topic"] for r in review_gate.pending(home)], ["bins"])
+        self.assertIn("operator", out["error"])
+
+
 class TestADropIsOneLine(HermeticCase):
     def test_the_release_and_the_mark_are_the_same_line(self):
         """Review M5: no crash can leave a drop retired but still held."""

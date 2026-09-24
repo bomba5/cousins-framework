@@ -250,14 +250,21 @@ def release(home, entry_id, verdict, *, why="", by=None):
         return row
 
 
-def settle(home, rows, verdicts, *, by=None, why=""):
+def settle(home, rows, verdicts, *, by=None, why="", model=False):
     """Apply {id: verdict} to `rows`; an id with no valid verdict stays
-    held. One failing id never stops the rest. Returns ({id: verdict}
-    applied, {id: error})."""
+    held. One failing id never stops the rest. With `model` (the verdicts
+    are a reviewing model's), an operator-level entry may be kept but not
+    dropped: a drop is an entry-level mark with no undo, so that one stays
+    the operator's (`cousin-memory review --drop`), and the entry stays
+    held (ruling P7b-1). Returns ({id: verdict} applied, {id: error})."""
     done, errors = {}, {}
     for r in rows:
         verdict = verdicts.get(r["id"])
         if verdict not in VERDICTS:
+            continue
+        if model and verdict == "drop" and \
+                memory.normalize_level(r.get("truth_level")) == memory.OPERATOR_LEVEL:
+            errors[r["id"]] = "an operator-level entry is the operator's to drop; left held"
             continue
         try:
             release(home, r["id"], verdict, why=why, by=by)
@@ -362,7 +369,7 @@ def gate(home, *, reviewer, limit=None, by=None, now=None):
             return out
         verdicts = reviewer(rows) or {}
         out["verdicts"], errors = settle(home, rows, verdicts, by=by,
-                                         why="the review gate's reviewer")
+                                         why="the review gate's reviewer", model=True)
         if errors:
             out["error"] = "; ".join("%s %s" % kv for kv in errors.items())
     except Exception as exc:  # noqa: BLE001 - a failed review leaves entries held

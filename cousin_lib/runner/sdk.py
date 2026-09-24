@@ -1554,7 +1554,8 @@ class SdkRunner:
                 verdicts = await asyncio.to_thread(self.memory_reviewer, rows)
             done, errors = await asyncio.to_thread(
                 review_gate.settle, self.home, rows, verdicts or {},
-                by="review-gate:%s" % self.session_id, why="the review gate's reviewer")
+                by="review-gate:%s" % self.session_id, why="the review gate's reviewer",
+                model=True)
             values = list(done.values())
             payload.update(kept=values.count("keep"), dropped=values.count("drop"),
                            pending=len(rows) - len(values))

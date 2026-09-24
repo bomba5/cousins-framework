@@ -126,7 +126,7 @@ def _tool_block(definition, registry, tool_name):
     return "\n".join(lines)
 
 
-def render(registry, version, *, tool_name=None, runner=None):
+def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS):
     """The contract for this registry at this release. Same inputs, same bytes.
 
     `tool_name(name) -> str` is the name the model sees for a tool on its
@@ -134,12 +134,18 @@ def render(registry, version, *, tool_name=None, runner=None):
     the prompt cache keys on; the opencode lane passes `cousin_<name>`. It
     names the tools in "Tools, not the terminal CLIs" too. `runner` is that
     section's name for the lane ("You run on <runner>"): None is "the SDK
-    runner"; the opencode lane passes its own."""
+    runner"; the opencode lane passes its own.
+
+    `other_servers` is the paragraph on the home's other MCP servers, whose
+    tools the SDK lane names `mcp__<server>__<tool>`. A lane that loads no
+    other server (opencode: exactly one) passes None.
+    """
     from cousin_lib.runner.tools import tool_definitions
     tool_name = tool_name or sdk_tool_name
     named = {n: tool_name(n) for n in ("reply", "send", "memory")}
     static = STATIC.format(runner=runner or "the SDK runner", **named)
     blocks = [_tool_block(d, registry, tool_name) for d in tool_definitions(registry)]
     text = "\n\n".join([HEADER.format(version=major_minor(version)), static,
-                        "## Your tools\n\n" + "\n".join(blocks), OTHER_SERVERS])
+                        "## Your tools\n\n" + "\n".join(blocks)]
+                       + ([other_servers] if other_servers else []))
     return text.rstrip("\n") + "\n"

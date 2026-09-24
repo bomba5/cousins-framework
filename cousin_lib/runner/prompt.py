@@ -102,7 +102,8 @@ def authored_identity(home, *, root):
     return "\n\n".join(p for p in (claude, portrait) if p), False
 
 
-def compose_system_prompt(home, *, root, registry, version=None, tool_name=None, runner=None):
+def compose_system_prompt(home, *, root, registry, version=None, tool_name=None, runner=None,
+                          other_servers=contract.OTHER_SERVERS):
     """law + contract + identity + operator rules. Never truncated.
     `tool_name` names the tools for the lane (contract.render); None is
     the SDK lane's `mcp__cousin__<name>`. `runner` is the lane's name in
@@ -117,7 +118,7 @@ def compose_system_prompt(home, *, root, registry, version=None, tool_name=None,
     if law:
         sections.append("# Framework law\n\n" + law)
     sections.append(contract.render(registry, version, tool_name=tool_name,
-                                    runner=runner).strip())
+                                    runner=runner, other_servers=other_servers).strip())
     sections.append(identity.strip())
     if rules:
         sections.append("# Operator rules every cousin follows\n\n" + "\n\n".join(rules))

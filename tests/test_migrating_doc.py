@@ -40,7 +40,7 @@ class TestRunbook(unittest.TestCase):
                                         "**The engineer cousin last.**")]
         self.assertEqual(order, sorted(order))
         self.assertIn("### Rolling back", sec)
-        self.assertIn('runner = "tmux"', sec)
+        self.assertIn("delete the `runner` line", sec)
 
     def test_what_round_1_missed_is_written_down(self):
         """Review C2, M11, I7 and M12: a peer's send is checked, the new

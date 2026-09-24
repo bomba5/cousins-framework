@@ -642,7 +642,15 @@ class TmuxRunner:
             start = next((i for i, e in enumerate(entries)
                           if transcript.turn_nonce(e, nonces)), None)
             if start is None:
-                continue                         # untaken: already requeued above
+                # untaken. A new pane never saw it: requeued above. A live
+                # pane may still hold it (queued behind a turn, or in the
+                # box): back with its nonces, and _run or _check_consumed
+                # decides (R23, review I4); a retype would deliver it twice
+                if how == "adopted" and self.inbox.claim_id(row["id"], claimant=self.runner_id):
+                    self._claims[row["id"]] = {"row": row, "nonces": sorted(nonces),
+                                               "offset": int(c.get("offset") or 0),
+                                               "taken": None, "typed_at": time.monotonic()}
+                continue
             end = next((e for e in entries[start + 1:]
                         if e.kind in ("turn_end", "interrupt", "api_error", "limit", "turn_start")), None)
             if end is None:
@@ -678,6 +686,21 @@ class TmuxRunner:
             self.stream.append("error", {"error": "stranded input in the adopted pane's box cleared",
                                          "text": stranded[:120]})
 
+    def _release_adopted_untaken(self):
+        """R23 on a live pane: an untaken row is requeued only when the tail
+        is at a turn end, the box is empty (a stranded paste was just
+        cleared) and no queued input shows; otherwise it stays claimed under
+        its nonces until its turn takes it or _check_consumed gives up."""
+        pending = self._pending_typed()
+        if not pending or self._live is not None or self.pane.queued() \
+                or self.pane.box_text() != "":
+            return
+        for c in pending:
+            self.inbox.requeue(c["row"]["id"])
+            self._claims.pop(c["row"]["id"], None)
+            self._closed_nonces |= set(c["nonces"])
+        self._persist_claims()
+
     # -- the worker ---------------------------------------------------------
     def _wake_error(self, message):
         self.stream.append("error", {"error": message})
@@ -692,6 +715,7 @@ class TmuxRunner:
                 self._to("running", "adopted mid-turn")
             elif how == "adopted":
                 self._clear_stranded()
+                self._release_adopted_untaken()
             self._persist_cursor()
             self._owe_start_notice(how)
         except Exception as exc:  # noqa: BLE001 - never a silent death

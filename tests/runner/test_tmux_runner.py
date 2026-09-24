@@ -453,6 +453,51 @@ class TestRecovery(Case):
         time.sleep(0.3)
         self.assertEqual(len(self.panes[0].typed), 1, "never typed twice")
 
+    def test_an_adopted_row_still_queued_in_the_cli_keeps_its_nonce(self):
+        """Review I4: a row typed and queued by the CLI behind a turn when the
+        runner restarted is put back with its nonce, never retyped: its turn
+        start takes it, once."""
+        class Queuing(FakePane):
+            holding = False
+
+            def _play(self, first_line, body, n):     # queued behind a running turn
+                self.holding = True
+                with self._lock:
+                    self._busy = False
+
+            def queued(self):
+                return self.holding
+
+            def type_row(self, first_line, body):
+                if self.holding:
+                    return Outcome.BLOCKED            # the real pane: queued input blocks
+                return super().type_row(first_line, body)
+        shared = []
+
+        def one_pane(path):
+            if not shared:
+                shared.append(Queuing(path, context_home=self.home))
+            return shared[0]
+        r = self.runner(pane=one_pane)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "queued in the CLI", sender="Wren"))
+        self.assertTrue(_wait(lambda: shared and shared[0].typed))
+        r.stop(timeout=3)                              # unheld: the pane lives on
+        self.hook_record(r, shared[0])
+        r2 = self.runner(pane=one_pane)
+        r2.start()
+        self.assertTrue(_wait(lambda: r2.state() == "idle" and r2._path is not None))
+        time.sleep(0.3)
+        first = shared[0].typed[0][0]
+        self.write(r2, {"type": "user", "promptSource": "queued", "promptId": "pq",
+                        "message": {"role": "user", "content": first}})
+        shared[0].holding = False
+        self.write(r2, {"type": "system", "subtype": "turn_duration", "durationMs": 1})
+        self.assertTrue(_wait(lambda: self.outcome(r2, rec)[1] == "delivered"))
+        time.sleep(0.3)
+        self.assertEqual(len(shared[0].typed), 1, "never typed twice")
+        self.assertNotIn("foreign_turn", self.kinds(r2))
+
     def test_a_stranded_paste_in_an_adopted_pane_is_cleared_never_entered(self):
         class Stranded(FakePane):
             box = "[Pasted text #1 +3 lines]"

@@ -243,6 +243,92 @@ class TestSessionsAsARunner(SessionsCase):
         self.assertIs(s.inbox, s.primary.inbox)
 
 
+class TestStopRacesTheWatcher(SessionsCase):
+    """Final review: stop() snapshots sessions() after its capped join of the
+    watcher; a rebuild still in flight then must not leave a side session
+    (a CLI process) running after the stop."""
+
+    def _gives_up_once(self, home):
+        made = []
+
+        def peer(options):
+            client = ScriptedClient(options, [])
+            made.append(client)
+            if len(made) == 1:              # the first CLI does not start
+                async def connect(prompt=None):
+                    raise OSError("the CLI did not start")
+                client.connect = connect
+            return client
+
+        s = sessions.Sessions(home, kinds=("peer",),
+                              factories={"primary": lambda o: ScriptedClient(o, []),
+                                         "peer": peer})
+        self.addCleanup(lambda: s.stop(timeout=5))
+        return s
+
+    def test_a_rebuild_in_flight_when_stop_runs_leaves_no_side_running(self):
+        home = _install(self)
+        s = self._gives_up_once(home)
+        import threading
+        building, stop_returned = threading.Event(), threading.Event()
+        real_build = s._build_side
+
+        def slow_build(kind):
+            building.set()
+            stop_returned.wait(15)          # lands after stop() took its snapshot
+            fresh = real_build(kind)
+            self.addCleanup(lambda: fresh.stop(timeout=5))
+            return fresh
+
+        s._build_side = slow_build
+        with mock.patch.object(sessions, "RESTART_BASE_S", 0.05):
+            s.start()
+            self.assertTrue(building.wait(15), "the watcher never rebuilt the side")
+            s.stop(timeout=5)
+            stop_returned.set()
+            self.assertTrue(_wait(lambda: not s._watcher.is_alive(), timeout=15))
+        self.assertTrue(_wait(lambda: not any(r.worker_alive() for r in s.sessions().values()),
+                              timeout=10),
+                        {name: r.worker_alive() for name, r in s.sessions().items()})
+
+    def test_a_look_after_a_stop_began_gives_up_nothing_and_rebuilds_nothing(self):
+        home = _install(self)
+        s = self._gives_up_once(home)
+        side = s.sides["peer"]
+        side.start()
+        self.assertTrue(_wait(lambda: not side.worker_alive(), timeout=15))
+        s._stopping.set()
+        s._look_after("peer")
+        self.assertEqual(s._restart_at, {})
+        self.assertEqual([e for e in s.events() if e["kind"] == "error"
+                          and "gave up" in e["payload"].get("error", "")], [])
+        self.assertIs(s.sides["peer"], side)
+
+    def test_stop_waits_for_the_watcher_at_most_its_cap(self):
+        """The watcher's join is capped at 2 * watch_s + 1 s: a look that
+        hangs never holds the stop for longer."""
+        home = _install(self)
+        s = self.build(home, ("peer",), [], primary_scripts=[])
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def hang(kind):
+            entered.set()
+            release.wait(30)
+
+        s._look_after = hang
+        s.start()
+        self.assertTrue(entered.wait(15))
+        t0 = time.monotonic()
+        s.stop(timeout=30)
+        took = time.monotonic() - t0
+        cap = 2 * s.watch_s + 1.0
+        self.assertGreaterEqual(took, cap - 0.05)
+        self.assertLess(took, cap + 5.0)
+        self.assertTrue(s._watcher.is_alive())      # still in its look: left to the exit
+
+
 class TestOnceSeesASideLogin(HermeticCase):
     def test_once_exits_4_when_only_a_side_session_waits_for_a_login(self):
         """Review I4: the primary idle, a side session's rows queued behind a

@@ -390,14 +390,23 @@ class Sessions:
                                                                       exc), "session": kind})
 
     def _look_after(self, kind):
+        if self._stopping.is_set():
+            return                   # a stop is under way: nothing given up, nothing rebuilt
         side, now = self.sides[kind], time.monotonic()
         if kind in self._restart_at:
-            if now >= self._restart_at[kind] and not self._stopping.is_set():
+            if now >= self._restart_at[kind]:
                 del self._restart_at[kind]
                 fresh = self._build_side(kind)
                 self.sides[kind] = fresh
                 self._started_at[kind] = now
                 fresh.start()
+                if self._stopping.is_set():
+                    # stop() began while this one was built: its join of the
+                    # watcher is capped, so it may have taken its snapshot of
+                    # sessions() before the assignment above. Stop it here, or
+                    # its CLI outlives the stop.
+                    fresh.stop(timeout=1.0)
+                    return
                 self.primary.stream.append("system", {"subtype": "side_restarted",
                                                       "session": kind,
                                                       "attempt": self._attempts[kind]})

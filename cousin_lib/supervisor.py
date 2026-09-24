@@ -62,8 +62,8 @@ rewritten (tmp + rename) on every change, for readers that must not
 block on a socket (the console's fleet view); `snapshot()` reads it
 only while a supervisor holds that lock.
 
-Which cousins. Every cousin whose cousin.toml says `[agent] runner = "sdk"`
-or `"fake"` gets a runner child, unless `[agent] auto_start = false`
+Which cousins. Every cousin whose cousin.toml `[agent] runner` is one of
+delivery.RUNNER_KINDS gets a runner child, unless `[agent] auto_start = false`
 (runner_cousins). A tmux cousin is never ours. SIGHUP and `reload`
 rescan the registry: a new runner cousin is started, one that is gone
 or left the runner lane is stopped and removed, a `failing` child is
@@ -1240,7 +1240,7 @@ def _agent_table(home):
 
 
 def is_runner_cousin(home):
-    """`[agent] runner` is sdk or fake (delivery._runner_kind's test)."""
+    """`[agent] runner` is one of RUNNER_KINDS (delivery._runner_kind's test)."""
     agent = _agent_table(home)
     return agent is not None and agent.get("runner") in RUNNER_KINDS
 
@@ -1264,7 +1264,7 @@ def _lane_homes(root):
 
 def runner_cousins(root):
     """The cousins the supervisor starts on its own: the runner lane
-    (`[agent] runner` sdk or fake) whose `[agent] auto_start` is not
+    (`[agent] runner` one of RUNNER_KINDS) whose `[agent] auto_start` is not
     false and that no runtime `stop` holds (<home>/run/held), in slug
     order. Only a literal `false` opts out."""
     return [c for c in _lane_homes(root)

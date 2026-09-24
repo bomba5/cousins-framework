@@ -167,6 +167,11 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `tokensSpent` | today's token total, 0 when token counting isn't set up |
 | `runner` | null for a tmux cousin. A runner cousin: `{"alive", "state", "since", "session", "kind", "pid", "unsupported"}` from its own stores: `alive` whether a runner holds its lock, `state` the last state its primary event stream recorded (with `since`, that event's time; it stays the last one recorded after the runner is gone, so read it with `alive`), `kind` (`sdk`, `fake` or `opencode`), `pid` and `unsupported` (the contract items the runner declares it does not support) from the `runner` event `cousin-runner` writes at start |
 | `supervisor` | `{"state": ...}` for a runner cousin the running `cousin-supervisor` holds as a child (`running`, `backoff`, `failing`, `stopped`), read from its `run/supervisor.json`; null when no supervisor runs (or the file is stale) or it holds no child for this cousin. Null is unknown, never stopped |
+| `lane` | the `[agent] runner` kind when it is one of the runner kinds, else `tmux-legacy` |
+| `account` | a runner cousin's `[agent] account`, `host` when it names none; null on `tmux-legacy` |
+| `autoStart` | a runner cousin's `[agent] auto_start` (the supervisor starts it with itself unless false); null on `tmux-legacy` |
+| `held` | `<home>/run/held` exists: a stop holds the runner down until the next start |
+| `loginRequired` | the runner waits for a login or billing fix: `{"reason", "action", "since"}` from `data/login-required.json` (`action` is the line to run), else null. The file's `detail` is never shown |
 
 With the hive on, remote nodes follow the local rows. They carry the same keys (the local-only ones null or 0) plus `remote: true`, `remoteState` (`online`, `offline`, `pending` = built but never checked in, `revoked`), `online`, `revoked`, `checkedIn`, `lastSeen`, `version`. For a remote row `status` is `running` when online, and `chat` is derived (`ok` online, `down` offline, `none` before the first checkin), never probed. If a slug is both local and a node, the local row wins.
 
@@ -181,7 +186,7 @@ Spawn a cousin. Body:
  "memory_scope": "private", "runner": "sdk", "account": "metered"}
 ```
 
-`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk`, `fake` or `opencode`) and `account` go to `[agent]`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
+`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk`, `fake` or `opencode`, or `tmux-legacy` to name the tmux lane so the install's default runner does not apply) and `account` go to `[agent]`, and so do a runner cousin's `model` and `effort` (a tmux cousin's go to `[runtime]`), checked by the lane first: the account must run on it and a key it does not read (an effort off the `sdk` lane, a model on `fake`) is a `400`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
 
 ### `GET /api/spawn/options`
 
@@ -191,8 +196,13 @@ What the spawn dialog offers:
 {"models": [...], "default_model": "...", "efforts": ["low","medium","high","xhigh","max"],
  "default_effort": "high", "memory_scopes": ["private","shared"],
  "default_memory_scope": "private", "default_heartbeat": 3600,
- "heartbeat_bounds": [60, 2592000], "operator_max_chars": 64}
+ "heartbeat_bounds": [60, 2592000], "operator_max_chars": 64,
+ "runners": ["sdk", "fake", "opencode"], "default_runner": null,
+ "accounts": [{"name": "host", "kind": "claude-login", "lanes": ["sdk", "fake"]}, ...],
+ "accounts_error": null, "lane_keys": {"sdk": ["runner", "account", ...], ...}}
 ```
+
+`runners` are the runner kinds (none chosen is the tmux lane); `default_runner` is `COUSIN_DEFAULT_RUNNER`, else null. `accounts` lists `host` and `config/accounts.toml`'s entries with their kind and the kinds each runs on (`accounts_error` says why the file could not be read, and the list is then `host` alone). `lane_keys` names the `[agent]` keys each kind reads, and `lane_models` how each kind that reads a model takes it: `{"required", "catalogue", "hint"}` (`catalogue`: the `models` list is a valid suggestion there; never on `opencode`, where a model is required and is `"<provider>/<model>"`). `tmux_lane` is the `runner` value that names the tmux lane.
 
 `models`, `default_model` and `default_effort` come from `config/harness.toml [agent]`. No `models` there means the built-in list; no `default_model` means the first model in the list. `500` if harness.toml exists but can't be read.
 
@@ -297,7 +307,7 @@ The last flip this console ran for the cousin, and any timed flip waiting in the
 
 Body `{"confirm": false, "delay_seconds": 0}`.
 
-- No delay: runs the flip on a background thread and answers `202 {"ok": true, "slug", "status": "running", "started_at"}` straight away. Progress comes as `cousin-flip` events. `409` if one is already running.
+- No delay: runs the flip on a background thread and answers `202 {"ok": true, "slug", "status": "running", "started_at"}` straight away. Progress comes as `cousin-flip` events. `409` if one is already running, or a long operation runs on the cousin (below). A clean stop is refused the same way.
 - `delay_seconds > 0`: queues a flip request for the loops daemon, which sends the T-5m / T-1m / T-30s warnings and fires it. `202 {"ok": true, "slug", "request_id", "fire_at", "delay_seconds"}`. `409` if a timed flip is already pending.
 
 `400` if `delay_seconds` isn't a non-negative integer.
@@ -305,6 +315,10 @@ Body `{"confirm": false, "delay_seconds": 0}`.
 ### `POST /api/cousins/<slug>/flip/cancel`
 
 Cancels a pending timed flip. `200 {"ok": true, "slug", "was_pending": bool}`. A flip that is already running can't be cancelled: `409`.
+
+### `GET /api/cousins/<slug>/op`
+
+The cousin's long operation (a kind switch, an account login: whatever a route runs through `console/longop.py`), running or the last one finished since the console started: `200 {"ok": true, "op": null}` before any, else `{"ok": true, "op": {"id", "slug", "kind", "status": "running" | "done" | "failed", "started_at", "finished_at", "params", "stages": [{"name", "status": "running" | "done" | "failed" | "skipped", "detail", "at"}], "result", "error"}}`. One operation runs per cousin at a time, and never beside a flip or a clean stop: a route that starts one answers `202 {"ok": true, "op"}`, or `409 {"busy": true}`. While one runs, the cousin's start, stop, restart, dismiss and auth switch are `409` too. A failure an operation words for the operator is its `error`; any other exception is `"failed: <ExceptionType>, see the console log"`, its text on the console's stderr only. Progress comes as `cousin-op` events. `404` unknown cousin.
 
 ### `GET /api/tokens`
 
@@ -655,6 +669,7 @@ The events come from two places: route handlers announce what they just did, and
 | `job-add`, `job-update` | job row | a job appeared or changed |
 | `job-delete` | `{"id"}` | a job went away |
 | `cousin-flip` | `{"slug", "phase", ...}` | see below |
+| `cousin-op` | `{"slug", "id", "kind", "phase": "started" \| "stage" \| "done" \| "failed", "stage"?, "error"?}` | a long operation started, reported a stage, or finished (`GET /api/cousins/<slug>/op`) |
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
 | `memory-change` | `{"slug", "action": "trash" \| "restore" \| "obsolete", ...}` | a memory delete, restore or obsolete mark through the console |

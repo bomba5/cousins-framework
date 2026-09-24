@@ -184,11 +184,21 @@ function CousinCard({ c, onClick, onAct, onChat }) {
           needs attention · the pane shows "{c.attention}"
         </div>
       )}
+      {c.loginRequired && (
+        <div className="card-attention" data-login-required
+             title={c.loginRequired.since ? `data/login-required.json since ${c.loginRequired.since}` : "data/login-required.json"}>
+          {c.loginRequired.reason === "billing" ? "billing stopped" : "login required"}
+          {c.loginRequired.action ? <> · run <code>{c.loginRequired.action}</code></> : null}
+        </div>
+      )}
       <div style={{ margin: "4px 0" }}>
         <HeartbeatGraph state={c.status === "running" ? (c.active ? "active" : "idle") : "stopped"} width={240} height={22} />
       </div>
       <div className="stats">
         <div>chat · <b>{c.chat === "ok" ? `:${c.port}` : c.chat}</b></div>
+        {/* the lane and what it runs on; "held" is a stop that holds the runner down */}
+        <div>lane · <b>{c.lane || "-"}</b>{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</div>
+        {c.account && <div>account · <b>{c.account}</b></div>}
         {c.runner && <div>runner · <b>{c.runner.alive ? (c.runner.state || "no state yet") : "(not running)"}</b>{c.runner.unsupported && c.runner.unsupported.length ? ` · unsupported: ${c.runner.unsupported.join(", ")}` : ""}</div>}
         <div>scope · <b>{c.memoryScope}</b></div>
         <div>operator · <b>{c.operator || "-"}</b></div>
@@ -312,11 +322,16 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>model</dt><dd><IdentityField cousin={c} field="model" options={options} /></dd>
           <dt>effort</dt><dd><IdentityField cousin={c} field="effort" options={options} /></dd>
           <dt>auth</dt><dd><AuthField cousin={c} /></dd>
+          <dt>lane</dt><dd>{c.lane || "-"}{c.account ? ` · account ${c.account}` : ""}{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</dd>
           <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>uptime</dt><dd>{c.uptime_seconds == null ? <span style={{ color: "var(--fg-3)" }}>-</span> : fmtDuration(c.uptime_seconds)}</dd>
           <dt>flip at</dt><dd>{c.flipAt || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
           <dt>activity</dt><dd>{c.activity || <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
         </dl>
+        {/* Package seams (ui.jsx registerSlot): a package fills these from
+            its own jsx file, props { cousin }; this file is never edited
+            for it. inspector.lane: the lane's settings, under identity. */}
+        <Slot name="inspector.lane" cousin={c} />
 
         <SectionLabel style={{ marginTop: 20 }}>tokens · today</SectionLabel>
         <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--fg-1)", marginTop: 6 }}>
@@ -340,6 +355,9 @@ function Inspector({ cousin: c, onClose, onAct }) {
 
         <FlipStatus cousin={c} />
 
+        {/* inspector.panels: a package's own panels, after the built-in ones */}
+        <Slot name="inspector.panels" cousin={c} />
+
         <div style={{ display: "flex", gap: 8, marginTop: 20, flexWrap: "wrap" }}>
           {c.status === "running"
             ? <button className="btn" onClick={() => onAct(c, "stop")}>{I.stop} stop</button>
@@ -358,6 +376,8 @@ function Inspector({ cousin: c, onClose, onAct }) {
             </button>
           )}
           <HideCousinButton cousin={c} />
+          {/* inspector.actions: a package's buttons in this row */}
+          <Slot name="inspector.actions" cousin={c} />
         </div>
       </div>
     </div>
@@ -509,14 +529,13 @@ function AuthField({ cousin }) {
   const [err, setErr] = React.useState(null);
   const [needForce, setNeedForce] = React.useState(null);
   const [keyOpen, setKeyOpen] = React.useState(false);
-  const [keyDraft, setKeyDraft] = React.useState("");
   const [note, setNote] = React.useState(null);
   const load = React.useCallback(async () => {
     const d = await apiGet(`/api/cousins/${cousin.slug}/auth`);
     if (d) setSt(d);
   }, [cousin.slug]);
   React.useEffect(() => {
-    setSt(null); setErr(null); setNeedForce(null); setKeyOpen(false); setKeyDraft(""); setNote(null);
+    setSt(null); setErr(null); setNeedForce(null); setKeyOpen(false); setNote(null);
     load();
   }, [cousin.slug, load]);
 
@@ -537,10 +556,9 @@ function AuthField({ cousin }) {
     }
   };
 
-  const sendKey = async () => {
-    if (busy || !keyDraft.trim()) return;
-    const key = keyDraft;
-    setKeyDraft("");
+  // SecretField (ui.jsx) clears its box before this is called
+  const sendKey = async (key) => {
+    if (busy) return;
     setBusy(true); setErr(null); setNote(null);
     try {
       const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/auth/key`, { key });
@@ -582,15 +600,8 @@ function AuthField({ cousin }) {
         )}
       </div>
       {keyOpen && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input className="txt" type="password" autoComplete="off" spellCheck={false}
-                 value={keyDraft} placeholder="paste the key" autoFocus style={{ flex: 1 }}
-                 onChange={e => setKeyDraft(e.target.value)}
-                 onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sendKey(); }
-                                   if (e.key === "Escape") { e.stopPropagation(); setKeyOpen(false); setKeyDraft(""); } }} />
-          <button className="btn" style={small} disabled={busy} onClick={() => { setKeyOpen(false); setKeyDraft(""); }}>cancel</button>
-          <button className="btn primary" style={small} disabled={busy || !keyDraft.trim()} onClick={sendKey}>save</button>
-        </div>
+        <SecretField placeholder="paste the key" autoFocus busy={busy}
+                     onSubmit={sendKey} onCancel={() => setKeyOpen(false)} />
       )}
       {!st.configured && (
         <span style={{ fontSize: 10, color: "var(--fg-3)" }}>key mode not configured (config/harness.toml [auth.api_key])</span>
@@ -624,7 +635,6 @@ function TelegramPanel({ cousin }) {
   const [err, setErr] = React.useState(null);
   const [note, setNote] = React.useState(null);
   const [bot, setBot] = React.useState(null);
-  const [tokenDraft, setTokenDraft] = React.useState("");
   const [newId, setNewId] = React.useState("");
   const [newName, setNewName] = React.useState("");
   const url = `/api/cousins/${cousin.slug}/telegram`;
@@ -635,7 +645,7 @@ function TelegramPanel({ cousin }) {
   }, [url]);
   React.useEffect(() => {
     setSt(null); setLoadErr(false); setErr(null); setNote(null); setBot(null);
-    setTokenDraft(""); setNewId(""); setNewName("");
+    setNewId(""); setNewName("");
     load();
     // Poll so a person who just pressed Start shows up without a click.
     const id = setInterval(load, 10000);
@@ -664,10 +674,8 @@ function TelegramPanel({ cousin }) {
     else { setBot(null); setErr("check failed: " + (c.error || "unknown error")); }
   };
 
-  const saveToken = async () => {
-    if (busy || !tokenDraft.trim()) return;
-    const token = tokenDraft;
-    setTokenDraft("");
+  // SecretField (ui.jsx) clears its box before this is called
+  const saveToken = async (token) => {
     const d = await post("/token", { token });
     if (d) applyCheck(d.check);
   };
@@ -767,17 +775,8 @@ function TelegramPanel({ cousin }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <input className="txt" type="password" autoComplete="off" spellCheck={false}
-                   value={tokenDraft} placeholder={st.token_set ? "paste a new bot token" : "paste the bot token"}
-                   style={{ flex: "1 1 180px", minWidth: 0 }}
-                   onChange={e => setTokenDraft(e.target.value)}
-                   onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); saveToken(); }
-                                     if (e.key === "Escape") { e.stopPropagation(); setTokenDraft(""); } }} />
-            <button className="btn primary" style={small} disabled={busy || !tokenDraft.trim()} onClick={saveToken}>
-              save token
-            </button>
-          </div>
+          <SecretField placeholder={st.token_set ? "paste a new bot token" : "paste the bot token"}
+                       submitLabel="save token" busy={busy} onSubmit={saveToken} />
           <span style={hintStyle}>From @BotFather: /newbot or /mybots &gt; API Token. Stored on the server only (0600); never shown again.</span>
         </div>
 
@@ -1379,6 +1378,14 @@ function SpawnModal({ onClose, onSpawn }) {
   const [effort, setEffort] = React.useState("");
   const [heartbeat, setHeartbeat] = React.useState("");
   const [scope, setScope] = React.useState("");
+  // The lane: "" is the tmux lane, else one of the server's runner kinds;
+  // the account it runs on, from the accounts whose `lanes` include it. A
+  // runner reads [agent] model and effort, and only the keys its lane
+  // reads (lane_keys) are sent; its model is free text (an opencode model
+  // is "<provider>/<model>"), the catalogue offered as suggestions.
+  const [runner, setRunner] = React.useState("");
+  const [account, setAccount] = React.useState("");
+  const [laneModel, setLaneModel] = React.useState("");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1390,12 +1397,24 @@ function SpawnModal({ onClose, onSpawn }) {
       setEffort(e => e || d.default_effort || "");
       setHeartbeat(h => h || String(d.default_heartbeat || 3600));
       setScope(s => s || d.default_memory_scope || "private");
+      setRunner(r => r || d.default_runner || "");
     })();
     return () => { cancelled = true; };
   }, []);
   const models = options?.models || [];
   const efforts = options?.efforts || [];
   const scopes = options?.memory_scopes || [];
+  const runners = options?.runners || [];
+  const laneAccounts = (options?.accounts || []).filter(a => runner && (a.lanes || []).includes(runner));
+  const laneReads = (key) => !runner || ((options?.lane_keys || {})[runner] || []).includes(key);
+  // how the lane takes a model (lane_models): required or not, and whether
+  // the harness catalogue is a valid suggestion there (never on a lane
+  // that refuses those models)
+  const laneModelRule = (runner && (options?.lane_models || {})[runner]) || null;
+  React.useEffect(() => {
+    // a lane change keeps the account only when it still runs there
+    setAccount(a => laneAccounts.some(x => x.name === a) ? a : (laneAccounts[0]?.name || ""));
+  }, [runner, options]);
 
   // Where the cousin runs. "Remote" is offered only when the hive is on
   // (config/hive.toml); it builds a node archive instead of a local home.
@@ -1412,7 +1431,8 @@ function SpawnModal({ onClose, onSpawn }) {
   }, [name]);
 
   // voice is required: the template refuses to render without it.
-  const valid = name.trim() && slug.trim() && role.trim() && voice.trim();
+  const valid = name.trim() && slug.trim() && role.trim() && voice.trim()
+    && !(laneModelRule && laneModelRule.required && !laneModel.trim());
 
   const [error, setError] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
@@ -1426,8 +1446,13 @@ function SpawnModal({ onClose, onSpawn }) {
       if (roleParagraph.trim()) body.role_paragraph = roleParagraph.trim();
       if (String(port).trim()) body.port = Number(port);
       if (operator.trim()) body.operator = operator.trim();
-      if (model) body.model = model;
-      if (effort) body.effort = effort;
+      // the lane is always named: "" sends the tmux lane's own name, so an
+      // install's COUSIN_DEFAULT_RUNNER cannot turn it into a runner cousin
+      body.runner = runner || options?.tmux_lane || "tmux-legacy";
+      if (runner && account) body.account = account;
+      const chosenModel = runner ? laneModel.trim() : model;
+      if (chosenModel && laneReads("model")) body.model = chosenModel;
+      if (effort && laneReads("effort")) body.effort = effort;
       if (String(heartbeat).trim()) body.heartbeat = Number(heartbeat);
       if (scope) body.memory_scope = scope;
       const { r, d } = await apiSend("POST", "/api/cousins", body);
@@ -1439,7 +1464,9 @@ function SpawnModal({ onClose, onSpawn }) {
         slug, name, role, type: "cousin", port: d.port, host: null, home: d.home,
         tmuxSession: slug, operator: operator.trim() || null,
         memoryScope: scope || "private", heartbeat: Number(heartbeat) || 3600,
-        model: model || null, effort: effort || null, pid: null, uptime_seconds: null,
+        model: (laneReads("model") && chosenModel) || null, effort: (laneReads("effort") && effort) || null,
+        lane: runner || "tmux-legacy", account: runner ? (account || null) : null,
+        pid: null, uptime_seconds: null,
         flipAt: null, hidden: false, status: "running", chat: "ok", active: false,
         activity: "", lastMsgTs: 0, tokensSpent: 0,
       });
@@ -1500,18 +1527,54 @@ function SpawnModal({ onClose, onSpawn }) {
           </div>
           <div style={{ marginTop: 14 }} />
           <div className="grid2">
-            <FormField label="model" hint="Rendered into the agent command's {model} placeholder.">
-              <select className="sel" value={model} onChange={e => setModel(e.target.value)} disabled={!options}>
-                {!options && <option value="">loading...</option>}
-                {models.map(m => <option key={m} value={m}>{m}</option>)}
+            <FormField label="lane" hint="tmux-legacy runs the agent in a tmux pane; a runner kind runs it under cousin-supervisor.">
+              <select className="sel" value={runner} onChange={e => setRunner(e.target.value)} disabled={!options}>
+                <option value="">tmux-legacy</option>
+                {runners.map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </FormField>
-            <FormField label="effort" hint="Rendered into the {effort} placeholder.">
-              <select className="sel" value={effort} onChange={e => setEffort(e.target.value)} disabled={!options}>
-                {!options && <option value="">loading...</option>}
-                {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+            <FormField label="account" hint={runner ? "The credentials the runner uses (config/accounts.toml)." : "A runner lane only."}>
+              <select className="sel" value={account} onChange={e => setAccount(e.target.value)} disabled={!runner || !laneAccounts.length}>
+                {!runner && <option value="">-</option>}
+                {runner && !laneAccounts.length && <option value="">no account runs on this lane</option>}
+                {laneAccounts.map(a => <option key={a.name} value={a.name}>{a.name} · {a.kind}</option>)}
               </select>
             </FormField>
+          </div>
+          {options?.accounts_error && (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber)", marginTop: 4 }}>accounts: {options.accounts_error}</div>
+          )}
+          <div style={{ marginTop: 14 }} />
+          <div className="grid2">
+            {!runner ? (
+              <FormField label="model" hint="Rendered into the agent command's {model} placeholder.">
+                <select className="sel" value={model} onChange={e => setModel(e.target.value)} disabled={!options}>
+                  {!options && <option value="">loading...</option>}
+                  {models.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </FormField>
+            ) : laneReads("model") ? (
+              <FormField label="model" hint={"[agent] model, the one the runner reads: " + ((laneModelRule && laneModelRule.hint) || "a model name")}>
+                <input className="txt" list={laneModelRule && laneModelRule.catalogue ? "spawn-lane-models" : undefined}
+                       value={laneModel} onChange={e => setLaneModel(e.target.value)}
+                       placeholder={laneModelRule && laneModelRule.required ? "<provider>/<model>" : "the runner's default"} />
+                {laneModelRule && laneModelRule.catalogue && (
+                  <datalist id="spawn-lane-models">{models.map(m => <option key={m} value={m} />)}</datalist>
+                )}
+              </FormField>
+            ) : (
+              <FormField label="model" hint="This lane reads no model."><span className="muted">-</span></FormField>
+            )}
+            {laneReads("effort") ? (
+              <FormField label="effort" hint={runner ? "[agent] effort, the one the runner reads." : "Rendered into the {effort} placeholder."}>
+                <select className="sel" value={effort} onChange={e => setEffort(e.target.value)} disabled={!options}>
+                  {!options && <option value="">loading...</option>}
+                  {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </FormField>
+            ) : (
+              <FormField label="effort" hint="This lane reads no effort."><span className="muted">-</span></FormField>
+            )}
           </div>
           <div style={{ marginTop: 14 }} />
           <div className="grid2">

@@ -73,6 +73,11 @@ class OverviewMarkup(unittest.TestCase):
         for word in ("generation", "context", "packet"):
             self.assertNotIn("<th>%s" % word, self.view)
 
+    def test_a_login_wait_is_a_banner_with_its_action_line(self):
+        self.assertIn("data-login-required", self.view)
+        self.assertIn("fleetLoginWaits(", self.view)
+        self.assertIn("loginRequired.action", self.view)
+
     def test_the_sidebar_carries_the_count_and_the_next_flip(self):
         app = _read("app.jsx")
         self.assertIn("fleetHealth(", app)
@@ -132,6 +137,30 @@ process.stdout.write(JSON.stringify(rows.map(r => [
             [None, "stopped", "gray"],
             [None, "enrolled", "green"],
         ])
+
+    def test_a_login_wait_needs_you_and_says_its_action(self):
+        got = self.run_node("""
+const login = {reason: "login_required", action: "cousin-account login fleet", since: "t"};
+const rows = [
+  {slug: "a", status: "running", runner: {alive: true, state: "idle"}, loginRequired: login},
+  {slug: "b", status: "running", runner: {alive: true, state: "idle"},
+   loginRequired: {reason: "billing", action: "top up the account", since: "t"}},
+  {slug: "c", status: "stopped", loginRequired: login},
+  {slug: "d", status: "running", runner: {alive: true, state: "idle"}, loginRequired: null},
+  {slug: "e", remote: true, status: "running", loginRequired: login},
+];
+process.stdout.write(JSON.stringify({
+  att: rows.map(r => fleetAttention(r)),
+  word: fleetState(rows[0]).word,
+  waits: fleetLoginWaits(rows).map(r => r.slug),
+}));""")
+        self.assertEqual(got["att"][0]["level"], "needs")
+        self.assertIn("cousin-account login fleet", got["att"][0]["why"])
+        self.assertIn("billing", got["att"][1]["why"])
+        self.assertEqual(got["att"][2:], [None, None, None])
+        self.assertEqual(got["word"], "needs you")
+        # a stopped cousin still waits for its login; a remote row has no file
+        self.assertEqual(got["waits"], ["a", "b", "c"])
 
     def test_needs_you_first_then_warnings_then_running_then_stopped(self):
         got = self.run_node("""

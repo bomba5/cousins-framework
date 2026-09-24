@@ -5,8 +5,9 @@ everything else as a projection of a store some other component owns
 
 Extension points for the other console tasks:
 
-- `ROUTE_MODULES`: the list of module names whose import registers
-  routes on `router`. Every name is imported when a `ConsoleServer` is
+- `ROUTE_MODULES` and `PACKAGE_ROUTE_MODULES` (one stub per UI parity
+  package, filled by that package only): the module names whose import
+  registers routes on `router`. Every name is imported when a `ConsoleServer` is
   constructed and its `register()` called again, so a registry cleared
   by a test, or a module appended to the list after import, still
   serves. Route modules keep per-server state on `req.server.state`,
@@ -66,6 +67,22 @@ ROUTE_MODULES = [
     "cousin_lib.console.pane",
     "cousin_lib.console.stream",
     "cousin_lib.console.sse",
+    "cousin_lib.console.longop",
+]
+
+# The seam for the UI parity packages (docs: notes of the console audit,
+# "Work packages"): one route module per package, each owned by that
+# package alone and loaded exactly as ROUTE_MODULES is. A package adds its
+# routes in its own module's register(); it never edits this file. A new
+# package gets its stub here once, in the same change that adds its jsx
+# stub to index.html's package block.
+PACKAGE_ROUTE_MODULES = [
+    "cousin_lib.console.routes_agent",      # WP-A: agent and cousin settings
+    "cousin_lib.console.routes_migrate",    # WP-B: kind switch and migration
+    "cousin_lib.console.routes_lifecycle",  # WP-B: reincarnate, transplant
+    "cousin_lib.console.routes_accounts",   # WP-C: accounts and login flows
+    "cousin_lib.console.routes_mcp",        # WP-D: MCP registry and policy
+    "cousin_lib.console.routes_system",     # WP-F: system and install config
 ]
 
 # /api/version is public: the login page may show it, and it says only
@@ -141,7 +158,7 @@ def load_routes():
     registrations are on the registry even after a `router.clear()`.
     Registration is idempotent (the router replaces a repeated
     method+pattern), so calling it again costs nothing."""
-    for name in ROUTE_MODULES:
+    for name in ROUTE_MODULES + PACKAGE_ROUTE_MODULES:
         module = importlib.import_module(name)
         register = getattr(module, "register", None)
         if callable(register):

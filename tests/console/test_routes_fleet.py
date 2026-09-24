@@ -5,12 +5,14 @@ two flip paths."""
 import json
 import os
 import tarfile
+import threading
 import time
 import tomllib
 import unittest
 from unittest import mock
 
 from cousin_lib import loops
+from cousin_lib.console import longop
 from tests.console._harness import ConsoleCase
 
 
@@ -281,6 +283,89 @@ class TestStartStopRestart(ConsoleCase):
         self.assertEqual(body["start"]["status"], "started")
         self.assertIn(("cousin-status", {"slug": "wren",
                                          "status": "stopping"}), seen)
+
+
+class TestExclusiveMark(ConsoleCase):
+    """Fix round 2, Important: dismiss, start, stop, restart and set_auth
+    used to read longop.op_running() unlocked and then do their own
+    unlocked work - nothing marked the cousin busy, so a migrate or a
+    login (longop.start) could start on the same cousin mid-route. Each
+    route now holds an exclusive mark (routes_fleet._exclusive, backed by
+    longop.exclusive) for as long as its own work runs."""
+
+    def _block_start(self, gate, released):
+        def slow_start(home, **kw):
+            gate.set()
+            released.wait(5)
+        return slow_start
+
+    def test_a_route_holding_the_mark_refuses_a_longop(self):
+        # the reviewer's repro: while start's own work runs, nothing
+        # used to mark the cousin busy, so a migrate could start beside
+        # it (and, in the real finding, beside a dismiss archiving and
+        # deleting the home).
+        self.cousin("wren")
+        (self.root / "config" / "agent-cmd").write_text("my-agent\n")
+        server = self.serve()
+        gate, released = threading.Event(), threading.Event()
+        result = {}
+
+        def call():
+            with mock.patch("cousin_lib.spawn.start_cousin",
+                            self._block_start(gate, released)):
+                result["status"], result["body"] = \
+                    self.post("/api/cousins/wren/start")
+
+        t = threading.Thread(target=call)
+        t.start()
+        try:
+            self.assertTrue(gate.wait(5))
+            with self.assertRaises(longop.Busy) as cm:
+                longop.start(server, "wren", "migrate", lambda op: {})
+            self.assertIn("start", str(cm.exception))
+        finally:
+            released.set()
+            t.join(5)
+        self.assertEqual(result["status"], 200, result["body"])
+        self.assertIsNone(longop.op_running(server, "wren"))
+
+    def test_the_mark_releases_on_the_routes_own_error_path(self):
+        # no config/agent-cmd: _start fails with a 500 before it ever
+        # reaches spawn.start_cousin - the mark must not survive it
+        self.cousin("wren")
+        server = self.serve()
+        status, body = self.post("/api/cousins/wren/start")
+        self.assertEqual(status, 500, body)
+        self.assertIsNone(longop.op_running(server, "wren"))
+        # a second attempt fails the same way, not "already busy"
+        status, body = self.post("/api/cousins/wren/start")
+        self.assertEqual(status, 500, body)
+        self.assertNotIn("running on", body["error"])
+
+    def test_two_concurrent_routes_on_one_slug_one_gets_409(self):
+        self.cousin("wren")
+        (self.root / "config" / "agent-cmd").write_text("my-agent\n")
+        self.serve()
+        gate, released = threading.Event(), threading.Event()
+        first = {}
+
+        def call():
+            with mock.patch("cousin_lib.spawn.start_cousin",
+                            self._block_start(gate, released)):
+                first["status"], first["body"] = \
+                    self.post("/api/cousins/wren/start")
+
+        t = threading.Thread(target=call)
+        t.start()
+        try:
+            self.assertTrue(gate.wait(5))
+            status, body = self.post("/api/cousins/wren/stop", {"clean": False})
+            self.assertEqual(status, 409, body)
+            self.assertIn("start", body["error"])
+        finally:
+            released.set()
+            t.join(5)
+        self.assertEqual(first["status"], 200, first["body"])
 
 
 class TestEditors(ConsoleCase):

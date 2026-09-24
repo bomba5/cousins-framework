@@ -57,6 +57,45 @@ class SpawnDialog(unittest.TestCase):
         self.assertNotRegex(self.src, r'\[\s*"low"\s*,')
 
 
+class SpawnDialogLane(unittest.TestCase):
+    """Audit defect 2: the spawn route takes `runner` and `account` and the
+    dialog sends them. The kinds, the accounts (with the kinds each runs
+    on) and the keys each lane reads come from GET /api/spawn/options;
+    the dialog names no runner kind of its own."""
+
+    def setUp(self):
+        self.src = _component(_read("cousins.jsx"), "SpawnModal")
+
+    def test_sends_runner_and_account(self):
+        body = self.src[self.src.index("const body"):]
+        self.assertRegex(body, r"body\.runner\s*=")
+        self.assertRegex(body, r"body\.account\s*=")
+
+    def test_the_catalogue_is_the_servers(self):
+        self.assertRegex(self.src, r"\.runners\s*\|\|")
+        self.assertRegex(self.src, r"\.accounts\s*\|\|")
+        self.assertIn("lane_keys", self.src)
+        self.assertIn("lanes || []).includes(runner)", self.src)
+        self.assertRegex(self.src, r'label="lane"')
+        self.assertRegex(self.src, r'label="account"')
+        for kind in ('"sdk"', '"fake"', '"opencode"', '"tmux"'):
+            self.assertNotIn(kind, self.src, kind)
+
+    def test_the_tmux_lane_is_sent_explicitly(self):
+        body = self.src[self.src.index("const body"):]
+        self.assertIn("body.runner = runner || options?.tmux_lane", body)
+
+    def test_the_model_rule_is_the_lanes(self):
+        self.assertIn("lane_models", self.src)
+        self.assertIn("laneModelRule.catalogue", self.src)
+        self.assertIn("laneModelRule.required", self.src)
+
+    def test_model_and_effort_only_where_the_lane_reads_them(self):
+        body = self.src[self.src.index("const body"):]
+        self.assertIn("laneReads(\"model\")", body)
+        self.assertIn("laneReads(\"effort\")", body)
+
+
 class RemoteCousins(unittest.TestCase):
     """Remote cousins (hive nodes): their own card with no start, stop,
     restart or pane control, revoke behind a confirm and forget after
@@ -130,12 +169,11 @@ class InspectorAuthField(unittest.TestCase):
         self.assertNotIn('"api_key"', self.src)
 
     def test_the_key_is_a_password_field_sent_once(self):
-        self.assertIn('type="password"', self.src)
+        # the box is ui.jsx's SecretField, which clears its draft before
+        # onSubmit runs (pinned in test_static_seams)
+        self.assertIn("<SecretField", self.src)
+        self.assertIn("onSubmit={sendKey}", self.src)
         self.assertIn("/auth/key`", self.src)
-        # the draft is emptied before the request goes out
-        send = self.src[self.src.index("const sendKey"):]
-        self.assertLess(send.index('setKeyDraft("")'),
-                        send.index("apiSend("))
         self.assertIn("last4", self.src)
 
     def test_a_busy_refusal_offers_a_forced_restart(self):
@@ -159,6 +197,11 @@ class CousinCardRows(unittest.TestCase):
         # healthy; the row's attention field is shown on the card.
         self.assertIn("c.attention", self.src)
         self.assertIn("needs attention", self.src)
+
+    def test_lane_account_hold_and_a_login_wait(self):
+        for token in ("lane ·", "account ·", "c.lane", "c.account", "c.held",
+                      "c.loginRequired", "data-login-required", "loginRequired.action"):
+            self.assertIn(token, self.src, token)
 
     def test_role_sits_under_the_name(self):
         self.assertRegex(self.src, r'className="role"[^\n]*\{c\.role\}')
@@ -336,13 +379,13 @@ class TelegramPanel(unittest.TestCase):
             self.assertIn(path, self.src, path)
 
     def test_the_token_is_write_only(self):
-        self.assertIn('type="password"', self.src)
-        self.assertIn('autoComplete="off"', self.src)
-        # The draft is cleared before the send, and only token_set shows.
+        # ui.jsx's SecretField: a password box cleared before onSubmit
+        # (pinned in test_static_seams); only token_set shows.
+        self.assertIn("<SecretField", self.src)
+        self.assertIn("onSubmit={saveToken}", self.src)
         body = self.src[self.src.index("const saveToken"):]
         body = body[:body.index("};")]
-        self.assertLess(body.index('setTokenDraft("")'),
-                        body.index('post("/token"'))
+        self.assertIn('post("/token", { token })', body)
         self.assertIn("st.token_set", self.src)
         self.assertIn("never shown again", self.src)
 

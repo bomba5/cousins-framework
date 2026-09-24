@@ -876,9 +876,54 @@ class TestStop(Case):
         t = time.monotonic()
         r.stop(timeout=2)
         self.assertLess(time.monotonic() - t, 3.0, "bounded")
-        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by stop"))
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by a requested stop"))
         self.assertEqual(r.inbox.requeue_stale(older_than_s=0.0), 0, "nothing left claimed")
         self.assertEqual(json.loads((self.home / "data" / "tmux-claims.json").read_text())["claims"], [])
+
+
+class TestPaneLostInAStop(Case):
+    """Live proofs 09-25, finding 5: under a systemd stop the unit's cgroup
+    kill takes the tmux server while the runner stops. A pane lost once a
+    stop was asked for is the stop's cut, worded as exit criterion 2 has it
+    ("cut by restart"; "cut by a requested stop" when held), and the next
+    start is told."""
+
+    def lose_the_pane_in_a_stop(self):
+        r = self.runner(slow=True, slow_s=10.0)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.begin_stop()                                 # the SIGTERM
+        self.panes[0].die()                            # and the cgroup kill took tmux
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        r.stop(timeout=4)
+        return r, rec
+
+    def test_unheld_it_reads_cut_by_restart_and_the_next_start_is_told(self):
+        from cousin_lib.runner import restart_note
+        r, rec = self.lose_the_pane_in_a_stop()
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by restart"))
+        note = restart_note.read(self.home)
+        self.assertIsNotNone(note, "the cut is marked for the next start")
+        self.assertNotIn("held", note)
+
+    def test_held_it_reads_cut_by_a_requested_stop(self):
+        from cousin_lib.runner import restart_note
+        self.home = temp_home(self)
+        (self.home / "run").mkdir(exist_ok=True)
+        (self.home / "run" / "held").write_text("2026-09-25T01:00:00+00:00 cousin-migrate")
+        r, rec = self.lose_the_pane_in_a_stop()
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by a requested stop"))
+        self.assertIn("cousin-migrate", restart_note.read(self.home)["held"])
+
+    def test_a_pane_lost_with_no_stop_still_reads_pane_loss(self):
+        r = self.runner(slow=True, slow_s=10.0)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0].die()
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        self.assertEqual(self.outcome(r, rec)[2], "cut by pane loss")
 
 
 class TestRecovery(Case):
@@ -950,7 +995,7 @@ class TestRecovery(Case):
         self.assertTrue(_wait(lambda: self.panes and any(
             "a requested stop" in b for _f, b in self.panes[0].typed), timeout=6))
         self.assertFalse(any("restarted" in b for _f, b in self.panes[0].typed))
-        self.assertEqual(self.outcome(r2, rec)[2], "cut by stop")
+        self.assertEqual(self.outcome(r2, rec)[2], "cut by a requested stop")
         from cousin_lib.runner import restart_note
         self.assertTrue(_wait(lambda: restart_note.read(self.home) is None), "taken once typed")
 

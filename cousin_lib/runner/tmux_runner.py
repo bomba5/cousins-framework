@@ -148,6 +148,7 @@ class TmuxRunner:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._stopping = threading.Event()   # a stop is under way: no claim, the transcript still read
+        self._stop_cut = False               # a pane lost during the stop cut a taken row
         self._thread = None
         self._session_id, self._fresh = None, True
         self._path, self._cursor = None, 0
@@ -252,6 +253,7 @@ class TmuxRunner:
         if self.pane is not None and held is not None:
             self.pane.kill()
             cut = self._settle_on_stop() or cut
+        cut = cut or self._stop_cut          # the pane went first (a unit's cgroup kill)
         if cut:
             try:
                 restart_note.mark(self.home, "a stop cut the turn in flight", held=held)
@@ -277,7 +279,7 @@ class TmuxRunner:
         for inbox_id, c in sorted(self._claims.items()):
             self._closed_nonces |= set(c["nonces"])
             if c["taken"] is not None:
-                self.inbox.done(inbox_id, DELIVERED, "cut by stop")
+                self.inbox.done(inbox_id, DELIVERED, "cut by a requested stop")
                 cut.append(inbox_id)
             else:
                 self.inbox.requeue(inbox_id)
@@ -589,10 +591,12 @@ class TmuxRunner:
             self.stream.append("error", {"error": "reading the lost pane's transcript: %s: %s"
                                          % (type(exc).__name__, exc)})
         cut, requeued = [], []
+        stopping = self._stopping.is_set()
+        detail = self._cut_detail() if stopping else "cut by pane loss"
         for inbox_id, c in sorted(self._claims.items()):
             self._closed_nonces |= set(c["nonces"])
             if c["taken"] is not None:
-                self.inbox.done(inbox_id, DELIVERED, "cut by pane loss")
+                self.inbox.done(inbox_id, DELIVERED, detail)
                 cut.append(inbox_id)
             else:
                 self.inbox.requeue(inbox_id)
@@ -607,7 +611,9 @@ class TmuxRunner:
         self._live, self._interrupting = None, False
         self._turn_file(None)
         self._to("idle", "pane lost")
-        if cut:
+        if cut and stopping:
+            self._stop_cut = True            # stop() marks it; the next start says it (#98)
+        elif cut:
             self._owe_notice("The previous turn was cut short: the pane's CLI exited before it"
                              " finished, and the runner resumed this session in a new pane. Its"
                              " message was delivered. Check what it did and continue.")
@@ -630,6 +636,12 @@ class TmuxRunner:
                                " itself" % (time.monotonic() - booting["since"]))
             return
         self._lost = {"next": time.monotonic()}
+
+    def _cut_detail(self):
+        """A taken row's close when the pane went during a stop (live proofs
+        09-25, finding 5: a unit's cgroup kill takes the tmux server as the
+        runner stops): the stop's cut, as exit criterion 2 words it."""
+        return "cut by a requested stop" if restart_note.held_by(self.home) else "cut by restart"
 
     def _failed_start(self, why):
         """One more failed start in a row: the next after REOPEN_BASE_S,

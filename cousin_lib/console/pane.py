@@ -27,6 +27,17 @@ program's mode-setting escapes, so the frame sets it.
 
 Input goes through the injection module's process-wide lock, so a chat
 delivery and a keystroke never interleave.
+
+A tmux-kind runner cousin (`[agent] runner = "tmux"`, phase 11) is
+addressed where its runner keeps it: the framework's own socket
+(`<root>/run/tmux.sock`) and the session `tmux-<slug>`, matched exactly
+(tmux_runner.pane_for). The runner types into that pane itself, from
+another process the injection lock does not reach, so a person's keys go
+in only while the pane waits on a person (tmux_runner.LOGIN_SCREENS: the
+trust dialog, the login menu, onboarding, the bypass and MCP dialogs),
+where the runner never types; anywhere else they are refused (409) and
+the chat is the way in. It keeps the fixed size its screen parsers read
+(a resize is 409).
 """
 from __future__ import annotations
 
@@ -333,9 +344,31 @@ def _tmux_for(req, cousin):
                 host=cousin.chat_host)
 
 
+def kind_pane(cousin):
+    """A tmux-kind runner cousin's pane (tmux_runner.pane_for: the
+    framework socket, the runner's session name), or None for any other
+    cousin, a remote one included."""
+    home = getattr(cousin, "home", None)
+    if home is None or getattr(cousin, "chat_host", None):
+        return None
+    from cousin_lib.delivery import _runner_kind
+    if _runner_kind(home) != "tmux":
+        return None
+    from cousin_lib.runner.tmux_runner import pane_for
+    return pane_for(home)
+
+
 def _resolve(req, slug):
-    """(cousin, session, tmux) or a RouteError per the contract."""
+    """(cousin, session, tmux, kind) or a RouteError per the contract;
+    `kind` is the tmux-kind runner's pane (kind_pane), else None."""
     cousin = find_cousin(req, slug)
+    kind = kind_pane(cousin)
+    if kind is not None:
+        tmux = Tmux(getattr(req, "tmux_bin", None) or "tmux", socket=str(kind.socket))
+        # exact matches: `=name` for the session, `=name:` for its pane
+        if not tmux.has_session("=" + kind.name):
+            raise RouteError(409, {"ok": False, "error": "session not running"})
+        return cousin, "=%s:" % kind.name, tmux, kind
     session = cousin.tmux_session
     if not session:
         raise RouteError(400, {"ok": False,
@@ -343,7 +376,23 @@ def _resolve(req, slug):
     tmux = _tmux_for(req, cousin)
     if not tmux.has_session(session):
         raise RouteError(409, {"ok": False, "error": "session not running"})
-    return cousin, session, tmux
+    return cousin, session, tmux, None
+
+
+def _waits_on_a_person(tmux, session):
+    """The screen the tmux-kind pane shows, when it is one that waits on a
+    person (tmux_runner.LOGIN_SCREENS), else None. Only the visible
+    screen is read (no history): an old dialog scrolled away is not one."""
+    from cousin_lib.runner.tmux_pane import attention_in
+    from cousin_lib.runner.tmux_runner import LOGIN_SCREENS
+    try:
+        r = tmux.run("capture-pane", "-p", "-t", session)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    seen = attention_in(r.stdout or "")
+    return seen if seen in LOGIN_SCREENS else None
 
 
 def _lines(query):
@@ -364,29 +413,38 @@ def register():
     @router.route("GET", "/api/pane")
     @guarded
     def pane(req):
-        _, session, tmux = _resolve(req, req.query.get("cousin"))
+        _, session, tmux, _kind = _resolve(req, req.query.get("cousin"))
         return 200, {"text": tmux.capture(session, _lines(req.query))}
 
     @router.route("GET", "/api/pane/stream")
     @guarded
     def stream(req):
-        _, session, tmux = _resolve(req, req.query.get("cousin"))
+        _, session, tmux, _kind = _resolve(req, req.query.get("cousin"))
         return 200, sse.Stream(stream_pane(session, _lines(req.query),
                                            tmux=tmux))
 
     @router.route("POST", "/api/pane/input")
     @guarded
     def pane_input(req):
-        _, session, tmux = _resolve(req, req.body.get("cousin"))
+        _, session, tmux, kind = _resolve(req, req.body.get("cousin"))
         data = req.body.get("data")
         if data is not None and not isinstance(data, str):
             raise RouteError(400, {"ok": False, "error": "data must be a string"})
+        if kind is not None and data and _waits_on_a_person(tmux, session) is None:
+            raise RouteError(409, {"ok": False, "error": (
+                "the tmux runner types into this pane: keys go in only while it waits on"
+                " a person (the trust, login, onboarding, bypass or MCP dialog); write to"
+                " the cousin through the chat")})
         return 200, {"ok": True, "tokens": send_input(tmux, session, data)}
 
     @router.route("POST", "/api/pane/resize")
     @guarded
     def resize(req):
-        _, session, tmux = _resolve(req, req.body.get("cousin"))
+        _, session, tmux, kind = _resolve(req, req.body.get("cousin"))
+        if kind is not None:
+            raise RouteError(409, {"ok": False, "error": (
+                "the tmux kind's pane keeps its fixed size (%dx%d): the runner reads its"
+                " screen at that size" % (kind.width, kind.height))})
         cols = _int(req.body.get("cols"), 20, 400)
         rows = _int(req.body.get("rows"), 5, 200)
         try:

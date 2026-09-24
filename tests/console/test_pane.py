@@ -239,6 +239,63 @@ class TestResize(PaneCase):
                                     cols=True, rows=10)[0], 400)
 
 
+class TestTmuxKind(PaneCase):
+    """A tmux-kind runner cousin (phase 11): its pane is on the framework's
+    own socket under the runner's session name, not the legacy address.
+    A person may type into it only while it waits on a person (the trust,
+    login, onboarding, bypass or MCP dialog), where the runner never
+    types; it keeps its fixed size."""
+
+    TRUST = "Quick safety check\nIs this a project you trust?\n> 1. Yes, I trust this folder\n"
+    PROMPT = "the model's words\n" + "\u2500" * 20 + "\n\u276f \n" + "\u2500" * 20 + "\n"
+
+    def setUp(self):
+        super().setUp()
+        self._write_toml('\n[agent]\nrunner = "tmux"\n')
+        self.socket = str(self.root / "run" / "tmux.sock")
+
+    def test_it_reads_the_kinds_socket_and_exact_session(self):
+        self.pane_file.write_text("hello")
+        status, body = self._get("/api/pane", cousin="testa")
+        self.assertEqual(status, 200, body)
+        calls = self._calls()
+        self.assertTrue(all(c.startswith("-S %s " % self.socket) for c in calls), calls)
+        self.assertIn("has-session -t =tmux-testa", calls[0])
+        self.assertIn("-t =tmux-testa: -S -200", [c for c in calls if "capture-pane" in c][0])
+
+    def test_keys_go_in_on_a_screen_that_waits_on_a_person(self):
+        self.pane_file.write_text(self.TRUST)
+        status, body = self._post("/api/pane/input", cousin="testa", data="\r")
+        self.assertEqual(status, 200, body)
+        sends = [c for c in self._calls() if "send-keys" in c]
+        self.assertEqual(sends, ["-S %s send-keys -t =tmux-testa: Enter" % self.socket])
+
+    def test_keys_are_refused_where_the_runner_types(self):
+        self.pane_file.write_text(self.PROMPT)
+        status, body = self._post("/api/pane/input", cousin="testa", data="/clear\r")
+        self.assertEqual(status, 409, body)
+        self.assertIn("waits on a person", body["error"])
+        self.assertFalse([c for c in self._calls() if "send-keys" in c])
+
+    def test_an_unreadable_screen_refuses_the_keys(self):
+        with mock.patch.dict("os.environ", {"FAKE_TMUX_RC": "1", "FAKE_TMUX_HAS_SESSION": "0"}):
+            status, body = self._post("/api/pane/input", cousin="testa", data="a")
+        self.assertEqual(status, 409, body)
+        self.assertFalse([c for c in self._calls() if "send-keys" in c])
+
+    def test_it_keeps_its_fixed_size(self):
+        status, body = self._post("/api/pane/resize", cousin="testa", cols=100, rows=30)
+        self.assertEqual(status, 409, body)
+        self.assertIn("fixed size", body["error"])
+        self.assertFalse([c for c in self._calls() if "resize-window" in c])
+
+    def test_an_sdk_runner_keeps_the_legacy_address(self):
+        self._write_toml('\n[agent]\nrunner = "sdk"\n')
+        self.pane_file.write_text("x")
+        self._get("/api/pane", cousin="testa")
+        self.assertIn("-t testa", [c for c in self._calls() if "capture-pane" in c][0])
+
+
 def _state(**kw):
     base = {"alt": 0, "mouse": 0, "sgr": 0, "cols": 80, "rows": 4,
             "cx": 0, "cy": 0, "cursor": 1}

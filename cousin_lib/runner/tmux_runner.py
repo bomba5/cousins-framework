@@ -9,8 +9,10 @@ interrupt entry delivers it (interrupted), an API error fails it, a limit
 error requeues it (R4, R6). A turn start while a turn is live ends that
 turn as interrupted ("send now" writes no end of its own; measured).
 
-Continuity is the session id (P11-2): start() adopts a live pane, else
-resumes the recorded session in a new pane, else starts fresh; nothing
+Continuity is the session id (P11-2): start() adopts a live pane whose
+hook record (run/tmux-session.json, runner/tmux_hook.py) names the recorded
+session and the pane's CLI pid, else kills it and resumes the recorded
+session in a new pane, else starts fresh (R24); nothing
 depends on the pane outliving the runner. A stop always ends the live
 turn; the pane is killed only when the stop is a hold (run/held, P11-10).
 
@@ -43,6 +45,7 @@ LOGIN_SCREENS = ("trust", "onboarding", "login", "bypass", "mcp_approval")
 CLAIMS_FILE = "tmux-claims.json"
 CURSOR_FILE = "tmux-cursor.json"
 SESSION_FILE = "runner-session.json"
+HOOK_RECORD = ("run", "tmux-session.json")    # written by the pane's SessionStart hook
 
 
 def _atomic_write(path, data):
@@ -108,6 +111,7 @@ class TmuxRunner:
         self._hook_heard = False         # a pane hook's datagram for this session arrived (M-a)
         self._first_end = None           # monotonic time of the first turn end
         self._hooks_silent_said = False
+        self._changes_said = set()       # session ids a SessionStart named that are not ours
         self.hooks_silent_s = HOOKS_SILENT_S   # tests shorten it
         self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
 
@@ -203,8 +207,24 @@ class TmuxRunner:
             data["fresh"] = True       # kept until the CLI has written the session
         _atomic_write(self._data(SESSION_FILE), data)
 
+    def _hook_record(self):
+        return _read_json(self.home.joinpath(*HOOK_RECORD))
+
+    def _adopt_refusal(self):
+        """Why the live pane may not be adopted (R24), or None: the hook's
+        record must name the recorded session and the pane's CLI pid."""
+        rec = self._hook_record()
+        if rec is None:
+            return {"reason": "no_record"}
+        if rec.get("session_id") != self._session_id:
+            return {"reason": "session_mismatch", "record_session_id": rec.get("session_id")}
+        pane_pid = self.pane.pid()
+        if pane_pid is None or rec.get("pid") != pane_pid:
+            return {"reason": "pid_mismatch", "record_pid": rec.get("pid"), "pane_pid": pane_pid}
+        return None
+
     def _hook_path(self):
-        data = _read_json(self.home / "run" / "tmux-session.json") or {}
+        data = self._hook_record() or {}
         if data.get("session_id") == self._session_id and data.get("transcript_path"):
             return Path(data["transcript_path"])
         return None
@@ -247,10 +267,19 @@ class TmuxRunner:
         self._fresh = fresh and self._size() == 0
         self.pane = self._make_pane(self._path)
         # a live pane runs the recorded id, fresh or not: a rollover ends the
-        # old CLI before it writes the new id, so the pane is never the old one
+        # old CLI before it writes the new id, so the pane is never the old one;
+        # the hook's record proves it (R24), and a pane it does not prove is
+        # killed (reap_pane's own kill: this runner already holds the lock)
+        how = None
         if recorded is not None and self.pane.alive():
-            how, self._fresh = "adopted", False
-        else:
+            refused = self._adopt_refusal()
+            if refused is None:
+                how, self._fresh = "adopted", False
+            else:
+                self.stream.append("system", dict({"subtype": "adopt_refused",
+                                                   "session_id": self._session_id}, **refused))
+                self.pane.kill()
+        if how is None:
             self.pane.start(self._argv(self._fresh), cwd=str(self.home), env_base=self._env_base())
             how = "fresh" if self._fresh else "resumed"
         self._save_session()
@@ -378,15 +407,29 @@ class TmuxRunner:
                 data = json.loads(raw)
             except ValueError:
                 continue            # a plain poke from a producer
-            if isinstance(data, dict) and data.get("event") and \
-                    data.get("session_id") == self._session_id:
+            if not (isinstance(data, dict) and data.get("event")):
+                continue
+            sid = data.get("session_id")
+            if sid == self._session_id:
                 self._hook_heard = True
+            if data["event"] == "SessionStart" and (sid != self._session_id
+                                                    or data.get("source") == "clear"):
+                self._session_changed(sid, data.get("source"))
         if (not self._hook_heard and not self._hooks_silent_said and self._first_end is not None
                 and time.monotonic() - self._first_end >= self.hooks_silent_s):
             self._hooks_silent_said = True
             self.stream.append("system", {"subtype": "hooks_silent", "session_id": self._session_id,
                                           "detail": "no pane hook datagram by the first turn end;"
                                                     " the runner polls the transcript instead"})
+
+    def _session_changed(self, sid, source):
+        """A SessionStart for a session that is not the runner's (a /clear in
+        the pane): said once per id, never followed (a known gap)."""
+        if sid in self._changes_said:
+            return
+        self._changes_said.add(sid)
+        self.stream.append("system", {"subtype": "session_changed", "session_id": self._session_id,
+                                      "new_session_id": sid, "source": source})
 
     # -- the transcript ------------------------------------------------------
     def _pump(self):

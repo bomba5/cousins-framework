@@ -51,6 +51,13 @@ class Case(HermeticCase):
         with r._path.open("a") as fh:
             fh.write(json.dumps(obj) + "\n")
 
+    def hook_record(self, r, pane):
+        """What the pane's SessionStart hook writes (tmux_hook, R24): the
+        record a later runner needs before it adopts `pane`."""
+        (self.home / "run" / "tmux-session.json").write_text(json.dumps(
+            {"session_id": r.session_id(), "transcript_path": str(r._path),
+             "source": "startup", "pid": pane.pid()}))
+
 
 class TestTyping(Case):
     def test_a_blocked_row_is_requeued_never_failed(self):
@@ -228,6 +235,7 @@ class TestRecovery(Case):
         self.assertTrue(_wait(lambda: shared and shared[0].alive()))
         r.stop(timeout=3)                   # unheld: the pane lives on
         self.assertTrue(shared[0].alive())
+        self.hook_record(r, shared[0])
         r2 = self.runner(pane=one_pane)
         r2.start()
         self.assertTrue(_wait(lambda: "C-u" in shared[0].keys))

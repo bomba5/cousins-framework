@@ -109,10 +109,10 @@ class TestDatagram(Case):
                 self.hook(event, _start() if event == "SessionStart" else json.dumps(
                     {"session_id": SID, "notification_type": "permission_prompt"}))
                 self.assertTrue(listener.wait(timeout=1.0), event)
+                extra = {"Notification": {"type": "permission_prompt"},
+                         "SessionStart": {"source": "startup"}}.get(event, {})
                 self.assertEqual([json.loads(m) for m in listener.messages],
-                                 [dict({"event": event, "session_id": SID},
-                                       **({"type": "permission_prompt"}
-                                          if event == "Notification" else {}))])
+                                 [dict({"event": event, "session_id": SID}, **extra)])
 
     def test_an_idle_prompt_notification_is_ignored(self):
         with wake.Listener(self.home) as listener:
@@ -259,6 +259,104 @@ class TestRunnerSide(Case):
         rec = r.enqueue(Item("operator:wren", "chat", "hi", sender="Wren"))
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
         self.assertTrue(_wait(lambda: self.silent(r)))
+
+
+class TestAdopt(Case):
+    """R24: a live pane is adopted only when the hook's record names the
+    recorded session and the pane's CLI pid; otherwise it is killed and the
+    session resumed in a new pane, and the refusal is said."""
+
+    def setUp(self):
+        super().setUp()
+        (self.home / "data" / "runner-session.json").write_text(json.dumps(
+            {"session_id": SID, "lane": None, "generation": 1, "updated": 0, "kind": "tmux"}))
+        self.live = None
+
+    def runner(self):
+        def factory(path):
+            if self.live is None:                  # the previous runner's pane, still running
+                self.live = FakePane(path)
+                self.live.start(["claude", SID], cwd=str(self.home), env_base={})
+            return self.live
+        r = TmuxRunner(self.home, account=None, pane_factory=factory,
+                       config_dir=self.home / ".cfg",
+                       launch_argv=lambda sid, fresh: ["claude", sid])
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r
+
+    def write_record(self, sid=SID, pid=4242):
+        (self.home / "run" / "tmux-session.json").write_text(json.dumps(
+            {"session_id": sid, "transcript_path": str(self.home / "t" / "s.jsonl"),
+             "source": "startup", "pid": pid}))
+
+    def opened(self, r):
+        self.assertTrue(_wait(lambda: any(e["kind"] == "session" for e in r.events())))
+        return next(e["payload"] for e in r.events() if e["kind"] == "session")
+
+    def refusals(self, r):
+        return [e["payload"] for e in r.events() if e["kind"] == "system"
+                and e["payload"].get("subtype") == "adopt_refused"]
+
+    def test_a_matching_record_adopts_the_pane(self):
+        self.write_record()
+        r = self.runner()
+        r.start()
+        self.assertEqual(self.opened(r)["source"], "adopted")
+        self.assertEqual((self.live.kills, len(self.live.started)), (0, 1))
+        self.assertEqual(self.refusals(r), [])
+
+    def assert_refused(self, reason):
+        r = self.runner()
+        r.start()
+        self.assertEqual(self.opened(r)["source"], "resumed")
+        self.assertEqual(self.live.kills, 1, "the old pane is killed")
+        self.assertEqual(len(self.live.started), 2, "and the session resumed in a new one")
+        self.assertEqual(self.live.started[-1][0], ["claude", SID])
+        refused = self.refusals(r)
+        self.assertEqual([x["reason"] for x in refused], [reason])
+        self.assertEqual(refused[0]["session_id"], SID)
+        return refused[0]
+
+    def test_no_record_refuses_the_adopt(self):
+        self.assert_refused("no_record")
+
+    def test_a_record_of_another_session_refuses_the_adopt(self):
+        self.write_record(sid="another-session")
+        self.assertEqual(self.assert_refused("session_mismatch")["record_session_id"],
+                         "another-session")
+
+    def test_a_record_of_another_pid_refuses_the_adopt(self):
+        self.write_record(pid=999999)
+        refused = self.assert_refused("pid_mismatch")
+        self.assertEqual((refused["record_pid"], refused["pane_pid"]), (999999, 4242))
+
+
+class TestSessionChanged(Case):
+    """A /clear in the pane starts a new session the runner does not follow
+    (a known gap): it is said, once per new id, never acted on."""
+
+    def test_a_session_start_of_another_id_is_said_once(self):
+        r = TestRunnerSide.runner(self)
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        for _ in range(2):
+            self.hook("SessionStart", _start(sid="after-clear", source="clear"))
+        changed = lambda: [e["payload"] for e in r.events() if e["kind"] == "system"
+                           and e["payload"].get("subtype") == "session_changed"]
+        self.assertTrue(_wait(changed))
+        time.sleep(0.3)
+        self.assertEqual(changed(), [{"subtype": "session_changed", "session_id": r.session_id(),
+                                      "new_session_id": "after-clear", "source": "clear"}])
+        self.assertNotEqual(r.session_id(), "after-clear", "the runner does not follow it")
+
+    def test_a_resume_of_this_session_is_not_a_change(self):
+        r = TestRunnerSide.runner(self)
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.hook("SessionStart", _start(sid=r.session_id(), source="resume"))
+        time.sleep(0.4)
+        self.assertFalse([e for e in r.events() if e["kind"] == "system"
+                          and e["payload"].get("subtype") == "session_changed"])
 
 
 if __name__ == "__main__":

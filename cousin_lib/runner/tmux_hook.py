@@ -11,7 +11,8 @@ with the hook's JSON on stdin. It does two things:
     <home>/run/tmux-session.json, atomically and 0600 (R24): the runner
     reads the transcript path from it, and `pid` is the CLI's own;
   - on every event but an `idle_prompt` Notification, sends the runner
-    one datagram, {"event", "session_id"} as JSON, on its wake socket
+    one datagram, {"event", "session_id"} as JSON (SessionStart adds its
+    `source`, a Notification its `type`), on its wake socket
     (runner/wake.py). Hooks are wake-ups: the runner decides nothing on
     one, the transcript confirms (R19).
 
@@ -139,6 +140,9 @@ def wake_runner(home, event, data):
     message = {"event": event, "session_id": sid if isinstance(sid, str) else None}
     if event == "Notification" and isinstance(kind, str):
         message["type"] = kind
+    source = data.get("source")
+    if event == "SessionStart" and isinstance(source, str):
+        message["source"] = source      # a "clear" is a session the runner does not follow
     from cousin_lib.runner import wake
     return wake.send(home, json.dumps(message).encode())
 

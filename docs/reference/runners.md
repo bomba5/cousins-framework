@@ -232,3 +232,9 @@ none is a contract item:
   Processes opencode starts other
   than a shell (language servers, formatters) run with the server's own
   environment, `HOME` in the account's data dir.
+- **tmux kind: a `/clear` typed in the pane is not followed.** The CLI starts
+  a new session id; the runner keeps reading the recorded session's
+  transcript and says so once with a `system` `session_changed` event naming
+  both ids. The next start finds the hook's record on the new id, refuses to
+  adopt the pane (`adopt_refused`, `session_mismatch`) and resumes the
+  recorded session.

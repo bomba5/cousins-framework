@@ -102,7 +102,7 @@ POLICY_ENV = "COUSIN_POLICY_FILE"
 # the cousin's home; SHELL_PASS and `[agent] shell_env` come from the runner's
 # own environment.
 SHELL_BLANK = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
-               "OPENCODE_SERVER_PASSWORD", "OPENCODE_CONFIG")
+               "OPENCODE_SERVER_PASSWORD", "OPENCODE_CONFIG", POLICY_ENV)
 SHELL_PASS = ("USER", "LOGNAME")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ACCOUNT_HOLDER = "account.holder"   # the home of the runner holding the account (its flock)
@@ -517,6 +517,7 @@ class OpencodeRunner:
         self._login_file_seen = False
         self._restore_pending = False
         self._account_fd = None
+        self._server_env = None
 
     # -- construction helpers ------------------------------------------------
     def _identity(self):
@@ -809,6 +810,7 @@ class OpencodeRunner:
         try:
             self._start_mcp()
             config, env = self._render(mcp_url=self._mcp.url, mcp_token=self._mcp.token)
+            self._server_env = env
             self._refuse_foreign_config()
             self._reap_leftover()
             path = self._write_config(config)
@@ -837,6 +839,7 @@ class OpencodeRunner:
                                   % (self.connect_timeout_s, self._reader.last_error))
             self._check_mcp()
             self._await_plugin_ack()
+            self._refuse_foreign_config()         # written while the server started
         except Exception as exc:  # noqa: BLE001 - a runner that cannot start says why
             if not self._stop.is_set():
                 self._fail_start("opencode start: %s: %s" % (type(exc).__name__, exc))
@@ -852,6 +855,29 @@ class OpencodeRunner:
             return
         if isinstance(record, dict) and record.get("pid") == getattr(self._server, "pid", None):
             self._pidfile().unlink(missing_ok=True)
+
+    def _guard_turn(self, row):
+        """Review round 2, Important 1 and 7b: the start's checks again
+        before every turn (a rollover's included), since the model can
+        change what opencode runs with while it runs (PATCH /global/config
+        reloads plugins and providers live, measured on 1.18.31) and a key
+        can change without a 401: auth.json (preflight), the config sources
+        opencode would merge, and the effective config. A failure puts the
+        row back and the runner gives up; the window is one turn."""
+        try:
+            accounts.preflight(self.account, self.root)
+            self._refuse_foreign_config()
+            effective = self._client.request("GET", "/config", timeout=self.plugin_timeout_s) or {}
+            check_effective_config(effective, self._server_env, account=self.account,
+                                   model=self.model, small_model=self.small_model)
+        except (accounts.AccountsError, RunnerError, OpencodeError) as err:
+            try:
+                self.inbox.requeue(row["id"])
+            except Exception:  # noqa: BLE001 - the stale-claim sweep at the next start
+                pass
+            self._fail_start("opencode turn guard: %s" % err)
+            return False
+        return True
 
     def _pidfile(self):
         return Path(self.account.data_dir) / opencode_http.PIDFILE
@@ -1036,6 +1062,8 @@ class OpencodeRunner:
                     if row["source"] == INTERRUPT:
                         self.inbox.done(row["id"], FAILED, NO_TURN)
                         continue
+                    if not self._guard_turn(row):
+                        break
                     try:
                         if row["source"] == "flip":
                             self._rollover_row(row)

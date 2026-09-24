@@ -113,7 +113,8 @@ class TestRenderedPolicy(OpencodeCase):
             "HOME": str(home), "USER": "sam", "LOGNAME": "sam",
             "SSH_AUTH_SOCK": "/run/user/1000/agent.sock",           # GPG_AGENT_INFO is unset
             "XDG_CONFIG_HOME": "", "XDG_DATA_HOME": "", "XDG_CACHE_HOME": "",
-            "XDG_STATE_HOME": "", "OPENCODE_SERVER_PASSWORD": "", "OPENCODE_CONFIG": ""})
+            "XDG_STATE_HOME": "", "OPENCODE_SERVER_PASSWORD": "", "OPENCODE_CONFIG": "",
+            "COUSIN_POLICY_FILE": ""})
 
     def test_shell_env_names_what_the_runner_owns_or_a_secret_is_refused(self):
         for bad in ('"HOME"', '"XDG_DATA_HOME"', '"OPENCODE_SERVER_PASSWORD"', '"OPENCODE_X"',

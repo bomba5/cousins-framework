@@ -967,7 +967,12 @@ or `<home>/.opencode`. The message names each path: remove it. After the
 server starts, the runner reads the config opencode actually runs with
 (`GET /config`) and runs no turn unless it holds exactly the plugin pack,
 exactly the one MCP server, no provider beyond the account's, the models
-`cousin.toml` names, and nothing the bridge guard refuses. A system-wide
+`cousin.toml` names, and nothing the bridge guard refuses. It makes all
+of these checks again (and reads `auth.json` again) before every turn,
+because opencode can take a new plugin or provider while it runs
+(`PATCH /global/config`, measured on 1.18.31): at the first mismatch the
+row goes back to the queue and the runner gives up (exit 3), so its restart
+reports the cause. A system-wide
 managed config opencode may also read is outside the cousin's reach and is
 checked the same way, through that effective config.
 

@@ -484,6 +484,72 @@ class TestGuards(OpencodeCase):
         self.assertTrue(self.factory.servers[0].stopped)
 
 
+class TestEveryTurnIsGuarded(OpencodeCase):
+    """Review round 2, Important 1 (and 7b): the start's checks bind the
+    config opencode loads at start, but the model can change it later
+    (PATCH /global/config reloads plugins and providers live, measured on
+    1.18.31, writing <data_dir>/config/opencode/opencode.jsonc), and a key
+    can change without a 401. So every turn starts with the start's checks
+    again: auth.json (preflight), the foreign config sources, and the
+    effective config. A failure puts the row back and the runner gives up;
+    the window is one turn."""
+
+    def first_turn(self, **kw):
+        r = self.started(self.runner([[("text", "one")], [("text", "two")]], **kw))
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        return r
+
+    def assert_refused_before_the_turn(self, r, needle):
+        b = r.enqueue(_op("two"))
+        self.assertTrue(_wait(lambda: r.fatal is not None, 8), "the turn ran unguarded")
+        self.assertIn(needle, r.fatal)
+        self.assertEqual(len(self.prompts()), 1, "no prompt after the check failed")
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "queued"))
+        self.assertTrue(_wait(lambda: not r.worker_alive()))
+
+    def test_a_config_source_written_mid_life_stops_the_next_turn(self):
+        r = self.first_turn()
+        g = Path(r.account.data_dir) / "config" / "opencode"
+        (g / "opencode.jsonc").write_text('{"plugin": ["file:///x.js"]}')
+        self.assert_refused_before_the_turn(r, "opencode.jsonc")
+
+    def test_an_effective_config_changed_mid_life_stops_the_next_turn(self):
+        r = self.first_turn()
+        self.factory.fake.config["plugin"] = self.factory.fake.config["plugin"] + ["file:///x.js"]
+        self.assert_refused_before_the_turn(r, "effective config")
+
+    def test_an_auth_json_changed_without_a_401_stops_the_next_turn(self):
+        home = self.home(model="openai/gpt-x")
+        account = self.account(endpoint=None, endpoint_model=None, providers=("openai",))
+        auth = Path(account.data_dir).joinpath(*accounts.AUTH_JSON)
+        auth.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        auth.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k1"}}))
+        auth.chmod(0o600)
+        r = self.first_turn(home=home, account=account)
+        auth.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k1"},
+                                    "https://corp.example": {"type": "wellknown"}}))
+        self.assert_refused_before_the_turn(r, "wellknown")
+
+    def test_a_config_source_written_during_the_start_is_caught_after_the_ack(self):
+        r = self.runner()
+        g = Path(r.account.data_dir) / "config" / "opencode"
+        real = r._await_plugin_ack
+
+        def ack_then_write():
+            real()
+            g.mkdir(parents=True, exist_ok=True)
+            (g / "tool").mkdir()
+        r._await_plugin_ack = ack_then_write
+        a = r.enqueue(_op("hello"))
+        r.start()
+        self.assertTrue(_wait(lambda: r.fatal is not None))
+        self.assertIn(str(g / "tool"), r.fatal)
+        self.assertEqual(self.prompts(), [])
+        self.assertEqual(r.inbox.get(a.inbox_id)["state"], "queued")
+
+
 class TestLeftoverServer(OpencodeCase):
     """Review Important 2: a server an earlier runner left behind (killed
     before its teardown) is killed at the next start, found by the pidfile

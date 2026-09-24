@@ -178,6 +178,22 @@ none is a contract item:
   writes `auth.json` atomically but takes no lock against a running
   `opencode serve` refreshing an OAuth token in the same file.
 - **Only x86-64 is pinned** in the image's opencode variant.
+- **The guard binds opencode's configuration, not the model's shell.** The
+  model's shell runs as the same user as the runner and the server. From it
+  the model can read the server's environment (`/proc/$PPID/environ`, the
+  server's password among it), call the server's API with that password
+  (`PATCH /global/config` adds a plugin or a provider to the running server
+  at once, measured on 1.18.31), read and write the account's data dir, and
+  read any credential that user can read, another account's Claude login
+  included on a bare host. The runner re-checks `auth.json`, the config
+  sources and the effective config before every turn and gives up at the
+  first mismatch, so such a change lasts at most the rest of the turn that
+  made it. The containment is the container: a cousin's shell is the
+  container ([the design](../design/agent-loop-runner.md)); on a bare host,
+  run an opencode cousin as a user that can read nothing it should not.
+- **`auth.json` is checked at every turn start, not during a turn.** A key
+  or login changed without a 401 binds from the next turn, when the per-turn
+  check reads the file again.
 - **A subagent's events do not reset the turn's idle clock.** A `task`
   subagent runs in a child session whose events the runner drops before it
   notes the turn's last event; a long subagent relies on opencode updating
@@ -192,8 +208,10 @@ none is a contract item:
 - **The model's shell keeps part of the server's environment.** opencode
   merges the plugin's `shell.env` answer over its own environment, so a
   variable can be overridden (the plugin sets `HOME` to the cousin's home and
-  empties the XDG variables, the server's password and its config path) but
-  not removed: the shell still sees opencode's `OPENCODE_*` switches and
-  `COUSIN_POLICY_FILE` (neither a secret). Processes opencode starts other
+  empties the XDG variables, the server's password, its config path and
+  `COUSIN_POLICY_FILE`) but not removed: the shell still sees opencode's
+  `OPENCODE_*` switches (flags, no value to hide). Emptying a variable does
+  not hide it from a process that reads another's (see the next entry).
+  Processes opencode starts other
   than a shell (language servers, formatters) run with the server's own
   environment, `HOME` in the account's data dir.

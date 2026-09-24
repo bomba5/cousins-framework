@@ -24,6 +24,8 @@ LITERAL = re.compile(r"""(runner"\)|_runner_kind\([^)]*\))\s*[!=]=\s*["'](sdk|fa
 OWNERS = {"cousin_lib/migrate.py": "Task 11 (the kind switch)"}
 
 SITES = (
+    ('cousin_lib/migrate.py', 'tmux_kind = _agent(home).get("runner") == "tmux"', 'kinds'),
+    ('cousin_lib/migrate.py', 'if current not in RUNNER_KINDS:', 'kinds'),
     ('cousin_lib/mcp_server.py', 'return _runner_kind(pathlib.Path(home)) == "tmux"', 'kinds'),
     ('cousin_lib/supervisor.py', 'if (_agent_table(home) or {}).get("runner") != "tmux":', 'pane'),
     ('cousin_lib/chat.py', 'return isinstance(delivery.backend_for(target.home), delivery.InboxBackend)', 'transport'),

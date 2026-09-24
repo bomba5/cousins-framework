@@ -612,6 +612,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
 | `COUSIN_DEFAULT_RUNNER` | `sdk` or `fake`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
+| `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set (the `opencode` image sets it); unset: `opencode` on `PATH` |
 
 ## cousin.toml
 
@@ -894,6 +895,40 @@ never stopped for it. A side session is not interruptible from the console
 in this phase: an interrupt reaches the primary's live turn only. Each side
 session is one more agent CLI process: measured at 300 to 480 MB of
 resident memory per interactive CLI on the reference host.
+
+### [agent] on the opencode lane
+
+A cousin whose runner is opencode (`OpencodeRunner`, phase 9) runs on a
+`kind = "opencode"` account (see [accounts.toml](#accountstoml)) and these
+`[agent]` keys:
+
+| key | default | meaning |
+|---|---|---|
+| `model` | required | `"<provider>/<model>"`, on a provider the account reaches: one of its `providers`, or `local/<endpoint_model>` for an `endpoint` account. No default: without it the runner refuses to start (exit 2), because opencode would otherwise pick a model from whatever provider it can reach |
+| `small_model` | `model` | the model opencode uses for its own small calls (session titles); the same rules |
+| `opencode_bin` | `COUSIN_OPENCODE_BIN`, else `opencode` on `PATH` | the `opencode` binary |
+| `opencode_models_fetch` | `true` | `false` sets `OPENCODE_DISABLE_MODELS_FETCH=1`: opencode then does not fetch the models.dev catalog at start (an outbound request that carries no credential) |
+
+The runner starts one `opencode serve` on `127.0.0.1` with a fresh password,
+in the cousin's home, with `HOME` and the four XDG directories in the
+account's data dir. Its environment is an allowlist: `PATH`, `LANG`,
+`LANGUAGE`, `LC_*`, `TZ`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, the cousin's
+`COUSIN_HOME` and `FRAMEWORK_ROOT`, and the runner's own switches; nothing
+else (no `OPENCODE_*` of the shell, no `*_API_KEY`) reaches it. The config
+it reads is rendered at every start into `<data_dir>/opencode.runner.json`
+(mode 0600) and nothing else is merged in: opencode's own hosted provider
+disabled, the model and small model above, `permission` allow-all (the
+cousin's `policy.toml` is the policy), the plugin pack, and one MCP server,
+the runner's own on loopback behind a per-start token, through which the
+model reaches the framework's tools as `cousin_<tool>`. A config or an
+environment that names the Claude-subscription bridge is refused before
+anything starts. The runner checks that opencode reports that MCP server
+connected before its first turn; when it does not, no turn runs (the runner
+gives up, exit 3). The composed system prompt goes with every prompt;
+opencode appends it to its own agent prompt. A restart resumes the session
+recorded in `data/runner-session.json` (lane `opencode`) while opencode
+still holds it; otherwise a new session starts, with the state digest as its
+first message when there is state to carry.
 
 ### policy.toml
 

@@ -23,6 +23,7 @@ import uuid
 from pathlib import Path
 
 from cousin_lib import agent_auth, memory
+from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
 from cousin_lib.config import (
     EFFORT_LEVELS,
     MEMORY_SCOPES,
@@ -360,11 +361,87 @@ def _tmux_base(tmux_bin, tmux_socket):
     return cmd
 
 
+SUPERVISOR_STOP_TIMEOUT = 60.0     # a waited stop is answered once the runner is down (up to 35 s)
+
+
+class NoSupervisor(SpawnError):
+    """A runner-lane start found no cousin-supervisor for the root."""
+
+
+def runner_lane(home):
+    """The cousin runs on cousin-runner (`[agent] runner` is sdk or fake),
+    the test every runner-lane caller uses; its start and stop are the
+    supervisor's (R10). A cousin.toml that is missing or does not parse
+    is the tmux lane, as delivery reads it."""
+    from cousin_lib import delivery
+    return delivery._runner_kind(home) in RUNNER_KINDS
+
+
+def _supervisor_root(home, root):
+    """The root whose supervisor holds this cousin: the caller's, else the
+    one runner.main.root_for derives from the home (the root the runner
+    itself runs under)."""
+    if root is not None:
+        return Path(root)
+    from cousin_lib.runner.main import root_for
+    return root_for(home)
+
+
+def _start_runner(home, root):
+    from cousin_lib import supervisor
+    root = _supervisor_root(home, root)
+    try:
+        answer = supervisor.request(root, "start", slug=Path(home).name)
+    except supervisor.SupervisorUnavailable:
+        raise NoSupervisor("no cousin-supervisor is running for %s: start it"
+                           " with `cousin-supervisor run`" % root)
+    if not answer.get("ok"):
+        raise SpawnError("cousin-supervisor refused the start: %s"
+                         % (answer.get("error") or "no reason given"))
+
+
+def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):
+    """Ask the supervisor to stop the cousin's runner child and hold it
+    down (it writes <home>/run/held; the next start removes it). With
+    wait the answer comes once it is down; without, once it is signalled
+    (`stopping`). A timeout while the supervisor is still up reads as
+    `stopping`, never as stopped."""
+    from cousin_lib import supervisor
+    root = _supervisor_root(home, root)
+    try:
+        answer = supervisor.request(root, "stop", slug=Path(home).name,
+                                    wait=wait, by=by,
+                                    timeout=SUPERVISOR_STOP_TIMEOUT)
+    except supervisor.SupervisorUnavailable:
+        if supervisor.snapshot(root) is None:
+            return {"runner": "not running", "supervisor": "not running"}
+        return {"runner": "stopping", "supervisor": "running"}
+    if answer.get("ok"):
+        return {"runner": answer.get("state") or "stopped",
+                "supervisor": "running"}
+    error = answer.get("error") or "refused"
+    if error.startswith("no child named"):
+        return {"runner": "not running", "supervisor": "running"}
+    return {"runner": "unknown", "supervisor": "running", "error": error}
+
+
 def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
-                port_pid=_pid_bound_to_port, term_wait=5.0):
+                port_pid=_pid_bound_to_port, term_wait=5.0, root=None,
+                wait=True, by="spawn.stop_cousin"):
     """Kill the tmux session and stop the chat server: the pid spawn
     wrote, else the process bound to the cousin's port on this host.
-    Idempotent; the result names what each half was found doing."""
+    Idempotent; the result names what each half was found doing.
+
+    On the runner lane the cousin-supervisor stops the runner (the
+    runner finishes its turn on SIGTERM) and holds it down, across a
+    supervisor restart too, until the next start; the result is
+    {"runner": <child state>, "supervisor": "running" | "not running"};
+    root locates the supervisor (else derived from the home). wait
+    (default) answers once the runner is down; wait=False once it is
+    signalled, `"runner": "stopping"`. by is who asked, for the hold
+    marker."""
+    if runner_lane(home):
+        return _stop_runner(home, root, wait=wait, by=by)
     home = Path(home)
     config = CousinConfig.load(home)
     base = _tmux_base(tmux_bin, tmux_socket)
@@ -785,7 +862,15 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
 
     A packet a clean stop left (pending_boot) is typed in after
     boot_settle seconds; the caller is responsible for not resuming
-    the closed session (resume_plan declines while one is pending)."""
+    the closed session (resume_plan declines while one is pending).
+
+    On the runner lane (runner_lane) nothing here runs: the
+    cousin-supervisor is asked to start the cousin's runner, the one
+    launcher of a runner process (R10), and agent_cmd, the tmux
+    arguments and start_chat_server are not used. No supervisor is
+    NoSupervisor; a refused start is a SpawnError with its reason."""
+    if runner_lane(home):
+        return _start_runner(home, root)
     config = CousinConfig.load(home)
     agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
     # The auth mode's checks (key file, isolated harness config) run

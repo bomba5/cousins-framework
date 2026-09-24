@@ -25,7 +25,7 @@ import unittest
 # tmux server, a filter override or a supervisor.
 HERMETIC_VARS = ("FRAMEWORK_ROOT", "COUSIN_HOME", "COUSIN_SLUG",
                  "COUSIN_TMUX_SOCKET", "COUSIN_FILTER_OVERRIDE",
-                 "INVOCATION_ID")
+                 "INVOCATION_ID", "COUSIN_SUPERVISED")
 
 _MARK = "_cousin_hermetic"
 

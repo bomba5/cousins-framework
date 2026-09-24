@@ -115,7 +115,10 @@ def register():
     @router.route("POST", "/api/admin/restart/framework")
     def restart(req):
         server = req.server
-        supervised = bool(os.environ.get("INVOCATION_ID"))
+        # systemd sets INVOCATION_ID; cousin-supervisor sets
+        # COUSIN_SUPERVISED for its children and restarts exit 75 at once.
+        supervised = bool(os.environ.get("INVOCATION_ID")
+                          or os.environ.get("COUSIN_SUPERVISED"))
         # Non-zero on purpose: the shipped unit restarts on failure only,
         # so a clean exit 0 would leave the console stopped.
         exit_fn = server.exit_fn or (lambda: os._exit(RESTART_EXIT_CODE))

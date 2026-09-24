@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import agent_auth, loops, spawn
+from cousin_lib import agent_auth, delivery, loops, spawn, supervisor
 from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
                                CousinConfig, FrameworkConfig,
                                MissingConfigError, agent_config,
@@ -228,7 +228,22 @@ def effective_runtime(config, defaults):
             "effort": config.effort or defaults["default_effort"]}
 
 
-def fleet_row(server, config, defaults=None, patterns=None):
+_UNREAD = object()
+
+
+def supervisor_state(snap, slug):
+    """The supervisor's view of a cousin's runner: {"state": ...} from its
+    snapshot (run/supervisor.json), or None when there is no live
+    snapshot or no `runner:<slug>` child in it. Unknown is null, never
+    "stopped" (R7)."""
+    children = (snap or {}).get("children")
+    row = children.get("runner:%s" % slug) if isinstance(children, dict) else None
+    if not isinstance(row, dict) or not row.get("state"):
+        return None
+    return {"state": row["state"]}
+
+
+def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
     chat = None if _is_runner(config) else chat_health(config)
@@ -236,6 +251,8 @@ def fleet_row(server, config, defaults=None, patterns=None):
         defaults = agent_defaults(server.root)
     if patterns is None:
         patterns = attention_patterns(server.root)
+    if snap is _UNREAD:
+        snap = supervisor.snapshot(server.root)
     attention = None
     runner = None
     if _is_runner(config):
@@ -296,6 +313,7 @@ def fleet_row(server, config, defaults=None, patterns=None):
                       else _last_msg_ts(config, chat)),
         "runner": runner,
         "tokensSpent": tokens.today_total(server, config.home),
+        "supervisor": supervisor_state(snap, config.slug),
     }
 
 
@@ -328,7 +346,8 @@ def fleet_rows(server):
     from cousin_lib.console import hive as console_hive
     defaults = agent_defaults(server.root)
     patterns = attention_patterns(server.root)
-    rows = [fleet_row(server, config, defaults, patterns)
+    snap = supervisor.snapshot(server.root)
+    rows = [fleet_row(server, config, defaults, patterns, snap)
             for config in FrameworkConfig(server.root).list_cousins()]
     return rows + console_hive.remote_rows(
         server, {row["slug"] for row in rows})
@@ -336,8 +355,27 @@ def fleet_rows(server):
 
 # ---- commands -----------------------------------------------------------
 
+def _start_runner(server, slug, config):
+    """The runner lane: the cousin-supervisor starts the runner. No
+    config/agent-cmd (a container has none), no chat server, no tmux;
+    "already running" is a runner holding the cousin's lock. 503 when
+    no supervisor runs for the root."""
+    if delivery.is_alive(config.home):
+        return {"ok": True, "slug": slug, "status": "already running"}
+    server.emit("cousin-status", {"slug": slug, "status": "starting"})
+    try:
+        spawn.start_cousin(config.home, agent_cmd=None, root=server.root)
+    except spawn.NoSupervisor as err:
+        raise HttpError(503, str(err))
+    except spawn.SpawnError as err:
+        raise HttpError(500, str(err))
+    return {"ok": True, "slug": slug, "status": "started"}
+
+
 def _start(server, slug):
     config = load_cousin(server, slug)
+    if spawn.runner_lane(config.home):
+        return _start_runner(server, slug, config)
     chat_ok = chat_health(config) == "ok"
     if session_alive(server, config):
         if not chat_ok and not config.chat_host:
@@ -364,11 +402,43 @@ def _start(server, slug):
 
 
 def _stop(server, slug):
+    """Stop at once. On the runner lane the supervisor is asked with
+    wait false (R6'): the answer comes once the runner is signalled,
+    `status: "stopping"`, and the fleet row's `supervisor.state` shows
+    when it is down; a turn in hand can take up to 35 s."""
     home = cousin_home(server, slug)
     server.emit("cousin-status", {"slug": slug, "status": "stopping"})
+    if spawn.runner_lane(home):
+        result = spawn.stop_cousin(home, root=server.root, wait=False, by="console")
+        status = "stopping" if result.get("runner") == "stopping" else "stopped"
+        return {"ok": True, "slug": slug, "status": status, **result}
     result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
                                tmux_socket=server.tmux_socket)
     return {"ok": True, "slug": slug, "status": "stopped", **result}
+
+
+def _start_when_down(server, slug, poll=0.2):
+    """The second half of a runner-lane restart: wait (bounded by the
+    runner's stop budget) until the supervisor's child for this cousin
+    has no pid, then start it. The outcome is a cousin-status event."""
+    name = "runner:%s" % slug
+    deadline = time.monotonic() + supervisor.STOP_TIMEOUTS["runner"] + supervisor.KILL_GRACE_S + 5
+    while time.monotonic() < deadline:
+        try:
+            row = supervisor.request(server.root, "status", timeout=5.0)["children"].get(name)
+        except (supervisor.SupervisorUnavailable, KeyError, AttributeError):
+            row = None
+        if row is None or row.get("pid") is None:
+            break
+        time.sleep(poll)
+    try:
+        _start(server, slug)
+    except HttpError as err:
+        server.emit("cousin-status", {"slug": slug, "status": "start failed",
+                                      "error": (err.body or {}).get("error")})
+    else:
+        server.emit("cousin-status", {"slug": slug, "status": "started"})
+    server.emit("cousins-refresh", fleet_rows(server))
 
 
 def _pending_flip(slug):
@@ -458,12 +528,18 @@ def register():
         next packet assembled (flip.close_session), in the background,
         202. {"clean": false} stops at once, as kill does for the
         session. A cousin that is not running stops at once either
-        way."""
+        way. On the runner lane a clean stop IS the runner's SIGTERM
+        path (it finishes its turn, then stops): the supervisor is asked
+        without waiting, and the answer is 202 `stopping` (200 `stopped`
+        when there was nothing to stop)."""
         server = req.server
         config = load_cousin(server, slug)
         clean = req.body.get("clean", True)
         if not isinstance(clean, bool):
             raise HttpError(400, "clean must be a boolean")
+        if spawn.runner_lane(config.home):
+            out = _stop(server, slug)
+            return (202 if out["status"] == "stopping" else 200), out
         if not clean or not session_alive(server, config):
             return 200, _stop(server, slug)
         lock = server.state.setdefault("flip_lock", threading.Lock())
@@ -503,11 +579,18 @@ def register():
     def restart(req, slug):
         # A restart stays immediate: it applies a setting (a model, an
         # auth mode) and comes straight back; a clean stop is the stop
-        # button's.
-        stopped = _stop(req.server, slug)
-        time.sleep(req.server.settle_seconds)
+        # button's. On the runner lane the stop does not wait (R6'): a
+        # runner mid-turn is answered 202 and started again in the
+        # background once the supervisor reports it down.
+        server = req.server
+        stopped = _stop(server, slug)
+        if stopped["status"] == "stopping":          # the runner lane only
+            threading.Thread(target=_start_when_down, args=(server, slug),
+                             daemon=True, name="console-restart-%s" % slug).start()
+            return 202, dict(stopped, target="cousin/%s" % slug)
+        time.sleep(server.settle_seconds)
         try:
-            started = _start(req.server, slug)
+            started = _start(server, slug)
         except HttpError as err:
             return err.status, {"ok": False, "target": "cousin/%s" % slug,
                                 "stop": stopped, "start": err.body}

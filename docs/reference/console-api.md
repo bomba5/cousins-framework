@@ -166,6 +166,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `lastMsgTs` | unix time of the cousin's newest reply in your thread (the `[operator] name`, last 20 rows), 0 if none |
 | `tokensSpent` | today's token total, 0 when token counting isn't set up |
 | `runner` | null for a tmux cousin. A runner cousin: `{"alive", "state", "since", "session", "kind", "pid", "unsupported"}` from its own stores: `alive` whether a runner holds its lock, `state` the last state its primary event stream recorded (with `since`, that event's time; it stays the last one recorded after the runner is gone, so read it with `alive`), `kind` (`sdk` or `fake`), `pid` and `unsupported` (the contract items the runner declares it does not support) from the `runner` event `cousin-runner` writes at start |
+| `supervisor` | `{"state": ...}` for a runner cousin the running `cousin-supervisor` holds as a child (`running`, `backoff`, `failing`, `stopped`), read from its `run/supervisor.json`; null when no supervisor runs (or the file is stale) or it holds no child for this cousin. Null is unknown, never stopped |
 
 With the hive on, remote nodes follow the local rows. They carry the same keys (the local-only ones null or 0) plus `remote: true`, `remoteState` (`online`, `offline`, `pending` = built but never checked in, `revoked`), `online`, `revoked`, `checkedIn`, `lastSeen`, `version`. For a remote row `status` is `running` when online, and `chat` is derived (`ok` online, `down` offline, `none` before the first checkin), never probed. If a slug is both local and a node, the local row wins.
 
@@ -203,15 +204,21 @@ Dismiss. Stops the cousin, tars the whole home (minus `.secrets/`) to `data/dism
 
 Starts the tmux session with the agent from `config/agent-cmd`, and the chat server if it isn't answering. `200 {"ok": true, "slug", "status": "started" | "already running", "chat_server": "started" | "reused" | "not running"}`. If the session is already up but the chat server is down, the chat server is started. `500` when `config/agent-cmd` is missing or tmux fails. Emits `cousin-status` `starting`.
 
+A runner cousin (`[agent] runner = "sdk"` or `"fake"`) is started by the running `cousin-supervisor` instead ([commands](../commands.md)): no `config/agent-cmd`, no tmux, no chat server. `200 {"ok": true, "slug", "status": "started" | "already running"}`; already running means a runner holds the cousin's lock. `503` when no supervisor runs for the install (the message says to run `cousin-supervisor run`), `500` with its reason when the supervisor refuses.
+
 ### `POST /api/cousins/<slug>/stop`
 
 Body (optional): `{"clean": true}` (the default). A running cousin stops cleanly in the background ([lifecycle](lifecycle.md#a-clean-stop)): `202 {"ok": true, "slug", "status": "closing", "started_at"}`, `cousin-status` `closing`, then `stopped` (or `stop failed`) and a `cousins-refresh` when it is done; `409` while a flip or another clean stop of that cousin is running. The run's stages show on `GET /api/cousins/<slug>/flip`.
 
 With `{"clean": false}`, or when the cousin isn't running: kills the tmux session and stops the chat server at once. Idempotent. `200 {"ok": true, "slug", "status": "stopped", "tmux": "stopped" | "already stopped", "chat_server": "stopped" | "not running"}`. Emits `cousin-status` `stopping`. `400` when `clean` is not a boolean.
 
+A runner cousin always stops through the supervisor, clean or not: a clean stop is the runner's own SIGTERM path (it finishes the turn in hand, then exits, which can take up to about 35 seconds). The route does not wait for that: `202 {"ok": true, "slug", "status": "stopping", "runner": "stopping", "supervisor": "running"}` once the runner is signalled, and the row's `supervisor.state` turns `stopped` when it is down. When there was nothing to stop the answer is `200` with `"status": "stopped"` and `"runner": "stopped" | "not running"`, `"supervisor": "running" | "not running"` (`error` is added when the supervisor refused). The stop holds the runner down until the next start, across a supervisor or container restart too (`<home>/run/held`).
+
 ### `POST /api/cousins/<slug>/restart`
 
 Immediate stop (as `{"clean": false}`), wait about a second, start. `200 {"ok": true, "target": "cousin/<slug>", "stop": {...}, "start": {...}}`. If the start fails you get the start's status code with `ok: false` and its error body under `start`.
+
+A runner cousin that is running is signalled and answered at once, `202 {"ok": true, "slug", "status": "stopping", "runner": "stopping", "supervisor": "running", "target": "cousin/<slug>"}`; the console starts it again in the background once the supervisor reports it down, and says how that went with a `cousin-status` event (`started` or `start failed`) and a `cousins-refresh`. With nothing to stop it is the `200` above.
 
 ### `GET /api/cousins/<slug>/auth`
 
@@ -627,7 +634,7 @@ Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`),
 
 ### `POST /api/admin/restart/framework`
 
-Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 0 about 0.6 s later. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`). If it's false, nothing will start it again: restart means stop.
+Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 0 about 0.6 s later. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`) or under `cousin-supervisor` (`COUSIN_SUPERVISED`), which starts it again at once. If it's false, nothing will start it again: restart means stop.
 
 ## `GET /api/events`
 

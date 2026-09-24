@@ -368,6 +368,83 @@ class Backup(ConsoleCase):
             want = 0o700 if path.is_dir() else 0o600
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), want, path)
 
+    def test_a_home_whose_cousin_toml_names_another_slug_is_refused(self):
+        home = self.cousin("wren")
+        (home / "cousin.toml").write_text('[cousin]\nslug = "robin"\nname = "R"\n')
+        dest = self.dest()
+        self.serve()
+        status, body = self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
+        self.assertEqual(status, 202, body)
+        op = wait_op(self, "wren")
+        self.assertEqual(op["status"], "failed", op)
+        self.assertIn("robin", op["error"])
+        self.assertEqual(os.listdir(dest), [])
+
+    def test_a_config_slug_and_a_link_into_the_root_never_write_there(self):
+        # scratch root: a cousin slugged "config" whose cousin.toml says so,
+        # and dest/config a link planted into the root's config/ after the
+        # route's own check (between the check and the op's work)
+        home = self.cousin("config")
+        (self.root / "config" / "keep.txt").write_text("live\n")
+        before = sorted(os.listdir(self.root / "config"))
+        mode = stat.S_IMODE((self.root / "config").stat().st_mode)
+        dest = self.dest()
+        self.serve()
+        from cousin_lib.console import routes_system
+        real_check = routes_system.check_backup_dest
+
+        def check_then_plant(root, d, slugs=()):
+            out = real_check(root, d, slugs)
+            os.symlink(self.root / "config", Path(d) / "config")
+            return out
+        with mock.patch.object(routes_system, "check_backup_dest", check_then_plant):
+            status, body = self.post("/api/system/backup", {"dest": dest, "slugs": ["config"]})
+        self.assertEqual(status, 202, body)
+        op = wait_op(self, "config")
+        self.assertEqual(op["status"], "failed", op)
+        self.assertEqual(sorted(os.listdir(self.root / "config")), before)
+        self.assertEqual(stat.S_IMODE((self.root / "config").stat().st_mode), mode)
+        self.assertTrue(home.is_dir())
+
+    def test_a_snapshot_that_lands_outside_its_directory_is_failed_and_left_alone(self):
+        self.cousin("wren")
+        dest = self.dest()
+        elsewhere = Path(self.dest())
+        self.serve()
+        from datetime import date
+        from cousin_lib import backup
+
+        def astray(home, dest_root=None, *, target=None):
+            snap = elsewhere / "wren" / date.today().isoformat()
+            snap.mkdir(parents=True)
+            (snap / "MEMORY.md").write_text("x\n")
+            return snap
+        with mock.patch.object(backup, "snapshot", astray):
+            status, body = self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
+            op = wait_op(self, "wren")
+        self.assertEqual(op["status"], "failed", op)
+        self.assertIn("outside", op["error"])
+        # outside the checked destination: not ours to delete
+        self.assertTrue((elsewhere / "wren").is_dir())
+
+    def test_a_snapshot_under_dest_but_not_its_directory_is_removed(self):
+        self.cousin("wren")
+        dest = self.dest()
+        self.serve()
+        from datetime import date
+        from cousin_lib import backup
+
+        def sideways(home, dest_root=None, *, target=None):
+            snap = Path(dest) / "other" / date.today().isoformat()
+            snap.mkdir(parents=True)
+            (snap / "MEMORY.md").write_text("x\n")
+            return snap
+        with mock.patch.object(backup, "snapshot", sideways):
+            self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
+            op = wait_op(self, "wren")
+        self.assertEqual(op["status"], "failed", op)
+        self.assertFalse((Path(dest) / "other" / date.today().isoformat()).exists())
+
     def test_a_snapshot_dir_may_not_land_in_the_live_root(self):
         self.cousin("config")  # a slug named like a protected directory
         self.serve()

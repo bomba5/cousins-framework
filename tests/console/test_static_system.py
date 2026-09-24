@@ -77,6 +77,10 @@ class SystemView(unittest.TestCase):
         send = reset[reset.index("const send"):]
         self.assertLess(send.index('setPw("")'), send.index("onSubmit("))
         self.assertIn("pw !== pw2", send)
+        # Enter takes the same guard as the button: never an empty password
+        self.assertLess(send.index("if (!pw || !pw2) return;"), send.index("onSubmit("))
+        self.assertIn('if (e.key === "Enter") send();', reset)
+        self.assertIn("disabled={!pw || !pw2}", reset)
 
     def test_a_panel_that_cannot_load_says_so(self):
         for name in ("SysSupervisorPanel", "SysAgentDefaultsPanel", "SysConfigEditors"):

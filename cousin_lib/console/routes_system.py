@@ -281,28 +281,85 @@ def _owner_only(top):
             os.chmod(path, 0o700 if os.path.isdir(path) else 0o600)
 
 
+def _slug_dir(root, dest, slug):
+    """<dest>/<slug> made ours: created 0700 if absent, never a symlink
+    (lstat, then an O_NOFOLLOW directory handle), tightened to 0700 through
+    that handle, and checked with its realpath: directly under the real
+    destination and not inside the live root. Returns (path, handle, its
+    stat); the caller closes the handle. ValueError or OSError otherwise,
+    before anything is written or chmodded through a link."""
+    top = os.path.join(dest, slug)
+    try:
+        os.mkdir(top, 0o700)
+    except FileExistsError:
+        pass
+    if os.path.islink(top) or not os.path.isdir(top):
+        raise ValueError("%s is a link or not a directory" % top)
+    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        st = os.fstat(fd)
+        if st.st_uid != os.geteuid():
+            raise ValueError("%s is not the console's own directory" % top)
+        os.fchmod(fd, 0o700)
+        real = _refuse_in_root(root, top)
+        if os.path.dirname(real) != os.path.realpath(dest):
+            raise ValueError("%s resolves outside %s" % (top, dest))
+    except BaseException:
+        os.close(fd)
+        raise
+    return top, fd, st
+
+
 def _backup_work(root, home, slug, dest):
     def work(op):
+        import shutil
+
         from cousin_lib import backup, jobs
+        from cousin_lib.config import CousinConfig, MissingConfigError
         from cousin_lib.console.longop import OpError
         op.stage("snapshot", "running", dest)
-        top = os.path.join(dest, slug)
         with jobs.track_job("backup", "backup %s" % slug, description="into %s" % dest,
                             spawned_by=slug) as job:
-            # <dest>/<slug> first, 0700, checked again now it exists: the
-            # snapshot's own files are then never readable by others, even
-            # before the pass that tightens them.
+            # The directory is named by the cousin's own cousin.toml slug, and
+            # that must be the one asked for: the check ran on the request's.
             try:
-                os.makedirs(top, mode=0o700, exist_ok=True)
-                os.chmod(top, 0o700)
-                _refuse_in_root(root, top)
+                configured = CousinConfig.load(home).slug
+            except MissingConfigError as err:
+                raise OpError("backup of %s refused: %s" % (slug, err))
+            if configured != slug:
+                raise OpError("backup of %s refused: its cousin.toml names the slug %s"
+                              % (slug, configured))
+            try:
+                top, fd, held = _slug_dir(root, dest, slug)
             except (OSError, ValueError) as err:
                 raise OpError("backup of %s refused: %s" % (slug, err))
             try:
-                snap = backup.snapshot(home, dest)
-            except backup.BackupError as err:
-                raise OpError("backup of %s failed: %s" % (slug, err))
-            _owner_only(top)
+                try:
+                    snap = backup.snapshot(home, target=top)
+                except backup.BackupError as err:
+                    raise OpError("backup of %s failed: %s" % (slug, err))
+                real_top = os.path.realpath(top)
+                real_snap = os.path.realpath(str(snap))
+                now = os.lstat(top)
+                if (not _under(real_snap, real_top) or real_snap == real_top
+                        or (now.st_dev, now.st_ino) != (held.st_dev, held.st_ino)):
+                    # remove it only when it is plainly the destination's and
+                    # nowhere near the live install
+                    removed = False
+                    try:
+                        _refuse_in_root(root, real_snap)
+                        if _under(real_snap, os.path.realpath(dest)) \
+                                and real_snap != os.path.realpath(dest):
+                            shutil.rmtree(real_snap)
+                            removed = True
+                    except (OSError, ValueError):
+                        pass
+                    raise OpError("backup of %s failed: the snapshot landed outside %s (%s)%s"
+                                  % (slug, top, real_snap,
+                                     "; removed" if removed else "; left in place"))
+                _owner_only(top)
+            finally:
+                os.close(fd)
             job.summary = str(snap)
         op.stage("snapshot", "done", str(snap))
         return {"ok": True, "snapshot": str(snap)}

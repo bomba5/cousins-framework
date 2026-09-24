@@ -430,17 +430,26 @@ class Sessions:
 
     def stop(self, *, timeout=30.0):
         """The watcher first (nothing is rebuilt during a stop), then every
-        session at once, each within `timeout`."""
+        session at once. `timeout` bounds the WHOLE stop, the watcher's join
+        and every session's included (phase 6: the supervisor kills the child
+        a few seconds after it); a session still stopping at the deadline is
+        left to the process's exit (its thread is a daemon)."""
         import threading
+        deadline = time.monotonic() + float(timeout)
+
+        def left():
+            return max(0.0, deadline - time.monotonic())
+
         self._stopping.set()
         if self._watcher is not None:
-            self._watcher.join(timeout)
-        threads = [threading.Thread(target=r.stop, kwargs={"timeout": timeout}, daemon=True)
+            self._watcher.join(min(left(), 2 * self.watch_s + 1.0))
+        budget = left()
+        threads = [threading.Thread(target=r.stop, kwargs={"timeout": budget}, daemon=True)
                    for r in self.sessions().values()]
         for t in threads:
             t.start()
         for t in threads:
-            t.join(timeout + 5)
+            t.join(left())
 
     def state(self):
         return self.primary.state()

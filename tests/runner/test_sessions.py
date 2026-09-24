@@ -197,6 +197,29 @@ class TestSessionsAsARunner(SessionsCase):
         s.interrupt()
         self.assertTrue(_wait(lambda: s.inbox.get(op.inbox_id)["state"] == "done"))
 
+    def test_stop_keeps_the_whole_stop_within_its_timeout(self):
+        """Phase 6's stop budget: `cousin-runner` gives `stop` STOP_TIMEOUT_S
+        and the supervisor kills the child soon after, so the budget is the
+        TOTAL, never per session: three sessions that each take 3 s to stop
+        still return within a 1 s budget."""
+        home = _install(self, 'peer = "own"\nperson = "own"\n')
+        s = self.build(home, ("person", "peer"), [], primary_scripts=[])
+        s.start()
+        slow = []
+        for runner in s.sessions().values():
+            real = runner.stop
+
+            def hang(*, timeout=30.0, _real=real):
+                slow.append(timeout)
+                time.sleep(3.0)
+                _real(timeout=0.5)
+            runner.stop = hang
+        t0 = time.monotonic()
+        s.stop(timeout=1.0)
+        self.assertLess(time.monotonic() - t0, 1.5)
+        self.assertEqual(len(slow), 3)
+        self.assertTrue(all(budget <= 1.0 for budget in slow), slow)
+
     def test_the_rows_a_dead_side_session_claimed_go_back(self):
         home = _install(self)
         s = self.build(home, ("peer",), [], primary_scripts=[])

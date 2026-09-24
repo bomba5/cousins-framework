@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Added
+- The `job` tool has a `run` command: `title`, `argv` (the command as an
+  array, never a shell string), optional `desc` and `log` (relative to the
+  home). It is `cousin-job start shell TITLE -- CMD`, the same launcher, on
+  both lanes: the command runs detached in its own process group from the
+  cousin's home, its output goes to the row's log, and the row closes with
+  its exit code. It returns the job id and log path at once. An empty argv
+  or a non-string element is refused. A cousin no longer needs `cousin-job`
+  through Bash for a tracked long command, and the runner contract says so.
+  An existing cousin's registry gains `run` at its next start or flip; the
+  job tool's description and the `kind` text there keep their old wording,
+  because the registry sync never changes a value a cousin already has.
+- MCP registry: an `array` placeholder is checked (a JSON array of its
+  `items` type, not empty unless optional), and a command's options go
+  before a literal `--` in its argv.
+
+### Changed
+- `cousin-job start ... --log PATH -- CMD` records the log path as absolute,
+  so the console finds a relative one.
+
 ## 1.19.0 - 2026-09-24
 
 ### Added

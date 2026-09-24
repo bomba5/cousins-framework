@@ -14,7 +14,7 @@ Every cousin spawned by the framework comes with five tools:
 |---|---|---|
 | `memory` | `cousin-memory` | `search`, `decide`, `remember`, `recall`, `activity` |
 | `send` | `cousin-chat send` or `cousin-reply` | picked by the destination |
-| `job` | `cousin-job` | `start`, `done`, `fail`, `list`, `show` |
+| `job` | `cousin-job` | `start`, `run`, `done`, `fail`, `list`, `show` |
 | `schedule` | `cousin-schedule` | `add`, `list`, `cancel` |
 | `meeting` | `cousin-meeting` | `say`, `pass`, `minutes`, `show` ([meetings](meetings.md)) |
 
@@ -49,6 +49,21 @@ once, from `cousin-chat list`, when the MCP process starts.
 list. Without it, `send` reaches peers only, and its error says no
 operator is configured. For an existing cousin, edit the `operators =
 [...]` line in its `mcp-registry.toml`.
+
+`job run` is how a cousin launches a long shell command as a tracked
+job without a shell of its own: it takes `title`, `argv` (the command as
+an array, one element per argument, never a shell string), and
+optionally `desc` and `log` (a path relative to the cousin's home;
+without it, the job's own log under `data/job-logs/`). It runs
+`cousin-job start shell TITLE --json -- ARGV...`, so it's the same
+launcher: the command runs detached in its own process group, from the
+cousin's home, its output streams into the row's log for the console's
+Jobs view, and the row closes `done` or `failed` with the command's exit
+code. The call returns at once with `{"job_id": ..., "log_path": ...}`
+and never waits for the command. An empty `argv`, or one with an element
+that isn't a string, is refused before anything runs. The row records
+the command line as given, so a secret in `argv` ends up in the jobs
+store: pass secrets some other way.
 
 What's deliberately not there: spawn, flip, reincarnate, transplant,
 loop control and shared-tier review. Those are yours, not the cousin's.
@@ -111,7 +126,11 @@ Each registry command maps to a library function in `HANDLERS`; a
 command the registry enables but `HANDLERS` has no function for stops
 the runner at start, with the list of what's missing. Two tools exist
 only in-process and never over stdio: `reply`, the sole writer of
-`chat.db` on this lane, and `handoff`.
+`chat.db` on this lane, and `handoff`. Handlers are library calls in the
+runner's process, with one exception: `job run` starts the `cousin-job
+start shell` launcher in a fresh interpreter (the same code the runner
+imported), from the cousin's home, because forking the multi-threaded
+runner itself could hang the child.
 
 `handoff` ends the generation: the runner asks for it at a rollover (see
 [agent-loop-runner](design/agent-loop-runner.md#continuous-extraction-and-rollover)),
@@ -155,7 +174,7 @@ cousin-mcp --selftest
 #   -> registry: .../cousins/wren/mcp-registry.toml (4 tools, ceiling 12, timeout 120s, output cap 16000 chars)
 #        memory    cousin-memory                activity, decide, recall, remember, search
 #        send      cousin-chat, cousin-reply    operator, peer (operators: ana)
-#        job       cousin-job                   done, fail, list, show, start
+#        job       cousin-job                   done, fail, list, run, show, start
 #        schedule  cousin-schedule              add, cancel, list
 #        cousin-memory -> beside the interpreter
 #        ...
@@ -254,10 +273,15 @@ argv = ["cancel", "{id}"]
 - `commands.<name>.argv`: literal strings, or exactly `{property}` for a
   value. A placeholder has to be the whole element. A call that leaves
   out a placeholder's property is an error, unless the property is
-  `optional = true`, in which case the element is dropped.
+  `optional = true`, in which case the element is dropped. An `array`
+  property as a placeholder spreads into one element per item; it has
+  to be a JSON array of its `items` type, and not empty unless it's
+  optional (that's how `job run` passes a command line).
 - `commands.<name>.options`: `property = "--flag"`. `true` gives the
   bare flag, a list repeats the flag once per item, anything else goes
-  after the flag. Left out or `false`, there's no flag.
+  after the flag. Left out or `false`, there's no flag. The flags go at
+  the end of the argv, or just before a literal `"--"` in it, so the
+  operands after `--` stay last.
 - `commands.<name>.stdin`: properties joined and fed on stdin, with
   `stdin_sep` on its own line between them. This is how `decide` gets
   its three chunks.
@@ -267,7 +291,8 @@ argv = ["cancel", "{id}"]
 An `enum` is checked by the adapter before anything runs. Everything
 else is checked by the CLI's own argument parser. The default `job`
 tool uses that on purpose: its `kind` enum leaves out `shell`, because
-`start` over MCP takes no command and a shell row would never close.
+`start` over MCP takes no command and a shell row would never close. A
+shell job goes through `run` instead, which takes the command.
 
 A non-zero exit comes back as a tool error with the CLI's stderr, not
 as a protocol error. A call with nothing for stdin gets `/dev/null`.

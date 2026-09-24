@@ -73,7 +73,10 @@ way on this lane. Here:
   the `memory` tool's `search` or `recall` first, and open a memory
   file directly only where a search result points.
 - Jobs, schedules and meetings go through the `job`, `schedule` and
-  `meeting` tools.
+  `meeting` tools. A long shell command is the `job` tool's `run`,
+  which launches it, logs its output and closes the row with its exit
+  code (or a Bash call with `run_in_background`, which the hooks
+  track), never `cousin-job` through Bash.
 
 Read an identity line that says `cousin-reply --user <name>` as a call
 to `reply`, and one that says `cousin-memory decide` as the `memory`

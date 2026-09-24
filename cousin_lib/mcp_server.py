@@ -326,10 +326,37 @@ def check_enums(props, args, cmd_name):
                        ("; " + desc) if desc else ""))
 
 
+_ITEM_TYPES = {"string": str, "integer": int, "number": (int, float),
+               "boolean": bool}
+
+
+def _array_elements(spec, value, cmd_name, name):
+    """An array property's value as whole argv elements, checked: a JSON
+    array whose items are the declared `items` type (string by default).
+    A required one must not be empty. A scalar is refused, so a command
+    line given as one string never reaches an argv as one element."""
+    if not isinstance(value, list):
+        raise ToolError("%s: %s must be an array, not %r"
+                        % (cmd_name, name, value))
+    if not value and not spec.get("optional"):
+        raise ToolError("%s: %s must not be empty" % (cmd_name, name))
+    item = spec.get("items", "string")
+    want = _ITEM_TYPES.get(item, str)
+    for v in value:
+        if not isinstance(v, want) or (item != "boolean"
+                                       and isinstance(v, bool)):
+            raise ToolError("%s: every element of %s must be a %s, not %r"
+                            % (cmd_name, name, item, v))
+    return [str(v) for v in value]
+
+
 def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
     """The argv list and stdin bytes for one call. Never a string: a
     placeholder becomes whole elements, an option becomes flag elements,
-    and nothing is ever formatted into a larger string."""
+    and nothing is ever formatted into a larger string. An array-typed
+    placeholder spreads into one element per item. Options go at the end,
+    or just before a literal `--` in the command's argv, so a command
+    array after `--` stays the last thing on the line."""
     cmd = tool["commands"].get(cmd_name)
     if cmd is None:
         raise ToolError("unknown command %r; known: %s"
@@ -339,29 +366,41 @@ def build_call(tool, cmd_name, args, extra_argv=(), resolve=resolve_command):
     head = list(cmd["command"])
     head[0] = resolve(head[0])
     argv = head + list(extra_argv)
+    operands_at = None
     for element in cmd["argv"]:
         name = _placeholder(element)
         if name is None:
+            if element == "--" and operands_at is None:
+                operands_at = len(argv)
             argv.append(element)
             continue
         if name in args and args[name] is not None:
-            argv.extend(_as_elements(args[name]))
+            if props[name].get("type") == "array":
+                argv.extend(_array_elements(props[name], args[name],
+                                            cmd_name, name))
+            else:
+                argv.extend(_as_elements(args[name]))
         elif props[name].get("optional"):
             continue
         else:
             raise ToolError("%s: missing required property %r"
                             % (cmd_name, name))
+    flags = []
     for name, flag in cmd["options"].items():
         value = args.get(name)
         if value is None or value is False:
             continue
         if value is True:
-            argv.append(flag)
+            flags.append(flag)
         elif isinstance(value, list):
             for v in value:
-                argv.extend([flag, str(v)])
+                flags.extend([flag, str(v)])
         else:
-            argv.extend([flag, str(value)])
+            flags.extend([flag, str(value)])
+    if operands_at is None:
+        argv.extend(flags)
+    else:
+        argv[operands_at:operands_at] = flags
     stdin = None
     if cmd["stdin"]:
         parts = []

@@ -167,6 +167,20 @@ class TestBackgroundCommand(JobsCase):
         self.assertIn("hello-from-job",
                       pathlib.Path(job["log_path"]).read_text())
 
+    def test_a_relative_log_is_recorded_absolute(self):
+        # The job tool's `run` passes its `log` relative to the home, the
+        # working directory there; the console reads the row from anywhere.
+        here = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, here)
+        _, out, _ = self._main([
+            "start", "shell", "logged", "--log", "mine.log", "--",
+            "sh", "-c", "echo into-mine",
+        ])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["log_path"], str(self.root / "mine.log"))
+        self.assertIn("into-mine", (self.root / "mine.log").read_text())
+
     def test_failing_command_marks_failed_with_its_exit_code(self):
         _, out, _ = self._main([
             "start", "shell", "fails", "--", "sh", "-c", "exit 7",

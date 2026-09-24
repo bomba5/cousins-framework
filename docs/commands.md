@@ -444,6 +444,9 @@ Jobs page reads the same store. Subcommands: `start KIND TITLE [-- CMD...]`
 cousin-job start shell "rebuild the index" -- cousin-memory reindex
 ```
 
+A cousin's `job` tool does the same with `run` (`title`, `argv` as an array,
+optional `desc` and `log`); see [MCP tools](mcp.md#what-a-cousin-gets).
+
 `cousin-loops` is the loops daemon and its controls. Subcommands: `run
 [--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each
 cousin's daily flip time and where it comes from), `fire SLUG LOOP`. One

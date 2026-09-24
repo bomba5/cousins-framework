@@ -551,7 +551,10 @@ def _cmd_start(args):
     )
     log_path = args.log
     if cmd:
-        log_path = log_path or str(_default_log_path(job_id))
+        # Absolute in the row, so the console finds a relative --log
+        # wherever it runs; relative means relative to where this ran.
+        log_path = (os.path.abspath(log_path) if log_path
+                    else str(_default_log_path(job_id)))
         set_log_path(job_id, log_path)
         _write_log_header(log_path, args.kind, args.title,
                           "$ " + " ".join(cmd))

@@ -103,6 +103,13 @@ class TestRunnerLaneDoctrine(HermeticCase):
         self.assertIn("asked what you know or remember", self.flat)
         self.assertIn("`search` or `recall` first", self.flat)
 
+    def test_a_long_shell_command_is_the_job_tools_run(self):
+        """A runner cousin ran `cousin-job start shell` through Bash because
+        the job tool had no way to launch a command (09-24)."""
+        self.assertIn("A long shell command is the `job` tool's `run`", self.flat)
+        self.assertIn("`run_in_background`", self.flat)
+        self.assertIn("never `cousin-job` through Bash", self.flat)
+
     def test_the_fallback_is_only_for_a_missing_or_erroring_tool(self):
         self.assertIn("fallback only", self.flat)
         self.assertIn("missing", self.flat)

@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 from unittest import mock
@@ -1072,7 +1073,8 @@ class ShippedRegistryGuards(unittest.TestCase):
     def test_job_start_shell_is_refused_before_anything_runs(self):
         # `job start` takes no command, so a shell row started here
         # would stay "running" forever. It is refused, with the two
-        # paths that do launch and close a shell job.
+        # paths that do launch and close a shell job: the tool's own
+        # `run`, and a backgrounded Bash call.
         with mock.patch.object(mcp_server, "run_call",
                                side_effect=AssertionError("ran")):
             text, is_error = mcp_server.call_tool(
@@ -1081,7 +1083,7 @@ class ShippedRegistryGuards(unittest.TestCase):
         self.assertTrue(is_error)
         self.assertIn("shell", text)
         self.assertIn("run_in_background", text)
-        self.assertIn("cousin-job start shell", text)
+        self.assertIn("`run`", text)
 
 
 class ParityCase(unittest.TestCase):
@@ -1146,6 +1148,29 @@ class ParityCase(unittest.TestCase):
                               "json": True}, self.env)
         self.assertFalse(is_error, shown)
         self.assertEqual(json.loads(shown)["title"], HOSTILE)
+
+    def test_job_run_via_tool_launches_the_command_and_closes_the_row(self):
+        code = "print('ran via mcp', flush=True); raise SystemExit(4)"
+        text, is_error = mcp_server.call_tool(
+            self.reg, "job", {"command": "run", "title": HOSTILE,
+                              "argv": [sys.executable, "-c", code]}, self.env)
+        self.assertFalse(is_error, text)
+        started = json.loads(text)
+        deadline = time.monotonic() + 20
+        while True:
+            shown, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "show", "id": started["job_id"],
+                                  "json": True}, self.env)
+            self.assertFalse(is_error, shown)
+            job = json.loads(shown)
+            if job["status"] != "running" and not job["live_processes"]:
+                break
+            self.assertLess(time.monotonic(), deadline, job)
+            time.sleep(0.05)
+        self.assertEqual((job["kind"], job["title"], job["status"],
+                          job["exit_code"]), ("shell", HOSTILE, "failed", 4))
+        self.assertEqual(job["log_path"], started["log_path"])
+        self.assertIn("ran via mcp", pathlib.Path(job["log_path"]).read_text())
 
     def test_send_discovers_peers_through_the_shipped_list_command(self):
         (self.root / "cousins" / "kestrel").mkdir()
@@ -1223,3 +1248,81 @@ class TestLenientOnlyWhenServing(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("meeting", err)
         self.assertEqual(out, "")
+
+
+class JobRunCase(unittest.TestCase):
+    """The job tool's `run` is `cousin-job start shell TITLE --json -- CMD`
+    over MCP: the command array spreads into trailing argv elements, the
+    options land before the `--`, and an empty or mixed array is refused
+    before anything runs."""
+
+    def setUp(self):
+        self.tool = mcp_server.load_registry(SHIPPED)["tools"]["job"]
+
+    def _argv(self, args):
+        argv, stdin = mcp_server.build_call(self.tool, "run", args,
+                                            resolve=lambda name: name)
+        self.assertIsNone(stdin)
+        return argv
+
+    def test_the_command_array_becomes_trailing_elements(self):
+        self.assertEqual(
+            self._argv({"title": "rebuild", "argv": ["make", "-j4", "a b"]}),
+            ["cousin-job", "start", "shell", "rebuild", "--json", "--",
+             "make", "-j4", "a b"])
+
+    def test_desc_and_log_go_before_the_separator(self):
+        self.assertEqual(
+            self._argv({"title": "t", "desc": "why", "log": "data/t.log",
+                        "argv": ["sh", "--desc", "x"]}),
+            ["cousin-job", "start", "shell", "t", "--json", "--desc", "why",
+             "--log", "data/t.log", "--", "sh", "--desc", "x"])
+
+    def test_an_empty_or_mixed_or_scalar_argv_is_refused(self):
+        for bad in ([], ["echo", 3], "echo hi", None):
+            args = {"title": "t"}
+            if bad is not None:
+                args["argv"] = bad
+            with self.assertRaises(ToolError, msg=repr(bad)) as cm:
+                self._argv(args)
+            self.assertIn("argv", str(cm.exception))
+
+    def test_the_description_and_kind_name_run_not_the_cli(self):
+        self.assertIn("run", self.tool["description"])
+        kind = self.tool["properties"]["kind"]["description"]
+        self.assertIn("`run`", kind)
+        self.assertNotIn("cousin-job start shell", kind)
+        self.assertEqual(self.tool["properties"]["argv"]["type"], "array")
+
+
+class TrailingOperandCase(unittest.TestCase):
+    """Generic: options are inserted before a literal `--` in a command's
+    argv, so a trailing array placeholder stays the last thing."""
+
+    def _tool(self, optional=False):
+        tool = {"kind": "command", "command": "c", "description": "d",
+                "properties": {"cmd": {"type": "array", "items": "string",
+                                       "optional": optional},
+                               "flag": {"type": "boolean"},
+                               "n": {"type": "integer"}},
+                "commands": {"x": {"argv": ["x", "--", "{cmd}"],
+                                   "options": {"flag": "--flag", "n": "--n"}}}}
+        mcp_server._validate_tool("t", tool)
+        return tool
+
+    def test_options_precede_the_separator(self):
+        argv, _ = mcp_server.build_call(
+            self._tool(), "x", {"cmd": ["a", "-b"], "flag": True, "n": 2},
+            resolve=lambda name: name)
+        self.assertEqual(argv, ["c", "x", "--flag", "--n", "2", "--", "a", "-b"])
+
+    def test_an_optional_array_may_be_empty(self):
+        argv, _ = mcp_server.build_call(self._tool(optional=True), "x",
+                                        {"cmd": []}, resolve=lambda name: name)
+        self.assertEqual(argv, ["c", "x", "--"])
+
+    def test_an_array_placeholder_checks_its_item_type(self):
+        with self.assertRaises(ToolError):
+            mcp_server.build_call(self._tool(), "x", {"cmd": ["a", 1]},
+                                  resolve=lambda name: name)
+

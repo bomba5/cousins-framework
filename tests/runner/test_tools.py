@@ -5,7 +5,9 @@ import os
 import pathlib
 import sqlite3
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -337,6 +339,95 @@ class TestServerBuild(HermeticCase):
         ctx = _ctx(self)
         cfg = tools.build_tool_server(ctx, _registry(ctx.root))
         self.assertEqual(cfg["type"], "sdk"); self.assertEqual(cfg["name"], "cousin")
+
+
+class TestJobRun(HermeticCase):
+    """`job run`: the tool form of `cousin-job start shell TITLE -- CMD`. A
+    real short command in a scratch root: the row runs, then closes with
+    the command's own exit code, and the log holds its output."""
+
+    def _ctx(self):
+        ctx = _ctx(self)
+        ctx.registry = _registry(ctx.root)
+        return ctx
+
+    def _run(self, ctx, **args):
+        text, err = tools.call(ctx, "job", dict({"command": "run"}, **args))
+        self.assertFalse(err, text)
+        return json.loads(text)
+
+    def _wait(self, job_id, timeout=20):
+        """The closed row, once the job's detached runner has also exited:
+        it goes on writing (the row, then a raw memory entry) after the
+        status flips, and the scratch root is removed at cleanup."""
+        from cousin_lib import jobs
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            job = jobs.get_job(job_id)
+            if job["status"] != "running" and not jobs.live_members(job):
+                return jobs.get_job(job_id)
+            time.sleep(0.05)
+        self.fail("job #%d still running after %ss" % (job_id, timeout))
+
+    def test_a_failing_command_runs_then_closes_failed_with_its_exit_code(self):
+        from cousin_lib import jobs
+        ctx = self._ctx()
+        code = "import time; print('hello from run', flush=True); time.sleep(0.5); raise SystemExit(3)"
+        out = self._run(ctx, title="exit three", argv=[sys.executable, "-c", code])
+        job = jobs.get_job(out["job_id"])
+        self.assertEqual((job["status"], job["kind"], job["spawned_by"]), ("running", "shell", "wren"))
+        self.assertEqual(job["log_path"], out["log_path"])
+        self.assertTrue(job["pgid"])
+        job = self._wait(out["job_id"])
+        self.assertEqual((job["status"], job["exit_code"]), ("failed", 3))
+        self.assertIn("hello from run", pathlib.Path(out["log_path"]).read_text())
+        self.assertTrue(jobs.is_minted_log(out["log_path"]))
+
+    def test_a_succeeding_command_closes_done(self):
+        ctx = self._ctx()
+        out = self._run(ctx, title="ok", desc="a check", argv=[sys.executable, "-c", "print('fine')"])
+        job = self._wait(out["job_id"])
+        self.assertEqual((job["status"], job["exit_code"], job["description"]), ("done", 0, "a check"))
+
+    def test_run_returns_before_the_command_finishes(self):
+        ctx = self._ctx()
+        t0 = time.monotonic()
+        out = self._run(ctx, title="sleeper", argv=[sys.executable, "-c", "import time; time.sleep(30)"])
+        self.assertLess(time.monotonic() - t0, 10)
+        text, err = tools.call(ctx, "job", {"command": "fail", "id": out["job_id"], "summary": "test over"})
+        self.assertFalse(err, text)
+        self.assertEqual(self._wait(out["job_id"])["status"], "failed")
+
+    def test_the_command_runs_from_the_home_and_argv_is_never_a_shell(self):
+        ctx = self._ctx()
+        code = "import os, sys; print('cwd=' + os.getcwd()); print('arg=' + sys.argv[1])"
+        out = self._run(ctx, title="where", argv=[sys.executable, "-c", code, "$(echo no) `x` ;"])
+        self._wait(out["job_id"])
+        log = pathlib.Path(out["log_path"]).read_text()
+        self.assertIn("cwd=%s" % os.path.realpath(ctx.home), log)
+        self.assertIn("arg=$(echo no) `x` ;", log)
+
+    def test_a_relative_log_lands_under_the_home(self):
+        ctx = self._ctx()
+        out = self._run(ctx, title="logged", log="data/my-run.log",
+                        argv=[sys.executable, "-c", "print('into my log')"])
+        self.assertEqual(out["log_path"], str(ctx.home / "data" / "my-run.log"))
+        self._wait(out["job_id"])
+        self.assertIn("into my log", (ctx.home / "data" / "my-run.log").read_text())
+
+    def test_empty_or_invalid_argv_and_a_missing_title_are_refused(self):
+        from cousin_lib import jobs
+        ctx = self._ctx()
+        for args in ({"title": "t", "argv": []},
+                     {"title": "t"},
+                     {"title": "t", "argv": "echo hi"},
+                     {"title": "t", "argv": ["echo", 3]},
+                     {"title": "t", "argv": ["", "x"]},
+                     {"argv": ["echo", "hi"]}):
+            text, err = tools.call(ctx, "job", dict({"command": "run"}, **args))
+            self.assertTrue(err, args)
+            self.assertRegex(text, "argv|title", args)
+        self.assertEqual(jobs.list_jobs(), [])
 
 
 if __name__ == "__main__":

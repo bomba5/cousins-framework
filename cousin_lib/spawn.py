@@ -702,14 +702,17 @@ def persist_runtime(home, key, value):
     is persisted, after check_runtime_value. The console's effort and
     model routes and any CLI that edits these go through here; the
     running agent keeps its old value until the next start. A real
-    change (not a same-value save) is recorded as an L1 event."""
+    change (not a same-value save) is recorded as an L1 event. True when
+    the value changed."""
     check_runtime_value(key, value)
     previous = read_runtime_value(home, key)
     _persist_runtime_line(home, key, value)
-    if previous != value:
-        framework_event(home, key, "%s %s -> %s (applies at the next"
-                        " start)" % (key, previous or "(install default)",
-                                     value))
+    if previous == value:
+        return False
+    framework_event(home, key, "%s %s -> %s (applies at the next"
+                    " start)" % (key, previous or "(install default)",
+                                 value))
+    return True
 
 
 # The validating turn of a model change, run as a child process: the
@@ -743,8 +746,8 @@ def validate_turn_out_of_process(home, root, model, effort, *,
         p for p in (package_root, env.get("PYTHONPATH")) if p)
     try:
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=env,
-                                start_new_session=True)
+                                stderr=subprocess.PIPE, encoding="utf-8",
+                                errors="replace", env=env, start_new_session=True)
     except OSError as err:
         return 2, "validate: cannot start the validating process: %s" % err
     try:
@@ -779,7 +782,8 @@ def persist_agent_value(home, key, value, *, root=None):
     (validate_turn_out_of_process), an opencode model the lane's own checks
     (ruling P9-1, "<provider>/<model>", a provider the account holds). A
     refusal is a SpawnError with the reason; nothing is written then. An
-    unchanged value runs no turn and writes nothing."""
+    unchanged value runs no turn and writes nothing. True when the value
+    changed."""
     from cousin_lib import accounts, delivery, migrate
     from cousin_lib.config import FrameworkConfig
     home = Path(home)
@@ -794,7 +798,7 @@ def persist_agent_value(home, key, value, *, root=None):
         raise SpawnError("effort applies to the sdk lane only; %s runs on %s" % (home.name, lane))
     previous = agent.get(key)
     if previous == value:
-        return      # nothing changes: no validating turn, no write, no event
+        return False    # nothing changes: no validating turn, no write, no event
     if key == "model" and lane in ("sdk", "opencode"):
         try:
             account = accounts.for_cousin(home, root)
@@ -817,6 +821,7 @@ def persist_agent_value(home, key, value, *, root=None):
     migrate._write_toml(home, text.encode("utf-8"), path.stat().st_mode & 0o777)
     framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"
                     % (key, previous or "(the CLI's default)", value))
+    return True
 
 # The identity keys the console edits in place, by the name its routes
 # use: (table, key) in cousin.toml.

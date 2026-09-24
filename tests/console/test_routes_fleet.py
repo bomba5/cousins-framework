@@ -636,6 +636,34 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
                          "m-two")
 
+    def test_an_unchanged_model_or_effort_asks_no_restart_and_refreshes_nothing(self):
+        """#100 re-review minor: a save of the value the cousin already has
+        changes nothing, so it needs no restart and no fleet refresh."""
+        from unittest import mock
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\nmodel = "m-one"\n'
+                                         'effort = "low"\n')
+        tmux = self.cousin("sam", extra='\n[runtime]\nmodel = "m-one"\neffort = "low"\n')
+        server = self.serve()
+        seen = []
+        server.listeners.append(lambda k, d: seen.append((k, d)))
+        before = (home / "cousin.toml").read_bytes()
+        with mock.patch("cousin_lib.spawn.validate_turn_out_of_process") as child:
+            for slug in ("wren", "sam"):
+                for key, value in (("model", "m-one"), ("effort", "low")):
+                    status, body = self.post("/api/cousins/%s/%s" % (slug, key), {key: value})
+                    self.assertEqual(status, 200, body)
+                    self.assertEqual(body, {"ok": True, "slug": slug, key: value,
+                                            "restart_required": False}, (slug, key))
+        child.assert_not_called()
+        self.assertEqual([k for k, _ in seen if k == "cousins-refresh"], [])
+        self.assertEqual((home / "cousin.toml").read_bytes(), before)
+        self.assertEqual(tomllib.loads((tmux / "cousin.toml").read_text())["runtime"],
+                         {"model": "m-one", "effort": "low"})
+        # a real change still asks for both
+        status, body = self.post("/api/cousins/wren/effort", {"effort": "high"})
+        self.assertTrue(body["restart_required"])
+        self.assertIn("cousins-refresh", [k for k, _ in seen])
+
     def test_an_opencode_cousins_model_takes_the_lanes_checks_and_no_effort(self):
         (self.root / "config" / "accounts.toml").write_text(
             '[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')

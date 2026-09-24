@@ -4,6 +4,7 @@ import asyncio
 import os
 import pathlib
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -301,6 +302,64 @@ class TestRecorderBudget(HooksCase):
             "PostToolUse", tool_name="Bash", tool_input={}, tool_use_id="tu-late",
             tool_response={"backgroundTaskId": "b1"}), "tu-late", {}))
         self.assertEqual(jobs.list_jobs(), [])
+
+    def _budget_runs_out_in_set_log_path(self, tool, tool_input, response):
+        """#104 re-review: the budget runs out AFTER _register's second check,
+        while mint_log's set_log_path waits on the busy store again. The hook
+        has answered {} (no rewrite, no trap); no row may survive it, and the
+        Post finds nothing to annotate."""
+        from cousin_lib import jobs, recording
+        real = jobs.set_log_path
+
+        def slow_set_log_path(job_id, path):
+            time.sleep(0.4)                  # the store is busy again
+            return real(job_id, path)
+        with mock.patch.object(hooks, "RECORD_BUDGET_S", 0.1), \
+                mock.patch.object(jobs, "set_log_path", slow_set_log_path):
+            out = _run(self.cbs["PreToolUse"](self._base(
+                "PreToolUse", tool_name=tool, tool_input=tool_input,
+                tool_use_id="tu-w"), "tu-w", {}))
+        self.assertEqual(out, {})
+        self.assertEqual(jobs.list_jobs(), [])
+        self.assertIsNone(recording.recall(self.home, "tool", "tu-w", forget=False))
+        _run(self.cbs["PostToolUse"](self._base(
+            "PostToolUse", tool_name=tool, tool_input={}, tool_use_id="tu-w",
+            tool_response=response), "tu-w", {}))
+        self.assertEqual(jobs.list_jobs(), [])
+
+    def test_a_shell_whose_budget_runs_out_after_the_insert_leaves_no_row(self):
+        self._budget_runs_out_in_set_log_path(
+            "Bash", {"command": "sleep 2", "run_in_background": True},
+            {"backgroundTaskId": "b1"})
+
+    def test_a_subagent_whose_budget_runs_out_after_the_insert_leaves_no_row(self):
+        self._budget_runs_out_in_set_log_path(
+            "Agent", {"prompt": "x", "description": "late"}, {"content": "done"})
+
+    def test_a_cancelled_hook_sets_the_flag_and_propagates(self):
+        """#104 re-review minor: the SDK cancelling the hook task is past the
+        budget as much as a timeout: the late recording must be dropped."""
+        seen = []
+        started = threading.Event()
+
+        def slow(payload, cancelled=None):
+            started.set()
+            time.sleep(0.4)
+            seen.append(cancelled.is_set())
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream, recorder=slow)
+
+        async def drive():
+            task = asyncio.ensure_future(cbs["PreToolUse"](self._base(
+                "PreToolUse", tool_name="Agent", tool_input={"prompt": "x"},
+                tool_use_id="t"), "t", {}))
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        _run(drive())
+        self.assertEqual(seen, [True])
 
     def test_the_flag_is_set_for_a_recorder_past_its_budget(self):
         seen = []

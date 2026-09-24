@@ -736,6 +736,19 @@ class TestValidateTurnOutOfProcess(unittest.TestCase):
         self.assertEqual(rc, 4)
         self.assertIn("boom", line)
 
+    def test_a_bad_byte_is_replaced_never_raised(self):
+        """#100 re-review minor: a byte that is not UTF-8 must not raise out
+        of the decode (a 500, and the child left unwaited)."""
+        rc, line = self._run(
+            "import sys; sys.stdout.buffer.write(b'\\xff\\xfe junk\\n'); "
+            "sys.stdout.buffer.write(b'{\"rc\": 4, \"line\": \"validate: \\xc3\\x28\"}\\n')")
+        self.assertEqual(rc, 4)
+        self.assertIn("validate:", line)
+        rc, line = self._run("import sys; sys.stderr.buffer.write(b'bad \\xff byte\\n'); "
+                             "sys.exit(1)")
+        self.assertEqual(rc, 4)
+        self.assertIn("bad", line)
+
     def test_a_child_past_the_budget_is_killed_and_fails(self):
         import time
         started = time.monotonic()

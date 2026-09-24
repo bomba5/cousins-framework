@@ -1227,6 +1227,223 @@ function runnerEventLine(ev) {
   }
 }
 
+// Syntax highlighting for the runner pane. Every helper below is pure and
+// returns a node tree, never HTML: a node is a string (text, which React
+// escapes) or {tag, cls, children[, href]}. rpToReact is the only place a
+// node becomes an element, through a fixed tag list, so model and tool
+// output (untrusted) can never inject markup. Colors live in styles.css
+// (`.rp-*`) on the theme variables.
+const RP_TAGS = { span: 1, strong: 1, em: 1, code: 1, pre: 1, div: 1, a: 1 };
+const rpSafeHref = (u) => /^https?:\/\//i.test(String(u || "")) ? String(u) : null;
+const rpCut = (s, n) => { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 3) + "..." : s; };
+const rpSpan = (cls, text) => ({ tag: "span", cls, children: [String(text)] });
+
+// Which color group an event's body takes: the model's words ("text"), its
+// thinking, tool executions (muted), errors, and the runner's own
+// bookkeeping ("meta": state, turn, session, usage, ...).
+function runnerKindClass(kind) {
+  switch (kind) {
+    case "text": case "user": case "result": return "text";
+    case "thinking": return "thinking";
+    case "tool": case "tool_call": case "tool_result": case "output": return "tool";
+    case "error": return "error";
+    default: return "meta";
+  }
+}
+
+// A unified diff, detected conservatively: at least two +/- lines AND a
+// real header (an `@@ -a,b +c,d @@` hunk, a `--- `/`+++ ` pair, or
+// `diff --git`), so a list of "- item" lines is never colored as one.
+function looksLikeDiff(text) {
+  const lines = String(text == null ? "" : text).split("\n");
+  let changed = 0, header = false;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/.test(l) || /^diff --git /.test(l)) header = true;
+    else if (/^--- /.test(l) && /^\+\+\+ /.test(lines[i + 1] || "")) header = true;
+    else if (/^(\+\+\+|---)( |$)/.test(l)) continue;
+    else if (/^[+-]/.test(l)) changed++;
+  }
+  return header && changed >= 2;
+}
+
+function renderDiff(text) {
+  const out = [];
+  String(text == null ? "" : text).split("\n").forEach((l, i) => {
+    if (i) out.push("\n");
+    let cls = "rp-diff-ctx";
+    if (/^(diff --git |index |--- |\+\+\+ )/.test(l)) cls = "rp-diff-file";
+    else if (/^@@/.test(l)) cls = "rp-diff-hunk";
+    else if (/^\+/.test(l)) cls = "rp-diff-add";
+    else if (/^-/.test(l)) cls = "rp-diff-del";
+    out.push(rpSpan(cls, l));
+  });
+  return out;
+}
+
+// A lexer, not a parser: it colors truncated JSON (an unterminated string
+// at the cut) as well as whole JSON. A string followed by `:` is a key.
+function highlightJson(text) {
+  const s = String(text == null ? "" : text);
+  const re = /("(?:[^"\\\n]|\\.)*"?)(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false)\b|\b(null)\b|([{}\[\],:])/g;
+  const out = [];
+  let last = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    if (m[1] !== undefined) {
+      out.push(rpSpan(m[2] !== undefined ? "rp-json-key" : "rp-json-str", m[1]));
+      if (m[2] !== undefined) out.push(rpSpan("rp-json-punc", m[2]));
+    } else if (m[3] !== undefined) out.push(rpSpan("rp-json-num", m[3]));
+    else if (m[4] !== undefined) out.push(rpSpan("rp-json-bool", m[4]));
+    else if (m[5] !== undefined) out.push(rpSpan("rp-json-null", m[5]));
+    else out.push(rpSpan("rp-json-punc", m[6]));
+    last = re.lastIndex;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
+
+// A JSON value within the pane's existing budget (`limit` characters of
+// its compact form): pretty-printed when it fits, else the compact form
+// cut, as the plain line always was.
+function rpJsonBlock(value, limit) {
+  const compact = JSON.stringify(value);
+  if (compact === undefined) return [];
+  return highlightJson(compact.length <= limit ? JSON.stringify(value, null, 2) : rpCut(compact, limit));
+}
+
+// Inline markdown: `code`, **bold**, *italic*, [label](http(s) url). A
+// link with any other scheme stays literal text.
+function mdInline(text) {
+  const s = String(text == null ? "" : text);
+  const re = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|\*([^*\s](?:[^*\n]*?[^*\s])?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  const out = [];
+  let last = 0, m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    if (m[1] !== undefined) out.push({ tag: "code", cls: "rp-md-code", children: [m[1]] });
+    else if (m[2] !== undefined) out.push({ tag: "strong", children: [m[2]] });
+    else if (m[3] !== undefined) out.push({ tag: "em", children: [m[3]] });
+    else if (rpSafeHref(m[5])) out.push({ tag: "a", cls: "rp-md-a", href: m[5], children: [m[4]] });
+    else out.push(m[0]);
+    last = re.lastIndex;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
+
+// Block markdown, one node per line: fenced code (```diff and a detected
+// diff get diff colors, ```json the JSON colors), headings, list items,
+// quotes, rules, paragraphs.
+function renderMarkdownLite(text) {
+  const src = String(text == null ? "" : text);
+  if (!src) return [];
+  const lines = src.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = /^\s*```\s*([\w+-]*)\s*$/.exec(line);
+    if (fence) {
+      const lang = fence[1].toLowerCase(), body = [];
+      for (i++; i < lines.length && !/^\s*```\s*$/.test(lines[i]); i++) body.push(lines[i]);
+      i++;
+      const code = body.join("\n");
+      const kids = (lang === "diff" || looksLikeDiff(code)) ? renderDiff(code)
+        : lang === "json" ? highlightJson(code) : [code];
+      out.push({ tag: "pre", cls: "rp-md-pre", children: kids });
+      continue;
+    }
+    let m;
+    if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+      out.push({ tag: "div", cls: "rp-md-h rp-md-h" + m[1].length, children: mdInline(m[2]) });
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      out.push({ tag: "div", cls: "rp-md-hr", children: [] });
+    } else if ((m = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line))) {
+      out.push({ tag: "div", cls: "rp-md-li", children: [m[1], rpSpan("rp-md-bullet", m[2]), " "].concat(mdInline(m[3])) });
+    } else if ((m = /^\s*>\s?(.*)$/.exec(line))) {
+      out.push({ tag: "div", cls: "rp-md-quote", children: mdInline(m[1]) });
+    } else if (!line.trim()) {
+      out.push({ tag: "div", cls: "rp-md-gap", children: [] });
+    } else {
+      out.push({ tag: "div", cls: "rp-md-p", children: mdInline(line) });
+    }
+    i++;
+  }
+  return out;
+}
+
+// A tool's input: an edit (old_string/new_string) as a diff of the file,
+// anything else as JSON.
+function rpToolInput(input) {
+  if (input && typeof input.old_string === "string" && typeof input.new_string === "string") {
+    const f = String(input.file_path || "");
+    const diff = ["--- " + f, "+++ " + f]
+      .concat(input.old_string.split("\n").map(l => "-" + l))
+      .concat(input.new_string.split("\n").map(l => "+" + l)).join("\n");
+    return ["\n"].concat(renderDiff(rpCut(diff, 600)));
+  }
+  return rpJsonBlock(input, 300);
+}
+
+// A tool's output: JSON when it parses as JSON, a diff when it is one,
+// plain text otherwise; within runnerEventLine's 600-character budget.
+function rpToolOutput(text) {
+  const s = String(text == null ? "" : text);
+  const t = s.trim();
+  if (/^[\[{]/.test(t)) {
+    try { return rpJsonBlock(JSON.parse(t), 600); } catch (e) { /* not JSON */ }
+  }
+  if (looksLikeDiff(s)) return renderDiff(rpCut(s, 600));
+  return [rpCut(s, 600)];
+}
+
+// The body of one pane line as a node tree; the text is runnerEventLine's
+// where nothing is highlighted.
+function runnerEventBody(ev) {
+  const p = ev.payload || {};
+  switch (ev.kind) {
+    case "text": case "user": return renderMarkdownLite(p.text);
+    case "tool": return [rpSpan("rp-tool-name", p.name || ""), " "].concat(rpToolInput(p.input));
+    case "tool_result": case "output":
+      return (p.is_error ? [rpSpan("rp-err", "error: ")] : []).concat(rpToolOutput(p.text));
+    case "tool_call":
+      return [rpSpan("rp-tool-name", p.tool || ""), " " + (p.command || "")]
+        .concat(p.is_error ? [rpSpan("rp-err", " error")] : [])
+        .concat([rpSpan("rp-dim", " (" + p.ms + " ms)")]);
+    case "state": case "turn_start": case "thinking": case "result": case "error": case "session":
+      return [runnerEventLine(ev)];
+    default: return highlightJson(rpCut(JSON.stringify(p), 300));
+  }
+}
+
+// A pane row's rendered body, once per event: the pane re-renders all its
+// rows (up to RUNNER_PANE_KEEP) on every frame that brings new events, and
+// an event never changes after it arrives.
+const RP_BODY_CACHE = new WeakMap();
+function rpRowBody(ev) {
+  let body = RP_BODY_CACHE.get(ev);
+  if (!body) {
+    body = runnerEventBody(ev).map((n, j) => rpToReact(n, j));
+    RP_BODY_CACHE.set(ev, body);
+  }
+  return body;
+}
+
+// The one place a node becomes a React element: a tag outside RP_TAGS
+// renders as a span, an href is re-checked, text stays text.
+function rpToReact(node, key) {
+  if (node == null) return null;
+  if (typeof node !== "object") return String(node);
+  const tag = RP_TAGS[node.tag] ? node.tag : "span";
+  const props = { key, className: node.cls || undefined };
+  if (tag === "a") {
+    const href = rpSafeHref(node.href);
+    if (href) { props.href = href; props.target = "_blank"; props.rel = "noopener noreferrer"; }
+  }
+  return React.createElement(tag, props, ...(node.children || []).map((c, i) => rpToReact(c, i)));
+}
+
 // The pane's liveness/state follow the stream it already reads, with the
 // fleet row (the 15s `cousins-refresh` poll) as the fallback before any
 // stream evidence: a `session` frame (the runner started or restarted)
@@ -1399,8 +1616,9 @@ function RunnerPaneView({ cousin, onClose }) {
         whiteSpace: "pre-wrap", wordBreak: "break-word",
       }}>
         {events.map((ev, i) => (
-          <div key={i} className={"runner-ev runner-ev-" + ev.kind}>
-            <span style={{ color: "var(--fg-3)", marginRight: 8 }}>{ev.kind}</span>{runnerEventLine(ev)}
+          <div key={i} className={"runner-ev runner-ev-" + ev.kind + " rp-" + runnerKindClass(ev.kind)}>
+            <span className="rp-kind">{ev.kind}</span>
+            <div className="rp-body">{rpRowBody(ev)}</div>
           </div>
         ))}
       </div>
@@ -1816,4 +2034,4 @@ function fmtShortTime(ts) {
   } catch (e) { return ""; }
 }
 
-Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, paneLiveness, runnerFleetKey, renderMarkdown, resolveChatUser, groupReactions });
+Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, runnerEventBody, paneLiveness, runnerFleetKey, renderMarkdown, resolveChatUser, groupReactions });

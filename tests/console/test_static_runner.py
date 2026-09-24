@@ -162,6 +162,190 @@ process.stdout.write(JSON.stringify({same: a === b, different: a === c}));
         self.assertFalse(result["different"])
 
 
+class TestRunnerPaneHighlighting(unittest.TestCase):
+    """The pane's syntax highlighting (operator's ask): the kind label in the
+    accent, the model's text in the primary foreground, tool executions
+    muted, diffs in diff colors, JSON and light markdown on top. The helpers
+    are pure (a node tree of strings and {tag, cls, children}); only
+    rpToReact makes elements, so untrusted text can never become markup."""
+
+    def setUp(self):
+        self.chat = (_STATIC / "chat.jsx").read_text()
+        self.css = (_STATIC / "styles.css").read_text()
+        self.src = self.chat[self.chat.index("function runnerEventLine("):
+                             self.chat.index("function RunnerPaneView(")]
+
+    def run_node(self, body):
+        out = subprocess.run(["node", "-e", self.src + body], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    def test_the_pane_renders_the_highlighted_body(self):
+        pane = self.chat[self.chat.index("function RunnerPaneView("):]
+        pane = pane[:pane.index("\n}\n")]
+        self.assertIn('className="rp-kind"', pane)
+        self.assertIn("runnerKindClass(ev.kind)", pane)
+        self.assertIn("rpRowBody(ev)", pane)
+        self.assertNotIn("dangerouslySetInnerHTML", self.src + pane)
+
+    def test_the_colors_come_from_the_theme_variables(self):
+        """The kind label follows the Settings hue slider (it overrides
+        --accent on :root), so a literal color would not move with it."""
+        css = self.css[self.css.index("Runner pane highlighting"):]
+        self.assertRegex(css, r"\.rp-kind \{[^}]*color: var\(--accent\)")
+        self.assertRegex(css, r"\.rp-text \.rp-body \{ color: var\(--fg-0\)")
+        self.assertRegex(css, r"\.rp-tool \.rp-body \{ color: var\(--fg-2\)")
+        self.assertRegex(css, r"\.rp-diff-add \{ color: var\(--green\)")
+        self.assertRegex(css, r"\.rp-diff-del \{ color: var\(--red\)")
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,6}\b|rgb\(|oklch\(\d")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_each_kind_takes_its_color_group(self):
+        kinds = ["text", "user", "result", "thinking", "tool", "tool_call", "tool_result",
+                 "output", "error", "state", "turn_start", "session", "usage", "extract",
+                 "propose", "rate_limit"]
+        got = self.run_node("process.stdout.write(JSON.stringify(%s.map(runnerKindClass)));"
+                            % json.dumps(kinds))
+        self.assertEqual(dict(zip(kinds, got)), {
+            "text": "text", "user": "text", "result": "text", "thinking": "thinking",
+            "tool": "tool", "tool_call": "tool", "tool_result": "tool", "output": "tool",
+            "error": "error", "state": "meta", "turn_start": "meta", "session": "meta",
+            "usage": "meta", "extract": "meta", "propose": "meta", "rate_limit": "meta"})
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_a_real_diff_is_detected_and_a_dashed_list_is_not(self):
+        got = self.run_node(r"""
+const git = "diff --git a/x.py b/x.py\nindex 1..2 100644\n--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n import os\n-x = 1\n+x = 2\n";
+const bare = "@@ -4 +4 @@\n-old\n+new";
+const list = "Plan:\n- read the code\n- write the test\n+ maybe more\n--- \nthat is all";
+const rule = "---\n- one\n- two";
+process.stdout.write(JSON.stringify({
+  git: looksLikeDiff(git), bare: looksLikeDiff(bare), list: looksLikeDiff(list),
+  rule: looksLikeDiff(rule), one: looksLikeDiff("-just one line"),
+  classes: renderDiff(git).filter(n => typeof n === "object").map(n => n.cls),
+}));
+""")
+        self.assertTrue(got["git"])
+        self.assertTrue(got["bare"])
+        self.assertFalse(got["list"])
+        self.assertFalse(got["rule"])
+        self.assertFalse(got["one"])
+        self.assertEqual(got["classes"], [
+            "rp-diff-file", "rp-diff-file", "rp-diff-file", "rp-diff-file", "rp-diff-hunk",
+            "rp-diff-ctx", "rp-diff-del", "rp-diff-add", "rp-diff-ctx"])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_tool_events_get_json_diff_and_plain_bodies(self):
+        got = self.run_node(r"""
+const cls = (nodes) => nodes.filter(n => typeof n === "object").map(n => n.cls);
+const text = (nodes) => nodes.map(n => typeof n === "object" ? n.children.join("") : n).join("");
+const edit = runnerEventBody({kind: "tool", payload: {name: "Edit",
+  input: {file_path: "a.py", old_string: "x = 1", new_string: "x = 2"}}});
+const bash = runnerEventBody({kind: "tool", payload: {name: "Bash", input: {command: "ls"}}});
+const big = runnerEventBody({kind: "tool", payload: {name: "Write", input: {content: "y".repeat(1000)}}});
+const js = runnerEventBody({kind: "tool_result", payload: {text: '{"ok": true, "n": 2}'}});
+const gd = runnerEventBody({kind: "tool_result", payload: {text: "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b"}});
+const plain = runnerEventBody({kind: "tool_result", payload: {is_error: true, text: "- not\n- a diff"}});
+const call = runnerEventBody({kind: "tool_call", payload: {tool: "cousin-memory", command: "search", is_error: true, ms: 12}});
+process.stdout.write(JSON.stringify({
+  edit: cls(edit), bash: text(bash), bigLen: text(big).length, bigEnd: text(big).slice(-3),
+  js: cls(js), jsText: text(js), gd: cls(gd), plain: cls(plain), plainText: text(plain),
+  call: cls(call), callText: text(call),
+}));
+""")
+        self.assertEqual(got["edit"], ["rp-tool-name", "rp-diff-file", "rp-diff-file",
+                                       "rp-diff-del", "rp-diff-add"])
+        self.assertEqual(got["bash"], 'Bash {\n  "command": "ls"\n}')
+        # the existing budget: the compact form cut at 300, as before
+        self.assertEqual(got["bigLen"], len("Write ") + 300)
+        self.assertEqual(got["bigEnd"], "...")
+        self.assertIn("rp-json-bool", got["js"])
+        self.assertIn("rp-json-num", got["js"])
+        self.assertEqual(got["jsText"], '{\n  "ok": true,\n  "n": 2\n}')
+        self.assertEqual(got["gd"], ["rp-diff-file", "rp-diff-file", "rp-diff-hunk",
+                                     "rp-diff-del", "rp-diff-add"])
+        self.assertEqual(got["plain"], ["rp-err"])
+        self.assertEqual(got["plainText"], "error: - not\n- a diff")
+        self.assertEqual(got["call"], ["rp-tool-name", "rp-err", "rp-dim"])
+        self.assertEqual(got["callText"], "cousin-memory search error (12 ms)")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_the_json_highlighter_classes_each_token(self):
+        got = self.run_node(r"""
+const nodes = highlightJson('{"key": "val", "n": -1.5e3, "t": true, "f": false, "z": null, "a": [1]}');
+const pairs = nodes.filter(n => typeof n === "object").map(n => [n.cls, n.children[0]]);
+const cut = highlightJson('{"text": "unterminated str...');
+process.stdout.write(JSON.stringify({pairs, cut: cut.filter(n => typeof n === "object").map(n => n.cls)}));
+""")
+        pairs = got["pairs"]
+        self.assertIn(["rp-json-key", '"key"'], pairs)
+        self.assertIn(["rp-json-str", '"val"'], pairs)
+        self.assertIn(["rp-json-num", "-1.5e3"], pairs)
+        self.assertIn(["rp-json-bool", "true"], pairs)
+        self.assertIn(["rp-json-bool", "false"], pairs)
+        self.assertIn(["rp-json-null", "null"], pairs)
+        self.assertIn(["rp-json-num", "1"], pairs)
+        self.assertIn(["rp-json-punc", "{"], pairs)
+        self.assertEqual(got["cut"], ["rp-json-punc", "rp-json-key", "rp-json-punc", "rp-json-str"])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_markdown_lite_renders_structure(self):
+        got = self.run_node(r"""
+const md = renderMarkdownLite("## Plan\n- read **this** and `that`\n1. *one* [docs](https://example.com/x)\n\n```diff\n--- a\n+++ b\n-x\n+y\n```\n```json\n{\"a\": 1}\n```\nplain");
+const walk = (n) => typeof n === "string" ? null : [n.tag, n.cls || "", (n.children || []).map(walk).filter(Boolean), n.href || ""];
+process.stdout.write(JSON.stringify(md.map(walk)));
+""")
+        tags = [n[0] + ":" + n[1] for n in got]
+        self.assertEqual(tags, ["div:rp-md-h rp-md-h2", "div:rp-md-li", "div:rp-md-li",
+                                "div:rp-md-gap", "pre:rp-md-pre", "pre:rp-md-pre", "div:rp-md-p"])
+        li = got[1][2]
+        self.assertIn(["strong", "", [], ""], li)
+        self.assertIn(["code", "rp-md-code", [], ""], li)
+        li2 = got[2][2]
+        self.assertIn(["em", "", [], ""], li2)
+        self.assertIn(["a", "rp-md-a", [], "https://example.com/x"], li2)
+        self.assertEqual([c[1] for c in got[4][2]],
+                         ["rp-diff-file", "rp-diff-file", "rp-diff-del", "rp-diff-add"])
+        self.assertIn("rp-json-key", [c[1] for c in got[5][2]])
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_markdown_lite_never_makes_markup_from_its_input(self):
+        """Model output is untrusted: `<script>`, `<img onerror>` and a
+        javascript: link stay text nodes; the only elements are the
+        whitelisted tags the renderer itself chose, and rpToReact passes no
+        raw-HTML prop and no non-http(s) href."""
+        got = self.run_node(r"""
+const evil = "<script>alert(1)</script>\n# <img src=x onerror=alert(1)>\n- **<b>x</b>** [c](javascript:alert(1)) [d](data:text/html,<script>)\n```\n<iframe src=//evil>\n```";
+const tree = renderMarkdownLite(evil);
+const tags = new Set(), texts = [];
+const walk = (n) => {
+  if (typeof n === "string") { texts.push(n); return; }
+  tags.add(n.tag);
+  if (n.tag === "a") texts.push("HREF:" + n.href);
+  (n.children || []).forEach(walk);
+};
+tree.forEach(walk);
+const made = [];
+global.React = {createElement: (tag, props, ...children) => { made.push({tag, props: Object.keys(props), href: props.href || null}); return {tag, children}; }};
+tree.forEach((n, i) => rpToReact(n, i));
+rpToReact({tag: "script", children: ["x"]}, 0);
+rpToReact({tag: "a", href: "javascript:alert(1)", children: ["y"]}, 1);
+process.stdout.write(JSON.stringify({tags: [...tags].sort(), texts, made}));
+""")
+        self.assertTrue(set(got["tags"]) <= {"div", "span", "strong", "pre"}, got["tags"])
+        joined = "".join(got["texts"])
+        self.assertIn("<script>alert(1)</script>", joined)
+        self.assertIn("<img src=x onerror=alert(1)>", joined)
+        self.assertIn("<b>x</b>", joined)
+        self.assertIn("<iframe src=//evil>", joined)
+        self.assertNotIn("HREF:", joined)
+        for el in got["made"]:
+            self.assertIn(el["tag"], {"div", "span", "strong", "em", "code", "pre", "a"})
+            self.assertNotIn("dangerouslySetInnerHTML", el["props"])
+            self.assertIsNone(el["href"])
+
+
 class TestFleetAndTokens(unittest.TestCase):
     def test_the_card_shows_the_runners_state_and_unsupported_items(self):
         cousins = (_STATIC / "cousins.jsx").read_text()

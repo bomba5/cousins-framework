@@ -1621,3 +1621,46 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   /* The smallest phones: the release tag gives way so the topbar fits. */
   .topbar .build { display: none; }
 }
+
+/* Runner pane highlighting (chat.jsx, runnerEventBody): the kind label in
+   the accent (the Settings hue slider moves it), the model's words in the
+   primary foreground, tool executions muted, the runner's bookkeeping
+   dimmest, errors red; diffs, JSON and light markdown on top. Theme
+   variables only. */
+.runner-ev { display: flex; gap: 8px; }
+.runner-ev .rp-kind { flex: none; min-width: 11ch; color: var(--accent); }
+.runner-ev .rp-body { flex: 1; min-width: 0; }
+.rp-text .rp-body { color: var(--fg-0); }
+.rp-thinking .rp-body { color: var(--fg-1); font-style: italic; }
+.rp-tool .rp-body { color: var(--fg-2); }
+.rp-meta .rp-body { color: var(--fg-3); }
+.rp-error .rp-body { color: var(--red); }
+.rp-tool-name { font-weight: 600; }
+.rp-err { color: var(--red); }
+.rp-dim { color: var(--fg-3); }
+
+.rp-diff-add { color: var(--green); }
+.rp-diff-del { color: var(--red); }
+.rp-diff-hunk { color: var(--accent); }
+.rp-diff-file { color: var(--fg-1); font-weight: 700; }
+
+.rp-json-key { color: var(--assistant); }
+.rp-json-str { color: var(--green); }
+.rp-json-num { color: var(--amber); }
+.rp-json-bool, .rp-json-null { color: var(--violet); }
+.rp-json-punc { color: var(--fg-3); }
+
+.rp-md-h { font-weight: 700; }
+.rp-md-h1, .rp-md-h2 { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.rp-md-code { background: var(--bg-2); color: var(--fg-1); padding: 0 3px; border-radius: 3px; }
+.rp-md-pre {
+  margin: 2px 0; padding: 4px 8px;
+  background: var(--bg-1); border-left: 2px solid var(--line);
+  font: inherit; color: var(--fg-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.rp-md-bullet { color: var(--fg-3); }
+.rp-md-a { color: var(--accent); }
+.rp-md-quote { color: var(--fg-2); border-left: 2px solid var(--line); padding-left: 6px; }
+.rp-md-hr { border-top: 1px solid var(--line); margin: 5px 0; }
+.rp-md-gap { height: 0.6em; }

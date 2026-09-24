@@ -51,6 +51,7 @@ import sqlite3
 import time
 import tomllib
 import urllib.request
+import zlib
 from pathlib import Path
 
 from cousin_lib import reinforce
@@ -238,7 +239,7 @@ def _raw_entries(home):
             opener = gzip.open if path.suffix == ".gz" else open
             with opener(path, "rt", errors="replace") as fh:
                 lines = fh.readlines()
-        except OSError:
+        except (OSError, EOFError, zlib.error):
             continue
         for number, line in enumerate(lines, 1):
             line = line.strip()
@@ -1024,7 +1025,7 @@ def raw_entry(key):
                 if n == wanted:
                     entry = json.loads(line)
                     return entry if isinstance(entry, dict) else None
-    except (OSError, ValueError):
+    except (OSError, ValueError, EOFError, zlib.error):
         return None
     return None
 

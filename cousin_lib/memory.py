@@ -16,6 +16,7 @@ import json
 import re
 import os
 import sys
+import zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -515,12 +516,13 @@ def ensure_backfilled(home):
 
 def try_backfill(home):
     """ensure_backfilled for a reader (search, recall): a failure (a
-    read-only or full data/, an unreadable log) costs the backfill, never
-    the read. It says so on stderr and writes no mark, so the next read
-    tries again."""
+    read-only or full data/, an unreadable log, or a truncated gzip
+    archive raising EOFError or zlib.error out of _raw_memories) costs
+    the backfill, never the read. It says so on stderr and writes no
+    mark, so the next read tries again."""
     try:
         ensure_backfilled(home)
-    except (OSError, ValueError) as err:
+    except (OSError, ValueError, EOFError, zlib.error) as err:
         print("memory: decisions backfill skipped: %s: %s" % (type(err).__name__, err),
               file=sys.stderr)
 

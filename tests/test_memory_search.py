@@ -319,6 +319,29 @@ class TestRawEntriesAreIndexed(SearchCase):
         self.assertTrue(raw_only)
         self.assertEqual({h["collection"] for h in raw_only}, {"raw"})
 
+    def test_a_truncated_archive_never_costs_the_other_entries(self):
+        """Item 5 (final fix wave): a truncated gzip archive raises
+        EOFError (a corrupt deflate stream, zlib.error) reading the bytes
+        back, not OSError; _raw_entries and raw_entry must skip it like
+        any other unreadable file, and try_backfill (a reader's own call
+        into ensure_backfilled) must not let it through either."""
+        import gzip
+        self._raw("2026-09-20", {"timestamp": "2026-09-20T10:00:00+02:00",
+                                 "topic": "sanderling", "content": "sanderling runs the tideline"})
+        arch = self.home / "memory" / "raw" / "archive"
+        arch.mkdir(parents=True)
+        with gzip.open(arch / "2026-08.jsonl.gz", "wt") as fh:
+            fh.write(json.dumps({"timestamp": "2026-08-03T09:00:00+02:00",
+                                 "topic": "dunlin", "content": "dunlin was here"}) + "\n")
+        good = (arch / "2026-08.jsonl.gz").read_bytes()
+        (arch / "2026-08.jsonl.gz").write_bytes(good[:len(good) // 2])
+        hits, _ = search("sanderling", home=self.home, top=5)
+        self.assertTrue(hits, "a truncated archive must not cost the other entries")
+        from cousin_lib import memory
+        memory.try_backfill(self.home)          # must not raise
+        entries = memory.recall_entries(self.home, "sanderling")
+        self.assertTrue(entries, "recall must still answer over the truncated archive")
+
 
 class TestCuratedFloor(SearchCase):
     """Indexing the raw store put entries in 36 of 45 top-three slots on

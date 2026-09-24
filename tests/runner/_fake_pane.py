@@ -16,12 +16,13 @@ import time
 import uuid
 from pathlib import Path
 
-from cousin_lib.runner.tmux_pane import Outcome
+from cousin_lib.runner.tmux_pane import NO_PANE, Outcome
 
 
 class FakePane:
     def __init__(self, transcript, *, slow=False, fail_first=False, turn_s=0.05, slow_s=3.0,
-                 attention=None, on_prompt=None, settle_s=0.0, linger=None, context_home=None):
+                 attention=None, on_prompt=None, settle_s=0.0, linger=None, context_home=None,
+                 boot_s=0.0):
         self.transcript = Path(transcript)
         self.slow, self.fail_first = slow, fail_first
         self.turn_s, self.slow_s = turn_s, slow_s
@@ -44,6 +45,10 @@ class FakePane:
         # data/run/tmux-context.md in this home exits 2, and the pane dies
         self.context_home = Path(context_home) if context_home is not None else None
         self.launch_refused = 0
+        # the CLI's boot: no input box (type_row BLOCKED, box_text None) for
+        # this long after start
+        self.boot_s, self._ready_at = boot_s, 0.0
+        self.type_calls = 0        # every type_row, typed or not
 
     # -- the Pane protocol ------------------------------------------------
     def alive(self):
@@ -63,6 +68,7 @@ class FakePane:
             return
         self._dead = False
         self._alive = True
+        self._ready_at = time.monotonic() + self.boot_s
 
     def kill(self):
         self.kills += 1
@@ -85,22 +91,30 @@ class FakePane:
         self._alive = False
         self._escape.set()
 
+    def _booting(self):
+        return time.monotonic() < self._ready_at
+
     def capture(self):
-        return ""
+        return "" if self._alive else None
 
     def box_text(self):
+        if not self._alive or self._booting():
+            return None
         return ""
 
     def queued(self):
         return False
 
     def attention(self):
+        if not self._alive:
+            return NO_PANE              # a capture that fails is not a clear screen
         return self._attention
 
     def type_row(self, first_line, body):
+        self.type_calls += 1
         if not self._alive:
             return Outcome.FAILED
-        if self._attention or self._busy:
+        if self._attention or self._busy or self._booting():
             return Outcome.BLOCKED
         if first_line == "/exit" and not body:     # a slash command: no prompt entry
             self.exits += 1

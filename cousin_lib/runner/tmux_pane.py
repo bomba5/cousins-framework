@@ -46,6 +46,7 @@ _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # (`!cmd` runs a shell with no model and no policy, `/login`, `/clear`).
 _CONTROLS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 RULE_CHAR = "─"
+NO_PANE = "no_pane"      # attention() when the screen cannot be read: never a clear screen
 
 # (id, substrings that must all appear); `rewind` is the only one the
 # runner answers (one Escape); every other waits for a person
@@ -239,7 +240,10 @@ class TmuxPane:
         return QUEUED_HINT in (self.capture() or "")
 
     def attention(self):
-        return attention_in(self.capture() or "")
+        """The attention screen showing, None for none, NO_PANE when the
+        screen cannot be read (a capture that fails is never a clear one)."""
+        screen = self.capture()
+        return NO_PANE if screen is None else attention_in(screen)
 
     def type_row(self, first_line, body):
         """Type `first_line` as keys, paste `body` bracketed after a blank

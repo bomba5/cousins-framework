@@ -251,8 +251,9 @@ class TestTyping(PaneCase):
         os.environ["FAKE_TMUX_FAIL"] = "capture-pane"
         self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.FAILED)
         self.assertFalse(any("send-keys" in c for c in self.calls()))
+        # review C3: a screen nobody can read is not a clear one
         self.assertEqual((self.pane.box_text(), self.pane.attention(), self.pane.queued()),
-                         (None, None, False))
+                         (None, tp.NO_PANE, False))
 
     def test_a_failure_after_the_first_key_clears_the_box(self):
         for sub in ("load-buffer", "paste-buffer"):

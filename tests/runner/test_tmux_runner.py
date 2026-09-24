@@ -203,6 +203,84 @@ class TestContext(Case):
         self.assertFalse((self.home / "run" / "turn.json").exists())
 
 
+class TestPaneLoss(Case):
+    """Review C3: the CLI exits under a live runner. The runner stops
+    claiming, says so, settles the rows per R23 (never `failed` for a dead
+    pane) and resumes the session in a new pane, with a backoff."""
+
+    def lost(self, r):
+        return [e["payload"] for e in r.events()
+                if e["kind"] == "system" and e["payload"].get("subtype") == "pane_lost"]
+
+    def test_rows_queued_on_a_dead_pane_wait_for_the_resumed_pane(self):
+        r = self.runner()
+        r.reopen_base_s = 0.1
+        r.start()
+        first = r.enqueue(Item("operator:wren", "chat", "before", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, first)[1] == "delivered"))
+        sid = r.session_id()
+        self.panes[0].die()                        # the CLI exits under a live runner
+        recs = [r.enqueue(Item("operator:wren", "chat", "m%d" % i, sender="Wren")) for i in range(5)]
+        self.assertTrue(_wait(lambda: all(self.outcome(r, x)[1] == "delivered" for x in recs),
+                              timeout=10), [self.outcome(r, x) for x in recs])
+        self.assertEqual(len(self.lost(r)), 1)
+        self.assertEqual(len(self.panes), 2)
+        self.assertEqual(self.panes[1].started[0][0], ["claude", sid], "resumed, not fresh")
+        self.assertEqual(r.session_id(), sid)
+
+    def test_a_turn_cut_by_the_pane_dying_closes_delivered_and_the_model_is_told(self):
+        r = self.runner(slow=True, slow_s=5.0)
+        r.reopen_base_s = 0.1
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0].die()
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+        self.assertIn("pane", self.outcome(r, rec)[2])
+        self.assertTrue(_wait(lambda: len(self.panes) == 2 and any(
+            "cut short" in body for _f, body in self.panes[1].typed)))
+        self.assertEqual(self.lost(r)[0]["cut"], [rec.inbox_id])
+        self.assertEqual(self.panes[1].typed and len([t for t in self.panes[1].typed
+                                                     if "mid-turn" in t[1]]), 0, "never retyped")
+
+    def test_a_pane_that_will_not_start_is_retried_with_a_backoff(self):
+        tries = []
+
+        class Stillborn(FakePane):
+            def start(self, argv, *, cwd, env_base):
+                tries.append(time.monotonic())
+                super().start(argv, cwd=cwd, env_base=env_base)
+                if len(tries) in (2, 3):
+                    self._alive = False             # the CLI exits at once
+        r = self.runner(pane=lambda path: Stillborn(path, context_home=self.home))
+        r.reopen_base_s = 0.3
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.panes[0].die()
+        rec = r.enqueue(Item("operator:wren", "chat", "after", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered", timeout=10))
+        self.assertEqual(len(tries), 4)
+        gaps = [b - a for a, b in zip(tries[1:], tries[2:])]
+        self.assertGreater(gaps[1] - gaps[0], 0.15, "the wait doubles: %s" % gaps)
+        self.assertEqual(len(self.lost(r)), 1, "one event per loss, not per try")
+
+    def test_a_blocked_row_backs_off_and_is_said_once(self):
+        class Full(FakePane):
+            def type_row(self, first_line, body):
+                self.type_calls += 1
+                return Outcome.BLOCKED             # text in the box nobody clears
+        r = self.runner(pane=lambda path: Full(path, context_home=self.home))
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        rec = r.enqueue(Item("operator:wren", "chat", "waits", sender="Wren"))
+        time.sleep(2.0)
+        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        self.assertLess(self.panes[0].type_calls, 8, "not a 10 Hz spin")
+        blocked = [e for e in r.events() if e["kind"] == "system"
+                   and e["payload"].get("subtype") == "typing_blocked"]
+        self.assertEqual(len(blocked), 1)
+
+
 class TestStop(Case):
     def test_an_unheld_stop_leaves_the_pane_and_a_held_one_kills_it(self):
         r = self.runner()

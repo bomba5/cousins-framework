@@ -34,7 +34,7 @@ from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
-from cousin_lib.runner.tmux_pane import Outcome, TmuxPane, printable
+from cousin_lib.runner.tmux_pane import NO_PANE, Outcome, TmuxPane, printable
 
 POLL_S = 0.1              # the transcript poll while nothing wakes the runner
 CONSUME_S = 60.0          # a typed row not taken by then, at a turn end with an empty box, is requeued
@@ -44,6 +44,11 @@ EXIT_WAIT_S = 10.0        # how long `/exit` gets to end the CLI before the pane
 HOOKS_SILENT_S = 5.0      # after the first turn end, how long a pane hook's datagram may still take
 KILL_GRACE_S = 3.0        # a refused pane's CLI gets this long after the kill before a SIGKILL
 KILL_BOUND_S = 6.0        # and this long in all before the runner gives up on starting
+ALIVE_CHECK_S = 1.0       # how often the loop asks tmux whether the pane is still there
+REOPEN_BASE_S = 1.0       # a lost pane is started again after this, doubling per failed try
+REOPEN_MAX_S = 60.0       # up to this
+BLOCKED_BASE_S = 0.5      # a screen that refuses typing is tried again after this, doubling
+BLOCKED_MAX_S = 5.0       # up to this
 MAX_ID = 128              # a hook datagram's session_id; a CLI's is a 36-character uuid
 MAX_SOURCE = 32           # and its SessionStart source ("startup", "resume", "clear", "compact")
 CHANGES_KEPT = 32         # session ids a session_changed was said for, the newest kept
@@ -134,6 +139,11 @@ class TmuxRunner:
         self._first_end = None           # monotonic time of the first turn end
         self._hooks_silent_said = False
         self._changes_said = {}          # session ids a SessionStart named that are not ours
+        self._lost = None                # {"attempt", "next"} while the pane is gone (C3)
+        self._next_alive = 0.0
+        self._blocked = None             # {"delay", "until"} while typing is refused
+        self._notice = None              # {"text", "nonce"}: a runner line owed at the first idle
+        self.reopen_base_s = REOPEN_BASE_S
         self.hooks_silent_s = HOOKS_SILENT_S   # tests shorten these three
         self.kill_grace_s, self.kill_bound_s = KILL_GRACE_S, KILL_BOUND_S
         self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
@@ -396,6 +406,116 @@ class TmuxRunner:
             time.sleep(POLL_S)
         return True
 
+    # -- a pane that went away (review C3) -----------------------------------
+    def _check_alive(self, force=False):
+        """True while the pane is there; asked of tmux at most every
+        ALIVE_CHECK_S unless `force`. A pane found gone is settled here."""
+        now = time.monotonic()
+        if not force and now < self._next_alive:
+            return True
+        self._next_alive = now + ALIVE_CHECK_S
+        if self.pane is not None and self.pane.alive():
+            return True
+        self._pane_lost()
+        return False
+
+    def _pane_lost(self):
+        """The CLI exited under a live runner: stop claiming, read what it
+        wrote before it went, settle every claim as R23 does for a dead pane
+        (a taken row whose turn has no end closes `delivered`, cut, and the
+        model is told once the pane is back; an untaken row is requeued;
+        never `failed`), say it once, and reopen the session with a backoff."""
+        try:
+            self._pump()
+        except Exception as exc:  # noqa: BLE001 - settled from what was read
+            self.stream.append("error", {"error": "reading the lost pane's transcript: %s: %s"
+                                         % (type(exc).__name__, exc)})
+        cut, requeued = [], []
+        for inbox_id, c in sorted(self._claims.items()):
+            self._closed_nonces |= set(c["nonces"])
+            if c["taken"] is not None:
+                self.inbox.done(inbox_id, DELIVERED, "cut by pane loss")
+                cut.append(inbox_id)
+            else:
+                self.inbox.requeue(inbox_id)
+                requeued.append(inbox_id)
+        self._claims = {}
+        self._persist_claims()
+        if self._live is not None:
+            self.stream.append("result", {"inbox_ids": cut, "interrupted": True, "is_error": False})
+        self._live, self._interrupting = None, False
+        self._turn_file(None)
+        self._to("idle", "pane lost")
+        self._lost = {"attempt": 0, "next": time.monotonic()}
+        self.stream.append("system", {"subtype": "pane_lost", "session_id": self._session_id,
+                                      "cut": cut, "requeued": requeued})
+        if cut:
+            self._owe_notice("The previous turn was cut short: the pane's CLI exited before it"
+                             " finished, and the runner resumed this session in a new pane. Its"
+                             " message was delivered. Check what it did and continue.")
+
+    def _reopen(self):
+        """One try at a new pane on the recorded session (resumed, or fresh
+        under a rollover's id), REOPEN_BASE_S after the last failed one,
+        doubling to REOPEN_MAX_S."""
+        now = time.monotonic()
+        if now < self._lost["next"]:
+            return
+        self._lost["attempt"] += 1
+        attempt, why = self._lost["attempt"], None
+        try:
+            how = self._open_session()
+            if not self.pane.alive():
+                why = "the new pane's CLI exited at once"
+        except Exception as exc:  # noqa: BLE001 - tried again after the backoff
+            why = "%s: %s" % (type(exc).__name__, exc)
+        if why is None:
+            self._lost = None
+            self._next_alive = time.monotonic() + ALIVE_CHECK_S
+            self.stream.append("system", {"subtype": "pane_reopened", "session_id": self._session_id,
+                                          "source": how, "attempts": attempt})
+            return
+        delay = min(REOPEN_MAX_S, self.reopen_base_s * 2 ** (attempt - 1))
+        self._lost["next"] = time.monotonic() + delay
+        self.stream.append("error", {"error": "the pane did not come back (try %d): %s; next try"
+                                              " in %.1fs" % (attempt, why, delay)})
+
+    def _blocked_stretch(self, what):
+        """Typing refused by the screen: the next try waits BLOCKED_BASE_S,
+        doubling to BLOCKED_MAX_S; one event per stretch."""
+        now = time.monotonic()
+        if self._blocked is None:
+            self._blocked = {"delay": BLOCKED_BASE_S}
+            self.stream.append("system", {"subtype": "typing_blocked", "what": what,
+                                          "screen": self.pane.attention() or "box"})
+        else:
+            self._blocked["delay"] = min(BLOCKED_MAX_S, self._blocked["delay"] * 2)
+        self._blocked["until"] = now + self._blocked["delay"]
+
+    def _typing_held(self):
+        return self._blocked is not None and time.monotonic() < self._blocked["until"]
+
+    def _owe_notice(self, text):
+        self._notice = {"text": text, "nonce": None}
+
+    def _maybe_notice(self):
+        """A runner line owed at the first idle (a cut turn, R23), typed
+        before any row. True when this tick was spent on it."""
+        if self._notice is None or self._pending_typed() or self._typing_held():
+            return False
+        if not self._screen_allows():
+            return True
+        if self._notice["nonce"] is None:
+            self._notice["nonce"] = secrets.token_hex(6)
+        out = self._runner_line(self._notice["text"], nonce=self._notice["nonce"])
+        if out is Outcome.TYPED:
+            self._notice, self._blocked = None, None
+        elif out is Outcome.BLOCKED:
+            self._blocked_stretch("notice")
+        else:
+            self._check_alive(force=True)
+        return True
+
     # -- claims ------------------------------------------------------------
     def _persist_claims(self):
         _atomic_write(self._data(CLAIMS_FILE), {
@@ -486,9 +606,9 @@ class TmuxRunner:
                 self._clear_stranded()
             self._persist_cursor()
             if self._cut:
-                self._runner_line("The previous turn was cut short by a restart before it "
-                                  "finished; its message was delivered. Check what it did and "
-                                  "continue.")
+                self._owe_notice("The previous turn was cut short by a restart before it "
+                                 "finished; its message was delivered. Check what it did and "
+                                 "continue.")
         except Exception as exc:  # noqa: BLE001 - never a silent death
             self._to("errored", "start failed: %s: %s" % (type(exc).__name__, exc))
             self.stream.append("error", {"error": "start: %s: %s" % (type(exc).__name__, exc)})
@@ -496,11 +616,16 @@ class TmuxRunner:
         with wake.listen(self.home, self._wake_error) as listener:
             while not self._stop.is_set():
                 try:
-                    self._pump()
-                    if self._live is not None:
-                        self._take_interrupts()
-                    elif not self._stop.is_set():
-                        self._maybe_claim()
+                    if self._lost is not None:
+                        self._reopen()
+                    else:
+                        self._pump()
+                        if not self._check_alive():
+                            pass                             # said and settled: reopened next
+                        elif self._live is not None:
+                            self._take_interrupts()
+                        elif not self._stop.is_set() and not self._maybe_notice():
+                            self._maybe_claim()
                 except Exception as exc:  # noqa: BLE001 - recorded, the loop goes on
                     self._fail_turn([], exc)
                     time.sleep(0.2)
@@ -739,7 +864,10 @@ class TmuxRunner:
 
     # -- claiming and typing -------------------------------------------------
     def _screen_allows(self):
-        seen = self.pane.attention() if self.pane is not None else None
+        seen = self.pane.attention() if self.pane is not None else NO_PANE
+        if seen == NO_PANE:
+            self._check_alive(force=True)            # a screen nobody can read is not clear
+            return False
         if seen == "rewind":
             self.pane.key("Escape")                  # the one screen the runner answers
             self.stream.append("error", {"error": "the rewind selector was open; dismissed"})
@@ -778,6 +906,8 @@ class TmuxRunner:
         if pending:
             self._check_consumed(pending)
             return
+        if self._typing_held():
+            return
         if not self._screen_allows():
             return
         rows = self.inbox.claim(limit=1, claimant=self.runner_id)
@@ -810,11 +940,15 @@ class TmuxRunner:
         first, body = self._render(row, nonce)
         out = self.pane.type_row(first, body)
         if out is Outcome.TYPED:
+            self._blocked = None
             return
+        if out is Outcome.FAILED and not self._check_alive(force=True):
+            return                                  # requeued by _pane_lost: never failed for a dead pane
         self._claims.pop(row["id"], None)
         self._persist_claims()
         if out is Outcome.BLOCKED:
             self.inbox.requeue(row["id"])
+            self._blocked_stretch("row")
             return
         self.inbox.done(row["id"], FAILED, "the pane refused the row")
         self.stream.append("error", {"error": "typing row %d failed" % row["id"]})
@@ -839,8 +973,8 @@ class TmuxRunner:
                 self.inbox.requeue(row["id"])
             self._persist_claims()
 
-    def _runner_line(self, text):
-        nonce = secrets.token_hex(6)
+    def _runner_line(self, text, nonce=None):
+        nonce = nonce or secrets.token_hex(6)
         self._runner_nonces.add(nonce)
         self._persist_claims()
         first = "[inbox:%s] [system] runner from the framework" % nonce

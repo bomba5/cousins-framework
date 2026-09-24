@@ -60,7 +60,10 @@ public_url = "http://192.0.2.10:8600"
 # How often nodes check in, in seconds (default 60, at least 5).
 #checkin_seconds = 60
 
-# Optional: a chat server that a node's [tell-home: ...] marker posts to.
+# Optional: the local cousin a node's [tell-home: ...] marker reaches,
+# through the queen, with the node's own token.
+#home_cousin = "wren"
+# Legacy: a chat server the marker posts to directly, unauthenticated.
 #home_chat_url = "http://192.0.2.10:8090"
 ```
 
@@ -100,7 +103,8 @@ This is how I do it.
      8210.
    - **brain**: `placeholder`, or `agent command` with the command line
      as it runs on the node (see [The brain](#the-brain)).
-   - **home chat**: only available when `home_chat_url` is set.
+   - **home chat**: only available when `home_cousin` (or the legacy
+     `home_chat_url`) is set.
    - **chat from this console**: on by default. The node then listens on
      `0.0.0.0` instead of loopback, so the console can proxy chat to it.
 3. Click **build node kestrel**. You get two commands with copy buttons:
@@ -308,8 +312,10 @@ Each message becomes one turn, whether it arrived on the node's own
      queen, readable by every node whose token has shared scope.
    - `[tell <slug>: text]` sends a message to another cousin through the
      queen.
-   - `[tell-home: text]` posts to the home chat server, if the node was
-     built with one. Otherwise it's dropped.
+   - `[tell-home: text]` reaches the home cousin, if the node was built
+     with home chat: through the queen (`POST /hive/tell-home`, with the
+     node's token) when `home_cousin` is set, else to the legacy
+     `home_chat_url`. Otherwise it's dropped.
 4. **Remember.** The whole exchange is stored on the queen under the
    node's own scope, every turn. Only that node can recall its own
    memories. If the node's disk dies, its memory doesn't.
@@ -328,12 +334,13 @@ A rough edge: local cousins are not on the hive by default. A local
 cousin can talk to it with a token (`cousin-hive mint wren`, then
 `cousin-hive send` and `cousin-hive recall`), but nothing reads a local
 cousin's hive inbox yet. If you want a node's words to land in a local
-cousin's chat, use `[tell-home: ...]` with `home_chat_url` pointing at
-that cousin's chat server. That works for a runner cousin
-(`[agent] runner = "sdk"`) too: its chat server starts without a tmux
-binary and puts the node's message in the runner's inbox. In the
-container, `cousin-supervisor` starts no per-cousin chat server, so a
-`[tell-home]` has nothing to post to there yet.
+cousin's chat, set `home_cousin` to that cousin and build the node with
+home chat: `[tell-home: ...]` then reaches it through the queen, which
+checks the node's token and refuses a replayed message. It needs no chat
+server, so it works in the container too, where `cousin-supervisor`
+starts none. The legacy `home_chat_url` posts to a cousin's chat server
+instead (a runner cousin's starts without a tmux binary), and has
+nothing to post to in the container.
 
 ```sh
 # from anywhere holding a token
@@ -447,7 +454,8 @@ http://<this machine>:8101`.
 | `enabled` | `false` | turns the hive on |
 | `public_url` | none, required when enabled | the queen as nodes reach it; baked into every archive the console builds and used for download links |
 | `checkin_seconds` | `60` | how often nodes check in; at least 5. Online means a checkin within 2.5 periods |
-| `home_chat_url` | empty | chat server for `[tell-home: ...]` on console-built nodes |
+| `home_cousin` | empty | the local cousin `[tell-home: ...]` reaches through the queen (`POST /hive/tell-home`) |
+| `home_chat_url` | empty | legacy: a chat server `[tell-home: ...]` posts to, unauthenticated; used only when `home_cousin` is unset |
 
 ### node.env
 
@@ -460,7 +468,8 @@ http://<this machine>:8101`.
 | `NODE_HOST` | `127.0.0.1` | where the chat binds; `0.0.0.0` lets the console proxy chat |
 | `QUEEN_URL` | | the queen, reached outbound |
 | `HIVE_TOKEN` | | the node's bearer token. Secret |
-| `HOME_CHAT_URL` | empty | where `[tell-home: ...]` posts; empty means it's dropped |
+| `TELL_HOME` | empty | `1`: `[tell-home: ...]` goes to the queen's `POST /hive/tell-home` with `HIVE_TOKEN` |
+| `HOME_CHAT_URL` | empty | legacy: where `[tell-home: ...]` posts when `TELL_HOME` is not `1`; empty means it's dropped |
 | `AGENT_CMD` | empty | the brain command; empty means the placeholder |
 | `NODE_POLL_SECONDS` | `5` | inbox poll interval; 0 turns it off |
 | `AGENT_TIMEOUT_SECONDS` | `120` | how long one brain call may take |

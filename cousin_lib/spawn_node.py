@@ -36,7 +36,7 @@ class SpawnNodeError(Exception):
 
 def render_node_env(*, slug, name, port, queen_url, token, home_chat,
                     agent_cmd, poll_seconds=5, agent_timeout=120,
-                    role="", node_host="127.0.0.1"):
+                    role="", node_host="127.0.0.1", tell_home=False):
     """The node's environment file: every key the runtime reads, shell
     quoted so install.sh can source it whatever the values hold. Keys
     that are optional are present and empty, so the operator edits a
@@ -50,6 +50,7 @@ def render_node_env(*, slug, name, port, queen_url, token, home_chat,
         ("QUEEN_URL", queen_url),
         ("HIVE_TOKEN", token),
         ("HOME_CHAT_URL", home_chat or ""),
+        ("TELL_HOME", "1" if tell_home else ""),
         ("AGENT_CMD", agent_cmd or ""),
         ("NODE_POLL_SECONDS", str(poll_seconds)),
         ("AGENT_TIMEOUT_SECONDS", str(agent_timeout)),
@@ -102,7 +103,7 @@ def _render_readme(*, slug, name, queen_url, port):
 
 def build_node_archive(root, *, slug, queen_url, name, role, out,
                        token=None, home_chat=None, port=_DEFAULT_PORT,
-                       agent_cmd="", node_host="127.0.0.1"):
+                       agent_cmd="", node_host="127.0.0.1", tell_home=False):
     """Mint (or take) the token, render everything in memory, and only
     then write the tarball: a failed render leaves no archive behind.
     Returns {tarball, token, slug}.
@@ -148,7 +149,7 @@ def build_node_archive(root, *, slug, queen_url, name, role, out,
         ("CLAUDE.md", claude_md, 0o644),
         ("node.env", render_node_env(
             slug=slug, name=name, port=port, queen_url=queen_url,
-            token=token, home_chat=home_chat, agent_cmd=agent_cmd,
+            token=token, home_chat=home_chat, agent_cmd=agent_cmd, tell_home=tell_home,
             role=role, node_host=node_host), 0o600),
         ("README", _render_readme(slug=slug, name=name,
                                   queen_url=queen_url, port=port), 0o644),

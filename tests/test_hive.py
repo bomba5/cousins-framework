@@ -545,7 +545,7 @@ class TestHiveConfig(HiveCase):
         self._write('enabled = true\npublic_url = "http://q.invalid:8600/"\n')
         self.assertEqual(hive_config(self.root), {
             "enabled": True, "public_url": "http://q.invalid:8600",
-            "checkin_seconds": 60, "home_chat_url": ""})
+            "checkin_seconds": 60, "home_chat_url": "", "home_cousin": ""})
 
     def test_unusable_values_are_loud(self):
         from cousin_lib.hive import HiveConfigError, hive_config

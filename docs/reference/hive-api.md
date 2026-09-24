@@ -11,7 +11,8 @@ There are two ways to run a queen. Both run the same route code over the same da
 enabled = true
 public_url = "http://192.0.2.10:8600"   # the console as nodes reach it
 checkin_seconds = 60                     # at least 5
-home_chat_url = ""                       # optional, for [tell-home: ...]
+home_chat_url = ""                       # optional, legacy, for [tell-home: ...]
+home_cousin = ""                         # optional: [tell-home: ...] through POST /hive/tell-home
 ```
 
 ```sh
@@ -99,6 +100,16 @@ Send a message to another slug's inbox.
 ```
 
 All three are required (`id` a string or integer). `200 {"ok": true}`. The sender is the token's slug. Delivery is idempotent on (recipient, id): sending the same id twice stores it once, so retrying is safe. The queen doesn't check that `to` exists; the message waits in that inbox until someone with that slug's token reads it.
+
+### `POST /hive/tell-home`
+
+A node's `[tell-home: ...]`: one message to the install's home cousin (`home_cousin` in `config/hive.toml`), stored in its chat and delivered to its inbox.
+
+```json
+{"message": "the greenhouse report is ready", "msg_id": "kestrel-7f3a2c1b", "sent_at": 1790000000.5}
+```
+
+The sender is the token's slug (shown under the name the node checked in with); the body names no sender and no destination, and any it carries is ignored. `msg_id` is 8-128 letters, digits, `-` or `_`; `sent_at` is epoch seconds within 300 s of the queen's clock. `200 {"ok": true, "to": "<home cousin>", "id": <message id>}`; `400` for a bad body, a stale or future `sent_at`, an empty or overlong (16000) message; `409` when that node already delivered that `msg_id` (kept 15 minutes, so a replay is either seen or stale); `429` past 30 messages a minute from one node; `404` when no `home_cousin` is set. A delivery that fails is a `502` and frees the id, so the node may retry with it; a delivery that timed out is a `504` and keeps it (the message may have landed). The name the message is signed with is the one the operator minted the node's token with (the build dialog, `cousin-spawn-node --name`), never the name the node checks in with, and it is refused (`403`) when the home cousin would take it for its operator or a local cousin. Only the console's queen serves this route: the standalone queen (`cousin-hive serve`) has no home cousin and answers `404`.
 
 ### `GET /hive/inbox`
 

@@ -17,7 +17,11 @@ public_url = "http://192.0.2.10:8600"
 # online while its last checkin is within 2.5 periods.
 #checkin_seconds = 60
 
-# Optional: a chat server (this framework's /api/send) that a
-# console-built node's [tell-home: ...] marker posts to. The build
-# dialog's "home chat" switch needs it.
+# Optional: the local cousin a console-built node's [tell-home: ...]
+# marker reaches, through this queen (POST /hive/tell-home, with the
+# node's token). The build dialog's "home chat" switch needs it, or the
+# legacy home_chat_url below.
+#home_cousin = "wren"
+# Legacy: a chat server (this framework's /api/send) the marker posts to
+# directly, unauthenticated; used only when home_cousin is unset.
 #home_chat_url = "http://192.0.2.10:8090"

@@ -84,15 +84,34 @@ def context(server, cfg):
     """The QueenContext for this server, rebuilt when the checkin
     period in hive.toml changes."""
     ctx = server.state.get("hive_context")
-    period = cfg["checkin_seconds"]
-    if ctx is None or ctx.checkin_seconds != period:
+    period, home = cfg["checkin_seconds"], cfg.get("home_cousin") or ""
+    if ctx is None or ctx.checkin_seconds != period or getattr(ctx, "home_cousin", "") != home:
         ctx = hive_lib.QueenContext(
             store(server), checkin_seconds=period,
             embedder=hive_lib.EmbedderSource(server.root), min_score=None,
             on_checkin=lambda slug, previous: _on_checkin(
-                server, slug, previous))
+                server, slug, previous),
+            tell_home=(lambda slug, body: tell_home(server, home, slug, body)) if home else None)
+        ctx.home_cousin = home
         server.state["hive_context"] = ctx
     return ctx
+
+
+def tell_home(server, home, slug, body):
+    """A node's tell-home, authenticated by its token (`slug`): through
+    peer_inbound.accept to the home cousin only, under the name the
+    operator minted the token with (else the slug), never the name the
+    node checks in with (ruling P10a-1). Returns (status, payload)."""
+    from cousin_lib import peer_inbound
+    display = store(server).minted_name(slug) or slug
+    try:
+        out = peer_inbound.accept(
+            server.root, identity="hive:%s" % slug, display=display,
+            to=home, message=body.get("message"), msg_id=body.get("msg_id"),
+            sent_at=body.get("sent_at"), allowed=lambda target: target == home)
+    except peer_inbound.Refused as err:
+        return err.status, {"error": err.error}
+    return 200, {"ok": True, "to": home, "id": out.get("id")}
 
 
 def _on_checkin(server, slug, previous):
@@ -402,8 +421,9 @@ def build_request(server, cfg, body):
     reachable = body.get("reachable", True)
     if not isinstance(home_chat, bool) or not isinstance(reachable, bool):
         raise HttpError(400, "home_chat and reachable must be booleans")
-    if home_chat and not cfg["home_chat_url"]:
-        raise HttpError(400, "home chat needs home_chat_url in"
+    tell_home = bool(home_chat and cfg.get("home_cousin"))
+    if home_chat and not (cfg.get("home_cousin") or cfg["home_chat_url"]):
+        raise HttpError(400, "home chat needs home_cousin (or the legacy home_chat_url) in"
                              " config/hive.toml")
     purge_expired(server)
     directory = tempfile.mkdtemp(prefix="node-",
@@ -412,7 +432,8 @@ def build_request(server, cfg, body):
         result = spawn_node.build_node_archive(
             server.root, slug=slug, queen_url=cfg["public_url"],
             name=name.strip(), role=role.strip(), out=directory,
-            home_chat=cfg["home_chat_url"] if home_chat else None,
+            home_chat=cfg["home_chat_url"] if home_chat and not tell_home else None,
+            tell_home=tell_home,
             port=port, agent_cmd=agent_cmd,
             node_host="0.0.0.0" if reachable else "127.0.0.1")
     except spawn_node.SpawnNodeError as err:

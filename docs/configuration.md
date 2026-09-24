@@ -424,7 +424,8 @@ the problem.
 | `enabled` | `false` | `true` or `false`, nothing else |
 | `public_url` | required when enabled | the console as the nodes reach it, e.g. `http://192.0.2.10:8600`. Baked into every node archive the console builds. |
 | `checkin_seconds` | 60 | how often a node checks in, at least 5. A node counts as online within 2.5 periods of its last checkin. |
-| `home_chat_url` | none | a chat server that a console-built node's `[tell-home: ...]` marker posts to. The build dialog's "home chat" switch needs it. |
+| `home_cousin` | none | the local cousin a console-built node's `[tell-home: ...]` reaches, through the queen's authenticated `POST /hive/tell-home`. The build dialog's "home chat" switch needs it (or the legacy key below). |
+| `home_chat_url` | none | legacy: a chat server that a node's `[tell-home: ...]` posts to directly, unauthenticated; used only when `home_cousin` is unset. |
 
 The hive's database lives in `<root>/shared/hive/`. See
 [remote cousins](remote-cousins.md).

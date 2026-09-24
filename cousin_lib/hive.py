@@ -65,8 +65,10 @@ def hive_config(root):
 
     Keys: enabled (bool), public_url (the queen as nodes reach it,
     required when enabled), checkin_seconds (default 60, at least 5),
-    home_chat_url (optional: the chat server a console-built node's
-    [tell-home: ...] marker posts to)."""
+    home_chat_url (optional, legacy: the chat server a console-built
+    node's [tell-home: ...] marker posts to, unauthenticated), home_cousin
+    (optional: the local cousin a node's [tell-home: ...] reaches through
+    the queen's authenticated POST /hive/tell-home, phase 10a)."""
     path = Path(root) / "config" / "hive.toml"
     if not path.exists():
         return None
@@ -93,9 +95,13 @@ def hive_config(root):
     home_chat = data.get("home_chat_url") or ""
     if not isinstance(home_chat, str):
         raise HiveConfigError("%s: home_chat_url must be a string" % path)
+    home_cousin = data.get("home_cousin") or ""
+    if not isinstance(home_cousin, str) or (
+            home_cousin and not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", home_cousin)):
+        raise HiveConfigError("%s: home_cousin must be a cousin's slug" % path)
     return {"enabled": True, "public_url": public_url.rstrip("/"),
             "checkin_seconds": checkin,
-            "home_chat_url": home_chat.rstrip("/")}
+            "home_chat_url": home_chat.rstrip("/"), "home_cousin": home_cousin}
 
 
 # ---- the embedder --------------------------------------------------------
@@ -321,6 +327,17 @@ class HiveStore:
                 " COALESCE(revoked, 0)=0 ORDER BY rowid LIMIT 1", (slug,)
             ).fetchone()
         return row["token"] if row else None
+
+    def minted_name(self, slug):
+        """The name the operator gave `slug`'s live token when it was minted
+        (the build dialog, cousin-spawn-node), or None. Never the name a
+        node reports at checkin: that one is the node's own claim (phase
+        10a, ruling P10a-1)."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT name FROM tokens WHERE slug=? AND COALESCE(revoked, 0)=0"
+                " ORDER BY created DESC LIMIT 1", (slug,)).fetchone()
+        return (row["name"] or None) if row else None
 
     def revoke(self, slug):
         """Revoke every live token of the slug; returns how many. The
@@ -577,12 +594,15 @@ class QueenContext:
     returning an Embedder or None, asked per recall so an edited
     embedding.toml applies without a restart), the default min_score,
     and an optional `on_checkin(slug, previous_last_seen)` hook the
-    console uses to push a card update."""
+    console uses to push a card update, and `tell_home(slug, body) ->
+    (status, payload)`, the delivery of a node's tell-home (None: the
+    route answers 404, no home cousin is configured)."""
 
     def __init__(self, store, *, checkin_seconds=DEFAULT_CHECKIN_SECONDS,
                  embedder=None, min_score=None, on_checkin=None,
-                 embed_in_background=True):
+                 embed_in_background=True, tell_home=None):
         self.store = store
+        self.tell_home = tell_home
         self.checkin_seconds = checkin_seconds
         self.embedder = embedder or (lambda: None)
         self.min_score = min_score
@@ -666,6 +686,12 @@ def handle_request(ctx, method, path, query_string, headers, raw_body,
         ctx.store.deliver(sender=slug, recipient=to, msg_id=str(msg_id),
                           body=text)
         return 200, {"ok": True}
+    if path == "/hive/tell-home":
+        # The node's [tell-home: ...]: to the install's home cousin only,
+        # as the token's slug (peer_inbound.accept: window, dedupe, rate).
+        if ctx.tell_home is None:
+            return 404, {"error": "no home cousin: config/hive.toml sets no home_cousin"}
+        return ctx.tell_home(slug, body)
     if path == "/hive/memory":
         scope = body.get("scope", "own")
         text = body.get("text")

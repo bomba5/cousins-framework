@@ -133,6 +133,9 @@ class NodeConfig:
         if not self.token:
             raise ConfigError("HIVE_TOKEN is missing from the environment")
         self.home_chat_url = (get("HOME_CHAT_URL") or "").strip().rstrip("/")
+        # TELL_HOME=1: [tell-home: ...] goes through the queen, with this
+        # node's token (POST /hive/tell-home), not to a chat server
+        self.tell_home = (get("TELL_HOME") or "").strip() == "1"
         self.agent_cmd = (get("AGENT_CMD") or "").strip()
         self.node_dir = (get("NODE_DIR") or "").strip() or _HERE
         self.data_dir = os.path.join(self.node_dir, "data")
@@ -200,6 +203,13 @@ class Hive:
         return self._call("/hive/msg", method="POST",
                           body={"to": to, "id": msg_id, "body": body}
                           ) is not None
+
+    def tell_home(self, text, *, msg_id):
+        """[tell-home: ...] through the queen: the token is the sender,
+        msg_id and sent_at let the queen refuse a replay."""
+        return self._call("/hive/tell-home", method="POST",
+                          body={"message": text, "msg_id": msg_id,
+                                "sent_at": time.time()}) is not None
 
     def inbox(self, *, since):
         out = self._call("/hive/inbox?since=%d" % since)
@@ -455,6 +465,9 @@ class Brain:
             return reply
 
     def _tell_home(self, text):
+        if self.config.tell_home:
+            return self.hive.tell_home(text, msg_id="%s-%s" % (
+                self.config.slug, uuid.uuid4().hex))
         url = self.config.home_chat_url
         if not url:
             return False

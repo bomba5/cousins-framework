@@ -148,6 +148,8 @@ class _Writer:
     def submit(self, job):
         if self._closed:
             raise RunnerError("the turn's writer is closed")
+        if self._task.done():       # died without a close: nothing would ever write it
+            raise RunnerError("the turn's writer has ended")
         self._jobs.append(job)
         self._wake.set()
         return job
@@ -175,13 +177,15 @@ class _Writer:
             except Exception as exc:  # noqa: BLE001 - handed to the job's owner
                 self._fail(job, exc)
             else:
-                job.future.set_result(value)
+                if not job.future.done():       # its awaiter may have cancelled it
+                    job.future.set_result(value)
                 self._call(job.on_ok, value)
             self._current = None
 
     def _fail(self, job, exc):
-        job.future.set_exception(exc)
-        job.future.exception()      # read here: its owner may not await it
+        if not job.future.done():       # its awaiter may have cancelled it
+            job.future.set_exception(exc)
+            job.future.exception()      # read here: its owner may not await it
         self._call(job.on_error, exc)
 
     def _call(self, handler, arg):
@@ -347,6 +351,8 @@ class SdkRunner:
         # it, never awaited by the reader. None between turns.
         self._writer = None
         self._write_error = None  # a fold write that failed: the reader raises it
+        self._unwritten = []      # folds whose write wrote nothing: requeued by the failure path
+        self._drop_writes = False  # set by _close's login branch: close the writer at once
         # A rejected rate limit (epoch seconds): nothing is claimed before it
         # (_wait_rate_limit); None when no limit holds.
         self._limited_until = None
@@ -917,7 +923,7 @@ class SdkRunner:
             for row in rows:
                 self.inbox.requeue(row["id"])
             self.stream.append("result", {"inbox_ids": [], "requeued": [r["id"] for r in rows],
-                                          "interrupted": self._interrupt_requested,
+                                          "interrupted": self._interrupt_sent,
                                           "is_error": True, "num_turns": 0,
                                           "total_cost_usd": None, "session_id": None,
                                           "usage": None, "repeat_in_transcript": True,
@@ -1246,14 +1252,14 @@ class SdkRunner:
         reader keeps reading while it is written (_Writer). The row joins
         `open_rows` now, so the turn cannot end with it in flight; it is
         closed, as every row is, by the first result after its echo. A
-        write that raises before anything was written takes it back out
-        and fails the turn as `_NotWritten` (the row requeued); any other
-        failure leaves it open (it may have reached the CLI) and fails the
-        turn with it; a write never begun when the writer closes goes back
-        to the queue."""
+        write that raises before anything was written takes it back out,
+        lists it in `_unwritten` (every such row is requeued once by the
+        turn's failure path) and fails the turn; any other failure leaves
+        it open (it may have reached the CLI) and fails the turn with it; a
+        write never begun when the writer closes goes back to the queue.
+        Raises, with the row in no list, when it could not be handed over."""
         message, text = self._prepare(row)
         entry = (row, text)
-        open_rows.append(entry)
 
         def forget():
             if entry in open_rows:
@@ -1266,6 +1272,7 @@ class SdkRunner:
                 return      # already closed or requeued (a login's result): nothing to fail
             if isinstance(exc, _NotWritten):
                 forget()
+                self._unwritten.append(row)
             if self._write_error is None:
                 self._write_error = exc
 
@@ -1276,6 +1283,9 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
         self._writer.submit(_Job(lambda: self._write(sdk, row, message),
                                  on_error=on_error, on_dropped=on_dropped))
+        # after the submit: no yield in between, so the writer cannot have
+        # run it yet, and a refused submit leaves the row in no list
+        open_rows.append(entry)
 
     async def _write(self, sdk, row, message):
         """The query() of one message; `_NotWritten` when it raised before
@@ -1316,7 +1326,9 @@ class SdkRunner:
             try:
                 self._send_later(sdk, row, open_rows)
             except Exception:
-                for rest in rows[i + 1:]:   # claimed here, never offered: back to the queue
+                # this row (it could not be rendered or handed over) and the
+                # rest, claimed here and never offered: back to the queue
+                for rest in rows[i:]:
                     self.inbox.requeue(rest["id"])
                 raise
 
@@ -1480,7 +1492,7 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
             self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
                                           "requeued": [r["id"] for r in requeued],
-                                          "interrupted": self._interrupt_requested,
+                                          "interrupted": self._interrupt_sent,
                                           "is_error": True, "num_turns": 0,
                                           "total_cost_usd": None, "session_id": None,
                                           "usage": None})
@@ -1584,6 +1596,8 @@ class SdkRunner:
             # between turns, so its stdout is not filling
             await self._send(sdk, first, open_rows)
             self._write_error = None
+            self._unwritten = []
+            self._drop_writes = False
             self._writer = _Writer(lambda text: self.stream.append("error", {"error": text}))
             started = time.monotonic()
             self._last_fold = 0.0
@@ -1627,6 +1641,11 @@ class SdkRunner:
                             results += 1
                             self._live = False
                             ok = self._close(msg, open_rows, echoed, closing) and ok
+                            if self._drop_writes:
+                                # a login's result requeued every open row: none of
+                                # them may still be written during _after_turn
+                                self._drop_writes = False
+                                await self._close_writer()
                             await self._after_turn(msg)
                             break
                 finally:
@@ -1638,7 +1657,11 @@ class SdkRunner:
             # mid-write stays open (it may have reached the CLI)
             await self._close_writer()
             self._write_error = None
-            requeued = [exc.row] if isinstance(exc, _NotWritten) else []
+            # every fold whose write wrote nothing, once each, plus a first
+            # row that was never written
+            requeued, self._unwritten = list(self._unwritten), []
+            if isinstance(exc, _NotWritten) and all(r["id"] != exc.row["id"] for r in requeued):
+                requeued.append(exc.row)
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
             # A raise before the send (the move to `running` refused, say) leaves
             # `first` claimed and in no list: back to the queue, the client untouched.
@@ -1693,6 +1716,7 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
             ids = [row["id"] for row in rows]
             closing[:], open_rows[:] = [], []
+            self._drop_writes = True        # _turn closes the writer before _after_turn
             self.stream.append("result", {"inbox_ids": [], "requeued": ids,
                                           "interrupted": interrupted, "is_error": True,
                                           "num_turns": msg.num_turns,

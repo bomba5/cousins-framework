@@ -1206,6 +1206,43 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
         self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", timeout=8))
 
+    def test_every_fold_write_that_wrote_nothing_goes_back_to_the_queue(self):
+        """Review round 2 of #118: a closed transport refuses every fold of
+        one claim without a byte written. Each row goes back exactly once,
+        not only the first: a second one (a STOP, say) must not stay
+        claimed until the next start."""
+        refusals = []
+
+        class Refuses(ScriptedClient):
+            async def query(self, prompt, session_id="default"):
+                if self.queries and len(refusals) < 2:     # the two folds
+                    refusals.append(1)
+                    raise CLIConnectionError("ProcessTransport is not ready for writing")
+                await super().query(prompt, session_id)
+        made = {}
+
+        def factory(options):
+            made.setdefault("clients", []).append(Refuses(options, [
+                [init_msg(), assistant(tool="Bash"), "PAUSE", assistant(text="x"), result()]]))
+            return made["clients"][-1]
+        r = SdkRunner(self.home, client_factory=factory, drain_timeout_s=1.0)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
+        self.assertTrue(_wait(lambda: made.get("clients") and made["clients"][0].paused))
+        # straight into the inbox, no doorbell: both land in one fold's claim
+        b_id = r.inbox.put(Item("peer:testa", "chat", "one", sender="Testa"))
+        c_id = r.inbox.put(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: len(refusals) == 2))
+        made["clients"][0].resume()
+        self.assertTrue(_wait(lambda: [x for x in _results(r) if x["is_error"]]))
+        failed = [x for x in _results(r) if x["is_error"]][0]
+        self.assertEqual(sorted(failed["requeued"]), sorted([b_id, c_id]))
+        for i in (b_id, c_id):          # requeued, then run by a later turn
+            self.assertTrue(_wait(lambda: r.inbox.get(i)["state"] == "done", timeout=10),
+                            "fold %d was left claimed" % i)
+            self.assertEqual(r.inbox.get(i)["outcome"], "delivered")
+
     def test_an_interrupt_row_behind_a_blocked_fold_is_written_after_it(self):
         """One writer, in order: the fold that was taken first reaches the
         CLI first, then the interrupt; the reader never waits on either."""
@@ -1334,6 +1371,42 @@ class TestTurnWriterEdges(HermeticCase):
                 await t
         asyncio.run(go())
         self.assertEqual(dropped, [True])
+
+    def test_a_job_whose_awaiter_cancelled_its_future_does_not_kill_the_writer(self):
+        from cousin_lib.runner.sdk import _Job, _Writer
+
+        async def go():
+            w = _Writer(lambda text: None)
+
+            async def slow():
+                await asyncio.sleep(0.05)
+                return "late"
+
+            async def fine():
+                return "ok"
+            first = w.submit(_Job(slow))
+            first.future.cancel()                # its awaiter gave up
+            last = w.submit(_Job(fine))
+            self.assertEqual(await asyncio.wait_for(last.future, 2.0), "ok")
+            await w.close()
+        asyncio.run(go())
+
+    def test_submit_to_a_writer_whose_task_died_is_refused(self):
+        from cousin_lib.runner.base import RunnerError
+        from cousin_lib.runner.sdk import _Job, _Writer
+
+        async def go():
+            w = _Writer(lambda text: None)
+            w._task.cancel()                     # died, and nobody closed it
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            async def fine():
+                return "ok"
+            with self.assertRaises(RunnerError):
+                w.submit(_Job(fine))
+            await w.close()
+        asyncio.run(go())
 
     def test_a_cancelled_error_from_inside_the_client_fails_the_job_and_the_writer_goes_on(self):
         from cousin_lib.runner.sdk import _Job, _Writer

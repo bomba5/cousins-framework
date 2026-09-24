@@ -114,7 +114,8 @@ async function migPost(path, body) {
   return { ok: r.ok, status: r.status, d: d || {} };
 }
 
-// GET /api/cousins/<slug>/migrate, reloaded when the cousin's op moves.
+// GET /api/cousins/<slug>/migrate, reloaded when the cousin's op moves and
+// every 10 s (a pane screen answered outside an op clears on its own).
 function useMigrateState(slug) {
   const [state, setState] = React.useState(null);
   const load = React.useCallback(async () => {
@@ -126,7 +127,8 @@ function useMigrateState(slug) {
     load();
     const on = (e) => { if ((e.detail || {}).slug === slug) load(); };
     window.addEventListener("fw-cousin-op", on);
-    return () => window.removeEventListener("fw-cousin-op", on);
+    const tick = slug ? setInterval(load, 10000) : null;
+    return () => { window.removeEventListener("fw-cousin-op", on); if (tick) clearInterval(tick); };
   }, [slug, load]);
   return [state, load];
 }
@@ -141,8 +143,10 @@ function MigMsg({ msg }) {
 // the pane waits on a person; the runner types everywhere else.
 function MigratePaneModal({ slug, onClose }) {
   const PV = window.PaneView;
+  // it opens over the switch dialog: a click on its backdrop closes it alone
+  const close = (e) => { if (e) e.stopPropagation(); onClose(); };
   return (
-    <div className="modal-bg" onClick={onClose}>
+    <div className="modal-bg" onClick={close}>
       <div className="modal" data-migrate-pane style={{ width: "min(1100px, 96vw)", maxWidth: "96vw" }}
            onClick={e => e.stopPropagation()}>
         <div className="hdr">
@@ -150,7 +154,7 @@ function MigratePaneModal({ slug, onClose }) {
           <span style={{ ...MIG_HINT, marginLeft: 8 }}>
             answer the dialog here (arrows and Enter); keys go in only while the pane waits on a person
           </span>
-          <button className="close" onClick={onClose} style={{ marginLeft: "auto" }}>x</button>
+          <button className="close" onClick={close} style={{ marginLeft: "auto" }}>x</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", height: "70vh", minHeight: 0 }}>
           {PV ? <PV cousin={{ slug, tmuxSession: "tmux-" + slug }} onClose={onClose} />
@@ -166,7 +170,9 @@ function MigratePaneModal({ slug, onClose }) {
 function MigrateOpStages({ op, loginScreen, paneOk, onOpenPane }) {
   if (!op) return null;
   const rows = migrateStageRows(op);
-  const screen = paneOk && op.status === "running" ? paneWaitScreen(op, loginScreen) : null;
+  // a running op's own words first; after it, what the pane still shows
+  const screen = !paneOk ? null
+    : op.status === "running" ? paneWaitScreen(op, loginScreen) : paneWaitScreen(null, loginScreen);
   const p = op.params || {};
   const what = [p.to && `to ${p.to}`, p.account && `account ${p.account}`, p.validate && "validated",
                 p.mode, p.donor && `donor ${p.donor}`, p.new_role && `role "${p.new_role}"`,
@@ -399,7 +405,7 @@ function KindSwitchHost() {
   return <KindSwitchDialog key={slug} slug={slug} onClose={() => setSlug(null)} />;
 }
 
-function openKindSwitch(slug) {
+function openKindSwitchDialog(slug) {
   window.dispatchEvent(new CustomEvent("fw-open-kind-switch", { detail: { slug } }));
 }
 
@@ -534,12 +540,12 @@ function MigratePanel({ cousin }) {
             <div style={MIG_HINT}>{recordLine("kind switch", state.switch)}</div>
             <div style={MIG_ROW}>
               <button className="btn" style={MIG_SMALL} disabled={running} data-open-kind-switch
-                      onClick={() => openKindSwitch(slug)}>
+                      onClick={() => openKindSwitchDialog(slug)}>
                 {lane === "tmux-legacy" ? "migrate to the runner..." : "switch kind..."}
               </button>
               <button className={`btn ${showCheck ? "active" : "ghost"}`} style={MIG_SMALL}
                       onClick={() => setShowCheck(!showCheck)}>check</button>
-              {lane === "tmux" && paneWaitScreen(null, state.loginScreen) && (
+              {!migOp && lane === "tmux" && paneWaitScreen(null, state.loginScreen) && (
                 <button className="btn" style={MIG_SMALL} data-open-pane onClick={() => setPaneOpen(true)}>
                   {paneButtonLabel(paneWaitScreen(null, state.loginScreen))}
                 </button>
@@ -759,7 +765,7 @@ registerSlot("inspector.panels", { id: "lifecycle", order: 41, render: ({ cousin
 })();
 
 Object.assign(window, {
-  KindSwitchDialog, KindSwitchHost, openKindSwitch, MigratePanel, LifecyclePanel,
+  KindSwitchDialog, KindSwitchHost, openKindSwitchDialog, MigratePanel, LifecyclePanel,
   ReincarnateDialog, TransplantDialog, MigrateOpStages, MigratePaneModal,
   migrateStageRows, paneWaitScreen, rollbackOffers, swapPhrase,
 });

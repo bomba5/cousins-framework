@@ -89,6 +89,31 @@ class TestRollover(OpencodeCase):
         self.assertTrue(_wait(lambda: self.outcome(r, rec) == "delivered"))
         self.assertIn(r.opencode_session, self.prompts()[-1]["path"])
 
+    def test_the_digest_turn_after_a_rollover_is_guarded_too(self):
+        """Review round 3, minor 3: the rollover runs the new session's digest
+        turn itself, so it gets the per-turn check: a config source written
+        during the handoff turn stops it before its prompt."""
+        r = self.started(self.runner([[("SLOW", 1.0), ("text", "no handoff")],
+                                      [("text", "digest read")]]))
+        g = Path(r.account.data_dir) / "config" / "opencode"
+
+        def write_while_handing_off():
+            self.assertTrue(_wait(lambda: len(self.prompts()) == 1))
+            g.mkdir(parents=True, exist_ok=True)
+            (g / "opencode.json").write_text("{}")
+        import threading
+        t = threading.Thread(target=write_while_handing_off)
+        t.start()
+        r.rollover("contract")
+        t.join(10)
+        self.assertTrue(_wait(lambda: r.fatal is not None, 8), "the digest turn ran unguarded")
+        self.assertIn("opencode.json", r.fatal)
+        self.assertEqual(len(self.prompts()), 1, "no digest prompt")
+        # the digest row went back to the queue (durable: the next start runs
+        # it), and nothing is left claimed
+        self.assertTrue(_wait(lambda: r.inbox.pending() >= 1))
+        self.assertEqual(r.inbox.unfinished(), r.inbox.pending())
+
     def test_a_handoff_the_model_never_writes_is_an_emergency_and_the_generation_moves(self):
         r = self.started(self.runner([[("text", "I would rather not")]]))
         g0 = boot.read_generation(r.home)

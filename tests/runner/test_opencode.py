@@ -560,6 +560,44 @@ class TestEveryTurnIsGuarded(OpencodeCase):
                                     "https://corp.example": {"type": "wellknown"}}))
         self.assert_refused_before_the_turn(r, "wellknown")
 
+    def test_an_unreadable_config_dir_requeues_and_gives_up_never_a_stuck_claim(self):
+        """Review round 3, minor 4: chmod 000 on opencode's config dir made
+        the check raise PermissionError out of the guard, the worker died
+        and the claimed row stayed claimed."""
+        r = self.first_turn()
+        g = Path(r.account.data_dir) / "config" / "opencode"
+        g.mkdir(parents=True, exist_ok=True)
+        g.chmod(0)
+        self.addCleanup(g.chmod, 0o700)
+        self.assert_refused_before_the_turn(r, str(g))
+        errors = self.payloads(r, "error")
+        self.assertTrue(errors and errors[-1].get("fatal"), errors)
+
+    def test_a_transient_config_read_is_retried_once(self):
+        """Review round 3, minor 5: one timeout of GET /config (or one failed
+        read of auth.json) is retried before the runner gives up."""
+        r = self.first_turn()
+        real, fails = r._client.request, []
+
+        def flaky(method, path, *a, **kw):
+            if method == "GET" and path == "/config" and not fails:
+                fails.append(path)
+                raise opencode_http.OpencodeError("GET /config: timed out")
+            return real(method, path, *a, **kw)
+        r._client.request = flaky
+        b = r.enqueue(_op("two"))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8), "the retry never ran")
+        self.assertEqual(fails, ["/config"])
+        self.assertIsNone(r.fatal)
+        # twice in a row is not transient
+        c = r.enqueue(_op("three"))
+        r._client.request = lambda method, path, *a, **kw: (_ for _ in ()).throw(
+            opencode_http.OpencodeError("GET /config: timed out")) \
+            if (method, path) == ("GET", "/config") else real(method, path, *a, **kw)
+        self.assertTrue(_wait(lambda: r.fatal is not None, 8))
+        self.assertIn("timed out", r.fatal)
+        self.assertTrue(_wait(lambda: r.inbox.get(c.inbox_id)["state"] == "queued"))
+
     def test_a_config_source_written_during_the_start_is_caught_after_the_ack(self):
         r = self.runner()
         g = Path(r.account.data_dir) / "config" / "opencode"

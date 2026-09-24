@@ -108,6 +108,7 @@ _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # A name shaped like a credential is never passed to the model's shell
 # (review round 2, minor 6): *SECRET*, *_PASSWORD, *_KEY, *_TOKEN.
 _SECRET_NAME = re.compile(r"SECRET|_PASSWORD$|_KEY$|_TOKEN$", re.IGNORECASE)
+TURN_GUARD_RETRY_S = 0.5            # one more try of the per-turn checks before giving up
 ACCOUNT_HOLDER = "account.holder"   # the home of the runner holding the account (its flock)
 ACCOUNT_TAKE_S = 1.0                # a restarting runner's predecessor may still be exiting
 PLUGIN_TIMEOUT_S = 30.0         # GET /config (the instance's bootstrap), then the plugin's word
@@ -293,6 +294,8 @@ def foreign_config_sources(account, root, home):
         names = os.listdir(config_dir)
     except (FileNotFoundError, NotADirectoryError):
         names = []
+    except OSError:                 # unreadable (chmod 000): what is in it cannot be known
+        return [config_dir]
     found = [config_dir / n for n in names if n not in CONFIG_DIR_OWN]
     lock = config_dir / "package-lock.json"
     if "package-lock.json" in names and _lock_names_others(lock):
@@ -882,27 +885,40 @@ class OpencodeRunner:
             self._pidfile().unlink(missing_ok=True)
 
     def _guard_turn(self, row):
-        """Review round 2, Important 1 and 7b: the start's checks again
-        before every turn (a rollover's included), since the model can
-        change what opencode runs with while it runs (PATCH /global/config
-        reloads plugins and providers live, measured on 1.18.31) and a key
-        can change without a 401: auth.json (preflight), the config sources
-        opencode would merge, and the effective config. A failure puts the
-        row back and the runner gives up; the window is one turn."""
-        try:
-            accounts.preflight(self.account, self.root)
-            self._refuse_foreign_config()
-            effective = self._client.request("GET", "/config", timeout=self.plugin_timeout_s) or {}
-            check_effective_config(effective, self._server_env, account=self.account,
-                                   model=self.model, small_model=self.small_model)
-        except (accounts.AccountsError, RunnerError, OpencodeError) as err:
+        """The start's checks again before every turn (the rollover's
+        handoff and digest turns included): auth.json (preflight), the
+        config sources opencode would merge, and the effective config
+        (PATCH /global/config reloads plugins and providers live, measured
+        on 1.18.31). It catches a change still in place when a turn starts;
+        it bounds nothing the model does from its shell (a change made and
+        undone inside a turn, a detached process prompting the server
+        between turns). The container is the containment. A failure is
+        tried once more after TURN_GUARD_RETRY_S (a timeout, a read caught
+        mid-write), then puts the row back and the runner gives up; any
+        exception is a failure, never a dead worker holding a claim."""
+        err = None
+        for attempt in range(2):
             try:
-                self.inbox.requeue(row["id"])
-            except Exception:  # noqa: BLE001 - the stale-claim sweep at the next start
-                pass
-            self._fail_start("opencode turn guard: %s" % err)
-            return False
-        return True
+                accounts.preflight(self.account, self.root)
+                self._refuse_foreign_config()
+                effective = self._client.request("GET", "/config",
+                                                 timeout=self.plugin_timeout_s) or {}
+                check_effective_config(effective, self._server_env, account=self.account,
+                                       model=self.model, small_model=self.small_model)
+                return True
+            except Exception as exc:  # noqa: BLE001 - a failed check is a refusal, never a crash
+                err = exc
+                if attempt == 0 and not self._stop.wait(TURN_GUARD_RETRY_S):
+                    continue
+                break
+        try:
+            self.inbox.requeue(row["id"])
+        except Exception:  # noqa: BLE001 - the stale-claim sweep at the next start
+            pass
+        self._fail_start("opencode turn guard: %s" % (err if isinstance(
+            err, (accounts.AccountsError, RunnerError, OpencodeError))
+            else "%s: %s" % (type(err).__name__, err)))
+        return False
 
     def _pidfile(self):
         return Path(self.account.data_dir) / opencode_http.PIDFILE
@@ -1197,7 +1213,7 @@ class OpencodeRunner:
         if digest_id is None or self._stop.is_set():
             return          # a stored digest row stays queued (durable): the next start runs it
         first = self.inbox.claim_id(digest_id, claimant=self.session_id)
-        if first is not None:
+        if first is not None and self._guard_turn(first):
             self._turn(first)
 
     def _ask_handoff(self, reason):

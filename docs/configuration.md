@@ -1003,7 +1003,13 @@ without its teardown left behind: the server's group when that pid is still
 `opencode serve` with the same start time in the same boot, then everything
 carrying its marker, the model's detached commands included. A recycled pid
 or a file from another boot kills nothing; the system stream says
-`opencode_leftover` with the pids when it killed any. With any plugin
+`opencode_leftover` with the pids when it killed any. So everything the
+model starts from its shell dies at every stop or restart of its runner, a
+service it detached and another cousin's runner it launched included (a
+flip is not a stop: the rollover opens a new session on the same server, so
+they keep running through it): start anything meant to outlive a turn outside the cousin (the
+exceptions, a process that drops the marker, are in
+[runners](reference/runners.md#known-gaps)). With any plugin
 configured, opencode would first install its plugin library from npm into
 its config dir and load no plugin until that ends (a network fetch, and a
 start that hangs offline); the pack imports nothing, so the runner marks

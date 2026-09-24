@@ -187,10 +187,19 @@ none is a contract item:
   read any credential that user can read, another account's Claude login
   included on a bare host. The runner re-checks `auth.json`, the config
   sources and the effective config before every turn and gives up at the
-  first mismatch, so such a change lasts at most the rest of the turn that
-  made it. The containment is the container: a cousin's shell is the
+  first mismatch. That catches a change still in place when a turn starts;
+  it bounds nothing the model does from its shell: a change made and undone
+  inside one turn, a detached process prompting the server between turns, a
+  turn kept going by folded messages, and the rollover's turns all pass it.
+  The containment is the container: a cousin's shell is the
   container ([the design](../design/agent-loop-runner.md)); on a bare host,
   run an opencode cousin as a user that can read nothing it should not.
+- **What the model starts is found by a marker it can drop.** A stop, and
+  the next start after a hard kill, kill every process carrying the start's
+  `COUSIN_OPENCODE_START`, repeating until a pass kills nothing (at most five
+  passes). A process escapes if it drops the variable (`env -i`, `exec -c`),
+  makes its environment unreadable (`PR_SET_DUMPABLE` 0), or is started by
+  another manager on its behalf (`tmux`, `systemd-run`, `at`).
 - **`node_modules` in opencode's config dir is checked by name only.** The
   runner allows the directory (its plugin-library seed) and checks the lock's
   root names only that library, but does not look inside `node_modules`;
@@ -215,8 +224,11 @@ none is a contract item:
   variable can be overridden (the plugin sets `HOME` to the cousin's home and
   empties the XDG variables, the server's password, its config path and
   `COUSIN_POLICY_FILE`) but not removed: the shell still sees opencode's
-  `OPENCODE_*` switches (flags, no value to hide). Emptying a variable does
-  not hide it from a process that reads another's (see the next entry).
+  `OPENCODE_*` switches (flags, no value to hide) and
+  `COUSIN_OPENCODE_START`, the start's marker, which is left on purpose (it
+  is how a stop finds what the model started) and is not a secret. Emptying
+  a variable does not hide it from a process that reads another's (see
+  "The guard binds opencode's configuration" above).
   Processes opencode starts other
   than a shell (language servers, formatters) run with the server's own
   environment, `HOME` in the account's data dir.

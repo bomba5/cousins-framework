@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from cousin_lib.runner import opencode_http
@@ -255,6 +256,19 @@ class TestOrphans(ServerCase):
         killed = opencode_http.reap_leftover(pidfile)
         self.assertEqual(killed, [child])
         self.assertTrue(_wait(lambda: _gone(child) or _zombie(child)))
+
+    def test_the_marker_sweep_repeats_until_a_pass_kills_nothing_bounded(self):
+        """Review round 3, minor 1: a marked process can start another while
+        the pass runs; the sweep repeats until a pass kills nothing, at most
+        MARK_PASSES times."""
+        passes = iter([[101], [102, 103], [], [104]])
+        with mock.patch.object(opencode_http, "_marked_pids", lambda entry: next(passes)), \
+                mock.patch.object(opencode_http.os, "kill") as kill:
+            self.assertEqual(opencode_http.kill_marked("m"), [101, 102, 103])
+        self.assertEqual([c.args[0] for c in kill.call_args_list], [101, 102, 103])
+        with mock.patch.object(opencode_http, "_marked_pids", lambda entry: [7]), \
+                mock.patch.object(opencode_http.os, "kill"):
+            self.assertEqual(len(opencode_http.kill_marked("m")), opencode_http.MARK_PASSES)
 
     def test_the_pidfile_checks_the_boot_and_the_command_too(self):
         """Review round 2, minor 2: a pidfile from another boot, or naming a

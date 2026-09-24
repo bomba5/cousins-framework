@@ -55,6 +55,7 @@ PIDFILE = "opencode.pid"        # in the account's data dir: the server this run
 # those processes. Not a secret.
 MARKER_ENV = "COUSIN_OPENCODE_START"
 BOOT_ID = "/proc/sys/kernel/random/boot_id"
+MARK_PASSES = 5                 # kill_marked repeats until a pass kills nothing, at most this
 PR_SET_PDEATHSIG = 1            # linux/prctl.h
 # prctl resolved in the parent, at import: the forked child only calls it
 # (no dlopen after fork in a threaded process)
@@ -88,8 +89,10 @@ def _die_with(parent):
     dies (PR_SET_PDEATHSIG; the runner's worker thread lives as long as its
     server), and exit at once when that parent is already gone, the race
     prctl cannot see. The supervisor's SIGKILL of the runner's group, an
-    OOM kill or a crash then take the server with it (review Important 2);
-    what the server itself started stays in its group for reap_leftover."""
+    OOM kill or a crash then take the server with it (review Important 2).
+    What the server started does not die with it (the model's shell is in
+    a session of its own, measured on 1.18.31): kill_marked and
+    reap_leftover find it by the start's marker."""
     def preexec():
         if _PRCTL is not None:
             _PRCTL(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
@@ -122,27 +125,46 @@ def _environ_has(pid, entry):
         return False
 
 
-def kill_marked(marker, *, exclude=()):
-    """SIGKILL every process of this user whose environment carries this
-    start's marker (what a server started, in whatever session); the pids."""
-    if not marker:
-        return []
-    entry = ("%s=%s" % (MARKER_ENV, marker)).encode()
-    killed = []
+def _marked_pids(entry):
+    """Live processes of this user whose environment holds `entry`."""
+    found = []
     for name in os.listdir("/proc"):
         if not name.isdigit():
             continue
         pid = int(name)
-        if pid == os.getpid() or pid in exclude or not _environ_has(pid, entry):
+        if pid == os.getpid() or not _environ_has(pid, entry):
             continue
         state = _proc_stat(pid)
-        if state is None or state[0] == "Z":
-            continue
-        try:
-            os.kill(pid, signal.SIGKILL)
-            killed.append(pid)
-        except (ProcessLookupError, PermissionError):
-            pass
+        if state is not None and state[0] != "Z":
+            found.append(pid)
+    return found
+
+
+def kill_marked(marker, *, exclude=()):
+    """SIGKILL every process of this user whose environment carries this
+    start's marker (what a server started, in whatever session), pass
+    after pass until one kills nothing (one may start another while a
+    pass runs), at most MARK_PASSES; the pids. It misses what dropped the
+    marker (env -i, exec -c), what made its environment unreadable
+    (PR_SET_DUMPABLE 0), and what another manager started for it (tmux,
+    systemd-run, at): a Known gap."""
+    if not marker:
+        return []
+    entry = ("%s=%s" % (MARKER_ENV, marker)).encode()
+    killed = []
+    for _ in range(MARK_PASSES):
+        this_pass = []
+        for pid in _marked_pids(entry):
+            if pid in exclude:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+                this_pass.append(pid)
+            except (ProcessLookupError, PermissionError):
+                pass
+        killed += this_pass
+        if not this_pass:
+            break
     return killed
 
 

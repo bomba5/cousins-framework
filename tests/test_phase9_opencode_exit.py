@@ -72,6 +72,19 @@ class TestPhase9Exit(unittest.TestCase):
         self.has("terms risk", runners, "runners.md")
         self.has("--method", runners, "runners.md")
 
+    def test_the_per_turn_check_promises_no_time_bound(self):
+        """Review round 3, Important: the check catches a change still in
+        place when a turn starts; it bounds nothing the model does from its
+        shell (a change made and undone inside a turn, a detached process
+        prompting the server between turns)."""
+        runners = self.read("docs/reference/runners.md")
+        self.has("bounds nothing the model does from its shell", runners, "runners.md")
+        self.assertNotIn("lasts at most", runners)
+        from cousin_lib.runner import opencode
+        doc = opencode.OpencodeRunner._guard_turn.__doc__
+        self.assertIn("bounds nothing the model does from its shell", doc)
+        self.assertNotIn("the window is one turn", doc)
+
     def test_the_master_plan_marks_phase_9_done_at_this_version(self):
         text = self.read(_PLAN)
         row = next(line for line in text.splitlines()

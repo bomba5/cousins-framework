@@ -128,6 +128,24 @@ class TestTurns(Case):
         self.assertTrue(_wait(results), "the row closes a moment before its result event")
         self.assertTrue(results()[0]["interrupted"])
 
+    def test_an_interrupt_row_whose_escape_was_refused_closes_failed(self):
+        """Review minor: a refused Escape (an attention screen showing) is
+        not a delivered interrupt; the turn runs on."""
+        from cousin_lib.runner.base import INTERRUPT
+        r = self.runner(slow=True, slow_s=3.0)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "slow", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0]._attention = "mcp_approval"      # a dialog came up mid-turn
+        stop = r.enqueue(Item("system", INTERRUPT, "interrupt asked from the console",
+                              sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, stop)[0] == "done"))
+        self.assertEqual(self.outcome(r, stop)[1], "failed")
+        self.assertIn("refused", self.outcome(r, stop)[2])
+        self.assertNotIn("Escape", self.panes[0].keys)
+        self.panes[0]._attention = None
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+
     def test_a_closed_nonce_seen_again_is_a_duplicate(self):
         r = self.runner()
         r.start()
@@ -137,6 +155,30 @@ class TestTurns(Case):
         self.write(r, {"type": "user", "promptSource": "typed", "promptId": "pd",
                        "message": {"role": "user", "content": "[inbox:%s] again" % nonce}})
         self.assertTrue(_wait(lambda: "duplicate_delivery" in self.kinds(r)))
+
+
+class TestCursor(Case):
+    def test_the_cursor_is_saved_per_line_so_a_failure_never_replays_the_ones_before(self):
+        """Review minor: _pump saved the cursor after ALL entries, so one
+        that raised replayed every entry before it every 0.2 s."""
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: r._path is not None and r._path.exists()))
+        handled, real = [], r._handle
+
+        def handle(e):
+            handled.append(e.prompt_id)
+            if e.prompt_id == "p2":
+                raise RuntimeError("scripted")
+            real(e)
+        r._handle = handle
+        for pid in ("p1", "p2"):
+            self.write(r, {"type": "user", "promptSource": "typed", "promptId": pid,
+                           "message": {"role": "user", "content": "someone %s" % pid}})
+        self.assertTrue(_wait(lambda: handled.count("p2") >= 3))
+        self.assertEqual(handled.count("p1"), 1, "the line before the failing one is not replayed")
+        saved = json.loads((self.home / "data" / "tmux-cursor.json").read_text())["offset"]
+        self.assertEqual(saved, len(r._path.read_text().splitlines()[0]) + 1)
 
 
 class TestContext(Case):

@@ -798,9 +798,15 @@ class TmuxRunner:
 
     # -- the transcript ------------------------------------------------------
     def _pump(self):
+        """The new transcript lines, handled in order; the cursor is saved
+        after each LINE (the entries a torn line held share its end), so an
+        entry that raises replays only its own line, never the ones before."""
         entries, cursor = transcript.read_from(self._path, self._cursor)
-        for e in entries:
+        for i, e in enumerate(entries):
             self._handle(e)
+            if i + 1 == len(entries) or entries[i + 1].offset >= e.end:
+                self._cursor = e.end
+                self._persist_cursor()
         if cursor != self._cursor:
             self._cursor = cursor
             self._persist_cursor()
@@ -968,7 +974,12 @@ class TmuxRunner:
             if row["state"] != "queued" or self.inbox.claim_id(row["id"], claimant=self.runner_id) is None:
                 continue
             already = self._interrupting
-            self._send_interrupt()
+            if not self._send_interrupt():
+                # an attention screen (or no pane): no Escape was sent, the turn runs on
+                screen = self.pane.attention() if self.pane is not None else NO_PANE
+                self.inbox.done(row["id"], FAILED, "the pane refused the Escape (%s showing)"
+                                % (screen or "a screen"))
+                continue
             self.inbox.done(row["id"], DELIVERED, "the live turn was already being interrupted"
                             if already else "interrupted the live turn")
 

@@ -32,7 +32,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   - **System**: the supervisor's children (start, stop, reload), every
     cousin's one-shot schedules, console users (add, reset, remove; never
     the last one or yourself), backup now into a checked destination
-    (owner-only files), `harness.toml [agent]` defaults with where each
+    (owner-only files; a destination other users can write is refused
+    unless it is sticky; a misplaced copy is reported in
+    `data/system/audit.jsonl`, never deleted), `harness.toml [agent]` defaults with where each
     value comes from, and editors for media, embedding, hive,
     external-peers, outbound-filter, law and allowlist, each checked by its
     own loader before it is written.

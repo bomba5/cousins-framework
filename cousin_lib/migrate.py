@@ -98,6 +98,7 @@ STEPS = ("close", "handover", "import", "toml", "start", "verify")
 STALE_S = 3600.0          # an inbox row not done after this long is a lost message
 TOOL_GRACE_S = 600.0      # a tool call this recent may still be running
 VERIFY_S = 90.0           # how long verify waits for a stable runner
+TRUST_WAIT_S = 600.0      # how long a kind switch's verify waits for the operator at the pane's trust dialog
 STABLE_S = 10.0           # how long the runner must stay up to count as started
 DOWN_S = 60.0             # how long rollback waits for a stopped runner to let go of its lock
 PRE_RUNNER_BOOT = "data/pending-boot.pre-runner.json"
@@ -1280,11 +1281,87 @@ def _claude_json(account):
 
 
 def trust_recorded(home, account):
-    """P11-11: the config dir has recorded the trust dialog for this home
-    (projects[<home>].hasTrustDialogAccepted, Z9)."""
+    """P11-11's fast path, never a gate: the config dir has recorded the
+    trust dialog for this home (projects[<home>].hasTrustDialogAccepted,
+    Z9). False proves nothing: every live CLI rewrites that file, and CLI
+    2.1.282 recorded no entry for a home even after a hand-accepted dialog
+    (the live proofs, 2026-09-25, finding 2)."""
     projects = _claude_json(account).get("projects")
     entry = projects.get(str(Path(home))) if isinstance(projects, dict) else None
     return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
+
+
+# The pane's one-time dialogs an operator answers (P11-11). The tmux runner
+# types nothing into them; it writes data/login-required.json {kind: tmux,
+# screen, ts} and emits `auth login_required` (TmuxRunner._screen_allows).
+OPERATOR_DIALOGS = ("trust", "bypass")
+
+
+def pane_hint(home, root):
+    """Where the operator answers the pane: tmux on the framework's socket
+    (TmuxRunner._make_pane's socket and session name), or the console's
+    pane view where it shows that session (it resolves `[chat]
+    tmux_session` on the console's own --tmux-socket)."""
+    home = Path(home)
+    return ("`tmux -S %s attach -t tmux-%s`, or the console's pane view where it shows"
+            " that session" % (Path(root) / "run" / "tmux.sock", home.name))
+
+
+def pane_dialog(home, since):
+    """The operator dialog ("trust", "bypass") the tmux runner reports the
+    pane showing since `since` (wall time), or None. A file older than
+    `since` is another start's."""
+    try:
+        data = json.loads((Path(home) / "data" / "login-required.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("kind") != "tmux":
+        return None
+    screen = data.get("screen")
+    try:
+        fresh = float(data.get("ts") or 0) >= since
+    except (TypeError, ValueError):
+        fresh = False
+    return screen if screen in OPERATOR_DIALOGS and fresh else None
+
+
+def _dialog_hint(screen, home, root):
+    if screen == "trust":
+        what = "the trust dialog: accept it (the cursor may start on \"No, exit\")"
+    else:
+        what = "the %s dialog: accept it" % screen
+    return "%s in %s" % (what, pane_hint(home, root))
+
+
+def wait_for_turn(home, started, *, root, since, what, timeout=VERIFY_S,
+                  trust_timeout=TRUST_WAIT_S, say=None, clock=time.monotonic, sleep=time.sleep):
+    """A kind switch's verify for the tmux kind: poll `started()` until it is
+    true, for `timeout`. While the pane shows an operator dialog (the trust
+    dialog on a home the account's CLI never trusted, P11-11) the wait is
+    neither a failure nor a rollback: it is said once through `say`, and the
+    deadline moves out to `trust_timeout` from the start. (ok, detail)."""
+    begun = clock()
+    deadline = begun + timeout
+    seen = None
+    while True:
+        if started():
+            return True, (what if seen is None else
+                          "%s, after the operator accepted the %s dialog" % (what, seen))
+        screen = pane_dialog(home, since)
+        if screen is not None and seen is None:
+            seen = screen
+            deadline = max(deadline, begun + trust_timeout)
+            if say is not None:
+                say("waiting for the operator to accept the %s dialog in the pane (%s);"
+                    " up to %d s" % (screen, pane_hint(home, root), trust_timeout))
+        if clock() >= deadline:
+            break
+        sleep(1.0)
+    detail = "no %s within %ds" % (what, round(clock() - begun))
+    screen = pane_dialog(home, since) or seen
+    if screen is not None:
+        detail += "; the pane showed %s" % _dialog_hint(screen, home, root)
+    return False, detail
 
 
 def account_mcp_servers(account):
@@ -1357,15 +1434,9 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
                          "the supervisor runs" if supervisor_up(root) else
                          "no cousin-supervisor: the switch stops and starts through it"))
     if to == "tmux" and account is not None:
-        if trust_recorded(home, account):
-            checks.append(_check("trust", True, "the trust dialog is recorded for this home"))
-        else:
-            env = ("CLAUDE_CONFIG_DIR=%s " % account.config_dir
-                   if account.config_dir is not None else "")
-            checks.append(_check("trust", False, (
-                "a one-time operator step (P11-11): in a terminal, run `cd %s && %sclaude`,"
-                " accept the trust dialog (and the bypass one if it shows), then /exit;"
-                " then apply again" % (home, env))))
+        # never a gate (finding 2): the pane asks, the runner types nothing
+        # into it, and verify waits for the operator (wait_for_turn)
+        checks.append(_check("trust", True, _trust_detail(home, root, account)))
     if account is not None:
         servers = account_mcp_servers(account)
         if servers and to == "tmux":
@@ -1373,6 +1444,13 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
                             " pane and not in the SDK kind (P11-13)" % ", ".join(servers))
     return {"slug": home.name, "from": current, "to": to, "steps": list(SWITCH_STEPS[to]),
             "checks": checks, "warnings": warnings, "ready": all(c["ok"] for c in checks)}
+
+
+def _trust_detail(home, root, account):
+    if trust_recorded(home, account):
+        return "the trust dialog is recorded for this home: the pane should not ask"
+    return ("not known in advance: the pane asks once; the switch waits up to %d s for the"
+            " operator to accept it in %s" % (TRUST_WAIT_S, pane_hint(home, root)))
 
 
 def _switch_notice(home, old, new):
@@ -1390,8 +1468,9 @@ def _switch_notice(home, old, new):
 def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor_up,
                  clock=time.time, **_unused):
     """Run the switch; the record, state `switched` or `failed`. MigrateError
-    when the plan is not ready (nothing is changed then: the trust step
-    stops it until it is recorded)."""
+    when the plan is not ready (nothing is changed then). The trust step
+    gates nothing: for `--to tmux` the pane may ask once, and verify waits
+    for the operator (wait_for_turn)."""
     from cousin_lib import harness_settings
     from cousin_lib.runner import extract
     home, root = Path(home), Path(root)
@@ -1413,7 +1492,8 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
 
     _write_switch_record(home, rec)
     if to == "tmux":
-        step("trust", "recorded in the account's config dir")
+        account, _err = _account(home, root)
+        step("trust", _trust_detail(home, root, account))
     close(home, root)
     step("close", "the %s runner stopped at idle; session %s kept" % (p["from"], sid))
     text = set_agent_keys(prior.decode("utf-8"), {"runner": to})
@@ -1534,16 +1614,20 @@ def _switch_live():
                     return True
         return False
 
+    def say(line):
+        print("  ..  %-10s %s" % ("verify", line), flush=True)
+
     def verify(home, root, sid, to, since, timeout=VERIFY_S):
+        if to == "tmux":
+            return wait_for_turn(home, lambda: _turn_started(home, root, sid, since), root=root,
+                                 since=since, timeout=timeout, say=say,
+                                 what="turn start under %s in the pane's transcript" % sid)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if (_turn_started(home, root, sid, since) if to == "tmux"
-                    else _session_init(home, sid, since)):
-                return True, ("a turn start under %s in the pane's transcript" % sid
-                              if to == "tmux" else "the SDK's session_init names %s" % sid)
+            if _session_init(home, sid, since):
+                return True, "the SDK's session_init names %s" % sid
             time.sleep(1.0)
-        return False, ("no %s under %s within %ds" % (
-            "turn start" if to == "tmux" else "session_init", sid, timeout))
+        return False, "no session_init under %s within %ds" % (sid, timeout)
 
     def cursor_end(home, root, sid, to):
         if to == "tmux":

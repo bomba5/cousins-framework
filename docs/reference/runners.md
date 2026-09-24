@@ -78,6 +78,23 @@ A cousin moves between `sdk` and `tmux` with `cousin-migrate --to <kind>`,
 keeping its session (`data/runner-session.json`, resumed with `claude
 --resume`).
 
+No step is needed before `--to tmux`. Whether the account's CLI has trusted
+the cousin's home is not known in advance: `~/.claude.json` (or the account's
+config dir's) is rewritten by every live CLI, and CLI 2.1.282 recorded no
+`hasTrustDialogAccepted` entry for a home even after the dialog was accepted
+by hand. So the plan reports the trust line as `ok` ("not known in advance:
+the pane asks once"), or says the entry is recorded when it is. On the first
+start the pane may show the trust dialog (or the bypass one). The runner
+types nothing into it: it writes `data/login-required.json` (`{"kind":
+"tmux", "screen": "trust"}`) and emits an `auth` `login_required` event. The
+switch's verify sees that, neither fails nor rolls back, prints that it is
+waiting for the operator to accept the dialog, with the command (`tmux -S
+<root>/run/tmux.sock attach -t tmux-<slug>`, or the console's pane view where
+it shows that session), and waits up to 10 minutes (`TRUST_WAIT_S`). It
+completes at the first turn start after the acceptance (the switch's notice).
+If nobody accepts in time, verify fails as before, naming the dialog, and the
+error says how to roll back.
+
 A cousin with no `[agent] runner` is a legacy tmux cousin: it has no runner at
 all.
 
@@ -277,8 +294,10 @@ none is a contract item:
 
 ## Lane differences on tmux
 
-- The pane's CLI runs with `--dangerously-skip-permissions` (the P11-11
-  one-time operator step), so the harness's own permission system is never
+- The pane's CLI runs with `--dangerously-skip-permissions` (P11-11: the
+  trust and bypass dialogs are the operator's, answered once in the pane
+  when it shows them; the runner never answers them), so the harness's own
+  permission system is never
   consulted: `can_use_tool` does not fire in the pane, unlike the `sdk` and
   `opencode` lanes. `policy.toml` is enforced instead as static rules baked
   into the pane's own settings at start (`harness_settings.py`), not as a

@@ -1,5 +1,6 @@
 """FakeRunner beyond the contract: state transitions and stop."""
 import os
+import threading
 import time
 import unittest
 
@@ -42,20 +43,30 @@ class _RaisesOnceRunner(FakeRunner):
         return super()._fold_midturn(consumed)
 
 
-class _RaisesAfterDelayRunner(FakeRunner):
-    """A FakeRunner whose first fold sleeps briefly, then raises - long
-    enough for a concurrent `stop()` to force the state machine to
-    `stopped` before the turn's own failure path runs. Proves
-    `_fail_turn` never attempts an illegal transition out of `stopped`."""
+class _RaisesAfterStopRunner(FakeRunner):
+    """A FakeRunner whose first fold announces itself (`fold_entered`),
+    blocks until the test opens `release`, then raises - so the test can
+    force `stop()` onto the machine while the turn is inside its body and
+    only then let the turn fail. Proves `_fail_turn` never attempts an
+    illegal transition out of `stopped`.
+
+    Gates, not a sleep: `state() == "running"` flips before the turn has
+    reached its first fold, and a stop that lands in that window is an
+    interrupt the turn honours by folding nothing (no fold after an
+    interrupt is by design), so it ends in a clean interrupted `result`
+    and never raises. The test must wait for the fold itself."""
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self._raised = False
+        self.fold_entered = threading.Event()
+        self.release = threading.Event()
 
     def _fold_midturn(self, consumed):
         if not self._raised:
             self._raised = True
-            time.sleep(0.4)
+            self.fold_entered.set()
+            self.release.wait(10)
             raise RuntimeError("boom-after-stop")
         return super()._fold_midturn(consumed)
 
@@ -178,16 +189,19 @@ class TestFakeRunner(HermeticCase):
         self.assertEqual(r.state(), "idle")
 
     def test_a_turn_that_raises_after_stop_never_touches_a_stopped_machine(self):
-        r = _RaisesAfterDelayRunner(self.home, turn_seconds=1.0)
+        r = _RaisesAfterStopRunner(self.home, turn_seconds=1.0)
         self.addCleanup(lambda: r.stop(timeout=5))
+        self.addCleanup(r.release.set)          # runs first (LIFO): never stop a worker parked on the gate
         r.start()
         r.enqueue(Item("operator:priya", "chat", "slow-boom", sender="Priya"))
-        self.assertTrue(_wait(lambda: r.state() == "running"))
+        # the turn is inside its body, not merely `running` (see the runner's docstring)
+        self.assertTrue(r.fold_entered.wait(10))
 
-        r.stop(timeout=0.01)  # returns long before the 0.4s fold-and-raise finishes
+        r.stop(timeout=0.01)  # the worker is parked on the gate: this cannot join it
         self.assertEqual(r.state(), "stopped")
+        r.release.set()       # only now does the turn raise, against a stopped machine
 
-        r._thread.join(10)   # 3 s was not always enough with two suites on the machine
+        r._thread.join(10)
         self.assertFalse(r._thread.is_alive(), "the worker thread must not die uncaught")
         self.assertEqual(r.state(), "stopped")
 

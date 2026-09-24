@@ -185,6 +185,24 @@ cousin-runner --home cousins/wren --check-auth
 cousin-runner --home cousins/wren --check-auth --validate
 ```
 
+`cousin-watch <slug>` prints a runner cousin's reasoning stream in any
+terminal: the same events the console's pane shows (its state changes, the
+turns, its text, thinking and tool calls, their results), one line each, read
+from the runner's primary stream under the cousin's own `data/stream/`, with
+no console and no port. It starts at the newest 200 events (`--tail N` for
+another number, `--tail 0` for the whole stream), or after event `N` of the
+runner's current stream with `--after N`. Without `--follow` it prints those
+and exits; with `--follow` (`-f`) it keeps printing as the runner appends,
+following a restarted runner to its new stream, until interrupted. `--json`
+prints each event as its JSON line; `--home` names the home instead of
+finding it by slug. A tmux cousin has no stream (its view is its
+tmux pane): exit 2, as for an unknown cousin.
+
+```
+cousin-watch wren -f
+cousin-watch wren --json --after 120
+```
+
 ## Memory
 
 `cousin-memory` is the cousin's memory tool. Subcommands:

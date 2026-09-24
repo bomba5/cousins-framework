@@ -384,8 +384,11 @@ def spawn_lane_options(root):
     """What the spawn dialog offers for the lane: `runners` (the kinds,
     from delivery.RUNNER_KINDS; none chosen is the tmux lane),
     `default_runner` (COUSIN_DEFAULT_RUNNER, else null), `accounts` (host,
-    then config/accounts.toml's by name, each with its kind and the kinds
-    it runs on, accounts.check_lane's rule; no secret is in that file)
+    then config/accounts.toml's by name, each with its kind, the kinds it
+    runs on (agent_settings.check_lane, the runner's rule, the tmux kind's
+    refusal of a key or token account included) and, for an opencode
+    account, `models`: the "<provider>/" suggestions it offers; no secret
+    is in that file)
     with `accounts_error` when the file cannot be read, `lane_keys`, the
     [agent] keys each kind reads, and `lane_models`, how each kind that
     reads a model takes it (agent_settings.model_rule). `tmux_lane` is the
@@ -404,11 +407,15 @@ def spawn_lane_options(root):
         lanes = []
         for kind in kinds:
             try:
-                accounts.check_lane(account, kind)
+                agent_settings.check_lane(account, kind)
             except accounts.AccountsError:
                 continue
             lanes.append(kind)
-        rows.append({"name": account.name, "kind": account.kind, "lanes": lanes})
+        row = {"name": account.name, "kind": account.kind, "lanes": lanes}
+        models = agent_settings.account_models(account)
+        if models:
+            row["models"] = models
+        rows.append(row)
     return {"runners": kinds, "tmux_lane": agent_settings.TMUX_LEGACY,
             "lane_models": {kind: rule for kind in kinds
                             for rule in [agent_settings.model_rule(kind)] if rule},

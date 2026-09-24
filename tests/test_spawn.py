@@ -699,6 +699,95 @@ class TestPersistAgentValues(CreateCase):
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
 
 
+class TestPersistAgentValuesSeveral(CreateCase):
+    """WP-A: persist_agent_values is the ONE [agent] write path, the
+    console's settings panel and the model and effort routes both: the
+    lane's checks (agent_settings.validate), the sdk model's validating
+    turn in a child, then agent_settings.apply."""
+
+    def _runner_cousin(self, extra=""):
+        root = self._framework_root()
+        out = self._create(root)
+        path = out["home"] / "cousin.toml"
+        path.write_text(path.read_text() + '\n[agent]\nrunner = "sdk"\neffort = "low"\n'
+                        + extra)
+        return root, out["home"], path
+
+    def test_several_keys_one_write_one_turn(self):
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin()
+        with mock.patch.object(spawn, "validate_turn_out_of_process",
+                               return_value=(0, "validate: ok")) as child:
+            changed = spawn.persist_agent_values(
+                home, {"model": "m-two", "effort": "high", "auto_start": False,
+                       "rollover_at_percent": 70, "sessions": {"meeting": "own"}},
+                root=root)
+        # the turn runs on the effort being written with it
+        child.assert_called_once_with(home, root, "m-two", "high")
+        self.assertEqual(sorted(changed), ["auto_start", "effort", "model",
+                                           "rollover_at_percent", "sessions"])
+        agent = tomllib.loads(path.read_text())["agent"]
+        self.assertEqual((agent["model"], agent["effort"], agent["auto_start"]),
+                         ("m-two", "high", False))
+        self.assertEqual(agent["rollover_at_percent"], 70.0)
+        self.assertEqual(agent["sessions"], {"meeting": "own"})
+
+    def test_no_turn_without_a_model_change(self):
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin('model = "m-one"\n')
+        with mock.patch.object(spawn, "validate_turn_out_of_process") as child:
+            changed = spawn.persist_agent_values(
+                home, {"model": "m-one", "auto_start": False}, root=root)
+        child.assert_not_called()
+        self.assertEqual(changed, ["auto_start"])
+
+    def test_a_refusal_names_each_key_and_writes_nothing(self):
+        from cousin_lib import agent_settings, spawn
+        root, home, path = self._runner_cousin()
+        before = path.read_bytes()
+        with mock.patch.object(spawn, "validate_turn_out_of_process") as child:
+            with self.assertRaises(agent_settings.SettingsError) as ctx:
+                spawn.persist_agent_values(
+                    home, {"effort": "ultra", "rollover_at_percent": 400,
+                           "sessions": {"operator": "own"}}, root=root)
+        child.assert_not_called()
+        self.assertEqual(set(ctx.exception.errors),
+                         {"effort", "rollover_at_percent", "sessions"})
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_a_failed_turn_is_a_model_error_and_writes_nothing(self):
+        from cousin_lib import agent_settings, spawn
+        root, home, path = self._runner_cousin()
+        before = path.read_bytes()
+        with mock.patch.object(spawn, "validate_turn_out_of_process",
+                               return_value=(4, "validate: not_found_error")):
+            with self.assertRaises(agent_settings.SettingsError) as ctx:
+                spawn.persist_agent_values(home, {"model": "m-bad", "auto_start": False},
+                                           root=root)
+        self.assertEqual(list(ctx.exception.errors), ["model"])
+        self.assertIn("not_found_error", ctx.exception.errors["model"])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_removing_a_key_and_a_same_session_mode_are_changes_only_when_real(self):
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin('auto_start = false\n')
+        with mock.patch.object(spawn, "framework_event") as event:
+            self.assertEqual(spawn.persist_agent_values(
+                home, {"rollover_at_percent": None, "sessions": {"peer": "primary"}},
+                root=root), [])
+            event.assert_not_called()
+            self.assertEqual(spawn.persist_agent_values(
+                home, {"auto_start": None}, root=root), ["auto_start"])
+        self.assertNotIn("auto_start", tomllib.loads(path.read_text())["agent"])
+
+    def test_a_tmux_legacy_cousin_is_refused(self):
+        from cousin_lib import spawn
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        with self.assertRaises(SpawnError):
+            spawn.persist_agent_values(home, {"effort": "high"}, root=root)
+
+
 class TestPersistAgentValuesOnTmux(CreateCase):
     """Phase 11: the tmux kind's pane takes --model and --effort, so both
     are its [agent] keys; no validating turn runs (no pane here)."""

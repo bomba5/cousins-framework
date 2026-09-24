@@ -26,7 +26,8 @@ class SpawnOptions(ConsoleCase):
         self.assertEqual(body["accounts"], [
             {"name": "host", "kind": "claude-login", "lanes": claude_lanes},
             {"name": "fleet", "kind": "claude-login", "lanes": claude_lanes},
-            {"name": "oc", "kind": "opencode", "lanes": ["opencode"]}])
+            {"name": "oc", "kind": "opencode", "lanes": ["opencode"],
+             "models": ["openai/"]}])
         self.assertIsNone(body["accounts_error"])
         self.assertIn("effort", body["lane_keys"]["sdk"])
         self.assertNotIn("effort", body["lane_keys"]["opencode"])

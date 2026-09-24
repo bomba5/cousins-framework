@@ -110,6 +110,24 @@ def _check_lane(account, lane):
                 " account); account %s is %s" % (account.name, account.kind))
 
 
+def check_lane(account, lane):
+    """Whether `account` runs on `lane`, as the runner decides it: the
+    public name of _check_lane, for the spawn dialog's account list. An
+    AccountsError when it does not."""
+    _check_lane(account, lane)
+
+
+def account_models(account):
+    """The model suggestions an opencode account offers ("<provider>/" per
+    provider, or its endpoint's model), [] for any other kind."""
+    if account.kind != "opencode":
+        return []
+    if account.endpoint_model:
+        from cousin_lib.runner.opencode import ENDPOINT_PROVIDER
+        return ["%s/%s" % (ENDPOINT_PROVIDER, account.endpoint_model)]
+    return ["%s/" % p for p in account.providers]
+
+
 def _read_agent(home):
     try:
         data = tomllib.loads((Path(home) / "cousin.toml").read_text())
@@ -333,10 +351,7 @@ def _suggestions(key, lane, root, agent):
             account = _account(root, agent, None)
         except accounts.AccountsError:
             return []
-        if account.endpoint_model:
-            from cousin_lib.runner.opencode import ENDPOINT_PROVIDER
-            return ["%s/%s" % (ENDPOINT_PROVIDER, account.endpoint_model)]
-        return ["%s/" % p for p in account.providers]
+        return account_models(account)
     return None
 
 

@@ -808,6 +808,8 @@ def _agent_unchanged(agent, key, value):
     if value is None:
         return key not in agent
     if key == "sessions":
+        if not isinstance(value, dict):
+            return False            # validate refuses it with the parser's reason
         current = agent.get("sessions") or {}
         return all(current.get(kind, "primary") == mode for kind, mode in value.items())
     return key in agent and agent[key] == value and type(agent[key]) is type(value)

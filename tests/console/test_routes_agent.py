@@ -128,6 +128,11 @@ class PostAgent(AgentCase):
         self.serve()
         for bad in ({}, {"changes": {}}, {"changes": []}, {"changes": "effort"}):
             self.assertEqual(self.post("/api/cousins/wren/agent", bad)[0], 400, bad)
+        for bad in ({"sessions": "own"}, {"sessions": ["peer"]}, {"auto_start": "no"},
+                    {"rollover_at_percent": "80"}, {"env_allow": "EDITOR"}):
+            status, body = self.post("/api/cousins/wren/agent", {"changes": bad})
+            self.assertEqual(status, 400, (bad, body))
+            self.assertIn(list(bad)[0], body["errors"])
 
     def test_a_tmux_legacy_cousin_is_refused(self):
         self.cousin("wren")

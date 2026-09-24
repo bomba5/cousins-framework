@@ -780,6 +780,13 @@ class TestPersistAgentValuesSeveral(CreateCase):
                 home, {"auto_start": None}, root=root), ["auto_start"])
         self.assertNotIn("auto_start", tomllib.loads(path.read_text())["agent"])
 
+    def test_a_malformed_sessions_value_is_the_parsers_refusal(self):
+        from cousin_lib import agent_settings, spawn
+        root, home, path = self._runner_cousin()
+        with self.assertRaises(agent_settings.SettingsError) as ctx:
+            spawn.persist_agent_values(home, {"sessions": "own"}, root=root)
+        self.assertIn("sessions", ctx.exception.errors)
+
     def test_a_tmux_legacy_cousin_is_refused(self):
         from cousin_lib import spawn
         root = self._framework_root()

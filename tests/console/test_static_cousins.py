@@ -57,6 +57,36 @@ class SpawnDialog(unittest.TestCase):
         self.assertNotRegex(self.src, r'\[\s*"low"\s*,')
 
 
+class SpawnDialogLane(unittest.TestCase):
+    """Audit defect 2: the spawn route takes `runner` and `account` and the
+    dialog sends them. The kinds, the accounts (with the kinds each runs
+    on) and the keys each lane reads come from GET /api/spawn/options;
+    the dialog names no runner kind of its own."""
+
+    def setUp(self):
+        self.src = _component(_read("cousins.jsx"), "SpawnModal")
+
+    def test_sends_runner_and_account(self):
+        body = self.src[self.src.index("const body"):]
+        self.assertRegex(body, r"body\.runner\s*=")
+        self.assertRegex(body, r"body\.account\s*=")
+
+    def test_the_catalogue_is_the_servers(self):
+        self.assertRegex(self.src, r"\.runners\s*\|\|")
+        self.assertRegex(self.src, r"\.accounts\s*\|\|")
+        self.assertIn("lane_keys", self.src)
+        self.assertIn("lanes || []).includes(runner)", self.src)
+        self.assertRegex(self.src, r'label="lane"')
+        self.assertRegex(self.src, r'label="account"')
+        for kind in ('"sdk"', '"fake"', '"opencode"', '"tmux"'):
+            self.assertNotIn(kind, self.src, kind)
+
+    def test_model_and_effort_only_where_the_lane_reads_them(self):
+        body = self.src[self.src.index("const body"):]
+        self.assertIn("laneReads(\"model\")", body)
+        self.assertIn("laneReads(\"effort\")", body)
+
+
 class RemoteCousins(unittest.TestCase):
     """Remote cousins (hive nodes): their own card with no start, stop,
     restart or pane control, revoke behind a confirm and forget after
@@ -159,6 +189,11 @@ class CousinCardRows(unittest.TestCase):
         # healthy; the row's attention field is shown on the card.
         self.assertIn("c.attention", self.src)
         self.assertIn("needs attention", self.src)
+
+    def test_lane_account_hold_and_a_login_wait(self):
+        for token in ("lane ·", "account ·", "c.lane", "c.account", "c.held",
+                      "c.loginRequired", "data-login-required", "loginRequired.action"):
+            self.assertIn(token, self.src, token)
 
     def test_role_sits_under_the_name(self):
         self.assertRegex(self.src, r'className="role"[^\n]*\{c\.role\}')

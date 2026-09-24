@@ -1693,6 +1693,7 @@ function fleetRunnerKind(c) {
 // cousin is never flagged: stopping is the operator's decision.
 function fleetAttention(c) {
   if (!c || c.status !== "running") return null;
+  if (c.loginRequired && !c.remote) return { level: "needs", why: fleetLoginWhy(c.loginRequired) };
   if (c.attention) return { level: "needs", why: "the pane shows \"" + c.attention + "\"" };
   const r = c.runner;
   if (r && r.alive) {
@@ -1702,6 +1703,19 @@ function fleetAttention(c) {
   }
   if (c.chat === "down") return { level: "warn", why: "chat server down" };
   return null;
+}
+
+// A runner waiting on data/login-required.json: what it waits for and the
+// line that fixes it (the row carries reason, action and since only).
+function fleetLoginWhy(l) {
+  const what = l && l.reason === "billing" ? "billing stopped" : "login required";
+  return l && l.action ? what + ": " + l.action : what;
+}
+
+// The local cousins waiting for a login or billing fix, running or not: a
+// stopped runner still waits for it at its next start.
+function fleetLoginWaits(cousins) {
+  return (cousins || []).filter(c => !c.remote && c.loginRequired);
 }
 
 // The row's state in words, with the colour that goes with them.
@@ -1916,6 +1930,18 @@ function HostView({ onOpen }) {
         <span>{health.text}</span>
       </div>
 
+      {fleetLoginWaits(cousins).length > 0 && (
+        <div className="ov-login" data-login-required>
+          {fleetLoginWaits(cousins).map(c => (
+            <div key={c.slug} className="ov-login-row" title={c.loginRequired.since ? `since ${c.loginRequired.since}` : undefined}>
+              <span className="led amber" />
+              <span><b>@{c.slug}</b> {c.loginRequired.reason === "billing" ? "billing stopped" : "waits for a login"}{c.account ? ` on account ${c.account}` : ""}</span>
+              {c.loginRequired.action && <code className="ov-login-action">{c.loginRequired.action}</code>}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="ov-stats" data-fleet-stats>
         <div className="ov-stat">
           <div className="eyebrow">running</div>
@@ -2084,4 +2110,5 @@ Object.assign(window, {
   JobsView, MemoryView, LoopsView, TokensView, TrackerView, SettingsView, AccountPanel, RestartPanel,
   HostView, CousinTag, Field, Stat, TRACKER_STATES,
   fleetRunnerKind, fleetAttention, fleetState, fleetOrder, fleetHealth, fleetNextFlip, nextFlip, fleetIn,
+  fleetLoginWhy, fleetLoginWaits,
 });

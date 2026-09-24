@@ -243,6 +243,22 @@ def supervisor_state(snap, slug):
     return {"state": row["state"]}
 
 
+def lane_fields(home):
+    """The row's lane fields: `lane` (the [agent] runner kind, else
+    "tmux-legacy"), `account` (null on tmux-legacy), `autoStart` (null on
+    tmux-legacy), `held` (<home>/run/held: a stop holds the runner down)
+    and `loginRequired`: data/login-required.json's reason, action line and
+    since, or null. Never its detail, which carries the API's own words."""
+    from cousin_lib import agent_settings
+    from cousin_lib.runner import auth as runner_auth
+    out = agent_settings.summary(home)
+    out["held"] = supervisor.is_held(home)
+    login = runner_auth.read_login_required(home)
+    out["loginRequired"] = ({k: login.get(k) for k in ("reason", "action", "since")}
+                            if isinstance(login, dict) else None)
+    return out
+
+
 def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
@@ -314,6 +330,7 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
         "runner": runner,
         "tokensSpent": tokens.today_total(server, config.home),
         "supervisor": supervisor_state(snap, config.slug),
+        **lane_fields(config.home),
     }
 
 
@@ -351,6 +368,39 @@ def fleet_rows(server):
             for config in FrameworkConfig(server.root).list_cousins()]
     return rows + console_hive.remote_rows(
         server, {row["slug"] for row in rows})
+
+
+def spawn_lane_options(root):
+    """What the spawn dialog offers for the lane: `runners` (the kinds,
+    from delivery.RUNNER_KINDS; none chosen is the tmux lane),
+    `default_runner` (COUSIN_DEFAULT_RUNNER, else null), `accounts` (host,
+    then config/accounts.toml's by name, each with its kind and the kinds
+    it runs on, accounts.check_lane's rule; no secret is in that file)
+    with `accounts_error` when the file cannot be read, and `lane_keys`,
+    the [agent] keys each kind reads (agent_settings)."""
+    from cousin_lib import accounts, agent_settings
+    kinds = agent_settings.kinds()
+    error = None
+    try:
+        known = accounts.load(root)
+    except accounts.AccountsError as err:
+        known, error = {}, str(err)
+    listed = [accounts.Account(accounts.HOST, "claude-login", None, None, implicit=True)]
+    listed += [known[name] for name in sorted(known)]
+    rows = []
+    for account in listed:
+        lanes = []
+        for kind in kinds:
+            try:
+                accounts.check_lane(account, kind)
+            except accounts.AccountsError:
+                continue
+            lanes.append(kind)
+        rows.append({"name": account.name, "kind": account.kind, "lanes": lanes})
+    return {"runners": kinds,
+            "default_runner": os.environ.get("COUSIN_DEFAULT_RUNNER") or None,
+            "accounts": rows, "accounts_error": error,
+            "lane_keys": {kind: agent_settings.lane_keys(kind) for kind in kinds}}
 
 
 # ---- commands -----------------------------------------------------------
@@ -811,6 +861,7 @@ def register():
             "heartbeat_bounds": [spawn.HEARTBEAT_MIN_SECONDS,
                                  spawn.HEARTBEAT_MAX_SECONDS],
             "operator_max_chars": spawn.OPERATOR_MAX_CHARS,
+            **spawn_lane_options(req.server.root),
         }
 
     @router.route("POST", "/api/cousins/{slug}/hidden")

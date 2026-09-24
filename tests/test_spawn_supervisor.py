@@ -333,6 +333,39 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertEqual([c.slug for c in supervisor.runner_cousins(self.root)], ["wren"])
 
 
+class TestCreateARunnerCousinsModel(_CreateCase):
+    """Audit defect 1, spawn half: a runner reads [agent] model and effort
+    only, so a runner cousin's go there, checked by its lane
+    (agent_settings.check_new) before anything is written."""
+
+    def test_a_runner_cousins_model_and_effort_go_to_agent_not_runtime(self):
+        self.accounts()
+        self.create(runner="sdk", account="fleet", model="claude-x", effort="high")
+        data = tomllib.loads(self.toml())
+        self.assertNotIn("runtime", data)
+        self.assertEqual(data["agent"], {"runner": "sdk", "account": "fleet",
+                                         "model": "claude-x", "effort": "high"})
+
+    def test_a_tmux_cousins_model_stays_in_runtime(self):
+        self.create(model="claude-x", effort="low")
+        data = tomllib.loads(self.toml())
+        self.assertEqual(data["runtime"], {"model": "claude-x", "effort": "low"})
+        self.assertNotIn("agent", data)
+
+    def test_the_lane_refuses_what_it_does_not_read(self):
+        self.assertIn("model", self.refused(runner="fake", model="claude-x"))
+        self.assertIn("effort", self.refused(runner="opencode", effort="high"))
+
+    def test_the_account_must_run_on_the_lane(self):
+        (self.root / "config" / "accounts.toml").write_text(
+            ACCOUNTS + '\n[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
+        self.assertIn("kind opencode", self.refused(runner="sdk", account="oc"))
+        self.assertIn("P9-1", self.refused(runner="opencode", account="oc",
+                                           model="openai/claude-x"))
+        self.create(runner="opencode", account="oc", model="openai/gpt-5")
+        self.assertEqual(tomllib.loads(self.toml())["agent"]["model"], "openai/gpt-5")
+
+
 class TestSpawnCliOnTheRunnerLane(_CreateCase):
     ARGS = ("wren", "--name", "Wren", "--role", "example cousin",
             "--voice", "Plain and helpful.", "--port", "8100")

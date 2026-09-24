@@ -1729,6 +1729,14 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   display: flex; align-items: center; gap: 10px;
   font-size: 15px; color: var(--fg-0); letter-spacing: -0.01em;
 }
+.ov-login {
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--amber); border-radius: var(--radius-lg);
+  background: oklch(from var(--amber) l c h / 0.08);
+  padding: 10px 14px; font-size: 12.5px; color: var(--fg-1);
+}
+.ov-login-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ov-login-action { font-family: var(--mono); font-size: 11.5px; color: var(--amber); overflow-wrap: anywhere; }
 .ov-stats {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--hair); border-radius: var(--radius-lg);

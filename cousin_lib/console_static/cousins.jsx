@@ -184,11 +184,21 @@ function CousinCard({ c, onClick, onAct, onChat }) {
           needs attention · the pane shows "{c.attention}"
         </div>
       )}
+      {c.loginRequired && (
+        <div className="card-attention" data-login-required
+             title={c.loginRequired.since ? `data/login-required.json since ${c.loginRequired.since}` : "data/login-required.json"}>
+          {c.loginRequired.reason === "billing" ? "billing stopped" : "login required"}
+          {c.loginRequired.action ? <> · run <code>{c.loginRequired.action}</code></> : null}
+        </div>
+      )}
       <div style={{ margin: "4px 0" }}>
         <HeartbeatGraph state={c.status === "running" ? (c.active ? "active" : "idle") : "stopped"} width={240} height={22} />
       </div>
       <div className="stats">
         <div>chat · <b>{c.chat === "ok" ? `:${c.port}` : c.chat}</b></div>
+        {/* the lane and what it runs on; "held" is a stop that holds the runner down */}
+        <div>lane · <b>{c.lane || "-"}</b>{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</div>
+        {c.account && <div>account · <b>{c.account}</b></div>}
         {c.runner && <div>runner · <b>{c.runner.alive ? (c.runner.state || "no state yet") : "(not running)"}</b>{c.runner.unsupported && c.runner.unsupported.length ? ` · unsupported: ${c.runner.unsupported.join(", ")}` : ""}</div>}
         <div>scope · <b>{c.memoryScope}</b></div>
         <div>operator · <b>{c.operator || "-"}</b></div>
@@ -1376,6 +1386,14 @@ function SpawnModal({ onClose, onSpawn }) {
   const [effort, setEffort] = React.useState("");
   const [heartbeat, setHeartbeat] = React.useState("");
   const [scope, setScope] = React.useState("");
+  // The lane: "" is the tmux lane, else one of the server's runner kinds;
+  // the account it runs on, from the accounts whose `lanes` include it. A
+  // runner reads [agent] model and effort, and only the keys its lane
+  // reads (lane_keys) are sent; its model is free text (an opencode model
+  // is "<provider>/<model>"), the catalogue offered as suggestions.
+  const [runner, setRunner] = React.useState("");
+  const [account, setAccount] = React.useState("");
+  const [laneModel, setLaneModel] = React.useState("");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1387,12 +1405,20 @@ function SpawnModal({ onClose, onSpawn }) {
       setEffort(e => e || d.default_effort || "");
       setHeartbeat(h => h || String(d.default_heartbeat || 3600));
       setScope(s => s || d.default_memory_scope || "private");
+      setRunner(r => r || d.default_runner || "");
     })();
     return () => { cancelled = true; };
   }, []);
   const models = options?.models || [];
   const efforts = options?.efforts || [];
   const scopes = options?.memory_scopes || [];
+  const runners = options?.runners || [];
+  const laneAccounts = (options?.accounts || []).filter(a => runner && (a.lanes || []).includes(runner));
+  const laneReads = (key) => !runner || ((options?.lane_keys || {})[runner] || []).includes(key);
+  React.useEffect(() => {
+    // a lane change keeps the account only when it still runs there
+    setAccount(a => laneAccounts.some(x => x.name === a) ? a : (laneAccounts[0]?.name || ""));
+  }, [runner, options]);
 
   // Where the cousin runs. "Remote" is offered only when the hive is on
   // (config/hive.toml); it builds a node archive instead of a local home.
@@ -1423,8 +1449,11 @@ function SpawnModal({ onClose, onSpawn }) {
       if (roleParagraph.trim()) body.role_paragraph = roleParagraph.trim();
       if (String(port).trim()) body.port = Number(port);
       if (operator.trim()) body.operator = operator.trim();
-      if (model) body.model = model;
-      if (effort) body.effort = effort;
+      if (runner) body.runner = runner;
+      if (runner && account) body.account = account;
+      const chosenModel = runner ? laneModel.trim() : model;
+      if (chosenModel && laneReads("model")) body.model = chosenModel;
+      if (effort && laneReads("effort")) body.effort = effort;
       if (String(heartbeat).trim()) body.heartbeat = Number(heartbeat);
       if (scope) body.memory_scope = scope;
       const { r, d } = await apiSend("POST", "/api/cousins", body);
@@ -1436,7 +1465,9 @@ function SpawnModal({ onClose, onSpawn }) {
         slug, name, role, type: "cousin", port: d.port, host: null, home: d.home,
         tmuxSession: slug, operator: operator.trim() || null,
         memoryScope: scope || "private", heartbeat: Number(heartbeat) || 3600,
-        model: model || null, effort: effort || null, pid: null, uptime_seconds: null,
+        model: (laneReads("model") && chosenModel) || null, effort: (laneReads("effort") && effort) || null,
+        lane: runner || "tmux-legacy", account: runner ? (account || null) : null,
+        pid: null, uptime_seconds: null,
         flipAt: null, hidden: false, status: "running", chat: "ok", active: false,
         activity: "", lastMsgTs: 0, tokensSpent: 0,
       });
@@ -1497,18 +1528,50 @@ function SpawnModal({ onClose, onSpawn }) {
           </div>
           <div style={{ marginTop: 14 }} />
           <div className="grid2">
-            <FormField label="model" hint="Rendered into the agent command's {model} placeholder.">
-              <select className="sel" value={model} onChange={e => setModel(e.target.value)} disabled={!options}>
-                {!options && <option value="">loading...</option>}
-                {models.map(m => <option key={m} value={m}>{m}</option>)}
+            <FormField label="lane" hint="tmux-legacy runs the agent in a tmux pane; a runner kind runs it under cousin-supervisor.">
+              <select className="sel" value={runner} onChange={e => setRunner(e.target.value)} disabled={!options}>
+                <option value="">tmux-legacy</option>
+                {runners.map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </FormField>
-            <FormField label="effort" hint="Rendered into the {effort} placeholder.">
-              <select className="sel" value={effort} onChange={e => setEffort(e.target.value)} disabled={!options}>
-                {!options && <option value="">loading...</option>}
-                {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+            <FormField label="account" hint={runner ? "The credentials the runner uses (config/accounts.toml)." : "A runner lane only."}>
+              <select className="sel" value={account} onChange={e => setAccount(e.target.value)} disabled={!runner || !laneAccounts.length}>
+                {!runner && <option value="">-</option>}
+                {runner && !laneAccounts.length && <option value="">no account runs on this lane</option>}
+                {laneAccounts.map(a => <option key={a.name} value={a.name}>{a.name} · {a.kind}</option>)}
               </select>
             </FormField>
+          </div>
+          {options?.accounts_error && (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--amber)", marginTop: 4 }}>accounts: {options.accounts_error}</div>
+          )}
+          <div style={{ marginTop: 14 }} />
+          <div className="grid2">
+            {!runner ? (
+              <FormField label="model" hint="Rendered into the agent command's {model} placeholder.">
+                <select className="sel" value={model} onChange={e => setModel(e.target.value)} disabled={!options}>
+                  {!options && <option value="">loading...</option>}
+                  {models.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </FormField>
+            ) : laneReads("model") ? (
+              <FormField label="model" hint="[agent] model, the one the runner reads; blank is the runner's default.">
+                <input className="txt" list="spawn-lane-models" value={laneModel} onChange={e => setLaneModel(e.target.value)} placeholder="the runner's default" />
+                <datalist id="spawn-lane-models">{models.map(m => <option key={m} value={m} />)}</datalist>
+              </FormField>
+            ) : (
+              <FormField label="model" hint="This lane reads no model."><span className="muted">-</span></FormField>
+            )}
+            {laneReads("effort") ? (
+              <FormField label="effort" hint={runner ? "[agent] effort, the one the runner reads." : "Rendered into the {effort} placeholder."}>
+                <select className="sel" value={effort} onChange={e => setEffort(e.target.value)} disabled={!options}>
+                  {!options && <option value="">loading...</option>}
+                  {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </FormField>
+            ) : (
+              <FormField label="effort" hint="This lane reads no effort."><span className="muted">-</span></FormField>
+            )}
           </div>
           <div style={{ marginTop: 14 }} />
           <div className="grid2">

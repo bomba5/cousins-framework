@@ -27,7 +27,9 @@ alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one (what the start-at-boot unit
 uses); `--runner sdk|fake|opencode` and `--account <name>` make it a runner cousin
 (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
-`COUSIN_DEFAULT_ACCOUNT`), which `--start` starts through `cousin-supervisor`;
+`COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]` too, where
+the runner reads them, and only on a lane that reads them), which `--start`
+starts through `cousin-supervisor`;
 `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it

@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import pathlib
 import sqlite3
 import stat
@@ -1071,7 +1072,7 @@ def _transcripts(case, root, home, *, write_last=True, write_before=True):
     (root / "config" / "harness.toml").write_text(
         'transcripts_dir = "%s/{home_encoded}"\n' % base)
     (home / "cousin.toml").write_bytes(TOML.encode() + ('session_id = "%s"\r\n' % SID).encode())
-    tdir = base / str(home).replace("/", "-")
+    tdir = base / re.sub(r"[^A-Za-z0-9]", "-", str(home))    # config's home_encoded (#106)
     tdir.mkdir(parents=True)
     if write_before:
         (tdir / ("%s.jsonl" % OLD_SID)).write_text('{"type": "user"}\n')

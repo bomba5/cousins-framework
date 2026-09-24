@@ -1021,6 +1021,102 @@ class TestRegistrySyncCarriesJobRun(unittest.TestCase):
         self.assertEqual(job["properties"]["argv"]["type"], "array")
 
 
+class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
+    """A cousin's registry that still carries the job tool's pre-`run`
+    description and `kind` text (what the sync only ever ADDED to, never
+    corrected) gets the current wording; a cousin's own rewrite of the
+    same field is never touched; correcting is idempotent (tracker #110).
+    """
+
+    def setUp(self):
+        import tempfile
+        from cousin_lib import template_sync
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "config").mkdir()
+        self.shipped = (pathlib.Path(__file__).resolve().parents[1]
+                        / "config" / "mcp-registry.toml.example").read_text()
+        (self.root / "config" / "mcp-registry.toml.example").write_text(
+            self.shipped)
+        self.home = self.root / "cousins" / "wren"
+        self.home.mkdir(parents=True)
+        self.reg = self.home / "mcp-registry.toml"
+        self.template_sync = template_sync
+
+    def _old_registry(self):
+        """The shipped registry with every field _KNOWN_TEXT records
+        rolled back to the earlier wording it names, the way a cousin
+        synced before this fix would still have it."""
+        ts = self.template_sync
+        out = []
+        for path, body in ts._blocks(self.shipped):
+            new_entries = []
+            for key, lines in ts._entries(body):
+                old = (ts._KNOWN_TEXT.get("%s.%s" % (path, key))
+                      if path and key else None)
+                if old:
+                    text = ts._DESC.sub(
+                        lambda m, v=old[0]: m.group(1) + json.dumps(v),
+                        "".join(lines), count=1)
+                    lines = [text]
+                new_entries.append((key, lines))
+            out.append(("" if path is None else "[%s]\n" % path)
+                       + "".join(l for _, ls in new_entries for l in ls))
+        return "".join(out)
+
+    def _sync(self):
+        return self.template_sync._registry_sync(self.home, self.root,
+                                                  apply=True)
+
+    def test_old_shipped_text_is_corrected(self):
+        self.reg.write_text(self._old_registry())
+        before = tomllib.loads(self.reg.read_text())["tools"]["job"]
+        self.assertEqual(before["description"],
+                         self.template_sync._KNOWN_TEXT[
+                             "tools.job.description"][0])
+        out = self._sync()
+        for field in ("tools.job.description", "tools.job.properties.kind",
+                     "tools.job.properties.title",
+                     "tools.job.properties.desc"):
+            self.assertIn(field, out["corrected"])
+        job = tomllib.loads(self.reg.read_text())["tools"]["job"]
+        shipped_job = tomllib.loads(self.shipped)["tools"]["job"]
+        self.assertEqual(job["description"], shipped_job["description"])
+        self.assertEqual(job["properties"]["kind"]["description"],
+                         shipped_job["properties"]["kind"]["description"])
+        self.assertEqual(job["properties"]["title"]["description"],
+                         shipped_job["properties"]["title"]["description"])
+        self.assertEqual(job["properties"]["desc"]["description"],
+                         shipped_job["properties"]["desc"]["description"])
+        # kept valid TOML, and everything else about kind untouched
+        self.assertEqual(job["properties"]["kind"]["enum"],
+                         ["subagent", "build", "other"])
+
+    def test_the_cousins_own_wording_is_kept(self):
+        text = self._old_registry()
+        old_line = "description = %s" % json.dumps(
+            self.template_sync._KNOWN_TEXT["tools.job.description"][0])
+        self.assertIn(old_line, text)
+        text = text.replace(
+            old_line, 'description = "my own wording for the job tool"', 1)
+        self.reg.write_text(text)
+        out = self._sync()
+        self.assertNotIn("tools.job.description", out["corrected"])
+        job = tomllib.loads(self.reg.read_text())["tools"]["job"]
+        self.assertEqual(job["description"],
+                         "my own wording for the job tool")
+
+    def test_a_second_sync_is_a_no_op(self):
+        self.reg.write_text(self._old_registry())
+        self._sync()
+        once = self.reg.read_text()
+        out = self._sync()
+        self.assertEqual(self.reg.read_text(), once)
+        self.assertEqual(out["corrected"], [])
+        self.assertEqual(out["added"], [])
+
+
 class TestSyncTemplateCLI(unittest.TestCase):
     """`cousin-spawn <slug> --sync-template` is the entry an operator uses;
     it has to reach template_sync, not die in argument handling."""

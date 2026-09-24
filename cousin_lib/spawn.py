@@ -1274,6 +1274,11 @@ def _sync_template(root, slug, *, apply):
             len(result["registry_added"]),
             "added" if apply else "would be added",
             ", ".join(result["registry_added"])))
+    if result["registry_corrected"]:
+        print("mcp-registry.toml: %s field(s) %s to the current wording: %s" % (
+            len(result["registry_corrected"]),
+            "corrected" if apply else "would be corrected",
+            ", ".join(result["registry_corrected"])))
     if not result["changed"]:
         print("%s: CLAUDE.md already follows the template" % slug)
     elif apply:

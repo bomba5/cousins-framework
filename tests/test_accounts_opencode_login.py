@@ -183,14 +183,16 @@ class TestApiKey(OcLoginCase):
             self.assertEqual(path.read_bytes(), before)
             self.assertNotIn(KEY, out + err)
 
-    def test_anthropic_takes_an_api_key_and_replaces_an_oauth_login(self):
-        self.seed({"anthropic": OAUTH_ENTRY}, name="metered")
-        rc, out, err = self.cli("login", "metered", "--provider", "anthropic",
-                                stdin=io.StringIO("sk-ant-api03-fake\n"))
-        self.assertEqual(rc, 0, err)
-        self.assertEqual(self.auth("metered"),
-                         {"anthropic": {"type": "api", "key": "sk-ant-api03-fake"}})
-        self.assertTrue(accounts.status(self.acc["metered"], self.root)["loggedIn"])
+    def test_anthropic_is_refused_on_this_lane_even_by_key(self):
+        """Ruling P9-1: Claude cousins run on the Agent SDK and nowhere else,
+        so no Anthropic key is written for the opencode lane either."""
+        stdin = io.StringIO("sk-ant-api03-fake\n")
+        rc, out, err = self.cli("login", "metered", "--provider", "anthropic", stdin=stdin)
+        self.assertEqual(rc, 2, err)
+        self.assertIn("Agent SDK", err)
+        self.assertEqual(stdin.tell(), 0)                     # no key was read
+        self.assertNotIn("sk-ant-api03-fake", out + err)
+        self.assertFalse(self.acc["metered"].data_dir.joinpath(*accounts.AUTH_JSON).exists())
 
     def test_a_file_holding_a_claude_subscription_is_never_written_into(self):
         self.seed({"anthropic": OAUTH_ENTRY})

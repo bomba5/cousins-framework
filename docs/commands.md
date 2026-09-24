@@ -119,8 +119,9 @@ the provider, not when the screen says so. A method that asks for an API
 key, or asks another question first, ends the flow and says so. A browser
 method redirects to `localhost` on the host, so it only completes from a
 browser on the host; a device-code method completes from any device.
-Refused (exit 2): `anthropic` or any method named Claude or Anthropic by
-OAuth (a Claude subscription; an Anthropic API key is fine), the provider
+Refused (exit 2): the provider `anthropic`, by key or by OAuth, and any
+method named Claude or Anthropic (Claude cousins run on the Agent SDK and
+nowhere else, ruling P9-1), the provider
 `opencode` (the hosted service the runner disables), a provider or method
 that names the Claude-subscription bridge, an `endpoint` account, and these
 flags on any other kind of account. The binary is `COUSIN_OPENCODE_BIN`

@@ -210,8 +210,12 @@ through chat), or an OAuth login with `--method <label>` through opencode's
 own `auth login` (see [commands](commands.md)). That `auth.json` is held to the secret file rules: open to group or
 others, a symlink or not yours refuses the start (exit 2, the message names
 the file and the `chmod`); a missing one is a login to do. An Anthropic
-OAuth login in it (a Claude subscription) refuses the start: an `anthropic`
-provider on this lane takes an API key. `cousin-account status <name>`
+OAuth login in it (a Claude subscription) refuses the start, and so does any
+entry but an `api` key and another vendor's `oauth` login. Claude cousins
+run on the Agent SDK and nowhere else (ruling P9-1): an opencode account that
+names the `anthropic` provider, or an `endpoint_model`, `[agent] model` or
+`small_model` whose id says claude or anthropic (in any case), is refused at
+start (exit 2). `cousin-account status <name>`
 reads presence only, with no process run: a `providers` account is logged
 in when `auth.json` holds every provider it names, an `endpoint` account
 by its configuration. The lanes do not mix: an opencode cousin (`[agent]

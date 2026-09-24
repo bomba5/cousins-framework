@@ -554,6 +554,10 @@ class OpencodeRunner:
     def _check_models(self):
         """Both models well formed, on a provider this account reaches."""
         for what, model in (("model", self.model), ("small_model", self.small_model)):
+            try:
+                accounts.refuse_claude_name("cousin.toml [agent] %s" % what, model)
+            except accounts.AccountsError as err:
+                raise RunnerError(str(err))
             provider, _ = split_model(model, what)
             if self.account.endpoint and provider != ENDPOINT_PROVIDER:
                 raise RunnerError("cousin.toml [agent] %s %r: account %s is a local endpoint,"

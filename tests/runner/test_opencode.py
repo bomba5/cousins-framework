@@ -377,6 +377,17 @@ class TestGuards(OpencodeCase):
             self.runner()
         self.assertIn("environment variable PATH", str(err.exception))
 
+    def test_a_claude_model_is_refused_on_the_opencode_lane(self):
+        """Ruling P9-1: the models cousin.toml names, by id."""
+        for extra, needle in (("", "local/claude-3-5-haiku"),
+                              ('small_model = "local/Anthropic-small"\n', "Anthropic-small")):
+            with self.subTest(needle=needle):
+                model = "local/claude-3-5-haiku" if not extra else "local/m1"
+                with self.assertRaises(RunnerError) as err:
+                    self.runner(home=self.home(model=model, extra=extra))
+                self.assertIn(needle, str(err.exception))
+                self.assertIn("Agent SDK", str(err.exception))
+
     def test_a_bridge_marker_at_start_refuses_the_start(self):
         r = self.runner()
         os.environ["LC_MERIDIAN"] = "1"

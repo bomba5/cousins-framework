@@ -65,6 +65,17 @@ Anthropic provider (or `ANTHROPIC_BASE_URL`) pointed at a loopback address.
 Removing a bridge a live install still carries is an operator step:
 [migrating](../migrating.md).
 
+**No Claude model on this lane (ruling P9-1).** Claude cousins run on the
+Agent SDK and nowhere else, so an opencode account that names the
+`anthropic` provider, and an `endpoint_model`, `[agent] model` or
+`small_model` whose id contains `claude` or `anthropic` (any case), are
+refused at start (exit 2), and `cousin-account login` refuses the
+`anthropic` provider by key as well as by OAuth. The test is by name: it
+stops an honest mistake and a proxy that names its model after Claude, not
+an OpenAI-compatible proxy that serves Claude under another id. What a local
+endpoint really serves is the operator's to know; the bridge guard and this
+test are a floor, not a proof.
+
 ## The contract table
 
 Generated from each runner class's declarations by

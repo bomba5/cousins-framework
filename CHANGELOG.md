@@ -56,8 +56,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   straight into the account's `auth.json` (0600, merged, tmp + rename),
   never through chat; `--method <label> [--via <slug>]` runs an OAuth
   method through the pty and relays its URL and instruction line one way
-  (opencode 1.18.31 takes no code back). Refused: Anthropic by OAuth (a
-  Claude subscription), the provider `opencode`, anything naming the
+  (opencode 1.18.31 takes no code back). Refused: the provider `anthropic`
+  by key or by OAuth, the provider `opencode`, anything naming the
   Claude-subscription bridge.
 - The image's opencode variant: `--target opencode` adds the pinned
   opencode 1.18.31 binary (sha256-checked, x86-64 only; no node, no bun, no
@@ -65,6 +65,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   budget; `docker compose -f compose.yml -f compose.opencode.yml up -d`
   runs the framework on it (an override file, not a profile). The default
   image is unchanged.
+- Claude runs on the Agent SDK only (ruling P9-1): on the opencode lane an
+  account naming the `anthropic` provider, and a model, `small_model` or
+  `endpoint_model` whose id contains `claude` or `anthropic`, are refused
+  (exit 2). A test by name, a floor rather than a proof (docs/reference/runners.md).
 - The bridge guard: the opencode lane never carries Claude subscription
   traffic. A config or environment naming the Claude-subscription bridge
   (its plugin, package, proxy or header names, a base URL on port 3456), an

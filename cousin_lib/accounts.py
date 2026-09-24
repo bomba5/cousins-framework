@@ -236,6 +236,23 @@ def _check_endpoint(endpoint, where):
                             % (where, marker.pattern, opencode_guard.move_hint(marker)))
 
 
+# Ruling P9-1: "Claude cousins run on the Agent SDK and nowhere else", read
+# literally. On the opencode lane a provider or a model whose id says claude
+# or anthropic is refused. A name is a weak test (a proxy can serve Claude
+# under any id); it stops the honest mistake and the obvious proxy, and the
+# operator's account config stays the real boundary.
+CLAUDE_NAME = re.compile(r"claude|anthropic", re.IGNORECASE)
+
+
+def refuse_claude_name(what, text):
+    """AccountsError when `text` (a provider or model id) names Claude or
+    Anthropic, on the opencode lane (ruling P9-1)."""
+    if isinstance(text, str) and CLAUDE_NAME.search(text):
+        raise AccountsError("%s %r names Claude or Anthropic: Claude cousins run on the Agent"
+                            " SDK and nowhere else (ruling P9-1), so the opencode lane never"
+                            " runs one; use runner = \"sdk\" for a Claude model" % (what, text))
+
+
 def check_lane(account, runner_kind):
     """R12: an opencode runner runs on an opencode account only, and an
     opencode account on an opencode runner only. The Claude kinds (a login,
@@ -247,6 +264,9 @@ def check_lane(account, runner_kind):
                 "runner = \"opencode\" runs on a kind = \"opencode\" account only (its"
                 " providers' keys or a local endpoint); account %s is %s: name an opencode"
                 " account in [agent] account" % (account.name, account.kind))
+        for provider in account.providers or ():
+            refuse_claude_name("account %s's provider" % account.name, provider)
+        refuse_claude_name("account %s's endpoint_model" % account.name, account.endpoint_model)
     elif account.kind == "opencode":
         raise AccountsError(
             "account %s is kind opencode: it runs with runner = \"opencode\" only, not"
@@ -794,8 +814,8 @@ def check_opencode_login(account, provider, method=None):
     if method is not None and (provider == "anthropic"
                                or re.search("claude|anthropic", method, re.IGNORECASE)):
         raise AccountsError("an Anthropic or Claude login by OAuth is a Claude subscription;"
-                            " the opencode lane never carries one: use an Anthropic API key"
-                            " (no --method)")
+                            " the opencode lane never carries one")
+    refuse_claude_name("the provider", provider)
     if provider not in account.providers:
         raise AccountsError("account %s does not name provider %r in its providers (%s): add"
                             " it to config/accounts.toml first"

@@ -299,6 +299,29 @@ class TestLane(OpencodeCase):
         for name in ("keyed", "local"):
             accounts.check_lane(acc[name], "opencode")
 
+    def test_claude_by_name_never_runs_on_the_opencode_lane(self):
+        """Ruling P9-1 (review Important 5 and 6): "Claude cousins run on the
+        Agent SDK and nowhere else", read literally. On the opencode lane an
+        account that names the anthropic provider, or an endpoint model whose
+        id says claude or anthropic, is refused: the latter is the shape of
+        any OpenAI-compatible proxy in front of a Claude subscription."""
+        self.write('[accounts.both]\nkind = "opencode"\nproviders = ["openai", "anthropic"]\n'
+                   '[accounts.proxy]\nkind = "opencode"\nendpoint = "http://127.0.0.1:8080/v1"\n'
+                   'endpoint_model = "Claude-Sonnet-local"\n'
+                   '[accounts.proxy2]\nkind = "opencode"\nendpoint = "http://192.0.2.10:9/v1"\n'
+                   'endpoint_model = "my-anthropic-mirror"\n'
+                   '[accounts.qwen]\nkind = "opencode"\nendpoint = "http://127.0.0.1:8080/v1"\n'
+                   'endpoint_model = "qwen3-coder"\n')
+        acc = accounts.load(self.root)
+        for name, needle in (("both", "anthropic"), ("proxy", "Claude-Sonnet-local"),
+                             ("proxy2", "my-anthropic-mirror")):
+            with self.subTest(account=name):
+                with self.assertRaises(accounts.AccountsError) as cm:
+                    accounts.check_lane(acc[name], "opencode")
+                self.assertIn(needle, str(cm.exception))
+                self.assertIn("Agent SDK", str(cm.exception))
+        accounts.check_lane(acc["qwen"], "opencode")
+
     def test_an_sdk_or_fake_runner_refuses_an_opencode_account(self):
         self.write(TOML)
         acc = accounts.load(self.root)

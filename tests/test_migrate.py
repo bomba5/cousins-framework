@@ -148,6 +148,19 @@ class TestPlan(HermeticCase):
         self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
         self.assertEqual(_names(live), [])
 
+    def test_a_plan_never_tells_the_operator_to_delete_the_tmux_lanes_keys(self):
+        """The tmux lane stays supported (the operator, 2026-09-24): its keys are
+        not deprecated, so the plan carries no 'warn 2.0.0' removal lines."""
+        root, home = _root(self)
+        p = migrate.plan(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertNotIn("warnings", p)
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            migrate._print_plan(p)
+        self.assertNotIn("2.0.0", out.getvalue())
+
     def test_a_blocker_makes_the_plan_not_ready_and_apply_refuses(self):
         root, home = _root(self)
         for live, needle in ((Live(logged_in=False), "cousin-account login"),

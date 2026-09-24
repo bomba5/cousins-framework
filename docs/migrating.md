@@ -312,11 +312,7 @@ same dir).
 
 A key file already at `.secrets/accounts/<slug>-key` is used as it is when
 it holds the cousin's key, and never removed by a rollback; with another
-key there, the plan says `NO carry`. It also lists, as `warn 2.0.0` lines, every key the cousin
-or the install still carries that 2.0.0 will reject (a `[chat] port`, a
-`config/agent-cmd`, the harness's tmux patterns), with what to do: they
-are warnings, not blockers, and the cleanup belongs to the upgrade, after
-the fleet's week. When the plan says ready, and at a moment the cousin is
+key there, the plan says `NO carry`. When the plan says ready, and at a moment the cousin is
 between tasks:
 
 ```

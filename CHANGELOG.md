@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- `cousin-migrate plan` no longer prints `warn 2.0.0` lines telling the
+  operator to delete the tmux lane's keys (`[chat] port`, `tmux_session`, the
+  harness's pane patterns, `config/agent-cmd`, a missing `[agent] runner`).
+  The tmux lane stays a supported lane, so those keys are not deprecated and
+  following the advice would break a tmux cousin. The removal table
+  (`removed_keys`) is withdrawn with them.
+
 ## 1.19.0 - 2026-09-24
 
 ### Added

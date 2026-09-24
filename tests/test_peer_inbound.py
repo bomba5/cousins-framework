@@ -181,6 +181,31 @@ class TestTheSenderIsNeverTheOperatorOrACousin(InboundCase):
         self.assertEqual(_messages(self.root / "cousins" / "wren"), [("Kestrel", "the tins moved")])
 
 
+class TestTheSenderIsNeverTheFramework(InboundCase):
+    """Review round 2, N1: a sender named like the framework's own senders
+    ("fw-hook" is threaded on `system` as a hook; "runner" and "framework"
+    head the runner's boot, flip and proposal items) is refused."""
+
+    def test_a_reserved_framework_name_is_refused(self):
+        for i, display in enumerate(("fw-hook", "FW-Hook", "runner", "Framework",
+                                     "unknown", "system", "schedule")):
+            with self.assertRaises(peer_inbound.Refused, msg=repr(display)) as cm:
+                self.accept(display=display, msg_id="m-rsvd-%04d" % i)
+            self.assertEqual(cm.exception.status, 403, repr(display))
+            self.assertIn("reserved", cm.exception.error)
+        self.assertEqual(_messages(self.root / "cousins" / "wren"), [])
+
+    def test_every_sender_the_framework_writes_is_reserved(self):
+        import re
+        from cousin_lib import chat_hooks, delivery
+        src = pathlib.Path(delivery.__file__).parent
+        literals = set()
+        for path in src.rglob("*.py"):
+            literals |= set(re.findall(r"""\bsender=["']([^"']+)["']""", path.read_text()))
+        self.assertTrue(literals)
+        self.assertLessEqual(literals | {chat_hooks.HOOK_SENDER}, set(delivery.FRAMEWORK_SENDERS))
+
+
 class TestTheTmuxLineHasNoControls(unittest.TestCase):
     def test_compose_delivery_strips_them_from_the_name_and_the_message(self):
         """Review I5 for every door, the legacy /api/send included."""

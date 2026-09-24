@@ -92,12 +92,17 @@ def _target(root, to, allowed):
 
 
 def check_display(root, target, display):
-    """Refuse a display name that is not a plain name, or that the target
-    would take for its operator or a local cousin (ruling P10a-1)."""
+    """Refuse a display name that is not a plain name, that the framework
+    writes itself (delivery.FRAMEWORK_SENDERS: "fw-hook" would be threaded
+    on `system` as a hook), or that the target would take for its operator
+    or a local cousin (ruling P10a-1)."""
     from cousin_lib.config import FrameworkConfig
+    from cousin_lib.delivery import FRAMEWORK_SENDERS
     from cousin_lib.server.storage import is_operator, normalize_chat_user
     if not isinstance(display, str) or not _DISPLAY.match(display):
         raise Refused(403, "the sender's configured name is not a plain name")
+    if normalize_chat_user(display) in {normalize_chat_user(n) for n in FRAMEWORK_SENDERS}:
+        raise Refused(403, "the sender's configured name is reserved by the framework")
     if is_operator(target, display):
         raise Refused(403, "the sender's configured name is the operator's")
     wanted = normalize_chat_user(display)

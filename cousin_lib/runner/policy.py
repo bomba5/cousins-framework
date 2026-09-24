@@ -33,6 +33,10 @@ FILE = "policy.toml"
 # not a command line, so the command patterns never look at them.
 OWN_TOOL_PREFIX = "mcp__cousin__"
 KEYS = ("deny_tools", "deny_bash_patterns", "ask", "outbound_filter")
+# Every generation ends through this tool: a policy that denies it (or
+# asks for it, which is enforced as a deny) leaves a cousin that cannot
+# hand over. The console refuses such an edit (handoff_blockers).
+HANDOFF_TOOL = OWN_TOOL_PREFIX + "handoff"
 
 
 class PolicyError(RunnerError):
@@ -60,8 +64,19 @@ class Policy:
         if not path.exists():
             return cls()
         try:
-            data = tomllib.loads(path.read_text())
-        except (OSError, tomllib.TOMLDecodeError) as err:
+            text = path.read_text()
+        except OSError as err:
+            raise PolicyError("%s: cannot read: %s" % (FILE, err))
+        return cls.parse(text, source=str(path))
+
+    @classmethod
+    def parse(cls, text, source="<text>"):
+        """The policy a policy.toml of this text would load: the same
+        checks as load, so an edit is validated before it is written.
+        `source` is what describe() names."""
+        try:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as err:
             raise PolicyError("%s: cannot read: %s" % (FILE, err))
         unknown = set(data) - set(KEYS)
         if unknown:
@@ -76,7 +91,7 @@ class Policy:
         if not isinstance(flag, bool):
             raise PolicyError("%s: outbound_filter must be true or false" % FILE)
         return cls(deny_tools=_str_list(data, "deny_tools"), deny_bash_patterns=tuple(patterns),
-                   ask=_str_list(data, "ask"), outbound_filter=flag, source=str(path))
+                   ask=_str_list(data, "ask"), outbound_filter=flag, source=source)
 
     def _named(self, names, tool):
         tool = str(tool or "")
@@ -84,6 +99,14 @@ class Policy:
             if n == tool or (n.endswith("*") and tool.startswith(n[:-1])):
                 return n
         return None
+
+    def handoff_blockers(self):
+        """[(key, entry)] for each deny_tools or ask entry that names
+        HANDOFF_TOOL (exactly or as a prefix*); ask counts, because it is
+        enforced as a deny. Empty when the handoff stays allowed."""
+        return [(key, entry) for key, names in (("deny_tools", self.deny_tools),
+                                                ("ask", self.ask))
+                for entry in names if self._named((entry,), HANDOFF_TOOL)]
 
     def decide(self, tool_name, tool_input):
         """`("allow", "")`, `("deny", reason)` or `("ask", reason)`:

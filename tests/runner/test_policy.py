@@ -209,5 +209,39 @@ class TestBuildHooks(HermeticCase):
             stream=EventStream(home, "b2"), policy=policy.Policy.load(home)))
 
 
+class TestParseFromText(HermeticCase):
+    """Policy.parse(text): the same rules as load, over text the console
+    has not written yet, so an edit is validated before it lands."""
+
+    def test_parse_reads_what_load_reads(self):
+        text = ('deny_tools = ["WebFetch"]\ndeny_bash_patterns = ["\\\\brm\\\\s"]\n'
+                'ask = ["Agent"]\noutbound_filter = false\n')
+        p = policy.Policy.parse(text, source="draft")
+        self.assertEqual((p.deny_tools, p.ask, p.outbound_filter, p.source),
+                         (("WebFetch",), ("Agent",), False, "draft"))
+        self.assertEqual([rx.pattern for rx in p.deny_bash_patterns], ["\\brm\\s"])
+        home = _home(self, text)
+        self.assertEqual(policy.Policy.load(home).deny_tools, p.deny_tools)
+
+    def test_parse_refuses_what_load_refuses(self):
+        for text, key in (('deny_tools = "x"\n', "deny_tools"),
+                          ("deny_bash_patterns = ['(']\n", "deny_bash_patterns"),
+                          ('outbound_filter = "yes"\n', "outbound_filter"),
+                          ('surprise = 1\n', "surprise"),
+                          ("not toml ==\n", "cannot read")):
+            with self.assertRaises(policy.PolicyError) as cm:
+                policy.Policy.parse(text)
+            self.assertIn(key, str(cm.exception))
+
+    def test_handoff_blockers_names_every_entry_that_stops_the_handoff(self):
+        p = policy.Policy.parse('deny_tools = ["WebFetch", "mcp__cousin__*"]\n'
+                                'ask = ["mcp__cousin__handoff", "Agent"]\n')
+        self.assertEqual(p.handoff_blockers(),
+                         [("deny_tools", "mcp__cousin__*"), ("ask", "mcp__cousin__handoff")])
+        self.assertEqual(policy.Policy.parse('deny_tools = ["mcp__cousin__send"]\n')
+                         .handoff_blockers(), [])
+        self.assertEqual(policy.HANDOFF_TOOL, "mcp__cousin__handoff")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1010,6 +1010,30 @@ class ApproveCase(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(self.settings.read_text(), "{broken")
 
+    def test_approve_keeps_the_mode_and_writes_through_a_symlink(self):
+        from cousin_lib import mcp_server
+        real = self.root / "real-settings.json"
+        real.write_text(json.dumps({"theme": "dark"}))
+        os.chmod(real, 0o600)
+        self.settings.symlink_to(real)
+        mcp_server.approve_registration(self.settings, self.home)
+        self.assertTrue(self.settings.is_symlink())
+        self.assertEqual(os.stat(real).st_mode & 0o777, 0o600)
+        data = json.loads(real.read_text())
+        self.assertEqual(data["theme"], "dark")
+        self.assertIn("cousin", data["projects"][str(self.home)]["enabledMcpjsonServers"])
+
+    def test_approve_leaves_no_temp_file_when_the_write_fails(self):
+        from unittest import mock
+        from cousin_lib import mcp_server
+        self.settings.write_text("{}")
+        with mock.patch.object(mcp_server.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                mcp_server.approve_registration(self.settings, self.home)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()),
+                         ["config", "cousins", "harness-settings.json"])
+        self.assertEqual(self.settings.read_text(), "{}")
+
 
 def _help_text(cli_name, subcommand):
     argv = _script_argv(cli_name) + ([subcommand] if subcommand else []) + ["--help"]

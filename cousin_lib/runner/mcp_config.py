@@ -92,22 +92,18 @@ def _shape(entry):
     return kind, None
 
 
-def read(home):
-    """(present, entries, skipped) with nothing expanded: entries is
-    [(name, type, entry)] ordered by name. The structural half, which
-    `cousin-migrate plan` also uses."""
-    path = Path(home) / FILE
-    if not path.exists():
-        return False, [], []
+def parse(text):
+    """(entries, skipped) of .mcp.json text, nothing expanded: entries is
+    [(name, type, entry)] ordered by name. The structural half of read(),
+    for text not on disk yet (the console checks an edit with it)."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError) as err:
+        data = json.loads(text)
+    except ValueError as err:
         # a JSONDecodeError says where, never what
-        return True, [], [{"name": None, "reason": "%s does not parse: %s" % (FILE, err)}]
+        return [], [{"name": None, "reason": "%s does not parse: %s" % (FILE, err)}]
     servers = data.get("mcpServers") if isinstance(data, dict) else None
     if not isinstance(servers, dict):
-        return True, [], [{"name": None,
-                           "reason": "%s has no `mcpServers` object" % FILE}]
+        return [], [{"name": None, "reason": "%s has no `mcpServers` object" % FILE}]
     entries, skipped = [], []
     for name in sorted(servers):
         if name == RESERVED:
@@ -122,6 +118,21 @@ def read(home):
             skipped.append({"name": name, "reason": why})
         else:
             entries.append((name, kind, servers[name]))
+    return entries, skipped
+
+
+def read(home):
+    """(present, entries, skipped) with nothing expanded: entries is
+    [(name, type, entry)] ordered by name. The structural half, which
+    `cousin-migrate plan` also uses."""
+    path = Path(home) / FILE
+    if not path.exists():
+        return False, [], []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as err:
+        return True, [], [{"name": None, "reason": "%s does not parse: %s" % (FILE, err)}]
+    entries, skipped = parse(text)
     return True, entries, skipped
 
 
@@ -143,6 +154,12 @@ def _strings(kind, entry):
     return [entry["url"]] + list(entry.get("headers", {}).values())
 
 
+def variables(kind, entry):
+    """[(name, has_default)] for every `${NAME}` the CLI expands in this
+    entry (command, args, env values; url, header values)."""
+    return [r for v in _strings(kind, entry) for r in references(v)]
+
+
 def _config(kind, entry):
     """The SDK config: the declared keys only, every value as written."""
     out = {"type": kind}
@@ -157,7 +174,7 @@ def _config(kind, entry):
 def _refusal(kind, entry, environ):
     """Why this entry's variables skip it, or None."""
     from cousin_lib.accounts import AUTH_VARS
-    refs = [r for v in _strings(kind, entry) for r in references(v)]
+    refs = variables(kind, entry)
     auth = sorted({name for name, _ in refs if name in AUTH_VARS})
     if auth:
         return "names an account variable, never passed to a server: %s" % ", ".join(auth)

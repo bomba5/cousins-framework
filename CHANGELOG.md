@@ -23,7 +23,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   exits 1 on a lost memory, 2 when nothing was compared, including a
   manifest it cannot read (no comparison is attempted). Both bring the
   search indexes fully current first. An imported copy inherits its
-  original's recall weighting.
+  original's recall weighting, and search indexes it as its original's
+  exact text (the provenance lines stripped), so both legs rank it the same.
 - On the SDK lane, after a turn in which the cousin reached a decision
   and recorded none, the runner queues one `propose` row asking whether
   to keep it: the lowest priority, never about its own turn, at most

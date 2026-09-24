@@ -20,7 +20,8 @@ since is never overwritten (a conflict, listed by name), and a copy the
 cousin removed is `dropped`: never imported again, whatever its source
 does.
 memory_search skips a harness file whose imported copy is current, so
-one memory is one hit.
+one memory is one hit, and indexes each copy as original_text(), the
+source's exact text, so the copy ranks where its original did.
 
 verify() is the check (master task 5's recall regression test), before
 against after. The queries are the cousin's own (memory/.recall-log.jsonl,
@@ -99,9 +100,14 @@ def load_manifest(home, *, strict=False):
     return data
 
 
+PROVENANCE = ("imported_from", "imported_sha256", "imported_at")
+
+
 def render(name, text, *, imported_at):
     """The imported file: the source's frontmatter kept, provenance appended
-    to it; a source without frontmatter gets one holding only provenance."""
+    to it; a source without frontmatter gets one holding only provenance.
+    original_text() is its exact inverse: original_text(render(name, text,
+    imported_at=...)) == text for every text."""
     provenance = "imported_from: %s\nimported_sha256: %s\nimported_at: %s" % (
         name, sha256(text), imported_at)
     match = _FRONT.match(text)
@@ -109,6 +115,44 @@ def render(name, text, *, imported_at):
         cut = match.end(1)
         return text[:cut] + "\n" + provenance + text[cut:]
     return "---\n" + provenance + "\n---\n" + text
+
+
+def _is_provenance(line, key=None):
+    keys = (key,) if key else PROVENANCE
+    return any(line.startswith(k + ": ") for k in keys)
+
+
+def original_text(written):
+    """The source text an imported copy was rendered from, byte for byte:
+    the inverse of render(), so search indexes a copy exactly like its
+    original (same chunk windows, same embeddings, same keyword body).
+
+    A render ends its head frontmatter with exactly the three provenance
+    lines, in render's order: they are stripped, and when they were the
+    whole block (the source had no frontmatter, render made one) the
+    block goes too. Only the head frontmatter is read: a body line that
+    starts `imported_from:` is the memory's own text and stays.
+
+    Text that is not a render never raises: without a head frontmatter
+    it is returned as is; a copy edited by hand (a provenance line gone
+    or moved) loses every provenance line still in its head frontmatter,
+    and the whole block when nothing else was in it."""
+    match = _FRONT.match(written)
+    if not match:
+        return written
+    lines = match.group(1).split("\n")
+    if len(lines) >= 3 and all(_is_provenance(line, key)
+                               for line, key in zip(lines[-3:], PROVENANCE)):
+        kept = lines[:-3]
+        if not kept:
+            return written[match.end():]      # render made this block
+    else:
+        kept = [line for line in lines if not _is_provenance(line)]
+        if len(kept) == len(lines):
+            return written
+        if not kept:
+            return written[match.end():]
+    return written[:match.start(1)] + "\n".join(kept) + written[match.end(1):]
 
 
 _IMPORTED_AT = re.compile(r"^imported_at: (.*)$", re.M)

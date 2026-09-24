@@ -155,14 +155,13 @@ def _read_owned_attribution(home):
 
 
 def _write_owned_attribution(home, owned, *, previous):
-    """The sidecar recording exactly what _compute_attribution decided
-    this run; removed (not left as `{}`) when nothing is owned any
-    more, so its mere presence answers "does this module own anything
-    here". Skipped entirely when `owned` already matches `previous`
-    (round 2 review, Minor): settings.json already short-circuits its
-    own unchanged write, and the marker deserves the same - it is
-    called after every apply_project_settings, not only when something
-    moved."""
+    """The sidecar recording exactly what this module currently owns;
+    removed (not left as `{}`) when nothing is owned any more, so its
+    mere presence answers "does this module own anything here". Skipped
+    entirely when `owned` already matches `previous` (round 2 review,
+    Minor): settings.json already short-circuits its own unchanged
+    write, and the marker deserves the same - it is called after every
+    apply_project_settings, not only when something moved."""
     if owned == previous:
         return
     path = _marker_path(home)
@@ -179,44 +178,50 @@ def _write_owned_attribution(home, owned, *, previous):
     os.replace(tmp, path)
 
 
-def _compute_attribution(data, owned, commit_attribution):
-    """(data, new_owned): includeCoAuthoredBy / attribution, added to
-    `data` when commit_attribution is False, removed again when it is
-    True - pure, no I/O, so the caller controls write order (round 2
-    review, Important: settings.json must land on disk before the
-    marker, so a crash between them heals instead of stranding a key
-    forever; see apply_project_settings). Ownership is never decided by
-    matching the framework's own shape alone (Critical 1, round 1
-    review): turning on removes a key only when `owned` (the marker
-    read BEFORE this call) already recorded it with the same value.
-    Turning off is different on purpose: since commit_attribution is
-    false right now, a key already holding exactly the off value -
-    whether this module wrote it before (including a crash-recovery
-    case: the marker never caught up) or an operator happened to type
-    the identical value by hand - is claimed going forward. That known
-    limit (an operator who retypes the framework's exact value can have
-    it deleted on a later turn-on) is accepted, not fixed: telling the
-    two cases apart needs more than a value to compare, and the safer
-    direction (never delete without a marker) already covers the
-    turn-on side, which is where an untouched operator key actually
-    lives."""
+def _reconcile_owned(data, owned):
+    """`owned`, with every entry dropped whose key is no longer in
+    `data`, or whose value there no longer matches (round 3 review,
+    "generally": reconciled against settings.json at the start of every
+    run). Both are read events, not writes: a crash in a previous run
+    can leave the marker claiming a key settings.json never got (a
+    turn-off crash before its write) or one settings.json no longer has
+    (a turn-on crash after its write); either way this is the one place
+    that notices and drops the stale claim, before anything below
+    decides what to do this run."""
+    return {key: value for key, value in owned.items() if data.get(key) == value}
+
+
+def _compute_attribution_off(data, owned):
+    """(data, new_owned) for commit_attribution == False: only a key
+    ABSENT from `data` is added; a key already present, at any value,
+    is left exactly as it is and never claimed - including one that
+    already holds the exact off value (round 3 review, C1 reopened:
+    claiming an already-matching value with no marker entry is how an
+    operator's own pre-existing includeCoAuthoredBy: false got deleted
+    on a later turn-on; that claim is gone, not just "accepted", now).
+    `owned` is the already-reconciled map (_reconcile_owned), so every
+    entry in it is a real, currently-true claim; those keys are kept in
+    `new_owned` unchanged whether or not this call adds anything."""
     data = dict(data)
-    if commit_attribution:
-        for key, written in owned.items():
-            if data.get(key) == written:
-                del data[key]
-        return data, {}
     to_write = {"includeCoAuthoredBy": False, "attribution": dict(ATTRIBUTION_OFF)}
-    new_owned = {}
+    new_owned = dict(owned)
     for key, value in to_write.items():
-        # Claims an already-matching value with no marker entry too (not
-        # just `key in owned`): crash recovery needs that, and it is the
-        # accepted limit - an operator who independently types the exact
-        # off value can have it deleted on a later turn-on.
-        if key not in data or data[key] == value:
+        if key not in data:
             data[key] = value
             new_owned[key] = value
     return data, new_owned
+
+
+def _compute_attribution_on(data, owned):
+    """(data, {}) for commit_attribution == True: every key in `owned`
+    (already reconciled, so each one still matches `data`) is removed.
+    An operator's own key was never in `owned` to begin with (off never
+    claims a pre-existing value now), so this never touches it."""
+    data = dict(data)
+    for key, value in owned.items():
+        if data.get(key) == value:
+            del data[key]
+    return data, {}
 
 
 def _load(path):
@@ -231,6 +236,18 @@ def _load(path):
         raise SettingsError("%s is not a JSON object, left as it is"
                             % path)
     return data
+
+
+def _write_settings_file(path, data):
+    """settings.json itself: unchanged bytes write nothing (the same
+    short-circuit the marker now has)."""
+    text = json.dumps(data, indent=2) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists() or path.read_text() != text:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
 
 
 def _strip_owned(groups):
@@ -299,19 +316,29 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
         commit_attribution = resolve_commit_attribution(root, _cousin_agent_table(home))
     except MissingConfigError as err:
         raise SettingsError(str(err))
-    owned = _read_owned_attribution(home)
-    data, new_owned = _compute_attribution(data, owned, commit_attribution)
-    text = json.dumps(data, indent=2) + "\n"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists() or path.read_text() != text:
-        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    # The marker lands only AFTER settings.json is durably written (round
-    # 2 review, Important): a crash between the two leaves settings.json
-    # already correct and the marker stale, and a stale marker heals on
-    # the next apply_project_settings call (_compute_attribution's own
-    # docstring says how) rather than stranding a key forever.
-    _write_owned_attribution(home, new_owned, previous=owned)
+    owned_raw = _read_owned_attribution(home)
+    owned = _reconcile_owned(data, owned_raw)
+    # The two writes (settings.json, the marker) are ordered by
+    # direction (round 3 review), so neither crash window ever needs a
+    # claim-by-match to heal:
+    #
+    # - Turning off ADDS keys: the marker goes first, recording only
+    #   the keys it is about to add. A crash before settings.json
+    #   catches up leaves the marker claiming a key that is still
+    #   absent there; the next run's reconciliation (_reconcile_owned)
+    #   would drop that claim, except the key is still absent, so the
+    #   off branch below adds it again - the claim was correct all
+    #   along, never stale.
+    # - Turning on REMOVES keys: settings.json goes first. A crash
+    #   before the marker catches up leaves it claiming keys that are
+    #   now gone from settings.json; the next run's reconciliation
+    #   drops those claims before anything else runs.
+    if commit_attribution:
+        data, new_owned = _compute_attribution_on(data, owned)
+        _write_settings_file(path, data)
+        _write_owned_attribution(home, new_owned, previous=owned_raw)
+    else:
+        data, new_owned = _compute_attribution_off(data, owned)
+        _write_owned_attribution(home, new_owned, previous=owned_raw)
+        _write_settings_file(path, data)
     return {"path": path, "events": sorted(wanted), "missing": missing}

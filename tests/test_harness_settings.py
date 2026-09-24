@@ -305,11 +305,17 @@ class TestAttribution(SettingsCase):
 
 
 class TestAttributionCrashSafety(SettingsCase):
-    """Round 2 review. Important: settings.json must land before the
-    marker, so a crash in the gap heals on the next run instead of
-    stranding a key forever. Minor: the marker's write is skipped when
-    its content did not change, same as settings.json's own
-    short-circuit."""
+    """Round 3 review: the two writes are ordered by DIRECTION, not
+    always the same way, so neither crash window ever needs a
+    claim-by-match to heal (round 2's claim-by-match reopened Critical
+    1: an operator's own pre-existing includeCoAuthoredBy: false got
+    adopted on a turn-off and then deleted on a later turn-on).
+    Turning off ADDS keys: the marker goes first (it can only ever
+    under-claim, never over-claim, across a crash). Turning on REMOVES
+    keys: settings.json goes first, and a stale marker claim is
+    reconciled away (_reconcile_owned) at the start of the next run.
+    Minor: the marker's write is skipped when its content did not
+    change, same as settings.json's own short-circuit."""
 
     def _cousin_agent(self, extra):
         (self.home / "cousin.toml").write_text(
@@ -318,42 +324,70 @@ class TestAttributionCrashSafety(SettingsCase):
     def _marker_path(self):
         return harness_settings._marker_path(self.home)
 
-    def test_settings_json_lands_before_the_marker_even_on_a_failed_write(self):
-        # the order itself: a marker write that raises must never have
-        # stopped settings.json from reaching disk first.
+    def test_turn_off_crash_after_the_marker_before_settings_json_heals(self):
+        # the marker claims the keys it is about to add BEFORE
+        # settings.json is touched; a crash right there must still let
+        # the next run add exactly what was already claimed.
         self._cousin_agent("commit_attribution = false\n")
-        with mock.patch.object(harness_settings, "_write_owned_attribution",
+        with mock.patch.object(harness_settings, "_write_settings_file",
                                side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 self._apply()
+        self.assertEqual(json.loads(self._marker_path().read_text()),
+                         {"includeCoAuthoredBy": False,
+                          "attribution": {"commit": "", "pr": ""}})
+        self.assertFalse(settings_path(self.home).exists())   # never reached
+        self._apply()   # the real run: heals by adding what was claimed
         data = self._read()
         self.assertIs(data["includeCoAuthoredBy"], False)
         self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
-        self.assertFalse(self._marker_path().exists())   # never reached
 
-    def test_a_crash_between_the_two_writes_heals_on_the_next_turn_on(self):
-        # simulates the crash directly: settings.json already holds the
-        # off values (as apply_project_settings would have left them),
-        # but the marker was never written (the process died first).
+    def test_turn_on_crash_after_settings_json_before_the_marker_heals(self):
+        # settings.json is written first on turn-on; a crash before the
+        # marker catches up leaves it claiming keys that are already
+        # gone. The next run must reconcile that away, not choke on it
+        # or resurrect the keys.
+        self._cousin_agent("commit_attribution = false\n")
+        self._apply()   # a normal off cycle: both keys claimed
+        stale = json.loads(self._marker_path().read_text())
+        self.assertIn("includeCoAuthoredBy", stale)
+        # simulate the crash: settings.json already has the keys
+        # removed (as turn-on's own write would leave them), the marker
+        # untouched - written directly, not through apply_project_settings,
+        # to model the process dying right after its settings.json write.
+        path = settings_path(self.home)
+        data = json.loads(path.read_text())
+        del data["includeCoAuthoredBy"]
+        del data["attribution"]
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        self._cousin_agent("commit_attribution = true\n")
+        self._apply()
+        self.assertFalse(self._marker_path().exists())   # reconciled away
+        data = self._read()
+        self.assertNotIn("includeCoAuthoredBy", data)
+        self.assertNotIn("attribution", data)
+
+    def test_operators_preexisting_identical_value_survives_off_then_on(self):
+        # Critical 1, reopened by round 2's claim-by-match: the operator
+        # already had includeCoAuthoredBy: false, with no marker entry,
+        # before this module ever ran. Off must never claim it; on must
+        # then have nothing of its own to remove.
         path = settings_path(self.home)
         path.parent.mkdir()
         path.write_text(json.dumps({
             "includeCoAuthoredBy": False,
             "attribution": {"commit": "", "pr": ""},
         }, indent=2) + "\n")
-        self.assertFalse(self._marker_path().exists())
-        # commit_attribution is still false: one more run must adopt
-        # (not strand) the values already on disk.
         self._cousin_agent("commit_attribution = false\n")
         self._apply()
-        self.assertTrue(self._marker_path().exists())
-        # proof the heal actually recorded ownership, not just a no-op:
-        # turning on now removes what it adopted.
+        self.assertFalse(self._marker_path().exists())   # never claimed
+        data = self._read()
+        self.assertIs(data["includeCoAuthoredBy"], False)   # untouched
         self._cousin_agent("commit_attribution = true\n")
         self._apply()
-        data = self._read()
-        self.assertNotIn("includeCoAuthoredBy", data)
-        self.assertNotIn("attribution", data)
+        data = self._read()   # still there: on had nothing owned to remove
+        self.assertIs(data["includeCoAuthoredBy"], False)
+        self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
 
     def test_a_crash_before_any_write_leaves_both_files_as_they_were(self):
         # the reverse order: nothing this module touches happens before

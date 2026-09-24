@@ -565,8 +565,17 @@ to that login, never into a chat, and a second code is refused. An opencode
 OAuth method has nothing to paste back: opencode finishes by itself, and a
 browser method only completes on the console's host (its callback goes to
 localhost), so prefer a headless or device method from elsewhere. "cancel
-login" ends it. The logins and keys refuse when the console itself was
-started inside a cousin: a cousin never obtains credentials.
+login" ends it. A login belongs to the console session that started it:
+another session sees that it runs, but not its URL, and cannot send its
+code or cancel it. Editing, removing or setting a key on the account waits
+until the login ends.
+
+The logins, keys and entry changes need a logged-in console user, even on
+a console with no users file (add one with `cousin-console adduser`), and
+refuse when the console itself was started inside a cousin: a cousin never
+obtains credentials. Who started a login or wrote a key is kept in
+`data/accounts/audit.jsonl` (the name and the account, never the value).
+The page refreshes when another session changes an account.
 
 ## Settings
 

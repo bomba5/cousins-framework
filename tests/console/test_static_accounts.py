@@ -50,6 +50,24 @@ class AccountsJsx(unittest.TestCase):
         flow = _component(self.src, "AccountFlow")
         self.assertIn('target="_blank" rel="noopener noreferrer"', flow)
 
+    def test_only_an_https_url_is_a_link_and_only_for_its_session(self):
+        flow = _component(self.src, "AccountFlow")
+        self.assertIn("flow.mine && flow.url", flow)
+        self.assertIn("flow.url_is_https && /^https:\\/\\//.test(flow.url) ?", flow)
+        self.assertEqual(flow.count("<a href={flow.url}"), 1)
+
+    def test_other_sessions_refresh_on_accounts_change(self):
+        view = _component(self.src, "AccountsView")
+        self.assertIn('"fw-accounts-change"', view)
+        app = (_STATIC / "app.jsx").read_text(encoding="utf-8")
+        self.assertIn('kind === "accounts-change"', app)
+        self.assertIn('new CustomEvent("fw-accounts-change"', app)
+
+    def test_the_panel_reads_the_cousins_op_once(self):
+        panel = _component(self.src, "CousinAccountPanel")
+        self.assertEqual(panel.count("useLongOp("), 1)
+        self.assertNotIn("<LongOpStatus", panel)
+
     def test_remove_needs_the_typed_name(self):
         remove = _component(self.src, "AccountRemove")
         self.assertIn("disabled={typed !== account.name}", remove)

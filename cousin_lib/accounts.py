@@ -392,6 +392,29 @@ def _check_entry(name, entry):
         for provider in entry.get("providers") or ():
             refuse_claude_name("%s's provider" % where, provider)
         refuse_claude_name("%s's endpoint_model" % where, entry.get("endpoint_model"))
+        _refuse_secret_query(where, entry.get("endpoint"))
+
+
+# A query or fragment parameter whose name says it carries a credential.
+_SECRET_PARAM = re.compile(r"(key|token|secret|pass|auth|sig|cred|session)", re.IGNORECASE)
+
+
+def _refuse_secret_query(where, endpoint):
+    """accounts.toml holds no secret: an endpoint whose query string (or
+    fragment) looks like it carries one is refused. The message never
+    repeats the URL."""
+    if not isinstance(endpoint, str):
+        return
+    from urllib.parse import parse_qsl
+    try:
+        parts = urlsplit(endpoint)
+    except ValueError:
+        return                              # load()'s own check words it
+    for text in (parts.query, parts.fragment):
+        for name, _value in parse_qsl(text, keep_blank_values=True):
+            if _SECRET_PARAM.search(name):
+                raise AccountsError("%s endpoint carries a %r parameter, which looks like a"
+                                    " credential: no secret goes in accounts.toml" % (where, name))
 
 
 def _drop_table(text, table):

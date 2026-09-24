@@ -85,9 +85,43 @@ class AccountsCase(ConsoleCase):
         patcher = mock.patch.object(accounts, "_cli", return_value="/opt/fake/claude")
         patcher.start()
         self.addCleanup(patcher.stop)
+        # a console with a user: the credential routes want a logged-in one
+        from cousin_lib.console import auth
+        users = auth.Users(self.root / "config" / "console-users.json")
+        users.set_password("ana", "correct horse")
+        users.set_password("bo", "battery staple")
         self.serve()
+        self.login("ana")
         self.events = []
         self.server.listeners.append(lambda kind, data: self.events.append((kind, data)))
+
+    def login(self, user):
+        password = {"ana": "correct horse", "bo": "battery staple"}[user]
+        status, body = self.post("/api/auth/login", {"user": user, "password": password})
+        self.assertEqual(status, 200, body)
+
+    def as_other(self, method, path, payload=None):
+        """The same request from another console session (user bo)."""
+        import http.cookiejar
+        import urllib.request
+        mine = self.opener
+        if not hasattr(self, "_other"):
+            self._other = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+            self.opener = self._other
+            try:
+                self.login("bo")
+            finally:
+                self.opener = mine
+        self.opener = self._other
+        try:
+            return self.request(method, path, payload)
+        finally:
+            self.opener = mine
+
+    def audit_rows(self):
+        path = routes_accounts.audit_path(self.root)
+        return [json.loads(ln) for ln in path.read_text().splitlines()] if path.exists() else []
 
     def accounts_text(self):
         return (self.root / "config" / "accounts.toml").read_text()
@@ -499,6 +533,9 @@ class CheckAuth(AccountsCase):
         self.assertEqual(op["status"], "done", op)
         self.assertEqual([s["name"] for s in op["stages"]], ["status", "one model turn"])
         self.assertEqual(op["stages"][1]["detail"], "validate: ok")
+        # one child: the status is checked once, not again before the turn
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
+        self.assertIn("--check-auth --validate", self.log.read_text())
 
     def test_logged_out_fails_with_the_action_and_skips_the_turn(self):
         with mock.patch.dict(os.environ, {"FAKE_CHECK_RC": "4"}):
@@ -536,3 +573,184 @@ class CheckAuth(AccountsCase):
         self.assertIn("opencode", body["error"])
         self.assertEqual(self.post("/api/cousins/ghost/check-auth", {})[0], 404)
         self.assertEqual(self.post("/api/cousins/wren/check-auth", {"validate": "yes"})[0], 400)
+
+
+class NoConsoleUsers(ConsoleCase):
+    """A console with no users file is open, but not for credentials."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "config" / "accounts.toml").write_text(TOML)
+        self.serve()
+
+    def test_credential_routes_want_a_logged_in_user(self):
+        for path, payload in (("/api/accounts/metered/key", {"key": KEY}),
+                              ("/api/accounts/fleet/login", {}),
+                              ("/api/accounts/nightly/token", {}),
+                              ("/api/accounts/fleet/code", {"code": CODE}),
+                              ("/api/accounts/fleet/cancel", {}),
+                              ("/api/accounts", {"name": "x", "entry": {"kind": "claude-login"}}),
+                              ("/api/accounts/fleet", {"entry": {"kind": "claude-login"}}),
+                              ("/api/accounts/fleet/remove", {"confirm": "fleet"})):
+            with self.subTest(path=path):
+                status, body = self.post(path, payload)
+                self.assertEqual(status, 403, body)
+                self.assertIn("cousin-console adduser", body["error"])
+        self.assertEqual((self.root / "config" / "accounts.toml").read_text(), TOML)
+        self.assertEqual(self.get("/api/accounts")[0], 200)          # reading stays open
+
+
+class Round1(AccountsCase):
+    def start_login(self, name="fleet", screens=LOGIN_SCREENS, route="login"):
+        self.fake = FakePty(screens)
+        self.server.state["accounts.pty"] = self.fake
+        return self.post("/api/accounts/%s/%s" % (name, route), {})
+
+    def test_a_flow_belongs_to_the_session_that_started_it(self):
+        self.start_login()
+        mine = self.wait_flow("fleet", lambda b: b.get("awaiting_code"))
+        self.assertTrue(mine["mine"])
+        status, theirs = self.as_other("GET", "/api/accounts/fleet/flow")
+        self.assertEqual(status, 200)
+        self.assertEqual((theirs["mine"], theirs["url"], theirs["instructions"],
+                          theirs["awaiting_code"]), (False, None, None, False))
+        self.assertEqual(self.as_other("POST", "/api/accounts/fleet/code", {"code": CODE})[0], 403)
+        self.assertEqual(self.as_other("POST", "/api/accounts/fleet/cancel", {})[0], 403)
+        self.assertEqual(self.fake.written, [])
+        # the op's events never carry the URL
+        ops = [d for k, d in self.events if k == longop.EVENT]
+        self.assertTrue(ops)
+        self.assertNotIn("oauth/authorize", json.dumps(ops))
+        self.assertEqual(self.post("/api/accounts/fleet/cancel")[0], 200)
+        self.wait_op("account:fleet")
+
+    def test_the_pty_session_and_the_code_are_dropped_when_it_ends(self):
+        with self.status({"loggedIn": True, "authMethod": "oauth_token"}):
+            self.start_login("nightly", TOKEN_SCREENS, "token")
+            self.wait_flow("nightly", lambda b: b.get("awaiting_code"))
+            flow = routes_accounts._flows(self.server)["nightly"]
+            self.assertIsNotNone(flow.session)
+            self.post("/api/accounts/nightly/code", {"code": CODE})
+            self.assertEqual(self.wait_op("account:nightly")["status"], "done")
+        self.assertIsNone(flow.session)
+        self.assertIsNone(flow._code)
+        self.assertTrue(self.fake.closed)
+
+    def test_a_cancel_never_signals_a_closed_session(self):
+        import subprocess
+        proc = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(lambda: (proc.poll() is None and proc.kill(), proc.wait()))
+
+        class Pid(FakePty):
+            pid = proc.pid
+        flow = routes_accounts.Flow("fleet", "login")
+        self.server.state["accounts.pty"] = Pid(LOGIN_SCREENS)
+        spawn = routes_accounts._spawn_for(self.server, flow)
+        session = spawn(["/opt/fake/claude"], {})
+        self.assertEqual(session.pid, proc.pid)
+        session.close()
+        flow.cancel()
+        time.sleep(0.2)
+        self.assertIsNone(proc.poll())                    # not signalled: the session was closed
+
+    def test_key_edit_and_remove_wait_for_a_running_login(self):
+        self.start_login()
+        self.wait_flow("fleet", lambda b: b.get("awaiting_code"))
+        self.assertEqual(self.post("/api/accounts/fleet", {"entry": {"kind": "claude-login"}})[0],
+                         409)
+        self.assertEqual(self.post("/api/accounts/fleet/remove", {"confirm": "fleet"})[0], 409)
+        self.post("/api/accounts/fleet/cancel")
+        self.wait_op("account:fleet")
+        (self.root / "config" / "accounts.toml").write_text(TOML)
+        self.server.state["accounts.pty"] = FakePty(TOKEN_SCREENS)
+        self.post("/api/accounts/nightly/token", {})
+        self.wait_flow("nightly", lambda b: b.get("awaiting_code"))
+        self.assertEqual(self.post("/api/accounts/nightly/key", {"key": KEY})[0], 409)
+        self.post("/api/accounts/nightly/cancel")
+        self.wait_op("account:nightly")
+
+    def test_the_console_writer_keeps_paths_where_the_framework_puts_them(self):
+        for entry in ({"kind": "claude-token", "secret_file": "data/x.key"},
+                      {"kind": "opencode", "providers": ["openai"], "data_dir": "data/oc"},
+                      {"kind": "claude-login", "config_dir": ".secrets/x"}):
+            with self.subTest(entry=entry):
+                status, body = self.post("/api/accounts", {"name": "x", "entry": entry})
+                self.assertEqual(status, 400, body)
+        self.assertEqual(self.accounts_text(), TOML)
+        for entry in ({"kind": "claude-token", "secret_file": ".secrets/tokens/x"},
+                      {"kind": "claude-login", "config_dir": "data/accounts/other"}):
+            status, body = self.post("/api/accounts", {"name": "x", "entry": entry})
+            self.assertEqual(status, 201, body)
+            self.post("/api/accounts/x/remove", {"confirm": "x"})
+
+    def test_a_file_outside_secrets_never_shows_its_tail(self):
+        (self.root / "config" / "accounts.toml").write_text(
+            TOML + '\n[accounts.odd]\nkind = "anthropic-key"\nsecret_file = "data/keys/odd"\n')
+        d = self.root / "data" / "keys"
+        d.mkdir(parents=True)
+        os.chmod(d, 0o700)
+        (d / "odd").write_text(KEY + "\n")
+        os.chmod(d / "odd", 0o600)
+        rows = {r["name"]: r for r in self.get("/api/accounts")[1]["accounts"]}
+        self.assertEqual(rows["odd"]["secret"]["set"], True)
+        self.assertIsNone(rows["odd"]["secret"]["last4"])
+
+    def test_an_endpoint_with_a_secret_in_its_query_is_refused(self):
+        status, body = self.post("/api/accounts", {"name": "x", "entry": {
+            "kind": "opencode", "endpoint": "http://127.0.0.1:1/v1?api_key=hunter2hunter2",
+            "endpoint_model": "m"}})
+        self.assertEqual(status, 400)
+        self.assertNotIn("hunter2", json.dumps(body))
+
+    def test_an_existing_secrets_dir_is_tightened(self):
+        (self.root / ".secrets").mkdir(mode=0o755)
+        os.chmod(self.root / ".secrets", 0o755)
+        self.assertEqual(self.post("/api/accounts/metered/key", {"key": KEY})[0], 200)
+        self.assertEqual(stat.S_IMODE((self.root / ".secrets").stat().st_mode), 0o700)
+
+    def test_one_status_check_per_account_at_a_time(self):
+        gate, entered = threading.Event(), threading.Event()
+        self.addCleanup(gate.set)
+
+        def slow(account, root):
+            entered.set()
+            gate.wait(5)
+            return {"loggedIn": True, "authMethod": "claude.ai"}
+        results = []
+        with mock.patch.object(accounts, "status", side_effect=slow):
+            t = threading.Thread(target=lambda: results.append(
+                self.get("/api/accounts/fleet/status")[0]))
+            t.start()
+            self.assertTrue(entered.wait(5))
+            self.assertEqual(self.get("/api/accounts/fleet/status")[0], 409)
+            gate.set()
+            t.join(5)
+        self.assertEqual(results, [200])
+
+    def test_who_started_a_login_and_wrote_a_key_is_audited_never_the_value(self):
+        self.post("/api/accounts/metered/key", {"key": KEY})
+        self.start_login()
+        self.wait_flow("fleet", lambda b: b.get("awaiting_code"))
+        self.post("/api/accounts/fleet/cancel")
+        self.wait_op("account:fleet")
+        rows = self.audit_rows()
+        self.assertEqual([(r["kind"], r["actor"], r["account"]) for r in rows],
+                         [("key", "ana", "metered"), ("login-start", "ana", "fleet"),
+                          ("login-cancel", "ana", "fleet")])
+        text = routes_accounts.audit_path(self.root).read_text()
+        self.assertNotIn(KEY, text)
+        self.assertNotIn(KEY[-4:], text)
+        self.assertNotIn("oauth", text)
+
+
+class OpencodeUrl(AccountsCase):
+    def test_a_url_that_is_not_https_is_not_served_as_a_link(self):
+        fake = GatedPty([GO.replace("https://", "http://") + DONE], accounts.OC_DONE_RX)
+        self.server.state["accounts.pty"] = fake
+        self.server.state["accounts.opencode_bin"] = "/opt/fake/opencode"
+        self.post("/api/accounts/keyed/login", {"provider": "openai", "method": HEADLESS})
+        flow = self.wait_flow("keyed", lambda b: b.get("url"))
+        self.assertFalse(flow["url_is_https"])
+        self.post("/api/accounts/keyed/cancel")
+        fake.gate.set()
+        self.wait_op("account:keyed")

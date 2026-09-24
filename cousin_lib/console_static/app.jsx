@@ -472,6 +472,10 @@ function App() {
         // A long operation's step (console/longop.py): ui.jsx useLongOp
         // listens for the re-dispatched window event.
         window.dispatchEvent(new CustomEvent("fw-cousin-op", { detail: data }));
+      } else if (kind === "accounts-change") {
+        // Re-dispatched like cousin-op: the Accounts view (accounts.jsx)
+        // reloads when another session changed an entry or a key.
+        window.dispatchEvent(new CustomEvent("fw-accounts-change", { detail: data }));
       } else if (kind === "meeting-change") {
         // Re-dispatched like cousin-flip: the Meetings view refetches
         // its list and the open thread without a SSE handle of its own.

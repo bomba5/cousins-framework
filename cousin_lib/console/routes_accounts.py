@@ -27,6 +27,8 @@ Test seams on req.server.state (never set by a request):
 prefix that replaces `python -m cousin_lib.runner.main`)."""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -102,6 +104,70 @@ def _operator_only():
                              % ancestor)
 
 
+def _require_user(req):
+    """The credential routes want a person on the other end: a console
+    login, even on a console with no users configured (where every other
+    route is open)."""
+    if req.user is None:
+        raise HttpError(403, "a logged-in console user is required for accounts and their"
+                             " credentials: add one with `cousin-console adduser <name>`,"
+                             " then log in")
+    return req.user
+
+
+def _owner(req):
+    """The session a flow is bound to: a digest of its token, never the token."""
+    token = req.session_token or ""
+    return hashlib.sha256(token.encode()).hexdigest() if token else None
+
+
+def _login_running(req, name):
+    """409 while a login runs on the account: its entry and its key stay put."""
+    if longop.op_running(req.server, flow_key(name)):
+        raise HttpError(409, "a login runs on account %s: wait for it or cancel it" % name,
+                        busy=True)
+
+
+def audit_path(root):
+    return Path(root) / "data" / "accounts" / "audit.jsonl"
+
+
+def _audit(req, kind, account, **extra):
+    """Append one row to data/accounts/audit.jsonl: who (the console user)
+    did what to which account. Never a value: no key, token, code or URL."""
+    from datetime import datetime, timezone
+    row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "kind": kind,
+           "actor": req.user, "account": account}
+    row.update({k: v for k, v in extra.items() if v is not None})
+    path = audit_path(_root(req))
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(path, "a") as fh:
+        fh.write(json.dumps(row) + "\n")
+
+
+def _under_rel(root, path, rel):
+    base = os.path.realpath(os.path.join(root, rel))
+    return os.path.realpath(path).startswith(base + os.sep)
+
+
+def _private_secrets_dir(root):
+    """<root>/.secrets, a directory of ours, 0700: made so when missing,
+    tightened when it exists looser. A symlink or a stranger's directory
+    is refused (os.makedirs would leave an intermediate at the umask)."""
+    import stat as _stat
+    path = Path(root) / ".secrets"
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        path.mkdir(mode=0o700)
+        st = os.lstat(path)
+    if _stat.S_ISLNK(st.st_mode) or not _stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise HttpError(400, ".secrets/ is not a directory of this user: fix it by hand")
+    if _stat.S_IMODE(st.st_mode) != 0o700:
+        os.chmod(path, 0o700)
+    return path
+
+
 def _rel(root, path):
     if path is None:
         return None
@@ -153,12 +219,17 @@ def _raw_tables(root):
     return tables if isinstance(tables, dict) else {}
 
 
-def _secret(account):
-    """{set, last4, error} of a secret-file kind; None for the others."""
+def _secret(root, account):
+    """{set, last4, error} of a secret-file kind; None for the others. The
+    tail is shown only for a file under .secrets/: a secret_file set by
+    hand elsewhere under the root never has any of its bytes served."""
     if account.kind not in ("claude-token", "anthropic-key") or account.secret_file is None:
         return None
     from cousin_lib.console import secrets
-    return secrets.secret_state(account.secret_file)
+    state = secrets.secret_state(account.secret_file)
+    if not _under_rel(root, account.secret_file, ".secrets"):
+        state = dict(state, last4=None)
+    return state
 
 
 def _row(root, account, users, tables):
@@ -167,7 +238,7 @@ def _row(root, account, users, tables):
             "where": _where(root, account), "lanes": _lanes(account),
             "cousins": [slug for slug, _lane in users.get(account.name, [])],
             "entry": dict(entry) if isinstance(entry, dict) else None,
-            "secret": _secret(account)}
+            "secret": _secret(root, account)}
 
 
 def _brief_status(st):
@@ -213,10 +284,17 @@ class Flow:
     taken, and the window is closed for good after that, after a timeout
     or a cancel, so a second or a late code is never delivered. The code
     lives in memory only, for as long as the flow's thread takes to pick
-    it up."""
+    it up.
 
-    def __init__(self, name, kind, provider=None):
-        self.name, self.kind, self.provider = name, kind, provider
+    A flow belongs to the console session that started it (`owner`, a
+    digest of its session token): only that session is shown the URL and
+    may post the code or cancel. The pty session is held only while it is
+    open (_TrackedSession drops it on close), so the screen text, which
+    may hold a code or a minted token, is released with it, and a cancel
+    never signals a pid the CLI no longer owns."""
+
+    def __init__(self, name, kind, provider=None, owner=None):
+        self.name, self.kind, self.provider, self.owner = name, kind, provider, owner
         self.url = self.instructions = None
         self.cancelled = False
         self.session = None
@@ -253,17 +331,56 @@ class Flow:
         with self._cond:
             self._code, self._state = None, "closed"
             self.url = self.instructions = None
+            self.session = None
             self._cond.notify_all()
 
+    def attach(self, session):
+        with self._cond:
+            self.session = session
+
+    def detach(self, session):
+        with self._cond:
+            if self.session is session:
+                self.session = None
+
     def cancel(self):
+        """Close the window and end the CLI's wait: SIGTERM to its pid,
+        only while its session is open (under the lock the session's
+        close takes first, so the child is not reaped yet and the pid is
+        still the CLI's)."""
         self.cancelled = True
+        with self._cond:
+            session = self.session
+            pid = getattr(session, "pid", None)
+            if session is not None and isinstance(pid, int) and pid > 0:
+                try:
+                    os.kill(pid, signal.SIGTERM)    # the CLI's read ends: the flow returns
+                except OSError:
+                    pass
         self.close()
-        pid = getattr(self.session, "pid", None)
-        if isinstance(pid, int) and pid > 0:
-            try:
-                os.kill(pid, signal.SIGTERM)    # the CLI's read ends: the flow returns
-            except OSError:
-                pass
+
+
+class _TrackedSession:
+    """The pty session as the library sees it; its close() first drops the
+    flow's reference (under the flow's lock), then closes the pty."""
+
+    def __init__(self, session, flow):
+        self._session, self._flow = session, flow
+        self.pid = getattr(session, "pid", None)
+
+    def read_until(self, pattern, timeout):
+        return self._session.read_until(pattern, timeout)
+
+    def write(self, text):
+        return self._session.write(text)
+
+    def text(self):
+        return self._session.text()
+
+    def close(self, *args, **kw):
+        self._flow.detach(self)
+        session, self._session = self._session, None
+        return session.close(*args, **kw) if session is not None else None
 
 
 def _flows(server):
@@ -276,8 +393,8 @@ def _spawn_for(server, flow):
     base = server.state.get("accounts.pty")
 
     def spawn(argv, env):
-        session = accounts._pty(base)(argv, env)
-        flow.session = session
+        session = _TrackedSession(accounts._pty(base)(argv, env), flow)
+        flow.attach(session)
         if flow.cancelled:
             flow.cancel()
         return session
@@ -286,8 +403,9 @@ def _spawn_for(server, flow):
 
 def _start_flow(req, account, kind, run, *, provider=None, params=None):
     """Start `run(op, flow)` as the account's long operation: 202 {op}, or
-    409 while one runs on the account."""
-    flow = Flow(account.name, kind, provider)
+    409 while one runs on the account. The flow is bound to the session
+    that started it; who started it is audited."""
+    flow = Flow(account.name, kind, provider, owner=_owner(req))
 
     def work(op):
         try:
@@ -304,6 +422,7 @@ def _start_flow(req, account, kind, run, *, provider=None, params=None):
     answer = longop.start_response(req.server, flow_key(account.name), kind, work,
                                    params=dict(params or {}, account=account.name))
     _flows(req.server)[account.name] = flow
+    _audit(req, "login-start", account.name, flow=kind, provider=provider)
     return answer
 
 
@@ -398,32 +517,62 @@ def _said(out, err, *, last):
 
 
 def _check_auth_work(server, home, validate):
+    """One child: `--check-auth`, or `--check-auth --validate`, which runs
+    the status check first and the turn only when it passed (runner/main
+    _check_auth), so the status is never checked twice. Its stdout is the
+    status line, then the validate line when a turn ran."""
     prefix = list(server.state.get("accounts.check_auth_command")
                   or [sys.executable, "-m", RUNNER_MODULE])
-    argv = prefix + ["--home", str(home), "--check-auth"]
+    argv = prefix + ["--home", str(home), "--check-auth"] + (["--validate"] if validate else [])
 
     def work(op):
-        op.stage("status", "running", "claude auth status under the account (no model call)")
-        rc, out, err = _run_child(argv, CHECK_TIMEOUT_S)
-        line = _said(out, err, last=False)
-        if rc != 0:
-            op.stage("status", "failed", line)
-            if validate:
-                op.stage("one model turn", "skipped", "not logged in: no turn spent")
-            raise longop.OpError(line)
-        op.stage("status", "done", line)
+        op.stage("status", "running", "claude auth status under the account (no model call)"
+                 + ("; then one smallest model turn" if validate else ""))
+        rc, out, err = _run_child(argv, VALIDATE_TIMEOUT_S if validate else CHECK_TIMEOUT_S)
+        lines = [ln.strip()[:LINE_MAX] for ln in (out or "").splitlines() if ln.strip()]
+        status_lines = [ln for ln in lines if not ln.startswith("validate:")]
+        turn_lines = [ln for ln in lines if ln.startswith("validate:")]
+        line = status_lines[0] if status_lines else _said("", err, last=True)
         if not validate:
+            if rc != 0:
+                op.stage("status", "failed", line)
+                raise longop.OpError(line)
+            op.stage("status", "done", line)
             return {"ok": True, "line": line}
-        op.stage("one model turn", "running",
-                 "spends one smallest model turn on the account (a throwaway client)")
-        rc, out, err = _run_child(argv + ["--validate"], VALIDATE_TIMEOUT_S)
-        vline = _said(out, err, last=True)
+        if not turn_lines:
+            # the status failed (or the check could not run): no turn was spent
+            op.stage("status", "failed" if rc != 0 else "done", line)
+            op.stage("one model turn", "skipped", "no turn spent")
+            if rc != 0:
+                raise longop.OpError(line)
+            return {"ok": True, "line": line}
+        op.stage("status", "done", line)
+        vline = turn_lines[-1]
         if rc != 0:
             op.stage("one model turn", "failed", vline)
             raise longop.OpError(vline)
         op.stage("one model turn", "done", vline)
         return {"ok": True, "line": line, "validate": vline}
     return work
+
+
+def _confine(root, account):
+    """The console's writer keeps an entry's paths where the framework puts
+    them: a secret file and an opencode data dir under .secrets/, a login's
+    config dir under data/accounts/. (accounts.toml by hand may say
+    otherwise; the console never writes that.)"""
+    for key, path, rel in (("secret_file", account.secret_file, ".secrets"),
+                           ("data_dir", account.data_dir, ".secrets"),
+                           ("config_dir", account.config_dir, os.path.join("data", "accounts"))):
+        if path is not None and not _under_rel(root, path, rel):
+            raise accounts.AccountsError("%s must be under %s/ (the console writes nothing"
+                                         " else; edit accounts.toml by hand for another place)"
+                                         % (key, rel))
+
+
+def _url_view(url):
+    """A sign-in URL is served as a link only when it is https://."""
+    return {"url": url, "url_is_https": isinstance(url, str) and url.startswith("https://")}
 
 
 # ---- routes -----------------------------------------------------------------------
@@ -450,7 +599,18 @@ def register():
     @router.route("GET", "/api/accounts/{name}/status")
     def account_status(req, name):
         account = _account(req, name)
-        return 200, _status(_root(req), account)
+        running = req.server.state.setdefault("account_status_running", set())
+        lock = req.server.state.setdefault("account_status_lock", threading.Lock())
+        with lock:
+            if name in running:
+                raise HttpError(409, "a status check of account %s is already running" % name,
+                                busy=True)
+            running.add(name)
+        try:
+            return 200, _status(_root(req), account)
+        finally:
+            with lock:
+                running.discard(name)
 
     def _lane_check(root, name):
         def check(account):
@@ -461,6 +621,7 @@ def register():
                         "account %s is in use by %s: move them to another account first"
                         % (name, ", ".join(slug for slug, _ in users)))
                 return
+            _confine(root, account)
             for slug, lane in users:
                 try:
                     accounts.check_lane(account, lane)
@@ -480,11 +641,13 @@ def register():
                 404 if text.startswith("no account") else 400
             raise HttpError(status, text)
         what = "removed" if entry is None else ("added" if expect == "absent" else "edited")
+        _audit(req, "entry-" + what, name)
         _emit(req, name, what)
         return account
 
     @router.route("POST", "/api/accounts")
     def add_account(req):
+        _require_user(req)
         name, entry = req.body.get("name"), req.body.get("entry")
         _check_name(name)
         if not isinstance(entry, dict):
@@ -495,28 +658,34 @@ def register():
 
     @router.route("POST", "/api/accounts/{name}")
     def edit_account(req, name):
+        _require_user(req)
         _check_name(name)
         if name == accounts.HOST:
             raise HttpError(400, "host is the host's own login: it has no entry to edit")
         entry = req.body.get("entry")
         if not isinstance(entry, dict):
             raise HttpError(400, "entry must be a table of the account's keys")
+        _login_running(req, name)
         account = _write(req, name, entry, "present")
         users, tables = _users(_root(req)), _raw_tables(_root(req))
         return 200, {"ok": True, "account": _row(_root(req), account, users, tables)}
 
     @router.route("POST", "/api/accounts/{name}/remove")
     def remove_account(req, name):
+        _require_user(req)
         _check_name(name)
         if req.body.get("confirm") != name:
             raise HttpError(400, "type the account's name in confirm to remove it")
+        _login_running(req, name)
         _write(req, name, None, "present")
         return 200, {"ok": True, "removed": name}
 
     @router.route("POST", "/api/accounts/{name}/key")
     def set_key(req, name):
+        _require_user(req)
         account = _account(req, name)
         _operator_only()
+        _login_running(req, name)
         value = req.body.get("key")
         if not isinstance(value, str):
             raise HttpError(400, "key must be a string")
@@ -529,6 +698,7 @@ def register():
                 raise HttpError(400, str(err))
             finally:
                 del value
+            _audit(req, "key", name, provider=provider)
             _emit(req, name, "key")
             return 200, {"ok": True, "name": name, "provider": provider,
                          "status": _status(root, account)}
@@ -536,25 +706,24 @@ def register():
             raise HttpError(400, "a claude-login account holds no key: log in instead"
                                  " (POST /api/accounts/%s/login)" % name)
         from cousin_lib.console import secrets
-        within = root / ".secrets"
         path = os.path.abspath(account.secret_file)
-        if not (os.path.realpath(path).startswith(os.path.realpath(within) + os.sep)):
+        if not _under_rel(root, path, ".secrets"):
             raise HttpError(400, "account %s's secret file is outside .secrets/: write it by"
                                  " hand (mode 0600, its directory 0700)" % name)
-        # the install's .secrets/ is private: made 0700 when it is missing
-        # (os.makedirs would leave an intermediate directory at the umask)
-        within.mkdir(mode=0o700, exist_ok=True)
+        within = _private_secrets_dir(root)
         try:
             state = secrets.write_secret_file(path, value, within=within)
         except ValueError as err:
             raise HttpError(400, str(err))
         finally:
             del value
+        _audit(req, "key", name)
         _emit(req, name, "key")
         return 200, {"ok": True, "name": name, "secret": state}
 
     @router.route("POST", "/api/accounts/{name}/login")
     def login(req, name):
+        _require_user(req)
         account = _account(req, name)
         _operator_only()
         timeout = _timeout(req.body)
@@ -584,6 +753,7 @@ def register():
 
     @router.route("POST", "/api/accounts/{name}/token")
     def token(req, name):
+        _require_user(req)
         account = _account(req, name)
         _operator_only()
         timeout = _timeout(req.body)
@@ -598,25 +768,40 @@ def register():
         _check_name(name)
         return 200, {"ok": True, "op": longop.status(req.server, flow_key(name))}
 
+    def _own_flow(req, name):
+        """(flow, running op) of the account, the flow None when there is
+        none; 403 when it belongs to another console session."""
+        op = longop.status(req.server, flow_key(name))
+        flow = _flows(req.server).get(name)
+        if flow is None or not op or op["status"] != "running":
+            return None, op
+        if flow.owner is None or flow.owner != _owner(req):
+            raise HttpError(403, "this login was started from another console session; only"
+                                 " that session sees its URL, sends its code or cancels it")
+        return flow, op
+
     @router.route("GET", "/api/accounts/{name}/flow")
     def flow_state(req, name):
         _check_name(name)
         op = longop.status(req.server, flow_key(name))
         flow = _flows(req.server).get(name)
         live = bool(flow) and bool(op) and op["status"] == "running"
+        mine = live and flow.owner is not None and flow.owner == _owner(req)
+        url = flow.url if mine else None
         return 200, {"ok": True, "name": name, "op": op,
                      "kind": flow.kind if flow else None,
                      "provider": flow.provider if flow else None,
-                     "url": flow.url if live else None,
-                     "instructions": flow.instructions if live else None,
-                     "awaiting_code": live and flow.awaiting}
+                     "mine": mine, **_url_view(url),
+                     "instructions": flow.instructions if mine else None,
+                     "awaiting_code": bool(mine and flow.awaiting)}
 
     @router.route("POST", "/api/accounts/{name}/code")
     def code(req, name):
         _check_name(name)
+        _require_user(req)
         _operator_only()
         value = req.body.get("code")
-        flow = _flows(req.server).get(name)
+        flow, _op = _own_flow(req, name)
         if flow is None or not flow.awaiting:
             raise HttpError(409, "no login on account %s waits for a code" % name)
         if not isinstance(value, str) or not accounts.CODE_SHAPE.match(value.strip()):
@@ -631,11 +816,12 @@ def register():
     @router.route("POST", "/api/accounts/{name}/cancel")
     def cancel(req, name):
         _check_name(name)
-        op = longop.status(req.server, flow_key(name))
-        flow = _flows(req.server).get(name)
-        if flow is None or not op or op["status"] != "running":
+        _require_user(req)
+        flow, _op = _own_flow(req, name)
+        if flow is None:
             raise HttpError(409, "no login runs on account %s" % name)
         flow.cancel()
+        _audit(req, "login-cancel", name)
         return 200, {"ok": True, "cancelled": True}
 
     @router.route("POST", "/api/cousins/{slug}/check-auth")

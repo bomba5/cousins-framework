@@ -127,11 +127,23 @@ function AccountFlow({ name, onDone }) {
   return (
     <div data-account-flow={name} style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <AccountOpStages op={op} />
-      {running && flow && flow.url && (
+      {running && flow && !flow.mine && (
+        <div style={{ ...ACCOUNT_MONO, color: "var(--fg-2)" }}>
+          this login was started from another console session: only that session sees its URL,
+          sends its code or cancels it
+        </div>
+      )}
+      {running && flow && flow.mine && flow.url && (
         <div style={{ ...ACCOUNT_MONO, display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ color: "var(--fg-2)" }}>open this sign-in URL and sign in:</span>
-          <a href={flow.url} target="_blank" rel="noopener noreferrer"
-             style={{ color: "var(--accent)", wordBreak: "break-all" }}>{flow.url}</a>
+          {flow.url_is_https && /^https:\/\//.test(flow.url) ? (
+            <a href={flow.url} target="_blank" rel="noopener noreferrer"
+               style={{ color: "var(--accent)", wordBreak: "break-all" }}>{flow.url}</a>
+          ) : (
+            <span style={{ color: "var(--amber)", wordBreak: "break-all" }}>
+              not https, so not a link; check it before you open it: {flow.url}
+            </span>
+          )}
           {flow.instructions && <span style={{ color: "var(--fg-1)" }}>opencode says: {flow.instructions}</span>}
           {flow.kind === "opencode-login" && (
             <span style={ACCOUNT_HINT}>nothing to paste back: opencode finishes the login by itself. A browser
@@ -144,7 +156,7 @@ function AccountFlow({ name, onDone }) {
                      submitLabel="send code" autoFocus
                      hint="Used once, by this login only; never kept, never in a chat. A second code is refused." />
       )}
-      {running && <div><button className="btn ghost" style={ACCOUNT_SMALL} onClick={cancel}>cancel login</button></div>}
+      {running && flow && flow.mine && <div><button className="btn ghost" style={ACCOUNT_SMALL} onClick={cancel}>cancel login</button></div>}
       {note && <div style={{ ...ACCOUNT_MONO, color: "var(--green)" }}>{note}</div>}
       {err && <div style={{ ...ACCOUNT_MONO, color: "var(--red)" }}>{err}</div>}
     </div>
@@ -158,8 +170,8 @@ function AccountStatusCell({ name }) {
   const [busy, setBusy] = React.useState(false);
   const check = async () => {
     setBusy(true);
-    const d = await apiGet(`/api/accounts/${encodeURIComponent(name)}/status`);
-    setSt(d || { ok: false, error: "status unavailable" });
+    const { r, d } = await apiSend("GET", `/api/accounts/${encodeURIComponent(name)}/status`);
+    setSt(r.ok ? d : { ok: false, error: (d && d.error) || `HTTP ${r.status}` });
     setBusy(false);
   };
   return (
@@ -400,7 +412,13 @@ function AccountsView() {
     const d = await apiGet("/api/accounts");
     if (d) { setData(d); setLoadErr(false); } else setLoadErr(true);
   }, []);
-  React.useEffect(() => { load(); }, [load]);
+  React.useEffect(() => {
+    load();
+    // another console session added, edited or removed an entry, or set a key
+    const on = () => load();
+    window.addEventListener("fw-accounts-change", on);
+    return () => window.removeEventListener("fw-accounts-change", on);
+  }, [load]);
 
   if (!data) {
     return <div className="wrap-pad" style={ACCOUNT_MONO}>{loadErr ? "accounts unavailable" : "loading..."}</div>;
@@ -536,8 +554,7 @@ function CousinAccountPanel({ cousin }) {
             </button>
           )}
         </div>
-        <LongOpStatus slug={c.slug} kind="check-auth" />
-        <LongOpStatus slug={c.slug} kind="validate" />
+        {op && (op.kind === "check-auth" || op.kind === "validate") && <AccountOpStages op={op} />}
         {err && <div style={{ ...ACCOUNT_MONO, color: "var(--red)" }}>{err}</div>}
       </div>
     </>

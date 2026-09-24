@@ -93,6 +93,18 @@ class Add(WriteCase):
                     self.fail("accepted %r" % (entry,))
                 self.assertEqual(self.text(), START)
 
+    def test_an_endpoint_query_that_carries_a_secret_is_refused(self):
+        for url in ("http://127.0.0.1:1/v1?api_key=s3cr3tvalue", "http://h/v1?token=s3cr3tvalue",
+                    "http://h/v1#access_token=s3cr3tvalue"):
+            with self.subTest(url=url):
+                with self.assertRaisesRegex(accounts.AccountsError, "credential") as caught:
+                    accounts.write_entry(self.root, "x", {"kind": "opencode", "endpoint": url,
+                                                          "endpoint_model": "m"})
+                self.assertNotIn("s3cr3tvalue", str(caught.exception))
+        accounts.write_entry(self.root, "x", {"kind": "opencode",
+                                              "endpoint": "http://h/v1?format=json",
+                                              "endpoint_model": "m"})
+
     def test_the_error_never_repeats_an_endpoint(self):
         with self.assertRaises(accounts.AccountsError) as caught:
             accounts.write_entry(self.root, "x", {"kind": "opencode",

@@ -341,3 +341,26 @@ above. Each is stated, none is hidden, and none is a contract item except
   isolated per pane (`exec env -i`, R3), but the server process itself, and
   the `run/` directory it lives in (chmod 0700 on every pane start), are one
   and the same for every tmux cousin on the host.
+- **A trailing `;` in the typed first line is lost.** The first line goes
+  to the pane with `tmux send-keys -l`, and tmux's own argument parser takes
+  a trailing `;` (or `\;`) as its command separator, so a sender name that
+  ends in one reaches the model without it. The body goes through a paste
+  buffer and keeps it.
+- **A numbered dialog could take the nonce's digits.** The screen is read
+  before the first line is typed and again after it, but a dialog that
+  opens in the window before the first key (the login menu's "2. Anthropic
+  Console account" is one) would read the nonce's digits as a choice. The
+  window is one tmux call wide; nothing closes it.
+- **An unheld stop, then a kind change outside `cousin-migrate`, leaves
+  claims behind.** An unheld stop keeps the pane and leaves
+  `data/tmux-claims.json` for the next tmux start to settle (R23). If
+  `[agent] runner` is edited to `sdk` by hand before that start, the SDK
+  kind's start sweep requeues the claimed rows without reading the pane's
+  transcript, and a row the pane had already taken can be delivered twice.
+  `cousin-migrate --to sdk` stops held, which settles them first.
+- **The retry budget is per runner restart.** A pane that dies before it
+  has stayed up 20 s is a failed start, retried after 1 s, doubling to
+  60 s; after 5 failed starts in a row, or more than 5 pane losses within
+  10 minutes, the runner gives up: `errored`, a `pane_failing` event, exit 3.
+  The supervisor then restarts the runner, and each restart gets 5 more
+  starts, until the supervisor's own exit limit marks the cousin `failing`.

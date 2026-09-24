@@ -303,7 +303,16 @@ model is carried, `plan` and `apply` say `NO validate` unless you pass
 model, effort and account the runner will run, and the API's own words when
 it fails. `apply --validate` runs it again itself, before anything changes.
 `cousin-migrate check wren --validate` does the same for a cousin already
-on the runner. It also lists, as `warn 2.0.0` lines, every key the cousin
+on the runner. An effort carried alone is validated the same way, on the
+CLI's default model. The turn never uses a key, token or config dir from
+your shell: the account is its only credential. For a key account,
+`--validate` makes `data/accounts/<slug>-key`, the account's own config
+dir with no login in it (no secret is written there; the runner uses the
+same dir).
+
+A key file already at `.secrets/accounts/<slug>-key` is used as it is when
+it holds the cousin's key, and never removed by a rollback; with another
+key there, the plan says `NO carry`. It also lists, as `warn 2.0.0` lines, every key the cousin
 or the install still carries that 2.0.0 will reject (a `[chat] port`, a
 `config/agent-cmd`, the harness's tmux patterns), with what to do: they
 are warnings, not blockers, and the cleanup belongs to the upgrade, after
@@ -352,9 +361,12 @@ cousin-migrate rollback wren --yes
 
 It undoes the steps `apply` got through, and only those. It stops the
 runner and waits until it has let go of its lock, puts the saved
-`cousin.toml` back byte for byte, removes the key account it made (its
-table and its secret copy) unless another cousin names it (then it is kept
-and the step says who), has the supervisor rescan, writes a fresh
+`cousin.toml` back byte for byte, removes what it made of the key account,
+even when `apply` stopped half-way through making it: exactly the bytes it
+appended to `config/accounts.toml` (the rest of the file comes back byte
+for byte), and the secret copy unless another account there still points
+at it. When another cousin names the account, all of it is kept and the
+step says who. has the supervisor rescan, writes a fresh
 boot packet from the cousin's state now, starts the tmux session (unless it
 is already up) and releases the supervisor's hold on the runner. If
 `apply` failed before `toml`, it changes nothing but the record. A step

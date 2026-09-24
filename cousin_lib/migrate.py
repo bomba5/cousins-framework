@@ -282,12 +282,34 @@ def carry(home, root, account=None):
                             % (auth, name, agent_auth.key_file(home), no_host))
             return out
         create["write_secret"] = held is None
+    else:
+        # no table, but a secret may already sit at the path: never
+        # overwritten, and never removed by a rollback (not ours)
+        try:
+            held = accounts._read_secret(accounts.Account(
+                name, "anthropic-key", None, root / rel, implicit=True))
+        except accounts.SecretMissing:
+            held = None
+        except accounts.AccountsError as err:
+            out["error"] = "%s: %s is already there and unusable: %s%s" % (
+                auth, rel, err, no_host)
+            return out
+        if held is not None and held != key:
+            out["error"] = ("%s: %s already holds a different key than %s%s"
+                            % (auth, rel, agent_auth.key_file(home), no_host))
+            return out
+        create["write_secret"] = held is None
     values["account"] = name
     if create["add_table"] or create["write_secret"]:
         out["create"] = create
         rows.append({"key": "account", "action": "create", "detail":
                      "%s -> [agent] account %r, an anthropic-key account made from %s"
-                     " (secret %s, 0600)" % (auth, name, agent_auth.key_file(home), rel)})
+                     " (%s)" % (auth, name, agent_auth.key_file(home), "; ".join(
+                         (["secret %s, 0600" % create["secret_file"]] if create["write_secret"]
+                          else ["secret %s already holds this key: kept, not ours"
+                                % create["secret_file"]])
+                         + (["its table appended to config/accounts.toml"]
+                            if create["add_table"] else [])))})
     else:
         rows.append({"key": "account", "action": "reuse", "detail":
                      "%s -> [agent] account %r (already in config/accounts.toml with this"
@@ -295,43 +317,68 @@ def carry(home, root, account=None):
     return out
 
 
-def _append_account(root, name, secret_rel):
-    """config/accounts.toml gains [accounts.<name>], appended (the rest of
-    the file untouched), written atomically; the result must load."""
-    from cousin_lib import accounts
-    path = Path(root) / "config" / "accounts.toml"
-    try:
-        text = path.read_text()
-        mode = path.stat().st_mode & 0o7777
-    except FileNotFoundError:
-        text, mode = "", 0o644
+def _appendix(text, name, secret_rel):
+    """What appending [accounts.<name>] to `text` adds, exactly: the block,
+    after one blank line when the file has content. The file's own bytes
+    are never touched, so removing this suffix gives them back."""
     block = '[accounts.%s]\nkind = "anthropic-key"\nsecret_file = %s\n' % (
         name, json.dumps(secret_rel))
-    new = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block
-    tomllib.loads(new)
+    if not text:
+        return block
+    return ("\n" if text.endswith("\n") else "\n\n") + block
+
+
+def _write_accounts(root, text, mode):
+    """config/accounts.toml atomically with `mode`; never a file that does
+    not parse."""
+    tomllib.loads(text)
+    path = Path(root) / "config" / "accounts.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".toml.tmp")
-    tmp.write_text(new)
+    tmp.write_text(text)
     os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+def _append_account(root, name, text, appended, mode):
+    """config/accounts.toml becomes `text` + `appended`; the result must
+    load with the new account. (Read-modify-write with no lock: two
+    migrations at the same instant could lose a table; parked.)"""
+    from cousin_lib import accounts
+    _write_accounts(root, text + appended, mode)
     if name not in accounts.load(root):
         raise MigrateError("config/accounts.toml does not load %s after the write" % name)
-    return block
 
 
-def make_account(home, root, create):
+def make_account(home, root, create, record=lambda done: None):
     """The key account `carry` planned: the secret (the cousin's key, one
     line, 0600 in a 0700 directory, through accounts' private writer) and
-    the config/accounts.toml table. What it did, never the key."""
+    the config/accounts.toml table. `record(done)` is called BEFORE each
+    sub-step (its state `planned`) and after it (`written`), so a rollback
+    after a failure half-way removes exactly what exists. What it did,
+    never the key."""
     from cousin_lib import accounts
     root = Path(root)
-    done = {"name": create["name"], "secret_file": create["secret_file"],
-            "secret_written": False, "table": None}
+    done = {"name": create["name"], "secret_file": create["secret_file"], "secret": None,
+            "table": None}
     if create["write_secret"]:
+        done["secret"] = "planned"
+        record(done)
         accounts._write_secret(root / create["secret_file"], _cousin_key(home, root))
-        done["secret_written"] = True
+        done["secret"] = "written"
+        record(done)
     if create["add_table"]:
-        done["table"] = _append_account(root, create["name"], create["secret_file"])
+        path = root / "config" / "accounts.toml"
+        try:
+            text, mode, existed = path.read_text(), path.stat().st_mode & 0o7777, True
+        except FileNotFoundError:
+            text, mode, existed = "", 0o644, False
+        appended = _appendix(text, create["name"], create["secret_file"])
+        done["table"] = {"appended": appended, "created_file": not existed, "state": "planned"}
+        record(done)
+        _append_account(root, create["name"], text, appended, mode)
+        done["table"]["state"] = "written"
+        record(done)
     return done
 
 
@@ -352,34 +399,55 @@ def _users_of(root, name, but):
 
 
 def drop_account(home, root, made):
-    """Rollback's half of make_account: the table and the secret this
-    migration made are removed when no other cousin names the account
-    and the table is still exactly what was appended; else kept, and
-    why. The cousin's own key file is never touched."""
+    """Rollback's half of make_account, for what exists of it (a sub-step
+    `planned` may or may not have happened). Kept, and why, when another
+    cousin names the account. The table: exactly the bytes appended are
+    taken out, the rest of the file byte for byte (a file the migration
+    created and left empty is removed); kept when those bytes are no
+    longer there. The secret: removed unless the table stayed or an
+    account in config/accounts.toml still resolves to its path. The
+    cousin's own key file is never touched."""
+    from cousin_lib import accounts
     root = Path(root)
     name = made["name"]
     users = _users_of(root, name, Path(home).name)
     if users:
         return "account %s kept: %s use it" % (name, ", ".join(users))
     parts = []
-    if made.get("table"):
+    table = made.get("table")
+    if table:
         path = root / "config" / "accounts.toml"
-        text = path.read_text()
-        if made["table"] not in text:
+        try:
+            text = path.read_text()
+        except FileNotFoundError:
+            text = None
+        at = -1 if text is None else text.rfind(table["appended"])
+        if at >= 0:
+            new = text[:at] + text[at + len(table["appended"]):]
+            if not new and table.get("created_file"):
+                path.unlink()
+            else:
+                _write_accounts(root, new, path.stat().st_mode & 0o7777)
+            parts.append("its table")
+        elif table.get("state") == "written":
             return ("account %s kept: its table in config/accounts.toml changed since the"
                     " migration" % name)
-        new = text.replace(made["table"], "", 1).rstrip("\n")
-        new = new + "\n" if new else ""
-        tomllib.loads(new)
-        tmp = path.with_suffix(".toml.tmp")
-        tmp.write_text(new)
-        os.chmod(tmp, path.stat().st_mode & 0o7777)
-        os.replace(tmp, path)
-        parts.append("its table")
-    if made.get("secret_written"):
-        with contextlib.suppress(FileNotFoundError):
-            (root / made["secret_file"]).unlink()
-        parts.append("its secret")
+    if made.get("secret") in ("planned", "written"):
+        secret = root / made["secret_file"]
+        try:
+            holders = [a.name for a in accounts.load(root).values()
+                       if a.secret_file is not None and Path(a.secret_file) == secret]
+        except accounts.AccountsError as err:
+            return "account %s: %s removed; its secret kept (%s)" % (
+                name, " and ".join(parts) or "nothing", err)
+        if holders:
+            return "account %s: %s removed; its secret kept: %s use it" % (
+                name, " and ".join(parts) or "nothing", ", ".join(holders))
+        try:
+            secret.unlink()
+            parts.append("its secret")
+        except FileNotFoundError:
+            pass
     return "account %s: %s removed (no other cousin uses it)" % (
         name, " and ".join(parts) or "nothing")
 
@@ -421,6 +489,15 @@ def _validate_account(home, root, name, moved):
     if name == accounts.HOST:
         return accounts.for_cousin(home, root)       # the host, or [agent] api_key_file
     return accounts.load(root)[name]
+
+
+def _dir_note(name, moved):
+    """What --validate leaves behind for a key account: the account's own
+    config dir (accounts.account_env makes it; no secret goes there)."""
+    if moved["create"] is None and "account" not in moved["values"]:
+        return ""
+    return (" (--validate makes data/accounts/%s, the account's login-free config dir;"
+            " no secret is written there)" % name)
 
 
 def _validate(validator, account, root, model, effort):
@@ -491,11 +568,14 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
                                  model, effort)
         except (MigrateError, accounts.AccountsError, KeyError) as err:
             ok, line = False, "validate: %s" % err
-        checks.append(_check("validate", ok, "%s; %s" % (line, NEVER_UNRUN)))
-    elif "model" in moved["values"]:
+        checks.append(_check("validate", ok, "%s%s; %s" % (line, _dir_note(name, moved),
+                                                          NEVER_UNRUN)))
+    elif "model" in moved["values"] or "effort" in moved["values"]:
         checks.append(_check("validate", False, (
-            "[agent] model %r would be written unvalidated: run with --validate (one smallest"
-            " model turn on %s); %s" % (model, cli, NEVER_UNRUN))))
+            "[agent] %s would be written unvalidated: run with --validate (one smallest"
+            " model turn on %s)%s; %s" % (" and ".join(
+                "%s %r" % (k, moved["values"][k]) for k in CARRIED if k in moved["values"]),
+                cli, _dir_note(name, moved), NEVER_UNRUN))))
     up = supervisor_up(root)
     checks.append(_check("supervisor", up, "a cousin-supervisor answers for %s" % root if up else
                          "no cousin-supervisor runs for %s: start it (`cousin-supervisor run`,"
@@ -602,10 +682,13 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
             if p["carry"]["create"] is not None:
                 # before cousin.toml names it: a runner never starts on an
                 # account that is not there yet
-                rec["account_created"] = make_account(home, root, p["carry"]["create"])
-                _write_record(home, rec)
-                made = "; account %s made (secret %s, 0600)" % (
-                    rec["account_created"]["name"], rec["account_created"]["secret_file"])
+                def record(done):
+                    rec["account_created"] = done
+                    _write_record(home, rec)
+                done = make_account(home, root, p["carry"]["create"], record)
+                made = "; account %s made (%s)" % (done["name"], ", ".join(
+                    (["secret %s, 0600" % done["secret_file"]] if done["secret"] else [])
+                    + (["its table"] if done["table"] else [])))
             text = set_agent_keys(prior.decode("utf-8"), values)
             _write_toml(home, text.encode("utf-8"), mode)
             kept = [r["detail"] for r in p["carry"]["rows"] if r["action"] == "kept"]

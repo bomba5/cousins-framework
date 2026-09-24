@@ -836,6 +836,128 @@ class TestValidateTheModel(HermeticCase):
         self.assertIn("Claude Code %s" % __cli_version__, migrate.runner_cli())
 
 
+def _secret_at(root, key):
+    d = root / ".secrets" / "accounts"
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(root / ".secrets", 0o700); os.chmod(d, 0o700)
+    (d / "wren-key").write_text(key + "\n")
+    os.chmod(d / "wren-key", 0o600)
+    return d / "wren-key"
+
+
+class TestAccountLifecycle(HermeticCase):
+    """#96 review: a key account is made, and unmade, exactly: a partial
+    make is rolled back, a secret the migration did not write is neither
+    overwritten nor removed, and config/accounts.toml comes back byte for
+    byte."""
+
+    def test_a_table_write_that_fails_after_the_secret_is_rolled_back_whole(self):
+        root, home = _key_cousin(self)
+        before = (root / "config" / "accounts.toml").read_bytes()
+        live = Live()
+        with mock.patch.object(migrate, "_append_account", side_effect=OSError("disk full")):
+            rec = migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual((rec["state"], rec["steps"][-1]["step"]), ("failed", "toml"))
+        made = json.loads((home / migrate.RECORD).read_text())["account_created"]
+        self.assertEqual((made["secret"], made["table"]["state"]), ("written", "planned"))
+        secret = root / ".secrets" / "accounts" / "wren-key"
+        self.assertTrue(secret.exists())
+        back = migrate.rollback(home, root=root, **live.kw())
+        self.assertEqual(back["state"], "rolled_back")
+        self.assertFalse(secret.exists())
+        self.assertEqual((root / "config" / "accounts.toml").read_bytes(), before)
+        self.assertNotIn(KEY, json.dumps(back))
+        # a retried apply makes the secret afresh: it is ours again, not "reused"
+        live.tmux = True
+        rec = migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        self.assertEqual(rec["account_created"]["secret"], "written")
+        self.assertEqual(secret.read_text(), KEY + "\n")
+
+    def test_a_secret_already_there_with_the_same_key_is_neither_rewritten_nor_removed(self):
+        root, home = _key_cousin(self)
+        secret = _secret_at(root, KEY)
+        inode = secret.stat().st_ino
+        live = Live()
+        p = migrate.plan(home, root=root, validate=True, **live.kw())
+        self.assertEqual(p["carry"]["create"]["write_secret"], False)
+        self.assertIn("kept, not ours", json.dumps(p["carry"]["rows"]))
+        rec = migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        self.assertIsNone(rec["account_created"]["secret"])
+        self.assertEqual(secret.stat().st_ino, inode)                # never rewritten
+        migrate.rollback(home, root=root, **live.kw())
+        self.assertEqual(secret.read_text(), KEY + "\n")            # never removed
+        from cousin_lib import accounts
+        self.assertNotIn("wren-key", accounts.load(root))             # the table was ours
+
+    def test_a_secret_already_there_with_another_key_is_a_blocker(self):
+        root, home = _key_cousin(self)
+        secret = _secret_at(root, "sk-ant-someone-else")
+        live = Live()
+        p = migrate.plan(home, root=root, validate=True, **live.kw())
+        self.assertFalse(p["ready"])
+        self.assertIn("different key", json.dumps(p["checks"]))
+        with self.assertRaisesRegex(migrate.MigrateError, "different key"):
+            migrate.apply(home, root=root, validate=True, **live.kw())
+        self.assertEqual(secret.read_text(), "sk-ant-someone-else\n")
+
+    def test_rollback_keeps_a_secret_another_account_resolves_to(self):
+        root, home = _key_cousin(self)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, **live.kw())
+        with open(root / "config" / "accounts.toml", "a") as fh:
+            fh.write('\n[accounts.shared]\nkind = "anthropic-key"\n'
+                     'secret_file = ".secrets/accounts/wren-key"\n')
+        back = migrate.rollback(home, root=root, **live.kw())
+        from cousin_lib import accounts
+        known = accounts.load(root)
+        self.assertNotIn("wren-key", known)
+        self.assertIn("shared", known)
+        self.assertTrue((root / ".secrets" / "accounts" / "wren-key").exists())
+        self.assertIn("shared use it", json.dumps(back["rollback_steps"]))
+
+    def test_accounts_toml_comes_back_byte_for_byte(self):
+        for before in (b'[accounts.team]\nkind = "claude-login"',          # no final newline
+                       b'# ops\n[accounts.team]\nkind = "claude-login"\n\n\n',
+                       None):                                               # no file at all
+            with self.subTest(before=before):
+                root, home = _key_cousin(self)
+                path = root / "config" / "accounts.toml"
+                if before is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(before)
+                live = Live()
+                rec = migrate.apply(home, root=root, validate=True, **live.kw())
+                self.assertEqual(rec["state"], "migrated", rec)
+                migrate.rollback(home, root=root, **live.kw())
+                if before is None:
+                    self.assertFalse(path.exists())
+                else:
+                    self.assertEqual(path.read_bytes(), before)
+
+    def test_an_effort_carried_alone_is_validated_too(self):
+        root, home = _root(self)
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n\n[runtime]\neffort = "low"\n')
+        live = Live()
+        p = migrate.plan(home, root=root, account="team", **live.kw())
+        self.assertFalse(p["ready"])
+        self.assertIn("effort 'low' would be written unvalidated",
+                      json.dumps(p["checks"]))
+        p = migrate.plan(home, root=root, account="team", validate=True, **live.kw())
+        self.assertTrue(p["ready"], p)
+        (_v, model, effort, acct), = [c for c in live.calls if c[0] == "validate"]
+        self.assertEqual((model, effort, acct.name), (None, "low", "team"))
+
+    def test_the_plan_says_validate_makes_the_accounts_config_dir(self):
+        root, home = _key_cousin(self)
+        for validate in (False, True):
+            p = migrate.plan(home, root=root, validate=validate, **Live().kw())
+            row = [c for c in p["checks"] if c["check"] == "validate"][0]
+            self.assertIn("makes data/accounts/wren-key", row["detail"])
+
+
 class TestFreshPacket(HermeticCase):
     def test_the_rollback_packet_is_the_cousins_state_now(self):
         """Review I7: tmux must not boot on the migration day's packet."""

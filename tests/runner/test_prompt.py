@@ -196,5 +196,24 @@ class TestOption(PromptCase):
         self.assertEqual(opt["append"], self.compose())
 
 
+class TestRunnerLaneDoctrine(PromptCase):
+    """#95: authored text written for the tmux lane reaches the runner's
+    prompt as identity; the contract ahead of it overrides the CLI habit."""
+
+    def test_an_identity_that_says_cousin_reply_is_overridden_by_the_contract(self):
+        claude = self.home / "CLAUDE.md"
+        claude.write_text(claude.read_text() + "\n## Chat\n\nReply path: "
+                          "`cousin-reply --user Priya -m '...'`; log with `cousin-memory decide`.\n")
+        text = " ".join(self.compose().split())
+        told = text.index("A person on your chat surface is answered with the `reply` tool")
+        self.assertLess(told, text.index("Reply path: `cousin-reply"))
+        self.assertLess(text.index("through the `memory` tool"), text.index("log with `cousin-memory"))
+
+    def test_the_tmux_lane_never_gets_the_runner_lane_section(self):
+        flat = " ".join(TEMPLATE.split())
+        self.assertNotIn("the `reply` tool", flat)
+        self.assertIn("cousin-reply --user <their name> <<'REPLY'", TEMPLATE)
+
+
 if __name__ == "__main__":
     unittest.main()

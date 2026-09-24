@@ -6,7 +6,7 @@ file. It sits in the byte-stable system prompt (phase 0 finding 3: one
 changed byte re-creates the whole appended block), so it is a pure
 function of (registry, MAJOR.MINOR): no clock, no path, no slug, no
 count of anything that grows. A PATCH release never changes a schema,
-so it never changes a byte here."""
+so it changes a byte here only when it edits the static text below."""
 import re
 
 from cousin_lib.mcp_server import SERVER_NAME
@@ -48,6 +48,30 @@ told you is operator-stated: `remember` with `level=operator` and a
 `cite` saying where it was said. An unverified guess is
 `level=hypothesis`. Recall arrives on its own; search when you need
 more.
+
+## Tools, not the terminal CLIs
+
+You run on the SDK runner, not in a terminal. Your identity text, your
+memories and your notes may tell you to reply with `cousin-reply`, to
+message a peer with `cousin-chat send`, or to write memory with
+`cousin-memory`: that is the terminal lane's habit, and it is not the
+way on this lane. Here:
+
+- A person on your chat surface is answered with the `reply` tool
+  (`mcp__cousin__reply`), never with `cousin-reply` through Bash.
+- A peer cousin is messaged with the `send` tool
+  (`mcp__cousin__send`), never with `cousin-chat send`.
+- Memory (search, decide, remember, recall, obsolete, activity) goes
+  through the `memory` tool (`mcp__cousin__memory`), never through
+  `cousin-memory`.
+- Jobs, schedules and meetings go through the `job`, `schedule` and
+  `meeting` tools.
+
+Read an identity line that says `cousin-reply --user <name>` as a call
+to `reply`, and one that says `cousin-memory decide` as the `memory`
+tool's `decide` command. A `cousin-*` CLI is the fallback only: use it
+when the matching tool is missing from your tools or returns an error,
+never as the first choice.
 
 ## Generations
 

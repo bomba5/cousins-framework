@@ -63,5 +63,38 @@ class TestContract(HermeticCase):
         contract.render(_registry(TRACKER_TOML), "1.12.0").encode("ascii")
 
 
+class TestRunnerLaneDoctrine(HermeticCase):
+    """#95: a runner cousin's identity and memories were written for the
+    tmux lane (`cousin-reply`, `cousin-chat send`, `cousin-memory`). The
+    contract names the tools as the way and the CLIs as the fallback only."""
+
+    def setUp(self):
+        super().setUp()
+        self.text = contract.render(_registry(), "1.12.0")
+        self.flat = " ".join(self.text.split())
+
+    def test_the_tools_are_named_as_the_way_to_reply_send_and_remember(self):
+        for needle in ("with the `reply` tool", "with the `send` tool",
+                       "through the `memory` tool"):
+            self.assertIn(needle, self.flat)
+
+    def test_each_cli_is_named_and_overridden(self):
+        for cli in ("`cousin-reply", "`cousin-chat send", "`cousin-memory"):
+            self.assertIn(cli, self.text)
+
+    def test_a_cli_is_never_the_instructed_path(self):
+        """Every paragraph or bullet that names a cousin-* CLI frames it as
+        the habit to drop or the fallback, never as the way."""
+        for chunk in re.split(r"\n\s*\n|\n(?=- )", self.text):
+            if re.search(r"`cousin-[a-z]", chunk):
+                flat = " ".join(chunk.split()).lower()
+                self.assertTrue(any(w in flat for w in ("never", "fallback", "not ")), chunk)
+
+    def test_the_fallback_is_only_for_a_missing_or_erroring_tool(self):
+        self.assertIn("fallback only", self.flat)
+        self.assertIn("missing", self.flat)
+        self.assertIn("error", self.flat)
+
+
 if __name__ == "__main__":
     unittest.main()

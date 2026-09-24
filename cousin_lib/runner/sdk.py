@@ -80,6 +80,16 @@ class _NotWritten(Exception):
         self.row, self.cause = row, cause
 
 
+class _Unrenderable(Exception):
+    """The row could not be rendered into a message (a broken attachment,
+    say). Not transient: the row is closed FAILED with this text, never
+    requeued to fail the same way again."""
+
+    def __init__(self, row, cause):
+        super().__init__("could not be rendered: %s: %s" % (type(cause).__name__, cause))
+        self.row, self.cause = row, cause
+
+
 def _nothing_written(sdk, exc):
     """True when the SDK raised before its transport wrote a byte: every
     check in `SubprocessCLITransport.write` (not ready, process ended,
@@ -1223,8 +1233,12 @@ class SdkRunner:
 
     def _prepare(self, row):
         """The row's message and the exact text its echo will carry,
-        noted in `_sent` before any write: the prompt hook may fire first."""
-        message = envelope.render_message(self._row_item(row))
+        noted in `_sent` before any write: the prompt hook may fire first.
+        `_Unrenderable` when the row cannot be rendered."""
+        try:
+            message = envelope.render_message(self._row_item(row))
+        except Exception as exc:  # noqa: BLE001 - any rendering failure is the row's
+            raise _Unrenderable(row, exc) from exc
         # The SDK's str path sets this key and its iterable path does not.
         message.setdefault("parent_tool_use_id", None)
         text = message["message"]["content"][0]["text"]
@@ -1325,9 +1339,17 @@ class SdkRunner:
             # would stop the reader that drains it (_Writer)
             try:
                 self._send_later(sdk, row, open_rows)
+            except _Unrenderable as exc:
+                # not transient: this row fails, the live turn goes on, and
+                # the rest, claimed here and never offered, go back
+                self.inbox.done(row["id"], FAILED, str(exc))
+                self.stream.append("error", {"error": "fold: %s" % exc, "inbox_id": row["id"]})
+                for rest in rows[i + 1:]:
+                    self.inbox.requeue(rest["id"])
+                return
             except Exception:
-                # this row (it could not be rendered or handed over) and the
-                # rest, claimed here and never offered: back to the queue
+                # this row (it could not be handed over) and the rest,
+                # claimed here and never offered: back to the queue
                 for rest in rows[i:]:
                     self.inbox.requeue(rest["id"])
                 raise
@@ -1478,7 +1500,8 @@ class SdkRunner:
         is never touched. `requeued` rows never reached the model and go
         back to the queue. A failure while closing rows is recorded and
         does not escape: the caller's resync must still run."""
-        message = "%s: %s" % (type(exc).__name__, exc)
+        message = str(exc) if isinstance(exc, _Unrenderable) \
+            else "%s: %s" % (type(exc).__name__, exc)
         # The state first: whoever sees the `error` event also sees `errored`.
         with self._lock:
             if self.machine.state in ("idle",) + LIVE_STATES:
@@ -1667,6 +1690,8 @@ class SdkRunner:
             # `first` claimed and in no list: back to the queue, the client untouched.
             unsent = [] if sending else [first]
             unclosed = [row for row, _ in open_rows] + closing
+            if isinstance(exc, _Unrenderable):
+                unclosed.append(exc.row)    # not transient: closed FAILED, never left claimed
             signal, self._auth_turn = self._auth_turn, None
             if signal is not None:
                 # the login failed the turn, and then the stream ended (or broke)

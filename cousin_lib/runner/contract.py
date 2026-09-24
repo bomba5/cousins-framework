@@ -108,19 +108,19 @@ def _tool_block(definition, registry, tool_name):
     return "\n".join(lines)
 
 
-def render(registry, version, *, tool_name=None):
+def render(registry, version, *, tool_name=None, runner=None):
     """The contract for this registry at this release. Same inputs, same bytes.
 
     `tool_name(name) -> str` is the name the model sees for a tool on its
     lane (phase 9 R7): None is the SDK lane's (sdk_tool_name), whose bytes
     the prompt cache keys on; the opencode lane passes `cousin_<name>`. It
-    names the tools in "Tools, not the terminal CLIs" too, where a lane
-    whose names are not the SDK's is the opencode runner."""
+    names the tools in "Tools, not the terminal CLIs" too. `runner` is that
+    section's name for the lane ("You run on <runner>"): None is "the SDK
+    runner"; the opencode lane passes its own."""
     from cousin_lib.runner.tools import tool_definitions
     tool_name = tool_name or sdk_tool_name
     named = {n: tool_name(n) for n in ("reply", "send", "memory")}
-    sdk = named["reply"] == sdk_tool_name("reply")
-    static = STATIC.format(runner="the SDK runner" if sdk else "the opencode runner", **named)
+    static = STATIC.format(runner=runner or "the SDK runner", **named)
     blocks = [_tool_block(d, registry, tool_name) for d in tool_definitions(registry)]
     text = "\n\n".join([HEADER.format(version=major_minor(version)), static,
                         "## Your tools\n\n" + "\n".join(blocks)])

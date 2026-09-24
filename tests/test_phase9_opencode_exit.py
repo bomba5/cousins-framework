@@ -93,7 +93,7 @@ class TestPhase9Exit(unittest.TestCase):
         section = _section(self.read(_PLAN), "## Interfaces locked across phases")
         for needle in ('RUNNER_KINDS = ("sdk", "fake", "opencode")',
                        'KINDS = ("claude-login", "claude-token", "anthropic-key", "opencode")',
-                       "def render(registry, version, *, tool_name=None)",
+                       "def render(registry, version, *, tool_name=None, runner=None)",
                        "# cousin_lib/runner/opencode.py (P9)", "# cousin_lib/runner/opencode_http.py (P9)",
                        "# cousin_lib/runner/opencode_guard.py (P9, R13)",
                        "# cousin_lib/runner/contract_table.py (P9, R19)", "plugin_items()"):

@@ -35,6 +35,9 @@ def as_opencode(sdk_text):
             .replace("You run on the SDK runner,", "You run on the opencode runner,"))
 
 
+OPENCODE_RUNNER = "the opencode runner"
+
+
 def opencode_name(name):
     return "cousin_%s" % name
 
@@ -57,7 +60,7 @@ class TestContractLanes(HermeticCase):
 
     def test_the_opencode_contract_names_cousin_tools(self):
         reg = _registry(TRACKER_TOML)
-        text = contract.render(reg, "1.12.0", tool_name=opencode_name)
+        text = contract.render(reg, "1.12.0", tool_name=opencode_name, runner=OPENCODE_RUNNER)
         for d in tools.tool_definitions(reg):
             self.assertIn("- `cousin_%s`: " % d["name"], text, d["name"])
         self.assertNotIn("mcp__", text)
@@ -79,6 +82,16 @@ class TestContractLanes(HermeticCase):
         self.assertEqual(len(lines), len(seen) - 3)
         self.assertTrue(all(re.match(r"- `X-[a-z_]+`: ", l) for l in lines), lines)
 
+    def test_the_runner_label_is_passed_never_guessed(self):
+        """Review round 2, minor 5: the section's "You run on ..." is what the
+        caller says, not a guess from the tool names."""
+        reg = _registry()
+        self.assertIn("You run on the SDK runner,", contract.render(reg, "1.12.0"))
+        self.assertIn("You run on the SDK runner,",
+                      contract.render(reg, "1.12.0", tool_name=opencode_name))
+        self.assertIn("You run on the fake runner,",
+                      contract.render(reg, "1.12.0", runner="the fake runner"))
+
     def test_the_opencode_contract_is_deterministic_and_ascii(self):
         a = contract.render(_registry(TRACKER_TOML), "1.12.0", tool_name=opencode_name)
         b = contract.render(_registry(TRACKER_TOML), "1.12.7", tool_name=opencode_name)
@@ -91,7 +104,7 @@ class TestPromptLanes(PromptCase):
 
     def test_the_opencode_prompt_names_cousin_tools_and_differs_only_there(self):
         sdk = self.compose()
-        oc = self.compose(tool_name=opencode_name)
+        oc = self.compose(tool_name=opencode_name, runner=OPENCODE_RUNNER)
         self.assertIn("- `cousin_reply`: ", oc)
         self.assertIn("- `cousin_handoff`: ", oc)
         self.assertNotIn("mcp__cousin__", oc)

@@ -748,6 +748,53 @@ A few other files in a cousin's home are configuration too:
 server reacts to, see [chat](chat.md)), `policy.toml` (below) and
 `.secrets/api-key.env` (the key for `api_key` mode, written by `cousin-auth`).
 
+### [agent.sessions]
+
+Side sessions: a thread kind that gets a session of its own, beside the
+primary. Every kind not named stays in the primary session, which is also
+the default with no table at all.
+
+```toml
+[agent.sessions]
+peer = "own"        # peer chat is answered in a session of its own
+person = "own"
+meeting = "primary"
+```
+
+Keys are thread kinds (`person`, `peer`, `meeting`, `loop`, `schedule`);
+values are `"primary"` or `"own"`. `operator` and `system` cannot be `"own"`:
+the generation's work arrives on operator threads, and the system thread
+carries the rollover, the state digest and the memory proposals. An unknown
+kind, another value, or either of those two as `"own"` is a configuration
+error: `cousin-runner` exits 2 naming it. Only `runner = "sdk"` has side
+sessions; `runner = "fake"` with a side session configured is refused the
+same way.
+
+A kind mapped to `"own"` gets one side session for all its threads, in the
+same `cousin-runner` process: the same system prompt, tools and working
+directory as the primary (so the cached prompt prefix is shared), the same
+memory, and its own context. It answers while the primary is busy: a peer
+is not kept waiting behind a long operator task. The `handoff` tool is
+refused in a side session; it never proposes memories and never runs the
+`[session]` hooks; the rest (leaving STATUS.md and the generation to the
+primary) is the side digest's instruction, not a guard. Its first turn
+carries that digest as context: which session it is, the primary's state
+and the kinds of threads it is on, the cousin's last activity note, then the
+state digest, whose layers every session shares. It never carries a row's
+words, a sender or a thread key from the primary's live turn. A side
+session's `activity` note is written as `[<kind> session] ...`. It starts
+over, with a fresh digest, at the context pressure `rollover_at_percent`
+sets and whenever the primary moves to a new generation. Its session id is
+kept in `data/runner-session-<kind>.json` and its event stream in
+`data/stream/sdk-<kind>-<id>.jsonl`, headed by a `side_session` event, never
+by the `runner` event that heads the primary's stream. A side session that
+fails (its CLI does not start, a reconnect fails) is restarted inside the
+same `cousin-runner` after a backoff; the primary and its running turn are
+never stopped for it. A side session is not interruptible from the console
+in this phase: an interrupt reaches the primary's live turn only. Each side
+session is one more agent CLI process: measured at 300 to 480 MB of
+resident memory per interactive CLI on the reference host.
+
 ### policy.toml
 
 `<home>/policy.toml`, read once when the runner starts and enforced by a

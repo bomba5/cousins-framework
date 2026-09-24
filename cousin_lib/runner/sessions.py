@@ -46,7 +46,13 @@ def load_map(home):
         data = tomllib.loads((Path(home) / "cousin.toml").read_text())
     except (OSError, tomllib.TOMLDecodeError) as err:
         raise SessionsError("cannot read %s/cousin.toml: %s" % (home, err))
-    table = (data.get("agent") or {}).get("sessions") or {}
+    return parse_map((data.get("agent") or {}).get("sessions") or {})
+
+
+def parse_map(table):
+    """load_map's reading of an [agent.sessions] table already parsed (the
+    console's settings validate a change with it before anything is
+    written); SessionsError naming the first bad entry."""
     if not isinstance(table, dict):
         raise SessionsError("[agent.sessions] must be a table of thread kinds")
     out = {kind: PRIMARY for kind in THREAD_KINDS}

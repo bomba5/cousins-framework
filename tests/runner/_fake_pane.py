@@ -5,7 +5,10 @@ prompt's `user` entry (promptSource "typed", its own promptId) when it
 takes the prompt, an assistant entry with a tool call, then
 `system`/`turn_duration`. Escape during a turn writes the interrupt entry
 and no `turn_duration`. `slow` holds the FIRST turn about 3 s;
-`fail_first` ends the FIRST turn with an API-error entry. Nothing here
+`fail_first` ends the FIRST turn with an API-error entry. `/exit` ends
+the CLI with no entry. `on_prompt(pane, first_line, body)` runs as a turn
+starts and may return "limit" to end it with a usage-limit error (a test
+plays the model's side there, e.g. the handoff tool). Nothing here
 decides anything for the runner: it only plays the CLI."""
 import json
 import threading
@@ -18,11 +21,13 @@ from cousin_lib.runner.tmux_pane import Outcome
 
 class FakePane:
     def __init__(self, transcript, *, slow=False, fail_first=False, turn_s=0.05, slow_s=3.0,
-                 attention=None):
+                 attention=None, on_prompt=None):
         self.transcript = Path(transcript)
         self.slow, self.fail_first = slow, fail_first
         self.turn_s, self.slow_s = turn_s, slow_s
         self._attention = attention
+        self.on_prompt = on_prompt
+        self.exits = 0
         self._alive = False
         self._lock = threading.Lock()
         self._escape = threading.Event()
@@ -74,6 +79,10 @@ class FakePane:
             return Outcome.FAILED
         if self._attention or self._busy:
             return Outcome.BLOCKED
+        if first_line == "/exit" and not body:     # a slash command: no prompt entry
+            self.exits += 1
+            self._alive = False
+            return Outcome.TYPED
         self.typed.append((first_line, body))
         with self._lock:
             self._busy = True
@@ -106,6 +115,13 @@ class FakePane:
         text = first_line + ("\n\n<pasted_content id=\"f00d\">\n%s\n</pasted_content>" % body if body else "")
         self._write({"type": "user", "promptSource": "typed", "promptId": prompt_id,
                      "entrypoint": "cli", "message": {"role": "user", "content": text}})
+        if self.on_prompt is not None and self.on_prompt(self, first_line, body) == "limit":
+            self._write({"type": "assistant", "isApiErrorMessage": True, "message": {
+                "role": "assistant", "content": [{"type": "text", "text":
+                                                  "You've hit your usage limit - resets at 5pm"}]}})
+            with self._lock:
+                self._busy = False
+            return
         self._write({"type": "assistant", "message": {"role": "assistant", "stop_reason": "tool_use",
                      "content": [{"type": "tool_use", "id": "toolu_%d" % n, "name": "Bash",
                                   "input": {"command": "true"}}],

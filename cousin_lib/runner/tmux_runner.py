@@ -36,6 +36,8 @@ from cousin_lib.runner.tmux_pane import Outcome, TmuxPane
 POLL_S = 0.1              # the transcript poll while nothing wakes the runner
 CONSUME_S = 60.0          # a typed row not taken by then, at a turn end with an empty box, is requeued
 LIMIT_RETRY_S = 300.0     # how long a usage limit holds the claim loop before trying again
+TURN_FINISH_S = 30.0      # after the handoff file lands, how long the handoff turn may take to end
+EXIT_WAIT_S = 10.0        # how long `/exit` gets to end the CLI before the pane is killed
 LOGIN_SCREENS = ("trust", "onboarding", "login", "bypass", "mcp_approval")
 CLAIMS_FILE = "tmux-claims.json"
 CURSOR_FILE = "tmux-cursor.json"
@@ -68,7 +70,9 @@ class TmuxRunner:
     takes_interrupts = True
 
     def __init__(self, home, *, account=None, model=None, effort=None, policy=None,
-                 pane_factory=None, config_dir=None, launch_argv=None, socket=None):
+                 pane_factory=None, config_dir=None, launch_argv=None, socket=None,
+                 handoff_deadline_s=None):
+        from cousin_lib.runner import rollover as _rollover
         self.home = Path(home)
         self.account = account
         self.model, self.effort = model, effort
@@ -95,14 +99,21 @@ class TmuxRunner:
         self._interrupting = False
         self._login_blocked = False
         self._limit_until = 0.0
+        self._hold_until = 0.0     # a postponed rollover holds the claim loop this long
+        self._handoff_limited = False
+        self._turn_seq = 0
+        self._runner_turn_seen = False   # a runner-nonce turn started since the flag was cleared
+        self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
 
     # -- small helpers ----------------------------------------------------
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})
 
     def _to(self, state, detail=""):
+        """A turn's own state change; a rollover owns the machine while it
+        runs (its handoff turn is a turn, but not a state of the runner)."""
         with self._lock:
-            if self.machine.state != state and self.machine.state != "stopped":
+            if self.machine.state not in (state, "stopped", "rolling_over"):
                 self.machine.to(state, detail)
 
     def _data(self, name):
@@ -170,15 +181,21 @@ class TmuxRunner:
 
     # -- the pane and the session ----------------------------------------
     def _recorded_session(self):
+        """(session_id or None, fresh): `fresh` is a rollover's new id whose
+        CLI never started (N9): it starts fresh under that id, not resumed."""
         data = _read_json(self._data(SESSION_FILE)) or {}
         sid = data.get("session_id")
-        return sid if isinstance(sid, str) and sid else None
+        if not (isinstance(sid, str) and sid):
+            return None, True
+        return sid, data.get("fresh") is True
 
     def _save_session(self):
         from cousin_lib import boot
-        _atomic_write(self._data(SESSION_FILE), {"session_id": self._session_id, "lane": None,
-                                                 "generation": boot.read_generation(self.home),
-                                                 "updated": time.time(), "kind": "tmux"})
+        data = {"session_id": self._session_id, "lane": None,
+                "generation": boot.read_generation(self.home), "updated": time.time(), "kind": "tmux"}
+        if self._fresh and self._size() == 0:
+            data["fresh"] = True       # kept until the CLI has written the session
+        _atomic_write(self._data(SESSION_FILE), data)
 
     def _hook_path(self):
         data = _read_json(self.home / "run" / "tmux-session.json") or {}
@@ -219,10 +236,10 @@ class TmuxRunner:
 
     def _open_session(self):
         """Adopt, else resume, else fresh (P11-2). Returns how."""
-        recorded = self._recorded_session()
+        recorded, fresh = self._recorded_session()
         self._session_id = recorded or str(uuid.uuid4())
-        self._fresh = recorded is None
         self._path = self._transcript_path()
+        self._fresh = fresh and self._size() == 0
         self.pane = self._make_pane(self._path)
         if not self._fresh and self.pane.alive():
             how = "adopted"
@@ -248,7 +265,7 @@ class TmuxRunner:
     def _size(self):
         try:
             return self._path.stat().st_size
-        except OSError:
+        except (OSError, AttributeError):
             return 0
 
     def _recover(self, how):
@@ -383,6 +400,7 @@ class TmuxRunner:
         if e.nonce and e.nonce in self._closed_nonces:
             self.stream.append("duplicate_delivery", {"nonce": e.nonce, "prompt_id": e.prompt_id})
         who = "runner" if e.nonce and e.nonce in self._runner_nonces else "foreign"
+        self._runner_turn_seen |= who == "runner"
         if who == "foreign":
             self.stream.append("foreign_turn", {"prompt_id": e.prompt_id})
         self._live = {"rows": [], "prompt_id": e.prompt_id, "who": who}
@@ -404,7 +422,24 @@ class TmuxRunner:
         ids = self._close_rows(DELIVERED, "turn %s%s" % (self._session_id, " (interrupted)" if interrupted else ""))
         self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted, "is_error": False})
         self._live, self._interrupting = None, False
+        self._turn_seq += 1
+        if not interrupted:
+            self._mine()
         self._to("idle", "turn done")
+
+    def _mine(self, **extra):
+        """Extraction at a normal turn end (and a final one at a rollover):
+        the transcript's new entries into raw memory (extract.mine_turn);
+        the outcome is an `extract` event, never a raise."""
+        from cousin_lib.runner import extract
+        payload = dict({"session_id": self._session_id, "turn": self._turn_seq}, **extra)
+        try:
+            payload["written"] = extract.mine_turn(
+                self.home, self._session_id, self._turn_seq,
+                store=transcript.TranscriptStore(self._path, self._session_id))
+        except Exception as exc:  # noqa: BLE001 - extraction must never fail a turn
+            payload.update(written=-1, error="%s: %s" % (type(exc).__name__, exc))
+        self.stream.append("extract", payload)
 
     def _fail_live(self, message):
         self._to("errored", message)
@@ -421,6 +456,7 @@ class TmuxRunner:
         self._persist_claims()
         self._live, self._interrupting = None, False
         self._limit_until = time.monotonic() + LIMIT_RETRY_S
+        self._handoff_limited = self.machine.state == "rolling_over"
         self.stream.append("rate_limit", {"until_s": LIMIT_RETRY_S, "source": "transcript"})
         self._to("rate_limited", "usage limit")
 
@@ -482,6 +518,8 @@ class TmuxRunner:
             if time.monotonic() >= self._limit_until:
                 self._limit_until = time.monotonic() + LIMIT_RETRY_S
                 self.stream.append("rate_limit", {"until_s": LIMIT_RETRY_S, "source": "screen"})
+            return False
+        if time.monotonic() < self._hold_until:
             return False
         if self.machine.state == "rate_limited":
             if time.monotonic() < self._limit_until:
@@ -565,26 +603,118 @@ class TmuxRunner:
         return self.pane.type_row(first, text)
 
     # -- rollover -------------------------------------------------------------
+    def _mtime(self, path):
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    def _ask_handoff(self, reason):
+        """The handoff turn (R9): the request typed under a runner nonce,
+        then the wait for data/handoff.md to change (the handoff tool writes
+        it last; flip.py's wait). 'clean' when it changed in time;
+        'emergency' when it did not (the file is then written from the
+        transcript's tail); 'stopped', 'rate_limited' and 'login_required'
+        postpone the rollover, never an emergency."""
+        from cousin_lib.runner import rollover as _rollover
+        path = self._data("handoff.md")
+        before = self._mtime(path)
+        self._handoff_limited = self._runner_turn_seen = False
+        out = self._runner_line(_rollover.handoff_request_text(reason))
+        deadline = time.monotonic() + self.handoff_deadline_s
+        why = None
+        if out is Outcome.BLOCKED and self.pane.attention() in LOGIN_SCREENS:
+            self._screen_allows()                      # records login-required.json
+            return "login_required"
+        if out is not Outcome.TYPED:
+            why = "the pane refused the handoff request (%s)" % out.name
+        while why is None:
+            if self._stop.is_set():
+                return "stopped"
+            self._pump()
+            if self._mtime(path) != before:
+                finish = time.monotonic() + TURN_FINISH_S
+                while self._live is not None and time.monotonic() < finish and not self._stop.is_set():
+                    time.sleep(POLL_S)
+                    self._pump()
+                self.stream.append("rollover", {"phase": "handoff", "handoff": "clean"})
+                return "clean"
+            if self._handoff_limited:
+                return "rate_limited"
+            if self.pane.attention() in LOGIN_SCREENS:
+                self._screen_allows()
+                return "login_required"
+            if self._runner_turn_seen and self._live is None:
+                why = "the model finished its turn without calling handoff"
+            if why is None and time.monotonic() >= deadline:
+                why = "handoff timeout (%.0fs)" % self.handoff_deadline_s
+            if why is None:
+                time.sleep(POLL_S)
+        if self._live is not None:
+            self._send_interrupt()
+        tail = transcript.TranscriptStore(self._path, self._session_id).tail_text(self._session_id)
+        _rollover.write_emergency_handoff(self.home, name=self.home.name, reason=why, tail=tail)
+        self.stream.append("rollover", {"phase": "handoff", "handoff": "emergency", "why": why})
+        return "emergency"
+
+    def _exit_pane(self):
+        """`/exit` on the old CLI (SessionEnd `prompt_input_exit`), the pane
+        killed when it has not ended in EXIT_WAIT_S. Returns how it ended."""
+        if not self.pane.alive():
+            return "gone"
+        if self.pane.type_row("/exit", "") is Outcome.TYPED:
+            end = time.monotonic() + EXIT_WAIT_S
+            while time.monotonic() < end:
+                if not self.pane.alive():
+                    return "exit"
+                time.sleep(POLL_S)
+        self.pane.kill()
+        return "killed"
+
+    def _postpone(self, row, reason, why):
+        self.inbox.requeue(row["id"])
+        self._hold_until = time.monotonic() + (LIMIT_RETRY_S if why == "rate_limited" else 0.0)
+        with self._lock:
+            if self.machine.state == "rolling_over":
+                self.machine.to("idle", "rollover postponed: " + why)
+        self.stream.append("rollover", {"phase": "postponed", "reason": reason, "why": why})
+
     def _rollover_row(self, row):
-        """FakeRunner's sequence on a pane: the generation moves once the new
-        session exists; the new session id is written before its pane starts
-        (N9). The handoff before it is Task 7's."""
+        """FakeRunner's sequence on a pane: the handoff turn, end hooks, the
+        archive, a final mine, `/exit`, the new session id written before
+        its pane starts (N9), then the generation, start hooks and the
+        digest. A failure before the new pane runs fails the row and keeps
+        the old session recorded; after it, a failure degrades the rollover
+        and is named in the detail (the SDK kind's point of no return)."""
         from cousin_lib import boot, session
         from cousin_lib.runner import prompt
         from cousin_lib.runner import rollover as _rollover
+        reason = row["body"] or "rollover"
         with self._lock:
             if self.machine.state != "idle":
                 self.inbox.requeue(row["id"])
                 return
-            self.machine.to("rolling_over", row["body"].splitlines()[0][:120] if row["body"] else "rollover")
+            self.machine.to("rolling_over", reason.splitlines()[0][:120])
+        old_sid = self._session_id
+        self.stream.append("rollover", {"phase": "start", "reason": reason, "session_id": old_sid})
+        exited = None
         try:
+            handoff = self._ask_handoff(reason)
+            if handoff == "stopped":
+                self.inbox.requeue(row["id"])          # the next start finishes this rollover
+                self.stream.append("rollover", {"phase": "requeued", "reason": reason})
+                return
+            if handoff in ("rate_limited", "login_required"):
+                self._postpone(row, reason, handoff)
+                return
             session.run_phase(self.home, "end")
             _rollover.archive_generation(self.home, boot.read_generation(self.home))
+            self._mine(final=True)                     # nothing of the old session arrives after this
+            exited = self._exit_pane()
             self._session_id, self._fresh = str(uuid.uuid4()), True
-            self._save_session()
-            self.pane.kill()
             self._path = self._transcript_path()
-            self._claims, self._cursor = {}, 0
+            self._claims, self._cursor, self._runner_nonces = {}, 0, set()
+            self._save_session()                       # the new id before its pane (N9)
             self._persist_claims()
             self.pane = self._make_pane(self._path)
             self.pane.start(self._argv(True), cwd=str(self.home), env_base=self._env_base())
@@ -595,7 +725,10 @@ class TmuxRunner:
                 if self.machine.state == "rolling_over":
                     self.machine.to("errored", "rollover failed: " + message)
                     self.machine.to("idle", "recovered")
-            self.inbox.done(row["id"], FAILED, json.dumps({"reason": row["body"], "error": message}))
+            detail = {"reason": reason, "error": message, "old_session": old_sid,
+                      "new_session": self._session_id if self._session_id != old_sid else None}
+            self.inbox.done(row["id"], FAILED, json.dumps(detail))
+            self.stream.append("rollover", dict(detail, phase="failed"))
             return
         problems, generation = [], boot.read_generation(self.home)
         try:
@@ -618,8 +751,8 @@ class TmuxRunner:
             self.inbox.put(Item(thread_id="system", source="boot", body=digest, sender="runner"))
         except Exception as exc:  # noqa: BLE001 - the session runs on without one
             problems.append("digest: %s: %s" % (type(exc).__name__, exc))
-        detail = {"reason": row["body"], "handoff": "not asked (Task 7)", "generation": generation,
-                  "session_id": self._session_id}
+        detail = {"reason": reason, "handoff": handoff, "exit": exited, "generation": generation,
+                  "old_session": old_sid, "session_id": self._session_id}
         if problems:
             detail["problems"] = problems
         with self._lock:

@@ -127,3 +127,39 @@ def read_from(path, offset):
             entries.append(classify(obj, start, end))
         pos = nl + 1
     return entries, offset + pos
+
+
+class TranscriptStore:
+    """The session store's two framework reads (`entries_after`,
+    `tail_text`, session_store.py) over the CLI's own transcript file, so
+    extract.mine_turn and the emergency handoff work unchanged for the
+    tmux kind. The cursor is a byte offset into the file; `session_id`
+    must be the file's own session."""
+
+    TAIL_BYTES = 256 * 1024
+
+    def __init__(self, path, session_id):
+        self.path, self.session_id = Path(path), session_id
+
+    def entries_after(self, session_id, cursor=0):
+        if session_id != self.session_id:
+            return [], int(cursor)
+        entries, end = read_from(self.path, int(cursor))
+        return [e.raw for e in entries if "_unparsed" not in e.raw], end
+
+    def tail_text(self, session_id, max_chars=2000):
+        """A BOUNDED tail, as the SQLite store's: the assistant text of the
+        file's last TAIL_BYTES, never the whole session."""
+        if session_id != self.session_id:
+            return ""
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return ""
+        start = max(0, size - self.TAIL_BYTES)
+        entries, _ = read_from(self.path, start)
+        texts = []
+        for e in entries[1:] if start else entries:      # the first line may be cut
+            if e.kind == "assistant":
+                texts += _texts((e.raw.get("message") or {}).get("content"))
+        return "\n".join(t for t in texts if t)[-max_chars:]

@@ -158,5 +158,31 @@ class TestLocate(unittest.TestCase):
         self.assertEqual(p, pathlib.Path("~/.claude/projects/-h-w/s.jsonl").expanduser())
 
 
+class TestTranscriptStore(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.path = pathlib.Path(self.dir.name) / "s.jsonl"
+
+    def say(self, text):
+        return json.dumps({"type": "assistant", "message": {"role": "assistant",
+                           "content": [{"type": "text", "text": text}]}}) + "\n"
+
+    def test_entries_after_is_a_byte_cursor_that_never_passes_a_torn_line(self):
+        whole = self.say("one")
+        self.path.write_text(whole + self.say("two")[:10])
+        store = tr.TranscriptStore(self.path, "sid")
+        entries, cursor = store.entries_after("sid", 0)
+        self.assertEqual((len(entries), cursor), (1, len(whole)))
+        self.assertEqual(store.entries_after("sid", cursor), ([], cursor))
+        self.assertEqual(store.entries_after("other", 0), ([], 0), "another session's cursor is not this file's")
+
+    def test_tail_text_is_the_assistant_text_bounded(self):
+        self.path.write_text(self.say("early") + self.say("late"))
+        store = tr.TranscriptStore(self.path, "sid")
+        self.assertEqual(store.tail_text("sid"), "early\nlate")
+        self.assertEqual(store.tail_text("sid", max_chars=4), "late")
+
+
 if __name__ == "__main__":
     unittest.main()

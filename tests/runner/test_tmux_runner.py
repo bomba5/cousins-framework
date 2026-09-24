@@ -29,11 +29,13 @@ class Case(HermeticCase):
         panes = []
 
         def factory(path):
-            p = pane(path) if pane else FakePane(path, **kw)
+            p = pane(path) if pane else FakePane(path, on_prompt=getattr(self, "on_prompt", None), **kw)
             panes.append(p)
             return p
+        deadline = kw.pop("handoff_deadline_s", None)
         r = TmuxRunner(self.home, account=None, pane_factory=factory, config_dir=self.home / ".cfg",
-                       launch_argv=lambda sid, fresh: ["claude", sid])
+                       handoff_deadline_s=deadline,
+                       launch_argv=lambda sid, fresh: ["claude", sid] + (["--fresh"] if fresh else []))
         self.addCleanup(lambda: r.stop(timeout=5))
         self.panes = panes
         return r
@@ -186,6 +188,92 @@ class TestRecovery(Case):
         r2 = self.runner()
         r2.start()
         self.assertTrue(_wait(lambda: self.outcome(r2, rec)[1] == "delivered"))
+
+
+def _handoff_tool(pane, first_line, body):
+    """The model's side of the handoff turn: the tool writes data/handoff.md last."""
+    if "`handoff` tool" in first_line + body:
+        home = pane.transcript.parents[3]
+        (home / "data" / "handoff.md").write_text("# Handoff\n\ndegraded_state: false\n")
+
+
+class TestRollover(Case):
+    def setUp(self):
+        super().setUp()
+        self.home = temp_home(self)
+        (self.home / ".cfg").mkdir()
+
+    def roll(self, r):
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        old = r.session_id()
+        out = r.rollover("contract")
+        self.assertTrue(out["ok"], out)
+        row = r.inbox.get(out["inbox_id"])
+        return old, row, json.loads(row["detail"] or "{}")
+
+    def test_a_clean_handoff_exits_the_old_cli_and_starts_the_new_id_fresh(self):
+        self.on_prompt = _handoff_tool
+        r = self.runner(handoff_deadline_s=5)
+        old, row, detail = self.roll(r)
+        self.assertEqual((row["outcome"], detail["handoff"], detail["exit"]), ("delivered", "clean", "exit"))
+        self.assertEqual(self.panes[0].exits, 1)
+        self.assertEqual(self.panes[0].kills, 0, "the old CLI ended by /exit, not a kill")
+        new = r.session_id()
+        self.assertNotEqual(new, old)
+        self.assertEqual(self.panes[-1].started[-1][0], ["claude", new, "--fresh"])
+        saved = json.loads((self.home / "data" / "runner-session.json").read_text())
+        self.assertEqual(saved["session_id"], new)
+        self.assertIn("`handoff` tool", self.panes[0].typed[0][0] + self.panes[0].typed[0][1])
+        finals = [e["payload"] for e in r.events() if e["kind"] == "extract" and e["payload"].get("final")]
+        self.assertEqual([e["session_id"] for e in finals], [old], "a final mine of the old session")
+
+    def test_a_turn_without_the_handoff_writes_an_emergency_handoff(self):
+        r = self.runner(handoff_deadline_s=5)
+        _old, row, detail = self.roll(r)
+        self.assertEqual((row["outcome"], detail["handoff"]), ("delivered", "emergency"))
+        archived = sorted((self.home / "data" / "generations").glob("gen-*/handoff.md"))
+        self.assertTrue(archived)
+        self.assertIn("degraded_state: true", archived[-1].read_text())
+        self.assertIn("without calling handoff", archived[-1].read_text())
+
+    def test_a_usage_limit_on_the_handoff_turn_postpones_the_rollover(self):
+        self.on_prompt = lambda pane, first, body: "limit" if "`handoff` tool" in first + body else None
+        r = self.runner(handoff_deadline_s=5)
+        from cousin_lib import boot
+        gen = boot.read_generation(self.home)
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        old = r.session_id()
+        from cousin_lib.runner import rollover, wake
+        inbox_id, _ = rollover.put_once(r.inbox, self.home, "contract")   # r.rollover() would wait 30 s
+        wake.poke(self.home)
+        self.assertTrue(_wait(lambda: any(e["kind"] == "rollover" and e["payload"].get("phase") == "postponed"
+                                          for e in r.events())))
+        row = r.inbox.get(inbox_id)
+        self.assertEqual(row["state"], "queued", "the row waits, never an emergency")
+        self.assertEqual((r.session_id(), boot.read_generation(self.home)), (old, gen))
+        self.assertFalse((self.home / "data" / "handoff.md").exists())
+
+    def test_a_recorded_id_whose_cli_never_started_starts_fresh_under_it(self):
+        sid = "5e55a000-0000-4000-8000-000000000001"
+        (self.home / "data").mkdir(exist_ok=True)
+        (self.home / "data" / "runner-session.json").write_text(json.dumps(
+            {"session_id": sid, "kind": "tmux", "fresh": True}))
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].started))
+        self.assertEqual(self.panes[0].started[0][0], ["claude", sid, "--fresh"])
+
+    def test_a_normal_turn_end_mines_the_transcript(self):
+        r = self.runner()
+        r.start()
+        rec = r.enqueue(Item("operator:priya", "chat", "hello", sender="priya"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        self.assertTrue(_wait(lambda: any(e["kind"] == "extract" for e in r.events())))
+        ex = [e["payload"] for e in r.events() if e["kind"] == "extract"][0]
+        self.assertEqual((ex["session_id"], ex["turn"]), (r.session_id(), 1))
+        self.assertGreaterEqual(ex["written"], 0)
 
 
 if __name__ == "__main__":

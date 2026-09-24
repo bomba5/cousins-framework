@@ -10,7 +10,9 @@ digests raw_fold leaves behind):
 - classify() picks the file: truth level first (operator-stated goes to
   operator-calibration), then whole-word topic and source keywords;
 - each file is bounded to max_lines, ranked by entry count then
-  recency;
+  recency, except that machine topics (MACHINE_PREFIXES: the transcript
+  miners, the jobs ledger, framework state changes) rank after every
+  authored topic, so the log fills only the lines memory leaves;
 - a file with nothing to say keeps the stub, so readers that test for
   the stub keep working;
 - a topic whose NEWEST entry is L5_OBSOLETE (`cousin-memory obsolete`,
@@ -40,6 +42,12 @@ DEFAULT_MAX_LINES = 40
 DEFAULT_SINCE_DAYS = 3650
 LINE_CONTENT_CHARS = 220
 DEFAULT_TRUTH_LEVEL = memory.DEFAULT_TRUTH_LEVEL
+# Topics the framework's own machinery writes, not a cousin: the
+# transcript miners (episode:), the jobs ledger (job:) and framework
+# state changes (framework:). Indexed like every raw entry, but in a
+# distilled file they rank after every authored topic, so they take
+# only the lines authored memory leaves (master plan phase 7 task 3).
+MACHINE_PREFIXES = ("episode:", "job:", "framework:")
 OPERATOR_TRUTH_LEVEL = "operator-stated"
 
 AUTO_MARKER = ("<!-- distilled:auto - lines below are regenerated from"
@@ -72,6 +80,12 @@ def classify(entry):
                          hay):
                 return fname
     return "decisions.md"
+
+
+def is_machine_topic(topic):
+    """True for a topic a framework writer produced (MACHINE_PREFIXES),
+    matched at the start of the stripped topic, never inside it."""
+    return str(topic or "").strip().startswith(MACHINE_PREFIXES)
 
 
 def _ts(entry):
@@ -172,15 +186,16 @@ def distill(home, *, max_lines=DEFAULT_MAX_LINES,
                     for e in entries}
         superseded = len(distinct) - 1
         per_file[classify(newest)].append(
-            (count, _ts(newest), _line(newest, count, superseded)))
+            (is_machine_topic(topic), count, _ts(newest),
+             _line(newest, count, superseded)))
 
     report = {"files": {}, "topics": len(groups), "entries": total,
               "obsolete": obsolete}
     ddir = memory.distilled_dir(home)
     for fname in memory.DISTILLED_FILES:
         ranked = sorted(per_file.get(fname, []),
-                        key=lambda t: (-t[0], -t[1]))[:max_lines]
-        lines = [t[2] for t in ranked]
+                        key=lambda t: (t[0], -t[1], -t[2]))[:max_lines]
+        lines = [t[3] for t in ranked]
         path = ddir / fname
         curated = _curated_block(path)
         if not lines and not curated:
@@ -190,8 +205,10 @@ def distill(home, *, max_lines=DEFAULT_MAX_LINES,
             body = ("\n".join(lines) + "\n" if lines
                     else "_(nothing distilled from raw yet)_\n")
             auto = ("%s: newest entry per topic, ranked by entry count"
-                    " then recency; rewritten on every boot and"
-                    " `cousin-memory distill`._\n\n%s" % (AUTO_HEADER, body))
+                    " then recency, the framework's own log (episode:,"
+                    " job:, framework:) after every authored topic;"
+                    " rewritten on every boot and `cousin-memory"
+                    " distill`._\n\n%s" % (AUTO_HEADER, body))
             text = head.rstrip("\n") + "\n\n" + AUTO_MARKER + "\n" + auto
         if not path.exists() or path.read_text() != text:
             tmp = path.with_suffix(".md.tmp")

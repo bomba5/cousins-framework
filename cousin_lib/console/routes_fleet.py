@@ -486,6 +486,16 @@ def register():
             value = body.get(key)
             if value is not None and value != "":
                 runtime[key] = value
+        # The lane: `runner` (sdk or fake) and the `account` it runs on;
+        # absent or empty, COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT
+        # apply (unset: the tmux lane).
+        for key in ("runner", "account"):
+            value = body.get(key)
+            if value is None or value == "":
+                continue
+            if not isinstance(value, str):
+                raise HttpError(400, "%s must be a string" % key)
+            runtime[key] = value
         try:
             out = spawn.create_cousin(
                 req.server.root, slug=slug, role=role,

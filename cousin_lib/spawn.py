@@ -138,12 +138,12 @@ def _toml_quote(value):
 
 def _write_cousin_toml(home, *, slug, name, role, port, operator=None,
                        model=None, effort=None, heartbeat=None,
-                       memory_scope=None):
+                       memory_scope=None, runner=None, account=None):
     """Write via a temporary file, re-parse, then rename into place: a
     config that cannot be read back is never persisted. The [operator],
-    [runtime], [heartbeat] and [memory] tables exist only when a value
-    was given for them: an absent key is the documented default, never
-    a copied-out one."""
+    [runtime], [heartbeat], [memory] and [agent] tables exist only when
+    a value was given for them: an absent key is the documented default,
+    never a copied-out one."""
     text = (
         "[cousin]\n"
         "slug = %s\n"
@@ -168,6 +168,10 @@ def _write_cousin_toml(home, *, slug, name, role, port, operator=None,
     if memory_scope is not None:
         text += "\n[memory]\nscope = %s\n" % _toml_quote(
             normalize_scope(memory_scope))
+    if runner is not None:
+        text += "\n[agent]\nrunner = %s\n" % _toml_quote(runner)
+        if account is not None:
+            text += "account = %s\n" % _toml_quote(account)
     tomllib.loads(text)
     fd, tmp = tempfile.mkstemp(dir=home, suffix=".toml.tmp")
     with os.fdopen(fd, "w") as fh:
@@ -186,16 +190,61 @@ def _write_identity_files(home, *, claude_md, name, role):
     (home / "MEMORY.md").write_text("# %s - memory index\n" % name)
 
 
+def spawn_lane(root, runner=None, account=None):
+    """(runner, account) a new cousin is created with. runner None reads
+    COUSIN_DEFAULT_RUNNER, where unset or empty is the tmux lane (None,
+    nothing written); a runner must be sdk or fake. account None reads
+    COUSIN_DEFAULT_ACCOUNT, which applies only to a runner cousin; an
+    explicit account needs a runner. An account must be `host` or one of
+    config/accounts.toml's. SpawnError on anything else, before any
+    write."""
+    from cousin_lib import accounts
+    runner_from = "runner"
+    if runner is None:
+        runner = os.environ.get("COUSIN_DEFAULT_RUNNER") or None
+        runner_from = "COUSIN_DEFAULT_RUNNER"
+    if runner is not None and runner not in RUNNER_KINDS:
+        raise SpawnError("%s must be one of %s, got %r"
+                         % (runner_from, ", ".join(RUNNER_KINDS), runner))
+    account_from = "account"
+    if account is None:
+        account = (os.environ.get("COUSIN_DEFAULT_ACCOUNT") or None) \
+            if runner is not None else None
+        account_from = "COUSIN_DEFAULT_ACCOUNT"
+    if account is None:
+        return runner, None
+    if not isinstance(account, str):
+        raise SpawnError("%s must be an account name, got %r"
+                         % (account_from, account))
+    if runner is None:
+        raise SpawnError("account %r needs a runner: an account is what a"
+                         " runner cousin runs on (runner = sdk or fake)"
+                         % account)
+    if account != accounts.HOST:
+        try:
+            known = accounts.load(root)
+        except accounts.AccountsError as err:
+            raise SpawnError("%s %r: %s" % (account_from, account, err))
+        if account not in known:
+            raise SpawnError("%s %r is not in config/accounts.toml (known: %s)"
+                             % (account_from, account,
+                                ", ".join(sorted(known)) or "none"))
+    return runner, account
+
+
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
                   voice=None, port=None, template_path=None, operator=None,
                   model=None, effort=None, heartbeat=None, memory_scope=None,
-                  _is_live=_is_live):
+                  runner=None, account=None, _is_live=_is_live):
     """The creation sequence from the spec: validate, allocate, create,
     write atomically, render, provision the MCP adapter - and on any
     failure after the home exists, remove everything this run created.
     model, effort, heartbeat and memory_scope are optional and land in
     cousin.toml ([runtime], [heartbeat] context_beat_seconds, [memory]
-    scope); each is validated before anything is written.
+    scope); runner and account land in [agent] (spawn_lane: the
+    COUSIN_DEFAULT_RUNNER and COUSIN_DEFAULT_ACCOUNT defaults, where
+    unset is the tmux lane, unchanged); each is validated before
+    anything is written.
     Returns {slug, home, port}."""
     root = FrameworkConfig(root).root
     if not slug or not _SLUG_RE.match(slug):
@@ -204,6 +253,7 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         )
     _check_spawn_options(model=model, effort=effort, heartbeat=heartbeat,
                          memory_scope=memory_scope)
+    runner, account = spawn_lane(root, runner, account)
     home = root / "cousins" / slug
     if (home / "cousin.toml").is_file():
         raise SpawnError("cousin %r already exists" % slug)
@@ -243,7 +293,8 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         _write_cousin_toml(home, slug=slug, name=name, role=role,
                            port=port, operator=operator, model=model,
                            effort=effort, heartbeat=heartbeat,
-                           memory_scope=memory_scope)
+                           memory_scope=memory_scope, runner=runner,
+                           account=account)
         _write_identity_files(home, claude_md=claude_md, name=name,
                               role=role)
         # The harness-side registration of the cousin's tool surface:
@@ -1073,6 +1124,23 @@ def _start_existing(root, slug, agent_cmd, resume=False):
     return 0
 
 
+def _start_existing_runner(root, slug):
+    """`cousin-spawn <slug> --start` on a runner cousin: the supervisor
+    starts it (a no-op when a runner already holds its lock)."""
+    from cousin_lib import delivery
+    home = root / "cousins" / slug
+    if delivery.is_alive(home):
+        print("%s is already running (cousin-runner); nothing started" % slug)
+        return 0
+    try:
+        start_cousin(home, agent_cmd=None, root=root)
+    except SpawnError as err:
+        print("cousin-spawn: start failed: %s" % err, file=sys.stderr)
+        return 1
+    print("started %s (cousin-supervisor)" % slug)
+    return 0
+
+
 def _repair_settings(root, slug):
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
@@ -1172,9 +1240,19 @@ def spawn_main(argv=None):
                         metavar="{%s}" % ",".join(MEMORY_SCOPES),
                         help="cousin.toml [memory] scope (absent: private);"
                              " shared = may propose to the shared tier")
+    parser.add_argument("--runner", choices=RUNNER_KINDS,
+                        help="cousin.toml [agent] runner: the cousin runs on"
+                             " cousin-runner under cousin-supervisor, not in"
+                             " tmux (absent: COUSIN_DEFAULT_RUNNER, else"
+                             " tmux)")
+    parser.add_argument("--account",
+                        help="cousin.toml [agent] account, one of"
+                             " config/accounts.toml's (a runner cousin only;"
+                             " absent: COUSIN_DEFAULT_ACCOUNT, else host)")
     parser.add_argument("--start", action="store_true",
                         help="start the cousin (tmux session + chat"
-                             " server) after creating it; on an EXISTING"
+                             " server; a runner cousin through"
+                             " cousin-supervisor) after creating it; on an EXISTING"
                              " cousin, given without --role/--voice, just"
                              " start it (a no-op when already running)")
     parser.add_argument("--resume", action="store_true",
@@ -1228,11 +1306,24 @@ def spawn_main(argv=None):
               " cousin-spawn %s --start" % (args.slug, args.slug),
               file=sys.stderr)
         return 2
+    on_runner = False
+    if start_existing:
+        on_runner = runner_lane(root / "cousins" / args.slug)
+    elif args.start:
+        try:
+            on_runner = spawn_lane(root, args.runner, args.account)[0] \
+                is not None
+        except SpawnError as err:
+            print("cousin-spawn: %s" % err, file=sys.stderr)
+            return 2
+    if start_existing and on_runner:
+        return _start_existing_runner(root, args.slug)
     agent_cmd = None
-    if args.start:
+    if args.start and not on_runner:
         # Everything a start needs is checked before anything is
         # created: a half-made cousin whose start then crashes is the
-        # failure this exists to prevent.
+        # failure this exists to prevent. A runner cousin needs neither
+        # config/agent-cmd nor tmux: cousin-supervisor starts it.
         try:
             agent_cmd = _read_agent_cmd(root)
         except SpawnError as err:
@@ -1255,7 +1346,8 @@ def spawn_main(argv=None):
             role_paragraph=args.role_paragraph, voice=args.voice,
             port=args.port, operator=args.operator, model=args.model,
             effort=args.effort, heartbeat=args.heartbeat,
-            memory_scope=args.memory_scope,
+            memory_scope=args.memory_scope, runner=args.runner,
+            account=args.account,
         )
     except SpawnError as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)

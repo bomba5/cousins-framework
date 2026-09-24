@@ -178,10 +178,10 @@ Spawn a cousin. Body:
 {"slug": "wren", "role": "research helper", "voice": "dry, short answers",
  "name": "Wren", "role_paragraph": "...", "port": 8611, "operator": "ana",
  "model": "claude-opus-5", "effort": "high", "heartbeat": 3600,
- "memory_scope": "private"}
+ "memory_scope": "private", "runner": "sdk", "account": "metered"}
 ```
 
-`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
+`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk` or `fake`) and `account` go to `[agent]`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
 
 ### `GET /api/spawn/options`
 

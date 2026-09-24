@@ -83,7 +83,9 @@ Every option:
 | `--effort` | `[runtime] effort`: `low`, `medium`, `high`, `xhigh`, `max` |
 | `--heartbeat` | `[heartbeat] context_beat_seconds` (default 3600) |
 | `--memory-scope` | `[memory] scope`: `private` (default) or `shared` (may propose memories to the shared tier; the retired `both` is read as `shared`) |
-| `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it |
+| `--runner` | `[agent] runner`: `sdk` or `fake` puts the cousin on `cousin-runner`, started by `cousin-supervisor` instead of in tmux; absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means tmux |
+| `--account` | `[agent] account`, one of `config/accounts.toml`'s (or `host`); a runner cousin only; absent, `COUSIN_DEFAULT_ACCOUNT` applies to a runner cousin |
+| `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. A runner cousin is started by asking the running `cousin-supervisor` (no `config/agent-cmd`, no tmux); with no supervisor the start fails, exit 1 |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
 
 An option you leave out writes no key, so the default applies and can change

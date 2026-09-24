@@ -25,7 +25,10 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one (what the start-at-boot unit
-uses); `--repair-settings` rewrites an
+uses); `--runner sdk|fake` and `--account <name>` make it a runner cousin
+(`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
+`COUSIN_DEFAULT_ACCOUNT`), which `--start` starts through `cousin-supervisor`;
+`--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
 (every start and flip does that by itself). See [cousins](cousins.md).

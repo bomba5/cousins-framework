@@ -544,7 +544,9 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_SLUG` | set by the framework for session hooks, chat hooks and the MCP server |
 | `COUSIN_TMUX_SOCKET` | a non-default tmux socket, read by the chat server and the watchdog. The console takes `--tmux-socket` instead. |
 | `COUSIN_FILTER_OVERRIDE` | `1` switches the outbound filter off for one command |
-| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you |
+| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
+| `COUSIN_DEFAULT_RUNNER` | `sdk` or `fake`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
+| `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 
 ## cousin.toml
 
@@ -566,6 +568,15 @@ tmux_session = "wren"
 
 [operator]
 name = "ana"
+```
+
+With `--runner` (or `COUSIN_DEFAULT_RUNNER`) it also writes `[agent] runner`,
+and `account` when one is given (`--account` or `COUSIN_DEFAULT_ACCOUNT`):
+
+```
+[agent]
+runner = "sdk"
+account = "metered"
 ```
 
 `[cousin]`:
@@ -698,6 +709,12 @@ unknown account, or a secret file that is open to others or malformed, is
 exit 2; a missing secret file is let through as a login to do, see
 [accounts.toml](#accountstoml)). The terms risk of running a cousin on a login is the
 user's.
+
+`cousin-spawn --runner sdk|fake [--account <name>]` (or the console's spawn
+with `runner` and `account`) writes both keys when the cousin is created, and
+`COUSIN_DEFAULT_RUNNER` / `COUSIN_DEFAULT_ACCOUNT` supply them when the flags
+are left out (see [Environment variables](#environment-variables)); an
+account without a runner is refused.
 
 `auto_start` (default `true`) says whether `cousin-supervisor` starts this
 runner cousin by itself when it starts or rescans (see

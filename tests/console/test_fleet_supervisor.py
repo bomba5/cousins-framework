@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+import tomllib
 from unittest import mock
 
 from tests._stub_supervisor import StubSupervisor
@@ -176,3 +177,45 @@ class TestRestartSupervised(_Case):
         self.assertEqual(status, 200, body)
         self.assertTrue(body["supervised"])
         time.sleep(0.8)                          # let the restart timer fire into exit_fn
+
+
+class TestCreateRunnerCousin(_Case):
+    """POST /api/cousins takes `runner` and `account` (phase 6 task 2)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "templates").mkdir()
+        (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
+            "# {{NAME}} ({{SLUG}}:{{PORT}})\n{{ROLE_ONE_LINE}}\n"
+            "{{ROLE_PARAGRAPH}}\n## Voice\n{{VOICE_GUIDE}}\n")
+        (self.root / "config" / "accounts.toml").write_text(
+            '[accounts.metered]\nkind = "anthropic-key"\n')
+
+    def test_post_with_runner_and_account_creates_a_runner_cousin(self):
+        from cousin_lib import supervisor
+        self.serve()
+        status, body = self.post("/api/cousins", {
+            "slug": "toki", "role": "r", "voice": "v", "port": 8123,
+            "runner": "fake", "account": "metered"})
+        self.assertEqual(status, 201, body)
+        data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
+        self.assertEqual(data["agent"], {"runner": "fake", "account": "metered"})
+        self.assertEqual([c.slug for c in supervisor.runner_cousins(self.root)], ["toki"])
+
+    def test_empty_runner_and_account_are_the_default(self):
+        self.serve()
+        status, body = self.post("/api/cousins", {
+            "slug": "toki", "role": "r", "voice": "v", "port": 8123,
+            "runner": "", "account": None})
+        self.assertEqual(status, 201, body)
+        data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
+        self.assertNotIn("agent", data)
+
+    def test_a_bad_runner_or_account_is_400_and_nothing_is_created(self):
+        self.serve()
+        for extra in ({"runner": "tmux"}, {"runner": 5}, {"account": ["metered"]},
+                      {"runner": "sdk", "account": "nobody"}):
+            payload = dict({"slug": "toki", "role": "r", "voice": "v"}, **extra)
+            status, body = self.post("/api/cousins", payload)
+            self.assertEqual(status, 400, (extra, body))
+            self.assertFalse((self.root / "cousins" / "toki").exists(), extra)

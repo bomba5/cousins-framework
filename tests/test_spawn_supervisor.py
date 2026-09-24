@@ -4,14 +4,18 @@ task 2, R10): `spawn.start_cousin`/`stop_cousin` on a cousin whose
 never touch tmux; the tmux lane is unchanged. A stub supervisor answers
 the protocol; one test runs the real one over a `fake` runner. Invented
 cast only; every wait has a deadline."""
+import contextlib
+import io
 import os
 import pathlib
+import shutil
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from unittest import mock
 
 from cousin_lib import spawn, supervisor
@@ -193,3 +197,149 @@ class TestRealSupervisor(_Case):
                         (self.dir / "supervisor.log").read_text())
         spawn.stop_cousin(home, wait=False)
         self.assertTrue(held.exists())
+
+
+# ---- phase 6 task 2, second half: a new cousin is a runner cousin where the install says so
+
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+BASE_TOML = ('[cousin]\nslug = "wren"\nname = "Wren"\nrole = "example cousin"\n\n'
+             '[chat]\nport = 8100\ntmux_session = "wren"\n')
+ACCOUNTS = ('[accounts.metered]\nkind = "anthropic-key"\n\n'
+            '[accounts.fleet]\nkind = "claude-login"\n')
+
+
+class _CreateCase(_Case):
+    def setUp(self):
+        super().setUp()
+        (self.root / "templates").mkdir()
+        shutil.copy(_REPO_ROOT / "templates" / "cousin-CLAUDE.template.md",
+                    self.root / "templates" / "cousin-CLAUDE.template.md")
+        self.home = self.root / "cousins" / "wren"
+
+    def accounts(self):
+        (self.root / "config" / "accounts.toml").write_text(ACCOUNTS)
+
+    def create(self, **kw):
+        args = dict(slug="wren", name="Wren", role="example cousin",
+                    voice="Plain and helpful.", port=8100)
+        args.update(kw)
+        return spawn.create_cousin(self.root, **args)
+
+    def toml(self):
+        return (self.home / "cousin.toml").read_text()
+
+    def refused(self, **kw):
+        with self.assertRaises(spawn.SpawnError) as caught:
+            self.create(**kw)
+        self.assertFalse(self.home.exists(), "a refused create wrote %s" % self.home)
+        return str(caught.exception)
+
+    def cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = spawn.spawn_main(list(argv) + ["--root", str(self.root)])
+        return rc, out.getvalue(), err.getvalue()
+
+
+class TestCreateOnTheRunnerLane(_CreateCase):
+    def test_no_env_and_no_argument_is_the_tmux_cousin_unchanged(self):
+        """guard: the cousin.toml spawn wrote before this task, byte for byte."""
+        self.create()
+        self.assertEqual(self.toml(), BASE_TOML)
+
+    def test_an_empty_env_is_the_tmux_lane(self):
+        os.environ["COUSIN_DEFAULT_RUNNER"] = ""
+        os.environ["COUSIN_DEFAULT_ACCOUNT"] = ""
+        self.create()
+        self.assertEqual(self.toml(), BASE_TOML)
+
+    def test_the_env_default_runner_is_written(self):
+        os.environ["COUSIN_DEFAULT_RUNNER"] = "sdk"
+        self.create()
+        self.assertEqual(self.toml(), BASE_TOML + '\n[agent]\nrunner = "sdk"\n')
+
+    def test_the_env_default_account_goes_with_the_runner(self):
+        self.accounts()
+        os.environ["COUSIN_DEFAULT_RUNNER"] = "sdk"
+        os.environ["COUSIN_DEFAULT_ACCOUNT"] = "metered"
+        self.create()
+        self.assertEqual(self.toml(), BASE_TOML
+                         + '\n[agent]\nrunner = "sdk"\naccount = "metered"\n')
+
+    def test_an_env_account_without_a_runner_writes_nothing(self):
+        self.accounts()
+        os.environ["COUSIN_DEFAULT_ACCOUNT"] = "metered"
+        self.create()
+        self.assertEqual(self.toml(), BASE_TOML)
+
+    def test_explicit_arguments_beat_the_env(self):
+        self.accounts()
+        os.environ["COUSIN_DEFAULT_RUNNER"] = "sdk"
+        os.environ["COUSIN_DEFAULT_ACCOUNT"] = "metered"
+        self.create(runner="fake", account="fleet")
+        data = tomllib.loads(self.toml())
+        self.assertEqual(data["agent"], {"runner": "fake", "account": "fleet"})
+
+    def test_an_invalid_runner_is_refused_before_anything_is_written(self):
+        self.assertIn("runner must be one of sdk, fake", self.refused(runner="tmux"))
+        os.environ["COUSIN_DEFAULT_RUNNER"] = "docker"
+        self.assertIn("COUSIN_DEFAULT_RUNNER", self.refused())
+
+    def test_an_unknown_account_is_refused_before_anything_is_written(self):
+        self.assertIn("not in config/accounts.toml",
+                      self.refused(runner="sdk", account="metered"))   # no accounts.toml
+        self.accounts()
+        self.assertIn("not in config/accounts.toml",
+                      self.refused(runner="sdk", account="nobody"))
+        os.environ["COUSIN_DEFAULT_RUNNER"] = "sdk"
+        os.environ["COUSIN_DEFAULT_ACCOUNT"] = "nobody"
+        self.assertIn("COUSIN_DEFAULT_ACCOUNT", self.refused())
+
+    def test_an_account_without_a_runner_is_refused(self):
+        self.accounts()
+        self.assertIn("needs a runner", self.refused(account="metered"))
+
+    def test_the_created_cousin_is_the_supervisors(self):
+        self.create(runner="fake")
+        self.assertTrue(spawn.runner_lane(self.home))
+        self.assertEqual([c.slug for c in supervisor.runner_cousins(self.root)], ["wren"])
+
+
+class TestSpawnCliOnTheRunnerLane(_CreateCase):
+    ARGS = ("wren", "--name", "Wren", "--role", "example cousin",
+            "--voice", "Plain and helpful.", "--port", "8100")
+
+    def test_runner_and_account_flags(self):
+        self.accounts()
+        rc, out, err = self.cli(*self.ARGS, "--runner", "fake", "--account", "metered")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(tomllib.loads(self.toml())["agent"],
+                         {"runner": "fake", "account": "metered"})
+
+    def test_an_unknown_account_exits_2_with_nothing_written(self):
+        rc, out, err = self.cli(*self.ARGS, "--runner", "fake", "--account", "nobody")
+        self.assertEqual(rc, 2)
+        self.assertIn("nobody", err)
+        self.assertFalse(self.home.exists())
+
+    def test_start_on_the_runner_lane_asks_the_supervisor_not_tmux(self):
+        # no config/agent-cmd and no tmux: neither is the runner lane's
+        stub = self.stub()
+        os.environ["PATH"] = str(self.dir / "empty-bin")
+        rc, out, err = self.cli(*self.ARGS, "--runner", "fake", "--start")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(stub.ops(), [("start", "wren")])
+        self.assertIn("started wren", out)
+
+    def test_start_of_an_existing_runner_cousin_asks_the_supervisor(self):
+        self.create(runner="fake")
+        stub = self.stub()
+        rc, out, err = self.cli("wren", "--start")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(stub.ops(), [("start", "wren")])
+
+    def test_start_with_no_supervisor_keeps_the_home_and_says_how(self):
+        rc, out, err = self.cli(*self.ARGS, "--runner", "fake", "--start")
+        self.assertEqual(rc, 1)
+        self.assertIn("cousin-supervisor run", err)
+        self.assertTrue((self.home / "cousin.toml").is_file())

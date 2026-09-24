@@ -55,7 +55,9 @@ def _clean_name(name):
 
 def paste_header(name):
     """The one-line header typed before a chat line that may be read as a
-    paste: `(Chat <Name>): <Name>'s message follows in full below.`
+    paste: `(Chat <Name>): <Name>'s message follows in full below;
+    answer the message, not this line.` The second clause makes it read
+    as a label for what follows, not a message of its own to answer.
 
     Why it exists: Claude Code treats a long burst of typed input (one
     read over 800 characters, or a bracketed paste) as a paste, puts it
@@ -74,7 +76,8 @@ def paste_header(name):
     It is built from the sender's name alone, never from the message, so
     a message cannot forge one."""
     name = _clean_name(name)
-    return "(Chat %s): %s's message follows in full below." % (name, name)
+    return ("(Chat %s): %s's message follows in full below; answer the"
+            " message, not this line." % (name, name))
 
 
 def compose_delivery(name, message, *, marker_path, attachments=(),
@@ -184,7 +187,11 @@ class TmuxInjector:
     SEND_KEYS_MAX_BYTES) is preceded by paste_header(sender): typed as
     its own send-keys call, with no newline, then a pause (header_settle)
     so the agent reads it as typing before the body arrives. The one
-    Enter still comes after the body and submits both. A short
+    Enter still comes after the body and submits both. The attention
+    gate is read again after the pause. If the body cannot be typed, or
+    the pane now shows an attention pattern, the header is erased with
+    one BSpace per character (never Escape: a double Escape opens the
+    CLI's rewind) and nothing is submitted. A short
     single-line message, and anything delivered without a sender (loops,
     schedules, meetings, reactions), is typed exactly as before.
 
@@ -240,6 +247,32 @@ class TmuxInjector:
     def _may_read_as_paste(self, text):
         return ("\n" in text or "\r" in text
                 or len(text.encode("utf-8")) > self.paste_header_min_bytes)
+
+    def _skipped(self, blocked, typed="nothing typed"):
+        print(
+            "[chat-server] tmux delivery SKIPPED target=%r: the pane shows"
+            " %r (waiting on a person, not ready); %s"
+            % (self.session, blocked, typed),
+            file=self.log, flush=True,
+        )
+
+    def _erase(self, header):
+        """Take a typed header back out of the input box: one BSpace per
+        character, in one call, so a failed or skipped body never leaves
+        it to prefix the next delivery. Never Escape (a double Escape
+        opens the CLI's rewind, which can roll back the conversation and
+        files) and never C-u (unmeasured in the CLI's input). A failed
+        erase is logged; nothing else is typed."""
+        r = self._tmux("send-keys", "-t", self.session,
+                       *(["BSpace"] * len(header)))
+        if r.returncode != 0:
+            print(
+                "[chat-server] tmux header erase FAILED (rc=%d) target=%r:"
+                " the header may still be in the input box: %s"
+                % (r.returncode, self.session, (r.stderr or "")[:200]),
+                file=self.log, flush=True,
+            )
+        return r.returncode == 0
 
     def _failed(self, r):
         # The only trace that the cousin never received the message
@@ -308,13 +341,7 @@ class TmuxInjector:
             try:
                 blocked = self._blocked_by()
                 if blocked is not None:
-                    print(
-                        "[chat-server] tmux delivery SKIPPED target=%r:"
-                        " the pane shows %r (waiting on a person, not"
-                        " ready); nothing typed"
-                        % (self.session, blocked),
-                        file=self.log, flush=True,
-                    )
+                    self._skipped(blocked)
                     return False
                 mode = self._mode()
                 if mode:
@@ -324,20 +351,33 @@ class TmuxInjector:
                         # text as commands; put it back in typing mode.
                         self._tmux("send-keys", "-t", self.session, "-l",
                                    mode["insert_keys"])
+                header = None
                 if sender and self._may_read_as_paste(text):
                     # typed on its own, no newline, trailing space as a
                     # separator: keystrokes, not part of the paste below
+                    header = paste_header(sender) + " "
                     r = self._tmux("send-keys", "-t", self.session, "-l",
-                                   paste_header(sender) + " ")
+                                   header)
                     if r.returncode != 0:
                         self._failed(r)
                         return False
                     time.sleep(self.header_settle)
+                    blocked = self._blocked_by()
+                    if blocked is not None:
+                        # a menu came up during the pause: the body
+                        # would pick its options
+                        self._erase(header)
+                        self._skipped(blocked, "header erased, body not"
+                                      " typed")
+                        return False
                 r = self._paste(text)
                 if r.returncode != 0:
                     # Nothing was pasted, so there is nothing to submit:
-                    # stop here rather than pressing Enter into the void.
+                    # stop here rather than pressing Enter into the void,
+                    # and take back a header typed ahead of it.
                     self._failed(r)
+                    if header is not None:
+                        self._erase(header)
                     return False
                 time.sleep(self.settle(len(text)))
                 self._tmux("send-keys", "-t", self.session, "Enter")

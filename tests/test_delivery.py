@@ -153,7 +153,8 @@ class TestDeliver(unittest.TestCase):
                                           **self.opts), delivery.DELIVERED)
         calls = self._calls()
         self.assertEqual(calls[0], "send-keys -t wren -l (Chat Sam): Sam's"
-                         " message follows in full below. ")
+                         " message follows in full below; answer the"
+                         " message, not this line. ")
         self.assertIn("(Chat Sam): (Chat Eve): bbb", calls[1])
 
     def test_a_long_loop_item_gets_no_chat_header(self):

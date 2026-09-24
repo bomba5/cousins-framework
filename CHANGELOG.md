@@ -13,8 +13,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   one cousin's transcript 41 of 244 inbound messages arrived that way, with
   nothing typed outside the block. A chat line over 600 bytes, or with a
   newline, is now preceded by `(Chat <Name>): <Name>'s message follows in
-  full below.`, typed as its own keystrokes with a short pause before the
-  body. The header comes from the sender's name only; the line itself, its
+  full below; answer the message, not this line.`, typed as its own
+  keystrokes with a short pause before the body. If the body then fails, or
+  a login or trust menu appears during the pause, the header is backspaced
+  out and nothing is submitted. The header comes from the sender's name only; the line itself, its
   `(Chat <Name>): ` prefix and the single Enter are unchanged, and short
   messages are typed exactly as before (docs/reference/chat-api.md).
 

@@ -24,6 +24,37 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   home's `.mcp.json` may be present and how their tools are named. It
   applies at each cousin's next rollover; a restart resumes the recorded
   prompt.
+- The `job` tool has a `run` command: `title`, `argv` (the command as an
+  array, never a shell string), optional `desc` and `log` (relative to the
+  home and confined to it). It is `cousin-job start shell --json [--desc D]
+  [--home-log L] -- TITLE CMD`, the same launcher, on both lanes, with the
+  title after `--` so no title is read as an option: the command runs detached in its own process group from the
+  cousin's home, its output goes to the row's log, and the row closes with
+  its exit code. It returns the job id and log path at once, and an answer
+  from the launcher without a job id is an error naming what came back. An
+  empty argv, a non-string element, a program starting with `-`, or a log
+  outside the home or in `.secrets` is refused before a row exists. A cousin no longer needs `cousin-job`
+  through Bash for a tracked long command, and the runner contract says so.
+  An existing cousin's registry gains `run` at its next start or flip; the
+  job tool's description and the `kind` text there keep their old wording,
+  because the registry sync never changes a value a cousin already has.
+- MCP registry: an `array` placeholder is checked (a JSON array of its
+  `items` type, not empty unless optional), and a command's options go
+  before a literal `--` in its argv.
+- `cousin-job start KIND [options] -- TITLE [CMD...]`: with the title after
+  `--`, nothing after it is re-read as cousin-job's own options (the job
+  tool's `start` and `run` both use this shape, so a model's title or
+  command can never set `--log`). The title-first shape keeps its options
+  as before. A command whose program starts with `-` is refused, exit 2,
+  no row.
+- `cousin-job start --home-log REL`: a log path confined to the cousin's
+  home with the console's own rule (home_files.resolve_in): absolute, `~`,
+  `..` and `.secrets` are refused, exit 2, no row.
+
+### Changed
+- `cousin-job start ... --log PATH -- CMD` records the log path as absolute,
+  so the console finds a relative one. `--log` itself stays unconfined: it
+  is the operator's own flag.
 
 ### Fixed
 - A cousin moved to the runner by `cousin-migrate apply` is handed its

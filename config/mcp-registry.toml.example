@@ -97,15 +97,15 @@ stdin = ["text"]
 
 [tools.job]
 command = "cousin-job"
-description = "Track sub-agents and background work: start, done, fail, list, show."
+description = "Track sub-agents and background work: start, done, fail, list, show, and run, which launches a long shell command as a tracked job (its output in the row's log, the row closed with its exit code) and returns the job id at once."
 
 [tools.job.properties]
 # shell is left out of the kind enum on purpose: start takes no command,
 # so a shell row started here would stay "running" forever. The adapter
 # enforces the enum and answers with the description below.
-kind = { type = "string", enum = ["subagent", "build", "other"], description = "(start) not shell: start takes no command, so a shell row would never close. For long shell work use a Bash call with run_in_background (tracked automatically by the job hooks), or run `cousin-job start shell TITLE -- CMD` from a shell, which launches CMD and closes the row with its exit code" }
-title = { type = "string", description = "(start)" }
-desc = { type = "string", description = "context for the job (start)" }
+kind = { type = "string", enum = ["subagent", "build", "other"], description = "(start) not shell: start takes no command, so a shell row would never close. For a long shell command use `run`, which launches it and closes the row with its exit code (or a Bash call with run_in_background, tracked by the job hooks)" }
+title = { type = "string", description = "(start, run)" }
+desc = { type = "string", description = "context for the job (start, run)" }
 id = { type = "integer", description = "job id (done, fail, show)" }
 summary = { type = "string", optional = true, description = "(done, fail)" }
 exit = { type = "integer", description = "exit code (fail)" }
@@ -113,10 +113,21 @@ status = { type = "string", description = "filter (list)" }
 mine = { type = "boolean", description = "only this cousin's jobs (list)" }
 active = { type = "boolean", description = "(list)" }
 json = { type = "boolean", description = "machine output (start, list, show)" }
+argv = { type = "array", items = "string", description = "the command as a list, one element per argument, never a shell string (run)" }
+log = { type = "string", optional = true, description = "log file, relative to your home (not absolute, no .., not in .secrets); default: the job's own log under data/job-logs (run)" }
 
 [tools.job.commands.start]
-argv = ["start", "{kind}", "{title}"]
+# The title after `--`: whatever it says, it is never read as an option.
+argv = ["start", "{kind}", "--", "{title}"]
 options = { desc = "--desc", json = "--json" }
+
+[tools.job.commands.run]
+# `cousin-job start shell [options] -- TITLE CMD`: the command is launched
+# detached and closes its own row. Options land before the `--`, and the
+# title after it, so a title such as "--json" is never read as an option.
+# --home-log confines the log to the home.
+argv = ["start", "shell", "--json", "--", "{title}", "{argv}"]
+options = { desc = "--desc", log = "--home-log" }
 
 [tools.job.commands.done]
 argv = ["done", "{id}", "{summary}"]

@@ -4,6 +4,7 @@ The store is module-owned SQLite - registering a job must work with no
 service running anywhere. Real databases, real processes; the only
 seams are environment roots.
 """
+import json
 import os
 import pathlib
 import tempfile
@@ -166,6 +167,77 @@ class TestBackgroundCommand(JobsCase):
         self.assertEqual(job["exit_code"], 0)
         self.assertIn("hello-from-job",
                       pathlib.Path(job["log_path"]).read_text())
+
+    def test_a_relative_log_is_recorded_absolute(self):
+        # The job tool's `run` passes its `log` relative to the home, the
+        # working directory there; the console reads the row from anywhere.
+        here = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, here)
+        _, out, _ = self._main([
+            "start", "shell", "logged", "--log", "mine.log", "--",
+            "sh", "-c", "echo into-mine",
+        ])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["log_path"], str(self.root / "mine.log"))
+        self.assertIn("into-mine", (self.root / "mine.log").read_text())
+
+    def test_a_home_log_is_confined_to_the_home(self):
+        home = pathlib.Path(os.environ["COUSIN_HOME"])
+        for bad in (str(self.root / "escape.log"), "../escape.log",
+                    "~/escape.log", ".secrets/x.log"):
+            rc, _, err = self._main([
+                "start", "shell", "--home-log", bad, "--", "t",
+                "sh", "-c", "echo no",
+            ])
+            self.assertEqual(rc, 2, bad)
+            self.assertIn("--home-log", err)
+        self.assertEqual(list_jobs(), [])
+        _, out, _ = self._main([
+            "start", "shell", "--home-log", "data/ok.log", "--", "t",
+            "sh", "-c", "echo into-home",
+        ])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["log_path"],
+                         os.path.realpath(home / "data" / "ok.log"))
+        self.assertIn("into-home", pathlib.Path(job["log_path"]).read_text())
+
+    def test_after_the_separator_nothing_is_read_as_an_option(self):
+        # `start shell [options] -- TITLE CMD`: the title and the command
+        # come after `--`, and neither is ever re-parsed as cousin-job's
+        # own options, so --log (or a prefix of it) cannot set the log.
+        escape = self.root / "escape.log"
+        for first in ("--log=%s" % escape, "--lo=%s" % escape, "--desc=x",
+                      "--json", "-x"):
+            rc, _, err = self._main(["start", "shell", "--json", "--", "t",
+                                     first, "x"])
+            self.assertEqual(rc, 2, first)
+            self.assertIn("must not start with", err)
+        self.assertEqual(list_jobs(), [])
+        self.assertFalse(escape.exists())
+        _, out, _ = self._main(["start", "shell", "--json", "--",
+                                "--log=%s" % escape, "sh", "-c",
+                                "echo $0", "--log=%s" % escape])
+        job = self._wait_status(json.loads(out)["job_id"], ("done",))
+        self.assertEqual(job["title"], "--log=%s" % escape)
+        self.assertNotEqual(job["log_path"], str(escape))
+        self.assertIn("--log=%s" % escape, pathlib.Path(job["log_path"]).read_text())
+        self.assertFalse(escape.exists())
+
+    def test_the_legacy_title_first_shape_still_takes_its_options(self):
+        legacy = self.root / "legacy.log"
+        _, out, _ = self._main(["start", "shell", "legacy", "--log",
+                                str(legacy), "--desc", "old shape", "--",
+                                "sh", "-c", "echo legacy-shape"])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual((job["title"], job["description"], job["log_path"]),
+                         ("legacy", "old shape", str(legacy)))
+        self.assertEqual(job["command"], "sh -c echo legacy-shape")
+        self.assertIn("legacy-shape", legacy.read_text())
+        _, out, _ = self._main(["start", "subagent", "mapping", "--desc", "d",
+                                "--json"])
+        job = get_job(json.loads(out)["job_id"])
+        self.assertEqual((job["title"], job["description"]), ("mapping", "d"))
 
     def test_failing_command_marks_failed_with_its_exit_code(self):
         _, out, _ = self._main([

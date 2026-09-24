@@ -11,7 +11,9 @@ Every handler is a plain synchronous function `(ctx, args) -> str` that
 returns the text the CLI would have printed, and never starts a
 subprocess: a peer send is chat.send_message (a runner-lane peer is
 written in this process, a tmux-lane one gets an HTTP POST to its chat
-server), everything else is a library call in this process.
+server), everything else is a library call in this process. The one
+exception is `job run`, whose whole point is a process: it hands the
+command to the `cousin-job start shell` launcher (see _j_run).
 
 `reply` is the only writer of chat.db on this lane. It routes by the
 live Turn: one thread, implicit; two, the destination must be named.
@@ -144,7 +146,7 @@ def _j_start(ctx, a):
     kind = _str(a, "kind") or "other"
     if kind == "shell":
         raise ValueError("start takes no command, so a shell row would never close;"
-                         " use a Bash call with run_in_background")
+                         " use run, or a Bash call with run_in_background")
     title = str(_required(a, "title", "start"))
     desc = _str(a, "desc")
     job_id = jobs.register_job(kind=kind, title=title, description=desc, spawned_by=ctx.slug)
@@ -158,6 +160,79 @@ def _j_start(ctx, a):
     if a.get("json"):
         return json.dumps({"job_id": job_id, "log_path": log_path})
     return str(job_id)
+
+
+# `run` hands the command to the one launcher there is, `cousin-job start
+# shell TITLE -- CMD` (jobs._cmd_start and _spawn_tracked), in a fresh
+# interpreter instead of forking this one: the runner is multi-threaded
+# (the SDK's event loop, the to_thread workers), and a fork of a threaded
+# process can hang its child on a lock another thread held. The first
+# argument pins the package this runner imported, so the launcher is the
+# same code; the command's own environment is not touched.
+_JOB_LAUNCHER = ("import sys; sys.path.insert(0, sys.argv.pop(1));"
+                 " from cousin_lib.jobs import jobs_main; sys.exit(jobs_main())")
+_LAUNCH_TIMEOUT = 15   # the launcher's double fork answers at once
+
+
+def _j_run(ctx, a):
+    # The one handler that starts a process: the launcher registers a shell
+    # row, detaches the command in its own process group with its output in
+    # the row's log, and returns; the command closes the row itself with its
+    # exit code. Never waits for the command.
+    import os
+    import subprocess
+    import sys
+    from cousin_lib import jobs
+    from cousin_lib.home_files import PathRefused
+    title = str(_required(a, "title", "run"))
+    argv = a.get("argv")
+    if not isinstance(argv, list) or not argv:
+        raise ValueError("run: argv must be a non-empty array of strings: the program"
+                         " and its arguments, one element each, never a shell string")
+    for element in argv:
+        if not isinstance(element, str):
+            raise ValueError("run: every element of argv must be a string, not %r" % (element,))
+    if not argv[0].strip():
+        raise ValueError("run: argv[0], the program, must not be empty")
+    if argv[0].startswith("-"):
+        raise ValueError("run: argv[0], the program, must not start with '-'")
+    # Options first, then `--`, then the title and the command: after the
+    # separator nothing is read as an option, so any title stays a title.
+    package = str(Path(jobs.__file__).resolve().parents[1])
+    cli = [sys.executable, "-c", _JOB_LAUNCHER, package, "start", "shell", "--json"]
+    desc = _str(a, "desc")
+    if desc:
+        cli += ["--desc", desc]
+    log = _str(a, "log")
+    if log:
+        # Checked here for a clear error before anything runs; the launcher
+        # checks --home-log again against the same home.
+        try:
+            jobs.home_log_path(ctx.home, log)
+        except PathRefused as err:
+            raise ValueError("run: log %r refused: %s (a path relative to your home,"
+                             " outside .secrets)" % (log, err))
+        cli += ["--home-log", log]
+    cli += ["--", title] + argv
+    env = dict(os.environ, FRAMEWORK_ROOT=str(ctx.root), COUSIN_HOME=str(ctx.home),
+               COUSIN_SLUG=ctx.slug)
+    proc = subprocess.run(cli, cwd=str(ctx.home), env=env, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=_LAUNCH_TIMEOUT)
+    said = (proc.stderr or proc.stdout or "").strip()[-500:]
+    if proc.returncode != 0:
+        raise RuntimeError("run: the job launcher exited %d: %s" % (proc.returncode, said))
+    try:
+        info = json.loads(proc.stdout)
+    except ValueError:
+        info = None
+    if not isinstance(info, dict) or not info.get("job_id"):
+        # Whatever came back is named: if a job did start, its row is in
+        # `job list --active` and the text here is how to find it.
+        raise RuntimeError("run: the job launcher answered without a job id, so the job"
+                           " may be running untracked by this call (see `job list`"
+                           " with active): stdout %r, stderr %r"
+                           % (proc.stdout[-500:], (proc.stderr or "")[-500:]))
+    return json.dumps({"job_id": info["job_id"], "log_path": info.get("log_path")})
 
 
 def _j_close(ctx, a, status):
@@ -385,8 +460,8 @@ def _t_delete(ctx, a):
 HANDLERS = {
     "memory": {"search": _m_search, "decide": _m_decide, "remember": _m_remember,
                "obsolete": _m_obsolete, "recall": _m_recall, "activity": _m_activity},
-    "job": {"start": _j_start, "done": _j_done, "fail": _j_fail, "list": _j_list,
-            "show": _j_show},
+    "job": {"start": _j_start, "run": _j_run, "done": _j_done, "fail": _j_fail,
+            "list": _j_list, "show": _j_show},
     "schedule": {"add": _s_add, "list": _s_list, "cancel": _s_cancel},
     "meeting": {"say": _mt_say, "pass": _mt_pass, "minutes": _mt_minutes, "show": _mt_show},
     "tracker": {"add": _t_add, "update": _t_update, "state": _t_state, "list": _t_list,

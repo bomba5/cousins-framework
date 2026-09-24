@@ -980,6 +980,47 @@ class TestRegistrySync(unittest.TestCase):
         self.assertIn("tools.schedule", out["added"])
 
 
+class TestRegistrySyncCarriesJobRun(unittest.TestCase):
+    """A cousin whose registry predates `job run` gains the command and its
+    two properties on sync, and the result still validates."""
+
+    def setUp(self):
+        import tempfile
+        from cousin_lib import template_sync
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        (self.root / "config").mkdir()
+        shipped = (pathlib.Path(__file__).resolve().parents[1] / "config"
+                   / "mcp-registry.toml.example").read_text()
+        (self.root / "config" / "mcp-registry.toml.example").write_text(shipped)
+        old = []
+        for path, body in template_sync._blocks(shipped):
+            if path == "tools.job.commands.run":
+                continue
+            if path == "tools.job.properties":
+                body = [l for _k, ls in template_sync._entries(body)
+                        if _k not in ("argv", "log") for l in ls]
+            old.append(("" if path is None else "[%s]\n" % path) + "".join(body))
+        self.home = self.root / "cousins" / "wren"
+        self.home.mkdir(parents=True)
+        self.reg = self.home / "mcp-registry.toml"
+        self.reg.write_text("".join(old))
+        before = tomllib.loads(self.reg.read_text())["tools"]["job"]
+        assert "run" not in before["commands"] and "argv" not in before["properties"]
+
+    def test_run_and_its_properties_are_added_and_validate(self):
+        from cousin_lib import mcp_server, template_sync
+        out = template_sync._registry_sync(self.home, self.root, apply=True)
+        self.assertIn("tools.job.commands.run", out["added"])
+        self.assertIn("tools.job.properties.argv", out["added"])
+        self.assertIn("tools.job.properties.log", out["added"])
+        job = mcp_server.load_registry(self.reg)["tools"]["job"]
+        self.assertIn("run", job["commands"])
+        self.assertEqual(job["commands"]["run"]["argv"][-1], "{argv}")
+        self.assertEqual(job["properties"]["argv"]["type"], "array")
+
+
 class TestSyncTemplateCLI(unittest.TestCase):
     """`cousin-spawn <slug> --sync-template` is the entry an operator uses;
     it has to reach template_sync, not die in argument handling."""

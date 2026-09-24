@@ -100,6 +100,32 @@ class TestRunnerLaneDoctrine(HermeticCase):
                 flat = " ".join(chunk.split()).lower()
                 self.assertTrue(any(w in flat for w in ("never", "fallback", "not ")), chunk)
 
+    def test_being_told_to_keep_something_is_a_remember_call_in_the_same_turn(self):
+        """A person saying 'remember this' or stating a preference got a
+        reply and no memory write: the doctrine named the tool, not when."""
+        self.assertIn("asks you to keep something", self.flat)
+        self.assertIn("in that same turn, before you reply", self.flat)
+        # operator level only for the operator's words; nobody else's
+        self.assertIn("at level `operator` when the operator said it", self.flat)
+        self.assertIn("at the default level when anyone else did", self.flat)
+        # an unasked remark is not a write (review: 'a fact about their
+        # life' fired on incidental remarks)
+        self.assertIn("A remark nobody asked you to keep is not a memory write", self.flat)
+        self.assertNotIn("a fact about their life", self.flat)
+
+    def test_being_asked_what_you_remember_searches_memory_first(self):
+        """Asked 'what do you remember about me', a cousin read its memory
+        files with sed instead of searching (09-24)."""
+        self.assertIn("asked what you know or remember", self.flat)
+        self.assertIn("`search` or `recall` first", self.flat)
+
+    def test_a_long_shell_command_is_the_job_tools_run(self):
+        """A runner cousin ran `cousin-job start shell` through Bash because
+        the job tool had no way to launch a command (09-24)."""
+        self.assertIn("A long shell command is the `job` tool's `run`", self.flat)
+        self.assertIn("`run_in_background`", self.flat)
+        self.assertIn("never `cousin-job` through Bash", self.flat)
+
     def test_the_fallback_is_only_for_a_missing_or_erroring_tool(self):
         self.assertIn("fallback only", self.flat)
         self.assertIn("missing", self.flat)

@@ -19,5 +19,5 @@ deny_bash_patterns = [                                # regexes on any tool's st
     # files are the same Unix user's until phase 6)
     '\bcousin-account\b',
 ]
-ask = []                                              # operator approval; enforced as deny until phase 5
+ask = []                                              # operator approval; no approval surface yet: enforced as deny
 outbound_filter = true                                # reply and send cross config/outbound-filter.json

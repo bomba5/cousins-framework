@@ -3,6 +3,47 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.14.0 - 2026-09-24
+
+### Added
+- A runner cousin's reasoning pane in the console: `GET /api/cousins/<slug>/stream`
+  (its primary event stream as SSE, live, starting at the newest 200 events;
+  frame ids are `<session>:<seq>`, so a reconnect resumes after its last event,
+  and one after a runner restart gets a `session` frame and the new stream),
+  `POST .../interrupt` (ends the running turn from outside the runner's
+  process, past its first answer too) and `POST .../say` (a message to the
+  running turn on the operator's thread; a login code is diverted, never
+  delivered). The chat page shows it in place of the tmux pane.
+- `cousin-watch <slug> [--follow] [--tail N | --after N] [--json]`: the same
+  stream in a terminal, from the newest 200 events by default.
+- An interrupt is an inbox row (source `interrupt`, priority 0), taken on every
+  poll of a live turn: it closes `delivered` when it interrupted, `failed` when
+  the CLI refused (the turn goes on) or when no turn was running (then it never
+  runs as a turn); a tmux cousin never gets one typed into its pane. Contract
+  items `interrupt_row` and `interrupt_row_idle`.
+- `cousin-runner` writes a `runner` event first in its stream (kind, pid, the
+  items it declares unsupported); the primary stream is the newest file headed
+  by one, so a side session's stream never stands in for it. `runner/status.py`
+  reads a runner cousin's state from its own stores, and the fleet row carries
+  it as `runner`.
+- The tokens view's prompt-cache hit rate per cousin and per day
+  (`cache_read / (cache_read + cache_creation + input)`, a result with no
+  usage left out): `/api/tokens` rows gain `cache`.
+
+### Changed
+- The console serves a runner cousin's chat (history, search, send, archive,
+  reactions) from its `chat.db`, through `server/chat_api.py`, the library the
+  chat server now answers with too: the same bodies on both lanes.
+- A runner cousin's fleet row: `status` from the runner's lock, `chat:
+  "console"`, `active` a live turn, `pid` the runner's, `lastMsgTs` read from
+  `chat.db` read-only; no chat server call and no tmux call for it.
+- `policy.toml`'s `ask` is enforced as deny with no approval surface yet; the
+  deny reason, the docs and the example no longer promise one in a phase.
+
+### Fixed
+- The reasoning stream carries a thinking block's text (bounded at 8000
+  characters, `truncated` when cut); since phase 2 it held only its length.
+
 ## 1.13.1 - 2026-09-24
 
 ### Fixed

@@ -136,7 +136,11 @@ class TestHookEnforcement(HermeticCase):
                                              "tool_name": "Write", "tool_input": {"file_path": "x"},
                                              "tool_use_id": "t2"}, "t2", {}))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("phase 5", out["hookSpecificOutput"]["permissionDecisionReason"])
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        # no approval surface exists yet, and the model is told so without a
+        # promise of when (phase 5 review I7; the operator places it later)
+        self.assertIn("no operator approval surface yet", reason)
+        self.assertNotIn("phase", reason)
         states = [e["payload"]["to"] for e in stream.tail() if e["kind"] == "state"]
         self.assertIn("waiting_permission", states); self.assertEqual(machine.state, "running")
         decisions = [e["payload"]["decision"] for e in stream.tail() if e["kind"] == "policy"]

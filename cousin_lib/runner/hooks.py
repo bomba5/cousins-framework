@@ -192,7 +192,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             event["agent_id"] = payload["agent_id"]
         stream.append("policy", event)
         if decision == "ask":
-            reason += " (operator approval arrives with the console in phase 5)"
+            reason += " (no operator approval surface yet: ask is enforced as deny)"
             with lock:
                 if machine.state == "running":
                     machine.to("waiting_permission", reason)

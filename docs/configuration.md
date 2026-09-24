@@ -666,10 +666,10 @@ since the put is the acceptance, and waits on a tmux cousin's typed line as
 before) and, where it needs to know whether the cousin is up,
 `delivery.is_alive(home)` (a runner cousin's answer is whether a runner holds
 its lock; a tmux cousin's is unchanged, tmux `has-session` or the chat port).
-This is no longer experimental for those four producers. It stays ahead of
-phase 4 (the composed prompt) and phase 5 (the console's views): a runner
-cousin's prompt is not yet composed the way a tmux cousin's is, and the
-console has no view of a runner's inbox or stream. The runner starts its
+This is no longer experimental for those four producers. The console serves a
+runner cousin's chat from its `chat.db` and shows its reasoning stream, with an
+interrupt and a say box ([console](console.md)); `cousin-watch` shows the same
+stream in a terminal. The runner starts its
 session with no settings files and `bypassPermissions`; `policy.toml`
 (`deny_tools`, `deny_bash_patterns`, `ask`, `outbound_filter`) is what stands
 in for a settings file's deny rules, read once at start and enforced by a
@@ -762,7 +762,7 @@ all optional:
 |---|---|---|
 | `deny_tools` | `[]` | tool names the model may never call; exact name or a `prefix*`. To deny subagents, list both `Task` and `Agent` (the tool's older and newer names) |
 | `deny_bash_patterns` | `[]` | regexes checked against the `command` string of any tool whose input carries one (`Bash`, `PowerShell`, `Monitor`, any other); never against a command a tool builds on the far side (an MCP server that shells out). The cousin's own `mcp__cousin__*` tools are skipped: their `command` is a verb such as `add` or `pass`, not a command line |
-| `ask` | `[]` | tools that need operator approval; enforced as `deny` until phase 5 gives the console an ask surface, the reason says so |
+| `ask` | `[]` | tools that need operator approval; there is no approval surface yet, so they are enforced as `deny`, and the reason says so |
 | `outbound_filter` | `true` | whether `reply` and `send` cross `config/outbound-filter.json` |
 
 Two failure modes: the file absent means every tool is allowed, said once in

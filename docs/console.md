@@ -112,7 +112,9 @@ One card per cousin. A card shows the name and slug, a status pill (`active`
 if the pane changed in the last minute, `idle`, or `stopped`), the role, and
 a row of facts: chat port, memory scope, operator, heartbeat, flip time,
 host, model, the agent's pid and uptime, the last activity line and tokens
-spent today. If the pane shows one of the `attention_patterns` from
+spent today. A runner cousin's card shows `chat · console` (the console
+serves its chat), and a runner line: the last state the runner recorded and
+the contract items it declares it does not support, if any. If the pane shows one of the `attention_patterns` from
 `config/harness.toml` (a login menu, a trust prompt) the card says "needs
 attention" with the matching text: the session is running but the agent is
 waiting for a person.
@@ -326,6 +328,27 @@ to live" button appears; going back to the bottom applies the latest frame.
 The pane header shows the tmux session and when the pane last changed. The
 "x" closes it.
 
+### The reasoning pane (a runner cousin)
+
+A cousin on the runner (`[agent] runner` in its `cousin.toml`) has no tmux
+session, so for it "pane" opens its reasoning stream instead: every state
+change, turn, text, thinking block, tool call and tool output the runner
+records, live, as it records them (read from the cousin's own
+`data/stream/`). It opens at the newest 200 events, not the whole history;
+a dropped connection picks up where it left off, and a runner that
+restarted meanwhile is marked with a new-session line. When no runner is
+running, the header says "not running" beside the last state it recorded.
+"interrupt" ends the running turn, past its first answer too; the button is
+live only while a turn runs, and the header says what came of it
+(`delivered`, or `failed` when the turn had already finished or the agent
+refused). The box at the bottom says
+something to the running turn as its operator: the runner writes it into the
+live turn, or takes it next. What you say there is not stored in the chat,
+as typing into a tmux pane is not; a login code typed there while a login
+waits on this cousin is taken for the login and never reaches the cousin. The chat itself works as for any cousin:
+the console serves it from the cousin's `chat.db`, since a runner cousin runs
+no chat server. `cousin-watch <slug> -f` shows the same stream in a terminal.
+
 ## Jobs
 
 Everything `cousin-job` tracks, including the subagents and background
@@ -418,9 +441,13 @@ loops](jobs-and-loops.md).
 ## Tokens
 
 Token use per cousin for today and the last 14 days, with output tokens
-separate, and fleet totals. The numbers come from the harness transcripts, so
-this page needs `transcripts_dir` in `config/harness.toml`. Without it the
-page says that instead of showing zeros.
+separate, and fleet totals, and the prompt-cache hit rate today and over the
+14 days: the share of cacheable input the model read from its cache,
+`cache_read / (cache_read + cache_creation + input)`, as the model reported
+it (`-` when there was no usage to measure). The numbers come from the harness
+transcripts, so this page needs `transcripts_dir` in `config/harness.toml`;
+a runner cousin's come from its own `data/usage.db` and need nothing. Without
+either the page says that instead of showing zeros.
 
 ## Tracker
 

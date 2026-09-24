@@ -330,6 +330,11 @@ def _serve(runner, once):
         # a claim from a runner that died is ours now (the lock says no
         # other runner is alive on this home)
         runner.inbox.requeue_stale(older_than_s=0.0)
+        # Before start: the head of this process's stream says what runs
+        # here, for a reader with no runner object (runner/status.py).
+        runner.stream.append("runner", {"kind": getattr(runner, "kind", None),
+                                        "pid": os.getpid(),
+                                        "unsupported": list(runner.unsupported())})
         runner.start()
         policy = getattr(runner, "policy", None)
         if policy is not None:

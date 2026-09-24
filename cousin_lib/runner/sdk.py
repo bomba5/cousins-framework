@@ -129,6 +129,7 @@ def _tool_result_text(content):
 
 
 class SdkRunner:
+    kind = "sdk"          # what runner/status.py reports (the `runner` event)
     # After this many consecutive failed turns the loop waits before its
     # next claim: backoff_base_s, doubling, capped; a good turn resets it.
     backoff_after = 3

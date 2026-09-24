@@ -165,6 +165,40 @@ def _last_msg_ts(config, chat):
     return newest
 
 
+def _is_runner(config):
+    """A runner cousin on this machine (cousin.toml `[agent] runner`): no
+    chat server, no tmux session; its row is read from its own stores."""
+    if getattr(config, "home", None) is None:
+        return False
+    from cousin_lib import delivery
+    return isinstance(delivery.backend_for(config.home), delivery.InboxBackend)
+
+
+def _runner_last_msg_ts(config):
+    """The newest reply's time among the last 20 live rows of the operator's
+    thread, from chat.db (the tmux row's _last_msg_ts asks the chat server
+    for the same rows). Read-only: a GET never creates the store, and a
+    busy or missing one is "no reply yet", never a 500."""
+    import sqlite3
+    from cousin_lib.server import chat_api
+    from cousin_lib.server.storage import normalize_chat_user
+    path = chat_api.db_path(config.home)
+    if not config.operator_name or not path.exists():
+        return 0
+    try:
+        conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=1.0)
+        try:
+            rows = conn.execute(
+                "SELECT timestamp, type FROM messages WHERE chat_user=? AND archived=0"
+                " ORDER BY id DESC LIMIT 20",
+                (normalize_chat_user(config.operator_name),)).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0
+    return max([_to_unix(ts) for ts, kind in rows if kind == config.slug] or [0])
+
+
 def _activity(home):
     try:
         return (Path(home) / "data" / "last-activity.txt") \
@@ -197,13 +231,22 @@ def effective_runtime(config, defaults):
 def fleet_row(server, config, defaults=None, patterns=None):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
-    chat = chat_health(config)
+    chat = None if _is_runner(config) else chat_health(config)
     if defaults is None:
         defaults = agent_defaults(server.root)
     if patterns is None:
         patterns = attention_patterns(server.root)
     attention = None
-    if config.type == "worker":
+    runner = None
+    if _is_runner(config):
+        # the runner's lock and stream, never the chat port or tmux
+        from cousin_lib.runner import status as runner_status
+        runner = runner_status.status(config.home)
+        chat = "console"
+        status = "running" if runner["alive"] else "stopped"
+        active = bool(runner["alive"]) and runner["state"] in ("running",
+                                                                "waiting_permission")
+    elif config.type == "worker":
         status = "running"
         active = False
     elif config.chat_host:
@@ -221,7 +264,9 @@ def fleet_row(server, config, defaults=None, patterns=None):
     # The agent process and its age: only a local, running session has
     # one to ask tmux about; everything else is null, not zero.
     pid = None
-    if status == "running" and config.type != "worker" \
+    if runner is not None:
+        pid = runner["pid"] if runner["alive"] else None
+    elif status == "running" and config.type != "worker" \
             and not config.chat_host:
         pid = _pane_pid(server, config)
     return {
@@ -247,7 +292,9 @@ def fleet_row(server, config, defaults=None, patterns=None):
         "pid": pid,
         "uptime_seconds": uptime_seconds(pid) if pid else None,
         "activity": _activity(config.home),
-        "lastMsgTs": _last_msg_ts(config, chat),
+        "lastMsgTs": (_runner_last_msg_ts(config) if runner is not None
+                      else _last_msg_ts(config, chat)),
+        "runner": runner,
         "tokensSpent": tokens.today_total(server, config.home),
     }
 

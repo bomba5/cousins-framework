@@ -25,6 +25,7 @@ from cousin_lib.runner.turn import Turn
 
 
 class FakeRunner:
+    kind = "fake"          # what runner/status.py reports (the `runner` event)
     def __init__(self, home, *, turn_seconds=0.0, script=None, policy=None):
         self.home = home
         self.policy = policy     # held for symmetry with SdkRunner; no tools, no hooks

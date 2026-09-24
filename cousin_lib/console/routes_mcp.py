@@ -607,6 +607,8 @@ def _write_servers(req, home):
     drop = req.body.get("drop") or []
     if not isinstance(drop, list) or not all(isinstance(d, str) for d in drop):
         raise HttpError(400, "drop must be a list of server names")
+    if mcp_config.RESERVED in drop:
+        raise HttpError(400, "`%s` is the cousin's own server: it is kept" % mcp_config.RESERVED)
     problems, names, wanted = [], set(), []
     for raw in raw_servers:
         name, entry = _entry_in(raw, problems, names)

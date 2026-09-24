@@ -284,6 +284,9 @@ class TestMcpJson(McpCase):
             "drop": ["odd"]})
         self.assertEqual(status, 200, body)
         self.assertTrue(body["restart_required"])
+        status, _ = self.post("/api/cousins/wren/mcp/servers", {
+            "etag": body["etag"], "servers": [], "drop": ["cousin"]})
+        self.assertEqual(status, 400)
         doc = json.loads((home / ".mcp.json").read_text())
         got = doc["mcpServers"]
         self.assertEqual(sorted(got), ["cousin", "files", "ha", "notes"])

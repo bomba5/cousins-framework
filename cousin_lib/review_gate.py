@@ -9,7 +9,7 @@ model (runner/sdk.py); anywhere, the operator's `cousin-memory review`.
 
 The cursor. The gate counts per home, not per session or per turn: the
 entries stamped since its cursor (`data/review-gate.json`), which moves
-only when a gate has looked, under the gate's lock. So a runner that
+only when a gate has looked, under the home's memory write lock. So a runner that
 crashed after the writes, a turn that ended in an error and a second
 session writing to the same home are all caught by the next gate, and
 two gates never hold the same entries. A home with no cursor has never
@@ -34,8 +34,6 @@ What counts: entries on authored topics. The framework's own log
 by its writers (extract.WINDOW_CAP) and distilled after every authored
 topic, so it is not gated; obsolete marks and the gate's records are not
 claims."""
-import contextlib
-import fcntl
 import json
 import os
 import time
@@ -50,7 +48,6 @@ TOPIC = "framework:review-gate"
 SOURCE = "review_gate"
 VERDICTS = ("keep", "drop")
 STATE = ("data", "review-gate.json")
-LOCK = ("data", ".review-gate.lock")
 # An entry is stamped before it is appended: one stamped just before the
 # cursor can land after the gate read. The next gate re-reads this much
 # before its cursor and skips the ids the last one already counted.
@@ -110,20 +107,16 @@ def pending(home):
 
 # ------------------------------------------------------------ the lock and the cursor
 
-@contextlib.contextmanager
 def lock(home):
-    """The gate's lock: a hold (read, decide, write) and a verdict (check
-    it is held, write) are atomic against another gate on the same home.
-    Never held across a model call. (Phase 8's reentrant
-    memory_lock.write_lock takes this role when it lands.)"""
-    path = Path(home).joinpath(*LOCK)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)
+    """The gate's lock is the home's memory write lock (phase 8's
+    memory_lock.write_lock): a hold (read, decide, write) and a verdict
+    (check it is held, write) are atomic against every memory writer,
+    another gate included. It is reentrant per thread, so the
+    `_append_raw` inside re-enters it; it is never held across a model
+    call; and it opens its file read-only, so a second uid (a container
+    user, the operator's shell) is never shut out."""
+    from cousin_lib import memory_lock
+    return memory_lock.write_lock(home)
 
 
 def _state(home):

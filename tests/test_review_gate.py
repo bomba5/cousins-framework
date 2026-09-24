@@ -216,6 +216,36 @@ class TestTheModelMayOnlyKeepAnOperatorFact(HermeticCase):
         self.assertIn("operator", out["error"])
 
 
+class TestTheLockIsTheMemoryWriteLock(HermeticCase):
+    """Execution review: the gate's read-decide-write takes phase 8's
+    memory_lock.write_lock (reentrant per thread), so it is atomic against
+    every memory writer, not only another gate, and it opens no file of
+    its own (a read-write 0600 lock file shut out a second uid)."""
+
+    def test_a_hold_waits_for_a_memory_writer(self):
+        """Under the batch (no hold is written), so only the gate's own lock
+        can make it wait: it must be the memory write lock."""
+        import threading
+        from cousin_lib import memory_lock
+        home = _home(self)
+        _write(home, 2)
+        inside, release, held = threading.Event(), threading.Event(), []
+
+        def writer():
+            with memory_lock.write_lock(home):
+                inside.set()
+                release.wait(10)
+        t = threading.Thread(target=writer); t.start()
+        self.assertTrue(inside.wait(5))
+        g = threading.Thread(target=lambda: held.extend(review_gate.hold_new(home))); g.start()
+        g.join(0.5)
+        self.assertTrue(g.is_alive(), "the hold did not wait for the memory write lock")
+        release.set(); t.join(5); g.join(5)
+        self.assertFalse(g.is_alive())
+        self.assertEqual(held, [])
+        self.assertFalse(pathlib.Path(home, "data", ".review-gate.lock").exists())
+
+
 class TestADropIsOneLine(HermeticCase):
     def test_the_release_and_the_mark_are_the_same_line(self):
         """Review M5: no crash can leave a drop retired but still held."""

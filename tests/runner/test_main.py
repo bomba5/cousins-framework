@@ -669,7 +669,7 @@ class TestRestartMark(HermeticCase):
         (home / "data" / "runner-restart.json").unlink()
         self.assertEqual(runner_main._serve(runner_main.runner_for(home), True), 0)
         self.assertFalse((home / "data" / "runner-restart.json").exists())
-        self.assertIsNone(restart_note.take(home))
+        self.assertIsNone(restart_note.read(home))
 
 
 @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "claude-agent-sdk not installed")

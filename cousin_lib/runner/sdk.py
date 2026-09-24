@@ -571,10 +571,12 @@ class SdkRunner:
         # A running turn is interrupted first, so the join below does not
         # wait on a turn nobody will end (FakeRunner does the same). The CLI
         # records that as the user's stop: leave the mark the next resume
-        # answers (#98).
+        # answers (#98). A requested stop wrote run/held before its signal:
+        # the mark then names that stop, never "not the operator".
         if self.interrupt() and self.takes_restart_note:
             try:
-                restart_note.mark(self.home, "a stop interrupted the turn in flight")
+                restart_note.mark(self.home, "a stop interrupted the turn in flight",
+                                  held=restart_note.held_by(self.home))
             except OSError as exc:
                 self.stream.append("error", {"error": "restart mark: %s" % exc})
         self._stop.set()
@@ -902,13 +904,21 @@ class SdkRunner:
         mark. The primary's alone."""
         if not self.takes_restart_note:
             return
-        note = restart_note.take(self.home)
-        if note is None or not resumed:
-            return
-        self.inbox.put(Item(thread_id="system", source=restart_note.SOURCE,
-                            body=restart_note.body(note), sender="runner"))
-        self.stream.append("system", {"subtype": "restart_note", "at": note.get("at"),
-                                      "why": note.get("why")})
+        # read, put, then clear: a crash in between repeats the line, never
+        # loses it; any failure is recorded and start-up goes on
+        try:
+            note = restart_note.read(self.home)
+            if note is None:
+                return
+            if resumed:
+                self.inbox.put(Item(thread_id="system", source=restart_note.SOURCE,
+                                    body=restart_note.body(note), sender="runner"))
+                self.stream.append("system", {"subtype": "restart_note", "at": note.get("at"),
+                                              "why": note.get("why"), "held": note.get("held")})
+            restart_note.clear(self.home)
+        except Exception as exc:  # noqa: BLE001 - a lost line must not stop the start
+            self.stream.append("error", {"error": "restart note: %s: %s"
+                                         % (type(exc).__name__, exc)})
 
     # -- the loop ------------------------------------------------------------
     def _run_loop(self):

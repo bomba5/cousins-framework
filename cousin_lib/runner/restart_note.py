@@ -10,7 +10,12 @@ mark in the home, and the next runner that RESUMES the session takes it and
 puts one line first on the system thread: the runner restarted, that was
 not the operator, continue where you were. A fresh session has nothing
 interrupted in it (the digest carries the state), so a fresh start only
-drops the mark."""
+drops the mark.
+
+A stop the operator asked for (console, cousin-supervisor stop) writes
+run/held BEFORE it signals the runner, so a stop that finds the hold marks
+it as held, and the line then says who stopped the turn. Only an unheld stop
+or a death is told "not the operator"."""
 import json
 import os
 from datetime import datetime, timezone
@@ -19,33 +24,49 @@ from pathlib import Path
 FILE = ("data", "runner-restart.json")
 SOURCE = "boot"             # the framework's start-up line (thread `system`, sender `runner`)
 MARKER = "[runner] the runner restarted"
+HELD_MARKER = "[runner] a requested stop cut your last turn"
 
 
 def _path(home):
     return Path(home).joinpath(*FILE)
 
 
-def mark(home, why):
-    """Record that the turn in flight was cut by a stop or a death (`why`)."""
+def held_by(home):
+    """The hold a requested stop wrote (`<ISO time> <who>`), or None. A hold
+    that cannot be read still counts: a stop was asked for."""
+    from cousin_lib import supervisor     # lazy: supervisor imports runner.main
+    path = supervisor.held_path(home)
+    if not path.exists():
+        return None
+    try:
+        return path.read_text().strip() or "a stop request"
+    except OSError:
+        return "a stop request"
+
+
+def mark(home, why, *, held=None):
+    """Record that the turn in flight was cut by a stop or a death (`why`);
+    `held` is the hold of a requested stop (held_by)."""
     path = _path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                               "why": str(why)}))
+    note = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "why": str(why)}
+    if held:
+        note["held"] = str(held)
+    tmp.write_text(json.dumps(note))
     os.replace(tmp, path)
 
 
-def take(home):
-    """The mark ({"at", "why"}), removed; None when there is none. A mark
-    that cannot be read still counts (it only says a turn was cut)."""
+def read(home):
+    """The mark ({"at", "why"[, "held"]}), left in place; None when there is
+    none. A mark that cannot be parsed still counts (it only says a turn was
+    cut). The caller puts its line, then clear()s: a crash between the two
+    repeats the line, it never loses it."""
     path = _path(home)
     try:
         text = path.read_text()
     except FileNotFoundError:
         return None
-    except OSError:
-        text = ""
-    path.unlink(missing_ok=True)
     try:
         note = json.loads(text)
     except ValueError:
@@ -53,8 +74,16 @@ def take(home):
     return note if isinstance(note, dict) else {"at": "unknown", "why": "unreadable mark"}
 
 
+def clear(home):
+    _path(home).unlink(missing_ok=True)
+
+
 def body(note):
     """The line the resumed session gets."""
+    if note.get("held"):
+        return (HELD_MARKER + " (at %s: %s). Your agent CLI records that stop as"
+                " \"[Request interrupted by user]\"; it was the stop that was asked for."
+                % (note.get("at", "unknown"), note["held"]))
     return (MARKER + " (at %s: %s). A restart interrupts the turn in"
             " flight, and your agent CLI records that as \"[Request interrupted by user]\" or"
             " \"stop what you are doing and wait for the user\": that was the restart, not the"

@@ -242,7 +242,8 @@ class TestRestartNote(HermeticCase):
 
     @staticmethod
     def is_note(row):
-        return "the runner restarted" in (row.get("body") or "")
+        body = row.get("body") or ""
+        return "the runner restarted" in body or "a requested stop cut your last turn" in body
 
     def test_a_stop_mid_turn_puts_the_restart_line_first_in_the_resumed_session(self):
         # an established session (an earlier turn recorded its id): the case
@@ -270,6 +271,33 @@ class TestRestartNote(HermeticCase):
         self.assertIn("not the operator", note["body"])
         self.assertIn("continue where you were", json.dumps(self.clients[-1].queries[0]))
         self.assertFalse(self.mark().exists(), "the mark is taken once")
+
+    def test_a_requested_stop_mid_turn_is_never_called_a_restart(self):
+        """#98 review, Critical: an operator's stop (console, cousin-supervisor
+        stop) writes run/held before it signals. The resumed session must be
+        told a requested stop cut its turn, never "not the operator"."""
+        from cousin_lib import supervisor
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login"}))
+        r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
+        r1.start()
+        r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
+        self.assertTrue(_wait(lambda: r1.state() == "running"))
+        held = supervisor.held_path(self.home)
+        held.parent.mkdir(parents=True, exist_ok=True)
+        held.write_text("2026-09-24T19:40:00+00:00 priya from the console")
+        r1.stop(timeout=5)
+        held.unlink()
+        r2 = self.runner([init_msg(session="s-live"), assistant(text="waiting"),
+                          result(session="s-live")])
+        r2.start()
+        self.assertTrue(_wait(lambda: any(self.is_note(row) and row["state"] == "done"
+                                          for row in self.rows(r2))), self.rows(r2))
+        note = next(row for row in self.rows(r2) if self.is_note(row))
+        self.assertNotIn("not the operator", note["body"])
+        self.assertNotIn("continue where you were", note["body"])
+        self.assertIn("a requested stop cut your last turn", note["body"])
+        self.assertIn("priya from the console", note["body"])
 
     def test_a_clean_stop_leaves_no_mark_and_no_line(self):
         r1 = self.runner([init_msg(session="s-live"), assistant(text="ok"),

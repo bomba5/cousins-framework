@@ -245,6 +245,12 @@ class TestRestartNote(HermeticCase):
         return "the runner restarted" in (row.get("body") or "")
 
     def test_a_stop_mid_turn_puts_the_restart_line_first_in_the_resumed_session(self):
+        # an established session (an earlier turn recorded its id): the case
+        # a restart interrupts. A session cut in its very first turn has no
+        # recorded id until the worker's teardown, so its next start is
+        # fresh, and a fresh start only drops the mark.
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login"}))
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
         r1.start()
         r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))

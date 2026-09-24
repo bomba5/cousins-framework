@@ -18,8 +18,9 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
               toml     cousin.toml [agent] runner = "sdk", the account, and
                        what the tmux lane's [runtime] carries (#96: the
                        runner reads only [agent]): model and effort, and
-                       for `auth = "api_key"` an anthropic-key account
-                       <slug>-key made from the cousin's own key file
+                       for the key mode (agent_auth.MODE_API_KEY) an
+                       anthropic-key account <slug>-key made from the
+                       cousin's own key file
                        (an existing [agent] key wins); only once the tmux
                        session is still down
               start    the migration-day boot packet archived (the runner
@@ -196,8 +197,9 @@ def carry(home, root, account=None):
       error    why the carry cannot be done (a blocker), or None
 
     An existing [agent] key wins and is reported, as does an explicit
-    --account. `[runtime] auth = "api_key"` becomes the anthropic-key
-    account <slug>-key, made from the cousin's own key file; a key file
+    --account. `[runtime] auth` in the key mode (agent_auth.MODE_API_KEY)
+    becomes the anthropic-key account <slug>-key, made from the cousin's
+    own key file; a key file
     that is missing or malformed is an error, never the host login. The
     key itself is never in what this returns."""
     from cousin_lib import accounts, agent_auth

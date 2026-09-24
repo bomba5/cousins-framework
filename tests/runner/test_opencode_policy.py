@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
@@ -601,6 +602,79 @@ class TestLivePlugin(HermeticCase):
             self.assertEqual(seen.get(name, ""), "", name)
         print("\nLIVE shell env: %s" % sorted(seen.items()))
 
+    def test_a_detached_process_the_model_started_is_reaped_by_its_marker(self):
+        """Review round 2, minor 1, live on 1.18.31. opencode starts the
+        model's bash in a session of its own, out of the server's process
+        group, and a server killed hard (its runner SIGKILLed, the death
+        signal SIGKILLs it) leaves the model's command running: the bash, its
+        children and anything it detached (`setsid`). The next start's
+        reap_leftover kills them all by the start's marker, which they
+        inherited."""
+        from tests.runner._fake_provider import FakeProvider
+        from cousin_lib.runner import opencode_http
+        cmd = "setsid sleep 301 < /dev/null > /dev/null 2>&1 & sleep 300; echo done"
+        provider = FakeProvider([("tool", "bash", {"command": cmd, "description": "detach"}),
+                                 ("text", "never")]).start()
+        self.addCleanup(provider.close)
+        home = temp_home(self, runner="opencode")
+        with open(home / "cousin.toml", "a") as f:
+            f.write('model = "local/m1"\nopencode_bin = "%s"\n' % os.environ["OPENCODE_BIN"])
+        data = home.parent.parent / ".secrets" / "accounts" / "live.opencode"
+        account = accounts.Account("live", "opencode", None, None, data_dir=data,
+                                   endpoint=provider.url, endpoint_model="m1")
+        r = OpencodeRunner(home, account=account,
+                           environ={"PATH": os.defpath + ":/run/current-system/sw/bin"})
+        self.addCleanup(lambda: r.stop(timeout=10))
+        r.enqueue(_op("run the detaching one"))
+        r.start()
+
+        def procs():
+            """{pid: comm} of every live process carrying this start's marker."""
+            marker = getattr(r._server, "marker", None)
+            if not marker:
+                return {}
+            entry = ("%s=%s" % (opencode_http.MARKER_ENV, marker)).encode()
+            found = {}
+            for name in os.listdir("/proc"):
+                if not name.isdigit() or int(name) == getattr(r._server, "pid", None):
+                    continue
+                try:
+                    if entry not in Path("/proc/%s/environ" % name).read_bytes().split(b"\0"):
+                        continue
+                    st = Path("/proc/%s/stat" % name).read_text()
+                    if st[st.rindex(")") + 2:].split()[0] != "Z":
+                        found[int(name)] = Path("/proc/%s/cmdline" % name).read_bytes()
+                except OSError:
+                    pass
+            return found
+        self.assertTrue(_wait(lambda: r._server is not None and any(
+            b"301" in c for c in procs().values()), 300), "the detached process never started")
+        before = procs()
+        pidfile = data / opencode_http.PIDFILE
+        self.assertTrue(pidfile.exists())
+        # A runner killed with its server never tears down: stand that in by
+        # taking the sweep away while the live runner notices and tears down,
+        # so what outlives the server is opencode's doing; then the next
+        # start's reap, from the pidfile, with the sweep back.
+        record = pidfile.read_text()          # a SIGKILLed runner never removes it
+        sweep = opencode_http.kill_marked
+        opencode_http.kill_marked = lambda *a, **k: []
+        try:
+            server = r._server
+            os.kill(server.pid, signal.SIGKILL)           # the death signal's kill
+            self.assertTrue(_wait(lambda: server.proc.poll() is not None, 10))
+            time.sleep(2.0)                               # the runner's teardown, sweepless
+            after = procs()
+        finally:
+            opencode_http.kill_marked = sweep
+        print("\nLIVE after the server's SIGKILL: %s" % sorted(
+            (p, b" ".join(c.split(b"\0")[:3]).decode()) for p, c in after.items()))
+        self.assertTrue(after, "nothing outlived the server")
+        pidfile.write_text(record)
+        killed = opencode_http.reap_leftover(pidfile)
+        self.assertTrue(set(after) <= set(killed), (after, killed))
+        self.assertTrue(_wait(lambda: procs() == {}, 10), "the reap missed them")
+        print("LIVE: %d marked under the turn; reap_leftover killed %s" % (len(before), killed))
 
 if __name__ == "__main__":
     unittest.main()

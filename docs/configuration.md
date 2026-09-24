@@ -987,11 +987,20 @@ environment, where set; `SSH_AUTH_SOCK` for work over ssh). Measured on
 
 The server dies with its runner: it is started with a death signal
 (`PR_SET_PDEATHSIG`, SIGKILL), so a runner killed without its teardown (the
-supervisor's escalation, the OOM killer, a crash) takes it along. The runner
-also writes `<data_dir>/opencode.pid` (the pid, its process group and its
-start time) and, at its next start, kills a leftover group that file still
-names (a recycled pid, with another start time, is left alone); the system
-stream says `opencode_leftover` when it did. With any plugin
+supervisor's escalation, the OOM killer, a crash) takes it along. What the model runs
+does not die with it by itself: opencode 1.18.31 starts the model's shell in
+a session of its own, outside the server's process group, and ends it on a
+normal stop but not when it is killed (measured). So every server start
+carries a random marker in its environment (`COUSIN_OPENCODE_START`), which
+everything it starts inherits; a stop kills the server's group and then
+every process of the user carrying that marker. The runner also writes
+`<data_dir>/opencode.pid` (the pid, its process group, its start time, the
+boot and the marker) and, at its next start, kills what a runner killed
+without its teardown left behind: the server's group when that pid is still
+`opencode serve` with the same start time in the same boot, then everything
+carrying its marker, the model's detached commands included. A recycled pid
+or a file from another boot kills nothing; the system stream says
+`opencode_leftover` with the pids when it killed any. With any plugin
 configured, opencode would first install its plugin library from npm into
 its config dir and load no plugin until that ends (a network fetch, and a
 start that hangs offline); the pack imports nothing, so the runner marks

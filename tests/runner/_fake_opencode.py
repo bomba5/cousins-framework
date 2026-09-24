@@ -790,7 +790,10 @@ def main(argv=None):
     config the JSON file OPENCODE_CONFIG names. For OpencodeServer's own
     tests, FAKE_OPENCODE_ENV_DUMP names a file that receives the argv, cwd,
     process group and environment; FAKE_OPENCODE_MODE=mute never serves,
-    =exit exits at once with a message, =ignore-term ignores SIGTERM."""
+    =exit exits at once with a message, =ignore-term ignores SIGTERM.
+    FAKE_OPENCODE_DETACH names a file: the fake starts a `sleep` in a session
+    of its own (as opencode 1.18.31 starts the model's bash, measured) with
+    its own environment, and writes that child's pid there."""
     import argparse
     import signal
     args = sys.argv[1:] if argv is None else argv
@@ -804,6 +807,14 @@ def main(argv=None):
         with open(dump, "w") as f:
             json.dump({"argv": args, "cwd": os.getcwd(), "pid": os.getpid(),
                        "pgid": os.getpgid(0), "env": dict(os.environ)}, f)
+    detach = os.environ.get("FAKE_OPENCODE_DETACH")
+    if detach:
+        import subprocess
+        child = subprocess.Popen(["sleep", "120"], start_new_session=True,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        with open(detach, "w") as f:
+            f.write(str(child.pid))
     mode = os.environ.get("FAKE_OPENCODE_MODE", "")
     if mode == "exit":
         print("Error: fake opencode refuses to start", flush=True)

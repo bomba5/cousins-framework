@@ -887,16 +887,17 @@ class OpencodeRunner:
         account left behind (it was SIGKILLed before its teardown, or its
         death signal was not delivered), so two servers never share the
         account's store and session."""
-        pid = opencode_http.reap_leftover(self._pidfile())
-        if pid is not None:
-            self.stream.append("system", {"subtype": "opencode_leftover", "pid": pid,
-                                          "detail": "killed an opencode serve an earlier runner"
-                                                    " left running"})
+        pids = opencode_http.reap_leftover(self._pidfile())
+        if pids:
+            self.stream.append("system", {"subtype": "opencode_leftover", "pids": pids,
+                                          "detail": "killed what an earlier runner's opencode"
+                                                    " serve left running"})
 
     def _record_server(self):
         pid = getattr(self._server, "pid", None)
         if pid:
-            opencode_http.write_pidfile(self._pidfile(), pid)
+            opencode_http.write_pidfile(self._pidfile(), pid,
+                                        marker=getattr(self._server, "marker", None))
 
     def _check_mcp(self):
         """opencode must report the runner's MCP server `connected` before

@@ -48,6 +48,13 @@ FIXED_ENV = {"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_DISABLE_SHARE": "1",
 DROPPED_ENV = ("OPENCODE_SERVER_USERNAME", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR")
 EXCERPT = 300
 PIDFILE = "opencode.pid"        # in the account's data dir: the server this runner started
+# A random value per start, in the server's environment and so in everything
+# it starts: opencode 1.18.31 starts the model's bash in a session of its own
+# (measured), out of the server's process group, and its shell environment is
+# merged over the server's, so this marker is how stop and reap_leftover find
+# those processes. Not a secret.
+MARKER_ENV = "COUSIN_OPENCODE_START"
+BOOT_ID = "/proc/sys/kernel/random/boot_id"
 PR_SET_PDEATHSIG = 1            # linux/prctl.h
 # prctl resolved in the parent, at import: the forked child only calls it
 # (no dlopen after fork in a threaded process)
@@ -101,12 +108,52 @@ def _proc_stat(pid):
     return fields[0], fields[19]
 
 
-def write_pidfile(path, pid):
-    """Record the server this runner started: its pid, its process group
-    and its start time (so a recycled pid is never taken for it), 0600,
-    by rename."""
+def _boot_id():
+    try:
+        return Path(BOOT_ID).read_text().strip()
+    except OSError:
+        return None
+
+
+def _environ_has(pid, entry):
+    try:
+        return entry in Path("/proc/%d/environ" % pid).read_bytes().split(b"\0")
+    except OSError:                 # gone, or not ours to read
+        return False
+
+
+def kill_marked(marker, *, exclude=()):
+    """SIGKILL every process of this user whose environment carries this
+    start's marker (what a server started, in whatever session); the pids."""
+    if not marker:
+        return []
+    entry = ("%s=%s" % (MARKER_ENV, marker)).encode()
+    killed = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == os.getpid() or pid in exclude or not _environ_has(pid, entry):
+            continue
+        state = _proc_stat(pid)
+        if state is None or state[0] == "Z":
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed.append(pid)
+        except (ProcessLookupError, PermissionError):
+            pass
+    return killed
+
+
+def write_pidfile(path, pid, marker=None):
+    """Record the server this runner started: its pid, its process group,
+    its start time and the boot (so a recycled pid, or one from another
+    boot, is never taken for it), and the start's marker (what it started
+    outside its group), 0600, by rename."""
     stat_ = _proc_stat(pid)
-    record = {"pid": int(pid), "pgid": os.getpgid(pid), "start": stat_[1] if stat_ else None}
+    record = {"pid": int(pid), "pgid": os.getpgid(pid), "start": stat_[1] if stat_ else None,
+              "boot_id": _boot_id(), "marker": marker}
     path = Path(path)
     tmp = path.with_suffix(".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
@@ -116,36 +163,48 @@ def write_pidfile(path, pid):
 
 
 def reap_leftover(path, timeout=5.0):
-    """SIGKILL the process group of a server an earlier runner left behind
-    (it was killed before its teardown), when the pidfile names a live
-    process with the same start time; the pid killed, else None. The file
-    is removed either way."""
+    """What a server an earlier runner left behind (killed before its
+    teardown) still runs, when the pidfile is from this boot: the server's
+    process group when its leader is alive with the same start time and is
+    `opencode serve`, then every process carrying that start's marker
+    (opencode starts the model's shell in a session of its own, which
+    outlives a dead leader). SIGKILL; the pids killed ([] when none). The
+    file is removed either way."""
     path = Path(path)
     try:
         record = json.loads(path.read_text())
     except FileNotFoundError:
-        return None
+        return []
     except (OSError, ValueError):
         record = None
     path.unlink(missing_ok=True)
     try:
         pid, pgid, start = int(record["pid"]), int(record["pgid"]), str(record["start"])
-    except (TypeError, KeyError, ValueError):
-        return None
+        boot, marker = record.get("boot_id"), record.get("marker")
+    except (TypeError, KeyError, ValueError, AttributeError):
+        return []
+    if pid <= 1 or pgid <= 1 or not boot or boot != _boot_id():
+        return []
+    killed = []
     now = _proc_stat(pid)
-    if pid <= 1 or pgid <= 1 or now is None or now[1] != start or now[0] == "Z":
-        return None
     try:
-        os.killpg(pgid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        return None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        now = _proc_stat(pid)
-        if now is None or now[1] != start or now[0] == "Z":
-            break
-        time.sleep(0.05)
-    return pid
+        serve = b"serve" in Path("/proc/%d/cmdline" % pid).read_bytes().split(b"\0")
+    except OSError:
+        serve = False
+    if now is not None and now[1] == start and now[0] != "Z" and serve:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            killed.append(pid)
+        except (ProcessLookupError, PermissionError):
+            pass
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            now = _proc_stat(pid)
+            if now is None or now[1] != start or now[0] == "Z":
+                break
+            time.sleep(0.05)
+    killed += [p for p in kill_marked(marker) if p not in killed]
+    return killed
 
 
 def _free_port():
@@ -186,6 +245,7 @@ class OpencodeServer:
         self.config_path = str(config_path)
         self.timeout = timeout
         self.password = None
+        self.marker = None
         self.port = None
         self.url = None
         self.proc = None
@@ -209,6 +269,8 @@ class OpencodeServer:
             env.pop(name, None)
         env.update(FIXED_ENV)
         env["OPENCODE_SERVER_PASSWORD"] = self.password
+        if self.marker:
+            env[MARKER_ENV] = self.marker
         env["OPENCODE_CONFIG"] = self.config_path
         return env
 
@@ -225,6 +287,7 @@ class OpencodeServer:
         if self.alive():
             return self
         self.password = secrets.token_urlsafe(24)
+        self.marker = secrets.token_hex(16)
         self.port = _free_port()
         self.url = "http://%s:%d" % (HOST, self.port)
         env = self.child_env()
@@ -293,6 +356,7 @@ class OpencodeServer:
                 except subprocess.TimeoutExpired:
                     pass
         self._signal(proc, signal.SIGKILL)       # what it started and left behind
+        kill_marked(self.marker)                 # ... in sessions of their own too
         if self._pump is not None:
             self._pump.join(1)
         if proc.stdout is not None and not (self._pump and self._pump.is_alive()):

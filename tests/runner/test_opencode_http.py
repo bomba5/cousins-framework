@@ -213,10 +213,66 @@ class TestOrphans(ServerCase):
         pidfile = self.dir / "opencode.pid"
         opencode_http.write_pidfile(pidfile, srv.pid)
         self.assertEqual(os.stat(pidfile).st_mode & 0o777, 0o600)
-        self.assertEqual(opencode_http.reap_leftover(pidfile), srv.pid)
+        self.assertEqual(opencode_http.reap_leftover(pidfile), [srv.pid])
         self.assertTrue(_wait(lambda: _gone(srv.pid) or _zombie(srv.pid)))
         self.assertFalse(pidfile.exists())
-        self.assertIsNone(opencode_http.reap_leftover(pidfile))      # nothing left
+        self.assertEqual(opencode_http.reap_leftover(pidfile), [])   # nothing left
+
+    def detached_child(self, srv):
+        path = self.dir / "detached.pid"
+        self.assertTrue(_wait(lambda: path.exists() and path.read_text().strip()))
+        child = int(path.read_text())
+        def kill():
+            try:
+                os.kill(child, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(kill)
+        self.assertNotEqual(os.getpgid(child), srv.pid)        # its own session
+        return child
+
+    def test_stop_kills_what_the_server_started_in_a_session_of_its_own(self):
+        """Review round 2, minor 1: opencode starts the model's bash in a
+        session of its own (measured on 1.18.31), which the server's process
+        group never held. Every process carrying this start's marker goes."""
+        srv = self.server(FAKE_OPENCODE_DETACH=str(self.dir / "detached.pid")).start()
+        child = self.detached_child(srv)
+        srv.stop()
+        self.assertTrue(_wait(lambda: _gone(child) or _zombie(child)), "the child outlived stop")
+
+    def test_a_leftover_is_reaped_with_its_detached_children_even_without_its_leader(self):
+        srv = self.server(FAKE_OPENCODE_DETACH=str(self.dir / "detached.pid")).start()
+        self.killpg_later(srv.pid)
+        child = self.detached_child(srv)
+        pidfile = self.dir / "opencode.pid"
+        opencode_http.write_pidfile(pidfile, srv.pid, marker=srv.marker)
+        record = json.loads(pidfile.read_text())
+        self.assertEqual(record["boot_id"], Path("/proc/sys/kernel/random/boot_id")
+                         .read_text().strip())
+        os.killpg(srv.pid, signal.SIGKILL)                    # the leader is gone (PDEATHSIG)
+        srv.proc.wait(5)
+        self.assertFalse(_gone(child))
+        killed = opencode_http.reap_leftover(pidfile)
+        self.assertEqual(killed, [child])
+        self.assertTrue(_wait(lambda: _gone(child) or _zombie(child)))
+
+    def test_the_pidfile_checks_the_boot_and_the_command_too(self):
+        """Review round 2, minor 2: a pidfile from another boot, or naming a
+        live process that is not `opencode serve`, kills nothing."""
+        srv = self.server().start()
+        self.killpg_later(srv.pid)
+        pidfile = self.dir / "opencode.pid"
+        opencode_http.write_pidfile(pidfile, srv.pid, marker=srv.marker)
+        record = json.loads(pidfile.read_text())
+        record["boot_id"] = "00000000-0000-0000-0000-000000000000"
+        pidfile.write_text(json.dumps(record))
+        self.assertEqual(opencode_http.reap_leftover(pidfile), [])
+        self.assertFalse(_gone(srv.pid))
+        other = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        self.addCleanup(other.kill)
+        opencode_http.write_pidfile(pidfile, other.pid, marker="nobody")
+        self.assertEqual(opencode_http.reap_leftover(pidfile), [])
+        self.assertIsNone(other.poll())
 
     def test_a_recycled_pid_is_never_killed(self):
         """The pidfile names a start time: a live process with that pid but
@@ -228,12 +284,12 @@ class TestOrphans(ServerCase):
         record = json.loads(pidfile.read_text())
         record["start"] = str(int(record["start"]) - 1)
         pidfile.write_text(json.dumps(record))
-        self.assertIsNone(opencode_http.reap_leftover(pidfile))
+        self.assertEqual(opencode_http.reap_leftover(pidfile), [])
         self.assertFalse(_gone(srv.pid))
         self.assertFalse(pidfile.exists())
         for junk in ("", "{", "[]", '{"pid": "x"}', '{"pid": 1, "pgid": 1, "start": "0"}'):
             pidfile.write_text(junk)
-            self.assertIsNone(opencode_http.reap_leftover(pidfile), junk)
+            self.assertEqual(opencode_http.reap_leftover(pidfile), [], junk)
             self.assertFalse(pidfile.exists(), junk)
 
 

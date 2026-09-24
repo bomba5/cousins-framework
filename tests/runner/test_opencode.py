@@ -322,13 +322,13 @@ class TestEnvironment(OpencodeCase):
         # what OpencodeServer then gives the child: the switches, nothing planted
         srv = OpencodeServer("opencode", **{k: v for k, v in self.factory.calls[0].items()
                                             if k != "argv0"})
-        srv.password = "pw"
+        srv.password, srv.marker = "pw", "m"
         child = srv.child_env()
         for name in ("OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_SHARE",
                      "OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_PROJECT_CONFIG"):
             self.assertEqual(child[name], "1")
         self.assertEqual(sorted(set(child) - set(env)), sorted([
-            "OPENCODE_CONFIG", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_CLAUDE_CODE",
+            "COUSIN_OPENCODE_START", "OPENCODE_CONFIG", "OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_CLAUDE_CODE",
             "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_SHARE",
             "OPENCODE_SERVER_PASSWORD"]))
 
@@ -577,7 +577,7 @@ class TestLeftoverServer(OpencodeCase):
         self.started(r)
         self.assertTrue(_wait(lambda: old.proc.poll() is not None), "the leftover still runs")
         said = [p for p in self.payloads(r, "system") if p.get("subtype") == "opencode_leftover"]
-        self.assertEqual([p["pid"] for p in said], [old.pid])
+        self.assertEqual([p["pids"] for p in said], [[old.pid]])
 
     def test_the_runner_records_its_server_and_forgets_it_at_stop(self):
         class WithPid(Factory):

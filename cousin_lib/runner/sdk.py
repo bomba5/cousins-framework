@@ -94,6 +94,16 @@ class _NotWritten(Exception):
         self.row, self.cause = row, cause
 
 
+class _Unrenderable(Exception):
+    """The row could not be rendered into a message (a broken attachment,
+    say). Not transient: the row is closed FAILED with this text, never
+    requeued to fail the same way again."""
+
+    def __init__(self, row, cause):
+        super().__init__("could not be rendered: %s: %s" % (type(cause).__name__, cause))
+        self.row, self.cause = row, cause
+
+
 def _nothing_written(sdk, exc):
     """True when the SDK raised before its transport wrote a byte: every
     check in `SubprocessCLITransport.write` (not ready, process ended,
@@ -159,9 +169,21 @@ class _Writer:
         self._closed = False
         self._task = asyncio.ensure_future(self._run())
 
+    def ended(self):
+        """Why the writer's task ended without a close, or None."""
+        if self._closed or not self._task.done():
+            return None
+        if self._task.cancelled():
+            return "the turn's writer ended: cancelled"
+        exc = self._task.exception()
+        return "the turn's writer ended: %s" % (
+            "%s: %s" % (type(exc).__name__, exc) if exc is not None else "returned")
+
     def submit(self, job):
         if self._closed:
             raise RunnerError("the turn's writer is closed")
+        if self._task.done():       # died without a close: nothing would ever write it
+            raise RunnerError("the turn's writer has ended")
         self._jobs.append(job)
         self._wake.set()
         return job
@@ -189,13 +211,15 @@ class _Writer:
             except Exception as exc:  # noqa: BLE001 - handed to the job's owner
                 self._fail(job, exc)
             else:
-                job.future.set_result(value)
+                if not job.future.done():       # its awaiter may have cancelled it
+                    job.future.set_result(value)
                 self._call(job.on_ok, value)
             self._current = None
 
     def _fail(self, job, exc):
-        job.future.set_exception(exc)
-        job.future.exception()      # read here: its owner may not await it
+        if not job.future.done():       # its awaiter may have cancelled it
+            job.future.set_exception(exc)
+            job.future.exception()      # read here: its owner may not await it
         self._call(job.on_error, exc)
 
     def _call(self, handler, arg):
@@ -373,6 +397,8 @@ class SdkRunner:
         # it, never awaited by the reader. None between turns.
         self._writer = None
         self._write_error = None  # a fold write that failed: the reader raises it
+        self._unwritten = []      # folds whose write wrote nothing: requeued by the failure path
+        self._drop_writes = False  # set by _close's login branch: close the writer at once
         # A rejected rate limit (epoch seconds): nothing is claimed before it
         # (_wait_rate_limit); None when no limit holds.
         self._limited_until = None
@@ -972,7 +998,7 @@ class SdkRunner:
             for row in rows:
                 self.inbox.requeue(row["id"])
             self.stream.append("result", {"inbox_ids": [], "requeued": [r["id"] for r in rows],
-                                          "interrupted": self._interrupt_requested,
+                                          "interrupted": self._interrupt_sent,
                                           "is_error": True, "num_turns": 0,
                                           "total_cost_usd": None, "session_id": None,
                                           "usage": None, "repeat_in_transcript": True,
@@ -1323,8 +1349,12 @@ class SdkRunner:
 
     def _prepare(self, row):
         """The row's message and the exact text its echo will carry,
-        noted in `_sent` before any write: the prompt hook may fire first."""
-        message = envelope.render_message(self._row_item(row))
+        noted in `_sent` before any write: the prompt hook may fire first.
+        `_Unrenderable` when the row cannot be rendered."""
+        try:
+            message = envelope.render_message(self._row_item(row))
+        except Exception as exc:  # noqa: BLE001 - any rendering failure is the row's
+            raise _Unrenderable(row, exc) from exc
         # The SDK's str path sets this key and its iterable path does not.
         message.setdefault("parent_tool_use_id", None)
         text = message["message"]["content"][0]["text"]
@@ -1352,14 +1382,14 @@ class SdkRunner:
         reader keeps reading while it is written (_Writer). The row joins
         `open_rows` now, so the turn cannot end with it in flight; it is
         closed, as every row is, by the first result after its echo. A
-        write that raises before anything was written takes it back out
-        and fails the turn as `_NotWritten` (the row requeued); any other
-        failure leaves it open (it may have reached the CLI) and fails the
-        turn with it; a write never begun when the writer closes goes back
-        to the queue."""
+        write that raises before anything was written takes it back out,
+        lists it in `_unwritten` (every such row is requeued once by the
+        turn's failure path) and fails the turn; any other failure leaves
+        it open (it may have reached the CLI) and fails the turn with it; a
+        write never begun when the writer closes goes back to the queue.
+        Raises, with the row in no list, when it could not be handed over."""
         message, text = self._prepare(row)
         entry = (row, text)
-        open_rows.append(entry)
 
         def forget():
             if entry in open_rows:
@@ -1372,6 +1402,7 @@ class SdkRunner:
                 return      # already closed or requeued (a login's result): nothing to fail
             if isinstance(exc, _NotWritten):
                 forget()
+                self._unwritten.append(row)
             if self._write_error is None:
                 self._write_error = exc
 
@@ -1382,6 +1413,9 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
         self._writer.submit(_Job(lambda: self._write(sdk, row, message),
                                  on_error=on_error, on_dropped=on_dropped))
+        # after the submit: no yield in between, so the writer cannot have
+        # run it yet, and a refused submit leaves the row in no list
+        open_rows.append(entry)
 
     async def _write(self, sdk, row, message):
         """The query() of one message; `_NotWritten` when it raised before
@@ -1407,9 +1441,10 @@ class SdkRunner:
 
     async def _fold(self, sdk, open_rows):
         """Operator, person and peer chat that arrived during the live
-        turn is written into it (finding 1, #118), each through `_send`,
-        the one write every fold takes; anything else goes back to the
-        queue (`base.FOLDED_KINDS` says why)."""
+        turn is handed to the turn's writer (finding 1, #118), each through
+        `_send_later`, never awaited here; a row that cannot be rendered is
+        failed and the rest of the claim folds on; anything else goes back
+        to the queue (`base.FOLDED_KINDS` says why)."""
         rows = self._claim(10)
         for i, row in enumerate(rows):
             if row["source"] == INTERRUPT or self._interrupt_requested \
@@ -1422,8 +1457,22 @@ class SdkRunner:
             # would stop the reader that drains it (_Writer)
             try:
                 self._send_later(sdk, row, open_rows)
+            except _Unrenderable as exc:
+                # not transient: this row fails, the live turn goes on, and
+                # the rest of this claim folds at once
+                try:
+                    self.inbox.done(row["id"], FAILED, str(exc))
+                    self.stream.append("error", {"error": "fold: %s" % exc,
+                                                 "inbox_id": row["id"]})
+                except Exception:
+                    for rest in rows[i + 1:]:   # never stranded behind a failed close
+                        self.inbox.requeue(rest["id"])
+                    raise
+                continue
             except Exception:
-                for rest in rows[i + 1:]:   # claimed here, never offered: back to the queue
+                # this row (it could not be handed over) and the rest,
+                # claimed here and never offered: back to the queue
+                for rest in rows[i:]:
                     self.inbox.requeue(rest["id"])
                 raise
 
@@ -1455,10 +1504,17 @@ class SdkRunner:
             # handed over; this runs on the reader's path and never waits.
             self._interrupt_requested = True
             seq = self._turn_seq
-            self._writer.submit(_Job(lambda: self._interrupt_write(seq),
-                                     on_ok=self._interrupt_row_ok(row),
-                                     on_error=self._interrupt_row_refused(row),
-                                     on_dropped=self._interrupt_row_dropped(row)))
+            try:
+                self._writer.submit(_Job(lambda: self._interrupt_write(seq),
+                                         on_ok=self._interrupt_row_ok(row),
+                                         on_error=self._interrupt_row_refused(row),
+                                         on_dropped=self._interrupt_row_dropped(row)))
+            except RunnerError:
+                # the writer has ended: the row goes back (the boundary
+                # closes it NO_TURN), nothing was asked, and the turn fails
+                self._interrupt_requested = False
+                self.inbox.requeue(row["id"])
+                raise
 
     def _interrupt_row_ok(self, row):
         def ok(went):
@@ -1547,10 +1603,15 @@ class SdkRunner:
 
     def _raise_write_error(self):
         """A fold write that failed on the writer fails the turn here, on
-        the reader, as it did when the reader wrote it itself."""
+        the reader, as it did when the reader wrote it itself. So does a
+        writer whose task ended on its own: nothing handed to it would be
+        written, and the turn fails now rather than at the idle timeout."""
         exc, self._write_error = self._write_error, None
         if exc is not None:
             raise exc
+        why = self._writer.ended() if self._writer is not None else None
+        if why is not None:
+            raise RunnerError(why)
 
     async def _close_writer(self):
         writer, self._writer = self._writer, None
@@ -1575,7 +1636,8 @@ class SdkRunner:
         is never touched. `requeued` rows never reached the model and go
         back to the queue. A failure while closing rows is recorded and
         does not escape: the caller's resync must still run."""
-        message = "%s: %s" % (type(exc).__name__, exc)
+        message = str(exc) if isinstance(exc, _Unrenderable) \
+            else "%s: %s" % (type(exc).__name__, exc)
         # The state first: whoever sees the `error` event also sees `errored`.
         with self._lock:
             if self.machine.state in ("idle",) + LIVE_STATES:
@@ -1589,7 +1651,7 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
             self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
                                           "requeued": [r["id"] for r in requeued],
-                                          "interrupted": self._interrupt_requested,
+                                          "interrupted": self._interrupt_sent,
                                           "is_error": True, "num_turns": 0,
                                           "total_cost_usd": None, "session_id": None,
                                           "usage": None})
@@ -1693,6 +1755,8 @@ class SdkRunner:
             # between turns, so its stdout is not filling
             await self._send(sdk, first, open_rows)
             self._write_error = None
+            self._unwritten = []
+            self._drop_writes = False
             self._writer = _Writer(lambda text: self.stream.append("error", {"error": text}))
             started = time.monotonic()
             self._last_fold = 0.0
@@ -1736,6 +1800,11 @@ class SdkRunner:
                             results += 1
                             self._live = False
                             ok = self._close(msg, open_rows, echoed, closing) and ok
+                            if self._drop_writes:
+                                # a login's result requeued every open row: none of
+                                # them may still be written during _after_turn
+                                self._drop_writes = False
+                                await self._close_writer()
                             await self._after_turn(msg)
                             break
                 finally:
@@ -1747,12 +1816,18 @@ class SdkRunner:
             # mid-write stays open (it may have reached the CLI)
             await self._close_writer()
             self._write_error = None
-            requeued = [exc.row] if isinstance(exc, _NotWritten) else []
+            # every fold whose write wrote nothing, once each, plus a first
+            # row that was never written
+            requeued, self._unwritten = list(self._unwritten), []
+            if isinstance(exc, _NotWritten) and all(r["id"] != exc.row["id"] for r in requeued):
+                requeued.append(exc.row)
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
             # A raise before the send (the move to `running` refused, say) leaves
             # `first` claimed and in no list: back to the queue, the client untouched.
             unsent = [] if sending else [first]
             unclosed = [row for row, _ in open_rows] + closing
+            if isinstance(exc, _Unrenderable):
+                unclosed.append(exc.row)    # not transient: closed FAILED, never left claimed
             signal, self._auth_turn = self._auth_turn, None
             if signal is not None:
                 # the login failed the turn, and then the stream ended (or broke)
@@ -1802,6 +1877,7 @@ class SdkRunner:
                 self.inbox.requeue(row["id"])
             ids = [row["id"] for row in rows]
             closing[:], open_rows[:] = [], []
+            self._drop_writes = True        # _turn closes the writer before _after_turn
             self.stream.append("result", {"inbox_ids": [], "requeued": ids,
                                           "interrupted": interrupted, "is_error": True,
                                           "num_turns": msg.num_turns,

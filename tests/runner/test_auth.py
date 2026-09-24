@@ -232,6 +232,23 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.mark = ("m", 2)                              # the operator replaced the key
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
 
+    def test_a_login_result_closes_the_writer_before_the_after_turn_work(self):
+        """#118 review item 3: the login branch requeued every open row, so
+        no fold may still be written while _after_turn runs."""
+        from tests.runner.test_sdk import init_msg
+        r = self.build(first_turn=[init_msg(), _result_401()])
+        seen = []
+        real = r._after_turn
+
+        async def spy(msg):
+            seen.append(r._writer is None)
+            return await real(msg)
+        r._after_turn = spy
+        r.start()
+        self.op(r)
+        self.assertTrue(_wait(lambda: seen))
+        self.assertEqual(seen[0], True, "the writer was still open during _after_turn")
+
     def test_a_revoked_login_reads_logged_in_so_only_new_credentials_retry(self):
         from tests.runner.test_sdk import init_msg
         r = self.build(first_turn=[init_msg(), _result_401()])

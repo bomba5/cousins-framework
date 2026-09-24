@@ -608,24 +608,27 @@ class TestModelAndEffort(ConsoleCase):
 
     def test_a_runner_cousins_model_is_validated_by_one_turn_before_it_is_written(self):
         """As migrate does (NEVER_UNRUN): one smallest turn with the model on
-        the cousin's own account; a failure is the API's words, nothing
-        written."""
+        the cousin's own account, in a child process (#100 review: the
+        turn's scrub of os.environ is process-wide); a failure is the API's
+        words, nothing written. The console never runs the turn itself."""
         from unittest import mock
         home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\neffort = "low"\n')
         self.serve()
         seen = []
 
-        def passes(account, root, *, model=None, effort=None):
-            seen.append((account.name, model, effort))
+        def passes(home_, root, model, effort):
+            seen.append((home_.name, model, effort))
             return 0, "validate: ok"
-        with mock.patch("cousin_lib.runner.sdk.validate_account", passes):
+        with mock.patch("cousin_lib.runner.sdk.validate_account") as in_process, \
+                mock.patch("cousin_lib.spawn.validate_turn_out_of_process", passes):
             status, body = self.post("/api/cousins/wren/model", {"model": "m-two"})
         self.assertEqual(status, 200, body)
-        self.assertEqual(seen, [("host", "m-two", "low")])
+        in_process.assert_not_called()
+        self.assertEqual(seen, [("wren", "m-two", "low")])
         self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
                          "m-two")
         self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["model"], "m-two")
-        with mock.patch("cousin_lib.runner.sdk.validate_account",
+        with mock.patch("cousin_lib.spawn.validate_turn_out_of_process",
                         lambda *a, **k: (4, "model not_a_model: not_found_error")):
             status, body = self.post("/api/cousins/wren/model", {"model": "not_a_model"})
         self.assertEqual(status, 400, body)

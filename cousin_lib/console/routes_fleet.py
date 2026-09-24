@@ -26,6 +26,7 @@ from cousin_lib.console._common import (chat_call, chat_health, check_slug,
                                         session_alive, tmux)
 from cousin_lib.console.app import HttpError
 from cousin_lib.console.toml_edit import write_key
+from cousin_lib.runner import restart_note
 
 ACTIVE_WINDOW_SECONDS = 60
 ROLE_MAX_CHARS = 5000
@@ -416,8 +417,10 @@ def _start(server, slug):
             "chat_server": "reused" if chat_ok else "started"}
 
 
-def _stop(server, slug):
-    """Stop at once. On the runner lane the supervisor is asked with
+def _stop(server, slug, by="console"):
+    """Stop at once; `by` names the request in the runner's hold (a
+    restart's names itself, restart_note.REQUESTED_RESTART_BY, so the
+    resumed session is told to continue, #98). On the runner lane the supervisor is asked with
     wait false (R6'): the answer comes once the runner is signalled,
     `status: "stopping"`, and the fleet row's `supervisor.state` shows
     when it is down; a turn in hand can take up to 35 s. Only `stopping`
@@ -427,7 +430,7 @@ def _stop(server, slug):
     home = cousin_home(server, slug)
     server.emit("cousin-status", {"slug": slug, "status": "stopping"})
     if spawn.runner_lane(home):
-        result = spawn.stop_cousin(home, root=server.root, wait=False, by="console")
+        result = spawn.stop_cousin(home, root=server.root, wait=False, by=by)
         runner = result.get("runner")
         if runner == "stopping":
             status = "stopping"
@@ -626,7 +629,7 @@ def register():
         # a refused start below puts it back as it was instead of dropping it
         held_path = supervisor.held_path(home)
         earlier_hold = held_path.read_text() if held_path.is_file() else None
-        stopped = _stop(server, slug)
+        stopped = _stop(server, slug, by=restart_note.REQUESTED_RESTART_BY)
         if stopped["status"] == "stopping":          # the runner lane only
             threading.Thread(target=_start_when_down, args=(server, slug),
                              daemon=True, name="console-restart-%s" % slug).start()

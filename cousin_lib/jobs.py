@@ -557,6 +557,11 @@ def _cmd_start(args):
         # an empty program registers a job that dies 127 (#115)
         print("cousin-job: the command's program is empty", file=sys.stderr)
         return 2
+    if cmd and cmd[0] != cmd[0].strip():
+        # " echo" is no program on PATH either: the same 127
+        print("cousin-job: the command's program %r starts or ends with"
+              " whitespace" % cmd[0], file=sys.stderr)
+        return 2
     if cmd and cmd[0].startswith("-"):
         # A program is never named like an option; refusing it keeps a
         # command line from ever standing in for cousin-job's own flags.

@@ -167,7 +167,8 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
 
   // Effort: the levels come from the server (GET /api/spawn/options),
   // the current value from the cousin row, and a change persists to
-  // cousin.toml [runtime] through the effort route. The running agent
+  // cousin.toml through the effort route: [agent] for a runner cousin,
+  // [runtime] for a tmux one (#100). The running agent
   // keeps the level it started with, so a saved change shows "restart
   // to apply" rather than pretending it is live.
   const [efforts, setEfforts] = React.useState([]);
@@ -210,7 +211,9 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
             value={effort}
             onChange={e => applyEffort(e.target.value)}
             disabled={!efforts.length}
-            title="cousin.toml [runtime] effort: rendered into the agent command at the next start"
+            title={cousin.runner
+              ? "cousin.toml [agent] effort: read by the runner at the next start"
+              : "cousin.toml [runtime] effort: rendered into the agent command at the next start"}
             className="sel-inline"
             style={{ height: btnH }}
           >

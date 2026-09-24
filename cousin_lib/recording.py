@@ -194,21 +194,38 @@ def close_subagent_log(job_id, payload, tool_use_id, status, summary):
 
 # --------------------------------------------------------------- events
 
-def pre(home, slug, payload):
+def _register(cancelled, **fields):
+    """jobs.register_job, unless the hook already answered without this
+    call (`cancelled` set: its recorder ran past the budget,
+    runner/hooks.py). The flag is read before the insert and again after
+    it, since the wait on a busy store is inside register_job: a row that
+    landed once the hook had answered is taken back. None: no row."""
+    from cousin_lib import jobs
+    if cancelled is not None and cancelled.is_set():
+        return None
+    job_id = jobs.register_job(**fields)
+    if cancelled is not None and cancelled.is_set():
+        jobs.delete_job(job_id)
+        return None
+    return job_id
+
+
+def pre(home, slug, payload, *, cancelled=None):
     tool = payload.get("tool_name")
     tool_input = payload.get("tool_input") or {}
     tid = payload.get("tool_use_id")
     if not tid:
         return
-    from cousin_lib import jobs
     if tool in SUBAGENT_TOOLS:
         prompt = str(tool_input.get("prompt") or "")
         title = (tool_input.get("description") or one_line(prompt, 60)
                  or "subagent")
         desc = "%s: %s" % (tool_input.get("subagent_type") or "agent",
                            prompt[:400])
-        job_id = jobs.register_job(kind="subagent", title=str(title),
-                                   description=desc, spawned_by=slug)
+        job_id = _register(cancelled, kind="subagent", title=str(title),
+                           description=desc, spawned_by=slug)
+        if job_id is None:
+            return None
         log_path = mint_log(job_id)
         if log_path:
             activity.write_header(log_path, title=str(title),
@@ -219,9 +236,11 @@ def pre(home, slug, payload):
     elif tool in SHELL_TOOLS and tool_input.get("run_in_background"):
         command = str(tool_input.get("command") or "")
         title = tool_input.get("description") or one_line(command, 80)
-        job_id = jobs.register_job(kind="shell", title=str(title),
-                                   description="background shell",
-                                   spawned_by=slug, command=command)
+        job_id = _register(cancelled, kind="shell", title=str(title),
+                           description="background shell",
+                           spawned_by=slug, command=command)
+        if job_id is None:
+            return None
         remember(home, "tool", tid, job_id)
         prune(home)
         log_path = mint_log(job_id)
@@ -333,11 +352,13 @@ def is_tracked(payload):
     return False
 
 
-def handle(payload, home, root, *, slug=None):
+def handle(payload, home, root, *, slug=None, cancelled=None):
     """Act on one hook payload. Raises on a store error; the caller
     (job_hooks.main on the harness lane, runner/hooks.py on the SDK
     lane) is the catch-all. With slug given, skips the CousinConfig
-    load for it."""
+    load for it. `cancelled`, a threading.Event the SDK lane's hook sets
+    once it has answered without this recording: a PreToolUse then
+    registers no row (see _register)."""
     if not is_tracked(payload):
         return
     os.environ["COUSIN_HOME"] = str(home)
@@ -359,7 +380,7 @@ def handle(payload, home, root, *, slug=None):
                 slug = CousinConfig.load(home).slug
             except Exception:
                 slug = pathlib.Path(home).name
-        return pre(home, slug, payload)
+        return pre(home, slug, payload, cancelled=cancelled)
     elif event == "PostToolUse":
         post(home, payload)
     elif event == "PostToolUseFailure":

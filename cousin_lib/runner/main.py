@@ -451,10 +451,14 @@ def _serve(runner, once):
         previous_int = signal.signal(signal.SIGINT, _signal)
         # a claim from a runner that died is ours now (the lock says no
         # other runner is alive on this home). That runner died in a turn:
-        # the resumed session is told so (#98, restart_note)
+        # the resumed session is told so (#98, restart_note). A mark a
+        # requested stop left for the same turn keeps its hold: that stop
+        # was asked for, whatever the sweep finds after it
         if runner.inbox.requeue_stale(older_than_s=0.0):
             try:
-                restart_note.mark(runner.home, "the last runner died with a row claimed")
+                earlier = restart_note.read(runner.home) or {}
+                restart_note.mark(runner.home, "the last runner died with a row claimed",
+                                  held=earlier.get("held"))
             except OSError:
                 pass
         # Before start: the head of this process's stream says what runs

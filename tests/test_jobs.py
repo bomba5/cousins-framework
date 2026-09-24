@@ -212,6 +212,16 @@ class TestBackgroundCommand(JobsCase):
                 self.assertIn("program", err)
         self.assertEqual(list_jobs(), [])
 
+    def test_a_program_with_surrounding_whitespace_is_refused_like_a_blank_one(self):
+        """#115 review: " echo" or "echo " is no program on PATH either; it
+        registered a job that died 127."""
+        for program in (" echo", "echo ", "\techo", "echo\n"):
+            with self.subTest(program=program):
+                rc, _, err = self._main(["start", "shell", "--", "t", program, "x"])
+                self.assertEqual(rc, 2)
+                self.assertIn("program", err)
+        self.assertEqual(list_jobs(), [])
+
     def test_one_option_set_serves_every_start_parser(self):
         """#115: the separated shape's check and the title-first re-parse
         read the start options from the same builder as the start parser,

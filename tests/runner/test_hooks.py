@@ -272,6 +272,79 @@ class TestRecorderBudget(HooksCase):
         self.assertTrue(any("budget" in e.get("error", "") for e in events), events)
         holder.execute("ROLLBACK")
 
+    def test_a_late_registration_is_cancelled_and_leaves_no_row(self):
+        """#104 review: past the budget the hook answered {} (no rewrite, so
+        no trap to close a shell's row); the recording then finished on its
+        thread and left a running row nobody would close. Now the late
+        recording is cancelled: no row, nothing remembered, and Post finds
+        no record and returns."""
+        import sqlite3
+        from cousin_lib import jobs, recording
+        jobs._db().close()
+        holder = sqlite3.connect(self.root / "data" / "jobs.db", timeout=0,
+                                 isolation_level=None)
+        holder.execute("BEGIN EXCLUSIVE")
+        self.addCleanup(holder.close)
+
+        async def answer():
+            out = await self.cbs["PreToolUse"](self._base(
+                "PreToolUse", tool_name="Bash",
+                tool_input={"command": "sleep 2", "run_in_background": True},
+                tool_use_id="tu-late"), "tu-late", {})
+            holder.execute("ROLLBACK")          # the store frees after the answer
+            return out
+        # asyncio.run waits for the recorder's thread at shutdown
+        self.assertEqual(_run(answer()), {})
+        self.assertEqual(jobs.list_jobs(), [])
+        self.assertIsNone(recording.recall(self.home, "tool", "tu-late"))
+        _run(self.cbs["PostToolUse"](self._base(
+            "PostToolUse", tool_name="Bash", tool_input={}, tool_use_id="tu-late",
+            tool_response={"backgroundTaskId": "b1"}), "tu-late", {}))
+        self.assertEqual(jobs.list_jobs(), [])
+
+    def test_the_flag_is_set_for_a_recorder_past_its_budget(self):
+        seen = []
+
+        def slow(payload, cancelled=None):
+            time.sleep(0.4)
+            seen.append(cancelled.is_set())
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream, recorder=slow)
+        with mock.patch.object(hooks, "RECORD_BUDGET_S", 0.1):
+            _run(cbs["PreToolUse"](self._base("PreToolUse", tool_name="Agent",
+                                              tool_input={"prompt": "x"}, tool_use_id="t"),
+                                   "t", {}))
+        self.assertEqual(seen, [True])
+
+    def test_a_late_recorder_exception_is_logged_not_swallowed(self):
+        def late_failure(payload):
+            time.sleep(0.4)
+            raise RuntimeError("database is locked")
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream, recorder=late_failure)
+        with mock.patch.object(hooks, "RECORD_BUDGET_S", 0.1):
+            out = _run(cbs["PreToolUse"](self._base("PreToolUse", tool_name="Agent",
+                                                    tool_input={"prompt": "x"},
+                                                    tool_use_id="t"), "t", {}))
+        self.assertEqual(out, {})
+        errors = [e["payload"]["error"] for e in self.stream.tail() if e["kind"] == "hook"]
+        self.assertTrue(any("RuntimeError: database is locked" in e and "late" in e
+                            for e in errors), errors)
+
+    def test_a_post_past_its_budget_says_what_a_post_misses(self):
+        """#104 review minor: "the call runs without its job row or rewrite"
+        is the PreToolUse's; a PostToolUse's call has already run."""
+        cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
+                              stream=self.stream, recorder=lambda payload: time.sleep(0.4))
+        with mock.patch.object(hooks, "RECORD_BUDGET_S", 0.1):
+            _run(cbs["PostToolUse"](self._base("PostToolUse", tool_name="Bash", tool_input={},
+                                               tool_use_id="t", tool_response={}), "t", {}))
+        errors = [e["payload"]["error"] for e in self.stream.tail() if e["kind"] == "hook"]
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("budget", errors[0])
+        self.assertNotIn("the call runs without", errors[0])
+        self.assertIn("closed when the store frees", errors[0])
+
     def test_a_fast_recorder_is_answered_as_before(self):
         out = _run(self.cbs["PreToolUse"](self._base(
             "PreToolUse", tool_name="Bash",

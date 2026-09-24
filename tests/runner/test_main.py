@@ -725,6 +725,38 @@ class TestRestartMark(HermeticCase):
         self.assertFalse((home / "data" / "runner-restart.json").exists())
         self.assertIsNone(restart_note.read(home))
 
+    def test_the_sweep_keeps_the_hold_a_requested_stop_marked(self):
+        """#98 review minor: a requested stop marked the cut turn with its
+        hold; the next start's sweep finds the same turn's row claimed and
+        must not overwrite the mark into "not the operator"."""
+        from cousin_lib.delivery import Item
+        from cousin_lib.runner import restart_note
+        home = temp_home(self, runner="fake")
+        restart_note.mark(home, "a stop interrupted the turn in flight",
+                          held="2026-09-24T19:40:00+00:00 console")
+        runner = runner_main.runner_for(home)
+        runner.inbox.put(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertEqual(len(runner.inbox.claim(limit=1, claimant="the-stopped-one")), 1)
+        self.assertEqual(runner_main._serve(runner, True), 0)
+        note = restart_note.read(home)
+        self.assertEqual(note["held"], "2026-09-24T19:40:00+00:00 console")
+        self.assertIn("a requested stop cut your last turn", restart_note.body(note))
+
+    def test_a_requested_restart_and_a_requested_stop_read_differently(self):
+        from cousin_lib.runner import restart_note
+        at = "2026-09-24T19:40:00+00:00"
+        restart = restart_note.body({"at": at, "why": "a stop interrupted the turn in flight",
+                                     "held": at + " console restart"})
+        self.assertIn("a requested restart cut your last turn", restart)
+        self.assertIn("continue", restart)
+        self.assertNotIn("a requested stop", restart)
+        self.assertNotIn("not the operator", restart)
+        stop = restart_note.body({"at": at, "why": "a stop interrupted the turn in flight",
+                                  "held": at + " console"})
+        self.assertIn("a requested stop cut your last turn", stop)
+        self.assertIn("it was the stop that was asked for", stop)
+        self.assertNotIn("restart", stop)
+
 
 @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "claude-agent-sdk not installed")
 class TestCheckAuthAndLogin(HermeticCase):

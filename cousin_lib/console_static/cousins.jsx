@@ -377,7 +377,10 @@ function fmtBeat(sec) {
 // /model, /effort); the route says whether a restart applies it, and
 // the hint follows the chat header's effort select: "restart to apply".
 // A select's choices come from /api/spawn/options, so the catalogue is
-// the install's (config/harness.toml), never one written here.
+// the install's (config/harness.toml), never one written here. Model
+// and effort live in [agent] for a runner cousin (its row carries
+// `runner`), in [runtime] for a tmux one (#100).
+const agentOrRuntime = c => (c && c.runner ? "[agent]" : "[runtime]");
 const IDENTITY_FIELDS = {
   operator:     { url: slug => `/api/cousins/${slug}/operator`,     row: "operator",    kind: "text",
                   title: "[operator] name" },
@@ -386,9 +389,9 @@ const IDENTITY_FIELDS = {
   heartbeat:    { url: slug => `/api/cousins/${slug}/heartbeat`,    row: "heartbeat",   kind: "seconds",
                   title: "[heartbeat] context_beat_seconds" },
   model:        { url: slug => `/api/cousins/${slug}/model`,        row: "model",       kind: "select",
-                  title: "[runtime] model", choices: o => o?.models },
+                  title: c => `${agentOrRuntime(c)} model`, choices: o => o?.models },
   effort:       { url: slug => `/api/cousins/${slug}/effort`,       row: "effort",      kind: "select",
-                  title: "[runtime] effort", choices: o => o?.efforts },
+                  title: c => `${agentOrRuntime(c)} effort`, choices: o => o?.efforts },
 };
 
 function IdentityField({ cousin, field, options }) {
@@ -457,7 +460,7 @@ function IdentityField({ cousin, field, options }) {
       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span>{text}</span>
         <button className="btn ghost" onClick={start} style={small}
-          title={`edit cousin.toml ${spec.title}`}>edit</button>
+          title={`edit cousin.toml ${typeof spec.title === "function" ? spec.title(cousin) : spec.title}`}>edit</button>
         {hint && <span style={{ color: "var(--fg-2)", fontSize: 11 }}>{hint}</span>}
       </span>
     );

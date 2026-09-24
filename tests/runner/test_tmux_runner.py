@@ -294,5 +294,21 @@ class TestRollover(Case):
         self.assertGreaterEqual(ex["written"], 0)
 
 
+class TestMiningCursor(HermeticCase):
+    def test_a_cursor_moved_to_the_end_mines_nothing_already_there(self):
+        """R17: after a switch the session keeps its id and the mining
+        cursor moves to the end of the target's transcript."""
+        from cousin_lib.runner import extract, transcript
+        home = temp_home(self)
+        path = home / "t.jsonl"
+        said = json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "The tmux kind decided that the runner owns the cursor file."}]}})
+        path.write_text(said + "\n")
+        store = transcript.TranscriptStore(path, "sid-1")
+        extract.set_cursor(home, "sid-1", path.stat().st_size)
+        self.assertEqual(extract.mine_turn(home, "sid-1", 1, store=store), 0)
+        self.assertEqual(extract._load(home)["sid-1"], path.stat().st_size)
+
+
 if __name__ == "__main__":
     unittest.main()

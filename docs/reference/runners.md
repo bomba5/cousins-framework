@@ -274,9 +274,70 @@ none is a contract item:
   Processes opencode starts other
   than a shell (language servers, formatters) run with the server's own
   environment, `HOME` in the account's data dir.
-- **tmux kind: a `/clear` typed in the pane is not followed.** The CLI starts
-  a new session id; the runner keeps reading the recorded session's
-  transcript and says so once with a `system` `session_changed` event naming
-  both ids. The next start finds the hook's record on the new id, refuses to
-  adopt the pane (`adopt_refused`, `session_mismatch`) and resumes the
-  recorded session.
+
+## Lane differences on tmux
+
+- The pane's CLI runs with `--dangerously-skip-permissions` (the P11-11
+  one-time operator step), so the harness's own permission system is never
+  consulted: `can_use_tool` does not fire in the pane, unlike the `sdk` and
+  `opencode` lanes. `policy.toml` is enforced instead as static rules baked
+  into the pane's own settings at start (`harness_settings.py`), not as a
+  live veto.
+- Only `deny_tools` reaches the pane, rendered into the CLI's own
+  `permissions.deny` (`harness_settings._policy_deny`,
+  `apply_project_settings`); see "Known gaps" below for what that leaves out.
+- `midturn_fold` is DECLARED (`TmuxRunner.UNSUPPORTED`): the pane's CLI
+  queues typed input to the turn's end or interrupts, never folds, so an
+  operator's or a peer's message put while a turn runs is claimed only once
+  the pane goes idle (see "What folds into a running turn" above).
+- The composed system prompt reaches the pane only on a fresh start, as
+  `--append-system-prompt` read from `data/run/tmux-context.md`; a resume or
+  a kind switch gets a short pointer instead, never the full block again
+  (`runner/prompt.py`, R10).
+
+## Known gaps on tmux
+
+What the tmux kind does not do yet, separate from the opencode lane's list
+above. Each is stated, none is hidden, and none is a contract item except
+`midturn_fold`, which is declared (see the contract table):
+
+- **`deny_bash_patterns` and `ask` do not reach the pane.** Both need a
+  live PreToolUse veto to enforce, and under `--dangerously-skip-permissions`
+  the CLI never consults one, so only `deny_tools`, rendered into
+  `permissions.deny`, still holds (`harness_settings.py`,
+  `_policy_deny`/`apply_project_settings`). A rule `policy.toml` can express
+  in bash patterns or `ask` is silently absent on this kind, not enforced a
+  different way.
+- **`deny_tools`' prefix syntax is not the CLI's own.** `Policy._named`
+  treats a name ending in `*` as a prefix match (`policy.py`): `Web*` denies
+  any tool whose name starts with `Web`. The CLI's `permissions.deny` rule
+  syntax has no such prefix form; an entry like `Web*` is written there
+  verbatim and denies nothing.
+- **Attachments are not rendered into the pane.** `TmuxRunner._render`
+  builds the typed envelope from a row's body and context only; it never
+  reads `row["attachments"]`. The `sdk` and `opencode` lanes turn an
+  attachment into an inline image block, a `Read <path>` marker for an
+  oversized image, or a `[attachment: <name>]` line (`runner/envelope.py`);
+  on tmux an attachment is silently dropped, with no marker line at all.
+- **No recall.** Nothing on the tmux path computes recall or carries it in
+  the typed envelope; the SDK lane's chat-server recall (operator and person
+  chat only) has no counterpart here.
+- **A usage-limit screen is caught only through the transcript's limit
+  entry, unmeasured live.** An `isApiErrorMessage` transcript entry whose
+  text matches `transcript.LIMIT_WORDS` ("usage limit", "limit reached",
+  "resets at") drives `TmuxRunner._limit_live`, requeuing the claimed row
+  and moving the runner to `rate_limited`. The wording is the binary's own,
+  but the live signature has never been measured against a real usage-limit
+  hit; the tests exercise it on fixtures built from that wording.
+- **A typed `/clear` changes the session.** The CLI starts a new session
+  id; the runner keeps reading the recorded session's transcript and says so
+  once with a `system` `session_changed` event naming both ids. The next
+  start finds the hook's record on the new id, refuses to adopt the pane
+  (`adopt_refused`, `session_mismatch`) and resumes the recorded session.
+- **The tmux server's environment is shared across tmux cousins.** Every
+  tmux-kind cousin's pane lives on one tmux server, one socket
+  (`<framework root>/run/tmux.sock`, `TmuxRunner._make_pane`), each in its
+  own session (`tmux-<home.name>`); the pane's own process environment is
+  isolated per pane (`exec env -i`, R3), but the server process itself, and
+  the `run/` directory it lives in (chmod 0700 on every pane start), are one
+  and the same for every tmux cousin on the host.

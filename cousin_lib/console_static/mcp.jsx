@@ -39,17 +39,18 @@ function policyRemovals(before, after) {
 }
 
 // Why a pattern would fail on the opencode lane, where the plugin runs it as a
-// JavaScript RegExp; null when JavaScript compiles it.
+// JavaScript RegExp with the `u` flag (as the plugin compiles it: stricter
+// escapes, so `\-` outside a class fails); null when it compiles.
 function jsRegexProblem(pattern) {
-  try { new RegExp(pattern); return null; } catch (e) { return String(e.message || e); }
+  try { new RegExp(pattern, "u"); return null; } catch (e) { return String(e.message || e); }
 }
 
 // A server as GET answers it -> the editable draft (masked values stay null).
 function mcpServerDraft(s) {
-  const d = { name: s.name, type: s.type, ignored_keys: s.ignored_keys || [], masked: s.masked || [],
+  const d = { _id: "file:" + s.name, name: s.name, type: s.type, ignored_keys: s.ignored_keys || [], masked: s.masked || [],
               account_vars: s.account_vars || [], unset_vars: s.unset_vars || [] };
   if (s.type === "stdio") {
-    d.command = s.command || "";
+    d.command = s.command_masked ? null : (s.command || "");
     d.args = (s.args || []).map(a => (a && typeof a === "object") ? a.value : a);
     d.env = (s.env || []).map(e => ({ name: e.name, value: e.value }));
   } else {
@@ -148,10 +149,11 @@ function RestartOffer({ cousin, note }) {
 }
 
 // A typed confirmation: the action runs only once the word is typed.
-function TypedConfirm({ word, label, busy, onConfirm, onCancel }) {
+function TypedConfirm({ word, label, busy, onConfirm, onCancel, children }) {
   const [typed, setTyped] = React.useState("");
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      {children && <div style={{ ...mcpHint, color: "var(--amber)", flexBasis: "100%" }}>{children}</div>}
       <span style={mcpHint}>type <code>{word}</code> to confirm</span>
       <input className="txt" value={typed} onChange={e => setTyped(e.target.value)} style={{ width: 90 }} autoFocus />
       <button className="btn danger" style={mcpSmall} disabled={busy || typed !== word} onClick={onConfirm}>{label}</button>
@@ -208,7 +210,7 @@ function RegistryEditor({ url, scope, cousin }) {
     setBusy(true); setMsg(null); setStale(false);
     try {
       const { r, d } = await apiSend("POST", url + path, body);
-      if (r.status === 409 && d.etag) setStale(true);
+      if (r.status === 409 && d.stale) setStale(true);
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setData(d); setSaved(true);
       return d;
@@ -351,6 +353,12 @@ function McpRows({ rows, onChange, namePlaceholder, valuePlaceholder, disabled, 
 
 function McpServerCard({ draft, onChange, onRemove, problems, busy }) {
   const mine = (problems || []).filter(p => p.server === draft.name);
+  const [removing, setRemoving] = React.useState(false);
+  React.useEffect(() => {
+    if (!removing) return;
+    const t = setTimeout(() => setRemoving(false), 4000);
+    return () => clearTimeout(t);
+  }, [removing]);
   const set = (patch) => onChange(Object.assign({}, draft, patch));
   const field = (label, children) => (
     <label style={{ ...mcpMono, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", color: "var(--fg-2)" }}>
@@ -373,11 +381,16 @@ function McpServerCard({ draft, onChange, onRemove, problems, busy }) {
           <option value="sse">sse</option>
         </select>
         <span style={{ flex: 1 }} />
-        <button className="btn danger" style={mcpSmall} disabled={busy} onClick={onRemove}>remove</button>
+        <button className="btn danger" style={mcpSmall} disabled={busy}
+                onClick={() => { if (removing) { setRemoving(false); onRemove(); } else setRemoving(true); }}
+                title="drops this server from the list; nothing is written until save">
+          {removing ? "click again to remove" : "remove"}
+        </button>
       </div>
       {draft.type === "stdio" ? (
         <>
-          {field("command", <input className="txt" value={draft.command || ""} disabled={busy} placeholder="/path/to/server"
+          {field("command", <input className="txt" value={draft.command ?? ""} disabled={busy}
+                                   placeholder={draft.command === null ? "masked secret in the command: write ${NAME}" : "/path/to/server"}
                                    style={{ flex: "1 1 200px", minWidth: 0 }} onChange={e => set({ command: e.target.value })} />)}
           {field("args", (
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: "1 1 200px" }}>
@@ -456,7 +469,7 @@ function McpServersEditor({ cousin }) {
       const body = { etag: data.etag, servers: drafts.map(mcpServerBody), drop };
       if (replaceBroken) body.replace_broken = true;
       const { r, d } = await apiSend("POST", url, body);
-      if (r.status === 409 && d.etag) setStale(true);
+      if (r.status === 409 && d.stale) setStale(true);
       if (!r.ok) {
         if (d.problems) setProblems(d.problems);
         throw new Error(d.error || `HTTP ${r.status}`);
@@ -507,7 +520,7 @@ function McpServersEditor({ cousin }) {
       {data.parse_error && <div style={{ ...mcpMono, fontSize: 10, color: "var(--red)" }}>{data.parse_error}</div>}
 
       {drafts.map((d, i) => (
-        <McpServerCard key={i} draft={d} busy={busy} problems={problems}
+        <McpServerCard key={d._id} draft={d} busy={busy} problems={problems}
                        onChange={next => setDrafts(drafts.map((x, j) => j === i ? next : x))}
                        onRemove={() => setDrafts(drafts.filter((_, j) => j !== i))} />
       ))}
@@ -534,7 +547,7 @@ function McpServersEditor({ cousin }) {
       ))}
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <button className="btn ghost" style={mcpSmall} disabled={busy}
-                onClick={() => setDrafts(drafts.concat([{ name: "", type: "stdio", command: "", args: [], env: [] }]))}>+ server</button>
+                onClick={() => setDrafts(drafts.concat([{ _id: "new:" + Date.now() + ":" + drafts.length, name: "", type: "stdio", command: "", args: [], env: [] }]))}>+ server</button>
         {!data.parse_error && <button className="btn primary" style={mcpSmall} disabled={busy} onClick={() => save(false)}>save</button>}
         {data.parse_error && !replacing && (
           <button className="btn danger" style={mcpSmall} disabled={busy} onClick={() => setReplacing(true)}>replace the broken file</button>
@@ -555,15 +568,10 @@ function McpDiagnostics({ cousin }) {
   const [selftest, setSelftest] = React.useState(null);
   const [last, setLast] = React.useState(undefined);
   const [busy, setBusy] = React.useState(null);
-  const [confirm, setConfirm] = React.useState(false);
+  const [approving, setApproving] = React.useState(false);
   const [msg, setMsg] = React.useState(null);
 
-  React.useEffect(() => { setSelftest(null); setLast(undefined); setMsg(null); }, [cousin.slug]);
-  React.useEffect(() => {
-    if (!confirm) return;
-    const t = setTimeout(() => setConfirm(false), 4000);
-    return () => clearTimeout(t);
-  }, [confirm]);
+  React.useEffect(() => { setSelftest(null); setLast(undefined); setMsg(null); setApproving(false); }, [cousin.slug]);
 
   const run = async (what) => {
     setBusy(what); setMsg(null);
@@ -577,11 +585,10 @@ function McpDiagnostics({ cousin }) {
         if (!d) throw new Error("last connection unavailable");
         setLast(d.last);
       } else if (what === "approve") {
-        if (!confirm) { setConfirm(true); return; }
-        setConfirm(false);
         const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/mcp/approve`, {});
         if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
         setMsg({ ok: true, text: `approved in ${d.settings_file}: ${d.note}` });
+        setApproving(false);
         loadStatus();
       }
     } catch (e) {
@@ -591,7 +598,8 @@ function McpDiagnostics({ cousin }) {
     }
   };
 
-  const runner = status && status.lane && status.lane !== "tmux-legacy";
+  // the lanes whose harness reads .mcp.json approvals (routes_mcp.HARNESS_LANES)
+  const runner = status && status.lane && !["tmux-legacy", "tmux"].includes(status.lane);
   const stateTone = { connected: "green", failed: "red", unrecorded: "amber" };
   return (
     <div data-mcp-diagnostics style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -600,11 +608,13 @@ function McpDiagnostics({ cousin }) {
                 title="load the registry, build every schema, resolve every command">{busy === "selftest" ? "testing..." : "selftest"}</button>
         <button className="btn" style={mcpSmall} disabled={!!busy} onClick={() => run("last")}
                 title="what the harness recorded the last time it connected this cousin's MCP server">last connection</button>
-        <button className="btn" style={mcpSmall} disabled={!!busy || !status || !status.mcp_json || !status.settings_file}
-                onClick={() => run("approve")}
-                title="trust the home and enable `cousin` in the harness settings file config/harness.toml names">
-          {confirm ? "click again to approve" : "approve"}
-        </button>
+        {!runner && (
+          <button className="btn" style={mcpSmall} disabled={!!busy || approving || !status || !status.mcp_json || !status.settings_file}
+                  onClick={() => setApproving(true)}
+                  title="trust the home and enable `cousin` in the harness settings file config/harness.toml names">
+            approve
+          </button>
+        )}
         {status && status.approved === true && <Pill tone="green">approved</Pill>}
         {status && status.approved === false && <Pill tone="amber">not approved</Pill>}
       </div>
@@ -613,9 +623,17 @@ function McpDiagnostics({ cousin }) {
           {runner
             ? "A runner cousin serves `cousin` in-process: approval matters only to the tmux lane's harness."
             : status.settings_file
-              ? `approve edits ${status.settings_file} (this home's entry only); the harness reads it at the next session start`
+              ? `approve rewrites the whole harness settings file ${status.settings_file} to trust this home and enable \`cousin\`; the harness reads it at the next session start`
               : (status.reason || "no harness settings file configured")}
         </div>
+      )}
+      {approving && status && (
+        <TypedConfirm word="approve" label="approve" busy={!!busy} onCancel={() => setApproving(false)}
+                      onConfirm={() => run("approve")}>
+          This rewrites the whole harness settings file, {status.settings_file}, not only this home's entry.
+          A live harness session keeps its own copy and writes it back: it can overwrite this change, or this
+          write can overwrite what the session wrote. Approve while {cousin.slug}'s session is stopped.
+        </TypedConfirm>
       )}
       <McpMsg msg={msg} />
       {selftest && (
@@ -811,7 +829,7 @@ function PolicyPanel({ cousin }) {
       const body = Object.assign({ etag: data.etag }, draft, opts || {});
       const { r, d } = await apiSend("POST", url, body);
       if (r.status === 409 && d.needs_confirm) { setLoosen(d.removed); return; }
-      if (r.status === 409 && d.etag) setStale(true);
+      if (r.status === 409 && d.stale) setStale(true);
       if (!r.ok) {
         if (d.problems) setProblems(d.problems);
         throw new Error(d.error || `HTTP ${r.status}`);

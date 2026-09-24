@@ -87,6 +87,15 @@ class McpCase(ConsoleCase):
             (home / "mcp-registry.toml").write_text(registry)
         return home
 
+    def harness(self, **keys):
+        lines = ['mcp_logs_dir = "%s/cache/{home_encoded}/mcp-logs-{server}"' % self.root]
+        lines += ['%s = "%s"' % (k, v) for k, v in keys.items()]
+        (self.root / "config" / "harness.toml").write_text("\n".join(lines) + "\n")
+
+    def write(self, home, servers, extra=None):
+        doc = dict(extra or {}, mcpServers=servers)
+        (home / ".mcp.json").write_text(json.dumps(doc, indent=2))
+
     def stream(self, home, *events):
         path = home / "data" / "stream" / "s1.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,10 +217,6 @@ class TestInstallRegistry(McpCase):
 
 
 class TestMcpJson(McpCase):
-    def write(self, home, servers, extra=None):
-        doc = dict(extra or {}, mcpServers=servers)
-        (home / ".mcp.json").write_text(json.dumps(doc, indent=2))
-
     def base(self, home):
         self.write(home, {
             "cousin": {"command": "/opt/cousin-mcp", "env": {"COUSIN_SLUG": "wren"}},
@@ -347,12 +352,97 @@ class TestMcpJson(McpCase):
         self.assertIn("a", json.loads((home / ".mcp.json").read_text())["mcpServers"])
 
 
-class TestCousinMcp(McpCase):
-    def harness(self, **keys):
-        lines = ['mcp_logs_dir = "%s/cache/{home_encoded}/mcp-logs-{server}"' % self.root]
-        lines += ['%s = "%s"' % (k, v) for k, v in keys.items()]
-        (self.root / "config" / "harness.toml").write_text("\n".join(lines) + "\n")
+class TestMcpJsonRound1(McpCase):
+    def test_replacing_a_broken_file_on_the_tmux_lane_keeps_the_cousin_entry(self):
+        home = self.wren()
+        (home / ".mcp.json").write_text("{broken")
+        self.serve()
+        view = self.get("/api/cousins/wren/mcp/servers")[1]
+        server = {"name": "a", "type": "sse", "url": "https://x/sse"}
+        status, body = self.post("/api/cousins/wren/mcp/servers", {
+            "etag": view["etag"], "servers": [server], "replace_broken": True})
+        self.assertEqual(status, 200, body)
+        got = json.loads((home / ".mcp.json").read_text())["mcpServers"]
+        self.assertEqual(sorted(got), ["a", "cousin"])
+        self.assertEqual(got["cousin"]["env"]["COUSIN_SLUG"], "wren")
+        self.assertIn("--registry", got["cousin"]["args"])
 
+    def test_a_runner_lane_replacement_writes_no_cousin_entry(self):
+        home = self.wren(runner="fake")
+        (home / ".mcp.json").write_text("{broken")
+        self.serve()
+        view = self.get("/api/cousins/wren/mcp/servers")[1]
+        status, body = self.post("/api/cousins/wren/mcp/servers", {
+            "etag": view["etag"], "servers": [], "replace_broken": True})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads((home / ".mcp.json").read_text()), {"mcpServers": {}})
+
+    def test_a_secret_shaped_command_is_masked_and_a_masked_url_gets_a_reference(self):
+        home = self.wren()
+        self.write(home, {"a": {"command": "/opt/run " + OPAQUE},
+                          "b": {"type": "http", "url": "https://x/mcp?token=abcdefgh1234"}})
+        self.serve()
+        status, body = self.get("/api/cousins/wren/mcp/servers")
+        self.assertNotIn(OPAQUE, json.dumps(body))
+        self.assertNotIn("abcdefgh1234", json.dumps(body))
+        servers = {s["name"]: s for s in body["servers"]}
+        self.assertEqual((servers["a"]["command"], servers["a"]["command_masked"]), (None, True))
+        self.assertIn("command", servers["a"]["masked"])
+        status, out = self.post("/api/cousins/wren/mcp/servers",
+                                {"etag": body["etag"], "servers": body["servers"]})
+        self.assertEqual(status, 400, out)
+        by_field = {p["field"]: p for p in out["problems"]}
+        self.assertEqual(by_field["command"]["suggest"], "${A_COMMAND}")
+        self.assertEqual(by_field["url"]["suggest"], "${B_URL}")
+
+    def test_changing_the_type_drops_the_old_types_keys(self):
+        home = self.wren()
+        self.write(home, {"a": {"command": "/opt/a", "args": ["x"], "env": {"L": "C"},
+                                "headersHelper": "/h"}})
+        self.serve()
+        view = self.get("/api/cousins/wren/mcp/servers")[1]
+        status, body = self.post("/api/cousins/wren/mcp/servers", {
+            "etag": view["etag"], "servers": [{"name": "a", "type": "http", "url": "https://x"}]})
+        self.assertEqual(status, 200, body)
+        got = json.loads((home / ".mcp.json").read_text())["mcpServers"]["a"]
+        self.assertEqual(got, {"headersHelper": "/h", "type": "http", "url": "https://x"})
+
+
+class TestRound1Misc(McpCase):
+    def test_an_exists_refusal_is_not_a_stale_etag(self):
+        self.wren()
+        self.serve()
+        status, body = self.post("/api/cousins/wren/mcp/registry/copy-default", {})
+        self.assertEqual(status, 409, body)
+        self.assertNotIn("etag", body)
+        self.assertNotIn("stale", body)
+        status, body = self.post("/api/cousins/wren/mcp/registry",
+                                 {"etag": "old", "timeout": 30})
+        self.assertEqual((status, body["stale"]), (409, True))
+
+    def test_files_that_are_not_utf8_answer_400_or_show_the_error(self):
+        home = self.wren()
+        (home / "mcp-registry.toml").write_bytes(b"\xff\xfe ceiling = 1\n")
+        (home / "policy.toml").write_bytes(b"\xff\xfe\n")
+        self.serve()
+        status, view = self.get("/api/cousins/wren/mcp/registry")
+        self.assertEqual(status, 200, view)
+        self.assertTrue(view["error"])
+        status, body = self.post("/api/cousins/wren/mcp/registry",
+                                 {"etag": view["etag"], "timeout": 30})
+        self.assertEqual(status, 400, body)
+        self.assertEqual(self.get("/api/cousins/wren/mcp/selftest")[0], 200)
+        status, view = self.get("/api/cousins/wren/policy")
+        self.assertEqual(status, 200, view)
+        self.assertTrue(view["error"])
+        payload = {"etag": view["etag"], "deny_tools": [], "deny_bash_patterns": [], "ask": [],
+                   "outbound_filter": True}
+        self.assertEqual(self.post("/api/cousins/wren/policy", payload)[0], 409)
+        status, body = self.post("/api/cousins/wren/policy", dict(payload, replace_broken=True))
+        self.assertEqual(status, 200, body)
+
+
+class TestCousinMcp(McpCase):
     def test_selftest_reports_commands_that_resolve_nowhere(self):
         self.wren(REG.replace('command = "true"\ndescription', 'command = "no-such-cmd-zz"\n'
                               'description'))
@@ -404,6 +494,25 @@ class TestCousinMcp(McpCase):
         self.assertEqual(data["other"], 1)
         self.assertIn("cousin", data["projects"][str(home)]["enabledMcpjsonServers"])
         self.assertTrue(self.get("/api/cousins/wren/mcp/status")[1]["approved"])
+
+
+class TestApproveLanes(McpCase):
+    def test_approve_is_refused_on_a_runner_lane_and_allowed_on_tmux(self):
+        settings = self.root / "harness-settings.json"
+        settings.write_text("{}")
+        self.harness(settings_file=str(settings))
+        home = self.wren(runner="fake")
+        (home / ".mcp.json").write_text('{"mcpServers": {}}')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/mcp/approve", {})
+        self.assertEqual(status, 409, body)
+        self.assertIn("runner", body["error"])
+        self.assertEqual(settings.read_text(), "{}")
+        # the phase 11 tmux kind approves like the legacy lane
+        text = (home / "cousin.toml").read_text().replace('runner = "fake"', 'runner = "tmux"')
+        (home / "cousin.toml").write_text(text)
+        status, body = self.post("/api/cousins/wren/mcp/approve", {})
+        self.assertEqual(status, 200, body)
 
 
 class TestPolicy(McpCase):
@@ -493,6 +602,21 @@ class TestPolicy(McpCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(runner_policy.Policy.load(home).deny_tools, ("WebFetch",))
         self.assertEqual(stat.S_IMODE((home / "policy.toml").stat().st_mode), 0o600)
+
+    def test_replacing_a_policy_that_parses_as_toml_still_checks_the_loosening(self):
+        home = self.wren()
+        (home / "policy.toml").write_text('deny_tools = ["WebFetch"]\nsurprise = 1\n')
+        self.serve()
+        view = self.get("/api/cousins/wren/policy")[1]
+        self.assertIn("surprise", view["error"])
+        payload = {"etag": view["etag"], "deny_tools": [], "deny_bash_patterns": [], "ask": [],
+                   "outbound_filter": True, "replace_broken": True}
+        status, body = self.post("/api/cousins/wren/policy", payload)
+        self.assertEqual((status, body.get("needs_confirm")), (409, True), body)
+        self.assertEqual(body["removed"]["deny_tools"], ["WebFetch"])
+        status, body = self.post("/api/cousins/wren/policy", dict(payload, confirm_loosening=True))
+        self.assertEqual(status, 200, body)
+        self.assertNotIn("surprise", (home / "policy.toml").read_text())
 
     def test_every_list_must_be_strings(self):
         self.wren()

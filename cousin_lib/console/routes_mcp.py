@@ -177,7 +177,7 @@ def _check_etag(req, path):
     now = _etag(path)
     if sent != now:
         raise HttpError(409, "%s changed since it was loaded: reload it and make the change"
-                        " again" % Path(path).name, etag=now)
+                        " again" % Path(path).name, etag=now, stale=True)
 
 
 def _atomic_write(path, text, mode=None):
@@ -203,9 +203,15 @@ def _lane(home):
     return agent_settings.summary(home)["lane"]
 
 
+# The lanes whose agent is Claude Code in a pane, reading .mcp.json itself and
+# needing the harness's approval for it: tmux-legacy, and phase 11's `tmux`
+# runner kind (named here already, so it works once that kind lands).
+HARNESS_LANES = ("tmux-legacy", "tmux")
+
+
 def _is_runner(lane):
-    from cousin_lib.agent_settings import TMUX_LEGACY
-    return lane != TMUX_LEGACY
+    """An in-process runner (sdk, opencode, fake): it serves `cousin` itself."""
+    return lane not in HARNESS_LANES
 
 
 def last_events(home, kinds):
@@ -302,8 +308,9 @@ def _registry_answer(path, *, scope, lane=None, source=None, shown=None, root=No
     if read_from is not None:
         try:
             body.update(registry_view(Path(read_from).read_text(), Path(read_from).name))
-        except OSError as err:
-            body.update(registry_view("", read_from.name), error=str(err))
+        except (OSError, UnicodeDecodeError) as err:
+            body.update(registry_view("", read_from.name))
+            body["error"] = "%s cannot be read as text: %s" % (Path(read_from).name, err)
         body["shown"] = str(read_from)
     else:
         body.update(registry_view("", "none"), shown=None)
@@ -367,7 +374,11 @@ def _write_registry(req, path, *, runner_lane):
         if not path.is_file():
             raise HttpError(409, "%s does not exist here: copy the default first" % path.name)
         _check_etag(req, path)
-        text = path.read_text()
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError as err:
+            raise HttpError(400, "%s is not UTF-8 text (%s): replace it with the default, or"
+                            " fix it by hand" % (path.name, err))
         try:
             tomllib.loads(text)
         except tomllib.TOMLDecodeError as err:
@@ -395,7 +406,7 @@ def _copy_into(req, target, text):
         if target.exists():
             if req.body.get("replace") is not True:
                 raise HttpError(409, "%s exists: replacing it needs replace and its etag"
-                                % target.name, etag=_etag(target))
+                                % target.name)
             _check_etag(req, target)
         try:
             mcp_server.parse_registry(text, "default", strict=True)
@@ -424,7 +435,11 @@ def _server_view(name, kind, entry):
     if kind == "stdio":
         args = list(entry.get("args", []))
         hidden = set(arg_secrets(args))
-        row["command"] = entry["command"]
+        command_hidden = any(_token_secret(t) for t in _literal_text(entry["command"]).split())
+        row["command"] = None if command_hidden else entry["command"]
+        row["command_masked"] = command_hidden
+        if command_hidden:
+            masked.append("command")
         row["args"] = [{"value": None if i in hidden else a, "masked": i in hidden}
                        for i, a in enumerate(args)]
         masked += ["args.%d" % i for i in sorted(hidden)]
@@ -547,7 +562,10 @@ def _entry_in(raw, problems, names):
     before = len(problems)
     if kind == "stdio":
         command = raw.get("command")
-        if not isinstance(command, str) or not command.strip() or not _string(command):
+        if command is None and "command" in raw:
+            _problem(problems, name, "command", "the file holds a literal secret here: replace"
+                     " it with a ${VAR} reference", suggest=_suggest(name, "command"))
+        elif not isinstance(command, str) or not command.strip() or not _string(command):
             _problem(problems, name, "command", "a stdio server needs a command")
         elif any(_token_secret(t) for t in _literal_text(command).split()):
             _problem(problems, name, "command", "looks like a secret: use a ${VAR} reference",
@@ -578,7 +596,10 @@ def _entry_in(raw, problems, names):
             entry["env"] = env
     else:
         url = raw.get("url")
-        if not isinstance(url, str) or not url.strip() or not _string(url):
+        if url is None and "url" in raw:
+            _problem(problems, name, "url", "the file holds a literal secret in the url: replace"
+                     " it with a ${VAR} reference", suggest=_suggest(name, "url"))
+        elif not isinstance(url, str) or not url.strip() or not _string(url):
             _problem(problems, name, "url", "an %s server needs a url" % kind)
         elif url_secret(url):
             _problem(problems, name, "url", "looks like it carries a secret: use a ${VAR}"
@@ -632,6 +653,10 @@ def _write_servers(req, home):
             elif req.body.get("replace_broken") is not True:
                 raise HttpError(409, "%s does not parse as a server list: replacing it needs"
                                 " replace_broken" % mcp_config.FILE)
+            elif _lane(home) in HARNESS_LANES:
+                # the harness lane starts cousin-mcp from this file: a
+                # replacement keeps the entry spawn writes, fresh
+                old = mcp_server.mcp_json(home, Path(home).name, req.server.root)["mcpServers"]
         editable = {n for n, _k, _e in mcp_config.parse(json.dumps({"mcpServers": old}))[0]}
         new = {}
         for name, entry in old.items():
@@ -640,8 +665,10 @@ def _write_servers(req, home):
         for name, entry in wanted:
             prior = old.get(name) if isinstance(old.get(name), dict) else {}
             kind = entry["type"]
-            merged = {k: v for k, v in prior.items()
-                      if k != "type" and k not in mcp_config.KEYS[kind]}
+            # keys no shape declares are kept; every declared key (this type's
+            # or the one it was) comes from the body alone
+            declared = {k for keys in mcp_config.KEYS.values() for k in keys}
+            merged = {k: v for k, v in prior.items() if k != "type" and k not in declared}
             if kind != "stdio" or "type" in prior or name not in old:
                 merged["type"] = kind
             for key in mcp_config.KEYS[kind]:
@@ -755,14 +782,18 @@ def _write_policy(req, home):
         fresh = False
         old = {"deny_tools": [], "deny_bash_patterns": [], "ask": [], "outbound_filter": True}
         if path.is_file():
-            parsed, error = _policy_values(path.read_text())
+            try:
+                parsed, error = _policy_values(path.read_text())
+            except (OSError, UnicodeDecodeError) as err:
+                parsed, error = dict(old), "%s: cannot read: %s" % (path.name, err)
             if error is not None:
                 if req.body.get("replace_broken") is not True:
                     raise HttpError(409, "%s is broken (%s): the runner refuses to start with"
                                     " it; replacing it needs replace_broken" % (path.name, error))
                 fresh = True
-            else:
-                old = parsed
+            # a file that reads as TOML but not as a policy still says what it
+            # denied: the loosening check runs against that too
+            old = parsed
         removed = {key: [v for v in old[key] if v not in values[key]] for key in POLICY_LISTS}
         removed["outbound_filter"] = old["outbound_filter"] is True and \
             values["outbound_filter"] is False
@@ -794,7 +825,7 @@ def _check_policy_text(text):
 def _keys_in(path):
     try:
         return set(tomllib.loads(Path(path).read_text()))
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return set()
 
 
@@ -815,6 +846,9 @@ def selftest(home, root, lane):
         registry = mcp_server.load_registry(path, strict=False)
     except mcp_server.RegistryError as err:
         out["error"] = str(err)
+        return out
+    except UnicodeDecodeError as err:
+        out["error"] = "%s is not UTF-8 text: %s" % (path, err)
         return out
     out.update(ceiling=registry["ceiling"], timeout=registry["timeout"],
                max_output=registry["max_output"])
@@ -978,6 +1012,11 @@ def register():
     @router.route("POST", "/api/cousins/{slug}/mcp/approve")
     def approve(req, slug):
         home = cousin_home(req.server, slug)
+        lane = _lane(home)
+        if lane not in HARNESS_LANES:
+            raise HttpError(409, "%s runs on the %s runner, which serves `cousin` in-process:"
+                            " only a harness lane (%s) reads .mcp.json approvals"
+                            % (slug, lane, ", ".join(HARNESS_LANES)))
         if not (home / mcp_config.FILE).is_file():
             raise HttpError(409, "%s has no %s to approve" % (slug, mcp_config.FILE))
         path, why = _settings_file(req.server.root)

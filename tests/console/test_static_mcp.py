@@ -43,7 +43,22 @@ class McpJsx(unittest.TestCase):
         self.assertIn('<TypedConfirm word="replace"', self.src)
         self.assertIn("confirm_loosening: true", self.src)
         self.assertIn("click again to restart", self.src)
-        self.assertIn("click again to approve", self.src)
+        self.assertIn('<TypedConfirm word="approve"', self.src)
+        self.assertIn("click again to remove", self.src)
+
+    def test_approve_says_it_rewrites_the_whole_settings_file(self):
+        self.assertIn("rewrites the whole harness settings file", self.src)
+        self.assertIn("while {cousin.slug}'s session is stopped", self.src)
+        self.assertNotIn("this home's entry only", self.src)
+        self.assertIn('["tmux-legacy", "tmux"]', self.src)
+
+    def test_patterns_compile_with_the_u_flag_like_the_plugin(self):
+        self.assertIn('new RegExp(pattern, "u")', self.src)
+
+    def test_stale_means_the_servers_stale_flag_and_servers_key_by_id(self):
+        self.assertIn("d.stale", self.src)
+        self.assertNotIn("d.etag) setStale", self.src)
+        self.assertIn("key={d._id}", self.src)
 
     def test_no_colour_literals_and_no_em_dashes(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(")
@@ -81,10 +96,14 @@ process.stdout.write(JSON.stringify([
   ["mcp__cousin__handoff", "mcp__cousin__*", "mcp__*", "*", "mcp__cousin__send", "Bash"]
     .map(e => mcpNamesTool(e, MCP_HANDOFF_TOOL)),
   jsRegexProblem("\\\\bgit\\\\s+push"), typeof jsRegexProblem("(?P<x>a)"),
+  typeof jsRegexProblem("rm\\\\-rf"), jsRegexProblem("[a\\\\-z]"),
 ]));""")
         self.assertEqual(got[0], [True, True, True, True, False, False])
         self.assertIsNone(got[1])
         self.assertEqual(got[2], "string")
+        # `\-` outside a class: fine without `u`, an error with it (the plugin's flag)
+        self.assertEqual(got[3], "string")
+        self.assertIsNone(got[4])
 
     def test_server_draft_body_and_suggestion(self):
         got = self.run_node("""
@@ -95,13 +114,15 @@ const d = mcpServerDraft(view);
 const fixed = mcpApplySuggestion(d, {server: "notes", field: "env", key: "NOTES_TOKEN", suggest: "${NOTES_TOKEN}"});
 const arg = mcpApplySuggestion(fixed, {server: "notes", field: "args", key: 1, suggest: "${NOTES_ARG}"});
 const other = mcpApplySuggestion(d, {server: "else", field: "env", key: "NOTES_TOKEN", suggest: "x"});
-process.stdout.write(JSON.stringify([d.args, mcpServerBody(arg), other === d,
+const masked = mcpServerDraft({name: "m", type: "stdio", command: null, command_masked: true});
+process.stdout.write(JSON.stringify([d.args, mcpServerBody(arg), other === d, masked.command, masked._id,
   mcpServerBody({name: " h ", type: "http", url: "https://x", headers: [{name: "", value: ""}]})]));""")
         self.assertEqual(got[0], ["--root", None])
         self.assertEqual(got[1]["env"][0], {"name": "NOTES_TOKEN", "value": "${NOTES_TOKEN}"})
         self.assertEqual(got[1]["args"], ["--root", "${NOTES_ARG}"])
         self.assertTrue(got[2])
-        self.assertEqual(got[3], {"name": "h", "type": "http", "url": "https://x", "headers": []})
+        self.assertEqual((got[3], got[4]), (None, "file:m"))
+        self.assertEqual(got[5], {"name": "h", "type": "http", "url": "https://x", "headers": []})
 
 
 if __name__ == "__main__":

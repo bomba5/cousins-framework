@@ -233,7 +233,9 @@ reach. Each change is checked by the parser the runner reads the file with,
 keeps every line it does not touch, and applies at the next start: after a
 save the panel says so and, on a running cousin, offers "restart now" (a
 second click confirms). A file that changed on disk since the panel loaded it
-is never overwritten; reload and make the change again.
+is never overwritten; reload and make the change again. (The model writing the
+file in the milliseconds between that check and the console's write loses to
+the console.)
 
 - **Tool registry** (`<home>/mcp-registry.toml`): a switch per tool, and the
   ceiling, timeout and output cap. More enabled tools than the ceiling is
@@ -251,7 +253,10 @@ is never overwritten; reload and make the change again.
 - **cousin-mcp**: selftest (the registry, where each command resolves, the
   SDK), last connection (what the harness logged, its stderr included) and
   approve (trusts the home and enables `cousin` in the harness settings file
-  `config/harness.toml` names; only the tmux lane needs it).
+  `config/harness.toml` names; only the tmux lane has it). Approve rewrites
+  that whole file and a live harness session writes its own copy back, so
+  approve while the cousin's session is stopped; you type "approve" to
+  confirm.
 - **Policy** (`<home>/policy.toml`): `deny_tools` and `ask` as chips,
   `deny_bash_patterns` one per line (compiled on save; on opencode a pattern
   JavaScript cannot compile is flagged, since it would deny every command),

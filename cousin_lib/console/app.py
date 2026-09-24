@@ -64,6 +64,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.hive",
     "cousin_lib.console.proxy",
     "cousin_lib.console.pane",
+    "cousin_lib.console.stream",
     "cousin_lib.console.sse",
 ]
 

@@ -12,6 +12,10 @@ from pathlib import Path
 _IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                 ".gif": "image/gif", ".webp": "image/webp"}
 CONTEXT_MARK = "--- context (not the sender's words) ---"
+# The API refuses an image over 5 MB, and base64 grows a file by 4/3. A
+# larger file (a phone photo) is handed over by path for the model's Read
+# tool, which downsizes it; the core has no image library to do it here.
+INLINE_IMAGE_MAX_BYTES = 3_700_000
 
 
 def _image_type(path):
@@ -19,6 +23,17 @@ def _image_type(path):
     path = Path(str(path))
     media = _IMAGE_TYPES.get(path.suffix.lower())
     return media if media and path.is_file() else None
+
+
+def _too_big(path):
+    try:
+        return Path(str(path)).stat().st_size > INLINE_IMAGE_MAX_BYTES
+    except OSError:
+        return False
+
+
+def _read_marker(path):
+    return "[image attached, too large to inline -> Read %s]" % path
 
 
 def _header(item, now):
@@ -40,7 +55,9 @@ def _attachment_blocks(item):
     for raw in item.attachments:
         path = Path(str(raw))
         media = _image_type(path)
-        if media:
+        if media and _too_big(path):
+            blocks.append({"type": "text", "text": _read_marker(path)})
+        elif media:
             data = base64.b64encode(path.read_bytes()).decode("ascii")
             blocks.append({"type": "image",
                            "source": {"type": "base64", "media_type": media,
@@ -52,7 +69,8 @@ def _attachment_blocks(item):
 
 def render(item, *, now=None):
     text = _text(item, now)
-    names = ["[image: %s]" % Path(str(a)).name if _image_type(a)
+    names = [_read_marker(a) if _image_type(a) and _too_big(a)
+             else "[image: %s]" % Path(str(a)).name if _image_type(a)
              else "[attachment: %s]" % Path(str(a)).name for a in item.attachments]
     return text + ("\n" + "\n".join(names) if names else "")
 

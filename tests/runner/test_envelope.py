@@ -75,5 +75,38 @@ class TestRenderMessage(HermeticCase):
         self.assertIn("missing.png", blocks[1]["text"])
 
 
+class TestOversizedImage(HermeticCase):
+    """An image too large to inline is handed over by path, never base64."""
+
+    def _big(self, size):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        jpg = pathlib.Path(tmp.name) / "phone.jpg"
+        jpg.write_bytes(b"\xff\xd8\xff" + b"\0" * (size - 3))
+        return jpg
+
+    def test_an_image_over_the_limit_is_a_read_marker_with_its_full_path(self):
+        jpg = self._big(envelope.INLINE_IMAGE_MAX_BYTES + 1)
+        item = Item("operator:priya", "chat", "look", sender="Priya", attachments=(str(jpg),))
+        blocks = envelope.render_message(item, now=NOW)["message"]["content"]
+        self.assertEqual([b["type"] for b in blocks], ["text", "text"])
+        self.assertIn("Read %s" % jpg, blocks[1]["text"])
+        self.assertNotIn("data", str(blocks[1]))
+
+    def test_an_image_at_the_limit_is_still_inlined(self):
+        jpg = self._big(envelope.INLINE_IMAGE_MAX_BYTES)
+        item = Item("operator:priya", "chat", "look", sender="Priya", attachments=(str(jpg),))
+        blocks = envelope.render_message(item, now=NOW)["message"]["content"]
+        self.assertEqual([b["type"] for b in blocks], ["text", "image"])
+
+    def test_the_limit_keeps_the_encoded_image_under_the_api_cap(self):
+        # base64 grows a payload by 4/3; the API refuses an image over 5 MB.
+        self.assertLessEqual(envelope.INLINE_IMAGE_MAX_BYTES * 4 / 3, 5 * 1024 * 1024)
+
+    def test_the_text_render_names_it_as_an_image_to_read(self):
+        jpg = self._big(envelope.INLINE_IMAGE_MAX_BYTES + 1)
+        item = Item("operator:priya", "chat", "look", sender="Priya", attachments=(str(jpg),))
+        self.assertIn("Read %s" % jpg, envelope.render(item, now=NOW))
+
+
 if __name__ == "__main__":
     unittest.main()

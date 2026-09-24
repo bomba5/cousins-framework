@@ -33,7 +33,9 @@ RECALL_BUDGET_S. The runner moves `waiting_permission` back to
 loop)."""
 import asyncio
 import contextlib
+import functools
 import inspect
+import threading
 
 from cousin_lib import recording
 from cousin_lib.runner.envelope import CONTEXT_MARK
@@ -46,8 +48,9 @@ RECALL_BUDGET_S = 4.0
 # The recorder writes <root>/data/jobs.db, which every cousin on the host
 # shares (sqlite waits up to 5 s per connect, and a call connects more than
 # once), and the CLI holds the tool until the hook answers (#104): past this
-# budget the hook answers without it and says so (the call runs unrecorded;
-# the recording finishes on its thread when the store frees).
+# budget the hook answers without it and says so. A PreToolUse's late
+# recording is cancelled (the call runs unrecorded, and no row outlives it);
+# a later event's finishes on its thread when the store frees.
 RECORD_BUDGET_S = 2.0
 PERMISSION_NOTIFICATION = "permission_prompt"
 # The reply tool as the CLI names it: the runner registers its tool server
@@ -80,6 +83,16 @@ def default_recall(home, root=None):
     return recall
 
 
+def _accepts(fn, name):
+    """fn takes a keyword argument `name` (an injected recorder may not)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD
+                                 for p in params.values())
+
+
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
               request_rollover=None):
@@ -108,7 +121,9 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home, root)
-    recorder = recorder or (lambda payload: recording.handle(payload, home, root, slug=slug))
+    recorder = recorder or (lambda payload, cancelled=None: recording.handle(
+        payload, home, root, slug=slug, cancelled=cancelled))
+    takes_cancel = _accepts(recorder, "cancelled")
     body_for_prompt = body_for_prompt or (lambda prompt: prompt)
     lock = lock if lock is not None else contextlib.nullcontext()
 
@@ -151,15 +166,41 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             if event == "PreToolUse" and policy is not None \
                     and gate(policy, payload)[0] != "allow":
                 return {}
+            # The recorder checks `cancelled` before it registers a row: once
+            # the hook has answered without it, a late row would be one nobody
+            # closes (no rewrite, no trap), so the late recording is dropped.
+            cancelled = threading.Event()
+            kwargs = {"cancelled": cancelled} if takes_cancel else {}
+            work = asyncio.get_running_loop().run_in_executor(
+                None, functools.partial(recorder, dict(payload), **kwargs))
             try:
-                return await asyncio.wait_for(asyncio.to_thread(recorder, dict(payload)),
-                                              RECORD_BUDGET_S)
+                # shielded: past the budget the work runs on, and its end is seen
+                return await asyncio.wait_for(asyncio.shield(work), RECORD_BUDGET_S)
             except asyncio.TimeoutError:
+                cancelled.set()
+                work.add_done_callback(functools.partial(late, event))
+                if event == "PreToolUse":
+                    missed = "the call runs without its job row or rewrite"
+                else:
+                    missed = "the hook answered; the job row is closed when the store frees"
                 stream.append("hook", {"event": event, "error": (
-                    "recorder over its %.1fs budget (a shared store busy): the call runs"
-                    " without its job row or rewrite" % RECORD_BUDGET_S)})
+                    "recorder over its %.1fs budget (a shared store busy): %s"
+                    % (RECORD_BUDGET_S, missed))})
                 return {}
         return record
+
+    def late(event, work):
+        """A recording that finished after its hook answered: nobody awaits
+        it, so its failure is written here instead of lost."""
+        if work.cancelled():
+            return
+        err = work.exception()
+        if err is not None:
+            try:
+                stream.append("hook", {"event": event, "error": "late recorder: %s: %s"
+                                       % (type(err).__name__, err)})
+            except Exception:  # noqa: BLE001 - the stream itself failed
+                pass
 
     async def on_prompt(payload):
         prompt = payload.get("prompt") or ""

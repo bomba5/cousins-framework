@@ -157,14 +157,18 @@ means search won't find it.
 One writer at a time: the writes to the file-backed stores (the raw day
 file, `data/decisions.jsonl` and its rotation, the decisions backfill, the
 recall counts and log, the distilled views with the read of raw behind them,
-the extraction and proposal cursors, `data/last-activity.txt`) hold an flock
-on `data/.memory-write.lock` while they read and write. Two sessions of one
-cousin (see `[agent.sessions]` in [configuration](configuration.md)), the
-cousin's own `cousin-memory` commands and the runner's per-turn miner can all
-write at once, and none of them loses the other's entry. Outside the lock:
-the trash (`memory_trash`, which re-reads and retries when a file changed
-under it), `cousin-memory import-auto`, and `compact`/the raw fold (they
-touch only files older than the hot window, never today's).
+the extraction and proposal cursors, `data/last-activity.txt`, the raw fold
+(`compact --target raw`: a month's read, archive and removal of its day
+files) and the trash's check-and-replace of a raw or decisions file) hold an
+flock on `data/.memory-write.lock` while they read and write. Two sessions
+of one cousin (see `[agent.sessions]` in [configuration](configuration.md)),
+the cousin's own `cousin-memory` commands and the runner's per-turn miner can
+all write at once, and none of them loses the other's entry. The raw fold
+needs it although it folds only days older than the hot window: the
+decisions backfill writes a decision into the raw file of its own day, which
+is often one of those. Outside the lock: `cousin-memory import-auto` (an
+operator act, into `memory/imported/`) and the `MEMORY.md` index compaction
+(`compact --target index`), which write no store the lock covers.
 
 ## Truth levels
 

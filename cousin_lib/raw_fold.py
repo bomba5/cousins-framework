@@ -16,7 +16,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cousin_lib import memory
+from cousin_lib import memory, memory_lock
 
 DEFAULT_KEEP_DAYS = 30
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
@@ -87,6 +87,33 @@ def _merge_digest(digest, entry, month):
         current["last_at"] = day
 
 
+def _fold_month(home, month, files, report):
+    dpath = digest_path(home, month)
+    digest = _load_digest(dpath)
+    archive = archive_dir(home) / ("%s.jsonl.gz" % month)
+    with gzip.open(archive, "at") as out:
+        for path in files:
+            raw = path.read_text()
+            if raw and not raw.endswith("\n"):
+                raw += "\n"
+            out.write(raw)
+            for line in raw.splitlines():
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                _merge_digest(digest, entry, month)
+                report["folded_entries"] += 1
+            report["folded_days"] += 1
+    tmp = dpath.with_suffix(".jsonl.tmp")
+    tmp.write_text("".join(json.dumps(d) + "\n"
+                           for d in digest.values()))
+    tmp.replace(dpath)
+    for path in files:
+        path.unlink()
+    report["months"].append(month)
+
+
 def fold_raw(home, *, keep_days=DEFAULT_KEEP_DAYS):
     """Fold daily raw files older than keep_days. Returns
     {"folded_days", "folded_entries", "months"}."""
@@ -106,28 +133,13 @@ def fold_raw(home, *, keep_days=DEFAULT_KEEP_DAYS):
         return report
     archive_dir(home).mkdir(parents=True, exist_ok=True)
     for month, files in by_month.items():
-        dpath = digest_path(home, month)
-        digest = _load_digest(dpath)
-        archive = archive_dir(home) / ("%s.jsonl.gz" % month)
-        with gzip.open(archive, "at") as out:
-            for path in files:
-                raw = path.read_text()
-                if raw and not raw.endswith("\n"):
-                    raw += "\n"
-                out.write(raw)
-                for line in raw.splitlines():
-                    try:
-                        entry = json.loads(line)
-                    except ValueError:
-                        continue
-                    _merge_digest(digest, entry, month)
-                    report["folded_entries"] += 1
-                report["folded_days"] += 1
-        tmp = dpath.with_suffix(".jsonl.tmp")
-        tmp.write_text("".join(json.dumps(d) + "\n"
-                               for d in digest.values()))
-        tmp.replace(dpath)
-        for path in files:
-            path.unlink()
-        report["months"].append(month)
+        # One month's read, archive, digest and unlink are one section under
+        # the home's memory write lock: the decisions backfill appends to a
+        # decision's own (often old) day file, and an append between this
+        # read and the unlink would be lost for good (review P8-5).
+        with memory_lock.write_lock(home):
+            files = [p for p in files if p.exists()]   # a concurrent fold took it
+            if not files:
+                continue
+            _fold_month(home, month, files, report)
     return report

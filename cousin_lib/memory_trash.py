@@ -48,6 +48,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import memory_lock
 from cousin_lib.home_files import PathRefused, resolve_in
 
 TRASH_NAME = ".trash"
@@ -144,10 +145,11 @@ def _check_file(home, rel, allow_legacy):
     return rel, path
 
 
-def _rewrite(path, mutate):
+def _rewrite(home, path, mutate):
     """Apply mutate(lines) -> lines to a file atomically. Retried when
     the file changed while the new content was prepared (an appender
-    wrote a line), so no concurrent append is lost."""
+    wrote a line); the check and the replace hold the home's memory write
+    lock, so no append lands between them and none is lost."""
     for _ in range(_REWRITE_TRIES):
         before = path.stat()
         raw = path.read_bytes().decode("utf-8", "replace")
@@ -157,11 +159,12 @@ def _rewrite(path, mutate):
         tmp = path.with_name(".%s.trash-tmp" % path.name)
         tmp.write_text(body)
         os.chmod(tmp, before.st_mode & 0o7777)
-        now = path.stat()
-        if (now.st_size, now.st_mtime_ns) == (before.st_size,
-                                              before.st_mtime_ns):
-            os.replace(tmp, path)
-            return
+        with memory_lock.write_lock(home):
+            now = path.stat()
+            if (now.st_size, now.st_mtime_ns) == (before.st_size,
+                                                  before.st_mtime_ns):
+                os.replace(tmp, path)
+                return
         tmp.unlink()
     raise PathRefused("the file kept changing; try again", status=409)
 
@@ -221,7 +224,7 @@ def trash_lines(home, refs, *, by=None):
                     keep.append(text)
             return keep
 
-        _rewrite(path, mutate)
+        _rewrite(home, path, mutate)
         for line_no, text in removed:
             items.append({"kind": "line", "path": rel, "line_no": line_no,
                           "sha": line_sha(text), "line": text})
@@ -330,7 +333,7 @@ def restore(home, trash_id, *, by=None):
                 lines.insert(at, it["line"])
             return lines
 
-        _rewrite(target, mutate)
+        _rewrite(home, target, mutate)
     shutil.rmtree(batch_dir)
     stamp = _now().isoformat()
     for item in items:

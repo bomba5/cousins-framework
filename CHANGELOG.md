@@ -30,10 +30,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `data/.memory-write.lock`, held by the file-backed memory writes (raw,
   the decisions log and its rotation, the decisions backfill, the recall
   counts, the distilled views with their read of raw, the extraction
-  cursors, the activity note), across threads and processes, on a lock
-  file opened read-only (another user's lock file never shuts a cousin
-  out). Before it, two writers at once could lose a decision from the log
-  during its rotation, a recall count, or an extraction cursor.
+  cursors, the activity note, the raw fold's read-archive-remove of a
+  month, the trash's check-and-replace), across threads and processes, on
+  a lock file opened read-only (another user's lock file never shuts a
+  cousin out). Before it, two writers at once could lose a decision from
+  the log during its rotation, a recall count, or an extraction cursor, and
+  a decision the backfill wrote into an old day file while `compact
+  --target raw` folded that day was lost for good.
 
 ### Changed
 - `data/last-activity.txt` is written through a temporary file, so a reader

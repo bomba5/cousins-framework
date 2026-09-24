@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest import mock
 
-from cousin_lib import distill, memory, reinforce
+from cousin_lib import distill, memory, memory_trash, raw_fold, reinforce
 from cousin_lib.runner import extract, tools
 from cousin_lib.runner.policy import Policy
 from cousin_lib.runner.turn import Turn
@@ -188,6 +188,79 @@ class TestWholeSections(RaceCase):
         text = (memory.distilled_dir(home) / "decisions.md").read_text()
         self.assertIn("spare keys", text)
         self.assertIn("ledger cadence", text)
+
+
+def _old_day(days=40):
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=days)).isoformat()
+
+
+def _every_raw_line(home):
+    """Every raw line, the day files and the fold's gzip archives alike."""
+    import gzip
+    out = []
+    for path in memory.raw_dir(home).rglob("*.jsonl*"):
+        if path.name.endswith(".jsonl.gz"):
+            with gzip.open(path, "rt") as fh:
+                out.extend(fh.read().splitlines())
+        elif not path.name.endswith("-digest.jsonl"):
+            out.extend(path.read_text().splitlines())
+    return out
+
+
+class TestRawFoldAndTrash(RaceCase):
+    """Review P8-5 and the trash: the raw fold and the trash's rewrite are
+    read-then-replace (or read-then-unlink) on a raw file another session
+    appends to; under the lock the append waits and is kept."""
+
+    def test_a_backfill_append_racing_the_raw_fold_is_kept(self):
+        """The backfill appends a decision to its own (old) day file; the
+        fold reads that file, archives it and unlinks it. An append between
+        the read and the unlink was lost for good."""
+        home = _home(self)
+        day = _old_day()
+        (memory.raw_dir(home) / ("%s.jsonl" % day)).write_text(json.dumps(
+            {"timestamp": day + "T09:00:00+00:00", "topic": "ledger",
+             "content": "Priya closes the ledger.", "source": "remember"}) + "\n")
+        (home / "data" / "decisions.jsonl").write_text(json.dumps(
+            {"timestamp": day + "T10:00:00+00:00", "topic": "keys",
+             "decision": "Sam keeps the keys", "reasoning": "he is home"}) + "\n")
+        pause = _Pause()
+        real_read = pathlib.Path.read_text
+        with mock.patch.object(pathlib.Path, "read_text", pause.wrap(
+                real_read, when=lambda self, *a, **k: self.name == "%s.jsonl" % day)):
+            self.race(pause, lambda: raw_fold.fold_raw(home),
+                      lambda: memory.backfill_decisions(home))
+        contents = [json.loads(line).get("content") for line in _every_raw_line(home)]
+        self.assertIn("Sam keeps the keys - why: he is home", contents)
+        self.assertIn("Priya closes the ledger.", contents)
+
+    def test_an_append_racing_the_trash_rewrite_is_kept(self):
+        """The trash checks the file did not change, then replaces it: an
+        append between the check and the replace was lost."""
+        home = _home(self)
+        memory.remember(home, "ledger", "Priya closes the ledger.")
+        memory.remember(home, "audit", "Mallory audits in March.")
+        raw = next(memory.raw_dir(home).glob("*.jsonl"))
+        rel = "memory/raw/%s" % raw.name
+        pause = threading.Event(), threading.Event()     # reached, other_done
+        real_replace = os.replace
+
+        def replace(src, dst, *a, **k):
+            if threading.current_thread().name == "session-a" and not pause[0].is_set() \
+                    and pathlib.Path(dst) == raw:
+                pause[0].set()
+                pause[1].wait(PAUSE_S)
+            return real_replace(src, dst, *a, **k)
+
+        class Before:
+            reached, other_done = pause
+
+        with mock.patch.object(memory_trash.os, "replace", replace):
+            self.race(Before, lambda: memory_trash.trash_lines(home, [(rel, 1, None)]),
+                      lambda: memory.remember(home, "keys", "Toki keeps the spare keys."))
+        contents = [json.loads(line)["content"] for line in raw.read_text().splitlines()]
+        self.assertEqual(contents, ["Mallory audits in March.", "Toki keeps the spare keys."])
 
 
 class TestTheLock(HermeticCase):

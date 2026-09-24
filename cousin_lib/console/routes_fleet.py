@@ -19,7 +19,7 @@ from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
                                CousinConfig, FrameworkConfig,
                                MissingConfigError, agent_config,
                                harness_config)
-from cousin_lib.console import router, tokens
+from cousin_lib.console import longop, router, tokens
 from cousin_lib.console._common import (chat_call, chat_health, check_slug,
                                         cousin_home, load_cousin, read_toml,
                                         session_alive, tmux)
@@ -595,6 +595,7 @@ def register():
         except spawn.SpawnError as err:
             raise HttpError(404, str(err))
         req.server.state.setdefault("flips", {}).pop(slug, None)
+        longop.forget(req.server, slug)
         return 200, {"ok": True, **out}
 
     @router.route("POST", "/api/cousins/{slug}/start")
@@ -629,6 +630,9 @@ def register():
             if current and current["status"] == "running":
                 raise HttpError(409, "a flip or clean stop is already"
                                      " running")
+            if longop.op_running(server, slug):
+                raise HttpError(409, "a %s is running on %s"
+                                % (longop.op_running(server, slug), slug))
             entry = {"status": "running", "started_at": time.time(),
                      "kind": "stop"}
             flips[slug] = entry
@@ -964,6 +968,9 @@ def register():
             current = flips.get(slug)
             if current and current["status"] == "running":
                 raise HttpError(409, "a flip is already running")
+            if longop.op_running(server, slug):
+                raise HttpError(409, "a %s is running on %s"
+                                % (longop.op_running(server, slug), slug))
             entry = {"status": "running", "started_at": time.time()}
             flips[slug] = entry
         run_flip = server.flip_fn or _default_flip

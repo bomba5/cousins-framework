@@ -307,7 +307,7 @@ The last flip this console ran for the cousin, and any timed flip waiting in the
 
 Body `{"confirm": false, "delay_seconds": 0}`.
 
-- No delay: runs the flip on a background thread and answers `202 {"ok": true, "slug", "status": "running", "started_at"}` straight away. Progress comes as `cousin-flip` events. `409` if one is already running.
+- No delay: runs the flip on a background thread and answers `202 {"ok": true, "slug", "status": "running", "started_at"}` straight away. Progress comes as `cousin-flip` events. `409` if one is already running, or a long operation runs on the cousin (below). A clean stop is refused the same way.
 - `delay_seconds > 0`: queues a flip request for the loops daemon, which sends the T-5m / T-1m / T-30s warnings and fires it. `202 {"ok": true, "slug", "request_id", "fire_at", "delay_seconds"}`. `409` if a timed flip is already pending.
 
 `400` if `delay_seconds` isn't a non-negative integer.
@@ -315,6 +315,10 @@ Body `{"confirm": false, "delay_seconds": 0}`.
 ### `POST /api/cousins/<slug>/flip/cancel`
 
 Cancels a pending timed flip. `200 {"ok": true, "slug", "was_pending": bool}`. A flip that is already running can't be cancelled: `409`.
+
+### `GET /api/cousins/<slug>/op`
+
+The cousin's long operation (a kind switch, an account login: whatever a route runs through `console/longop.py`), running or the last one finished since the console started: `200 {"ok": true, "op": null}` before any, else `{"ok": true, "op": {"id", "slug", "kind", "status": "running" | "done" | "failed", "started_at", "finished_at", "params", "stages": [{"name", "status": "running" | "done" | "failed" | "skipped", "detail", "at"}], "result", "error"}}`. One operation runs per cousin at a time, and never beside a flip or a clean stop: a route that starts one answers `202 {"ok": true, "op"}`, or `409 {"busy": true}`. Progress comes as `cousin-op` events. `404` unknown cousin.
 
 ### `GET /api/tokens`
 
@@ -665,6 +669,7 @@ The events come from two places: route handlers announce what they just did, and
 | `job-add`, `job-update` | job row | a job appeared or changed |
 | `job-delete` | `{"id"}` | a job went away |
 | `cousin-flip` | `{"slug", "phase", ...}` | see below |
+| `cousin-op` | `{"slug", "id", "kind", "phase": "started" \| "stage" \| "done" \| "failed", "stage"?, "error"?}` | a long operation started, reported a stage, or finished (`GET /api/cousins/<slug>/op`) |
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
 | `memory-change` | `{"slug", "action": "trash" \| "restore" \| "obsolete", ...}` | a memory delete, restore or obsolete mark through the console |

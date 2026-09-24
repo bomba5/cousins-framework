@@ -66,6 +66,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.pane",
     "cousin_lib.console.stream",
     "cousin_lib.console.sse",
+    "cousin_lib.console.longop",
 ]
 
 # /api/version is public: the login page may show it, and it says only

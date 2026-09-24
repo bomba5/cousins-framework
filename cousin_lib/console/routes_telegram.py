@@ -44,13 +44,17 @@ def _supervisor_rescan(req, home):
     outside it when the config no longer runs. Only with no supervisor
     to ask does the console stop a bridge itself (one started outside
     any supervisor), when the config no longer runs; it never starts
-    one. What to report."""
+    one. A supervisor that is alive but slow is not a missing one (#113):
+    its rescan follows when it answers, so the console stops nothing
+    (a second stop would race it). What to report."""
     try:
         answer = supervisor.request(req.server.root, "reload")
-    except supervisor.SupervisorUnavailable:
+    except supervisor.SupervisorAbsent:
         if telegram_admin.ready(home, req.server.root) is not None:
             telegram_admin.stop_bridge(home)
         return "no cousin-supervisor running; the bridge starts with it"
+    except supervisor.SupervisorUnavailable as err:
+        return "the supervisor did not answer the rescan (%s); the bridge follows its rescan" % err
     if not answer.get("ok"):
         return "the supervisor refused the rescan: %s" % (answer.get("error") or "no reason given")
     return "supervised"

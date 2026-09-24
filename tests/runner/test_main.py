@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import signal
 import subprocess
@@ -648,6 +649,27 @@ class TestStopTimeout(HermeticCase):
             rc = runner_main._serve(runner, True)
         self.assertEqual(rc, 0)
         self.assertEqual(seen, [7.5])
+
+
+class TestRestartMark(HermeticCase):
+    def test_a_claim_a_dead_runner_left_marks_the_restart(self):
+        """#98: a runner killed without its teardown left its row claimed;
+        the next start's sweep requeues it, and that turn was cut as much as
+        a stop's: the restart mark says so to the resumed session."""
+        from cousin_lib.delivery import Item
+        from cousin_lib.runner import restart_note
+        home = temp_home(self, runner="fake")
+        runner = runner_main.runner_for(home)
+        runner.inbox.put(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertEqual(len(runner.inbox.claim(limit=1, claimant="the-dead-one")), 1)
+        self.assertEqual(runner_main._serve(runner, True), 0)
+        note = json.loads((home / "data" / "runner-restart.json").read_text())
+        self.assertIn("claimed", note["why"])
+        # a clean start (nothing claimed) marks nothing
+        (home / "data" / "runner-restart.json").unlink()
+        self.assertEqual(runner_main._serve(runner_main.runner_for(home), True), 0)
+        self.assertFalse((home / "data" / "runner-restart.json").exists())
+        self.assertIsNone(restart_note.read(home))
 
 
 @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "claude-agent-sdk not installed")

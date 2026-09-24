@@ -179,6 +179,7 @@ class SideSession(SdkRunner):
     # (phase 7b review round 2, N2). A side session still holds after its
     # own turns and reviews what it held.
     sweeps_at_start = False
+    takes_restart_note = False
 
     def __init__(self, home, *, kind, primary_activity=None, **kw):
         if kind not in THREAD_KINDS or kind in ALWAYS_PRIMARY:

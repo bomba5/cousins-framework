@@ -10,10 +10,9 @@
 #
 # A leading ~ is the home of the account the framework runs as.
 # {home_encoded} is Claude Code's project-directory name for the cousin
-# home: every "/" becomes "-". If your checkout path holds characters
-# other than letters, digits, "-" and "/", compare with the directory
-# Claude Code actually created under ~/.claude/projects/ and write that
-# path out instead.
+# home: every character other than a letter or a digit becomes "-" (so
+# /srv/fw_1/cousins/wren becomes -srv-fw-1-cousins-wren), as Claude Code
+# names the directories under ~/.claude/projects/.
 
 transcripts_dir = "~/.claude/projects/{home_encoded}"
 auto_memory_dir = "~/.claude/projects/{home_encoded}/memory"

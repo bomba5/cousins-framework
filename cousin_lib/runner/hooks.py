@@ -43,6 +43,12 @@ PRE_MATCHER = "Agent|Task|Bash"
 # The chat server's RECALL_BUDGET_SECONDS: past it the prompt goes on
 # without recall and the search finishes on its thread, index warm.
 RECALL_BUDGET_S = 4.0
+# The recorder writes <root>/data/jobs.db, which every cousin on the host
+# shares (sqlite waits up to 5 s per connect, and a call connects more than
+# once), and the CLI holds the tool until the hook answers (#104): past this
+# budget the hook answers without it and says so (the call runs unrecorded;
+# the recording finishes on its thread when the store frees).
+RECORD_BUDGET_S = 2.0
 PERMISSION_NOTIFICATION = "permission_prompt"
 # The reply tool as the CLI names it: the runner registers its tool server
 # under the key "cousin" (sdk.py, options()).
@@ -145,7 +151,14 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             if event == "PreToolUse" and policy is not None \
                     and gate(policy, payload)[0] != "allow":
                 return {}
-            return await asyncio.to_thread(recorder, dict(payload))
+            try:
+                return await asyncio.wait_for(asyncio.to_thread(recorder, dict(payload)),
+                                              RECORD_BUDGET_S)
+            except asyncio.TimeoutError:
+                stream.append("hook", {"event": event, "error": (
+                    "recorder over its %.1fs budget (a shared store busy): the call runs"
+                    " without its job row or rewrite" % RECORD_BUDGET_S)})
+                return {}
         return record
 
     async def on_prompt(payload):

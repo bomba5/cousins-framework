@@ -241,6 +241,23 @@ class TestSocket(_Case):
         with self.assertRaises(SupervisorUnavailable):
             request(self.root, "status")
 
+    def test_a_slow_supervisor_is_unavailable_but_not_absent(self):
+        """#113: a caller whose fallback does the supervisor's work itself
+        must run it only when there is no supervisor (nothing to connect
+        to), never for one that is alive but slower than the timeout."""
+        with self.assertRaises(supervisor.SupervisorAbsent):
+            request(self.root, "status")                      # no socket
+        run = self.root / "run"
+        run.mkdir(exist_ok=True)
+        slow = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        slow.bind(str(self.root / supervisor.SOCKET))
+        slow.listen(1)                                         # accepts, never answers
+        self.addCleanup(slow.close)
+        with self.assertRaises(SupervisorUnavailable) as cm:
+            request(self.root, "status", timeout=0.2)
+        self.assertNotIsInstance(cm.exception, supervisor.SupervisorAbsent)
+        self.assertIn("did not answer", str(cm.exception))
+
     def test_cli_status_exits_1_with_no_supervisor(self):
         rc, out, err = self.cli("status")
         self.assertEqual(rc, 1)

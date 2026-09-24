@@ -158,11 +158,20 @@ class TestPeerSend(PeerCase):
         self.assertEqual(_messages(self.home), [])
 
     def test_a_peer_that_shares_a_local_cousins_slug_is_refused(self):
-        """Review I1: an entry [peers.sam] would be threaded as the local Sam."""
+        """Review I1: an entry [peers.sam] would be threaded as the local Sam.
+        #114: the test once built two bodies, one sent and one signed; a
+        clock tick between them (a loaded full run) signed another sent_at,
+        so the signature failed (401) before the slug check (503). It runs
+        under a clock that ticks at every read, which made it fail every
+        time with two bodies."""
         self.peers(reach=["wren"], slug="sam", name="Remote")
         self.serve()
-        self.assertEqual(self.peer_send(self.body(), auth=self.signed(self.body(), sender="sam"))[0],
-                         503)
+        start = time.time()
+        clock = iter(start + 0.001 * n for n in range(1000000))
+        with mock.patch.object(time, "time", lambda: next(clock)):
+            body = self.body()                    # one body: the one sent is the one signed
+            status = self.peer_send(body, auth=self.signed(body, sender="sam"))[0]
+        self.assertEqual(status, 503)
         self.assertIn("local cousin", " ".join(self.logged))
 
     def test_a_peer_named_like_the_operator_is_refused(self):

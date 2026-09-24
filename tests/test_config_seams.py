@@ -50,6 +50,20 @@ class HarnessSeam(unittest.TestCase):
             self.assertIsNone(cfg["auto_memory_dir"])
             self.assertIsNone(cfg["settings_file"])
 
+    def test_home_encoded_is_the_harness_encoding_every_non_alphanumeric_is_a_dash(self):
+        """#106: Claude Code names a project dir by its path with every
+        character that is not a letter or a digit turned into '-' (seen on
+        this host: /tmp/tmpxpnoz7t_/cousins/wren is -tmp-tmpxpnoz7t--cousins-wren);
+        only '/' was mapped, so a home with '.', '_' or another character
+        resolved a transcripts dir that does not exist."""
+        for home, encoded in (("/srv/fw/cousins/testa/files", "-srv-fw-cousins-testa-files"),
+                              ("/tmp/tmpxpnoz7t_/cousins/wren", "-tmp-tmpxpnoz7t--cousins-wren"),
+                              ("/srv/ana/.cousins/wren.v2", "-srv-ana--cousins-wren-v2"),
+                              ("/srv/my fw/cousins/a+b", "-srv-my-fw-cousins-a-b")):
+            with self.subTest(home=home):
+                self.assertEqual(config.expand_harness_path("/p/{home_encoded}", Path(home)),
+                                 Path("/p/" + encoded))
+
     def test_home_placeholder_expands_verbatim(self):
         home = Path("/srv/fw/cousins/testa/files")
         self.assertEqual(

@@ -166,6 +166,13 @@ class SupervisorUnavailable(Exception):
     """No supervisor answered on the root's socket."""
 
 
+class SupervisorAbsent(SupervisorUnavailable):
+    """No supervisor at all: nothing to connect to (no socket, a stale one,
+    refused). A live one that is slow or answers badly is the plain
+    SupervisorUnavailable (#113): a caller whose fallback does the
+    supervisor's work itself runs it only for this one."""
+
+
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -1269,8 +1276,9 @@ def runner_cousins(root):
 
 def request(root, op, *, timeout=10.0, **args):
     """One request over `<root>/run/supervisor.sock`; the answer as a dict.
-    SupervisorUnavailable when nothing answers (no socket, a stale one,
-    or no answer within `timeout`). A `stop` answers when the child is
+    SupervisorUnavailable when nothing answers: SupervisorAbsent when there
+    is nothing to connect to (no socket, a stale one), the plain one when a
+    supervisor took the connection but gave no answer within `timeout`. A `stop` answers when the child is
     down: give it the child's stop timeout and some (the CLI uses 60 s)."""
     path = Path(root) / SOCKET
     payload = dict(args, op=op)
@@ -1280,8 +1288,8 @@ def request(root, op, *, timeout=10.0, **args):
         try:
             conn.connect(str(path))
         except OSError as err:
-            raise SupervisorUnavailable("no cousin-supervisor answers on %s (%s)"
-                                        % (path, err.strerror or err))
+            raise SupervisorAbsent("no cousin-supervisor answers on %s (%s)"
+                                   % (path, err.strerror or err))
         try:
             conn.sendall((json.dumps(payload) + "\n").encode())
             line = _read_line(conn)

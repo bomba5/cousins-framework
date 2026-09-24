@@ -252,11 +252,11 @@ Body `{"content": "..."}`, up to 200000 characters. The old file is copied to `d
 
 ### `POST /api/cousins/<slug>/model`
 
-Body `{"model": "claude-opus-5"}`. Written to `[runtime] model` in cousin.toml. It has to be one word of letters, digits and `._:/+-`, because it goes into the agent's argv. `200 {"ok": true, "slug", "model", "restart_required": true}`: the running agent keeps the model it started with. `400` empty or splittable.
+Body `{"model": "claude-opus-5"}`. A tmux cousin's goes to `[runtime] model` in cousin.toml; a runner cousin's to `[agent] model`, the key its runner reads. It has to be one word of letters, digits and `._:/+-`, because it goes into the agent's argv. On the runner lane it is validated first, as `cousin-migrate` validates: on `sdk`, one smallest model turn on the cousin's own account; on `opencode`, `"<provider>/<model>"` on a provider the account holds, never a Claude model. `200 {"ok": true, "slug", "model", "restart_required": true}`: the running agent keeps the model it started with. `400` empty or splittable, or a model that did not pass (the reason, the API's own words on `sdk`); nothing is written then.
 
 ### `POST /api/cousins/<slug>/effort`
 
-Body `{"effort": "high"}`, one of `low`, `medium`, `high`, `xhigh`, `max`. Written to `[runtime] effort`. `200 {"ok": true, "slug", "effort", "restart_required": true}`. `400` any other value.
+Body `{"effort": "high"}`, one of `low`, `medium`, `high`, `xhigh`, `max`. A tmux cousin's goes to `[runtime] effort`, a runner cousin's to `[agent] effort`. `200 {"ok": true, "slug", "effort", "restart_required": true}`. `400` any other value, or a runner cousin not on the `sdk` lane (only that lane uses an effort).
 
 ### `POST /api/cousins/<slug>/operator`
 

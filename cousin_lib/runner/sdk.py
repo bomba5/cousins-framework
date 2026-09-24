@@ -28,6 +28,7 @@ the stream for the next turn to misread.
 import asyncio
 import json
 import threading
+import contextlib
 import time
 import uuid
 from datetime import datetime, timezone
@@ -35,7 +36,7 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import auth, envelope, extract, hooks, rollover, tools, wake
+from cousin_lib.runner import auth, envelope, extract, hooks, restart_note, rollover, tools, wake
 from cousin_lib.runner.base import (FOLDED_KINDS, INTERRUPT, NO_TURN, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -143,6 +144,13 @@ def _tool_result_text(content):
     return ""
 
 
+# #104 (b): a turn's fold, interrupt-row control or query write that runs
+# longer than this is named on the stream (`system` `stall`, its site and
+# duration): the SDK buffers 100 messages from the CLI, and a consumer held
+# that long lets it fill, after which its reader answers no hook.
+STALL_REPORT_S = 30.0
+STALL_CHECK_S = 5.0
+
 class SdkRunner:
     kind = "sdk"          # what runner/status.py reports (the `runner` event)
     # The contract items this runner DECLARES unsupported, and those a
@@ -158,6 +166,9 @@ class SdkRunner:
     # per home does, or each would review the same rows (phase 8's
     # SideSession sets it False; phase 7b review round 2, N2).
     sweeps_at_start = True
+    # #98: the primary takes the restart mark and says so to its resumed
+    # session; a side session (SideSession) leaves it to the primary
+    takes_restart_note = True
     # After this many consecutive failed turns the loop waits before its
     # next claim: backoff_base_s, doubling, capped; a good turn resets it.
     backoff_after = 3
@@ -225,6 +236,7 @@ class SdkRunner:
         self._failures = 0       # consecutive failed turns
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
+        self._waits = []         # the turn's long waits in progress (#104 b)
         # A rejected rate limit (epoch seconds): nothing is claimed before it
         # (_wait_rate_limit); None when no limit holds.
         self._limited_until = None
@@ -557,8 +569,16 @@ class SdkRunner:
         if self.machine.state == "stopped":
             return
         # A running turn is interrupted first, so the join below does not
-        # wait on a turn nobody will end (FakeRunner does the same).
-        self.interrupt()
+        # wait on a turn nobody will end (FakeRunner does the same). The CLI
+        # records that as the user's stop: leave the mark the next resume
+        # answers (#98). A requested stop wrote run/held before its signal:
+        # the mark then names that stop, never "not the operator".
+        if self.interrupt() and self.takes_restart_note:
+            try:
+                restart_note.mark(self.home, "a stop interrupted the turn in flight",
+                                  held=restart_note.held_by(self.home))
+            except OSError as exc:
+                self.stream.append("error", {"error": "restart mark: %s" % exc})
         self._stop.set()
         wake.poke(self.home)
         if self._thread is not None:
@@ -878,6 +898,28 @@ class SdkRunner:
             self._fresh_pending = True
         return False
 
+    def _restart_line(self, resumed):
+        """#98: a resumed session whose last turn a restart cut gets one
+        runner line first (the restart_note row); a fresh one only drops the
+        mark. The primary's alone."""
+        if not self.takes_restart_note:
+            return
+        # read, put, then clear: a crash in between repeats the line, never
+        # loses it; any failure is recorded and start-up goes on
+        try:
+            note = restart_note.read(self.home)
+            if note is None:
+                return
+            if resumed:
+                self.inbox.put(Item(thread_id="system", source=restart_note.SOURCE,
+                                    body=restart_note.body(note), sender="runner"))
+                self.stream.append("system", {"subtype": "restart_note", "at": note.get("at"),
+                                              "why": note.get("why"), "held": note.get("held")})
+            restart_note.clear(self.home)
+        except Exception as exc:  # noqa: BLE001 - a lost line must not stop the start
+            self.stream.append("error", {"error": "restart note: %s: %s"
+                                         % (type(exc).__name__, exc)})
+
     # -- the loop ------------------------------------------------------------
     def _run_loop(self):
         # asyncio.Runner's close cancels leftover tasks, finalizes async
@@ -887,6 +929,7 @@ class SdkRunner:
             runner.run(self._main())
 
     async def _main(self):
+        watchdog = asyncio.ensure_future(self._stall_watch())
         try:
             # the start-up sweep first, before a resume or a fresh start: what
             # a dead runner wrote and never held is held before this session's
@@ -907,6 +950,7 @@ class SdkRunner:
                     self._expect_session = saved    # the first init must name it (R12)
                 if resumed:
                     self.stream.append("system", {"subtype": "resumed", "session_id": saved})
+            await asyncio.to_thread(self._restart_line, resumed)
             if not resumed and not self._login_blocked:
                 if not await self._connect() and not self._login_blocked:
                     return
@@ -965,9 +1009,36 @@ class SdkRunner:
                         elif self.fatal is None:
                             await self._start_fresh(with_digest=True)
         finally:
+            watchdog.cancel()
             await self._stop_review()
             await self._flush_session()     # a stop never loses the last id
             await self._disconnect()
+
+    @contextlib.contextmanager
+    def _waiting_at(self, site):
+        """A turn waits at `site` (#104 b): the watchdog names it while it
+        runs past STALL_REPORT_S, and its end is named with its duration."""
+        mark = {"site": site, "since": time.monotonic(), "said": False}
+        self._waits.append(mark)
+        try:
+            yield
+        finally:
+            self._waits.remove(mark)
+            took = time.monotonic() - mark["since"]
+            if took >= STALL_REPORT_S:
+                self.stream.append("system", {"subtype": "stall", "site": site,
+                                              "seconds": round(took, 1), "ongoing": False})
+
+    async def _stall_watch(self):
+        while True:
+            await asyncio.sleep(STALL_CHECK_S)
+            now = time.monotonic()
+            for mark in list(self._waits):
+                if not mark["said"] and now - mark["since"] >= STALL_REPORT_S:
+                    mark["said"] = True
+                    self.stream.append("system", {"subtype": "stall", "site": mark["site"],
+                                                  "seconds": round(now - mark["since"], 1),
+                                                  "ongoing": True})
 
     def _wake_error(self, message):
         self.stream.append("error", {"error": message})
@@ -1091,7 +1162,8 @@ class SdkRunner:
 
         gen = one()
         try:
-            await self._client.query(gen)
+            with self._waiting_at("send"):
+                await self._client.query(gen)
         except Exception as exc:
             if not yielded or _nothing_written(sdk, exc):
                 raise _NotWritten(row, exc) from exc
@@ -1173,10 +1245,12 @@ class SdkRunner:
             while True:
                 if control is not None and time.monotonic() - last_control >= self.poll_s:
                     last_control = time.monotonic()
-                    await control()
+                    with self._waiting_at("control"):
+                        await control()
                 if fold is not None and time.monotonic() - self._last_fold >= self.poll_s:
                     self._last_fold = time.monotonic()
-                    await fold()
+                    with self._waiting_at("fold"):
+                        await fold()
                 now = time.monotonic()
                 wait, overrun = idle_deadline - now, "no message for %.1fs" % self.idle_timeout_s
                 if self.turn_timeout_s is not None:

@@ -11,6 +11,7 @@ import os
 import subprocess
 import threading
 import time
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -220,10 +221,17 @@ def agent_defaults(root):
 
 
 def effective_runtime(config, defaults):
-    """The model and effort the NEXT start of this cousin renders: its
-    own [runtime] value, else the install default, else null (a
-    placeholder would then fail the start, and the row says so by
-    showing nothing rather than a guess)."""
+    """The model and effort the NEXT start of this cousin renders. A tmux
+    cousin: its own [runtime] value, else the install default, else null (a
+    placeholder would then fail the start, and the row says so by showing
+    nothing rather than a guess). A runner cousin (#100): its [agent]
+    value, the one its runner reads, else null (the CLI's own default)."""
+    if spawn.runner_lane(config.home):
+        try:
+            agent = tomllib.loads((config.home / "cousin.toml").read_text()).get("agent") or {}
+        except (OSError, tomllib.TOMLDecodeError):
+            agent = {}
+        return {"model": agent.get("model"), "effort": agent.get("effort")}
     return {"model": config.model or defaults["default_model"],
             "effort": config.effort or defaults["default_effort"]}
 
@@ -741,7 +749,11 @@ def register():
         if not isinstance(value, str):
             raise HttpError(400, "%s must be a string" % key)
         try:
-            spawn.persist_runtime(home, key, value)
+            if spawn.runner_lane(home):
+                # the runner reads [agent], never [runtime] (#100)
+                spawn.persist_agent_value(home, key, value, root=req.server.root)
+            else:
+                spawn.persist_runtime(home, key, value)
         except spawn.SpawnError as err:
             raise HttpError(400, str(err))
         req.server.emit("cousins-refresh", fleet_rows(req.server))

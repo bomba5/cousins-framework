@@ -393,7 +393,11 @@ appended to `config/accounts.toml` (the rest of the file comes back byte
 for byte), and the secret copy unless another account there still points
 at it. When another cousin names the account, all of it is kept and the
 step says who. It removes `data/previous-transcript.json` (and the
-`.consumed` one), has the supervisor rescan, writes a fresh
+`.consumed` one) and what the runner kept of its session
+(`data/runner-session.json`, a side session's `runner-session-<kind>.json`,
+the restart mark `data/runner-restart.json`), so a later migration starts a
+fresh session with the handover rather than resuming the old one, has the
+supervisor rescan, writes a fresh
 boot packet from the cousin's state now, starts the tmux session (unless it
 is already up) and releases the supervisor's hold on the runner. If
 `apply` failed before `toml`, it changes nothing but the record. A step

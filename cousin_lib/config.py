@@ -6,6 +6,7 @@ operator is optional by design - the null profile is "no operator", never
 a defaulted human being.
 """
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -361,10 +362,12 @@ def harness_config(root):
 def expand_harness_path(template, home):
     """Expand a harness.toml path template for one cousin home. {home}
     is the home verbatim; {home_encoded} is the harness's project-dir
-    encoding of it: every '/' becomes '-', so /a/b -> -a-b. A leading
-    ~ is the user's home, as the shell would read it."""
+    encoding of it: every character that is not an ASCII letter or digit
+    becomes '-' (Claude Code's own; #106), so /a/b -> -a-b and
+    /tmp/x_/w.v2 -> -tmp-x--w-v2. A leading ~ is the user's home, as the
+    shell would read it."""
     home = Path(home)
-    encoded = str(home).replace("/", "-")
+    encoded = re.sub(r"[^A-Za-z0-9]", "-", str(home))
     return Path(template.replace("{home_encoded}", encoded)
                         .replace("{home}", str(home))).expanduser()
 

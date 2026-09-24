@@ -241,6 +241,45 @@ class TestOffTheLoop(HooksCase):
             self.assertNotEqual(seen[key], seen["loop"], key)
 
 
+class TestRecorderBudget(HooksCase):
+    """#104 (a): the recorder writes <root>/data/jobs.db, one database every
+    cousin on the host shares (sqlite timeout 5 s per connect, and a call
+    connects more than once). The CLI waits for the PreToolUse answer, so the
+    hook bounds its wait on the recorder and fails open past the budget: the
+    call runs, without a job row or the background rewrite, and says so."""
+
+    def test_a_locked_shared_jobs_db_never_holds_the_hook_past_its_budget(self):
+        import sqlite3
+        from cousin_lib import jobs
+        jobs._db().close()                                   # the store exists
+        holder = sqlite3.connect(self.root / "data" / "jobs.db", timeout=0,
+                                 isolation_level=None)
+        holder.execute("BEGIN EXCLUSIVE")                    # another cousin's long write
+        self.addCleanup(holder.close)
+        async def answer():
+            # the hook's own answer time (asyncio.run would also wait for the
+            # recorder's thread at shutdown; the runner's loop never shuts down)
+            started = time.monotonic()
+            out = await self.cbs["PreToolUse"](self._base(
+                "PreToolUse", tool_name="Bash",
+                tool_input={"command": "sleep 2", "run_in_background": True},
+                tool_use_id="tu-locked"), "tu-locked", {})
+            return out, time.monotonic() - started
+        out, took = _run(answer())
+        self.assertLess(took, hooks.RECORD_BUDGET_S + 1.0, "the hook waited on the shared db")
+        self.assertEqual(out, {})                            # fail open: no rewrite
+        events = [e["payload"] for e in self.stream.tail() if e["kind"] == "hook"]
+        self.assertTrue(any("budget" in e.get("error", "") for e in events), events)
+        holder.execute("ROLLBACK")
+
+    def test_a_fast_recorder_is_answered_as_before(self):
+        out = _run(self.cbs["PreToolUse"](self._base(
+            "PreToolUse", tool_name="Bash",
+            tool_input={"command": "sleep 2", "run_in_background": True},
+            tool_use_id="tu-fast"), "tu-fast", {}))
+        self.assertIn("--close", out["hookSpecificOutput"]["updatedInput"]["command"])
+
+
 class TestCheckpointsAndState(HooksCase):
     def test_stop_and_precompact_write_the_checkpoint_files(self):
         (self.home / "data" / "last-activity.txt").write_text("2026-09-23T10:00: testing hooks\n")

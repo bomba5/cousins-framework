@@ -271,7 +271,7 @@ class TestRollover(Case):
 
     def test_a_clean_handoff_exits_the_old_cli_and_starts_the_new_id_fresh(self):
         self.on_prompt = _handoff_tool
-        r = self.runner(handoff_deadline_s=5)
+        r = self.runner(handoff_deadline_s=5, settle_s=0.5)   # /exit meets a CLI still busy
         old, row, detail = self.roll(r)
         self.assertEqual((row["outcome"], detail["handoff"], detail["exit"]), ("delivered", "clean", "exit"))
         self.assertEqual(self.panes[0].exits, 1)

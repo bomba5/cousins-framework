@@ -22,8 +22,12 @@ The shapes are the ones measured on Claude Code 2.1.281 in a tmux pane
 A reader resumes from a byte offset and never passes a partial last line,
 so a torn write (a SIGKILL mid-line) is read once it is complete. A torn
 line the CLI then appends to merges with the next entry into one line
-that does not parse; `turn_nonce` still finds a KNOWN nonce in it, at the
-start of a JSON string (R7, P11-9), so the row it names is not typed twice."""
+that does not parse: the complete entry at its end is recovered and
+classified as any other (`recover_tail`); the torn head was never an entry
+and is dropped. Only when no tail parses does `turn_nonce` look for a KNOWN
+nonce in the raw text, and only inside a user entry that holds no tool
+result (R7, P11-9), so a row is neither typed twice nor taken by a tool's
+output."""
 import json
 import re
 from dataclasses import dataclass, field
@@ -34,6 +38,8 @@ from cousin_lib.config import expand_harness_path
 LIMIT_WORDS = ("usage limit", "limit reached", "resets at")
 NONCE_RE = re.compile(r"^\[inbox:([0-9a-f]{12})\]")
 RAW_NONCE_RE = re.compile(r'"\[inbox:([0-9a-f]{12})\]')   # a nonce opening a JSON string
+USER_TYPE_RE = re.compile(r'"type"\s*:\s*"user"')
+TAIL_TRIES = 4096          # at most this many '{' tried from the end of a torn line
 INTERRUPT_PREFIX = "[Request interrupted by user"
 TURN_SOURCES = ("typed", "queued")
 
@@ -106,13 +112,46 @@ def classify(obj, offset, end):
     return Entry(offset, end, "other", prompt_id=prompt_id, raw=obj)
 
 
+def recover_tail(text):
+    """The complete entry a torn line ends with: the object starting at a
+    '{' (tried from the end) that parses to exactly the end of the line and
+    is a transcript entry (a dict with a `type`); None when there is none."""
+    decoder = json.JSONDecoder()
+    end = len(text.rstrip())
+    pos = end
+    for _ in range(TAIL_TRIES):
+        pos = text.rfind("{", 0, pos)
+        if pos <= 0:            # 0 is the whole line, which did not parse
+            return None
+        try:
+            obj, stop = decoder.raw_decode(text, pos)
+        except ValueError:
+            continue
+        if stop == end and isinstance(obj, dict) and isinstance(obj.get("type"), str):
+            return obj
+    return None
+
+
 def raw_nonces(entry, known):
-    """The KNOWN nonces in a line that did not parse, each at the start of
-    a JSON string, in order (R7, P11-9); [] for a parsed entry."""
+    """The KNOWN nonces in a line that did not parse and whose tail did not
+    parse either: each at the start of a JSON string INSIDE a user entry's
+    segment that holds no tool result (the fallback of R7, P11-9); [] for a
+    parsed entry."""
     text = entry.raw.get("_unparsed") if isinstance(entry.raw, dict) else None
     if not text:
         return []
-    return [n for n in RAW_NONCE_RE.findall(text) if n in known]
+    found = []
+    for m in RAW_NONCE_RE.finditer(text):
+        if m.group(1) not in known:
+            continue
+        users = list(USER_TYPE_RE.finditer(text, 0, m.start()))
+        if not users:
+            continue
+        segment = text[users[-1].start():]
+        if "tool_result" in segment:
+            continue
+        found.append(m.group(1))
+    return found
 
 
 def turn_nonce(entry, known):
@@ -145,7 +184,11 @@ def read_from(path, offset):
         try:
             obj = json.loads(text)
         except ValueError:
-            entries.append(Entry(start, end, "other", raw={"_unparsed": text}))
+            tail = recover_tail(text)
+            if tail is None:
+                entries.append(Entry(start, end, "other", raw={"_unparsed": text}))
+            else:
+                entries.append(classify(tail, start, end))   # the torn head is dropped
         else:
             entries.append(classify(obj, start, end))
         pos = nl + 1

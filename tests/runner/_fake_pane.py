@@ -21,12 +21,13 @@ from cousin_lib.runner.tmux_pane import Outcome
 
 class FakePane:
     def __init__(self, transcript, *, slow=False, fail_first=False, turn_s=0.05, slow_s=3.0,
-                 attention=None, on_prompt=None):
+                 attention=None, on_prompt=None, settle_s=0.0):
         self.transcript = Path(transcript)
         self.slow, self.fail_first = slow, fail_first
         self.turn_s, self.slow_s = turn_s, slow_s
         self._attention = attention
         self.on_prompt = on_prompt
+        self.settle_s = settle_s   # the CLI takes input this long after it writes a turn's end
         self.exits = 0
         self._alive = False
         self._lock = threading.Lock()
@@ -142,5 +143,6 @@ class FakePane:
                          "content": [{"type": "text", "text": "done"}],
                          "usage": {"input_tokens": 10, "output_tokens": 5}}})
             self._write({"type": "system", "subtype": "turn_duration", "durationMs": 50})
+        time.sleep(self.settle_s)
         with self._lock:
             self._busy = False

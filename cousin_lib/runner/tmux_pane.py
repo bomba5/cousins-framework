@@ -32,8 +32,9 @@ KEYS = ("Escape", "C-u", "Enter")
 QUEUED_HINT = "Press up to edit queued messages"
 PROMPT = "❯ "
 # The hard deny (R3, P11-12), in ONE place: tmux_launch imports it. A name
-# with one of these prefixes, or in accounts.AUTH_VARS, never enters the
-# pane's environment from the shell; the launcher adds only the account's own.
+# with one of these prefixes, an auth variable or a credential-shaped name
+# (accounts.credential_name, opencode's rule too) never enters the pane's
+# environment from the shell; the launcher adds only the account's own.
 DENY_PREFIXES = ("CLAUDE", "ANTHROPIC")      # CLAUDECODE, CLAUDE_AGENT_SDK_* included
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_CHAR = "─"
@@ -56,7 +57,7 @@ ATTENTION = (
 
 def denied(name):
     from cousin_lib import accounts
-    return name.startswith(DENY_PREFIXES) or name in accounts.AUTH_VARS
+    return name.startswith(DENY_PREFIXES) or accounts.credential_name(name)
 
 
 def env_command(names, argv):
@@ -191,8 +192,8 @@ class TmuxPane:
         line, press Enter. BLOCKED (nothing sent) on an attention screen, a
         box that is not empty, or queued input; FAILED when there is no pane
         to read, the first line holds a newline (it would submit early), or
-        tmux fails; a failure after the first key clears the box (C-u), so
-        the next row is not blocked by the leftovers."""
+        tmux fails; any failure from the first key onward clears the box
+        (C-u), so the next row is not blocked by the leftovers."""
         if "\n" in first_line or "\r" in first_line:
             return Outcome.FAILED
         screen = self.capture()

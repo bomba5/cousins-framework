@@ -692,8 +692,14 @@ class TmuxRunner:
         killed when it has not ended in EXIT_WAIT_S. Returns how it ended."""
         if not self.pane.alive():
             return "gone"
-        if self.pane.type_row("/exit", "") is Outcome.TYPED:
-            end = time.monotonic() + EXIT_WAIT_S
+        end = time.monotonic() + EXIT_WAIT_S
+        out = self.pane.type_row("/exit", "")
+        while out is Outcome.BLOCKED and time.monotonic() < end:
+            # the handoff turn's end is in the transcript a moment before the
+            # CLI takes input again: try again, never kill a CLI that is closing
+            time.sleep(POLL_S)
+            out = self.pane.type_row("/exit", "")
+        if out is Outcome.TYPED:
             while time.monotonic() < end:
                 if not self.pane.alive():
                     return "exit"

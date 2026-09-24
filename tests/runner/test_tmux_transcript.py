@@ -168,10 +168,31 @@ class TestTornLines(unittest.TestCase):
         with self.path.open("a") as fh:
             fh.write(json.dumps(typed("[inbox:%s] hello" % NONCE)) + "\n")
         entries, _ = tr.read_from(self.path, 0)
-        self.assertEqual(kinds(entries), ["other"])
-        self.assertIsNone(entries[0].nonce)
+        self.assertEqual(kinds(entries), ["turn_start"])
         self.assertEqual(tr.turn_nonce(entries[0], {NONCE}), NONCE)
         self.assertIsNone(tr.turn_nonce(entries[0], {"0" * 12}), "only a known nonce counts")
+
+    def test_a_torn_head_before_a_complete_turn_start_is_recovered_and_classified(self):
+        self.path.write_text('{"type": "assistant", "mess' + json.dumps(typed("[inbox:%s] hi" % NONCE)) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual([(e.kind, e.nonce) for e in entries], [("turn_start", NONCE)])
+
+    def test_a_torn_head_before_a_tool_result_opening_with_the_nonce_is_no_turn_start(self):
+        # a tmux cousin reading this repo's fixtures gets a tool result that opens with a nonce
+        self.path.write_text('{"type": "assistant", "mess'
+                             + json.dumps(tool_result("[inbox:%s] from a fixture" % NONCE)) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual([e.kind for e in entries], ["tool_result"])
+        self.assertIsNone(tr.turn_nonce(entries[0], {NONCE}))
+
+    def test_the_raw_fallback_needs_a_user_entry_without_a_tool_result(self):
+        # neither tail parses (the complete entry is itself cut): only the raw search is left
+        head = '{"type": "assistant", "mess'
+        user = json.dumps(typed("[inbox:%s] hi" % NONCE))[:-1]
+        tool = json.dumps(tool_result("[inbox:%s] out" % NONCE))[:-1]
+        for body, want in ((user, NONCE), (tool, None)):
+            e = tr.Entry(0, 1, "other", raw={"_unparsed": head + body})
+            self.assertEqual(tr.turn_nonce(e, {NONCE}), want, body[:40])
 
     def test_a_nonce_inside_a_string_is_not_found(self):
         self.path.write_text('{"type": "ass' + json.dumps(tool_result("seen [inbox:%s] mid" % NONCE)) + "\n")

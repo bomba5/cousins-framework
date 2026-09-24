@@ -130,16 +130,25 @@ class TestStart(PaneCase):
 
     def test_no_value_ever_reaches_the_tmux_command_line(self):
         self.pane.start(["claude"], cwd="/h", env_base={"HOME": "/h/secret-home",
-                                                         "FAKE_SECRET": "s3cr3t-value"})
+                                                         "FAKE_PLAIN": "s3cr3t-value"})
         for call in self.calls():
             self.assertFalse(any("s3cr3t-value" in a or "/h/secret-home" in a for a in call), call)
 
     def test_a_denied_name_is_refused_before_tmux_runs(self):
         for name in ("ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
-                     "CLAUDE_AGENT_SDK_VERSION", "AWS_BEARER_TOKEN_BEDROCK"):
+                     "CLAUDE_AGENT_SDK_VERSION", "AWS_BEARER_TOKEN_BEDROCK",
+                     "GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "STRIPE_API_KEY", "db_password"):
             with self.assertRaises(ValueError, msg=name):
                 self.pane.start(["claude"], cwd="/h", env_base={"HOME": "/h", name: "x"})
         self.assertEqual(self.calls(), [])
+
+    def test_the_pane_and_opencode_refuse_the_same_credential_names(self):
+        from cousin_lib import accounts
+        for name in ("GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "STRIPE_API_KEY", "ANTHROPIC_BASE_URL"):
+            self.assertTrue(accounts.credential_name(name), name)
+            self.assertTrue(tp.denied(name), name)
+        for name in ("HOME", "PATH", "SSH_AUTH_SOCK", "LANG", "TZ"):
+            self.assertFalse(tp.denied(name), name)
 
     def test_a_failed_size_pin_fails_the_start(self):
         for sub in ("set-option", "resize-window"):

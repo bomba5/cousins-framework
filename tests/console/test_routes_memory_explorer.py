@@ -167,6 +167,8 @@ class MarkObsolete(ExplorerCase):
     by the logged-in user, and the distilled views drop the topic."""
 
     def _login(self):
+        # kestrel is an operator-level claim: retiring it is the operator's
+        self.cousin("wren", operator="ana")
         auth.Users(self.root / "config" / "console-users.json") \
             .set_password("ana", "correct horse")
         self.serve()
@@ -194,6 +196,8 @@ class MarkObsolete(ExplorerCase):
 
     def test_refusals(self):
         self.serve()
+        # (kestrel, an operator-level topic, is refused before the reason
+        # only when the reason is there: a missing reason is 400 first)
         for payload in ({"topic": "kestrel", "why": "  "},
                         {"topic": "kestrel"},
                         {"topic": "no-such-topic", "why": "x"},

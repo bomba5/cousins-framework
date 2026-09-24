@@ -555,7 +555,7 @@ The batch lands in `<home>/memory/.trash/<id>/` with one audit line per item in 
 
 ### `POST /api/memory/<slug>/obsolete`
 
-Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
+Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. An operator-level claim is the operator's to retire: `403` for anyone but the operator account (see [Memory operator actions](#memory-operator-actions)) when `entry` names an L0 claim, or, without `entry`, when the topic has a live L0 claim. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
 
 ### `POST /api/memory/<slug>/restore`
 
@@ -563,7 +563,7 @@ Body `{"id": "..."}`. Files go back to their path, lines back into their file at
 
 ### Memory operator actions
 
-The routes below are the operator's side of `cousin-memory`, `cousin-self-portrait`, `cousin-reason` and `cousin-callback`, on one cousin. They call the same library functions the CLIs call. Three of them are a person's act and need a logged-in console user (`403` without logins or without a session): a review verdict, a self-portrait commit, and an operator-level write. The console has no roles, so the operator account is the logged-in user whose name is the cousin's `[operator] name`, case aside; with no `[operator] name` nobody is.
+The routes below are the operator's side of `cousin-memory`, `cousin-self-portrait`, `cousin-reason` and `cousin-callback`, on one cousin. They call the same library functions the CLIs call. A review verdict, a self-portrait commit and a change to the shared reviewer list are a person's act and need a logged-in console user (`403` without logins or without a session). The operator's word needs the operator account (`403` for anyone else): an operator-level write, retiring an operator-level claim (`obsolete`), and dropping one at review. The console has no roles, so the operator account is the logged-in user whose name is the cousin's `[operator] name`, case aside; with no `[operator] name` nobody is.
 
 ### `GET /api/memory/<slug>/search`
 
@@ -591,7 +591,7 @@ What the review gate holds: `{"held": [claim, ...], "batch", "operator", "is_ope
 
 ### `POST /api/memory/<slug>/review`
 
-Body `{"verdicts": {"<id>": "keep"|"drop"}, "why"?}`. The operator's verdicts (`cousin-memory review --keep/--drop`), recorded as by `console:<user>`; needs a logged-in user. A drop is an entry-level obsolete mark and has no undo, so an operator-level entry is dropped by the operator account only. Per id, an id that isn't held or may not be dropped is reported in `errors` and stays held. `200 {"ok": true, "done": {id: verdict}, "errors": {id: reason}, "effects": {"distilled"}}`, a rebuild of the distilled views when anything was settled, and a `memory-change` event. `400` when `verdicts` is not a non-empty map of ids to keep or drop.
+Body `{"verdicts": {"<id>": "keep"|"drop"}, "why"?}` (`why` at most 500 characters). The operator's verdicts (`cousin-memory review --keep/--drop`), recorded as by `console:<user>`; needs a logged-in user. A drop is an entry-level obsolete mark and has no undo, so an operator-level entry is dropped by the operator account only. Per id, an id that isn't held or may not be dropped is reported in `errors` and stays held. One or two verdicts answer at once: `200 {"ok": true, "done": {id: verdict}, "errors": {id: reason}, "effects": {"distilled"}}`, with a rebuild of the distilled views when anything was settled and a `memory-change` event. More run as the cousin's long operation of kind `memory-review` (`202 {"ok": true, "op"}`, `409` while something else runs), whose result is that same body. `400` when `verdicts` is not a non-empty map of ids to keep or drop.
 
 ### `POST /api/memory/<slug>/maintain`
 
@@ -603,7 +603,7 @@ Body `{"action": "distill"|"compact-raw"|"compact-index"|"reindex", "dry_run"?}`
 
 ### `POST /api/memory/<slug>/portrait/synthesize`
 
-Drafts a candidate from the cousin's own sources (no model call). A candidate that exists may hold edits: `409` unless the body says `{"replace": true}`. `200` with the portrait state.
+Drafts a candidate from the cousin's own sources (no model call). A candidate that exists may hold edits: `409` unless the body says `{"replace": true}`. A candidate path that is a symlink (dangling or not) is `403`, checked before anything is written; the same holds for the candidate write and the commit. `200` with the portrait state.
 
 ### `POST /api/memory/<slug>/portrait/candidate`
 
@@ -615,7 +615,7 @@ Body `{"confirm": "<slug>", "sha": "<candidate_sha>"}`. Promotes the candidate (
 
 ### `GET /api/memory/<slug>/callbacks`
 
-Query `limit` (default 200). `{"callbacks": [{"time", "cycle", "category", "moment"}]}`, newest first. Read-only.
+Query `limit` (default 200, at most 1000). `{"callbacks": [{"time", "cycle", "category", "moment"}]}`, newest first. Read-only.
 
 ### `GET /api/memory/<slug>/capsules`
 
@@ -669,11 +669,11 @@ For both: the reviewer is the logged-in user, and `by` is only read (and then re
 
 ### `GET /api/shared/reviewers`
 
-`{"configured", "reviewers", "error", "user", "you_review"}`: the list in `config/shared-reviewers.json`, whether the logged-in user is on it (resolved the way the promote check resolves names; null without a login), and `error` when the file is present but unreadable.
+`{"configured", "reviewers", "error", "user", "you_review", "can_edit"}`: the list in `config/shared-reviewers.json`, whether the logged-in user is on it and may change it (resolved the way the promote check resolves names; null without a login), and `error` when the file is present but unreadable.
 
 ### `POST /api/shared/reviewers`
 
-Body `{"reviewers": ["ana", ...]}`: replaces the list (at most 50 names of at most 64 printable characters; duplicates, case aside, are dropped), keeping the file's other keys. Who may promote is a perimeter, so this needs a logged-in user (`403`), and each change is a `reviewers` row in `shared/audit.jsonl`. `409` while the file is unreadable: fix or remove it by hand. `200` with the new state.
+Body `{"reviewers": ["ana", ...]}`: replaces the list (at most 50 names of at most 64 printable characters; duplicates, case aside, are dropped), keeping the file's other keys. Who may promote is a perimeter: once the list names anyone, only a logged-in user on it may change it; while it is empty or absent any logged-in user may start it (`403` otherwise). The read, the check and the write hold a lock (`config/shared-reviewers.json.lock`), and each change is a `reviewers` row in `shared/audit.jsonl` with `reviewers` and `previous`. `409` while the file is unreadable: fix or remove it by hand. `200` with the new state.
 
 ## Tracker
 

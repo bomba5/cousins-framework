@@ -488,7 +488,7 @@ a cousin's memory yourself, the same library calls the `cousin-memory`,
 | search | the cousin's own search: keyword always, meaning when `config/embedding.toml` is set up. Each hit says which found it; a raw hit shows its entry, a file hit opens in place. Your searches are not recorded as the cousin's recall. |
 | write | remember a fact or log a decision, at a truth level. The console fills the cite with your user name and the time, plus an optional note of where it came from. |
 | tensions | topics whose live claims disagree; "retire this claim" writes an entry-level obsolete mark with your reason. |
-| review gate | the entries the gate holds; mark each keep or drop and apply. A drop has no undo and asks twice. |
+| review gate | the entries the gate holds; mark each keep or drop and apply. A drop has no undo and asks twice. More than two verdicts run as the cousin's long operation. |
 | history | a topic's claims, oldest first, with their valid time; a live claim can be retired here too. |
 | maintenance | distill, compact raw, compact the MEMORY.md index (preview first), reindex. Each runs as the cousin's long operation and shows its stages. |
 | self-portrait | the diff between the committed portrait and its candidate, a draft from the cousin's sources, an editor, and the commit. |
@@ -500,13 +500,15 @@ slug, and a candidate that changed since you read it is refused), and a
 change to the shared reviewer list. The operator level is the operator's
 word, so only the operator account may write it: the console has no roles,
 so that is the logged-in user whose name is the cousin's `[operator] name`
-(case aside). The same account is the only one that may drop an
-operator-level entry at review. Nobody else is offered the level.
+(case aside). The same account is the only one that may retire an
+operator-level claim (or mark obsolete a topic that has a live one) and drop
+one at review. Nobody else is offered the level or those buttons.
 
 The **shared** tab also shows the reviewer list from
 `config/shared-reviewers.json`, says whether you are on it, and lets a
-logged-in user edit it (with a second click). Each change is written to the
-shared audit.
+reviewer edit it (with a second click; while the list is empty any
+logged-in user may start it). Each change is written to the shared audit
+with the list before and after.
 
 ## Loops
 

@@ -165,17 +165,19 @@ function fmtStamp(iso) {
 }
 
 // Two-step confirm: the first click arms, the second (within 4 s) acts.
-function ConfirmButton({ label, confirmLabel, onConfirm, className, title }) {
+// `disabled` disarms it and refuses both clicks.
+function ConfirmButton({ label, confirmLabel, onConfirm, className, title, disabled }) {
   const [armed, setArmed] = React.useState(false);
   React.useEffect(() => {
     if (!armed) return;
     const t = setTimeout(() => setArmed(false), 4000);
     return () => clearTimeout(t);
   }, [armed]);
+  React.useEffect(() => { if (disabled) setArmed(false); }, [disabled]);
   return (
-    <button className={className || "btn danger"} title={title}
+    <button className={className || "btn danger"} title={title} disabled={!!disabled}
             data-confirm={armed ? "armed" : "idle"}
-            onClick={(e) => { e.stopPropagation(); if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}>
+            onClick={(e) => { e.stopPropagation(); if (disabled) return; if (armed) { setArmed(false); onConfirm(); } else setArmed(true); }}>
       {armed ? (confirmLabel || "confirm: move to trash") : (label || "delete")}
     </button>
   );
@@ -196,6 +198,10 @@ function MemoryExplorer({ slug }) {
   const [badges, setBadges] = React.useState({});
   const [historyTopic, setHistoryTopic] = React.useState("");
   React.useEffect(() => { setHistoryTopic(""); }, [slug]);
+  // Whether the viewer is this cousin's operator account: the retire
+  // buttons on operator-level claims are theirs alone.
+  const [writer] = useMemoryJson(`/api/memory/${slug}/writer`, 0);
+  const isOperator = !!(writer && writer.can_write_operator);
   React.useEffect(() => {
     let cancelled = false;
     Promise.all([apiGet(`/api/memory/${slug}/tensions`), apiGet(`/api/memory/${slug}/review`)]).then(([t, r]) => {
@@ -227,7 +233,7 @@ function MemoryExplorer({ slug }) {
     const why = window.prompt(`Mark topic "${topic}" obsolete?\nIt leaves the distilled views; raw keeps its history, and a later entry on the topic revives it.\n\nWhy (what superseded it)?`, "");
     if (why === null) return false;
     if (!why.trim()) { flash({ ok: false, msg: "not marked: a reason is required" }); return false; }
-    const { r, d } = await apiSend("POST", `/api/memory/${slug}/obsolete`, { topic, why: why.trim() });
+    const { r, d } = await safeSend("POST", `/api/memory/${slug}/obsolete`, { topic, why: why.trim() });
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `could not mark "${topic}" obsolete: ${d.error || r.status}` }); return false; }
     flash({ ok: true, msg: `marked "${topic}" obsolete${d.effects && d.effects.distilled ? " · distilled views regenerated" : ""}` });
     setTick(t => t + 1);
@@ -236,7 +242,7 @@ function MemoryExplorer({ slug }) {
   };
   // Retire one claim (an entry-level L5 mark), from tensions or history.
   const retireClaim = async (body) => {
-    const { r, d } = await apiSend("POST", `/api/memory/${slug}/obsolete`, body);
+    const { r, d } = await safeSend("POST", `/api/memory/${slug}/obsolete`, body);
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `claim not retired: ${d.error || r.status}` }); return false; }
     flash({ ok: true, msg: `retired claim ${body.entry} of "${body.topic}"${d.effects && d.effects.distilled ? " · distilled views regenerated" : ""}` });
     setTick(t => t + 1);
@@ -364,12 +370,12 @@ function MemoryExplorer({ slug }) {
         {rawLayer &&
           <RawEntries key={layer} slug={slug} tier={layer === "raw" ? "daily" : layer} reload={tick}
                       levels={levels} setLevels={setLevels} onCounts={setLevelCounts}
-                      onRemove={remove} onObsolete={markObsolete} onHistory={openHistory} />}
+                      onRemove={remove} onObsolete={markObsolete} onHistory={openHistory} operator={isOperator} />}
         {layer === "op-search" && <MemorySearch slug={slug} onHistory={openHistory} />}
         {layer === "op-write" && <MemoryWrite slug={slug} flash={flash} onDone={changed} />}
-        {layer === "op-tensions" && <TensionsList slug={slug} reload={tick} onRetire={retireClaim} onHistory={openHistory} />}
+        {layer === "op-tensions" && <TensionsList slug={slug} reload={tick} onRetire={retireClaim} onHistory={openHistory} operator={isOperator} />}
         {layer === "op-review" && <ReviewQueue slug={slug} reload={tick} flash={flash} onChanged={changed} />}
-        {layer === "op-history" && <TopicHistory slug={slug} topic={historyTopic} reload={tick} onRetire={retireClaim} />}
+        {layer === "op-history" && <TopicHistory slug={slug} topic={historyTopic} reload={tick} onRetire={retireClaim} operator={isOperator} />}
         {layer === "op-maintain" && <MemoryMaintenance slug={slug} ov={ov} flash={flash} onChanged={changed} />}
         {layer === "op-portrait" && <SelfPortrait slug={slug} flash={flash} onChanged={changed} />}
         {layer === "op-moments" && <MomentsList slug={slug} reload={tick} />}
@@ -502,7 +508,7 @@ function SearchInfo({ l }) {
   );
 }
 
-function RawEntries({ slug, tier, reload, onRemove, onObsolete, onHistory, levels: levelsProp, setLevels: setLevelsProp, onCounts }) {
+function RawEntries({ slug, tier, reload, onRemove, onObsolete, onHistory, operator, levels: levelsProp, setLevels: setLevelsProp, onCounts }) {
   // The level filter normally comes from the explorer's rail; alone, the
   // list keeps its own.
   const [ownLevels, setOwnLevels] = React.useState([]);
@@ -569,7 +575,7 @@ function RawEntries({ slug, tier, reload, onRemove, onObsolete, onHistory, level
           {e.topic && onHistory &&
             <button className="btn ghost" data-history={e.topic} title="the topic's claims with their valid time"
                     onClick={(ev) => { ev.stopPropagation(); onHistory(e.topic); }}>history</button>}
-          {e.topic && e.level !== "L5_OBSOLETE" && onObsolete &&
+          {e.topic && e.level !== "L5_OBSOLETE" && onObsolete && (e.level !== "L0_OPERATOR" || operator) &&
             <button className="btn ghost" data-mark-obsolete={e.topic}
                     title="mark this topic superseded (L5): out of the distilled views, history kept in raw"
                     onClick={(ev) => { ev.stopPropagation(); onObsolete(e.topic); }}>mark obsolete</button>}
@@ -805,15 +811,38 @@ function portraitCommitReady(typed, slug, sha, dirty) {
 }
 // ---- end operator-action helpers ----
 
+// apiSend (the shared helper: a 401 brings the login back) that never
+// throws: a network failure comes back as a failed answer, so every
+// caller can clear its busy state and say why.
+async function safeSend(method, path, body) {
+  try {
+    return await apiSend(method, path, body);
+  } catch (e) {
+    return { r: { ok: false, status: 0 }, d: { ok: false, error: `network: ${e.message || e}` } };
+  }
+}
+
+// [data, reload, error]: a GET that says why it failed instead of
+// leaving "loading..." up forever.
 function useMemoryJson(url, reload) {
   const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(null);
   const load = React.useCallback(async () => {
-    if (!url) { setData(null); return; }
-    const d = await apiGet(url);
+    if (!url) { setData(null); setErr(null); return; }
+    const { r, d } = await safeSend("GET", url);
+    if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); return; }
+    setErr(null);
     setData(d);
   }, [url]);
   React.useEffect(() => { load(); }, [load, reload]);
-  return [data, load];
+  return [data, load, err];
+}
+
+// "loading..." until the data comes, or the error that stopped it.
+function Pending({ data, err }) {
+  if (err) return <div className="mx-toast bad">{err}</div>;
+  if (!data) return <div className="mx-empty">loading...</div>;
+  return null;
 }
 
 function LevelPill({ level }) {
@@ -850,8 +879,11 @@ function ClaimRetire({ topic, id, onRetire }) {
   );
 }
 
-function ClaimRow({ c, topic, onRetire, showTopic }) {
+// `operator`: the viewer is the operator account; an operator-level claim
+// is theirs alone to retire (the server refuses anyone else).
+function ClaimRow({ c, topic, onRetire, showTopic, operator }) {
   const live = !c.valid_to;
+  const theirs = normLevel(c.truth_level) === "L0_OPERATOR" && !operator;
   return (
     <div className={"mx-entry lvl-" + LEVEL_SHORT(normLevel(c.truth_level))} data-claim={c.id}
          data-entry-level={live ? normLevel(c.truth_level) : "L5_OBSOLETE"}>
@@ -868,7 +900,8 @@ function ClaimRow({ c, topic, onRetire, showTopic }) {
         {c.cite && <span>cite · <b>{c.cite}</b></span>}
         <span>{live ? <b>live</b> : <>valid to <b>{fmtStamp(c.valid_to)}</b>{c.retired_by ? ` (mark ${c.retired_by})` : ""}</>}</span>
         <span style={{ flex: 1 }} />
-        {live && onRetire && <ClaimRetire topic={topic || c.topic} id={c.id} onRetire={onRetire} />}
+        {live && onRetire && !theirs && <ClaimRetire topic={topic || c.topic} id={c.id} onRetire={onRetire} />}
+        {live && onRetire && theirs && <span className="muted" data-operator-only>the operator's to retire</span>}
       </div>
     </div>
   );
@@ -885,14 +918,14 @@ function normLevel(l) {
   return short[up] || "other";
 }
 
-function TensionsList({ slug, reload, onRetire, onHistory }) {
-  const [data] = useMemoryJson(`/api/memory/${slug}/tensions`, reload);
+function TensionsList({ slug, reload, onRetire, onHistory, operator }) {
+  const [data, , err] = useMemoryJson(`/api/memory/${slug}/tensions`, reload);
   const list = (data && data.tensions) || null;
   return (
     <div className="mx-list-wrap" data-tensions>
       <div className="mx-hint">topics whose live claims disagree. Nothing judges which is right: settle one by retiring the claim that no longer holds (an entry-level obsolete mark; raw keeps it).</div>
       <div className="mx-list">
-        {!list && <div className="mx-empty">loading...</div>}
+        <Pending data={list} err={err} />
         {list && list.length === 0 && <div className="mx-empty">no tensions</div>}
         {(list || []).map(t => (
           <section key={t.topic} className="mx-lgroup" data-tension={t.topic}>
@@ -902,7 +935,7 @@ function TensionsList({ slug, reload, onRetire, onHistory }) {
               <span style={{ flex: 1 }} />
               <button className="btn ghost" onClick={() => onHistory(t.topic)}>history</button>
             </div>
-            {t.claims.map(c => <ClaimRow key={c.id} c={c} topic={t.topic} onRetire={onRetire} />)}
+            {t.claims.map(c => <ClaimRow key={c.id} c={c} topic={t.topic} onRetire={onRetire} operator={operator} />)}
           </section>
         ))}
       </div>
@@ -910,11 +943,11 @@ function TensionsList({ slug, reload, onRetire, onHistory }) {
   );
 }
 
-function TopicHistory({ slug, topic: initial, reload, onRetire }) {
+function TopicHistory({ slug, topic: initial, reload, onRetire, operator }) {
   const [topic, setTopic] = React.useState(initial || "");
   const [asked, setAsked] = React.useState(initial || "");
   React.useEffect(() => { setTopic(initial || ""); setAsked(initial || ""); }, [initial]);
-  const [data] = useMemoryJson(asked ? `/api/memory/${slug}/history?topic=${encodeURIComponent(asked)}` : null, reload);
+  const [data, , err] = useMemoryJson(asked ? `/api/memory/${slug}/history?topic=${encodeURIComponent(asked)}` : null, reload);
   return (
     <div className="mx-list-wrap" data-topic-history>
       <div className="mx-filters">
@@ -928,9 +961,9 @@ function TopicHistory({ slug, topic: initial, reload, onRetire }) {
       </div>
       <div className="mx-list">
         {!asked && <div className="mx-empty">type a topic</div>}
-        {asked && !data && <div className="mx-empty">loading...</div>}
+        {asked && <Pending data={data} err={err} />}
         {data && data.claims.length === 0 && <div className="mx-empty">no claims for "{asked}"</div>}
-        {data && data.claims.map(c => <ClaimRow key={c.id} c={c} topic={asked} onRetire={onRetire} />)}
+        {data && data.claims.map(c => <ClaimRow key={c.id} c={c} topic={asked} onRetire={onRetire} operator={operator} />)}
       </div>
     </div>
   );
@@ -950,12 +983,9 @@ function MemorySearch({ slug, onHistory }) {
     setBusy(true); setErr(null); setOpen(null);
     const p = new URLSearchParams({ q: q.trim(), top: String(top) });
     if (collection) p.set("collection", collection);
-    try {
-      const r = await fetch(`/api/memory/${slug}/search?` + p.toString(), { cache: "no-store" });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); setRes(null); }
-      else setRes(d);
-    } catch (e) { setErr(String(e.message || e)); }
+    const { r, d } = await safeSend("GET", `/api/memory/${slug}/search?` + p.toString());
+    if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); setRes(null); }
+    else setRes(d);
     setBusy(false);
   };
   const semantic = res && { on: "on: ranked by meaning too", off: "off: config/embedding.toml is not set, keyword only",
@@ -1021,7 +1051,7 @@ function MemorySearch({ slug, onHistory }) {
 }
 
 function MemoryWrite({ slug, flash, onDone }) {
-  const [writer] = useMemoryJson(`/api/memory/${slug}/writer`, 0);
+  const [writer, , writerErr] = useMemoryJson(`/api/memory/${slug}/writer`, 0);
   const [kind, setKind] = React.useState("remember");
   const [form, setForm] = React.useState({ topic: "", fact: "", decision: "", reasoning: "", level: "conclusion", note: "" });
   const [busy, setBusy] = React.useState(false);
@@ -1038,7 +1068,7 @@ function MemoryWrite({ slug, flash, onDone }) {
       ? { topic: form.topic, fact: form.fact, level: form.level, note: form.note }
       : { topic: form.topic, decision: form.decision, reasoning: form.reasoning, level: form.level, note: form.note };
     const url = kind === "remember" ? `/api/memory/${slug}/remember` : `/api/memory/${slug}/decide`;
-    const { r, d } = await apiSend("POST", url, body);
+    const { r, d } = await safeSend("POST", url, body);
     setBusy(false);
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `not written: ${d.error || r.status}` }); return; }
     flash({ ok: true, msg: d.line || "written" });
@@ -1051,6 +1081,7 @@ function MemoryWrite({ slug, flash, onDone }) {
       <div className="panel mx-card" style={{ gridColumn: "1 / -1" }}>
         <div className="panel-hdr">
           <span className="title">write to @{slug}'s memory</span>
+          {writerErr && <span className="muted">{writerErr}</span>}
           <span style={{ flex: 1 }} />
           <div className="radio-row" data-write-kind={kind}>
             <button className={kind === "remember" ? "sel" : ""} onClick={() => setKind("remember")}>remember</button>
@@ -1096,46 +1127,68 @@ function MemoryWrite({ slug, flash, onDone }) {
 }
 
 function ReviewQueue({ slug, reload, flash, onChanged }) {
-  const [data, load] = useMemoryJson(`/api/memory/${slug}/review`, reload);
+  const [data, load, err] = useMemoryJson(`/api/memory/${slug}/review`, reload);
   const [writer] = useMemoryJson(`/api/memory/${slug}/writer`, 0);
+  const [op] = useLongOp(slug);
   const [marks, setMarks] = React.useState({});
   const [why, setWhy] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => { setMarks({}); }, [slug, reload]);
+  // A settle of more than a couple of entries runs as the cousin's long
+  // operation: follow it, then report and reload when it ends.
+  const reviewOp = op && op.kind === "memory-review" ? op : null;
+  const running = !!(op && op.status === "running");
+  const seen = React.useRef(null);
+  React.useEffect(() => {
+    if (!reviewOp) return;
+    const key = reviewOp.id + ":" + reviewOp.status;
+    if (seen.current && seen.current !== key && reviewOp.status !== "running") {
+      if (reviewOp.status === "done" && reviewOp.result) report(reviewOp.result);
+      else flash({ ok: false, msg: `review failed: ${reviewOp.error || "see the console log"}` });
+      load(); onChanged && onChanged();
+    }
+    seen.current = key;
+  }, [reviewOp && reviewOp.id, reviewOp && reviewOp.status]);
   const held = (data && data.held) || [];
   const body = reviewBody(marks, why);
   const n = Object.keys(body.verdicts).length;
   const drops = Object.values(body.verdicts).filter(v => v === "drop").length;
   const markAll = (v) => setMarks(Object.fromEntries(held.map(r => [r.id, v])));
-  const apply = async () => {
-    if (!n || busy) return;
-    setBusy(true);
-    const { r, d } = await apiSend("POST", `/api/memory/${slug}/review`, body);
-    setBusy(false);
-    if (!r.ok || !d.ok) { flash({ ok: false, msg: `review not applied: ${d.error || r.status}` }); return; }
+  const report = (d) => {
     const errs = Object.entries(d.errors || {});
     flash({ ok: errs.length === 0, msg: `${Object.keys(d.done || {}).length} settled` + (errs.length ? ` · left held: ${errs.map(([k, v]) => `${k} (${v})`).join("; ")}` : "") });
+  };
+  const apply = async () => {
+    if (!n || busy || running) return;
+    setBusy(true);
+    const { r, d } = await safeSend("POST", `/api/memory/${slug}/review`, body);
+    setBusy(false);
+    if (!r.ok || !d.ok) { flash({ ok: false, msg: `review not applied: ${d.error || r.status}` }); return; }
     setMarks({}); setWhy("");
+    if (r.status === 202) { flash({ ok: true, msg: `settling ${n} as @${slug}'s long operation...` }); seen.current = "pending"; return; }
+    report(d);
     load(); onChanged && onChanged();
   };
   const loggedIn = writer && writer.user;
+  const blocked = busy || running || !loggedIn;
   return (
     <div className="mx-list-wrap" data-review-queue>
       <div className="mx-hint">
         the review gate holds a batch of new entries (over [memory] review_batch = {data ? data.batch : "?"} at once) out of every view until someone keeps or drops each. A drop is an entry-level obsolete mark and has no undo; an operator-level entry is dropped by the operator account only ({(data && data.operator) || "none set"}).
         {writer && !loggedIn && <> <b>A verdict needs a logged-in console user</b>: without logins the console cannot tell you from a cousin.</>}
       </div>
+      {reviewOp && <LongOpStatus slug={slug} kind="memory-review" />}
       <div className="mx-inputs">
-        <button className="btn ghost" disabled={!held.length} onClick={() => markAll("keep")}>mark all keep</button>
-        <button className="btn ghost" disabled={!held.length} onClick={() => markAll("drop")}>mark all drop</button>
+        <button className="btn ghost" disabled={!held.length || running} onClick={() => markAll("keep")}>mark all keep</button>
+        <button className="btn ghost" disabled={!held.length || running} onClick={() => markAll("drop")}>mark all drop</button>
         <button className="btn ghost" disabled={!n} onClick={() => setMarks({})}>clear</button>
-        <input placeholder="why (optional, recorded with each verdict)" value={why} onChange={e => setWhy(e.target.value)} style={{ flex: 1 }} />
+        <input placeholder="why (optional, recorded with each verdict)" value={why} maxLength={500} onChange={e => setWhy(e.target.value)} style={{ flex: 1 }} />
         {drops > 0
-          ? <ConfirmButton className="btn danger" label={`apply ${n} (${drops} drop)`} confirmLabel={`confirm: drop ${drops}, no undo`} onConfirm={apply} />
-          : <button className="btn primary" disabled={!n || busy || !loggedIn} onClick={apply}>apply {n || ""}</button>}
+          ? <ConfirmButton className="btn danger" disabled={blocked} label={`apply ${n} (${drops} drop)`} confirmLabel={`confirm: drop ${drops}, no undo`} onConfirm={apply} />
+          : <button className="btn primary" disabled={!n || blocked} onClick={apply}>apply {n || ""}</button>}
       </div>
       <div className="mx-list">
-        {!data && <div className="mx-empty">loading...</div>}
+        <Pending data={data} err={err} />
         {data && held.length === 0 && <div className="mx-empty">nothing held for review</div>}
         {held.map(r => (
           <div key={r.id} className={"mx-entry lvl-" + LEVEL_SHORT(normLevel(r.truth_level))} data-held={r.id}>
@@ -1153,7 +1206,7 @@ function ReviewQueue({ slug, reload, flash, onChanged }) {
               <span style={{ flex: 1 }} />
               <div className="radio-row" data-verdict={marks[r.id] || "held"}>
                 {["keep", "drop"].map(v => (
-                  <button key={v} className={marks[r.id] === v ? "sel" : ""}
+                  <button key={v} className={marks[r.id] === v ? "sel" : ""} disabled={running}
                           onClick={() => setMarks(m => ({ ...m, [r.id]: m[r.id] === v ? undefined : v }))}>{v}</button>
                 ))}
               </div>
@@ -1184,7 +1237,7 @@ function MemoryMaintenance({ slug, ov, flash, onChanged }) {
     last.current = key;
   }, [mine && mine.id, mine && mine.status]);
   const start = async (action, extra) => {
-    const { r, d } = await apiSend("POST", `/api/memory/${slug}/maintain`, { action, ...(extra || {}) });
+    const { r, d } = await safeSend("POST", `/api/memory/${slug}/maintain`, { action, ...(extra || {}) });
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `${action} not started: ${d.error || r.status}` }); return; }
     reload();
   };
@@ -1220,7 +1273,7 @@ function MemoryMaintenance({ slug, ov, flash, onChanged }) {
                 <>
                   <button className="btn" disabled={running} onClick={() => start(m.action, { dry_run: true })}>preview</button>
                   <ConfirmButton className="btn danger" label="compact" confirmLabel="confirm: retire pointers"
-                                 onConfirm={() => !running && start(m.action)} />
+                                 disabled={running} onConfirm={() => start(m.action)} />
                 </>
               ) : (
                 <button className="btn primary" disabled={running} onClick={() => start(m.action)}>{m.title} now</button>
@@ -1234,7 +1287,7 @@ function MemoryMaintenance({ slug, ov, flash, onChanged }) {
 }
 
 function SelfPortrait({ slug, flash, onChanged }) {
-  const [st, load] = useMemoryJson(`/api/memory/${slug}/portrait`, 0);
+  const [st, load, err] = useMemoryJson(`/api/memory/${slug}/portrait`, 0);
   const [tab, setTab] = React.useState("diff");
   const [draft, setDraft] = React.useState(null);
   const [typed, setTyped] = React.useState("");
@@ -1249,7 +1302,7 @@ function SelfPortrait({ slug, flash, onChanged }) {
   };
   const call = async (what, body, okMsg) => {
     setBusy(true);
-    const { r, d } = await apiSend("POST", urls[what], body || {});
+    const { r, d } = await safeSend("POST", urls[what], body || {});
     setBusy(false);
     if (!r.ok || !d.ok) { flash({ ok: false, msg: `${what}: ${d.error || r.status}` }); if (r.status === 409) load(); return null; }
     flash({ ok: true, msg: okMsg });
@@ -1258,7 +1311,7 @@ function SelfPortrait({ slug, flash, onChanged }) {
     onChanged && onChanged();
     return d;
   };
-  if (!st) return <div className="mx-empty">loading...</div>;
+  if (!st) return <Pending data={st} err={err} />;
   const ready = portraitCommitReady(typed, slug, st.candidate_sha, dirty);
   return (
     <div className="mx-list-wrap" data-self-portrait>
@@ -1272,7 +1325,7 @@ function SelfPortrait({ slug, flash, onChanged }) {
         <span className="muted">candidate {st.candidate_exists ? st.candidate_sha : "none"} · committed {st.committed_exists ? "yes" : "none"}</span>
         <span style={{ flex: 1 }} />
         {st.candidate_exists
-          ? <ConfirmButton className="btn" label="draft again" confirmLabel="confirm: replace the candidate"
+          ? <ConfirmButton className="btn" label="draft again" confirmLabel="confirm: replace the candidate" disabled={busy}
                            onConfirm={() => call("synthesize", { replace: true }, "candidate drafted again")} />
           : <button className="btn" disabled={busy} onClick={() => call("synthesize", {}, "candidate drafted")}>draft a candidate</button>}
       </div>
@@ -1310,13 +1363,15 @@ function SelfPortrait({ slug, flash, onChanged }) {
 }
 
 function MomentsList({ slug, reload }) {
-  const [cb] = useMemoryJson(`/api/memory/${slug}/callbacks`, reload);
-  const [cap] = useMemoryJson(`/api/memory/${slug}/capsules`, reload);
+  const [cb, , cbErr] = useMemoryJson(`/api/memory/${slug}/callbacks`, reload);
+  const [cap, , capErr] = useMemoryJson(`/api/memory/${slug}/capsules`, reload);
+  const list = (v) => Array.isArray(v) ? v : (v == null || v === "" ? [] : [String(v)]);
   return (
     <div className="mx-cards" data-memory-moments>
       <div className="panel mx-card">
         <div className="panel-hdr"><span className="title">reasoning capsules</span><span className="muted">newest first · read-only (cousin-reason)</span></div>
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Pending data={cap} err={capErr} />
           {cap && cap.capsules.length === 0 && <div className="mx-empty">no capsules</div>}
           {(cap ? cap.capsules : []).map(c => (
             <div key={c.id} className="mx-entry" data-capsule={c.id}>
@@ -1325,8 +1380,8 @@ function MomentsList({ slug, reload }) {
                 <span style={{ flex: 1 }} />
                 <span className="pill gray">{c.confidence}</span>
               </div>
-              {(c.evidence || []).length > 0 && <div className="mx-content"><b>evidence:</b> {c.evidence.join(" · ")}</div>}
-              {(c.rejected || []).length > 0 && <div className="mx-content mx-why"><b>rejected:</b> {c.rejected.join(" · ")}</div>}
+              {list(c.evidence).length > 0 && <div className="mx-content"><b>evidence:</b> {list(c.evidence).join(" · ")}</div>}
+              {list(c.rejected).length > 0 && <div className="mx-content mx-why"><b>rejected:</b> {list(c.rejected).join(" · ")}</div>}
               <div className="mx-meta">{c.topic && <span>topic · <b>{c.topic}</b></span>}<span className="muted">{fmtStamp(c.timestamp)}</span></div>
             </div>
           ))}
@@ -1335,6 +1390,7 @@ function MomentsList({ slug, reload }) {
       <div className="panel mx-card">
         <div className="panel-hdr"><span className="title">callbacks</span><span className="muted">newest first · read-only (cousin-callback)</span></div>
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <Pending data={cb} err={cbErr} />
           {cb && cb.callbacks.length === 0 && <div className="mx-empty">no callbacks</div>}
           {(cb ? cb.callbacks : []).map((m, i) => (
             <div key={i} className="mx-meta" data-callback>
@@ -1357,27 +1413,29 @@ function SharedReviewersPanel({ onChange }) {
   const [edit, setEdit] = React.useState(null);
   const [msg, setMsg] = React.useState(null);
   const load = React.useCallback(async () => {
-    const d = await apiGet("/api/shared/reviewers");
+    const { r, d } = await safeSend("GET", "/api/shared/reviewers");
+    if (!r.ok) { setMsg({ ok: false, msg: `reviewers: ${d.error || r.status}` }); return; }
     setSt(d);
     if (onChange) onChange(d);
   }, [onChange]);
   React.useEffect(() => { load(); }, [load]);
   const save = async () => {
     const reviewers = (edit || "").split("\n").map(s => s.trim()).filter(Boolean);
-    const { r, d } = await apiSend("POST", "/api/shared/reviewers", { reviewers });
+    const { r, d } = await safeSend("POST", "/api/shared/reviewers", { reviewers });
     if (!r.ok || !d.ok) { setMsg({ ok: false, msg: d.error || `HTTP ${r.status}` }); return; }
     setMsg({ ok: true, msg: `reviewers saved: ${d.reviewers.join(", ") || "none"}` });
     setEdit(null);
     load();
   };
-  if (!st) return null;
+  if (!st) return msg ? <div className="mx-toast bad">{msg.msg}</div> : null;
   return (
     <div className="panel" style={{ flex: "0 0 auto" }} data-shared-reviewers>
       <div className="panel-hdr"><span className="title">reviewers</span>
         <span className="muted">{st.configured ? st.reviewers.length : "not configured"}</span>
         <span style={{ flex: 1 }} />
-        {edit === null && <button className="btn ghost" disabled={!st.user || !!st.error}
-                                  title={st.user ? "change who may promote into the shared tier" : "needs a logged-in console user"}
+        {edit === null && <button className="btn ghost" disabled={!st.can_edit}
+                                  title={st.can_edit ? "change who may promote into the shared tier"
+                                         : st.user ? "only a current reviewer changes the list" : "needs a logged-in console user"}
                                   onClick={() => { setEdit(st.reviewers.join("\n")); setMsg(null); }}>edit</button>}
       </div>
       <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>

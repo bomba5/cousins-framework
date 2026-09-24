@@ -4,9 +4,12 @@ each scope, diffs, the audit tail, and promote/reject through
 cousin_lib.shared_tier with the reviewer taken from the session (or,
 unconfigured, from the body), and the reviewer list itself
 (config/shared-reviewers.json): readable, and writable by a logged-in
-user only, each change a row in the tier's audit."""
+user who is on it (anyone logged in while it is empty or absent), each
+change a row in the tier's audit with the list before and after."""
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -117,6 +120,19 @@ def _clean_reviewers(value):
     return out
 
 
+@contextlib.contextmanager
+def _reviewers_lock(path):
+    """An exclusive flock on a sidecar of the reviewer file: it holds
+    across threads (each opens its own description) and processes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def _write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
@@ -144,9 +160,11 @@ def _reviewers_state(req):
             you = shared_tier._principal(req.user) in principals
         except Exception:  # noqa: BLE001 - a hint, never a failure
             you = None
+    can_edit = bool(req.user and req.server.users.configured()
+                    and data is not None and (not names or you))
     return {"configured": bool(data) and "reviewers" in data,
             "reviewers": names, "error": error, "user": req.user,
-            "you_review": you}
+            "you_review": you, "can_edit": can_edit}
 
 
 def register():
@@ -163,15 +181,29 @@ def register():
             raise HttpError(403, "changing the reviewers needs a logged-in"
                                  " console user")
         names = _clean_reviewers(req.body.get("reviewers"))
-        data, error = _read_reviewers(req.server.root)
-        if data is None:
-            raise HttpError(409, "config/shared-reviewers.json is %s; fix"
-                                 " or remove it by hand first" % error)
-        data["reviewers"] = names
-        _write_json(_reviewers_path(req.server.root), data)
-        shared_tier._audit("reviewers", req.user,
-                           "config/shared-reviewers.json",
-                           {"reviewers": names})
+        path = _reviewers_path(req.server.root)
+        # read, check, write and audit as one section: two edits must not
+        # both pass the check against the same old list
+        with _reviewers_lock(path):
+            data, error = _read_reviewers(req.server.root)
+            if data is None:
+                raise HttpError(409, "config/shared-reviewers.json is %s; fix"
+                                     " or remove it by hand first" % error)
+            previous = [r for r in data.get("reviewers", [])
+                        if isinstance(r, str)]
+            # Who may promote is decided by those who already may: once
+            # the list names anyone, only someone on it changes it (else
+            # any login could add itself and promote). An empty or absent
+            # list is anyone's to start.
+            if previous and shared_tier._principal(req.user) not in {
+                    shared_tier._principal(r) for r in previous}:
+                raise HttpError(403, "only a current reviewer may change the"
+                                     " reviewer list")
+            data["reviewers"] = names
+            _write_json(path, data)
+            shared_tier._audit("reviewers", req.user,
+                               "config/shared-reviewers.json",
+                               {"reviewers": names, "previous": previous})
         return 200, {"ok": True, **_reviewers_state(req)}
 
     @router.route("GET", "/api/shared/list")

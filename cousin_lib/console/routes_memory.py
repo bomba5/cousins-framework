@@ -15,10 +15,13 @@ The operator actions (search, remember, decide, history, the review
 gate, distill/compact/reindex, the self-portrait, callbacks and
 capsules) call the same library functions the `cousin-memory`,
 `cousin-self-portrait`, `cousin-callback` and `cousin-reason` CLIs call.
-Three of them are a person's act and need a logged-in console user: a
-review verdict, a self-portrait commit and an operator-level write. The
-console has no roles, so "the operator" is the logged-in user whose name
-is the cousin's `[operator] name` (case aside)."""
+A review verdict and a self-portrait commit are a person's act and need
+a logged-in console user (so does a change to the shared reviewer list,
+routes_shared.py). The operator's word needs the operator account: an
+operator-level write, and retiring or dropping an operator-level claim
+(the obsolete route, a review drop). The console has no roles, so "the
+operator" is the logged-in user whose name is the cousin's `[operator]
+name` (case aside)."""
 from __future__ import annotations
 
 import hashlib
@@ -212,6 +215,10 @@ def register():
             raise HttpError(400, "topic and why must be strings")
         if claim is not None and not isinstance(claim, str):
             raise HttpError(400, "entry must be a claim id string")
+        if not why.strip():
+            raise HttpError(400, "a reason is required (why): an obsolete"
+                                 " mark says what superseded the topic")
+        _guard_operator_claims(req, slug, home, topic, claim or None)
         try:
             entry = memory.mark_obsolete(home, topic, why, by=_who(req),
                                          force=_flag(req.body.get("force")),
@@ -277,6 +284,11 @@ SEARCH_TOP_MAX = 50
 PORTRAIT_MAX = 64 * 1024
 PORTRAIT_SHA_CHARS = 16
 MAINTAIN_ACTIONS = ("distill", "compact-raw", "compact-index", "reindex")
+CALLBACKS_MAX = 1000
+WHY_MAX = 500
+# A review of more than this many verdicts runs as the cousin's long
+# operation: each settle rewrites raw and redistills.
+REVIEW_SYNC_MAX = 2
 
 
 def _person(req, what):
@@ -301,6 +313,26 @@ def _is_operator(req, slug):
     operator = _operator_of(req, slug)
     return bool(operator and req.user and req.server.users.configured()
                 and req.user.strip().casefold() == operator.casefold())
+
+
+def _guard_operator_claims(req, slug, home, topic, claim):
+    """An operator-level claim is the operator's word, so retiring it is
+    the operator account's act: an entry-level mark on an L0 claim, or a
+    topic-level mark on a topic with a live L0 claim, is 403 for anyone
+    else (and for everyone without a login)."""
+    topic = str(topic or "").strip()
+    rows = [r for r in memory.validity(home)
+            if str(r.get("topic") or "").strip() == topic]
+    if claim:
+        rows = [r for r in rows if r["id"] == claim]
+    else:
+        rows = [r for r in rows if not r.get("valid_to")]
+    if any(memory.normalize_level(r.get("truth_level")) == memory.OPERATOR_LEVEL
+           for r in rows) and not _is_operator(req, slug):
+        operator = _operator_of(req, slug)
+        raise HttpError(403, "an operator-level claim is the operator's to"
+                             " retire; only the operator account (%s) may"
+                        % (operator or "none configured in [operator] name"))
 
 
 def _console_cite(req, note):
@@ -363,9 +395,14 @@ def _search_hits(req, home, query, top, collection):
     hits, notice = memory_search.search(query, top=top, home=home,
                                         collection=collection, root=root,
                                         record=False)
+    # The fused hit no longer says which leg found it. With no semantic
+    # leg every hit is a keyword hit; with one, one keyword query (at the
+    # depth search fused at) tells them apart.
+    semantic_ran = any(h.get("similarity") is not None for h in hits)
     words = {h["path"] for h in memory_search._keyword_search(
-        query, home, max(top, memory_search.FUSION_DEPTH_MIN),
-        collection, root)}
+        query, home, max(memory_search.FUSION_DEPTH_MIN,
+                         memory_search.FUSION_DEPTH_FACTOR * top),
+        collection, root)} if semantic_ran else {h["path"] for h in hits}
     harness = memory_explorer.harness_dir(home, root)
     out = []
     for hit in hits:
@@ -434,6 +471,14 @@ def _portrait_state(home):
             "diff": diff}
 
 
+def _no_link(home, path):
+    """Refuse a portrait path that is a symlink, dangling or not: a write
+    through it would land wherever the link points."""
+    if Path(path).is_symlink():
+        raise HttpError(403, "%s is a link; the console never writes"
+                             " through one" % Path(path).relative_to(home))
+
+
 def _write_candidate(home, text):
     import os
     import tempfile
@@ -495,6 +540,27 @@ def _maintain_work(server, slug, home, action, dry_run):
         server.emit("memory-change", {"slug": slug, "action": action})
         return result
     return work
+
+
+def _settle(server, slug, home, verdicts, why, user, operator):
+    """Apply the operator's verdicts, then redistill once. review_gate.settle
+    reads what is held once, under one lock; an id it does not hold comes
+    back in errors. A person who is not the operator account is held to the
+    reviewing model's rule (`model`): an operator-level entry is the
+    operator's to drop, and stays held."""
+    from cousin_lib import distill, review_gate
+    done, errors = review_gate.settle(
+        home, [{"id": i} for i in verdicts], verdicts,
+        by="console:%s" % user, why=why, model=not operator)
+    effects = {"distilled": False}
+    if done:
+        try:
+            distill.distill(home)
+            effects["distilled"] = True
+        except Exception as err:  # noqa: BLE001 - the verdicts are written
+            effects["distill_error"] = "%s: %s" % (type(err).__name__, err)
+        server.emit("memory-change", {"slug": slug, "action": "review"})
+    return {"ok": True, "done": done, "errors": errors, "effects": effects}
 
 
 def _register_actions():
@@ -585,7 +651,7 @@ def _register_actions():
         person's act: a logged-in user, recorded as `console:<user>`. An
         operator-level entry is dropped by the operator account only (a
         drop has no undo), as the reviewing model is held to the same."""
-        from cousin_lib import distill, review_gate
+        from cousin_lib import review_gate
         home = cousin_home(req.server, slug)
         verdicts = req.body.get("verdicts")
         if not isinstance(verdicts, dict) or not verdicts or any(
@@ -593,37 +659,25 @@ def _register_actions():
                 for k, v in verdicts.items()):
             raise HttpError(400, "verdicts must map entry ids to keep or drop")
         why = req.body.get("why") or ""
-        if not isinstance(why, str):
-            raise HttpError(400, "why must be a string")
+        if not isinstance(why, str) or len(why) > WHY_MAX:
+            raise HttpError(400, "why must be a string of at most %d"
+                                 " characters" % WHY_MAX)
         user = _person(req, "a review verdict")
         operator = _is_operator(req, slug)
-        rows = review_gate.pending(home)
-        held = {r["id"]: r for r in rows}
-        errors = {i: "not held for review" for i in verdicts if i not in held}
-        mine = {}
-        for entry_id, verdict in verdicts.items():
-            row = held.get(entry_id)
-            if row is None:
-                continue
-            if verdict == "drop" and not operator and memory.normalize_level(
-                    row.get("truth_level")) == memory.OPERATOR_LEVEL:
-                errors[entry_id] = ("an operator-level entry is the operator's"
-                                    " to drop; left held")
-                continue
-            mine[entry_id] = verdict
-        done, failed = review_gate.settle(home, rows, mine,
-                                          by="console:%s" % user, why=why)
-        errors.update(failed)
-        effects = {"distilled": False}
-        if done:
-            try:
-                distill.distill(home)
-                effects["distilled"] = True
-            except Exception as err:  # noqa: BLE001 - the verdicts are written
-                effects["distill_error"] = "%s: %s" % (type(err).__name__, err)
-            req.server.emit("memory-change", {"slug": slug, "action": "review"})
-        return 200, {"ok": True, "done": done, "errors": errors,
-                     "effects": effects}
+
+        def work(op=None):
+            if op:
+                op.stage("settle", "running", "%d verdict(s)" % len(verdicts))
+            result = _settle(req.server, slug, home, verdicts, why, user,
+                             operator)
+            if op:
+                op.stage("settle", "done", "%d settled, %d left held" % (
+                    len(result["done"]), len(result["errors"])))
+            return result
+        if len(verdicts) > REVIEW_SYNC_MAX:
+            return longop.start_response(req.server, slug, "memory-review", work,
+                                         params={"verdicts": len(verdicts)})
+        return 200, work()
 
     @router.route("POST", "/api/memory/{slug}/maintain")
     def maintain(req, slug):
@@ -651,6 +705,7 @@ def _register_actions():
         over it, else 409."""
         from cousin_lib import self_portrait
         home = cousin_home(req.server, slug)
+        _no_link(home, self_portrait.candidate_path(home))
         if self_portrait.candidate_path(home).exists() \
                 and not _flag(req.body.get("replace")):
             raise HttpError(409, "a candidate exists and may hold edits;"
@@ -669,6 +724,8 @@ def _register_actions():
         if len(text.encode("utf-8")) > PORTRAIT_MAX:
             raise HttpError(400, "a portrait is at most %d bytes"
                             % PORTRAIT_MAX)
+        from cousin_lib import self_portrait
+        _no_link(home, self_portrait.candidate_path(home))
         _write_candidate(home, text)
         req.server.emit("memory-change", {"slug": slug,
                                           "action": "portrait-edit"})
@@ -685,6 +742,8 @@ def _register_actions():
         user = _person(req, "a self-portrait commit")
         if req.body.get("confirm") != slug:
             raise HttpError(400, "type the cousin's slug (%s) to commit" % slug)
+        _no_link(home, self_portrait.candidate_path(home))
+        _no_link(home, self_portrait.committed_path(home))
         state = _portrait_state(home)
         if not state["candidate_exists"]:
             raise HttpError(404, "no candidate to commit; synthesize or"
@@ -706,7 +765,8 @@ def _register_actions():
         _confined(home, callback.library_path(home))
         rows = callback.list_all(home)
         rows.reverse()
-        return 200, {"callbacks": rows[:max(1, req.int_query("limit", 200))]}
+        limit = max(1, min(CALLBACKS_MAX, req.int_query("limit", 200)))
+        return 200, {"callbacks": rows[:limit]}
 
     @router.route("GET", "/api/memory/{slug}/capsules")
     def capsules(req, slug):

@@ -124,10 +124,11 @@ class TestReviewers(SharedCase):
         self.assertEqual(body["reviewers"], ["ana", "toki"])
         self.assertTrue(body["configured"])
         self.assertTrue(body["you_review"])
+        self.assertTrue(body["can_edit"])
 
     def test_write_replaces_the_list_keeps_other_keys_and_audits(self):
         path = self.root / "config" / "shared-reviewers.json"
-        path.write_text(json.dumps({"reviewers": ["ana"], "note": "kept"}))
+        path.write_text(json.dumps({"reviewers": ["Ana"], "note": "kept"}))
         self.login()
         status, body = self.post("/api/shared/reviewers",
                                  {"reviewers": [" ana ", "Toki", "ANA"]})
@@ -139,6 +140,37 @@ class TestReviewers(SharedCase):
         self.assertEqual(body["entries"][0]["kind"], "reviewers")
         self.assertEqual(body["entries"][0]["actor"], "ana")
         self.assertEqual(body["entries"][0]["reviewers"], ["ana", "Toki"])
+        self.assertEqual(body["entries"][0]["previous"], ["Ana"])
+
+    def test_only_a_reviewer_edits_the_list(self):
+        # a logged-in user who is not a reviewer cannot add themself and
+        # then promote
+        (self.root / "config" / "shared-reviewers.json").write_text(
+            json.dumps({"reviewers": ["toki"]}))
+        self.login()
+        status, body = self.post("/api/shared/reviewers",
+                                 {"reviewers": ["toki", "ana"]})
+        self.assertEqual(status, 403, body)
+        self.assertFalse(self.get("/api/shared/reviewers")[1]["can_edit"])
+        self.assertEqual(self.post("/api/shared/approve",
+                                   {"slug": "wren", "file": "project_x.md"})[0], 403)
+        self.assertEqual(json.loads((self.root / "config"
+                                     / "shared-reviewers.json").read_text()),
+                         {"reviewers": ["toki"]})
+
+    def test_anyone_logged_in_starts_an_empty_list(self):
+        (self.root / "config" / "shared-reviewers.json").write_text('{"reviewers": []}')
+        self.login()
+        status, body = self.post("/api/shared/reviewers", {"reviewers": ["ana"]})
+        self.assertEqual(status, 200, body)
+
+    def test_anyone_logged_in_starts_an_absent_list(self):
+        (self.root / "config" / "shared-reviewers.json").unlink()
+        self.login()
+        status, body = self.post("/api/shared/reviewers", {"reviewers": ["ana"]})
+        self.assertEqual(status, 200, body)
+        _, body = self.get("/api/shared/audit")
+        self.assertEqual(body["entries"][0]["previous"], [])
 
     def test_write_refusals(self):
         self.serve()

@@ -115,6 +115,61 @@ class TheGatesAreSaid(unittest.TestCase):
         self.assertNotIn("—", self.src)
 
 
+class RoundOne(unittest.TestCase):
+    """The review round's findings, pinned."""
+
+    def setUp(self):
+        self.src = _read("explorer.jsx")
+
+    def test_confirm_button_can_be_disabled_and_the_gated_ones_are(self):
+        confirm = _component(self.src, "ConfirmButton")
+        self.assertIn("disabled={!!disabled}", confirm)
+        self.assertIn("if (disabled) return;", confirm)
+        review = _component(self.src, "ReviewQueue")
+        self.assertIn('<ConfirmButton className="btn danger" disabled={blocked}', review)
+        self.assertIn("const blocked = busy || running || !loggedIn;", review)
+        portrait = _component(self.src, "SelfPortrait")
+        self.assertIn('confirmLabel="confirm: replace the candidate" disabled={busy}', portrait)
+
+    def test_a_big_settle_is_followed_as_a_long_op(self):
+        review = _component(self.src, "ReviewQueue")
+        self.assertIn('op.kind === "memory-review"', review)
+        self.assertIn("r.status === 202", review)
+        self.assertIn('<LongOpStatus slug={slug} kind="memory-review"', review)
+
+    def test_an_operator_claim_offers_no_retire_to_anyone_else(self):
+        row = _component(self.src, "ClaimRow")
+        self.assertIn('normLevel(c.truth_level) === "L0_OPERATOR" && !operator', row)
+        self.assertIn("!theirs && <ClaimRetire", row)
+        raw = _component(self.src, "RawEntries")
+        self.assertIn('(e.level !== "L0_OPERATOR" || operator)', raw)
+        explorer = _component(self.src, "MemoryExplorer")
+        self.assertIn("writer.can_write_operator", explorer)
+
+    def test_errors_are_said_and_calls_go_through_the_shared_helper(self):
+        hook = _component(self.src, "useMemoryJson")
+        self.assertIn("setErr(", hook)
+        self.assertIn('safeSend("GET", url)', hook)
+        safe = _component(self.src, "safeSend")
+        self.assertIn("await apiSend(method, path, body)", safe)
+        self.assertIn("catch (e)", safe)
+        search = _component(self.src, "MemorySearch")
+        self.assertNotIn("fetch(", search)
+        self.assertIn('safeSend("GET"', search)
+        for name in ("MemoryWrite", "ReviewQueue", "MemoryMaintenance",
+                     "SelfPortrait", "SharedReviewersPanel"):
+            self.assertNotIn("apiSend(", _component(self.src, name), name)
+
+    def test_capsule_lists_are_guarded(self):
+        moments = _component(self.src, "MomentsList")
+        self.assertIn("Array.isArray(v)", moments)
+        self.assertNotIn("c.evidence.join", moments)
+
+    def test_only_an_editor_gets_the_edit_button(self):
+        panel = _component(self.src, "SharedReviewersPanel")
+        self.assertIn("disabled={!st.can_edit}", panel)
+
+
 class TheHelpersBehave(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_helpers(self):

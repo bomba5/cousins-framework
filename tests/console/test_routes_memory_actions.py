@@ -156,6 +156,8 @@ class Writer(ActionsCase):
     def test_level_and_field_refusals(self):
         self.serve()
         for payload in ({"topic": "t", "fact": "f", "level": "framework"},
+                        {"topic": "t", "fact": "f", "level": "L0_OPERATOR"},
+                        {"topic": "t", "fact": "f", "level": "Operator"},
                         {"topic": "t", "fact": "f", "level": "obsolete"},
                         {"topic": "t", "fact": "f", "level": "wrong"},
                         {"topic": " ", "fact": "f"},
@@ -222,10 +224,15 @@ class Review(ActionsCase):
         self.assertEqual(len(body["held"]), 5)
         self.assertEqual(body["batch"], 3)
         ids = [r["id"] for r in body["held"]]
+        # more than a couple of verdicts: the cousin's long operation
         status, body = self.post("/api/memory/wren/review", {
             "verdicts": {ids[0]: "keep", ids[1]: "drop", "nope": "keep"},
             "why": "tidy"})
-        self.assertEqual(status, 200, body)
+        self.assertEqual(status, 202, body)
+        self.assertEqual(body["op"]["kind"], "memory-review")
+        op = self.wait_op()
+        self.assertEqual(op["status"], "done", op)
+        body = op["result"]
         self.assertEqual(body["done"], {ids[0]: "keep", ids[1]: "drop"})
         self.assertIn("nope", body["errors"])
         self.assertTrue(body["effects"]["distilled"])
@@ -248,6 +255,17 @@ class Review(ActionsCase):
         self.assertIn(said["id"], body["errors"])
         self.assertIn(said["id"], {r["id"] for r in review_gate.pending(self.home)})
 
+    def test_one_or_two_verdicts_answer_at_once(self):
+        held = self.hold()
+        self.users("ana")
+        self.serve()
+        self.login("ana")
+        status, body = self.post("/api/memory/wren/review",
+                                 {"verdicts": {held[0]["id"]: "keep",
+                                               held[1]["id"]: "keep"}})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(len(body["done"]), 2)
+
     def test_a_verdict_needs_a_login(self):
         held = self.hold()
         self.serve()
@@ -261,7 +279,8 @@ class Review(ActionsCase):
         self.serve()
         self.login("ana")
         for payload in ({}, {"verdicts": []}, {"verdicts": {"a": "maybe"}},
-                        {"verdicts": {"a": "keep"}, "why": 3}):
+                        {"verdicts": {"a": "keep"}, "why": 3},
+                        {"verdicts": {"a": "keep"}, "why": "x" * 501}):
             self.assertEqual(self.post("/api/memory/wren/review", payload)[0],
                              400, payload)
 
@@ -366,6 +385,31 @@ class Portrait(ActionsCase):
         self.assertEqual(status, 403)
         self.assertNotIn("not the cousin's", json.dumps(body))
 
+    def test_synthesize_never_writes_through_a_link(self):
+        outside = self.root / "victim.txt"          # dangling: not there yet
+        self_portrait.candidate_path(self.home).symlink_to(outside)
+        self.serve()
+        for payload in ({}, {"replace": True}):
+            status, _ = self.post("/api/memory/wren/portrait/synthesize", payload)
+            self.assertEqual(status, 403, payload)
+            self.assertFalse(outside.exists(), payload)
+        outside.write_text("mine")                  # a live link, inside or not
+        for path, payload in (("synthesize", {"replace": True}),
+                              ("candidate", {"text": "# W\n"})):
+            status, _ = self.post("/api/memory/wren/portrait/" + path, payload)
+            self.assertEqual(status, 403, path)
+        self.assertEqual(outside.read_text(), "mine")
+
+    def test_a_link_inside_the_home_is_refused_too(self):
+        inside = self.home / "notes.md"
+        inside.write_text("a note")
+        self_portrait.candidate_path(self.home).symlink_to(inside)
+        self.serve()
+        status, _ = self.post("/api/memory/wren/portrait/synthesize",
+                              {"replace": True})
+        self.assertEqual(status, 403)
+        self.assertEqual(inside.read_text(), "a note")
+
     def test_candidate_refusals(self):
         self.serve()
         for payload in ({}, {"text": 3}, {"text": "x" * 70000}):
@@ -373,6 +417,54 @@ class Portrait(ActionsCase):
                                        payload)[0], 400, payload)
         self.assertEqual(self.post("/api/memory/wren/portrait/commit",
                                    {"confirm": "wren", "sha": "x"})[0], 403)
+
+
+class RetiringTheOperatorsWord(ActionsCase):
+    """An operator-level claim is the operator's to retire: an entry-level
+    mark on it, or a topic-level mark on a topic with a live one, needs the
+    operator account."""
+
+    def setUp(self):
+        super().setUp()
+        _raw(self.home, "2026-09-03.jsonl", [
+            {"topic": "tea", "content": "no sugar", "truth_level": "L0_OPERATOR",
+             "cite": "chat 1", "timestamp": "2026-09-03T10:00:00+00:00"},
+            {"topic": "tea", "content": "two sugars", "truth_level": "L3_COUSIN_CONCLUSION",
+             "timestamp": "2026-09-03T11:00:00+00:00"}])
+
+    def claim(self, level):
+        return next(r["id"] for r in memory.validity(self.home)
+                    if r["topic"] == "tea" and r["truth_level"] == level)
+
+    def test_another_user_may_not(self):
+        self.users("ana", "bo")
+        self.serve()
+        self.login("bo")
+        for payload in ({"topic": "tea", "why": "x", "entry": self.claim("L0_OPERATOR")},
+                        {"topic": "tea", "why": "x"}):
+            status, body = self.post("/api/memory/wren/obsolete", payload)
+            self.assertEqual(status, 403, (payload, body))
+        # the cousin's own claim on the topic is anyone's to retire
+        status, _ = self.post("/api/memory/wren/obsolete", {
+            "topic": "tea", "why": "x", "entry": self.claim("L3_COUSIN_CONCLUSION")})
+        self.assertEqual(status, 200)
+        self.assertEqual(sum(1 for e in memory.topic_entries(self.home, "tea")
+                             if e.get("truth_level") == "L5_OBSOLETE"), 1)
+
+    def test_nobody_without_a_login(self):
+        self.serve()
+        status, _ = self.post("/api/memory/wren/obsolete", {"topic": "tea", "why": "x"})
+        self.assertEqual(status, 403)
+
+    def test_the_operator_may(self):
+        self.users("ana")
+        self.serve()
+        self.login("ana")
+        status, body = self.post("/api/memory/wren/obsolete", {
+            "topic": "tea", "why": "x", "entry": self.claim("L0_OPERATOR")})
+        self.assertEqual(status, 200, body)
+        status, body = self.post("/api/memory/wren/obsolete", {"topic": "tea", "why": "all"})
+        self.assertEqual(status, 200, body)
 
 
 class Moments(ActionsCase):
@@ -386,6 +478,7 @@ class Moments(ActionsCase):
         self.assertEqual(body["callbacks"][0]["moment"], "the roof leak joke")
         _, body = self.get("/api/memory/wren/capsules")
         self.assertEqual(body["capsules"][0]["conclusion"], "fix in spring")
+        self.assertEqual(self.get("/api/memory/wren/callbacks?limit=99999")[0], 200)
 
 
 class BehindTheLogin(ActionsCase):

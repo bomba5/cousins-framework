@@ -33,7 +33,7 @@ from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream
-from cousin_lib.runner.tmux_pane import Outcome, TmuxPane
+from cousin_lib.runner.tmux_pane import Outcome, TmuxPane, printable
 
 POLL_S = 0.1              # the transcript poll while nothing wakes the runner
 CONSUME_S = 60.0          # a typed row not taken by then, at a turn end with an empty box, is requeued
@@ -707,6 +707,7 @@ class TmuxRunner:
     def _render(self, row, nonce):
         sender = row.get("sender") or "someone"
         first = "[inbox:%s] [%s] %s from %s" % (nonce, row["thread_id"], row["source"], sender)
+        first = printable(" ".join(first.split()))   # one line whatever the sender is (C4)
         body = row.get("body") or ""
         context = row.get("context") or ""
         if context:

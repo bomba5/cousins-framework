@@ -7,7 +7,9 @@ really shows."""
 import json
 import os
 import pathlib
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -73,6 +75,13 @@ if sub == "capture-pane":
     sys.stdout.write(open(os.environ["FAKE_TMUX_SCREEN"]).read())
 if sub == "load-buffer":
     open(os.environ["FAKE_TMUX_LOG"] + ".buffer", "w").write(sys.stdin.read())
+if sub == "send-keys" and args[-1] == "C-u":       # C-u empties the box (Z8)
+    lines = open(os.environ["FAKE_TMUX_SCREEN"]).read().splitlines()
+    lines = ["\\u276f " if l.startswith("\\u276f ") and "Press up" not in l else l for l in lines]
+    open(os.environ["FAKE_TMUX_SCREEN"], "w").write(chr(10).join(lines))
+if sub == "send-keys" and "-l" in args and os.environ.get("FAKE_TMUX_SCREEN_AFTER"):
+    # the screen as it is once the first line is in: a dialog took the box
+    open(os.environ["FAKE_TMUX_SCREEN"], "w").write(open(os.environ["FAKE_TMUX_SCREEN_AFTER"]).read())
 sys.exit(0)
 """ % sys.executable
 
@@ -89,9 +98,11 @@ class PaneCase(unittest.TestCase):
         self.screen = self.dir / "screen"
         self.screen.write_text(IDLE)
         self.env = {"FAKE_TMUX_LOG": str(self.log), "FAKE_TMUX_SCREEN": str(self.screen)}
-        old = {k: os.environ.get(k) for k in list(self.env) + ["FAKE_TMUX_FAIL", "FAKE_TMUX_HAS", "FAKE_TMUX_SLEEP"]}
+        old = {k: os.environ.get(k) for k in list(self.env) + ["FAKE_TMUX_FAIL", "FAKE_TMUX_HAS", "FAKE_TMUX_SLEEP",
+                                                               "FAKE_TMUX_SCREEN_AFTER"]}
         os.environ.update(self.env)
         os.environ.pop("FAKE_TMUX_FAIL", None)
+        os.environ.pop("FAKE_TMUX_SCREEN_AFTER", None)
 
         def restore():
             for k, v in old.items():
@@ -266,11 +277,108 @@ class TestTyping(PaneCase):
         with self.assertRaises(OSError):
             pane.start(["claude"], cwd="/h", env_base=())
 
+    def test_escape_and_c0_controls_never_reach_the_pane(self):
+        """Review C4: an ESC[201~ in the body ends the bracketed paste early
+        (tmux 3.6a passes it through), then a CR submits and `!echo` runs in
+        bash mode. ESC and every C0 control but \\n and \\t are stripped
+        from the first line and the body before any key."""
+        payload = "hello\x1b[201~\r!echo injected\x1b[200~\x07\x00tab\there\r\nnext"
+        out = self.pane.type_row("[inbox:0123456789ab] chat from W\x1bren\x08", payload)
+        self.assertEqual(out, tp.Outcome.TYPED)
+        first = next(c for c in self.calls() if "send-keys" in c and "-l" in c)[-1]
+        self.assertEqual(first, "[inbox:0123456789ab] chat from Wren")
+        body = (self.log.parent / "log.buffer").read_text()
+        self.assertEqual(body, "\n\nhello[201~!echo injected[200~tab\there\nnext")
+        for ch in ("\x1b", "\r", "\x07", "\x00", "\x08"):
+            self.assertNotIn(ch, body + first)
+
+    def test_the_box_is_read_again_after_the_first_line(self):
+        """Review minor (check-then-type): a dialog that takes the box while
+        the first line goes in gets nothing more: no paste, no Enter, no C-u."""
+        after = self.dir / "after"
+        after.write_text(TRUST)
+        os.environ["FAKE_TMUX_SCREEN_AFTER"] = str(after)
+        out = self.pane.type_row("[inbox:0123456789ab] x", "the body")
+        self.assertEqual(out, tp.Outcome.BLOCKED)
+        typed = [c for c in self.calls() if "send-keys" in c or "paste-buffer" in c or "load-buffer" in c]
+        self.assertEqual(len(typed), 1, typed)
+        self.assertIn("-l", typed[0])
+
+    def test_a_first_line_left_by_a_blocked_row_is_cleared_before_the_next(self):
+        after = self.dir / "after"
+        after.write_text(TRUST)
+        os.environ["FAKE_TMUX_SCREEN_AFTER"] = str(after)
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "b"), tp.Outcome.BLOCKED)
+        os.environ.pop("FAKE_TMUX_SCREEN_AFTER")
+        self.screen.write_text(IDLE.replace("❯ \n", "❯ [inbox:0123456789ab] x\n"))  # the dialog went
+        self.log.write_text("")
+        self.assertEqual(self.pane.type_row("[inbox:ba9876543210] y", "c"), tp.Outcome.TYPED)
+        self.assertEqual(self.calls()[1][-1], "C-u", "the leftover first line is cleared first")
+        # someone else's text in the box is never cleared
+        self.screen.write_text(TEXT_IN_BOX)
+        self.log.write_text("")
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ac] z", ""), tp.Outcome.BLOCKED)
+        self.assertFalse(any("C-u" in c for c in self.calls()))
+
     def test_keys_are_an_allowlist_and_clear_is_ctrl_u(self):
         self.pane.clear()
         self.assertEqual(self.calls()[-1][-1], "C-u")
         with self.assertRaises(ValueError):
             self.pane.key("y")
+
+
+RAW_ECHO = """import os, sys, termios, time, tty, select
+fd = 0
+tty.setraw(fd)
+rule = "\\u2500" * 60
+os.write(1, ("\\x1b[?2004h" + rule + "\\r\\n\\u276f \\r\\n" + rule + "\\r\\n").encode("utf-8"))
+buf, end, last = b"", time.time() + 8, None
+while time.time() < end:
+    if select.select([fd], [], [], 0.1)[0]:
+        buf += os.read(fd, 4096)
+        last = time.time()
+    elif last is not None and time.time() - last > 0.8:
+        break
+open(sys.argv[1] + ".tmp", "wb").write(buf)
+os.replace(sys.argv[1] + ".tmp", sys.argv[1])
+time.sleep(30)
+"""
+
+
+@unittest.skipUnless(shutil.which("tmux"), "no tmux on this host")
+class TestRealTmux(unittest.TestCase):
+    """Measured on a real tmux server on a scratch socket (`tmux -L`, killed
+    by that socket): what the pane's program receives for the reviewer's
+    payload (review C4). A raw-mode program with bracketed paste on plays
+    the CLI and records every byte."""
+
+    def test_an_end_of_paste_in_the_body_never_ends_the_paste(self):
+        name = "cousin-test-%d-%d" % (os.getpid(), int(time.time() * 1000))
+        base = pathlib.Path(os.environ.get("TMUX_TMPDIR") or "/tmp") / ("tmux-%d" % os.getuid())
+        self.addCleanup(lambda: (base / name).unlink(missing_ok=True))   # after the kill below
+        self.addCleanup(subprocess.run, ["tmux", "-L", name, "kill-server"],
+                        capture_output=True, timeout=10, check=False)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        script, out = pathlib.Path(tmp.name) / "raw.py", pathlib.Path(tmp.name) / "raw.out"
+        script.write_text(RAW_ECHO)
+        pane = tp.TmuxPane(base / name, "raw", width=120, height=20)
+        pane.start([sys.executable, str(script), str(out)], cwd=tmp.name,
+                   env_base={"HOME": "", "PATH": "", "LANG": ""})
+        deadline = time.monotonic() + 10
+        while pane.box_text() != "" and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(pane.box_text(), "", pane.capture())
+        payload = "hello\x1b[201~\r!echo injected"
+        self.assertEqual(pane.type_row("[inbox:0123456789ab] chat from Wren", payload),
+                         tp.Outcome.TYPED)
+        while not out.exists() and time.monotonic() < deadline + 10:
+            time.sleep(0.1)
+        data = out.read_bytes()
+        self.assertEqual(data.count(b"\x1b[201~"), 1, data)
+        self.assertEqual(data.count(b"\x1b"), 2, data)       # the paste's own start and end
+        self.assertTrue(data.endswith(b"\x1b[201~\r"), data)
+        self.assertLess(data.index(b"!echo injected"), data.index(b"\x1b[201~"), data)
 
 
 class TestProcesses(unittest.TestCase):

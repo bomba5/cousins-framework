@@ -39,6 +39,12 @@ PROMPT = "❯ "
 # environment from the shell; the launcher adds only the account's own.
 DENY_PREFIXES = ("CLAUDE", "ANTHROPIC")      # CLAUDECODE, CLAUDE_AGENT_SDK_* included
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# What never reaches the pane as a key or inside a paste (review C4): ESC
+# and every other C0 control but \n and \t, DEL, and the C1 controls. An
+# ESC[201~ in a paste ends the bracketed paste early (tmux 3.6a passes it
+# through, measured), and a CR after it submits the rest as typed input
+# (`!cmd` runs a shell with no model and no policy, `/login`, `/clear`).
+_CONTROLS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 RULE_CHAR = "─"
 
 # (id, substrings that must all appear); `rewind` is the only one the
@@ -130,6 +136,11 @@ def process_kill(pid):
         pass
 
 
+def printable(text):
+    """`text` without ESC, the C0 controls but \\n and \\t, DEL and C1."""
+    return _CONTROLS.sub("", text)
+
+
 def attention_in(screen):
     for ident, needles in ATTENTION:
         if all(n in screen for n in needles):
@@ -158,6 +169,7 @@ class TmuxPane:
         self.width, self.height = width, height
         self.tmux_bin = tmux_bin
         self.timeout = timeout
+        self._residue = None      # a first line typed into a box a dialog then took
 
     def _tmux(self, *args, input=None):
         """One tmux call; a hung or missing tmux is a failed call (rc -1),
@@ -231,21 +243,41 @@ class TmuxPane:
 
     def type_row(self, first_line, body):
         """Type `first_line` as keys, paste `body` bracketed after a blank
-        line, press Enter. BLOCKED (nothing sent) on an attention screen, a
-        box that is not empty, or queued input; FAILED when there is no pane
-        to read, the first line holds a newline (it would submit early), or
-        tmux fails; any failure from the first key onward clears the box
-        (C-u), so the next row is not blocked by the leftovers."""
-        if "\n" in first_line or "\r" in first_line:
+        line, press Enter. Both lose ESC and the other controls first
+        (printable). BLOCKED (nothing sent) on an attention screen, a box
+        that is not empty, or queued input; BLOCKED with nothing more sent
+        when the box is gone once the first line is in (a dialog took it;
+        that line is cleared before the next row once the box is back);
+        FAILED when there is no pane to read, the first line holds a newline
+        (it would submit early), or tmux fails; any failure from the first
+        key onward clears the box (C-u), so the next row is not blocked by
+        the leftovers."""
+        first_line, body = printable(first_line), printable(body or "")
+        if "\n" in first_line:
             return Outcome.FAILED
         screen = self.capture()
         if screen is None:
             return Outcome.FAILED
-        if attention_in(screen) or box_in(screen) != "" or QUEUED_HINT in screen:
+        box = box_in(screen)
+        if box and self._residue and self._residue.startswith(box) \
+                and not attention_in(screen) and QUEUED_HINT not in screen:
+            self.clear()                  # our own first line, left by a blocked row
+            screen = self.capture()
+            if screen is None:
+                return Outcome.FAILED
+            box = box_in(screen)
+        self._residue = None
+        if attention_in(screen) or box != "" or QUEUED_HINT in screen:
             return Outcome.BLOCKED
         if self._tmux("send-keys", "-t", self._target(), "-l", first_line).returncode != 0:
             self.clear()
             return Outcome.FAILED
+        screen = self.capture()
+        if screen is None:
+            return Outcome.FAILED
+        if attention_in(screen) or box_in(screen) is None:
+            self._residue = first_line    # nothing more typed into whatever took the box
+            return Outcome.BLOCKED
         steps = []
         if body:
             buf = "cousin-%s" % self.name

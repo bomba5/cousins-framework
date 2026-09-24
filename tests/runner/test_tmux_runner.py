@@ -87,6 +87,14 @@ class TestTyping(Case):
         self.assertRegex(first, r"^\[inbox:[0-9a-f]{12}\] \[peer:kestrel\] chat from Kestrel$")
         self.assertEqual(body, "the body")
 
+    def test_a_sender_with_controls_is_one_line_never_a_failed_row(self):
+        r = self.runner()
+        r.start()
+        rec = r.enqueue(Item("peer:kestrel", "chat", "the body", sender="Kes\ntrel\x1b[201~\r"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+        first = self.panes[0].typed[0][0]
+        self.assertNotRegex(first, "[\x00-\x1f\x7f]")
+
     def test_the_rewind_selector_gets_one_escape_and_nothing_typed(self):
         r = self.runner(attention="rewind")
         r.start()

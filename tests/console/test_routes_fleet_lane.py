@@ -133,7 +133,7 @@ class RowLaneFields(ConsoleCase):
                                          'auto_start = false\n')
         (home / "run").mkdir()
         (home / "run" / "held").write_text("2026-09-24T10:00:00Z console\n")
-        auth.write_login_required(home, host="devhost", account="fleet", kind="claude-login",
+        auth.write_login_required(home, host="build-host", account="fleet", kind="claude-login",
                                   reason=auth.LOGIN, detail="Invalid API key sk-ant-SECRET",
                                   action="cousin-account login fleet")
         self.serve()

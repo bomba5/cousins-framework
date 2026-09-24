@@ -3,6 +3,76 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.23.0 - 2026-09-24
+
+Phase 11 of the runner plan, integrated onto 1.22.0. The live proofs the
+phase's exit criteria require (a kind switch both ways on a real cousin, the
+pane under a real login) are pending: they run on this release candidate
+before it ships.
+
+### Added
+- The `tmux` runner kind: `[agent] runner = "tmux"` runs the host's
+  interactive Claude Code CLI in a tmux pane on the framework's own socket
+  (`run/tmux.sock`), driven by `TmuxRunner` inside `cousin-runner` and
+  supervised as `runner:<slug>` like every kind. It is fed by the same inbox,
+  seen through the same event stream, interrupted from the same console
+  button and rolled over by the same row. The CLI's transcript is the source
+  of truth: a row is taken when a turn starts with its nonce and closes at
+  that turn's end. The session id (`data/runner-session.json`, `claude
+  --resume`) is the continuity, so a deploy, a supervisor restart and a kind
+  switch keep the conversation. It is the fallback if Agent SDK usage moves
+  off subscription limits.
+- What the tmux kind cannot do: fold a message into a running turn.
+  `TmuxRunner.UNSUPPORTED = ("midturn_fold",)`: the CLI queues typed input
+  to the turn's end or interrupts, never folds, so every row (an operator's
+  and a peer's included) is claimed at idle and waits for the running turn;
+  the operator's urgent path is the interrupt. Every other contract item is
+  implemented; the contract table in `docs/reference/runners.md` has the
+  `tmux` column.
+- It runs on `host` or a `claude-login` account only (`claude-token` and
+  `anthropic-key` are refused, exit 2). The pane starts from a fixed
+  environment allowlist plus `[agent] env_allow`; `CLAUDE*` and
+  `ANTHROPIC*` never reach it. `[agent] model` and `effort` are passed to
+  the CLI, and the console edits them on this lane.
+- The kind's project settings (`apply_project_settings(kind="tmux")`, at
+  spawn, `--repair-settings` and a kind switch): auto-compaction, auto-
+  continue at a usage limit and remote control off, `editorMode` normal,
+  `policy.toml`'s `deny_tools` as `permissions.deny`, and the bridge hooks;
+  `remove_kind_settings` undoes exactly what the kind added. Attribution
+  on the pane follows `[agent] commit_attribution` (#112), as on every
+  other kind.
+- The kind switch: `cousin-migrate plan|apply <slug> --to sdk|tmux` moves a
+  runner cousin between the two Claude kinds as a step machine, keeping its
+  session; `cousin-migrate rollback <slug> --to <kind> --yes` puts it back
+  byte for byte. `--to tmux` needs the account's one-time trust of the home
+  recorded first, and the plan names the command. A switch waits out a
+  tmux rollover whose new session the CLI has not written yet.
+- The pane hook, `cousin_lib.runner.tmux_hook`: on `SessionStart` it
+  records `run/tmux-session.json` (session id, transcript path, source, the
+  CLI's pid), and on every event it sends the runner one datagram on its
+  wake socket, which drops a datagram from another uid. It only wakes the
+  runner, exits 0 and is bounded (3 s itself, `timeout` 5 in the settings);
+  it acts only for the pane's own CLI (`COUSIN_PANE_PID`). A runner that
+  hears no hook by its first turn end says `hooks_silent` once.
+- Adopt: a restarted runner adopts a live pane only when the hook's record
+  names the recorded session and the pane's CLI pid; otherwise a `system`
+  `adopt_refused` event says why (`no_record`, `session_mismatch`,
+  `pid_mismatch`), the old CLI is killed and the recorded session resumes
+  in a new pane. A session the pane changed (a `/clear`) is a
+  `session_changed` event, not followed (runners.md, Known gaps). Claims a
+  previous runner left are settled from the transcript at start.
+- The kind's rollover asks for the handoff, mines the old session and ends
+  the CLI with `/exit`; a stop with no runner up reaps the pane
+  (`cousin-runner --reap-pane`, run by the supervisor). The console's token
+  view reads a tmux-kind cousin's usage from its pane's transcripts.
+- The pane's stdio `cousin` server serves `reply` and `handoff` for a
+  tmux-kind home, through the runner's own tool code.
+
+### Deferred to 1.23.x
+- Context-pressure detection for the tmux kind's rollover (1.23.0 keeps the
+  minimal rollover), `cousin-migrate --all`, `cousin-migrate adopt` (a legacy
+  cousin onto the tmux kind with its session) and the docker `tmux` profile.
+
 ## 1.22.0 - 2026-09-24
 
 ### Added

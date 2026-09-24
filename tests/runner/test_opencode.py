@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from cousin_lib import accounts
 from cousin_lib.delivery import Item
-from cousin_lib.runner import opencode
+from cousin_lib.runner import opencode, opencode_http
 from cousin_lib.runner.base import RunnerError
 from cousin_lib.runner.opencode import OpencodeRunner
 from cousin_lib.runner.opencode_http import OpencodeServer
@@ -471,6 +471,50 @@ class TestGuards(OpencodeCase):
         self.assertEqual(r.inbox.get(a.inbox_id)["state"], "queued")
         self.assertEqual(self.prompts(), [])
         self.assertTrue(self.factory.servers[0].stopped)
+
+
+class TestLeftoverServer(OpencodeCase):
+    """Review Important 2: a server an earlier runner left behind (killed
+    before its teardown) is killed at the next start, found by the pidfile
+    in the account's data dir; the runner writes that file for its own
+    server and removes it at its stop."""
+
+    def leftover(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d = Path(tmp.name)
+        binary = d / "opencode"
+        binary.write_text('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, FAKE_BIN))
+        binary.chmod(0o700)
+        (d / "c.json").write_text(json.dumps({"model": "local/m1"}))
+        srv = OpencodeServer(str(binary), cwd=d, env={"PATH": os.environ["PATH"], "HOME": str(d)},
+                             config_path=d / "c.json", timeout=10).start()
+        self.addCleanup(srv.stop)
+        return srv
+
+    def test_a_leftover_server_is_killed_before_the_new_one_starts(self):
+        r = self.runner()
+        old = self.leftover()
+        data = Path(r.account.data_dir)
+        opencode_http.write_pidfile(data / "opencode.pid", old.pid)
+        self.started(r)
+        self.assertTrue(_wait(lambda: old.proc.poll() is not None), "the leftover still runs")
+        said = [p for p in self.payloads(r, "system") if p.get("subtype") == "opencode_leftover"]
+        self.assertEqual([p["pid"] for p in said], [old.pid])
+
+    def test_the_runner_records_its_server_and_forgets_it_at_stop(self):
+        class WithPid(Factory):
+            def __call__(self, **kw):
+                srv = super().__call__(**kw)
+                srv.pid = os.getpid()                    # any live pid of ours stands in
+                return srv
+        r = self.started(self.runner(factory=WithPid()))
+        pidfile = Path(r.account.data_dir) / "opencode.pid"
+        record = json.loads(pidfile.read_text())
+        self.assertEqual(record["pid"], os.getpid())
+        self.assertEqual(os.stat(pidfile).st_mode & 0o777, 0o600)
+        r.stop(timeout=5)
+        self.assertFalse(pidfile.exists())
 
 
 class TestTurns(OpencodeCase):

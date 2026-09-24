@@ -21,6 +21,7 @@ prompt_async (204); its progress, its end (`session.idle`) and its
 failure (`session.error`) arrive on the event stream.
 """
 import base64
+import ctypes
 import http.client
 import json
 import os
@@ -32,6 +33,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 from cousin_lib import accounts
@@ -45,6 +47,14 @@ FIXED_ENV = {"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_DISABLE_SHARE": "1",
 # client does not send, and config sources merged over the rendered file.
 DROPPED_ENV = ("OPENCODE_SERVER_USERNAME", "OPENCODE_CONFIG_CONTENT", "OPENCODE_CONFIG_DIR")
 EXCERPT = 300
+PIDFILE = "opencode.pid"        # in the account's data dir: the server this runner started
+PR_SET_PDEATHSIG = 1            # linux/prctl.h
+# prctl resolved in the parent, at import: the forked child only calls it
+# (no dlopen after fork in a threaded process)
+try:
+    _PRCTL = ctypes.CDLL(None, use_errno=True).prctl
+except (OSError, AttributeError):          # not glibc/musl Linux: no death signal
+    _PRCTL = None
 
 
 class OpencodeError(Exception):
@@ -64,6 +74,78 @@ def _basic(password):
 def _excerpt(text):
     text = " ".join(text.split())
     return text if len(text) <= EXCERPT else text[:EXCERPT] + "..."
+
+
+def _die_with(parent):
+    """preexec_fn for the server: SIGKILL when the thread that started it
+    dies (PR_SET_PDEATHSIG; the runner's worker thread lives as long as its
+    server), and exit at once when that parent is already gone, the race
+    prctl cannot see. The supervisor's SIGKILL of the runner's group, an
+    OOM kill or a crash then take the server with it (review Important 2);
+    what the server itself started stays in its group for reap_leftover."""
+    def preexec():
+        if _PRCTL is not None:
+            _PRCTL(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+        if os.getppid() != parent:
+            os._exit(1)
+    return preexec
+
+
+def _proc_stat(pid):
+    """(state, start time in clock ticks) from /proc/<pid>/stat, or None."""
+    try:
+        line = Path("/proc/%d/stat" % int(pid)).read_text()
+    except (OSError, ValueError):
+        return None
+    fields = line[line.rindex(")") + 2:].split()
+    return fields[0], fields[19]
+
+
+def write_pidfile(path, pid):
+    """Record the server this runner started: its pid, its process group
+    and its start time (so a recycled pid is never taken for it), 0600,
+    by rename."""
+    stat_ = _proc_stat(pid)
+    record = {"pid": int(pid), "pgid": os.getpgid(pid), "start": stat_[1] if stat_ else None}
+    path = Path(path)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(record, f)
+    tmp.replace(path)
+
+
+def reap_leftover(path, timeout=5.0):
+    """SIGKILL the process group of a server an earlier runner left behind
+    (it was killed before its teardown), when the pidfile names a live
+    process with the same start time; the pid killed, else None. The file
+    is removed either way."""
+    path = Path(path)
+    try:
+        record = json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        record = None
+    path.unlink(missing_ok=True)
+    try:
+        pid, pgid, start = int(record["pid"]), int(record["pgid"]), str(record["start"])
+    except (TypeError, KeyError, ValueError):
+        return None
+    now = _proc_stat(pid)
+    if pid <= 1 or pgid <= 1 or now is None or now[1] != start or now[0] == "Z":
+        return None
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        return None
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        now = _proc_stat(pid)
+        if now is None or now[1] != start or now[0] == "Z":
+            break
+        time.sleep(0.05)
+    return pid
 
 
 def _free_port():
@@ -151,7 +233,8 @@ class OpencodeServer:
         try:
             self.proc = subprocess.Popen(argv, cwd=self.cwd, env=env, stdin=subprocess.DEVNULL,
                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                         start_new_session=True)
+                                         start_new_session=True,
+                                         preexec_fn=_die_with(os.getpid()))
         except OSError as err:
             raise OpencodeError("cannot start %s: %s" % (argv[0], err)) from err
         self._pump = threading.Thread(target=self._read_output, args=(self.proc.stdout,),

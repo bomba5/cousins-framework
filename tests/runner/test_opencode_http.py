@@ -4,8 +4,10 @@ opt-in: COUSIN_LIVE_OPENCODE=1 with OPENCODE_BIN=<path>."""
 import json
 import os
 import shutil
+import signal
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -13,6 +15,7 @@ import time
 import unittest
 from pathlib import Path
 
+from cousin_lib.runner import opencode_http
 from cousin_lib.runner.opencode_http import (EventReader, OpencodeClient, OpencodeError,
                                              OpencodeServer, iter_sse)
 from tests._hermetic import HermeticCase
@@ -29,6 +32,15 @@ def _wait(pred, timeout=5.0):
             return True
         time.sleep(0.02)
     return False
+
+
+def _zombie(pid):
+    """Dead and waiting to be reaped by its parent (a test's own child)."""
+    try:
+        stat_line = Path("/proc/%d/stat" % pid).read_text()
+    except OSError:
+        return True
+    return stat_line[stat_line.rindex(")") + 2:].split()[0] == "Z"
 
 
 def _gone(pid):
@@ -156,6 +168,73 @@ class TestOpencodeServer(ServerCase):
         with self.assertRaises(OpencodeError) as err:
             srv.start()
         self.assertIn("no-such-opencode", str(err.exception))
+
+
+class TestOrphans(ServerCase):
+    """Review Important 2: `opencode serve` runs in its own session, so the
+    supervisor's SIGKILL of the runner's process group missed it and it
+    kept running (a turn, provider calls, bash) after the runner died."""
+
+    def killpg_later(self, pid):
+        def kill():
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        self.addCleanup(kill)
+
+    def test_a_sigkilled_runner_takes_its_opencode_serve_with_it(self):
+        """A real runner stand-in: a Python process that starts the server,
+        prints the child's pid, then waits; SIGKILL it, as the supervisor's
+        escalation or the OOM killer would."""
+        script = (
+            "import json, sys, time\n"
+            "sys.path.insert(0, %r)\n"
+            "from cousin_lib.runner.opencode_http import OpencodeServer\n"
+            "s = OpencodeServer(%r, cwd=%r, env=json.loads(sys.argv[1]), config_path=%r,"
+            " timeout=10).start()\n"
+            "print(s.pid, flush=True)\n"
+            "time.sleep(60)\n"
+            % (str(Path(__file__).resolve().parents[2]), str(self.bin), str(self.home),
+               str(self.config)))
+        runner = subprocess.Popen([sys.executable, "-c", script, json.dumps(self.env())],
+                                  stdout=subprocess.PIPE, text=True)
+        self.addCleanup(runner.wait)
+        child = int(runner.stdout.readline())
+        self.killpg_later(child)
+        self.assertFalse(_gone(child))
+        runner.kill()                                      # SIGKILL, no teardown
+        self.assertTrue(_wait(lambda: _gone(child) or _zombie(child), 5),
+                        "opencode serve %d outlived its runner" % child)
+
+    def test_a_leftover_server_named_by_the_pidfile_is_killed(self):
+        srv = self.server().start()
+        self.killpg_later(srv.pid)
+        pidfile = self.dir / "opencode.pid"
+        opencode_http.write_pidfile(pidfile, srv.pid)
+        self.assertEqual(os.stat(pidfile).st_mode & 0o777, 0o600)
+        self.assertEqual(opencode_http.reap_leftover(pidfile), srv.pid)
+        self.assertTrue(_wait(lambda: _gone(srv.pid) or _zombie(srv.pid)))
+        self.assertFalse(pidfile.exists())
+        self.assertIsNone(opencode_http.reap_leftover(pidfile))      # nothing left
+
+    def test_a_recycled_pid_is_never_killed(self):
+        """The pidfile names a start time: a live process with that pid but
+        another start (the pid reused) is left alone."""
+        srv = self.server().start()
+        self.killpg_later(srv.pid)
+        pidfile = self.dir / "opencode.pid"
+        opencode_http.write_pidfile(pidfile, srv.pid)
+        record = json.loads(pidfile.read_text())
+        record["start"] = str(int(record["start"]) - 1)
+        pidfile.write_text(json.dumps(record))
+        self.assertIsNone(opencode_http.reap_leftover(pidfile))
+        self.assertFalse(_gone(srv.pid))
+        self.assertFalse(pidfile.exists())
+        for junk in ("", "{", "[]", '{"pid": "x"}', '{"pid": 1, "pgid": 1, "start": "0"}'):
+            pidfile.write_text(junk)
+            self.assertIsNone(opencode_http.reap_leftover(pidfile), junk)
+            self.assertFalse(pidfile.exists(), junk)
 
 
 class FakeCase(HermeticCase):

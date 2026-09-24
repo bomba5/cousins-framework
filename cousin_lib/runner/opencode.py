@@ -50,7 +50,8 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, recording, session
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import auth, checkpoints, envelope, opencode_guard, tools, wake
+from cousin_lib.runner import auth, checkpoints, envelope, opencode_guard, opencode_http
+from cousin_lib.runner import tools, wake
 from cousin_lib.runner import policy as _policy
 from cousin_lib.runner import rollover as _rollover
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError, folds_into_turn
@@ -714,6 +715,7 @@ class OpencodeRunner:
             self._start_mcp()
             config, env = self._render(mcp_url=self._mcp.url, mcp_token=self._mcp.token)
             self._refuse_foreign_config()
+            self._reap_leftover()
             path = self._write_config(config)
             seed_plugin_dependency(Path(env["XDG_CONFIG_HOME"]) / "opencode")
             self._write_policy()
@@ -725,6 +727,7 @@ class OpencodeRunner:
             self._server = self.server_factory(argv0=self.binary, cwd=self.home, env=env,
                                                config_path=path, timeout=self.health_timeout_s)
             self._server.start()
+            self._record_server()
             if self._stop.is_set():
                 return False
             self._client = OpencodeClient(self._server.url, self._server.password)
@@ -744,6 +747,35 @@ class OpencodeRunner:
                 self._fail_start("opencode start: %s: %s" % (type(exc).__name__, exc))
             return False
         return True
+
+    def _forget_server(self):
+        """The pidfile goes once this runner's own server is stopped (never
+        another's: the file names a pid)."""
+        try:
+            record = json.loads(self._pidfile().read_text())
+        except (OSError, ValueError):
+            return
+        if isinstance(record, dict) and record.get("pid") == getattr(self._server, "pid", None):
+            self._pidfile().unlink(missing_ok=True)
+
+    def _pidfile(self):
+        return Path(self.account.data_dir) / opencode_http.PIDFILE
+
+    def _reap_leftover(self):
+        """Review Important 2: kill the server an earlier runner on this
+        account left behind (it was SIGKILLed before its teardown, or its
+        death signal was not delivered), so two servers never share the
+        account's store and session."""
+        pid = opencode_http.reap_leftover(self._pidfile())
+        if pid is not None:
+            self.stream.append("system", {"subtype": "opencode_leftover", "pid": pid,
+                                          "detail": "killed an opencode serve an earlier runner"
+                                                    " left running"})
+
+    def _record_server(self):
+        pid = getattr(self._server, "pid", None)
+        if pid:
+            opencode_http.write_pidfile(self._pidfile(), pid)
 
     def _check_mcp(self):
         """opencode must report the runner's MCP server `connected` before
@@ -781,6 +813,7 @@ class OpencodeRunner:
             except Exception as exc:  # noqa: BLE001 - a dying child must not mask the stop
                 self.stream.append("error", {"error": "stopping opencode: %s: %s"
                                              % (type(exc).__name__, exc)})
+            self._forget_server()
         if self._mcp is not None:
             self._mcp.stop()
         if self._reader is not None:

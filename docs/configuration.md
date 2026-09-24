@@ -957,7 +957,15 @@ server starts, the runner reads the config opencode actually runs with
 exactly the one MCP server, no provider beyond the account's, the models
 `cousin.toml` names, and nothing the bridge guard refuses. A system-wide
 managed config opencode may also read is outside the cousin's reach and is
-checked the same way, through that effective config. With any plugin
+checked the same way, through that effective config.
+
+The server dies with its runner: it is started with a death signal
+(`PR_SET_PDEATHSIG`, SIGKILL), so a runner killed without its teardown (the
+supervisor's escalation, the OOM killer, a crash) takes it along. The runner
+also writes `<data_dir>/opencode.pid` (the pid, its process group and its
+start time) and, at its next start, kills a leftover group that file still
+names (a recycled pid, with another start time, is left alone); the system
+stream says `opencode_leftover` when it did. With any plugin
 configured, opencode would first install its plugin library from npm into
 its config dir and load no plugin until that ends (a network fetch, and a
 start that hangs offline); the pack imports nothing, so the runner marks

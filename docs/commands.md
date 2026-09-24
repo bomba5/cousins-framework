@@ -261,7 +261,9 @@ nothing, that the cousin is running on the tmux lane (a stopped one would be
 started by the move), with no migration open, that its account is logged in,
 that a `cousin-supervisor` runs, that the SDK is installed and that its
 auto-memory imports without a conflict, then lists the steps; it exits 0
-ready, 1 not. `apply <slug> [--account NAME] --yes` runs them in order and
+ready, 1 not. It also warns (`warn 2.0.0 ...`), without blocking, about every
+key the cousin or the install still carries that 2.0.0 will reject, with the
+line to follow (`cousin_lib/removed_keys.py`). `apply <slug> [--account NAME] --yes` runs them in order and
 stops at the first that fails: `close` (the console's clean stop: the
 handoff, the transcript mined), `import` (`cousin-memory import-auto
 --apply`), `toml` (`[agent] runner = "sdk"`, and the account, once the tmux

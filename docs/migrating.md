@@ -276,7 +276,11 @@ cousin-migrate plan wren --account team
 ```
 
 `plan` writes nothing. Leave out `--account` and the cousin runs on the
-host's own login. When the plan says ready, and at a moment the cousin is
+host's own login. It also lists, as `warn 2.0.0` lines, every key the cousin
+or the install still carries that 2.0.0 will reject (a `[chat] port`, a
+`config/agent-cmd`, the harness's tmux patterns), with what to do: they
+are warnings, not blockers, and the cleanup belongs to the upgrade, after
+the fleet's week. When the plan says ready, and at a moment the cousin is
 between tasks:
 
 ```

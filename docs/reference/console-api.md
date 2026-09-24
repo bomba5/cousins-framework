@@ -91,6 +91,138 @@ Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge:
 
 `getMe` with the stored token: `{"ok", "bot"?, "error"?}`.
 
+## Accounts
+
+The accounts runner cousins run on (`config/accounts.toml`, [configuration](../configuration.md#accountstoml)), and the implicit `host` login. This is the operator's console, so the operator entering a credential here is fine; nothing in the framework obtains one on its own. No answer, log line or event ever carries a key, a token or a sign-in code: a secret file is described as `{"set", "last4", "error"}` only (`last4` for a value of 16 characters or more), as in the auth key box.
+
+An `<name>` matches `^[a-z0-9][a-z0-9_-]{0,31}$`, otherwise `400 bad account name`; `host` is the host's own `~/.claude` login, with no entry.
+
+The routes that write an entry or take, mint or cancel a credential (add, edit, remove, `key`, `login`, `token`, `code`, `cancel`) want a logged-in console user: on a console with no users file they are `403` (add one with `cousin-console adduser <name>`), though the reads stay open. `key`, `login`, `token` and `code` are also `403` when the console itself runs inside a cousin (`COUSIN_HOME` or `COUSIN_SLUG` in its environment or an ancestor's), the guardrail `cousin-account` applies. Who started a login, cancelled one, wrote a key or changed an entry is appended to `data/accounts/audit.jsonl` (`{"ts", "kind": "login-start" | "login-cancel" | "key" | "entry-added" | "entry-edited" | "entry-removed", "actor", "account", "flow"?, "provider"?}`), never a value.
+
+A login is the account's long operation: `console/longop.py` under the key `account:<name>`, one at a time per account, with its stages and `cousin-op` events (slug `account:<name>`, never the URL). Its state is `GET /api/accounts/<name>/op`, the same shape as a cousin's op. A login belongs to the console session that started it: only that session is shown its URL and may post its code or cancel it (`403` for any other). While it runs, the account's edit, remove and `key` are `409`.
+
+### `GET /api/accounts`
+
+`{"ok": true, "error": null | "<why config/accounts.toml cannot be read>", "accounts": [row], "kinds": [...], "fields": {"<kind>": ["<key>", ...]}, "timeout": 600}`. A row: `{"name", "kind", "implicit", "where" (the config dir, secret file or data dir, relative to the root), "lanes" (the runner kinds it runs on, accounts.check_lane), "cousins" (the runner cousins that name it), "entry" (its table in accounts.toml, which holds no secret; null for host), "secret" (`{set, last4, error}` for claude-token and anthropic-key, else null)}`. With a broken file the list is `host` alone. `fields` names the keys each kind's entry takes.
+
+### `GET /api/accounts/<name>/status`
+
+Is it logged in, with no model call: `claude auth status --json` under the account, or for opencode the account's auth.json read (no process). One check per account at a time: `409` while one runs. `{"ok", "name", "kind", "loggedIn", "method", "error", "action"}`: `ok` is logged in with the method the kind wants; `action` (null when ok) is the line that fixes it. opencode adds `providers`, `missing` or `endpoint`. Never the email or organisation the CLI reports. `404` unknown account.
+
+### `POST /api/accounts`
+
+Add an entry. Body `{"name", "entry": {"kind", ...}}`, the entry's keys as in accounts.toml (a list of strings for `providers`, whole numbers for `endpoint_context` and `endpoint_output`; left out means the default). Written by `accounts.write_entry`: every other line of the file kept, the result checked by the same rules the runner reads it by (paths under the root, one of providers or endpoint, no credentials in an endpoint, no provider or endpoint model naming Claude, ruling P9-1) before the atomic rename. The console keeps an entry's paths where the framework puts them: `secret_file` and `data_dir` under `.secrets/`, `config_dir` under `data/accounts/` (another place is a hand edit of the file), and an `endpoint` whose query or fragment names a credential-like parameter (`key`, `token`, `secret`, `pass`, `auth`, `sig`, `cred`, `session`) is refused. `201 {"ok": true, "account": row}`. `400` refused (the reason), `409` the name exists. An `accounts-change` event follows; the page re-reads the list on it.
+
+### `POST /api/accounts/<name>`
+
+Replace an entry whole. Body `{"entry"}`. Refused (`400`, naming the cousin) when a cousin on the account could not run with the new entry on its lane. `200 {"ok": true, "account": row}`, `404` no such entry, `400` for `host`.
+
+### `POST /api/accounts/<name>/remove`
+
+Body `{"confirm": "<name>"}`, the name typed again. `200 {"ok": true, "removed"}`. `400` without the confirmation, `409` while a cousin names the account, `404` no such entry.
+
+### `POST /api/accounts/<name>/key`
+
+A write-only key. Body `{"key"}` for claude-token (a token you minted elsewhere) and anthropic-key: written through `console/secrets.py` to the account's secret file (0600, its directory 0700, read back as the runner reads it), which must be under `.secrets/` (otherwise `400`: write it by hand); `.secrets/` is made, or tightened to, 0700. A list row shows a secret file's last four only when it is under `.secrets/`. `200 {"ok": true, "name", "secret": {set, last4, error}}`. For opencode, body `{"provider", "key"}`: merged into the account's auth.json as an API key (`accounts.store_api_key`); a provider the account does not name, `opencode`, or one naming Claude or Anthropic is `400`. `200 {"ok": true, "name", "provider", "status"}` (the status above). `400` for a claude-login account (log it in), a key that is not one line of printable characters, or a local-endpoint account.
+
+### `POST /api/accounts/<name>/login`
+
+Start a login, `202 {"ok": true, "op"}` (`409` while one runs on the account). Body `{"timeout"?}` (seconds, 30 to 1800, default 600).
+
+- claude-login: `claude auth login --claudeai` under the account's config dir (`accounts.login_flow`). The sign-in URL shows at `GET .../flow`; the code the page shows goes to `POST .../code`. `claude auth status`, not the screen, decides. `host` needs `{"confirm_host": true}`: it re-logs `~/.claude`, which every cousin without an account and your own `claude` use.
+- opencode: body `{"provider", "method", "timeout"?}`, an OAuth method by its opencode label (`accounts.opencode_login_flow`). The URL and opencode's instruction line show at `GET .../flow`; nothing is pasted back, and the account's auth.json holding the provider decides. A browser method's callback goes to localhost on the console's host, so it completes only there; a headless or device method completes anywhere. A provider or method naming Claude or Anthropic is `400`, as is a missing method (an API key goes to `.../key`).
+
+`400` for another kind (a claude-token account uses `token`).
+
+### `POST /api/accounts/<name>/token`
+
+Mint a long-lived token for a claude-token account: `claude setup-token` in a throwaway config dir (`accounts.token_flow`), the URL and code as for a login; the token is read from the CLI's screen, verified (`claude auth status` reads `oauth_token`) and saved 0600 to the secret file. It is never served. `202 {"ok": true, "op"}`, `400` another kind.
+
+### `GET /api/accounts/<name>/flow`
+
+The running login beside its op: `{"ok", "name", "op", "kind": "login" | "token" | "opencode-login" | null, "provider", "mine", "url", "url_is_https", "instructions", "awaiting_code"}`. `mine` says the login belongs to this session; `url` and `instructions` are set only for that session, while the op runs and once the CLI has shown them; `url_is_https` says whether the page may make it a link (it does only for `https://`). `awaiting_code` is true while the CLI waits for the code.
+
+### `GET /api/accounts/<name>/op`
+
+The account's long operation (a login), running or the last one: `{"ok": true, "op": null | {...}}`, the shape of `GET /api/cousins/<slug>/op`.
+
+### `POST /api/accounts/<name>/code`
+
+The code the sign-in page shows, write-only, from the session that started the login (`403` from another). Body `{"code": "<code>#<state>"}`. `200 {"ok": true, "taken": true}`. It is handed to the waiting CLI in memory, once: the window closes for good after the first code, a timeout or a cancel, and a second or late code is `409` and never delivered. It is never written, logged, echoed or sent as an event, and never goes through a chat. `400` for something that is not the whole `code#state` (the window stays open), `409` when no login waits for a code.
+
+### `POST /api/accounts/<name>/cancel`
+
+End the running login, from the session that started it (`403` from another): the code window closes and the CLI is sent SIGTERM (only while its pty is open). The op fails with `cancelled by the operator`. `200 {"ok": true, "cancelled": true}`, `409` when none runs.
+
+### `POST /api/cousins/<slug>/check-auth`
+
+Body `{"validate"?: bool}`. The cousin's long operation (`202 {"ok": true, "op"}`, kind `check-auth` or `validate`, `409` while one runs): `cousin-runner --home <home> --check-auth`, run in a child process without any auth variable, is its `status` stage (no model call). With `validate: true` the one child runs `--check-auth --validate`, which checks the status once and then spends one smallest model turn on a throwaway client (never the cousin's own session): the second stage, `one model turn`, skipped when the status failed. Each stage's detail is the runner's own line; a failure is the op's `error`. `400` for a tmux cousin, or `validate` off the `sdk` lane.
+
+## MCP and policy
+
+A cousin's MCP tool registry, its `.mcp.json` servers, `cousin-mcp`'s diagnostics and its `policy.toml`, plus the install's default registry (`cousin_lib/console/routes_mcp.py`). Every edit is checked by the parser that reads the file: the registry by `mcp_server.parse_registry` (strict, the runner's reading; on a runner cousin also the in-process handlers, `runner/tools.missing_handlers`), `.mcp.json` by `runner/mcp_config.parse`, `policy.toml` by `runner/policy.Policy.parse`. A TOML file is edited through `console/toml_edit.write_file_keys`, so every line the change does not touch is kept.
+
+- **etag.** Every read answers `etag` (a hash of the file, `"absent"` when there is none). A write sends it back; a file that changed meanwhile is `409 {"error", "etag", "stale": true}` and nothing is written. The model can rewrite all of these files. The check is not a lock against the model: a write the model makes between the console's etag check and its rename (a window of milliseconds) is overwritten by the console's.
+- **Applies at the next start.** Every write answers the fresh read plus `restart_required: true`. The runner reads `.mcp.json`, `policy.toml` and its registry once, at start; a tmux cousin's harness reads `.mcp.json` and the registry at session start. The inspector offers `POST /api/cousins/<slug>/restart`.
+- **Secrets in `.mcp.json`.** The runner hands the servers to the agent CLI as a `--mcp-config` command-line argument, which any user on the host can read. A value that looks like a secret (a known key prefix, an opaque mixed-case token, eight or more literal characters under a name that says secret, a password in a URL, a secret-named flag's value) is refused with `problems: [{"server", "field", "key", "reason", "suggest"}]`, where `suggest` is the `${VAR}` reference to write instead. A literal already in the file is never answered: it reads as `value: null, masked: true` (a command as `command: null, command_masked`, a url as `url: null, url_masked`), and a save that sends it back as null is refused until it is replaced. A reference to an account variable (`accounts.AUTH_VARS`) is refused: the runner skips such a server.
+- **The handoff.** `policy.toml` can never deny `mcp__cousin__handoff`, in `deny_tools` or in `ask` (enforced as a deny), exactly or as a prefix (`mcp__cousin__*`, `*`): `400` naming the entry. Every generation ends through it.
+
+### `GET /api/cousins/<slug>/mcp/registry`
+
+`{"scope": "cousin", "file", "exists", "etag", "source": "own" | "install" | "example" | "shipped", "shown", "lane", "ceiling", "timeout", "max_output", "limits", "tools": [{"name", "kind", "enabled", "description", "commands", "editable"}], "enabled_count", "error", "skipped": [{"name", "reason"}]}`. With no registry in the home, `exists` is false and the tools shown are the one the cousin reads instead (`shown`). `error` is the strict parser's (the runner refuses to start with it); `skipped` the tools `cousin-mcp` would skip. Read from the raw TOML, so a registry over its ceiling still lists its tools.
+
+### `POST /api/cousins/<slug>/mcp/registry`
+
+Body `{"etag", "ceiling"?, "timeout"?, "max_output"?, "tools"?: {"<name>": true|false}}`. Numbers are whole, within `limits` (ceiling 1 to 50, timeout 5 to 3600 s, max_output 1000 to 1000000 characters). Only what differs is written: a tool's `enabled` key, a top-level number. `400` for a bad value, an unknown tool (adding a tool is a file edit), a result the strict parser refuses (more enabled tools than the ceiling) or, on a runner cousin, a tool with no in-process handler. `409` with no registry in the home. A registry that is not UTF-8 text is `400`.
+
+### `POST /api/cousins/<slug>/mcp/registry/copy-default`
+
+Writes the install default (`mcp_server.shipped_default_registry`, the operator filled in, as spawn does) into the home. Body `{}` when there is none yet; `{"replace": true, "etag"}` to overwrite one (`409` otherwise). The browser asks for a typed "replace".
+
+### `GET /api/mcp/registry`
+
+The install default, `config/mcp-registry.toml`, in the same shape (`scope: "install"`), plus `example_exists`. Absent, it shows `config/mcp-registry.toml.example`.
+
+### `POST /api/mcp/registry`
+
+As the cousin's, on `config/mcp-registry.toml`; `409` while it does not exist.
+
+### `POST /api/mcp/registry/copy-example`
+
+Copies `config/mcp-registry.toml.example` (else the checkout's) to `config/mcp-registry.toml`. `{}` when absent, `{"replace": true, "etag"}` to overwrite.
+
+### `GET /api/cousins/<slug>/mcp/servers`
+
+`{"file": ".mcp.json", "exists", "etag", "lane", "parse_error", "reserved": "cousin", "servers": [...], "kept": [{"name", "reason"}], "last_event"}`. A server: `{"name", "type": "stdio" | "http" | "sse", "command", "command_masked", "args": [{"value", "masked"}], "env": [{"name", "value", "masked"}]}` or `{"name", "type", "url", "url_masked", "headers": [{"name", "value", "masked"}]}`, plus `ignored_keys` (keys the runner drops, kept on save), `account_vars`, `unset_vars` (a `${VAR}` with no default that the console's environment does not set: a hint, the runner's environment decides) and `masked`. `kept` lists the entries this editor does not model (the reserved `cousin`, an entry of no known shape): a save keeps them as they are. `last_event` is the newest `mcp_config` event of the runner's primary stream (`{"ts", "seq", "payload": {"file", "servers", "skipped"}, "stream"}`), or null.
+
+### `POST /api/cousins/<slug>/mcp/servers`
+
+Body `{"etag", "servers": [...], "drop"?: ["<kept name>"], "replace_broken"?: true}`, every editable server, in the GET's shape (an arg may be a plain string; empty lists may be left out). Names are 1 to 64 of `A-Za-z0-9_-`, unique, never `cousin` (which can never be dropped either). `400 {"problems"}` for any refusal; nothing is written. Keys no server shape declares, and the file's other top-level keys, are kept; a server whose type changed loses the old type's keys. A masked value sent back as null is refused with the `${VAR}` to write. A file that does not parse needs `replace_broken` (`409` otherwise); on a harness lane (`tmux-legacy`, or the `tmux` runner kind) the replacement keeps a fresh `cousin` entry, the one spawn writes. The new text must load every server through `mcp_config.parse`.
+
+### `GET /api/cousins/<slug>/mcp/selftest`
+
+`cousin-mcp --selftest` as data: `{"ok", "registry", "ceiling", "timeout", "max_output", "tools": [{"name", "kind", "commands", "operators"?}], "commands": [{"command", "where", "found"}], "missing", "skipped", "sdk": {"present", "versions"}, "missing_handlers", "error"}`. `missing_handlers` only on a runner cousin.
+
+### `GET /api/cousins/<slug>/mcp/last-connection`
+
+`{"last": null | {"state": "connected" | "failed" | "unrecorded", "when", "session_id", "detail", "stderr", "earlier", "path"}}`: what the harness recorded the last time it connected the cousin's MCP server (`mcp_logs.last_connection`), each text cut at 4000 characters.
+
+### `GET /api/cousins/<slug>/mcp/status`
+
+`{"lane", "mcp_json", "settings_file", "approved": true | false | null, "reason"}`: whether the harness settings file `config/harness.toml` names trusts this home and enables `cousin` for it.
+
+### `POST /api/cousins/<slug>/mcp/approve`
+
+`cousin-mcp approve`: trusts the home and enables `cousin` in that settings file (`mcp_server.approve_registration`). It rewrites the whole file (through a symlink to its target, the mode kept): a live harness session keeps its own copy and writes it back, so approve while that cousin's session is stopped; the browser asks for a typed "approve" and says so. `409` on a lane that does not read the approval (only `tmux-legacy` and the `tmux` runner kind do; an sdk, opencode or fake runner serves `cousin` in-process), with no `.mcp.json`, no `settings_file`, or a settings file that cannot be edited. Read at the cousin's next session start.
+
+### `GET /api/cousins/<slug>/policy`
+
+`{"file": "policy.toml", "exists", "etag", "error", "lane", "protected": "mcp__cousin__handoff", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "template", "last_event"}`. `error` is `Policy.parse`'s (the runner refuses to start with it). `template` holds `templates/policy.toml.example`'s values, for "fill from the template". `last_event` is the start's `policy` `describe` event.
+
+### `POST /api/cousins/<slug>/policy`
+
+Body `{"etag", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "confirm_loosening"?, "replace_broken"?}`. The lists are non-empty one-line strings (a repeat is dropped). Each pattern is compiled (`400 {"problems": [{"key", "index", "entry", "reason"}]}`); the whole text must pass `Policy.parse`; the handoff rule above. A change that removes a `deny_tools`, `deny_bash_patterns` or `ask` entry, or turns `outbound_filter` off, answers `409 {"needs_confirm": true, "removed": {...}}` until it is sent again with `confirm_loosening: true`. Only the keys that change are rewritten; an absent file is created with a short header. A file the runner cannot read (not UTF-8, not TOML, or not a policy) needs `replace_broken` (`409` otherwise); what it lists as TOML still counts for the loosening check. On opencode the plugin runs the patterns as JavaScript RegExp: the browser warns about a pattern JavaScript cannot compile.
+
 ## Meetings
 
 A chat shared by the signed-in user and several running cousins, in rounds ([meetings](../meetings.md)). The store is `data/meetings.db`; cousins speak through `cousin-meeting`, so changes also arrive from outside the console and the event stream reports them as `meeting-change` (`{"id", "op"}`). A refusal (not your floor, a stopped or remote participant, a closed meeting) is `400` with the reason in `error`; an unknown id is `404`. The user's entries carry the signed-in user name.
@@ -499,7 +631,7 @@ Queues a fire request (`context-heartbeat` works too). `202 {"ok": true, "slug",
 
 The old flat view: `{"tree": {"shared/": {file: entry}, "<slug>/": {file: entry}}}`, entry `{"size", "updated" (seconds ago), "preview" (first 400 characters)}`. Lists `shared/*.md` and the first 50 `memory/*.md` of each cousin.
 
-The eight routes after it are the per-cousin memory explorer. Paths are relative to the cousin home. Absolute paths and `..` are `400`, a path that leads out of the home through a link is `403`, anything under `.secrets/` is `404`.
+The routes after it are the per-cousin memory explorer. Paths are relative to the cousin home. Absolute paths and `..` are `400`, a path that leads out of the home through a link is `403`, anything under `.secrets/` is `404`.
 
 ### `GET /api/memory/<slug>/overview`
 
@@ -555,11 +687,71 @@ The batch lands in `<home>/memory/.trash/<id>/` with one audit line per item in 
 
 ### `POST /api/memory/<slug>/obsolete`
 
-Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
+Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. An operator-level claim is the operator's to retire: `403` for anyone but the operator account (see [Memory operator actions](#memory-operator-actions)) when `entry` names an L0 claim, or, without `entry`, when the topic has a live L0 claim. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
 
 ### `POST /api/memory/<slug>/restore`
 
 Body `{"id": "..."}`. Files go back to their path, lines back into their file at their old position. `200 {"ok": true, "restored": manifest, "effects": {...}}` and a `memory-change` event. `409` if something is already back in the way, `404` unknown id. The CLI does the same with `cousin-memory trash restore <id>`.
+
+### Memory operator actions
+
+The routes below are the operator's side of `cousin-memory`, `cousin-self-portrait`, `cousin-reason` and `cousin-callback`, on one cousin. They call the same library functions the CLIs call. A review verdict, a self-portrait commit and a change to the shared reviewer list are a person's act and need a logged-in console user (`403` without logins or without a session). The operator's word needs the operator account (`403` for anyone else): an operator-level write, retiring an operator-level claim (`obsolete`), and dropping one at review. The console has no roles, so the operator account is the logged-in user whose name is the cousin's `[operator] name`, case aside; with no `[operator] name` nobody is.
+
+### `GET /api/memory/<slug>/search`
+
+Query `q` (required, else `400`), `top` (default 10, at most 50), `collection` (`memory`, `notes`, `harness` or `raw`; anything else `400`). The library search (`cousin-memory search`): keyword always, meaning when `config/embedding.toml` sets it up, fused by rank. `{"query", "hits", "semantic": "on"|"off"|"broken", "notice"}`. Each hit is `{"collection", "rel", "score", "similarity", "snippet", "legs"}`: `rel` is relative to the home (to the harness directory for a harness hit, with `layer: "harness"`; a raw hit is `memory/raw/<file>#<line>` and carries `entry` with its topic, content, level, timestamp, cite and id), and `legs` says which search found it, `keyword`, `semantic` or both. `notice` is the degrade line when meaning was promised and could not serve. A console search is not recorded in the cousin's recall log.
+
+### `GET /api/memory/<slug>/writer`
+
+What the write forms may offer the current user: `{"user", "operator", "can_write_operator", "levels", "cite_preview"}`.
+
+### `POST /api/memory/<slug>/remember`
+
+Body `{"topic", "fact", "level"?, "note"?}`. One fact into raw memory (`cousin-memory remember`). `level` is `operator`, `tool`, `conclusion` (default) or `hypothesis`; `framework` and `obsolete` are `400` (the framework writes its own entries, and obsolete is the retire action). `operator` from anyone but the operator account is `403`. The cite is filled here, never taken from the body: `console user <name>, <UTC time>` (`console (no login), <time>` without logins), then `; <note>` when a note (at most 300 characters) is given. `200 {"ok": true, "line"}` and a `memory-change` event.
+
+### `POST /api/memory/<slug>/decide`
+
+Body `{"topic", "decision", "reasoning", "level"?, "note"?}`. Logs the decision in `data/decisions.jsonl` and its raw copy (`cousin-memory decide`), levels and cite as for remember. `200 {"ok": true, "line"}`.
+
+### `GET /api/memory/<slug>/history`
+
+Query `topic` (required). `{"topic", "claims"}`: the topic's claims, oldest first, each a raw entry with `id`, `valid_from`, `valid_to` (null while live) and `retired_by` (`cousin-memory history`).
+
+### `GET /api/memory/<slug>/review`
+
+What the review gate holds: `{"held": [claim, ...], "batch", "operator", "is_operator"}`, `batch` being `[memory] review_batch`.
+
+### `POST /api/memory/<slug>/review`
+
+Body `{"verdicts": {"<id>": "keep"|"drop"}, "why"?}` (`why` at most 500 characters). The operator's verdicts (`cousin-memory review --keep/--drop`), recorded as by `console:<user>`; needs a logged-in user. A drop is an entry-level obsolete mark and has no undo, so an operator-level entry is dropped by the operator account only. Per id, an id that isn't held or may not be dropped is reported in `errors` and stays held. One or two verdicts answer at once: `200 {"ok": true, "done": {id: verdict}, "errors": {id: reason}, "effects": {"distilled"}}`, with a rebuild of the distilled views when anything was settled and a `memory-change` event. More run as the cousin's long operation of kind `memory-review` (`202 {"ok": true, "op"}`, `409` while something else runs), whose result is that same body. `400` when `verdicts` is not a non-empty map of ids to keep or drop.
+
+### `POST /api/memory/<slug>/maintain`
+
+Body `{"action": "distill"|"compact-raw"|"compact-index"|"reindex", "dry_run"?}`. Runs as the cousin's long operation of kind `memory-<action>` (`202 {"ok": true, "op"}`, `409` while another operation, a flip or a clean stop runs; follow it at [`GET /api/cousins/<slug>/op`](#get-apicousinsslugop)). `distill` rebuilds `memory/distilled/`, `compact-raw` folds old daily raw files (lossless), `compact-index` retires the oldest MEMORY.md pointers over the budget (`dry_run: true` only reports `would_retire`), `reindex` rebuilds the keyword index and, when configured, the semantic one. The op's result carries the library's report.
+
+### `GET /api/memory/<slug>/portrait`
+
+`{"candidate", "committed", "candidate_exists", "committed_exists", "backup_exists", "candidate_sha", "diff"}`: the reviewed identity layer (`self-portrait.md`), its candidate (`.self-portrait-candidate.md`) and the unified diff between them. `candidate_sha` is the first 16 hex characters of the candidate's SHA-256.
+
+### `POST /api/memory/<slug>/portrait/synthesize`
+
+Drafts a candidate from the cousin's own sources (no model call). A candidate that exists may hold edits: `409` unless the body says `{"replace": true}`. A candidate path that is a symlink (dangling or not) is `403`, checked before anything is written; the same holds for the candidate write and the commit. `200` with the portrait state.
+
+### `POST /api/memory/<slug>/portrait/candidate`
+
+Body `{"text"}` (at most 64 KiB). Replaces the candidate. `200` with the portrait state.
+
+### `POST /api/memory/<slug>/portrait/commit`
+
+Body `{"confirm": "<slug>", "sha": "<candidate_sha>"}`. Promotes the candidate (`cousin-self-portrait commit`; the previous portrait becomes `.self-portrait.md.bak`). The identity gate: a logged-in user (`403`), the slug typed back (`400`), and the candidate still the one read (`409` with the current `candidate_sha` when it changed). `404` no candidate.
+
+### `GET /api/memory/<slug>/callbacks`
+
+Query `limit` (default 200, at most 1000). `{"callbacks": [{"time", "cycle", "category", "moment"}]}`, newest first. Read-only.
+
+### `GET /api/memory/<slug>/capsules`
+
+Query `n` (default 50, at most 500). `{"capsules": [{"id", "timestamp", "topic", "conclusion", "evidence", "rejected", "confidence", "truth_level"}]}`, newest first. Read-only.
 
 ## Cousin files
 
@@ -606,6 +798,14 @@ Body `{"slug": "wren", "file": "house-rules.md", "by": "ana"}`. Promotes Wren's 
 Body `{"slug", "file", "reason"?, "by"?}`. Drops the proposal. `200 {"ok": true, "file"}`.
 
 For both: the reviewer is the logged-in user, and `by` is only read (and then required, `400` without it) when there's no users file. A reviewer who isn't in `config/shared-reviewers.json`, or who is the proposer, gets `403`. A missing proposal is `404`.
+
+### `GET /api/shared/reviewers`
+
+`{"configured", "reviewers", "error", "user", "you_review", "can_edit"}`: the list in `config/shared-reviewers.json`, whether the logged-in user is on it and may change it (resolved the way the promote check resolves names; null without a login), and `error` when the file is present but unreadable.
+
+### `POST /api/shared/reviewers`
+
+Body `{"reviewers": ["ana", ...]}`: replaces the list (at most 50 names of at most 64 printable characters; duplicates, case aside, are dropped), keeping the file's other keys. Who may promote is a perimeter: once the list names anyone, only a logged-in user on it may change it; while it is empty or absent any logged-in user may start it (`403` otherwise). The read, the check and the write hold a lock (`config/shared-reviewers.json.lock`), and each change is a `reviewers` row in `shared/audit.jsonl` with `reviewers` and `previous`. `409` while the file is unreadable: fix or remove it by hand. `200` with the new state.
 
 ## Tracker
 
@@ -654,6 +854,107 @@ Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`),
 
 Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 75 (`EX_TEMPFAIL`) about 0.6 s later: non-zero on purpose, because the shipped unit restarts on failure only. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`), whose `Restart=on-failure` brings it back, or under `cousin-supervisor` (`COUSIN_SUPERVISED`), which starts it again at once and does not count the exit against it. If it's false, nothing will start it again: restart means stop.
 
+## System (the System view)
+
+The supervisor, one-shot schedules, console users, backup and the install-wide config (`console/routes_system.py`, the view in `system.jsx`). Every change is a `POST`; a refusal is `{"ok": false, "error"}` with the status named below, and nothing is written.
+
+### `GET /api/system/supervisor`
+
+`cousin-supervisor status` over its socket: `{"ok": true, "running": true, "supervised", "pid", "started", "children": [{"name", "kind", "state", "pid", "restarts", "since", "reason", "last_exit", "actions": {"start", "stop", "restart", "confirm"?, "why"?}}]}`. `running` is false when no supervisor runs for the root, null when one took the connection but did not answer; `reason` says which. `supervised` is true when the console itself is a supervisor child.
+
+### `POST /api/system/supervisor/start`
+
+`{"child": "loops" | "runner:<slug>"}`: the supervisor's `start`. A runner cousin is held exclusively for the call, as the fleet's start does (`409` while a flip or an operation runs on it). `200` the supervisor's answer; `400` the console (it restarts through `POST /api/admin/restart/framework`, never stops from its own page) or a bridge (`telegram:<slug>` follows its runner); `404` no such cousin; `409` the supervisor refused, with its reason; `503` no supervisor.
+
+### `POST /api/system/supervisor/stop`
+
+As start, with the supervisor's `stop`, not waiting (`state: "stopping"`), `by: "console <user>"`. The loops daemon needs `"confirm": "loops"` (`400` without): stopping it stops every heartbeat, loop and scheduled prompt.
+
+### `POST /api/system/supervisor/reload`
+
+The supervisor's rescan: `200 {"ok": true, "added", "removed"}`.
+
+### `GET /api/system/schedules`
+
+Every cousin's pending one-shots (`cousin-schedule`), oldest first: `{"ok": true, "schedules": [{"id", "cousin", "target_ts", "when", "prompt", "status"}]}`. `?all=1` adds fired and cancelled ones, newest first, 200 at most.
+
+### `GET /api/cousins/<slug>/schedules`
+
+The same for one cousin (`?all=1` for its history, 100 at most).
+
+### `POST /api/cousins/<slug>/schedules`
+
+`{"when": "in 30m" | "tomorrow 06:30" | "YYYY-MM-DDTHH:MM", "prompt"}`: `schedule.add`. `201 {"ok": true, "schedule"}`; `400` a time that does not parse or is past, an empty prompt, or one over 8000 characters.
+
+### `POST /api/cousins/<slug>/schedules/<id>/cancel`
+
+`200 {"ok": true, "id", "status": "cancelled"}`; `404` no pending schedule with that id for that cousin.
+
+### `GET /api/system/users`
+
+`{"ok": true, "configured", "users": [names], "me"}`. Never a hash or a salt.
+
+### `POST /api/system/users`
+
+`{"name", "password"}`: a new console user. The name is taken as `cousin-console adduser` takes it (any non-empty string without NUL, kept exactly; percent-encode it in a path); the password is 8 or more characters, kept as typed. `201 {"ok": true, "user", "users"}`; `409` the user exists. The first user closes the console to everyone without a session, so that request is also logged in as it (`Set-Cookie`, `"logged_in": true`). The password is never returned or logged.
+
+### `POST /api/system/users/<name>/password`
+
+`{"password"}`: reset another user's password; their sessions end. `400` your own name (that goes through `POST /api/auth/change-password`, which asks for the current one); `404` no such user.
+
+### `POST /api/system/users/<name>/remove`
+
+`{"confirm": "<name>"}`, the name typed again. `400` without it or for your own user; `409` the last user (the console would have none); `404` no such user. Their sessions end at their next request.
+
+### `POST /api/system/backup`
+
+`{"dest": "/abs/dir", "slugs": ["wren"] | "all"}`: `cousin-backup` for each cousin, each a long operation (`kind: "backup"`, `GET /api/cousins/<slug>/op`, the `cousin-op` event) and a `backup` row in the jobs store. `dest` must be absolute, an existing directory the console can write, and neither it nor any `<dest>/<slug>` may resolve (symlinks followed) inside the install root at all (`400` otherwise). `<dest>/<slug>` is created `0700` before the snapshot (never through a link, and never when the cousin's own `cousin.toml` names another slug: that op fails and says so), the snapshot is written into exactly that directory (`backup.snapshot(home, target=...)`), and every directory under it ends `0700`, every file `0600`. A copy that resolves anywhere else, or a `<dest>/<slug>` replaced during the copy, fails the op with the exact path where the copy landed, removes nothing, and appends `{"action": "backup-misplaced", "user", "cousin", "expected", "landed"}` to `data/system/audit.jsonl`. A destination other users can write is refused unless it is sticky. A race that swaps `<dest>/<slug>` for a link between the checks and the copy is out of scope: winning it takes write access to the destination, so the operator's own uid, which can already read and write the homes and `config/`; the check after the copy reports it. `202 {"ok": true, "dest", "ops": {slug: op}, "busy": {slug: reason}}`; `409` when every cousin asked for is busy. A snapshot lands in `<dest>/<slug>/<YYYY-MM-DD>/`.
+
+### `GET /api/system/config`
+
+The install config files, each `{"path", "exists", "error", "applies", "restart"}` plus its values:
+
+- `media`: `kinds.<image|voice|video>` = `{url, model, timeout_s, key_file, key: {set, last4, error}}` or null; `key` is read as media reads it (a plain read under the root);
+- `embedding`, `hive`: `values` by key (`recall.min_score` for a subtable key);
+- `peers`: `peers.<slug>` = `{url, send_path, name, sender, reach, token_file, inbound_token_file, token, inbound_token, shadowed, unknown_reach}`; a token is read as `chat.read_secret` reads it, so a file group or others can read shows its refusal in `error`;
+- `outbound_filter`, `law`: `{content, sha}`;
+- `allowlist`: `{allow, sha, client, builtin}`, and `restart` naming the console and the chat servers;
+- `commands`: `agent-cmd` and `worker-cmd` as `{path, exists, content}`, shown only: no route writes them.
+
+A secret's value is never in the answer: `{set, last4, error}` only, `last4` for a value of 16 characters or more. A key or token file outside `config/` is never read (`set: null`).
+
+### `POST /api/system/config/<name>`
+
+`<name>` is `media`, `embedding`, `hive` or `peers`. `{"changes": [{"table", "key", "value"} | {"table", "key", "remove": true}], "remove_tables": [...]}`: `table` is `""` for a top-level key, `image`/`voice`/`video` for media, `recall` or `options` for embedding, `peers.<slug>` for a peer. A key is removed only by `"remove": true`: a missing, `null`, empty or non-finite value is `400`, so a mistyped number never deletes the key. A table in `remove_tables` that the file defines without a `[table]` header of its own (an inline table, dotted keys) is `400`: remove it by hand. Only the keys the editor lists are accepted (`url`, `model`, `timeout_s` for media; the documented keys for the others); a path to a secret (`key_file`, `token_file`, `inbound_token_file`) is never set here. The edited text is checked by the file's own loader (`hive.hive_config`, `chat.load_external_peers`, the embedding reader, which needs `url`) and written through `toml_edit`, every other line kept, the file created `0600` when absent. `200 {"ok": true, "file"}`; `400` with the loader's reason; `404` another name.
+
+### `POST /api/system/config/<name>/<target>/secret`
+
+`{"value", "which"?}`: a media kind's key (`<name>` `media`, `<target>` the kind) or a peer's token (`peers`, the peer's slug, `which` `outbound` or `inbound`). Written by `secrets.write_secret_file` to `config/media-keys/<kind>.key` or `config/peer-tokens/<slug>[.inbound].token` (`0600` in a `0700` directory), then `key_file`, `token_file` or `inbound_token_file` points at it. When that TOML write fails, the secret file is put back as it was. `200 {"ok": true, "secret": {set, last4, error}}`; `400` a value that is not one printable line; `404` a peer that is not in the file.
+
+### `POST /api/system/config/<name>/<target>/secret/clear`
+
+Removes the key from the file and deletes the secret file when it is the one this route writes.
+
+### `POST /api/system/outbound-filter`
+
+`{"content", "base_sha"}`: the whole of `config/outbound-filter.json`, refused (`400`) unless it is a JSON object whose `terms`, `protected` and `trusted_peers` are lists of non-empty strings and whose `surfaces` maps each name to an object with an `add` list of them: the loader reads an unparsable file as an inert filter and a string as its characters. Keys it ignores are kept. `409` when the file changed since `base_sha` was read. The old file is copied to `data/config-backups/` first (the last 20 kept). `200 {"ok": true, "backup", "sha"}`.
+
+### `POST /api/system/law`
+
+`{"content", "base_sha"}`: `config/law.md`, the same way (256 KiB at most). Each cousin reads it into its boot packet at its next start or flip.
+
+### `POST /api/system/allowlist`
+
+`{"allow": [cidr], "base_sha"}`: `config/net-allowlist.json`'s `allow`, every other key kept. Each entry must be a network the guard reads (`192.0.2.0/24`, not `192.0.2.1/24`) and not `/0`; `400` when the new list would no longer admit the requesting address. The console and each chat server read it when they start: the answer's `restart` names them and the console's restart route.
+
+### `GET /api/system/agent-defaults`
+
+`config/harness.toml [agent]`: `{"values": {"default_model", "default_effort", "commit_attribution": {"value", "source"}}, "choices": {"effort", "models"}, "exists", "error", "applies"}`. `source` is `config/harness.toml [agent]`, the built-in default (`commit_attribution` true) or unset.
+
+### `POST /api/system/agent-defaults`
+
+Any of `default_model` (one word, as the agent command renders it), `default_effort` (one of the levels), `commit_attribution` (a boolean), and `"remove": [keys]` to drop keys; a `null` or empty value is `400`. Checked by `config.agent_config`, `commit_attribution` and `harness_config` on the edited text, then written through `toml_edit`. `200` the new values; `400` a bad value; `409` no `config/harness.toml` (the route never creates it). A cousin reads these when it starts or is spawned.
+
 ## `GET /api/events`
 
 The live stream every open tab holds. Server-sent events, each frame a `data:` line with `{"kind": "...", "data": ...}`. The first frame is always a `snapshot`. A `: ping` comment goes out after 25 s of silence.
@@ -673,6 +974,7 @@ The events come from two places: route handlers announce what they just did, and
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
 | `memory-change` | `{"slug", "action": "trash" \| "restore" \| "obsolete", ...}` | a memory delete, restore or obsolete mark through the console |
+| `accounts-change` | `{"name", "what": "added" \| "edited" \| "removed" \| "key"}` | an account entry or key changed through the console (never the key) |
 
 `cousin-flip` phases: `scheduled` (with `fire_at`, and `delay_seconds` or `request_id`), `started`, `complete` (with `ok: true`, and `new_generation`, `boot_packet_tokens`, `degraded_sections` when the console ran it), `failed` (with `ok: false` and `error`), `cancelled`. Timed flips the daemon runs show up through the poller: a request that turns `done` is `complete`, `failed` or `expired` is `failed`.
 

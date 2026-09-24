@@ -961,10 +961,22 @@ def approve_registration(settings_path, home):
     if "disabledMcpjsonServers" in entry:
         entry["disabledMcpjsonServers"] = [
             s for s in entry["disabledMcpjsonServers"] if s != SERVER_NAME]
-    fd, tmp = tempfile.mkstemp(dir=settings_path.parent, suffix=".tmp")
-    with os.fdopen(fd, "w") as fh:
-        fh.write(json.dumps(data, indent=2) + "\n")
-    os.replace(tmp, settings_path)
+    # a settings path that is a symlink is written through to its target,
+    # never replaced by a plain file; the target's mode is kept
+    target = settings_path.resolve()
+    mode = target.stat().st_mode & 0o7777
+    fd, tmp = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(data, indent=2) + "\n")
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return entry
 
 

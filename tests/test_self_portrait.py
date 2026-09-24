@@ -62,6 +62,38 @@ class TestSynthesize(PortraitCase):
         self.assertNotIn("style", risks)
 
 
+class TestSynthesizeNeverWritesThroughALink(PortraitCase):
+    """The candidate is written to a fresh temp file in the home and
+    renamed over the candidate path: a link planted there is replaced,
+    never written through."""
+
+    def test_a_dangling_link_is_replaced_not_followed(self):
+        outside = pathlib.Path(tempfile.mkdtemp()) / "victim.md"
+        self.addCleanup(lambda: outside.parent.rmdir()
+                        if not outside.exists() else None)
+        cand = self.home / ".self-portrait-candidate.md"
+        cand.symlink_to(outside)
+        synthesize_candidate(self.home, "wren")
+        self.assertFalse(outside.exists())
+        self.assertFalse(cand.is_symlink())
+        self.assertIn("# Cousin Self-Portrait: wren", cand.read_text())
+
+    def test_a_live_link_is_replaced_and_its_target_untouched(self):
+        target = self.home / "data" / "keep.md"
+        target.write_text("mine")
+        cand = self.home / ".self-portrait-candidate.md"
+        cand.symlink_to(target)
+        synthesize_candidate(self.home, "wren")
+        self.assertEqual(target.read_text(), "mine")
+        self.assertFalse(cand.is_symlink())
+
+    def test_no_temp_file_is_left_behind(self):
+        synthesize_candidate(self.home, "wren")
+        self.assertEqual([p.name for p in self.home.iterdir()
+                          if p.name.startswith(".self-portrait-candidate")],
+                         [".self-portrait-candidate.md"])
+
+
 class TestCommitAndBoot(PortraitCase):
     def test_boot_reads_only_committed_never_candidate(self):
         synthesize_candidate(str(self.home), "wren")

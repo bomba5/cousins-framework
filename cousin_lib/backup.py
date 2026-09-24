@@ -142,15 +142,22 @@ def _copy_memory(src, dst):
                     ignore=shutil.ignore_patterns(*MEMORY_SKIP))
 
 
-def snapshot(home, dest_root):
-    """Snapshot <home> into <dest_root>/<slug>/<YYYY-MM-DD>/ and return
-    that directory. A second run on the same day overwrites in place."""
+def snapshot(home, dest_root=None, *, target=None):
+    """Snapshot <home> into <dest_root>/<slug>/<YYYY-MM-DD>/ (the slug
+    read from the home's cousin.toml), or, given `target`, into
+    <target>/<YYYY-MM-DD>/ with no directory derived from the home at all
+    (the console names the directory it checked). Exactly one of the two.
+    Returns the snapshot directory. A second run on the same day
+    overwrites in place."""
+    if (dest_root is None) == (target is None):
+        raise TypeError("snapshot takes dest_root or target, exactly one")
     home = Path(home)
     try:
         slug = CousinConfig.load(home).slug
     except MissingConfigError as err:
         raise BackupError(str(err))
-    snap = Path(dest_root) / slug / date.today().isoformat()
+    base = Path(target) if target is not None else Path(dest_root) / slug
+    snap = base / date.today().isoformat()
     snap.mkdir(parents=True, exist_ok=True)
     data = home / "data"
     if data.is_dir():

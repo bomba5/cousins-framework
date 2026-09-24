@@ -105,5 +105,98 @@ class TestReview(SharedCase):
         self.assertEqual(self.get("/api/shared/list")[1]["pending"], [])
 
 
+
+class TestReviewers(SharedCase):
+    """The reviewer list (config/shared-reviewers.json): read by anyone
+    the console admits, written only by a logged-in user, audited."""
+
+    def login(self):
+        auth.Users(self.root / "config" / "console-users.json") \
+            .set_password("ana", "correct horse")
+        self.serve()
+        self.post("/api/auth/login", {"user": "ana",
+                                      "password": "correct horse"})
+
+    def test_read_says_whether_you_review(self):
+        self.login()
+        status, body = self.get("/api/shared/reviewers")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["reviewers"], ["ana", "toki"])
+        self.assertTrue(body["configured"])
+        self.assertTrue(body["you_review"])
+        self.assertTrue(body["can_edit"])
+
+    def test_write_replaces_the_list_keeps_other_keys_and_audits(self):
+        path = self.root / "config" / "shared-reviewers.json"
+        path.write_text(json.dumps({"reviewers": ["Ana"], "note": "kept"}))
+        self.login()
+        status, body = self.post("/api/shared/reviewers",
+                                 {"reviewers": [" ana ", "Toki", "ANA"]})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["reviewers"], ["ana", "Toki"])
+        self.assertEqual(json.loads(path.read_text()),
+                         {"reviewers": ["ana", "Toki"], "note": "kept"})
+        _, body = self.get("/api/shared/audit")
+        self.assertEqual(body["entries"][0]["kind"], "reviewers")
+        self.assertEqual(body["entries"][0]["actor"], "ana")
+        self.assertEqual(body["entries"][0]["reviewers"], ["ana", "Toki"])
+        self.assertEqual(body["entries"][0]["previous"], ["Ana"])
+
+    def test_only_a_reviewer_edits_the_list(self):
+        # a logged-in user who is not a reviewer cannot add themself and
+        # then promote
+        (self.root / "config" / "shared-reviewers.json").write_text(
+            json.dumps({"reviewers": ["toki"]}))
+        self.login()
+        status, body = self.post("/api/shared/reviewers",
+                                 {"reviewers": ["toki", "ana"]})
+        self.assertEqual(status, 403, body)
+        self.assertFalse(self.get("/api/shared/reviewers")[1]["can_edit"])
+        self.assertEqual(self.post("/api/shared/approve",
+                                   {"slug": "wren", "file": "project_x.md"})[0], 403)
+        self.assertEqual(json.loads((self.root / "config"
+                                     / "shared-reviewers.json").read_text()),
+                         {"reviewers": ["toki"]})
+
+    def test_anyone_logged_in_starts_an_empty_list(self):
+        (self.root / "config" / "shared-reviewers.json").write_text('{"reviewers": []}')
+        self.login()
+        status, body = self.post("/api/shared/reviewers", {"reviewers": ["ana"]})
+        self.assertEqual(status, 200, body)
+
+    def test_anyone_logged_in_starts_an_absent_list(self):
+        (self.root / "config" / "shared-reviewers.json").unlink()
+        self.login()
+        status, body = self.post("/api/shared/reviewers", {"reviewers": ["ana"]})
+        self.assertEqual(status, 200, body)
+        _, body = self.get("/api/shared/audit")
+        self.assertEqual(body["entries"][0]["previous"], [])
+
+    def test_write_refusals(self):
+        self.serve()
+        self.assertEqual(self.post("/api/shared/reviewers",
+                                   {"reviewers": ["ana"]})[0], 403)
+        self.login()
+        for payload in ({}, {"reviewers": "ana"}, {"reviewers": [3]},
+                        {"reviewers": [""]}, {"reviewers": ["a\nb"]},
+                        {"reviewers": ["x" * 65]}):
+            self.assertEqual(self.post("/api/shared/reviewers", payload)[0],
+                             400, payload)
+        self.assertEqual(json.loads((self.root / "config"
+                                     / "shared-reviewers.json").read_text()),
+                         {"reviewers": ["ana", "toki"]})
+
+    def test_an_unreadable_file_is_said_not_overwritten(self):
+        path = self.root / "config" / "shared-reviewers.json"
+        path.write_text("{not json")
+        self.login()
+        _, body = self.get("/api/shared/reviewers")
+        self.assertFalse(body["configured"])
+        self.assertIn("not valid JSON", body["error"])
+        status, _ = self.post("/api/shared/reviewers", {"reviewers": ["ana"]})
+        self.assertEqual(status, 409)
+        self.assertEqual(path.read_text(), "{not json")
+
+
 if __name__ == "__main__":
     unittest.main()

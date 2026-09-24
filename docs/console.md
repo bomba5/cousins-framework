@@ -195,6 +195,13 @@ Click a card to open the inspector drawer. From top to bottom:
   added": whoever pressed Start on the bot and was refused, with an add
   button, so nobody has to look up a Telegram id. The bridge starts and
   stops with the cousin. See [chat](chat.md).
+- **Account** (a runner cousin). The account it runs on, "check auth"
+  (`cousin-runner --check-auth`: is it logged in, no model call) and, on the
+  `sdk` lane, "validate", which spends one smallest model turn on a
+  throwaway client and asks first. Both run as the cousin's long operation
+  with their steps shown. While `data/login-required.json` stands, the
+  panel shows its action line and "log in here", the account's login from
+  the Accounts page. See [Accounts](#accounts).
 - **Tokens today.**
 - **Files.** "browse home" opens a read-only file explorer over the cousin's
   home: a tree on the left (dotfiles behind a checkbox), a viewer on the
@@ -212,6 +219,9 @@ Click a card to open the inspector drawer. From top to bottom:
   prompt, on/off, remove. "+ loop" adds one, "save" writes the whole list.
   Daily and cron loops show their schedule here but are edited on the Loops
   page. If the loops daemon is down, it says so above the list.
+- **MCP.** Three tabs: the tool registry, the `.mcp.json` servers and
+  `cousin-mcp`. See [MCP and policy](#mcp-and-policy).
+- **Policy.** The cousin's `policy.toml`. See [MCP and policy](#mcp-and-policy).
 - **Flip.** The last flip the console ran (idle, running, done, failed, or a
   stale marker from a crashed flip) with its generation, and any pending
   timed flip with a cancel button.
@@ -222,6 +232,50 @@ Click a card to open the inspector drawer. From top to bottom:
 
 The model has no editor in the inspector yet. Set `[runtime] model` in
 `cousin.toml` (or respawn), then restart.
+
+### MCP and policy
+
+Two inspector panels and one Settings panel edit what a cousin's model can
+reach. Each change is checked by the parser the runner reads the file with,
+keeps every line it does not touch, and applies at the next start: after a
+save the panel says so and, on a running cousin, offers "restart now" (a
+second click confirms). A file that changed on disk since the panel loaded it
+is never overwritten; reload and make the change again. (The model writing the
+file in the milliseconds between that check and the console's write loses to
+the console.)
+
+- **Tool registry** (`<home>/mcp-registry.toml`): a switch per tool, and the
+  ceiling, timeout and output cap. More enabled tools than the ceiling is
+  refused, and so is enabling a tool the runner has no handler for. Adding a
+  tool is a file edit. A cousin without a registry of its own shows the one
+  it reads and offers "copy the install default here".
+- **Servers** (`<home>/.mcp.json`): stdio servers (command, args, env) and
+  http or sse servers (url, headers). The runner passes these to the agent CLI
+  on its command line, which any user on the host can read, so a value that
+  looks like a secret is refused and the panel offers the `${VAR}` reference
+  to write instead; set the variable in the runner's environment. A literal
+  secret already in the file is never shown. The `cousin` entry and entries
+  of no known shape are kept as they are. The panel also shows what the
+  runner loaded and skipped at its last start.
+- **cousin-mcp**: selftest (the registry, where each command resolves, the
+  SDK), last connection (what the harness logged, its stderr included) and
+  approve (trusts the home and enables `cousin` in the harness settings file
+  `config/harness.toml` names; only the tmux lane has it). Approve rewrites
+  that whole file and a live harness session writes its own copy back, so
+  approve while the cousin's session is stopped; you type "approve" to
+  confirm.
+- **Policy** (`<home>/policy.toml`): `deny_tools` and `ask` as chips,
+  `deny_bash_patterns` one per line (compiled on save; on opencode a pattern
+  JavaScript cannot compile is flagged, since it would deny every command),
+  and `outbound_filter`. `mcp__cousin__handoff` can never be denied: every
+  generation ends through it. A change that removes a deny entry or turns the
+  filter off lists what it removes and needs "save and loosen". A guardrail,
+  not a sandbox: the model can rewrite the file.
+- **Settings > mcp tool registry**: the install default,
+  `config/mcp-registry.toml`, with "copy from example" while it is absent.
+
+Replacing a registry with the default, or a broken `.mcp.json` or
+`policy.toml`, asks you to type "replace".
 
 ### Flipping from the console
 
@@ -477,6 +531,39 @@ cousin-memory trash restore 20260918T134746-314733
 Removing a file doesn't edit MEMORY.md. If the index linked to it, insights
 flags the dangling link and the cousin fixes its own index.
 
+### Operator actions
+
+Under "insights" the left column has an **operator** group: what you do to
+a cousin's memory yourself, the same library calls the `cousin-memory`,
+`cousin-self-portrait`, `cousin-reason` and `cousin-callback` CLIs make.
+
+| action | what it does |
+|---|---|
+| search | the cousin's own search: keyword always, meaning when `config/embedding.toml` is set up. Each hit says which found it; a raw hit shows its entry, a file hit opens in place. Your searches are not recorded as the cousin's recall. |
+| write | remember a fact or log a decision, at a truth level. The console fills the cite with your user name and the time, plus an optional note of where it came from. |
+| tensions | topics whose live claims disagree; "retire this claim" writes an entry-level obsolete mark with your reason. |
+| review gate | the entries the gate holds; mark each keep or drop and apply. A drop has no undo and asks twice. More than two verdicts run as the cousin's long operation. |
+| history | a topic's claims, oldest first, with their valid time; a live claim can be retired here too. |
+| maintenance | distill, compact raw, compact the MEMORY.md index (preview first), reindex. Each runs as the cousin's long operation and shows its stages. |
+| self-portrait | the diff between the committed portrait and its candidate, a draft from the cousin's sources, an editor, and the commit. |
+| capsules and callbacks | the cousin's reasoning capsules and callback moments, read-only. |
+
+Some acts are a person's, and the console asks for a login before it takes
+them: a review verdict, a self-portrait commit (you also type the cousin's
+slug, and a candidate that changed since you read it is refused), and a
+change to the shared reviewer list. The operator level is the operator's
+word, so only the operator account may write it: the console has no roles,
+so that is the logged-in user whose name is the cousin's `[operator] name`
+(case aside). The same account is the only one that may retire an
+operator-level claim (or mark obsolete a topic that has a live one) and drop
+one at review. Nobody else is offered the level or those buttons.
+
+The **shared** tab also shows the reviewer list from
+`config/shared-reviewers.json`, says whether you are on it, and lets a
+reviewer edit it (with a second click; while the list is empty any
+logged-in user may start it). Each change is written to the shared audit
+with the list before and after.
+
 ## Loops
 
 One table of every loop of every cousin, plus a `context-heartbeat` row per
@@ -528,6 +615,59 @@ by one), an optional facilitator and a timeout; the meeting view shows the
 transcript, whose turn it is, and lets you post, skip the speaker or close.
 See [meetings](meetings.md).
 
+## Accounts
+
+The accounts runner cousins run on: `host` (the host's own `~/.claude`) and
+every entry in `config/accounts.toml`, with its kind, where it lives, the
+lanes it runs on and the cousins on it. No secret is ever shown: a key or
+token file reads "set (ends WXYZ)" at most.
+
+- **check**: is the account logged in, with no model call (`claude auth
+  status` under it; an opencode account's auth.json). When it is not, the
+  line that fixes it.
+- **add account / edit / remove**: the entry's kind and keys, written by the
+  validated writer (every other line of the file kept, checked by the rules
+  the runner reads it by). An edit a cousin on the account could not run
+  with is refused; remove asks you to type the name and is refused while a
+  cousin names the account.
+- **log in / keys**: per kind. A claude-login account: "log in" (the host's
+  own login asks you to tick that you mean it). A claude-token account:
+  "mint a token", or paste one. An anthropic-key account: paste the key. An
+  opencode account: per provider, paste its API key, or name an OAuth
+  method by its opencode label and "sign in". Anthropic and Claude are
+  refused on opencode.
+
+A login runs in the background with its steps shown. The sign-in URL appears
+as a link; open it and sign in. For a Claude login or token the page then
+shows a code (`code#state`): paste the whole of it into the code box that
+appears. That box is write-only, the code goes to the console once and only
+to that login, never into a chat, and a second code is refused. An opencode
+OAuth method has nothing to paste back: opencode finishes by itself, and a
+browser method only completes on the console's host (its callback goes to
+localhost), so prefer a headless or device method from elsewhere. "cancel
+login" ends it. A login belongs to the console session that started it:
+another session sees that it runs, but not its URL, and cannot send its
+code or cancel it. Editing, removing or setting a key on the account waits
+until the login ends.
+
+The logins, keys and entry changes need a logged-in console user, even on
+a console with no users file (add one with `cousin-console adduser`), and
+refuse when the console itself was started inside a cousin: a cousin never
+obtains credentials. Who started a login or wrote a key is kept in
+`data/accounts/audit.jsonl` (the name and the account, never the value).
+The page refreshes when another session changes an account.
+
+## System
+
+The install as a whole, in six tabs. The routes are in [the API reference](reference/console-api.md#system-the-system-view).
+
+- **supervisor**: every child of `cousin-supervisor` with its state, pid, restarts and the reason it gave. Start or stop the loops daemon and each runner cousin, and rescan the registry (reload). The console itself is never stopped from its own page: its row offers the console restart. Stopping the loops daemon asks twice, because every heartbeat, loop and scheduled prompt stops with it. A Telegram bridge follows its runner.
+- **schedules**: every cousin's pending one-shot prompts (`cousin-schedule`), with history on a switch. Add one for any cousin ("in 30m", "tomorrow 06:30", an ISO time) or cancel one. A cousin's own schedules are also a panel in its inspector.
+- **users**: console users. Add one, reset another user's password (your own changes in Settings, with the current one), remove one by typing its name. The last user and the one you are logged in as cannot be removed. Passwords are never shown again.
+- **backup**: back up now. Pick an absolute destination (remembered in this browser) and the cousins; each one becomes a long operation and a job, and lands in `<dest>/<slug>/<date>/`. A destination inside the install, or one other users can write without the sticky bit, is refused, and the snapshot is owner-only (`0700` directories, `0600` files). A copy that lands anywhere but its own directory fails with the path it landed at, nothing is deleted, and the event is logged in `data/system/audit.jsonl`.
+- **agent defaults**: `config/harness.toml [agent]`: `default_model`, `default_effort` and `commit_attribution`, each shown with where its value comes from. A cousin reads them when it starts, so restart one from its inspector to apply.
+- **install config**: editors for `media.toml` (with each provider's key as a write-only field), `embedding.toml`, `hive.toml`, `external-peers.toml` (with each peer's outbound and inbound token as write-only fields), `outbound-filter.json`, `law.md` and `net-allowlist.json`. Each save is checked by the file's own loader first, a number that does not parse is refused, and an emptied field removes its key; the JSON and Markdown files are backed up to `data/config-backups/` and refused if they changed since you opened them. The allowlist refuses a list that would lock out the address you are on, and offers the console restart it needs. `agent-cmd` and `worker-cmd` are shown read-only: edit them on the host.
+
 ## Settings
 
 - **cosmetic**: accent hue and saturation, chat reveal speed (off, slow,
@@ -538,6 +678,8 @@ See [meetings](meetings.md).
   service manager to start it again (about 4 seconds). Logins survive the
   restart. If it isn't running under a supervisor, it warns you that restart
   means stop. Cousins are restarted from their inspector.
+- **mcp tool registry**: the install default registry, see
+  [MCP and policy](#mcp-and-policy).
 - **account**: who you're logged in as, change password, log out. Without a
   users file it shows the `cousin-console adduser` line instead.
 
@@ -545,8 +687,7 @@ See [meetings](meetings.md).
 
 - A page can lag its store by its poll interval (2 to 15 seconds depending on
   the page). When they disagree, the store is right.
-- There's no model editor and no way to create a cousin's first login or
-  approve its MCP server from the page; those are `cousin.toml`,
-  the pane, and `cousin-mcp approve`.
+- There's no model editor and no way to create a cousin's first login from
+  the page; those are `cousin.toml` and the pane.
 - The pane is a terminal over HTTP, not a real PTY. Normal typing, arrows,
   Ctrl keys and F1 to F4 work; exotic key sequences don't.

@@ -184,3 +184,33 @@ class TestBackupCoversTheRunnerStores(HermeticCase):
                 self.assertEqual(con.execute("SELECT COUNT(*) FROM %s" % table).fetchone()[0], 1)
             finally:
                 con.close()
+
+
+
+class ExplicitTarget(unittest.TestCase):
+    """snapshot(home, target=...) writes into <target>/<date>/ and never
+    derives a directory from the cousin's own cousin.toml (the console's
+    backup names the directory it checked)."""
+
+    def test_the_target_is_used_as_given(self):
+        import tempfile
+        from datetime import date
+        from pathlib import Path
+        from cousin_lib import backup
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            (home / "memory").mkdir(parents=True)
+            (home / "cousin.toml").write_text('[cousin]\nslug = "other"\nname = "O"\n')
+            (home / "MEMORY.md").write_text("m\n")
+            target = Path(tmp) / "out" / "wren"
+            snap = backup.snapshot(home, target=target)
+            self.assertEqual(snap, target / date.today().isoformat())
+            self.assertEqual((snap / "MEMORY.md").read_text(), "m\n")
+            self.assertFalse((Path(tmp) / "out" / "other").exists())
+
+    def test_one_of_dest_root_and_target(self):
+        from cousin_lib import backup
+        with self.assertRaises(TypeError):
+            backup.snapshot("/nowhere")
+        with self.assertRaises(TypeError):
+            backup.snapshot("/nowhere", "/a", target="/b")

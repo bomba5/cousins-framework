@@ -217,6 +217,37 @@ class TestProjectSettings(ProvisionCase):
         self.assertEqual(rc, 0, err)
         self.assertEqual(path.read_text(), first)
 
+    def test_create_refuses_a_non_boolean_install_commit_attribution(self):
+        # tracker #112, Critical 2, the create path (not just repair):
+        # create_cousin's own SpawnError conversion already catches
+        # anything apply_project_settings raises; this proves a bad
+        # commit_attribution rides that same path, home removed.
+        root = self._framework_root()
+        (root / "config" / "harness.toml").write_text(
+            '[agent]\ncommit_attribution = "off"\n')
+        rc, _out, err = self._main(
+            ["testa", "--root", str(root), "--role", "test cousin",
+             "--voice", "Plain and helpful.", "--port", "8100"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+        self.assertFalse((root / "cousins" / "testa").exists())
+
+    def test_repair_settings_refuses_a_non_boolean_commit_attribution(self):
+        # tracker #112, Critical 2: surfaced the way spawn's other
+        # config errors are (exit 2, printed, nothing written).
+        root = self._framework_root()
+        home = self._create(root)["home"]
+        toml_path = home / "cousin.toml"
+        toml_path.write_text(
+            toml_path.read_text() + '\n[agent]\ncommit_attribution = "off"\n')
+        path = home / ".claude" / "settings.json"
+        before = path.read_text()
+        rc, _out, err = self._main(["testa", "--root", str(root),
+                                    "--repair-settings"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+        self.assertEqual(path.read_text(), before)
+
     def test_repair_settings_on_an_unknown_slug_is_a_usage_error(self):
         root = self._framework_root()
         rc, _out, err = self._main(["ghost", "--root", str(root),

@@ -182,7 +182,8 @@ class SdkRunner:
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
                  effort=None, cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
-                 session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None):
+                 session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None,
+                 commit_attribution=None):
         self.home = Path(home)
         # Which rows this session claims (phase 8): claim_kinds None is every
         # kind but exclude_kinds; a side session names its own kind.
@@ -271,6 +272,13 @@ class SdkRunner:
         slug, name = self._identity()
         from cousin_lib.runner.main import root_for
         self.root = root_for(self.home)
+        # [agent] commit_attribution (tracker #112; runner_for checked it,
+        # like effort): resolved once here, not per options() call, so a
+        # cousin.toml edited mid-session never changes it mid-turn. A
+        # caller that builds a runner directly (most tests) leaves it
+        # unset and gets it resolved from cousin.toml / config/harness.toml.
+        self.commit_attribution = (self._commit_attribution() if commit_attribution is None
+                                   else bool(commit_attribution))
         self.tool_context = tools.ToolContext(home=self.home, slug=slug, name=name,
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
@@ -369,7 +377,7 @@ class SdkRunner:
                                       effort=self.effort,
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
-                                      settings=_attribution_settings(self._commit_attribution()),
+                                      settings=_attribution_settings(self.commit_attribution),
                                       system_prompt=system_prompt, session_store=self.session_store,
                                       # alwaysLoad: the CLI would defer these behind its
                                       # tool search, so a cousin's first memory, send or

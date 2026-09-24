@@ -325,17 +325,31 @@ def commit_attribution(root, agent_table=None):
     `_agent_table` and runner/sdk.py's `_agent_value` already read it.
     Unset anywhere: True, which keeps the CLI's stock behaviour - the
     framework is public and does not impose one operator's attribution
-    policy on every install."""
-    own = (agent_table or {}).get("commit_attribution")
-    if own is not None:
-        return bool(own)
+    policy on every install. Set but not a real boolean, at either
+    level: MissingConfigError naming the file, the key and the value -
+    bool() coerces "false" (the string) to True, and a value that loud
+    a mistake must never silently win."""
+    agent_table = agent_table or {}
+    if "commit_attribution" in agent_table:
+        own = agent_table["commit_attribution"]
+        if not isinstance(own, bool):
+            raise MissingConfigError(
+                "cousin.toml [agent] commit_attribution must be true or"
+                " false, got %r" % (own,))
+        return own
     data = _read_harness_toml(root) or {}
     agent = data.get("agent") or {}
     if not isinstance(agent, dict):
         raise MissingConfigError(
             "config/harness.toml [agent] must be a table")
-    install = agent.get("commit_attribution")
-    return True if install is None else bool(install)
+    if "commit_attribution" in agent:
+        install = agent["commit_attribution"]
+        if not isinstance(install, bool):
+            raise MissingConfigError(
+                "config/harness.toml [agent] commit_attribution must be"
+                " true or false, got %r" % (install,))
+        return install
+    return True
 
 
 def harness_config(root):

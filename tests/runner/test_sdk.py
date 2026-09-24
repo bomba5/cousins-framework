@@ -362,6 +362,24 @@ class TestSdkRunner(HermeticCase):
         r, _ = self._runner([])
         self.assertIsNone(r.options().settings)
 
+    def test_the_real_transport_puts_it_on_the_cli_argv(self):
+        # Not the SDK's own dataclass, the actual argv SubprocessCLITransport
+        # would exec: options.settings is a free-form field several SDK
+        # layers could still drop before it reaches the CLI (review round 1
+        # minor). _cli_path is set by hand so _build_command runs without
+        # connect()'s real CLI discovery / subprocess spawn.
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + "commit_attribution = false\n")
+        r, _ = self._runner([])
+        transport = SubprocessCLITransport("hi", r.options())
+        transport._cli_path = "/bin/true"
+        argv = transport._build_command()
+        self.assertIn("--settings", argv)
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        self.assertIs(settings["includeCoAuthoredBy"], False)
+        self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
+
     # -- one turn ----------------------------------------------------------------
     def test_a_turn_records_init_text_tool_and_result_and_closes_the_row(self):
         r, made = self._runner([[init_msg("none"), assistant(tool="Bash"),

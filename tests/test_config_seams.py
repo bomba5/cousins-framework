@@ -211,6 +211,35 @@ class CommitAttributionSeam(unittest.TestCase):
         root = self._root('[agent]\ncommit_attribution = false\n')
         self.assertIs(config.commit_attribution(root, {"runner": "sdk"}), False)
 
+    def test_a_non_boolean_install_value_is_loud_not_coerced(self):
+        # "false" the string is truthy under bool(); it must never win
+        for text in ('[agent]\ncommit_attribution = "false"\n',
+                    '[agent]\ncommit_attribution = 0\n',
+                    '[agent]\ncommit_attribution = 1\n',
+                    '[agent]\ncommit_attribution = ["false"]\n',
+                    '[agent]\ncommit_attribution = {x = 1}\n'):
+            root = self._root(text)
+            with self.assertRaises(config.MissingConfigError):
+                config.commit_attribution(root)
+
+    def test_a_non_boolean_cousin_value_is_loud_not_coerced(self):
+        root = self._root()
+        for bad in ("false", 0, 1, ["false"], {"x": 1}):
+            with self.assertRaises(config.MissingConfigError):
+                config.commit_attribution(root, {"commit_attribution": bad})
+
+    def test_cousin_type_error_names_cousin_toml_not_the_install_file(self):
+        root = self._root('[agent]\ncommit_attribution = false\n')
+        with self.assertRaises(config.MissingConfigError) as cm:
+            config.commit_attribution(root, {"commit_attribution": "nope"})
+        self.assertIn("cousin.toml", str(cm.exception))
+
+    def test_install_type_error_names_harness_toml(self):
+        root = self._root('[agent]\ncommit_attribution = "nope"\n')
+        with self.assertRaises(config.MissingConfigError) as cm:
+            config.commit_attribution(root)
+        self.assertIn("config/harness.toml", str(cm.exception))
+
 
 class TestClaudeCodePreset(unittest.TestCase):
     """The shipped Claude Code preset (config/harness.toml.claude-code.example).

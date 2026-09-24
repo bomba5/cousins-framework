@@ -317,6 +317,37 @@ class TestAuthLane(HermeticCase):
         self.assertEqual(rc, 2)
         self.assertIn("effort", err)
 
+    def test_a_non_boolean_cousin_commit_attribution_is_exit_2_at_start(self):
+        # tracker #112, Critical 2: bool("false") is True, so this must
+        # be refused, not silently accepted, at the same runner-start
+        # point as an effort the CLI would refuse.
+        home = temp_home(self, runner="sdk")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + 'commit_attribution = "off"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+        self.assertIn("cousin.toml", err)
+
+    def test_a_non_boolean_install_commit_attribution_is_exit_2_at_start(self):
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "config" / "harness.toml").write_text(
+            '[agent]\ncommit_attribution = "off"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+        self.assertIn("config/harness.toml", err)
+
+    def test_a_non_boolean_commit_attribution_is_exit_2_for_a_fake_runner_too(self):
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + 'commit_attribution = "off"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+
 
 class TestAccountBeforeTheLock(HermeticCase):
     def test_a_secret_open_to_others_is_exit_2_before_the_lock(self):

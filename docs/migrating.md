@@ -5,7 +5,9 @@ its chat history, and, if you ran cousins on other machines under an older
 framework, the hive's tokens and memory. It assumes the target install is
 done and working ([install](install.md)).
 
-There are two cases, and they go differently:
+There are two cases, and they go differently (moving a cousin already
+here from the tmux lane to the SDK runner is its own section,
+[below](#from-the-tmux-lane-to-the-sdk-runner)):
 
 - **The cousin already runs on this framework**, on another machine or in
   another root. The home has the right shape. You copy it across.
@@ -229,6 +231,113 @@ a containerised cousin runs on a named account whose config dir is inside
 it.
 
 See [configuration](configuration.md) for the accounts file.
+
+## From the tmux lane to the SDK runner
+
+A cousin on this framework runs on the tmux lane until you move it: an
+upgrade, a merge or a restart never changes the lane its `cousin.toml` names.
+`cousin-migrate` moves one cousin at a time, and every step it takes is
+recorded and can be undone. The fleet goes in this order:
+
+1. **A test cousin.** Spawn a throwaway one on the tmux lane
+   (`cousin-spawn testa --role "migration test"`), talk to it, then migrate
+   it. Nothing is at stake, so this is where a surprise should happen.
+2. **One low-stakes cousin.** One whose work can wait a day.
+3. **Observe two days.** Leave it on the runner, use it as usual, and run
+   `cousin-migrate check` on it each day. Move on only when both days are
+   clean.
+4. **The rest, one at a time.** One migration, one `check` the next day,
+   then the next cousin. Never two in flight.
+5. **The engineer cousin last.** The one that works on the framework itself
+   goes after the rest have run a week, so the cousin you would call to fix
+   a migration is still on the lane you know.
+
+### One cousin
+
+Before you start: after the upgrade that brings `cousin-migrate`, reinstall
+the framework into the install's venv (`pip install -e '.[sdk]'` from the
+checkout) so the new command is on PATH and the SDK is installed. A
+`cousin-supervisor` runs for the install (it starts the runner), the
+cousin's account is logged in (`cousin-account status <account>`), and the
+cousin is running on the tmux lane: migrating a stopped cousin would start
+it, so start it first or leave it for later. The plan checks all of that:
+
+```
+cousin-migrate plan wren --account team
+#   ok  lane       on the tmux lane
+#   ok  running    its tmux session is up
+#   ok  record     no migration in progress
+#   ok  account    account=team kind=claude-login loggedIn=True method=claude.ai
+#   ok  supervisor a cousin-supervisor answers for /srv/fw
+#   ok  sdk        claude-agent-sdk is installed
+#   ok  import     3 auto-memory file(s) to fold in
+# steps: close -> import -> toml -> start -> verify
+# wren: ready (run: cousin-migrate apply wren --yes)
+```
+
+`plan` writes nothing. Leave out `--account` and the cousin runs on the
+host's own login. When the plan says ready, and at a moment the cousin is
+between tasks:
+
+```
+cousin-migrate apply wren --account team --yes
+```
+
+It saves the current `cousin.toml` (its exact bytes and mode) in
+`data/migration.json`, then:
+
+| step | what happens |
+|---|---|
+| `close` | a clean stop of the tmux session: the cousin writes its handoff, the transcript is mined, the generation moves on |
+| `import` | Claude Code's own memory for the cousin is folded into `memory/imported/auto/` (`cousin-memory import-auto --apply`), with a recall baseline first |
+| `toml` | `[agent] runner = "sdk"`, and `account` when you named one; nothing else in the file changes. Refused if the tmux session came back meanwhile (a scheduled flip, a console start) |
+| `start` | the migration day's boot packet is set aside (the runner starts on its own digest), the supervisor starts the cousin's runner, and the cousin's chat server is started: the supervisor runs none, and other cousins' messages reach the inbox through it |
+| `verify` | the runner stays up and holds its lock for 10 seconds, and the chat server answers `/health` for the cousin |
+
+It stops at the first step that fails and says so. The runner's first
+session starts fresh, on a digest of the cousin's state.
+
+Then check it, the same day and each day after:
+
+1. It answers a chat message, and `cousin-watch wren` shows the turn.
+2. Another cousin's message reaches it: `cousin-chat send wren "ping"`
+   from a peer (or your shell) lands in its inbox and gets an answer.
+3. `cousin-memory import-auto --verify` (with `COUSIN_HOME` set) finds no
+   recall that got worse.
+4. `cousin-migrate check wren` says `ok`: since the migration, no inbox
+   row open for more than an hour, every tool call has a recorded result,
+   no recorder hook failed, and the chat server answers. The supervisor
+   runs no chat server: `cousin-chat-watchdog` (its timer) brings a runner
+   cousin's back after a reboot or a crash, so keep that timer on.
+
+### Rolling back
+
+```
+cousin-migrate rollback wren --yes
+```
+
+It undoes the steps `apply` got through, and only those. It stops the
+runner and waits until it has let go of its lock, puts the saved
+`cousin.toml` back byte for byte, has the supervisor rescan, writes a fresh
+boot packet from the cousin's state now, starts the tmux session (unless it
+is already up) and releases the supervisor's hold on the runner. If
+`apply` failed before `toml`, it changes nothing but the record. A step
+that fails is written into `data/migration.json` and reported; fix what it
+names and run `rollback` again. It
+refuses a second rollback, inbox rows that still wait (nothing on the tmux
+lane reads the inbox: let them finish, or pass `--force`, and they stay in
+`data/inbox.db`) and an inbox it cannot read. What the migration imported
+stays in `memory/imported/auto/`; it does no harm on the tmux lane.
+Entries the review gate still holds have no reviewer on the tmux lane:
+settle them with `cousin-memory review`. After a rollback, `plan` and
+`apply` work again.
+
+By hand, if `cousin-migrate` itself is the problem: `cousin-supervisor stop
+wren` and wait until `cousin-supervisor status` shows it `stopped`, put the
+old file back (its bytes are `prior_toml_b64` in `data/migration.json`, or
+set `runner = "tmux"` in the `[agent]` table), delete
+`data/pending-boot.json` if one is there (the tmux session would boot on an
+old packet otherwise), then `cousin-spawn wren --start`.
 
 ## Checking it
 

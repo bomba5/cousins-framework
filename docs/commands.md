@@ -281,7 +281,8 @@ anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]`
 is the week's measure, from the migration on by default: inbox rows not
 done after an hour, tool calls with no recorded result, recorder hooks that
 failed, an unreadable inbox, a chat server that does not answer; exit 0
-clean, 1 not.
+clean, 1 not. The runbook, with the fleet's order and the rollback, is in
+[migrating](migrating.md#from-the-tmux-lane-to-the-sdk-runner).
 
 ```
 cousin-migrate plan wren --account team

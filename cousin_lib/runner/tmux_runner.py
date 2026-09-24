@@ -229,9 +229,8 @@ class TmuxRunner:
     def _env_base(self):
         try:
             from cousin_lib.runner import tmux_launch
-        except ImportError:
-            keep = ("HOME", "PATH", "USER", "LOGNAME", "LANG", "TERM")
-            return {k: os.environ[k] for k in keep if k in os.environ}
+        except ImportError:          # names only: the pane's login shell supplies the values
+            return ("HOME", "PATH", "USER", "LOGNAME", "LANG")
         return tmux_launch.env_base(dict(os.environ))
 
     def _open_session(self):
@@ -287,7 +286,7 @@ class TmuxRunner:
             entries, _ = transcript.read_from(self._path, int(c.get("offset") or 0))
             nonces = set(c.get("nonces") or ())
             start = next((i for i, e in enumerate(entries)
-                          if e.kind == "turn_start" and e.nonce in nonces), None)
+                          if transcript.turn_nonce(e, nonces)), None)
             if start is None:
                 continue                         # untaken: already requeued above
             end = next((e for e in entries[start + 1:]
@@ -296,7 +295,8 @@ class TmuxRunner:
                 if how == "adopted" and self.inbox.claim_id(row["id"], claimant=self.runner_id):
                     self._claims[row["id"]] = {"row": row, "nonces": sorted(nonces),
                                                "offset": int(c.get("offset") or 0),
-                                               "taken": {"prompt_id": entries[start].prompt_id},
+                                               "taken": {"prompt_id": entries[start].prompt_id,
+                                                         "at": time.time()},
                                                "typed_at": time.monotonic()}
                     self._live = {"rows": [row], "prompt_id": entries[start].prompt_id, "who": "row"}
                     continue
@@ -354,7 +354,21 @@ class TmuxRunner:
             self._cursor = cursor
             self._persist_cursor()
 
+    def _known_nonces(self):
+        known = set(self._runner_nonces)
+        for c in self._claims.values():
+            if c["taken"] is None:
+                known |= set(c["nonces"])
+        return known
+
     def _handle(self, e):
+        if e.kind == "other" and "_unparsed" in e.raw:
+            nonce = transcript.turn_nonce(e, self._known_nonces())
+            if nonce is None:
+                return
+            # a torn line merged with a turn start (P11-9): that turn started
+            self.stream.append("error", {"error": "torn transcript line holding [inbox:%s]" % nonce})
+            e = transcript.Entry(e.offset, e.end, "turn_start", nonce=nonce, raw={})
         if e.kind == "turn_start":
             if self._live is not None:                  # "send now": the live turn was cut
                 self._end_turn(interrupted=True)
@@ -384,7 +398,8 @@ class TmuxRunner:
         return None
 
     def _begin_turn(self, e):
-        text = blocks.user_events((e.raw.get("message") or {}).get("content"))[0][1]["text"]
+        content = (e.raw.get("message") or {}).get("content")
+        text = blocks.user_events(content)[0][1]["text"] if content else "[inbox:%s]" % e.nonce
         inbox_id = self._row_for_nonce(e.nonce) if e.nonce else None
         if inbox_id is not None and self._claims[inbox_id]["taken"] is None:
             c = self._claims[inbox_id]

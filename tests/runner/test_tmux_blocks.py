@@ -51,7 +51,10 @@ except ImportError:                                   # pragma: no cover - CI ru
     AssistantMessage = None
 
 
-@unittest.skipIf(AssistantMessage is None, "claude_agent_sdk is not installed (the sdk extra)")
+# CI installs no sdk extra, so this parity check runs only where the SDK is
+# installed (the reference host, a release gate run); in CI it is a skip.
+@unittest.skipIf(AssistantMessage is None, "claude_agent_sdk is not installed (the sdk extra): "
+                 "the parity check runs on hosts with the SDK, never in CI")
 class TestParityWithTheSdkRunner(unittest.TestCase):
     """The SDK runner's `_record` and blocks.* give the same events for the
     same content (the tmux kind reads dicts, the SDK lane objects)."""

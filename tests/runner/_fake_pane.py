@@ -46,7 +46,7 @@ class FakePane:
         return 4242 if self._alive else None
 
     def start(self, argv, *, cwd, env_base):
-        self.started.append((list(argv), cwd, dict(env_base)))
+        self.started.append((list(argv), cwd, sorted(env_base)))   # names only, as the real pane
         self.transcript.parent.mkdir(parents=True, exist_ok=True)
         self.transcript.touch()
         self._alive = True

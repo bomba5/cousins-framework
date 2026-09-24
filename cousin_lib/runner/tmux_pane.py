@@ -4,7 +4,12 @@ Claude Code in a tmux session on the framework's own socket.
 What it may do is narrow on purpose. It starts the CLI with an
 allowlisted environment set INSIDE the pane (`exec env -i ...`), because
 tmux runs a command through the login shell, which rebuilds the
-environment (phase 11 findings S0+). It types a row as one typed line
+environment (phase 11 findings S0+). Only variable NAMES reach tmux: each
+is expanded by that login shell (`${NAME+"NAME=$NAME"}`), so no value, and
+no secret, is ever on a tmux command line (`#{pane_start_command}` keeps it
+for the pane's life); a denied name (DENY_PREFIXES, accounts.AUTH_VARS) is
+refused. The framework's server starts with `-f /dev/null`, so no
+~/.tmux.conf changes its shell or its window size. It types a row as one typed line
 (the sender's own words, outside `<pasted_content>`) plus a bracketed
 paste of the body, and never into a screen that is waiting on a person:
 the trust dialog, onboarding, the login menu (whose option 2 is API
@@ -16,6 +21,7 @@ so an attached terminal cannot change what it parses.
 It never decides whether a prompt was received: that is the transcript's
 (runner/transcript.py)."""
 import enum
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -25,6 +31,11 @@ WIDTH, HEIGHT = 200, 50
 KEYS = ("Escape", "C-u", "Enter")
 QUEUED_HINT = "Press up to edit queued messages"
 PROMPT = "❯ "
+# The hard deny (R3, P11-12), in ONE place: tmux_launch imports it. A name
+# with one of these prefixes, or in accounts.AUTH_VARS, never enters the
+# pane's environment from the shell; the launcher adds only the account's own.
+DENY_PREFIXES = ("CLAUDE", "ANTHROPIC")      # CLAUDECODE, CLAUDE_AGENT_SDK_* included
+_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RULE_CHAR = "─"
 
 # (id, substrings that must all appear); `rewind` is the only one the
@@ -41,6 +52,25 @@ ATTENTION = (
     ("limit", ("extra usage",)),
     ("rewind", ("Enter to continue", "(current)")),
 )
+
+
+def denied(name):
+    from cousin_lib import accounts
+    return name.startswith(DENY_PREFIXES) or name in accounts.AUTH_VARS
+
+
+def env_command(names, argv):
+    """The pane's command: `exec env -i` with each allowlisted NAME expanded
+    by the pane's login shell (an unset name is left out), plus TERM from
+    tmux, then argv. Raises ValueError on a denied or malformed name."""
+    names = [n for n in dict.fromkeys(names) if n != "TERM"]
+    for n in names:
+        if not _NAME.match(n):
+            raise ValueError("not a variable name: %r" % (n,))
+        if denied(n):
+            raise ValueError("%s is denied in the pane's environment (R3)" % n)
+    words = ['${%s+"%s=$%s"}' % (n, n, n) for n in names + ["TERM"]]
+    return "exec env -i " + " ".join(words + [shlex.quote(a) for a in argv])
 
 
 class Outcome(enum.Enum):
@@ -93,8 +123,14 @@ class TmuxPane:
         self.timeout = timeout
 
     def _tmux(self, *args, input=None):
-        return subprocess.run([self.tmux_bin, "-S", str(self.socket), *args], capture_output=True,
-                              text=True, input=input, timeout=self.timeout, check=False)
+        """One tmux call; a hung or missing tmux is a failed call (rc -1),
+        never a raise, so stop and interrupt survive it."""
+        argv = [self.tmux_bin, "-f", "/dev/null", "-S", str(self.socket), *args]
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, input=input,
+                                  timeout=self.timeout, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return subprocess.CompletedProcess(argv, -1, "", "%s: %s" % (type(exc).__name__, exc))
 
     def _session(self):
         """A session target, exact match (has-session, kill-session)."""
@@ -108,10 +144,7 @@ class TmuxPane:
         return "=" + self.name + ":"
 
     def alive(self):
-        try:
-            return self._tmux("has-session", "-t", self._session()).returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            return False
+        return self._tmux("has-session", "-t", self._session()).returncode == 0
 
     def pid(self):
         r = self._tmux("display-message", "-p", "-t", self._target(), "#{pane_pid}")
@@ -121,54 +154,66 @@ class TmuxPane:
             return None
 
     def start(self, argv, *, cwd, env_base):
+        """`env_base` is the allowlist of NAMES (a dict's keys; its values
+        are never used): the pane's login shell supplies the values."""
+        command = env_command(sorted(env_base), argv)
         self.socket.parent.mkdir(parents=True, exist_ok=True)
         self.socket.parent.chmod(0o700)
-        env = ["%s=%s" % (k, v) for k, v in sorted(env_base.items())]
-        command = "exec env -i " + shlex.join(env + list(argv))
-        r = self._tmux("new-session", "-d", "-s", self.name, "-x", str(self.width),
-                       "-y", str(self.height), "-c", str(cwd), command)
-        if r.returncode != 0:
-            raise OSError("tmux new-session failed (rc=%d): %s" % (r.returncode, (r.stderr or "").strip()[:200]))
-        self._tmux("set-option", "-t", self._target(), "window-size", "manual")
-        self._tmux("resize-window", "-t", self._target(), "-x", str(self.width), "-y", str(self.height))
+        for args in (("new-session", "-d", "-s", self.name, "-x", str(self.width),
+                      "-y", str(self.height), "-c", str(cwd), command),
+                     ("set-option", "-t", self._target(), "window-size", "manual"),
+                     ("resize-window", "-t", self._target(), "-x", str(self.width), "-y", str(self.height))):
+            r = self._tmux(*args)
+            if r.returncode != 0:     # the fixed size is what the screen parsers rely on (R25)
+                raise OSError("tmux %s failed (rc=%d): %s" % (args[0], r.returncode,
+                                                             (r.stderr or "").strip()[:200]))
 
     def kill(self):
         self._tmux("kill-session", "-t", self._session())
 
     def capture(self):
+        """The screen, or None when there is no pane to read."""
         r = self._tmux("capture-pane", "-p", "-t", self._target())
-        return (r.stdout or "") if r.returncode == 0 else ""
+        return (r.stdout or "") if r.returncode == 0 else None
 
     def box_text(self):
-        return box_in(self.capture())
+        screen = self.capture()
+        return None if screen is None else box_in(screen)
 
     def queued(self):
-        return QUEUED_HINT in self.capture()
+        return QUEUED_HINT in (self.capture() or "")
 
     def attention(self):
-        return attention_in(self.capture())
+        return attention_in(self.capture() or "")
 
     def type_row(self, first_line, body):
         """Type `first_line` as keys, paste `body` bracketed after a blank
         line, press Enter. BLOCKED (nothing sent) on an attention screen, a
-        box that is not empty, or queued input; FAILED when tmux fails."""
-        try:
-            screen = self.capture()
-            if attention_in(screen) or box_in(screen) != "" or QUEUED_HINT in screen:
-                return Outcome.BLOCKED
-            if self._tmux("send-keys", "-t", self._target(), "-l", first_line).returncode != 0:
-                return Outcome.FAILED
-            if body:
-                buf = "cousin-%s" % self.name
-                if self._tmux("load-buffer", "-b", buf, "-", input="\n\n" + body).returncode != 0:
-                    return Outcome.FAILED
-                if self._tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", self._target()).returncode != 0:
-                    return Outcome.FAILED
-            if self._tmux("send-keys", "-t", self._target(), "Enter").returncode != 0:
-                return Outcome.FAILED
-            return Outcome.TYPED
-        except (OSError, subprocess.SubprocessError):
+        box that is not empty, or queued input; FAILED when there is no pane
+        to read, the first line holds a newline (it would submit early), or
+        tmux fails; a failure after the first key clears the box (C-u), so
+        the next row is not blocked by the leftovers."""
+        if "\n" in first_line or "\r" in first_line:
             return Outcome.FAILED
+        screen = self.capture()
+        if screen is None:
+            return Outcome.FAILED
+        if attention_in(screen) or box_in(screen) != "" or QUEUED_HINT in screen:
+            return Outcome.BLOCKED
+        if self._tmux("send-keys", "-t", self._target(), "-l", first_line).returncode != 0:
+            self.clear()
+            return Outcome.FAILED
+        steps = []
+        if body:
+            buf = "cousin-%s" % self.name
+            steps += [(("load-buffer", "-b", buf, "-"), "\n\n" + body),
+                      (("paste-buffer", "-p", "-d", "-b", buf, "-t", self._target()), None)]
+        steps.append((("send-keys", "-t", self._target(), "Enter"), None))
+        for args, stdin in steps:
+            if self._tmux(*args, input=stdin).returncode != 0:
+                self.clear()
+                return Outcome.FAILED
+        return Outcome.TYPED
 
     def key(self, name):
         if name not in KEYS:

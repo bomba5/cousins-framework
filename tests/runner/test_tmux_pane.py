@@ -45,6 +45,9 @@ import json, os, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_TMUX_LOG"], "a") as fh:
     fh.write(json.dumps(args) + "\\n")
+if os.environ.get("FAKE_TMUX_SLEEP"):
+    import time
+    time.sleep(float(os.environ["FAKE_TMUX_SLEEP"]))
 fail = os.environ.get("FAKE_TMUX_FAIL", "")
 sub = next((a for a in args if a in ("has-session", "display-message", "capture-pane", "new-session",
             "kill-session", "send-keys", "load-buffer", "paste-buffer", "set-option", "resize-window")), "")
@@ -80,7 +83,7 @@ class PaneCase(unittest.TestCase):
         self.screen = self.dir / "screen"
         self.screen.write_text(IDLE)
         self.env = {"FAKE_TMUX_LOG": str(self.log), "FAKE_TMUX_SCREEN": str(self.screen)}
-        old = {k: os.environ.get(k) for k in list(self.env) + ["FAKE_TMUX_FAIL", "FAKE_TMUX_HAS"]}
+        old = {k: os.environ.get(k) for k in list(self.env) + ["FAKE_TMUX_FAIL", "FAKE_TMUX_HAS", "FAKE_TMUX_SLEEP"]}
         os.environ.update(self.env)
         os.environ.pop("FAKE_TMUX_FAIL", None)
 
@@ -100,7 +103,7 @@ class PaneCase(unittest.TestCase):
         return [json.loads(l) for l in self.log.read_text().splitlines()]
 
     def subs(self):
-        return [next(a for a in c if not a.startswith("-") and a not in (str(self.sock),)) for c in self.calls()]
+        return [next(a for a in c if not a.startswith("-") and a not in (str(self.sock), "/dev/null")) for c in self.calls()]
 
 
 class TestStart(PaneCase):
@@ -109,14 +112,35 @@ class TestStart(PaneCase):
                         cwd="/h/wren", env_base={"HOME": "/h", "PATH": "/bin", "LANG": "C.UTF-8"})
         self.assertEqual(stat.S_IMODE(self.sock.parent.stat().st_mode), 0o700)
         new = next(c for c in self.calls() if "new-session" in c)
-        self.assertEqual(new[:2], ["-S", str(self.sock)])
+        self.assertEqual(new[:4], ["-f", "/dev/null", "-S", str(self.sock)])
         self.assertIn("-c", new)
         self.assertEqual(new[new.index("-c") + 1], "/h/wren")
         command = new[-1]
         self.assertTrue(command.startswith("exec env -i "), command)
-        self.assertIn("HOME=/h", command)
+        self.assertIn('${HOME+"HOME=$HOME"}', command)
+        self.assertIn('${TERM+"TERM=$TERM"}', command)
+        self.assertNotIn("/h ", command)
         self.assertIn("/abs/tmux_launch.py", command)
         self.assertTrue(any("window-size" in c and "manual" in c for c in self.calls()))
+
+    def test_no_value_ever_reaches_the_tmux_command_line(self):
+        self.pane.start(["claude"], cwd="/h", env_base={"HOME": "/h/secret-home",
+                                                         "FAKE_SECRET": "s3cr3t-value"})
+        for call in self.calls():
+            self.assertFalse(any("s3cr3t-value" in a or "/h/secret-home" in a for a in call), call)
+
+    def test_a_denied_name_is_refused_before_tmux_runs(self):
+        for name in ("ANTHROPIC_API_KEY", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+                     "CLAUDE_AGENT_SDK_VERSION", "AWS_BEARER_TOKEN_BEDROCK"):
+            with self.assertRaises(ValueError, msg=name):
+                self.pane.start(["claude"], cwd="/h", env_base={"HOME": "/h", name: "x"})
+        self.assertEqual(self.calls(), [])
+
+    def test_a_failed_size_pin_fails_the_start(self):
+        for sub in ("set-option", "resize-window"):
+            os.environ["FAKE_TMUX_FAIL"] = sub
+            with self.assertRaises(OSError, msg=sub):
+                self.pane.start(["claude"], cwd="/h", env_base=())
 
     def test_alive_pid_kill(self):
         self.assertTrue(self.pane.alive())
@@ -194,6 +218,36 @@ class TestTyping(PaneCase):
     def test_a_tmux_failure_is_failed(self):
         os.environ["FAKE_TMUX_FAIL"] = "send-keys"
         self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", ""), tp.Outcome.FAILED)
+
+    def test_a_dead_pane_fails_the_row_never_blocks_it(self):
+        os.environ["FAKE_TMUX_FAIL"] = "capture-pane"
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.FAILED)
+        self.assertFalse(any("send-keys" in c for c in self.calls()))
+        self.assertEqual((self.pane.box_text(), self.pane.attention(), self.pane.queued()),
+                         (None, None, False))
+
+    def test_a_failure_after_the_first_key_clears_the_box(self):
+        for sub in ("load-buffer", "paste-buffer"):
+            os.environ["FAKE_TMUX_FAIL"] = sub
+            self.log.write_text("")
+            self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.FAILED)
+            self.assertEqual(self.calls()[-1][-1], "C-u", sub)
+
+    def test_a_newline_in_the_first_line_is_refused(self):
+        self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x\ny", ""), tp.Outcome.FAILED)
+        self.assertFalse(any("send-keys" in c for c in self.calls()))
+
+    def test_a_hung_tmux_never_raises(self):
+        os.environ["FAKE_TMUX_SLEEP"] = "2"
+        pane = tp.TmuxPane(self.sock, "tmux-wren", tmux_bin=str(self.tmux), timeout=0.2)
+        self.assertFalse(pane.alive())
+        self.assertIsNone(pane.pid())
+        self.assertIsNone(pane.capture())
+        pane.kill()
+        pane.key("Escape")
+        self.assertEqual(pane.type_row("[inbox:0123456789ab] x", ""), tp.Outcome.FAILED)
+        with self.assertRaises(OSError):
+            pane.start(["claude"], cwd="/h", env_base=())
 
     def test_keys_are_an_allowlist_and_clear_is_ctrl_u(self):
         self.pane.clear()

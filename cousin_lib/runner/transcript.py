@@ -20,7 +20,10 @@ The shapes are the ones measured on Claude Code 2.1.281 in a tmux pane
   measured) is a limit, any other a failure.
 
 A reader resumes from a byte offset and never passes a partial last line,
-so a torn write (a SIGKILL mid-line) is read once it is complete."""
+so a torn write (a SIGKILL mid-line) is read once it is complete. A torn
+line the CLI then appends to merges with the next entry into one line
+that does not parse; `turn_nonce` still finds a KNOWN nonce in it, at the
+start of a JSON string (R7, P11-9), so the row it names is not typed twice."""
 import json
 import re
 from dataclasses import dataclass, field
@@ -30,6 +33,7 @@ from cousin_lib.config import expand_harness_path
 
 LIMIT_WORDS = ("usage limit", "limit reached", "resets at")
 NONCE_RE = re.compile(r"^\[inbox:([0-9a-f]{12})\]")
+RAW_NONCE_RE = re.compile(r'"\[inbox:([0-9a-f]{12})\]')   # a nonce opening a JSON string
 INTERRUPT_PREFIX = "[Request interrupted by user"
 TURN_SOURCES = ("typed", "queued")
 
@@ -90,14 +94,33 @@ def classify(obj, offset, end):
             return Entry(offset, end, "tool_result", prompt_id=prompt_id, raw=obj)
         texts = _texts(content)
         first = texts[0] if texts else ""
-        if first.startswith(INTERRUPT_PREFIX):
-            return Entry(offset, end, "interrupt", prompt_id=prompt_id, raw=obj)
         source = obj.get("promptSource")
-        if source in TURN_SOURCES and texts and not obj.get("isMeta"):
+        # a turn start first: the interrupt entry carries no promptSource
+        # (measured), so a typed prompt that opens with its text stays a prompt
+        if source in TURN_SOURCES and any(t.strip() for t in texts) and not obj.get("isMeta"):
             m = NONCE_RE.match(first.split("\n", 1)[0])
             return Entry(offset, end, "turn_start", prompt_id=prompt_id, prompt_source=source,
                          nonce=m.group(1) if m else None, raw=obj)
+        if first.startswith(INTERRUPT_PREFIX):
+            return Entry(offset, end, "interrupt", prompt_id=prompt_id, raw=obj)
     return Entry(offset, end, "other", prompt_id=prompt_id, raw=obj)
+
+
+def raw_nonces(entry, known):
+    """The KNOWN nonces in a line that did not parse, each at the start of
+    a JSON string, in order (R7, P11-9); [] for a parsed entry."""
+    text = entry.raw.get("_unparsed") if isinstance(entry.raw, dict) else None
+    if not text:
+        return []
+    return [n for n in RAW_NONCE_RE.findall(text) if n in known]
+
+
+def turn_nonce(entry, known):
+    """The known nonce a turn start names, or one a merged torn line holds."""
+    if entry.kind == "turn_start":
+        return entry.nonce if entry.nonce in known else None
+    found = raw_nonces(entry, known)
+    return found[-1] if found else None
 
 
 def read_from(path, offset):

@@ -76,7 +76,7 @@ class TestClassify(unittest.TestCase):
         meta = typed("<local-command-stdout>ok</local-command-stdout>")
         meta["isMeta"] = True
         self.assertEqual(self.c(meta).kind, "other")
-        sdk_era = {"type": "user", "entrypoint": "sdk-py",
+        sdk_era = {"type": "user", "entrypoint": "sdk-py", "promptSource": "sdk",
                    "message": {"role": "user", "content": "[inbox:%s] from the SDK lane" % NONCE}}
         self.assertEqual(self.c(sdk_era).kind, "other")
 
@@ -85,6 +85,13 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(self.c(interrupt(text="[Request interrupted by user for tool use]")).kind,
                          "interrupt")
         self.assertEqual(self.c(interrupt()).prompt_id, "p1")
+
+    def test_an_empty_typed_prompt_is_not_a_turn_start(self):
+        self.assertEqual(self.c(typed("  ")).kind, "other")
+
+    def test_a_typed_prompt_opening_with_the_interrupt_text_is_a_prompt(self):
+        e = self.c(typed("[Request interrupted by user] was what I saw"))
+        self.assertEqual(e.kind, "turn_start")
 
     def test_turn_duration_ends_a_turn(self):
         self.assertEqual(self.c(turn_duration()).kind, "turn_end")
@@ -140,18 +147,43 @@ class TestReadFrom(unittest.TestCase):
         self.assertEqual(tr.read_from(self.path, 0), ([], 0))
 
     def test_an_sdk_era_stretch_starts_no_turn(self):
-        sdk_user = {"type": "user", "entrypoint": "sdk-py",
+        sdk_user = {"type": "user", "entrypoint": "sdk-py", "promptSource": "sdk",
                     "message": {"role": "user", "content": "[inbox:%s] sdk" % NONCE}}
         self.write([sdk_user, assistant(), typed("[inbox:%s] tmux" % NONCE, prompt_id="p9")])
         entries, _ = tr.read_from(self.path, 0)
         self.assertEqual(kinds(entries), ["other", "assistant", "turn_start"])
 
 
+class TestTornLines(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = pathlib.Path(tmp.name) / "s.jsonl"
+
+    def test_a_torn_line_merged_with_a_turn_start_still_names_its_known_nonce(self):
+        # SIGKILL tore a line; the next CLI appended its entry to the fragment
+        self.path.write_text('{"type": "assistant", "mess')
+        entries, cursor = tr.read_from(self.path, 0)
+        self.assertEqual((entries, cursor), ([], 0))
+        with self.path.open("a") as fh:
+            fh.write(json.dumps(typed("[inbox:%s] hello" % NONCE)) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual(kinds(entries), ["other"])
+        self.assertIsNone(entries[0].nonce)
+        self.assertEqual(tr.turn_nonce(entries[0], {NONCE}), NONCE)
+        self.assertIsNone(tr.turn_nonce(entries[0], {"0" * 12}), "only a known nonce counts")
+
+    def test_a_nonce_inside_a_string_is_not_found(self):
+        self.path.write_text('{"type": "ass' + json.dumps(tool_result("seen [inbox:%s] mid" % NONCE)) + "\n")
+        entries, _ = tr.read_from(self.path, 0)
+        self.assertEqual(tr.raw_nonces(entries[0], {NONCE}), [])
+
+
 class TestLocate(unittest.TestCase):
     def test_the_config_dir_and_the_encoded_home(self):
-        p = tr.locate("/home/u/cf/cousins/wren", session_id="sid-1",
+        p = tr.locate("/srv/u/cf/cousins/wren", session_id="sid-1",
                       config_dir=pathlib.Path("/cfg"))
-        self.assertEqual(p, pathlib.Path("/cfg/projects/-home-u-cf-cousins-wren/sid-1.jsonl"))
+        self.assertEqual(p, pathlib.Path("/cfg/projects/-srv-u-cf-cousins-wren/sid-1.jsonl"))
 
     def test_no_config_dir_is_the_host_login(self):
         p = tr.locate("/h/w", session_id="s", config_dir=None)

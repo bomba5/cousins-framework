@@ -189,6 +189,24 @@ class TestRecovery(Case):
         r2.start()
         self.assertTrue(_wait(lambda: self.outcome(r2, rec)[1] == "delivered"))
 
+    def test_a_torn_line_merged_with_the_rows_turn_start_takes_the_row_once(self):
+        class Deaf(FakePane):
+            def _play(self, first_line, body, n):     # the test writes the CLI's side
+                pass
+        r = self.runner(pane=lambda path: Deaf(path))
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "torn", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.panes[0].typed))
+        first = self.panes[0].typed[0][0]
+        with r._path.open("a") as fh:
+            fh.write('{"type": "assistant", "mess')          # torn by a SIGKILL
+            fh.write(json.dumps({"type": "user", "promptSource": "typed", "promptId": "p1",
+                                 "message": {"role": "user", "content": first}}) + "\n")
+            fh.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+        time.sleep(0.3)
+        self.assertEqual(len(self.panes[0].typed), 1, "never typed twice")
+
 
 def _handoff_tool(pane, first_line, body):
     """The model's side of the handoff turn: the tool writes data/handoff.md last."""

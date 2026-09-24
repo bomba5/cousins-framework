@@ -9,18 +9,27 @@ callers that read it).
 cousin_lib.memory_explorer (layers, raw entries, decisions, files) and
 cousin_lib.memory_trash (remove to trash, restore). Every path is
 confined to the cousin home by cousin_lib.home_files; the harness
-layer reads its own configured directory the same way."""
+layer reads its own configured directory the same way.
+
+The operator actions (search, remember, decide, history, the review
+gate, distill/compact/reindex, the self-portrait, callbacks and
+capsules) call the same library functions the `cousin-memory`,
+`cousin-self-portrait`, `cousin-callback` and `cousin-reason` CLIs call.
+Three of them are a person's act and need a logged-in console user: a
+review verdict, a self-portrait commit and an operator-level write. The
+console has no roles, so "the operator" is the logged-in user whose name
+is the cousin's `[operator] name` (case aside)."""
 from __future__ import annotations
 
+import hashlib
 import json
-
 import time
 from pathlib import Path
 
-from cousin_lib import home_files, memory_explorer, memory_trash
+from cousin_lib import home_files, memory, memory_explorer, memory_trash
 from cousin_lib.config import FrameworkConfig
-from cousin_lib.console import router
-from cousin_lib.console._common import cousin_home
+from cousin_lib.console import longop, router
+from cousin_lib.console._common import cousin_home, load_cousin
 from cousin_lib.console.app import HttpError
 
 PREVIEW_CHARS = 400
@@ -221,6 +230,8 @@ def register():
                                           "topic": entry["topic"]})
         return 200, {"ok": True, "entry": entry, "effects": effects}
 
+    _register_actions()
+
     @router.route("POST", "/api/memory/{slug}/restore")
     def restore(req, slug):
         home = cousin_home(req.server, slug)
@@ -251,6 +262,435 @@ def _decision_mirrors(home, line_no, sha):
         return []
     return [(r["path"], r["line_no"], r["sha"])
             for r in memory_explorer.mirror_refs(home, entry)]
+
+
+
+# ---------------------------------------------------------------- operator actions
+
+# What a console user may write: a person is neither the framework (L1,
+# written by the framework itself) nor a retirement (L5 has its own
+# action, obsolete). "operator" only for the operator account.
+WRITE_LEVELS = ("operator", "tool", "conclusion", "hypothesis")
+NOTE_MAX = 300
+SEARCH_COLLECTIONS = ("memory", "notes", "harness", "raw")
+SEARCH_TOP_MAX = 50
+PORTRAIT_MAX = 64 * 1024
+PORTRAIT_SHA_CHARS = 16
+MAINTAIN_ACTIONS = ("distill", "compact-raw", "compact-index", "reindex")
+
+
+def _person(req, what):
+    """The logged-in user, or a 403: `what` is a person's act, and with
+    no logins the console cannot tell a person from a local process (a
+    cousin included)."""
+    if not req.server.users.configured() or not req.user:
+        raise HttpError(403, "%s needs a logged-in console user; set up"
+                             " logins with `cousin-console adduser <name>`"
+                        % what)
+    return req.user
+
+
+def _operator_of(req, slug):
+    return (load_cousin(req.server, slug).operator_name or "").strip() or None
+
+
+def _is_operator(req, slug):
+    """The logged-in user is this cousin's operator: the user name is the
+    cousin.toml `[operator] name`, case aside. No logins, no user, or no
+    operator configured: nobody is."""
+    operator = _operator_of(req, slug)
+    return bool(operator and req.user and req.server.users.configured()
+                and req.user.strip().casefold() == operator.casefold())
+
+
+def _console_cite(req, note):
+    """The cite a console-written entry carries: who and when, filled
+    here and never taken from the client, then the writer's own note."""
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    who = ("console user %s" % req.user) if req.user else "console (no login)"
+    cite = "%s, %s" % (who, stamp)
+    return cite + ("; " + note if note else "")
+
+
+def _text(body, key, *, required=True, limit=None):
+    value = body.get(key)
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str) or (required and not value.strip()):
+        raise HttpError(400, "%s must be a non-empty string" % key)
+    value = value.strip()
+    if limit and len(value) > limit:
+        raise HttpError(400, "%s is longer than %d characters" % (key, limit))
+    return value
+
+
+def _write_level(req, slug, body):
+    level = body.get("level") or "conclusion"
+    if not isinstance(level, str) or level not in WRITE_LEVELS:
+        raise HttpError(400, "level must be one of %s (framework entries are"
+                             " the framework's, and obsolete is its own"
+                             " action)" % ", ".join(WRITE_LEVELS))
+    if level == "operator" and not _is_operator(req, slug):
+        operator = _operator_of(req, slug)
+        raise HttpError(403, "only the operator account (%s) may write an"
+                             " operator-level entry" % (operator or "none"
+                             " configured in [operator] name"))
+    return level
+
+
+def _rel(home, path):
+    """A hit path as the UI shows and opens it: relative to the home, or
+    the file's name when it lies elsewhere (the harness directory)."""
+    try:
+        return Path(path).relative_to(home).as_posix()
+    except ValueError:
+        return Path(path).name
+
+
+def _search_hits(req, home, query, top, collection):
+    from cousin_lib import memory_search
+    root = req.server.root
+    config = memory_search._embedding_config(root)
+    semantic = "off" if config is None else (
+        "broken" if config == "broken" else "on")
+    # record=False: the operator's search is not the cousin's, so it
+    # never feeds the recall log or the usage bonus it measures.
+    hits, notice = memory_search.search(query, top=top, home=home,
+                                        collection=collection, root=root,
+                                        record=False)
+    words = {h["path"] for h in memory_search._keyword_search(
+        query, home, max(top, memory_search.FUSION_DEPTH_MIN),
+        collection, root)}
+    out = []
+    for hit in hits:
+        legs = (["keyword"] if hit["path"] in words else []) + (
+            ["semantic"] if hit.get("similarity") is not None else [])
+        file, _, line = str(hit["path"]).rpartition("#") \
+            if hit.get("collection") == "raw" else (hit["path"], "", "")
+        row = {"collection": hit.get("collection"),
+               "rel": _rel(home, file) + ("#" + line if line else ""),
+               "score": hit.get("score"), "similarity": hit.get("similarity"),
+               "snippet": hit.get("snippet") or "", "legs": legs}
+        if hit.get("collection") == "raw":
+            entry = memory_search.raw_entry(hit["path"]) or {}
+            row["entry"] = {
+                "topic": entry.get("topic"), "content": entry.get("content"),
+                "level": memory.normalize_level(entry.get("truth_level")),
+                "timestamp": entry.get("timestamp"), "cite": entry.get("cite"),
+                "id": memory.entry_id(entry) if entry else None}
+        elif hit.get("collection") == "harness":
+            row["layer"] = "harness"
+        out.append(row)
+    return {"query": query, "hits": out, "semantic": semantic,
+            "notice": notice}
+
+
+def _jsonable(value):
+    return json.loads(json.dumps(value, default=str))
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:PORTRAIT_SHA_CHARS]
+
+
+def _portrait_state(home):
+    import difflib
+    from cousin_lib import self_portrait
+    cand_path = self_portrait.candidate_path(home)
+    comm_path = self_portrait.committed_path(home)
+    candidate = self_portrait._read(cand_path)
+    committed = self_portrait._read(comm_path)
+    diff = "".join(difflib.unified_diff(
+        committed.splitlines(keepends=True),
+        candidate.splitlines(keepends=True),
+        fromfile="committed", tofile="candidate")) if cand_path.exists() else ""
+    return {"candidate": candidate, "committed": committed,
+            "candidate_exists": cand_path.exists(),
+            "committed_exists": comm_path.exists(),
+            "backup_exists": (Path(home) / ".self-portrait.md.bak").exists(),
+            "candidate_sha": _sha(candidate) if cand_path.exists() else None,
+            "diff": diff}
+
+
+def _write_candidate(home, text):
+    import os
+    import tempfile
+    from cousin_lib import self_portrait
+    path = self_portrait.candidate_path(home)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _maintain_work(server, slug, home, action, dry_run):
+    """The op body for one maintenance action: the library call the
+    `cousin-memory` subcommand makes, its report as the result."""
+    def work(op):
+        from cousin_lib import compact, distill, memory_search, raw_fold
+        op.stage(action, "running")
+        if action == "distill":
+            report = distill.distill(home)
+            result = {"ok": True, "report": report}
+            detail = "%d topics from %d entries" % (report["topics"],
+                                                   report["entries"])
+        elif action == "compact-raw":
+            report = raw_fold.fold_raw(home)
+            result = {"ok": True, "report": report}
+            detail = "%d day files folded" % report["folded_days"]
+        elif action == "compact-index":
+            report = compact.compact_index(home, dry_run=dry_run)
+            if not report.get("ok"):
+                raise longop.OpError(report.get("reason") or "compact failed")
+            result = {"ok": True, "report": report}
+            names = report["would_retire"] if dry_run else report["retired"]
+            detail = "%s %d pointer(s)" % ("would retire" if dry_run
+                                           else "retired", len(names))
+        else:
+            root = server.root
+            count = memory_search.build_index(home, root=root)
+            config = memory_search._embedding_config(root)
+            result = {"ok": True, "indexed": count,
+                      "semantic": "off" if config is None else (
+                          "broken" if config == "broken" else "on")}
+            detail = "%d file(s) indexed" % count
+            if isinstance(config, dict):
+                op.stage(action, "running", detail + ", embedding")
+                report = memory_search.ensure_index(home, config, force=True,
+                                                    root=root)
+                result["embedded"] = report.get("embedded", 0)
+                result["failed"] = report.get("failed", 0)
+                detail += ", %d chunk(s) embedded, %d failed" % (
+                    result["embedded"], result["failed"])
+        op.stage(action, "done", detail)
+        server.emit("memory-change", {"slug": slug, "action": action})
+        return result
+    return work
+
+
+def _register_actions():
+    @router.route("GET", "/api/memory/{slug}/search")
+    def search(req, slug):
+        home = cousin_home(req.server, slug)
+        query = (req.query.get("q") or "").strip()
+        if not query:
+            raise HttpError(400, "q is required")
+        collection = req.query.get("collection") or None
+        if collection is not None and collection not in SEARCH_COLLECTIONS:
+            raise HttpError(400, "collection must be one of %s"
+                            % ", ".join(SEARCH_COLLECTIONS))
+        top = max(1, min(SEARCH_TOP_MAX, req.int_query("top", 10)))
+        return 200, _search_hits(req, home, query, top, collection)
+
+    @router.route("GET", "/api/memory/{slug}/writer")
+    def writer(req, slug):
+        """What the write forms may offer this user on this cousin."""
+        cousin_home(req.server, slug)
+        can = _is_operator(req, slug)
+        return 200, {"user": req.user, "operator": _operator_of(req, slug),
+                     "can_write_operator": can,
+                     "levels": [l for l in WRITE_LEVELS
+                                if l != "operator" or can],
+                     "cite_preview": _console_cite(req, "")}
+
+    @router.route("POST", "/api/memory/{slug}/remember")
+    def remember(req, slug):
+        home = cousin_home(req.server, slug)
+        body = req.body
+        topic = _text(body, "topic", limit=200)
+        fact = _text(body, "fact", limit=4000)
+        note = _text(body, "note", required=False, limit=NOTE_MAX)
+        level = _write_level(req, slug, body)
+        try:
+            line = memory.remember(home, topic, fact, level=level,
+                                   cite=_console_cite(req, note))
+        except ValueError as err:
+            raise HttpError(400, str(err))
+        req.server.emit("memory-change", {"slug": slug, "action": "remember",
+                                          "topic": topic})
+        return 200, {"ok": True, "line": line}
+
+    @router.route("POST", "/api/memory/{slug}/decide")
+    def decide(req, slug):
+        home = cousin_home(req.server, slug)
+        body = req.body
+        topic = _text(body, "topic", limit=200)
+        decision = _text(body, "decision", limit=4000)
+        reasoning = _text(body, "reasoning", limit=4000)
+        note = _text(body, "note", required=False, limit=NOTE_MAX)
+        level = _write_level(req, slug, body)
+        try:
+            line = memory.decide(home, topic, decision, reasoning, level=level,
+                                 cite=_console_cite(req, note))
+        except ValueError as err:
+            raise HttpError(400, str(err))
+        req.server.emit("memory-change", {"slug": slug, "action": "decide",
+                                          "topic": topic})
+        return 200, {"ok": True, "line": line}
+
+    @router.route("GET", "/api/memory/{slug}/history")
+    def history(req, slug):
+        """A topic's claims, oldest first, with their valid time
+        (`cousin-memory history`)."""
+        home = cousin_home(req.server, slug)
+        topic = (req.query.get("topic") or "").strip()
+        if not topic:
+            raise HttpError(400, "topic is required")
+        rows = [r for r in memory.validity(home)
+                if str(r.get("topic") or "").strip() == topic]
+        return 200, {"topic": topic, "claims": _jsonable(rows)}
+
+    @router.route("GET", "/api/memory/{slug}/review")
+    def review_list(req, slug):
+        from cousin_lib import review_gate
+        home = cousin_home(req.server, slug)
+        return 200, {"held": _jsonable(review_gate.pending(home)),
+                     "batch": review_gate.batch_limit(home),
+                     "operator": _operator_of(req, slug),
+                     "is_operator": _is_operator(req, slug)}
+
+    @router.route("POST", "/api/memory/{slug}/review")
+    def review_settle(req, slug):
+        """{"verdicts": {id: "keep"|"drop"}, "why"?}: the operator's side
+        of the review gate (`cousin-memory review --keep/--drop`). A
+        person's act: a logged-in user, recorded as `console:<user>`. An
+        operator-level entry is dropped by the operator account only (a
+        drop has no undo), as the reviewing model is held to the same."""
+        from cousin_lib import distill, review_gate
+        home = cousin_home(req.server, slug)
+        verdicts = req.body.get("verdicts")
+        if not isinstance(verdicts, dict) or not verdicts or any(
+                not isinstance(k, str) or v not in review_gate.VERDICTS
+                for k, v in verdicts.items()):
+            raise HttpError(400, "verdicts must map entry ids to keep or drop")
+        why = req.body.get("why") or ""
+        if not isinstance(why, str):
+            raise HttpError(400, "why must be a string")
+        user = _person(req, "a review verdict")
+        operator = _is_operator(req, slug)
+        rows = review_gate.pending(home)
+        held = {r["id"]: r for r in rows}
+        errors = {i: "not held for review" for i in verdicts if i not in held}
+        mine = {}
+        for entry_id, verdict in verdicts.items():
+            row = held.get(entry_id)
+            if row is None:
+                continue
+            if verdict == "drop" and not operator and memory.normalize_level(
+                    row.get("truth_level")) == memory.OPERATOR_LEVEL:
+                errors[entry_id] = ("an operator-level entry is the operator's"
+                                    " to drop; left held")
+                continue
+            mine[entry_id] = verdict
+        done, failed = review_gate.settle(home, rows, mine,
+                                          by="console:%s" % user, why=why)
+        errors.update(failed)
+        effects = {"distilled": False}
+        if done:
+            try:
+                distill.distill(home)
+                effects["distilled"] = True
+            except Exception as err:  # noqa: BLE001 - the verdicts are written
+                effects["distill_error"] = "%s: %s" % (type(err).__name__, err)
+            req.server.emit("memory-change", {"slug": slug, "action": "review"})
+        return 200, {"ok": True, "done": done, "errors": errors,
+                     "effects": effects}
+
+    @router.route("POST", "/api/memory/{slug}/maintain")
+    def maintain(req, slug):
+        """{"action": distill|compact-raw|compact-index|reindex,
+        "dry_run"?}: one maintenance run as the cousin's long operation."""
+        home = cousin_home(req.server, slug)
+        action = req.body.get("action")
+        if action not in MAINTAIN_ACTIONS:
+            raise HttpError(400, "action must be one of %s"
+                            % ", ".join(MAINTAIN_ACTIONS))
+        dry_run = action == "compact-index" and _flag(req.body.get("dry_run"))
+        return longop.start_response(
+            req.server, slug, "memory-" + action,
+            _maintain_work(req.server, slug, home, action, dry_run),
+            params={"action": action, "dry_run": dry_run})
+
+    @router.route("GET", "/api/memory/{slug}/portrait")
+    def portrait(req, slug):
+        return 200, _portrait_state(cousin_home(req.server, slug))
+
+    @router.route("POST", "/api/memory/{slug}/portrait/synthesize")
+    def portrait_synthesize(req, slug):
+        """Draft a candidate from the cousin's sources (no model call).
+        An existing candidate may hold edits: `replace: true` to draft
+        over it, else 409."""
+        from cousin_lib import self_portrait
+        home = cousin_home(req.server, slug)
+        if self_portrait.candidate_path(home).exists() \
+                and not _flag(req.body.get("replace")):
+            raise HttpError(409, "a candidate exists and may hold edits;"
+                                 " pass replace to draft over it")
+        self_portrait.synthesize_candidate(home, slug)
+        req.server.emit("memory-change", {"slug": slug,
+                                          "action": "portrait-synthesize"})
+        return 200, {"ok": True, **_portrait_state(home)}
+
+    @router.route("POST", "/api/memory/{slug}/portrait/candidate")
+    def portrait_candidate(req, slug):
+        home = cousin_home(req.server, slug)
+        text = req.body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HttpError(400, "text must be a non-empty string")
+        if len(text.encode("utf-8")) > PORTRAIT_MAX:
+            raise HttpError(400, "a portrait is at most %d bytes"
+                            % PORTRAIT_MAX)
+        _write_candidate(home, text)
+        req.server.emit("memory-change", {"slug": slug,
+                                          "action": "portrait-edit"})
+        return 200, {"ok": True, **_portrait_state(home)}
+
+    @router.route("POST", "/api/memory/{slug}/portrait/commit")
+    def portrait_commit(req, slug):
+        """{"confirm": "<slug>", "sha": "<candidate_sha>"}: promote the
+        reviewed candidate (`cousin-self-portrait commit`). The identity
+        gate: a logged-in person, the cousin's slug typed back, and the
+        candidate still the one they read (a changed candidate is 409)."""
+        from cousin_lib import self_portrait
+        home = cousin_home(req.server, slug)
+        user = _person(req, "a self-portrait commit")
+        if req.body.get("confirm") != slug:
+            raise HttpError(400, "type the cousin's slug (%s) to commit" % slug)
+        state = _portrait_state(home)
+        if not state["candidate_exists"]:
+            raise HttpError(404, "no candidate to commit; synthesize or"
+                                 " write one first")
+        if req.body.get("sha") != state["candidate_sha"]:
+            raise HttpError(409, "the candidate changed since it was read;"
+                                 " review it again",
+                            candidate_sha=state["candidate_sha"])
+        self_portrait.commit_candidate(home)
+        req.server.emit("memory-change", {"slug": slug,
+                                          "action": "portrait-commit",
+                                          "by": user})
+        return 200, {"ok": True, "by": user, **_portrait_state(home)}
+
+    @router.route("GET", "/api/memory/{slug}/callbacks")
+    def callbacks(req, slug):
+        from cousin_lib import callback
+        home = cousin_home(req.server, slug)
+        rows = callback.list_all(home)
+        rows.reverse()
+        return 200, {"callbacks": rows[:max(1, req.int_query("limit", 200))]}
+
+    @router.route("GET", "/api/memory/{slug}/capsules")
+    def capsules(req, slug):
+        from cousin_lib import capsule
+        home = cousin_home(req.server, slug)
+        n = max(1, min(500, req.int_query("n", 50)))
+        return 200, {"capsules": capsule.list_capsules(home, n)}
 
 
 register()

@@ -64,11 +64,12 @@ way on this lane. Here:
 - Memory (search, decide, remember, recall, obsolete, activity) goes
   through the `memory` tool (`mcp__cousin__memory`), never through
   `cousin-memory`.
-- When a person has told you to keep something (they say remember,
-  from now on, always or never, or they state a preference or a fact
-  about their life), call the `memory` tool's `remember` command at
-  level `operator`, with the chat message as the cite, in that same
-  turn, before you reply.
+- When a person asks you to keep something (they say remember, note
+  that, from now on, always or never), call the `memory` tool's
+  `remember` command in that same turn, before you reply, with the chat
+  message as the cite: at level `operator` when the operator said it,
+  at the default level when anyone else did. A remark nobody asked you
+  to keep is not a memory write.
 - When you are asked what you know or remember about something, run
   the `memory` tool's `search` or `recall` first, and open a memory
   file directly only where a search result points.

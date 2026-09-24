@@ -93,9 +93,15 @@ class TestRunnerLaneDoctrine(HermeticCase):
     def test_being_told_to_keep_something_is_a_remember_call_in_the_same_turn(self):
         """A person saying 'remember this' or stating a preference got a
         reply and no memory write: the doctrine named the tool, not when."""
-        self.assertIn("told you to keep something", self.flat)
-        self.assertIn("`remember` command at level `operator`", self.flat)
+        self.assertIn("asks you to keep something", self.flat)
         self.assertIn("in that same turn, before you reply", self.flat)
+        # operator level only for the operator's words; nobody else's
+        self.assertIn("at level `operator` when the operator said it", self.flat)
+        self.assertIn("at the default level when anyone else did", self.flat)
+        # an unasked remark is not a write (review: 'a fact about their
+        # life' fired on incidental remarks)
+        self.assertIn("A remark nobody asked you to keep is not a memory write", self.flat)
+        self.assertNotIn("a fact about their life", self.flat)
 
     def test_being_asked_what_you_remember_searches_memory_first(self):
         """Asked 'what do you remember about me', a cousin read its memory

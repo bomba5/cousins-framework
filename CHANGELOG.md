@@ -3,9 +3,34 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 1.22.0 - 2026-09-24
 
 ### Added
+- The console has a new look: restrained dark tokens with the current
+  accent and icon, the overview as one fleet table with what needs the
+  operator first and an activity rail (`GET /api/jobs?since_hours=`), the
+  chat and its pane side by side, and memory grouped by truth level (a raw
+  record now carries its entry's cite). Every existing control is kept. The
+  pane's remembered state moved from `fw_pane_open` to `fw_pane_side` in
+  the browser's storage, so a browser forgets it once.
+- Console foundations for editing everything from the UI:
+  `cousin_lib/agent_settings.py` (the `[agent]` schema per runner kind,
+  validated with the runner's own checks: the opencode bridge guard, the
+  account preflight, the lane check); `console/toml_edit.py` (floats, lists,
+  dotted subtables, `write_keys` with a validate hook, byte-preserving);
+  `console/secrets.py` (write-only secret fields, confined, checked by the
+  runner's own reader); `console/longop.py` (one long operation per cousin
+  with stages, a `cousin-op` event and `GET /api/cousins/<slug>/op`); and
+  registration seams (route modules, jsx views, named slots, `SecretField`,
+  `useLongOp`). The fleet row carries `lane`, `account`, `held`,
+  `autoStart` and `loginRequired`. The spawn dialog picks the lane and the
+  account; `tmux-legacy` is an explicit choice that no
+  `COUSIN_DEFAULT_RUNNER` overrides. Dismiss, start, stop, restart and the
+  auth switch hold the cousin exclusively (409 while another of them, a flip
+  or a long operation runs on it).
+- The SDK runner names a turn's long wait on its stream: a `system` `stall`
+  event while a write, a fold or a control call runs past 30 s, and again
+  with its duration when it ends (#104).
 - `[agent] commit_attribution` (tracker #112): install-wide in
   `config/harness.toml`, overridable per cousin in `cousin.toml`. `false`
   turns off the harness's own injected commit/PR attribution (a
@@ -19,6 +44,25 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `runner` stream event.
 
 ### Fixed
+- A resumed runner session is told why its last turn was cut: a runner
+  restart or crash says it was not the operator and to continue; a requested
+  stop says so; a console restart says to continue. The note is put once and
+  never aborts start-up (#98).
+- A runner cousin's model and effort change in the console writes `[agent]`
+  (not `[runtime]`), validated per lane: the SDK lane runs one smallest
+  turn on the cousin's own account in a child process (the console's own
+  environment is never touched), opencode checks the model and refuses an
+  effort. An unchanged value runs nothing and asks for no restart (#100).
+- A runner's PreToolUse/PostToolUse job recorder waits at most 2 s on the
+  shared jobs store; past that the tool runs, a late registration is
+  withdrawn, and no row is left running (#104).
+- `{home_encoded}` is Claude Code's own project-dir encoding: every
+  non-alphanumeric character is a dash (#106).
+- A migration rollback removes the runner lane's session records (#107).
+- The console's Telegram toggle runs its own bridge stop only when no
+  supervisor is there at all; a slow supervisor stops nothing (#113).
+- `cousin-job` and the `job` tool refuse an empty program, or one with
+  leading or trailing whitespace, before any row exists (#115).
 - The template sync now corrects a cousin's `mcp-registry.toml` when a
   `description` field still holds text an earlier framework release
   shipped, not just what it lacks entirely (#110). The `job` tool's `run`

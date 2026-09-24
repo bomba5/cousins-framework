@@ -7,7 +7,7 @@ Every edit is checked by the parser that reads the file: the registry by
 mcp_server.parse_registry (strict, the runner's reading, plus the in-process
 handlers on a runner cousin), .mcp.json by runner/mcp_config.parse and
 policy.toml by runner/policy.Policy.parse. A TOML file is edited through
-console/toml_edit (every other line kept); .mcp.json is JSON and is written
+console/toml_edit.write_file_keys (every other line kept); .mcp.json is JSON and is written
 whole, with every key this editor does not model kept as it was. Each read
 answers an `etag` (the file's hash) that the write must send back: a file
 changed meanwhile (the model can rewrite all of these) is 409, never
@@ -396,7 +396,7 @@ def _write_registry(req, path, *, runner_lane):
                                      " refuse to start" % ", ".join(missing))
         if changes:
             try:
-                toml_edit.write_file(path, changes, validate_text=check)
+                toml_edit.write_file_keys(path, changes, validate_text=check)
             except (ValueError, TypeError) as err:      # RegistryError is a ValueError
                 raise HttpError(400, str(err))
 
@@ -807,8 +807,9 @@ def _write_policy(req, home):
         if not changes:
             return
         try:
-            toml_edit.write_file(path, changes, validate_text=_check_policy_text,
-                                 initial=POLICY_HEADER, fresh=fresh)
+            toml_edit.write_file_keys(path, changes, validate_text=_check_policy_text,
+                                      create=True, initial=POLICY_HEADER, mode=0o644,
+                                      fresh=fresh)
         except (ValueError, TypeError) as err:
             raise HttpError(400, str(err))
 

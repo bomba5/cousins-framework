@@ -260,8 +260,9 @@ class RootTable(unittest.TestCase):
             toml_edit.set_key("x = = 1\n", "", "ceiling", 1)
 
 
-class WriteFile(unittest.TestCase):
-    """write_file: write_keys for any TOML file (a registry, policy.toml)."""
+class WriteFileKeysText(unittest.TestCase):
+    """write_file_keys's text hook, its initial text and mode for a created
+    file, and `fresh` over a broken one (WP-D: a registry, policy.toml)."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -269,14 +270,14 @@ class WriteFile(unittest.TestCase):
         self.dir = Path(tmp.name)
         self.path = self.dir / "mcp-registry.toml"
         self.path.write_text(ROOTED)
-        os.chmod(self.path, 0o600)
+        os.chmod(self.path, 0o640)
 
     def test_keys_of_any_file_and_its_mode_kept(self):
-        parsed = toml_edit.write_file(self.path, [("", "ceiling", 4),
-                                                  ("tools.memory", "enabled", False)])
+        parsed = toml_edit.write_file_keys(self.path, [("", "ceiling", 4),
+                                                       ("tools.memory", "enabled", False)])
         self.assertEqual((parsed["ceiling"], parsed["tools"]["memory"]["enabled"]), (4, False))
         self.assertEqual(tomllib.loads(self.path.read_text()), parsed)
-        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
 
     def test_the_text_hook_sees_the_new_text_and_can_refuse_it(self):
         seen = []
@@ -285,30 +286,60 @@ class WriteFile(unittest.TestCase):
             seen.append(text)
             raise ValueError("no")
         with self.assertRaises(ValueError):
-            toml_edit.write_file(self.path, [("", "ceiling", 4)], validate_text=hook)
+            toml_edit.write_file_keys(self.path, [("", "ceiling", 4)], validate_text=hook)
         self.assertIn("ceiling = 4", seen[0])
         self.assertEqual(self.path.read_text(), ROOTED)
         self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["mcp-registry.toml"])
 
-    def test_an_absent_file_is_created_only_when_asked(self):
+    def test_create_starts_from_initial_with_the_given_mode(self):
         path = self.dir / "policy.toml"
         with self.assertRaises(FileNotFoundError):
-            toml_edit.write_file(path, [("", "ask", [])])
-        parsed = toml_edit.write_file(path, [("", "ask", ["Agent"])], initial="# new\n")
+            toml_edit.write_file_keys(path, [("", "ask", [])], initial="# new\n")
+        parsed = toml_edit.write_file_keys(path, [("", "ask", ["Agent"])], create=True,
+                                           initial="# new\n", mode=0o644)
         self.assertEqual(parsed, {"ask": ["Agent"]})
         self.assertTrue(path.read_text().startswith("# new\n"))
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+        other = self.dir / "other.toml"
+        toml_edit.write_file_keys(other, [("", "a", 1)], create=True)
+        self.assertEqual(stat.S_IMODE(other.stat().st_mode), 0o600)
 
     def test_fresh_starts_from_initial_over_a_file_that_does_not_parse(self):
         path = self.dir / "policy.toml"
         path.write_text("broken = = 1\n")
         os.chmod(path, 0o600)
         with self.assertRaises(ValueError):
-            toml_edit.write_file(path, [("", "ask", [])])
-        parsed = toml_edit.write_file(path, [("", "ask", [])], initial="# new\n", fresh=True)
+            toml_edit.write_file_keys(path, [("", "ask", [])])
+        parsed = toml_edit.write_file_keys(path, [("", "ask", [])], initial="# new\n",
+                                           fresh=True)
         self.assertEqual(parsed, {"ask": []})
         self.assertNotIn("broken", path.read_text())
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_fresh_over_text_the_hook_refuses_or_that_is_not_utf8(self):
+        def hook(text):
+            if "surprise" in text:
+                raise ValueError("unknown key surprise")
+        path = self.dir / "policy.toml"
+        path.write_text("surprise = 1\n")
+        toml_edit.write_file_keys(path, [("", "ask", [])], validate_text=hook,
+                                  initial="# new\n", fresh=True)
+        self.assertNotIn("surprise", path.read_text())
+        path.write_bytes(b"\xff\xfe\n")
+        with self.assertRaises(UnicodeDecodeError):
+            toml_edit.write_file_keys(path, [("", "ask", [])])
+        toml_edit.write_file_keys(path, [("", "ask", [])], initial="", fresh=True)
+        self.assertEqual(tomllib.loads(path.read_text()), {"ask": []})
+
+    def test_fresh_is_refused_over_a_file_that_reads_fine(self):
+        before = self.path.read_text()
+        with self.assertRaises(ValueError):
+            toml_edit.write_file_keys(self.path, [("", "ceiling", 1)], initial="# new\n",
+                                      fresh=True)
+        with self.assertRaises(ValueError):
+            toml_edit.write_file_keys(self.path, [("", "ceiling", 1)], initial="",
+                                      fresh=True, validate_text=lambda t: None)
+        self.assertEqual(self.path.read_text(), before)
 
 if __name__ == "__main__":
     unittest.main()

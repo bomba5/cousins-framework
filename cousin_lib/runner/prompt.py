@@ -102,8 +102,10 @@ def authored_identity(home, *, root):
     return "\n\n".join(p for p in (claude, portrait) if p), False
 
 
-def compose_system_prompt(home, *, root, registry, version=None):
-    """law + contract + identity + operator rules. Never truncated."""
+def compose_system_prompt(home, *, root, registry, version=None, tool_name=None):
+    """law + contract + identity + operator rules. Never truncated.
+    `tool_name` names the tools for the lane (contract.render); None is
+    the SDK lane's `mcp__cousin__<name>`."""
     if version is None:
         from cousin_lib.version import version as _v
         version = _v()
@@ -113,7 +115,7 @@ def compose_system_prompt(home, *, root, registry, version=None):
     sections = []
     if law:
         sections.append("# Framework law\n\n" + law)
-    sections.append(contract.render(registry, version).strip())
+    sections.append(contract.render(registry, version, tool_name=tool_name).strip())
     sections.append(identity.strip())
     if rules:
         sections.append("# Operator rules every cousin follows\n\n" + "\n\n".join(rules))

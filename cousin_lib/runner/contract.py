@@ -90,10 +90,15 @@ def major_minor(version):
     return "%s.%s" % m.groups() if m else "unknown"
 
 
-def _tool_block(definition, registry):
+def sdk_tool_name(name):
+    """The SDK lane's name for a framework tool: its in-process server is
+    registered as SERVER_NAME, so the model sees `mcp__cousin__<name>`."""
+    return "mcp__%s__%s" % (SERVER_NAME, name)
+
+
+def _tool_block(definition, registry, tool_name):
     name = definition["name"]
-    lines = ["- `mcp__%s__%s`: %s" % (SERVER_NAME, name,
-                                        " ".join(definition["description"].split()))]
+    lines = ["- `%s`: %s" % (tool_name(name), " ".join(definition["description"].split()))]
     tool = registry["tools"].get(name)
     if tool is not None and tool.get("commands"):
         commands = set(tool["commands"])
@@ -103,10 +108,15 @@ def _tool_block(definition, registry):
     return "\n".join(lines)
 
 
-def render(registry, version):
-    """The contract for this registry at this release. Same inputs, same bytes."""
+def render(registry, version, *, tool_name=None):
+    """The contract for this registry at this release. Same inputs, same bytes.
+
+    `tool_name(name) -> str` is the name the model sees for a tool on its
+    lane (phase 9 R7): None is the SDK lane's (sdk_tool_name), whose bytes
+    the prompt cache keys on; the opencode lane passes `cousin_<name>`."""
     from cousin_lib.runner.tools import tool_definitions
-    blocks = [_tool_block(d, registry) for d in tool_definitions(registry)]
+    tool_name = tool_name or sdk_tool_name
+    blocks = [_tool_block(d, registry, tool_name) for d in tool_definitions(registry)]
     text = "\n\n".join([HEADER.format(version=major_minor(version)), STATIC,
                         "## Your tools\n\n" + "\n".join(blocks)])
     return text.rstrip("\n") + "\n"

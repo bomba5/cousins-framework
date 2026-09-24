@@ -65,6 +65,9 @@ LIVE_STATES = ("running", "waiting_permission")
 # no account kind can drop it; proven by effect in
 # tests/runner/test_live_prompt.py, with a control run (phase 7).
 AUTO_MEMORY_OFF = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+# The session a runner is (phase 8, runner/sessions.py): the primary holds
+# the generation; a side session is named by the thread kind it answers.
+PRIMARY = "primary"
 
 
 class _NotWritten(Exception):
@@ -160,8 +163,14 @@ class SdkRunner:
 
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
                  cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
-                 drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None):
+                 drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
+                 session=PRIMARY, claim_kinds=None, exclude_kinds=()):
         self.home = Path(home)
+        # Which rows this session claims (phase 8): claim_kinds None is every
+        # kind but exclude_kinds; a side session names its own kind.
+        self.session = session
+        self.claim_kinds = None if claim_kinds is None else tuple(claim_kinds)
+        self.exclude_kinds = tuple(exclude_kinds)
         # the tools and the model's own commands find the cousin and the
         # install through these; cousin-runner exports them, and a runner
         # built directly sets whichever is unset
@@ -184,7 +193,9 @@ class SdkRunner:
         self.turn_timeout_s = None if turn_timeout_s is None else float(turn_timeout_s)
         self.drain_timeout_s = float(drain_timeout_s)
         self.client_factory = client_factory or _default_factory
-        self.session_id = "sdk-" + uuid.uuid4().hex[:8]
+        self.session_id = "sdk-%s%s" % ("" if session == PRIMARY else session + "-",
+                                        uuid.uuid4().hex[:8])
+        self._turn_started_at = None   # the live turn's start (activity())
         self.inbox = Inbox(self.home)
         self.stream = EventStream(self.home, self.session_id)
         self.machine = StateMachine(on_change=self._on_state)
@@ -243,7 +254,7 @@ class SdkRunner:
         self.tool_context = tools.ToolContext(home=self.home, slug=slug, name=name,
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
-                                              registry=registry)
+                                              registry=registry, session=session)
         from cousin_lib.runner.session_store import SqliteSessionStore
         self.session_store = SqliteSessionStore(self.home)
         # The rollover (rollover.py): the handoff tool hands its summary to
@@ -323,7 +334,11 @@ class SdkRunner:
 
     # -- the session on file (restart with resume) -----------------------
     def _session_path(self):
-        return self.home / "data" / "runner-session.json"
+        """data/runner-session.json for the primary; a side session keeps its
+        own, data/runner-session-<kind>.json (phase 8)."""
+        if self.session == PRIMARY:
+            return self.home / "data" / "runner-session.json"
+        return self.home / "data" / ("runner-session-%s.json" % self.session)
 
     def _read_session_file(self):
         """The file's dict; {} when it is missing, unreadable or not an
@@ -567,6 +582,36 @@ class SdkRunner:
     def events(self, after=None):
         return self.stream.tail(after=after)
 
+    def activity(self):
+        """What this session is doing now, for another session's digest
+        (phase 8): the machine state, the KINDS of the threads its live
+        turn answers (never a key, a sender or a body) and when that turn
+        started (epoch seconds), None when no turn is live."""
+        active, threads = self.turn.snapshot()
+        kinds = []
+        for thread in threads if active else ():
+            kind = thread.partition(":")[0]
+            if kind not in kinds:
+                kinds.append(kind)
+        return {"state": self.machine.state, "thread_kinds": kinds,
+                "since": self._turn_started_at if active else None}
+
+    def _claim(self, limit):
+        """The rows this session may take (phase 8): its kinds only."""
+        return self.inbox.claim(limit=limit, claimant=self.session_id,
+                                kinds=self.claim_kinds, exclude_kinds=self.exclude_kinds)
+
+    def _doorbell(self):
+        """The wake socket (one per home, so the primary's); a side session
+        overrides it with a poller (runner/sessions.py)."""
+        return wake.listen(self.home, self._wake_error)
+
+    async def _boundary(self, row):
+        """Runs at a turn boundary with the claimed `row` in hand, before its
+        turn; False means the row went back and no turn runs. The primary has
+        nothing to do here; a side session resets itself here (sessions.py)."""
+        return True
+
     def unsupported(self):
         return []
 
@@ -804,7 +849,7 @@ class SdkRunner:
                     self._fresh_pending = bool(saved) or has_state
                 else:
                     await self._start_fresh(with_digest=bool(saved) or has_state)
-            with wake.listen(self.home, self._wake_error) as listener:
+            with self._doorbell() as listener:
                 while not self._stop.is_set() and self.fatal is None:
                     if self._login_blocked:
                         await self._await_login()     # no claim, no turn while it holds
@@ -814,7 +859,7 @@ class SdkRunner:
                     if self._stop.is_set():
                         break
                     try:
-                        rows = self.inbox.claim(limit=1, claimant=self.session_id)
+                        rows = self._claim(1)
                     except Exception as exc:  # noqa: BLE001 - a store failure is never silence
                         self._fail_turn([], exc)
                         await asyncio.sleep(0.2)  # a wedged store must not spin the loop
@@ -830,8 +875,10 @@ class SdkRunner:
                     try:
                         if rows[0]["source"] == "flip":
                             ok = await self._rollover_row(rows[0])
-                        else:
+                        elif await self._boundary(rows[0]):
                             ok = await self._turn(rows[0])
+                        else:
+                            ok = False
                     except Exception as exc:  # noqa: BLE001 - the idle transition can still raise
                         # `[]`: its rows are already closed (FakeRunner._fail_turn)
                         self._fail_turn([], exc)
@@ -988,7 +1035,7 @@ class SdkRunner:
     async def _fold(self, sdk, open_rows):
         """Operator/person chat that arrived during the live turn is
         written into it (finding 1); anything else goes back to the queue."""
-        rows = self.inbox.claim(limit=10, claimant=self.session_id)
+        rows = self._claim(10)
         for i, row in enumerate(rows):
             if row["source"] == INTERRUPT or self._interrupt_requested \
                     or not folds_into_turn(row["source"], row["thread_id"]):
@@ -1212,6 +1259,7 @@ class SdkRunner:
                 self._live = True
                 self.machine.to("running", "turn")
             self.turn.begin(first)
+            self._turn_started_at = time.time()
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})

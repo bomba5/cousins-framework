@@ -40,6 +40,7 @@ class ToolContext:
     stream: object = None     # EventStream or None
     registry: object = None   # set by build_tool_server
     on_handoff: object = None     # callable(summary) (phase 4)
+    session: str = "primary"      # "primary", or the thread kind a side session answers (phase 8)
 
 
 def _str(a, key, default=""):
@@ -122,7 +123,13 @@ def _m_recall(ctx, a):
 
 def _m_activity(ctx, a):
     from cousin_lib import memory
-    return memory.note_activity(ctx.home, _str(a, "text") or "Idle")
+    text = _str(a, "text") or "Idle"
+    session = getattr(ctx, "session", "primary")
+    if session != "primary":
+        # the note is the home's (checkpoints, the fleet view, the side
+        # digest): a side session's says so, never passes for the primary's
+        text = "[%s session] %s" % (session, text)
+    return memory.note_activity(ctx.home, text)
 
 
 # ---------------------------------------------------------------- job
@@ -619,6 +626,11 @@ def handoff(ctx, args):
     """The generation's handoff, in the ritual's order: STATUS.md's open
     loops, the thread list, the memories, and data/handoff.md LAST."""
     from cousin_lib import memory, sync_state
+    if getattr(ctx, "session", "primary") != "primary":
+        # the same tool list in every session keeps the cached prefix shared
+        # (phase 4 R1); a side session is refused here instead
+        raise ValueError("handoff belongs to the primary session; this is the %s side"
+                         " session: record what matters with the memory tool" % ctx.session)
     args = dict(args or {})
     missing = [k for k in ("position", "next_action", "status") if not str(args.get(k) or "").strip()]
     if missing:

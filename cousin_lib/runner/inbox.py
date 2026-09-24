@@ -46,6 +46,12 @@ _COLUMNS = ["id", "thread_id", "source", "sender", "body", "attachments_json",
             "claimant", "created_at", "claimed_at", "done_at"]
 
 
+# A thread id's kind in SQL: the text before the first colon, or the whole
+# id for a bare kind ("schedule", "system"); delivery.parse_thread's rule.
+_KIND_SQL = ("CASE WHEN instr(thread_id, ':') > 0"
+             " THEN substr(thread_id, 1, instr(thread_id, ':') - 1) ELSE thread_id END")
+
+
 def _row(cur_row):
     row = dict(zip(_COLUMNS, cur_row))
     row["attachments"] = json.loads(row.pop("attachments_json") or "[]")
@@ -91,17 +97,31 @@ class Inbox:
                  QUEUED, time.time()))
             return cur.lastrowid
 
-    def claim(self, *, limit=1, claimant=""):
+    def claim(self, *, limit=1, claimant="", kinds=None, exclude_kinds=()):
         """Oldest first within priority. BEGIN IMMEDIATE takes the write
         lock before the select, so two runners (or a runner and a test)
-        never claim the same row."""
+        never claim the same row. `kinds` (phase 8): only rows whose
+        thread is of one of these kinds, `()` claiming nothing;
+        `exclude_kinds`: never a row of these kinds. A side session claims
+        its kinds, the primary everything but them."""
         claimant = claimant or "pid:%d" % os.getpid()
+        where, params = "state=?", [QUEUED]
+        if kinds is not None:
+            kinds = tuple(kinds)
+            if not kinds:
+                return []
+            where += " AND %s IN (%s)" % (_KIND_SQL, ",".join("?" * len(kinds)))
+            params += kinds
+        if exclude_kinds:
+            exclude_kinds = tuple(exclude_kinds)
+            where += " AND %s NOT IN (%s)" % (_KIND_SQL, ",".join("?" * len(exclude_kinds)))
+            params += exclude_kinds
         with self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 ids = [r[0] for r in conn.execute(
-                    "SELECT id FROM inbox WHERE state=? ORDER BY priority, id"
-                    " LIMIT ?", (QUEUED, limit))]
+                    "SELECT id FROM inbox WHERE %s ORDER BY priority, id"
+                    " LIMIT ?" % where, (*params, limit))]
                 if not ids:
                     conn.execute("COMMIT")
                     return []

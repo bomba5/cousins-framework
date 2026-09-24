@@ -119,6 +119,8 @@ providers = ["openai"]           # keys in <data_dir>/data/opencode/auth.json
 kind = "opencode"                # opencode on a local OpenAI-compatible model
 endpoint = "http://127.0.0.1:11434/v1"
 endpoint_model = "qwen3-coder"
+# endpoint_context = 65536       # the model's context window, in tokens (optional)
+# endpoint_output = 8192         # its output bound (default: a quarter of the context)
 ```
 
 | kind | credentials live in | keys |
@@ -126,7 +128,7 @@ endpoint_model = "qwen3-coder"
 | `claude-login` | its own `.credentials.json` in `config_dir` (default `data/accounts/<name>`), refreshed by the CLI | `config_dir` |
 | `claude-token` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
 | `anthropic-key` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
-| `opencode` | opencode's own `auth.json` in `data_dir` (default `.secrets/accounts/<name>.opencode`), or none for a local endpoint | `data_dir`, and `providers` or `endpoint` plus `endpoint_model` |
+| `opencode` | opencode's own `auth.json` in `data_dir` (default `.secrets/accounts/<name>.opencode`), or none for a local endpoint | `data_dir`, and `providers` or `endpoint` plus `endpoint_model` (and optionally `endpoint_context`, `endpoint_output`) |
 
 The rules, all checked when the file is read, and a broken entry is an error
 that names the key, never a secret:
@@ -135,8 +137,8 @@ that names the key, never a secret:
 - `kind` is one of the four above.
 - `claude-login` takes `config_dir` and nothing else; the two secret kinds
   take `secret_file` and nothing else; `opencode` takes `data_dir`,
-  `providers`, `endpoint` and `endpoint_model` and nothing else. An unknown
-  key is refused.
+  `providers`, `endpoint`, `endpoint_model`, `endpoint_context` and
+  `endpoint_output` and nothing else. An unknown key is refused.
 - Every path is relative to the framework root. An absolute path, or one
   that leaves the root, is refused.
 - An `opencode` account takes exactly one of `providers` or `endpoint`.
@@ -145,6 +147,15 @@ that names the key, never a secret:
   which the runner always disables). `endpoint` is an http(s) base URL with a
   host and no `user:password@`, and needs `endpoint_model`, the model id the
   endpoint serves; `endpoint_model` without `endpoint` is refused.
+- `endpoint_context` (optional, with `endpoint` only) is the endpoint model's
+  context window in tokens, a positive whole number; `endpoint_output` (only
+  with `endpoint_context`) is its output bound, less than the context, default
+  a quarter of the context capped at 32000 (opencode's own largest). The
+  runner renders them as the model's `limit`: without it opencode reports no
+  context limit for a local model, so neither the runner's context-pressure
+  rollover nor opencode's own compaction happens (only the daily cadence
+  applies). opencode compacts at the context minus the output, so an output
+  near the context would compact every turn.
 - An `endpoint` that names the Claude-subscription bridge (its package or
   proxy names, or port 3456, the bridge proxy's port) is refused: move a
   legitimate local proxy on 3456 to another port.
@@ -613,6 +624,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_DEFAULT_RUNNER` | `sdk`, `fake` or `opencode`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 | `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set (the `opencode` image sets it); unset: `opencode` on `PATH` |
+| `COUSIN_POLICY_FILE` | set by an opencode cousin's runner for its `opencode serve`, not by you: the rendered policy file the plugin pack reads (`<data_dir>/cousin-policy.json`) |
 
 ## cousin.toml
 
@@ -915,7 +927,8 @@ The runner starts one `opencode serve` on `127.0.0.1` with a fresh password,
 in the cousin's home, with `HOME` and the four XDG directories in the
 account's data dir. Its environment is an allowlist: `PATH`, `LANG`,
 `LANGUAGE`, `LC_*`, `TZ`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, the cousin's
-`COUSIN_HOME` and `FRAMEWORK_ROOT`, and the runner's own switches; nothing
+`COUSIN_HOME` and `FRAMEWORK_ROOT`, `COUSIN_POLICY_FILE` (the plugin's policy
+file), and the runner's own switches; nothing
 else (no `OPENCODE_*` of the shell, no `*_API_KEY`) reaches it. The config
 it reads is rendered at every start into `<data_dir>/opencode.runner.json`
 (mode 0600) and nothing else is merged in: opencode's own hosted provider
@@ -933,7 +946,24 @@ environment that names the Claude-subscription bridge is refused before
 anything starts. The runner checks that opencode reports that MCP server
 connected before its first turn; when it does not, no turn runs (the runner
 gives up, exit 3). The composed system prompt goes with every prompt;
-opencode appends it to its own agent prompt. A restart resumes the session
+opencode appends it to its own agent prompt.
+
+The cousin's `policy.toml` is enforced by the plugin pack,
+`plugins/opencode/cousin-policy.js` (see
+[policy.toml on the opencode lane](#policytoml-on-the-opencode-lane)): the
+runner renders the policy into `<data_dir>/cousin-policy.json` (mode 0600)
+at every start and refuses to run turns (exit 3) until opencode's config
+lists the plugin and the plugin has acknowledged this start's file
+(`<data_dir>/cousin-policy.ack.json`). The listing alone proves nothing:
+opencode lists a configured plugin even when it failed to load. The runner
+records from opencode's event stream what the SDK lane's hooks record: each
+tool call, with its arguments, as an activity line, a `task` call (opencode's
+subagent tool) as a `subagent` job, a session checkpoint at the end of every
+turn, and on `session.compacted` the pre-compact checkpoint and a rollover
+at the next turn boundary. A subagent's own tool calls (in its child
+session) are vetoed by the plugin but not recorded.
+
+A restart resumes the session
 recorded in `data/runner-session.json` (lane `opencode`) while opencode
 still holds it; otherwise a new session starts, with the state digest as its
 first message when there is state to carry.
@@ -945,7 +975,8 @@ opencode's store. Context pressure is the last answer's tokens against the
 model's context limit as opencode reports it (`GET /config/providers`),
 against `rollover_at_percent`; a model opencode reports no limit for has no
 pressure rollover (the stream says so once) and only the daily cadence
-applies. `cousin-spawn --runner opencode` writes no model: add `model` (and
+applies. A local endpoint model has a limit only when its account names
+`endpoint_context`. `cousin-spawn --runner opencode` writes no model: add `model` (and
 the account) before the first start, or the runner refuses it.
 
 ### policy.toml
@@ -988,3 +1019,32 @@ What it is and is not:
   `thread` is denied ("a subagent must name the thread it answers"), because
   the turn's implicit thread belongs to the turn the subagent runs in, not to
   the subagent.
+
+#### policy.toml on the opencode lane
+
+On `runner = "opencode"` the same file is enforced by the plugin pack
+(`plugins/opencode/cousin-policy.js`, loaded by the config the runner
+renders), in opencode's `tool.execute.before`: a denied call becomes a tool
+error the model reads (`denied by policy: <reason>`) and the turn goes on,
+as on the SDK lane. The decisions are `Policy.decide`'s, with these lane
+differences:
+
+- Tool names are written the SDK lane's way on both lanes. The plugin maps
+  opencode's names before matching: `bash` `Bash`, `read` `Read`, `write`
+  `Write`, `edit` `Edit`, `glob` `Glob`, `grep` `Grep`, `task` `Agent` (the
+  subagent tool), `webfetch` `WebFetch`, `websearch` `WebSearch`,
+  `todowrite` `TodoWrite`, `skill` `Skill`, and the framework's
+  `cousin_<tool>` `mcp__cousin__<tool>`. A tool only opencode has keeps its
+  own name (`apply_patch` edits files: deny it by that name if `Edit` and
+  `Write` are denied).
+- `deny_bash_patterns` run as JavaScript regular expressions (with the `u`
+  flag). A pattern Python accepts and JavaScript does not (`(?P<name>...)`,
+  `(?i)`, `\A`, `\Z`) makes the plugin deny every call that carries a
+  command; the runner says which pattern at start. Write patterns in the
+  common subset.
+- The policy file is read once, when opencode loads the plugin: a rewrite of
+  `policy.toml` applies at the next start, as on the SDK lane.
+- opencode's own permission config is allow-all and any interactive ask it
+  still raises is rejected at once (an `error` event), so a turn never waits.
+- The subagent `reply` rule above is not enforced on this lane.
+

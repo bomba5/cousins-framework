@@ -13,6 +13,7 @@
 !cousin_lib
 !templates
 !hooks
+!plugins
 !config/*.example
 !docker/entrypoint.sh
 **/__pycache__

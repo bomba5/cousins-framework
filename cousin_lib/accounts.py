@@ -49,7 +49,8 @@ _NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _ALLOWED = {"claude-login": {"kind", "config_dir"},
             "claude-token": {"kind", "secret_file"},
             "anthropic-key": {"kind", "secret_file"},
-            "opencode": {"kind", "data_dir", "providers", "endpoint", "endpoint_model"}}
+            "opencode": {"kind", "data_dir", "providers", "endpoint", "endpoint_model",
+                         "endpoint_context", "endpoint_output"}}
 # An opencode account (phase 9 R12): opencode's HOME and its four XDG
 # directories live in the account's data dir, so its auth.json (the
 # provider keys, 0600, written by opencode itself) never leaves it.
@@ -94,6 +95,10 @@ class Account:
     providers: tuple = ()
     endpoint: str | None = None
     endpoint_model: str | None = None
+    # the endpoint model's context window and output bound, in tokens (Task
+    # 6): rendered as its `limit`, so context pressure works for it
+    endpoint_context: int | None = None
+    endpoint_output: int | None = None
 
 
 def root_of(home):
@@ -183,16 +188,27 @@ def _load_opencode(root, name, table, where):
             raise AccountsError("%s providers: 'opencode' is opencode's own hosted service,"
                                 " which the runner always disables; name the providers whose"
                                 " keys you hold" % where)
-        if "endpoint_model" in table:
-            raise AccountsError("%s endpoint_model goes with endpoint, not providers" % where)
+        for key in ("endpoint_model", "endpoint_context", "endpoint_output"):
+            if key in table:
+                raise AccountsError("%s %s goes with endpoint, not providers" % (where, key))
         return Account(name, "opencode", None, None, data_dir=data_dir, providers=tuple(provs))
     endpoint, model = table["endpoint"], table.get("endpoint_model")
     _check_endpoint(endpoint, where)
     if not isinstance(model, str) or not _MODEL.match(model):
         raise AccountsError("%s endpoint_model (the model id the endpoint serves) is required"
                             " with endpoint: one word, no spaces" % where)
+    context, output = table.get("endpoint_context"), table.get("endpoint_output")
+    for key, value in (("endpoint_context", context), ("endpoint_output", output)):
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool)
+                                  or value <= 0):
+            raise AccountsError("%s %s must be a positive whole number of tokens" % (where, key))
+    if output is not None and context is None:
+        raise AccountsError("%s endpoint_output goes with endpoint_context" % where)
+    if output is not None and output >= context:
+        raise AccountsError("%s endpoint_output must be less than endpoint_context (opencode"
+                            " compacts at the context minus the output)" % where)
     return Account(name, "opencode", None, None, data_dir=data_dir, endpoint=endpoint,
-                   endpoint_model=model)
+                   endpoint_model=model, endpoint_context=context, endpoint_output=output)
 
 
 def _check_endpoint(endpoint, where):

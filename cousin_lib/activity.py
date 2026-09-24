@@ -61,7 +61,8 @@ def describe_call(tool, tool_input):
             what = "[bg] " + what
         return what
     if tool in ("Read", "Write", "Edit", "NotebookEdit", "MultiEdit"):
-        return get("file_path") or get("notebook_path") or ""
+        # filePath: opencode's spelling (the runner names its tools the SDK way)
+        return get("file_path") or get("notebook_path") or get("filePath") or ""
     if tool in ("Grep", "Glob"):
         where = get("path") or ""
         return ("%s in %s" % (get("pattern"), where) if where

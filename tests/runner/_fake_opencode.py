@@ -38,6 +38,14 @@ run out a turn says "ok". Steps:
   ("HANG",)                           silence until abort
   ("FAIL", error_name, message)       session.error {name, data: {message}}
   ("AUTH_401",)                       the measured APIError 401
+  ("COMPACT",)                        session.compacted for the session
+
+The policy plugin (Task 6): opencode lists a configured plugin in GET
+/config whether or not it loaded, so the runner waits for the plugin's own
+acknowledgement file. Given `plugin_env` (the server's environment), the
+fake stands in for the plugin at start, as `load_plugin` describes;
+`plugin_mode` "load" (the default) acknowledges, "fatal" acknowledges a
+policy the plugin could not use, "absent" is a plugin that never ran.
 
 Measured semantics it keeps: a tool call ends the assistant message
 (finish "tool-calls") and the next step starts a new one; a turn ends with
@@ -83,7 +91,9 @@ AUTH_401 = {"name": "APIError", "data": {
         "code": "invalid_api_key"}}),
     "metadata": {"url": "http://127.0.0.1:9/v1/chat/completions"}}}
 _ARITY = {"text": 2, "reasoning": 2, "tool": 4, "tool_error": 4, "ASK": 4, "SLOW": 2,
-          "HANG": 1, "FAIL": 3, "AUTH_401": 1, "PARTIAL": 2, "PREP": 2}
+          "HANG": 1, "FAIL": 3, "AUTH_401": 1, "PARTIAL": 2, "PREP": 2, "COMPACT": 1}
+PLUGIN_NAME = "cousin-policy.js"
+POLICY_ENV = "COUSIN_POLICY_FILE"
 _ROUTES = [
     ("GET", re.compile(r"^/global/health$"), "health"),
     ("POST", re.compile(r"^/session$"), "create"),
@@ -115,6 +125,35 @@ def _compile(script):
     return steps
 
 
+def load_plugin(config, env, mode="load"):
+    """What the real plugin does at init, for the fake: when the config lists
+    a file:// plugin named cousin-policy.js and COUSIN_POLICY_FILE names a
+    readable policy, write the acknowledgement the policy asks for (its
+    nonce; `fatal` in mode "fatal"). Mode "absent" writes nothing. Returns
+    the acknowledgement's path or None."""
+    plugins = [p if isinstance(p, str) else (p[0] if p else "") for p in
+               (config or {}).get("plugin") or []]
+    if mode == "absent" or not any(str(p).startswith("file://") and str(p).endswith(
+            "/" + PLUGIN_NAME) for p in plugins):
+        return None
+    try:
+        with open((env or {})[POLICY_ENV]) as f:
+            policy = json.load(f)
+        ack = policy["ack"]
+    except (KeyError, OSError, ValueError, TypeError):
+        return None
+    fatal = "malformed policy: fake" if mode == "fatal" else None
+    body = {"nonce": policy.get("nonce"), "pid": os.getpid(), "fatal": fatal,
+            "deny_tools": 0 if fatal else len(policy.get("deny_tools") or []),
+            "deny_bash_patterns": 0 if fatal else len(policy.get("deny_bash_patterns") or []),
+            "ask": 0 if fatal else len(policy.get("ask") or []), "errors": []}
+    tmp = ack + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(body, f)
+    os.replace(tmp, ack)
+    return ack
+
+
 def _chunks(text):
     return re.findall(r"\s*\S+\s*", text) or ([text] if text else [])
 
@@ -136,8 +175,10 @@ class FakeOpencode:
     every bus event (not the per-connection server.connected/heartbeat)."""
 
     def __init__(self, scripts=(), *, password="pw", config=None, mcp=None, heartbeat=10.0,
-                 tokens=None, directory=None, port=0, providers=None):
+                 tokens=None, directory=None, port=0, providers=None, plugin_env=None,
+                 plugin_mode="load"):
         self.password = password
+        self.plugin_env, self.plugin_mode = plugin_env, plugin_mode
         self.config = _copy(config if config is not None else {})
         self.mcp = _copy(mcp if mcp is not None else {})
         self.providers = _copy(providers if providers is not None else [])
@@ -166,6 +207,8 @@ class FakeOpencode:
     # -- lifecycle ---------------------------------------------------------
 
     def start(self):
+        if self.plugin_env is not None:
+            load_plugin(self.config, self.plugin_env, self.plugin_mode)
         self._serve = threading.Thread(target=self._httpd.serve_forever, kwargs={
             "poll_interval": 0.05}, name="fake-opencode", daemon=True)
         self._serve.start()
@@ -512,6 +555,8 @@ class FakeOpencode:
             elif kind == "AUTH_401":
                 self._fail(sid, state, info, _copy(AUTH_401))
                 return "error"
+            elif kind == "COMPACT":
+                self._emit("session.compacted", {"sessionID": sid})
         if self._closing.is_set():
             return "closed"
         if state.abort.is_set():
@@ -763,7 +808,7 @@ def main(argv=None):
         with open(os.environ["OPENCODE_CONFIG"]) as f:
             config = json.load(f)
     fake = FakeOpencode(password=os.environ.get("OPENCODE_SERVER_PASSWORD", ""), config=config,
-                        port=opts.port)
+                        port=opts.port, plugin_env=dict(os.environ))
     if mode != "ignore-term":
         signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
     print("opencode server listening on %s" % fake.url, flush=True)

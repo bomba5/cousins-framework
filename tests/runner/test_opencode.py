@@ -23,7 +23,7 @@ from cousin_lib.runner.base import RunnerError
 from cousin_lib.runner.opencode import OpencodeRunner
 from cousin_lib.runner.opencode_http import OpencodeServer
 from tests._hermetic import HermeticCase
-from tests.runner._fake_opencode import FakeOpencode
+from tests.runner._fake_opencode import FakeOpencode, load_plugin
 from tests.runner._home import temp_home
 
 FAKE_BIN = Path(__file__).with_name("_fake_opencode.py")
@@ -64,7 +64,9 @@ def _probe_mcp(config):
 class FakeServer:
     """What server_factory returns: the fake on a fresh password, serving
     the config the runner rendered, its /mcp the result of a real MCP
-    handshake with the runner's server (unless `mcp` is forced)."""
+    handshake with the runner's server (unless `mcp` is forced), standing
+    in for the policy plugin as the factory's `plugin` mode says ("load",
+    "fatal", "absent"; "unlisted" serves a config without the plugin)."""
 
     def __init__(self, factory, kwargs):
         self.factory, self.kwargs = factory, kwargs
@@ -74,14 +76,19 @@ class FakeServer:
 
     def start(self):
         config = json.loads(Path(self.kwargs["config_path"]).read_text())
+        mode = self.factory.plugin
+        if mode == "unlisted":
+            config.pop("plugin", None)
         mcp = self.factory.mcp if self.factory.mcp is not None else _probe_mcp(config)
         if self.factory.shared is not None and self.factory.shared.fake is not None:
             self.fake = self.factory.shared.fake        # a restart on the same opencode store
             self.fake.mcp = mcp
+            load_plugin(config, self.kwargs["env"], mode)
         else:
             self.fake = FakeOpencode(self.factory.scripts, password=secrets.token_urlsafe(8),
                                      config=config, mcp=mcp, providers=self.factory.providers,
-                                     directory=str(self.kwargs["cwd"])).start()
+                                     directory=str(self.kwargs["cwd"]),
+                                     plugin_env=self.kwargs["env"], plugin_mode=mode).start()
             if self.factory.shared is not None:
                 self.factory.shared.fake = self.fake
         self.url, self.password = self.fake.url, self.fake.password
@@ -100,9 +107,9 @@ class FakeServer:
 
 
 class Factory:
-    def __init__(self, scripts=(), *, mcp=None, shared=None, providers=None):
+    def __init__(self, scripts=(), *, mcp=None, shared=None, providers=None, plugin="load"):
         self.scripts, self.mcp, self.shared = list(scripts), mcp, shared
-        self.providers = providers
+        self.providers, self.plugin = providers, plugin
         self.calls, self.servers = [], []
 
     def __call__(self, **kwargs):

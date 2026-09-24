@@ -26,6 +26,16 @@ that the model never started is requeued. A `session.error` classifies
 the turn (R2): an auth error puts the rows back and waits for the login,
 an abort is an interruption, anything else fails the turn.
 
+The policy veto lives in the plugin pack (R9): the runner renders
+policy.toml as `<data dir>/cousin-policy.json`, names it to opencode in
+COUSIN_POLICY_FILE, and refuses to run turns until opencode's config lists
+the plugin AND the plugin acknowledged this start's file (opencode lists a
+plugin whether or not it loaded). Recording, subagent jobs and checkpoints
+come from SSE, here (R10): a tool part's `running` state carries its
+arguments, and the runner hands the recording library the SDK lane's hook
+payloads, the tool named in the SDK form (`bash` -> `Bash`, `cousin_reply`
+-> `mcp__cousin__reply`), the one form policy.toml and the recorder use.
+
 Stdlib and cousin_lib only."""
 import hashlib
 import json
@@ -38,9 +48,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import accounts, boot, session
+from cousin_lib import accounts, boot, recording, session
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import auth, envelope, opencode_guard, tools, wake
+from cousin_lib.runner import auth, checkpoints, envelope, opencode_guard, tools, wake
+from cousin_lib.runner import policy as _policy
 from cousin_lib.runner import rollover as _rollover
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
@@ -77,11 +88,69 @@ TEXT_CHARS = 2000               # a tool result's, a user echo's bound
 # 1.18.31, Task 7). The pack imports nothing, so the runner marks it
 # present (seed_plugin_dependency) and opencode installs nothing.
 PLUGIN_DEPENDENCY = "@opencode-ai/plugin"
+# The plugin pack's policy file, its acknowledgement and how the plugin
+# finds the file (R9). Both files live in the account's data dir.
+POLICY_NAME = "cousin-policy.json"
+POLICY_ACK = "cousin-policy.ack.json"
+POLICY_ENV = "COUSIN_POLICY_FILE"
+PLUGIN_TIMEOUT_S = 30.0         # GET /config (the instance's bootstrap), then the plugin's word
+DENIED = "denied by policy: "   # what the plugin's throw reads as, to the model
+# opencode's built-in tools in the SDK lane's names: the ONE form policy.toml
+# and the recorder use on both lanes. A tool opencode has and the SDK lane
+# has not (apply_patch, question, invalid) keeps its own name.
+SDK_NAMES = {"bash": "Bash", "read": "Read", "write": "Write", "edit": "Edit",
+             "glob": "Glob", "grep": "Grep", "task": "Agent", "webfetch": "WebFetch",
+             "websearch": "WebSearch", "todowrite": "TodoWrite", "skill": "Skill"}
+OWN_PREFIX = "cousin_"
+# The largest output opencode asks of any model (its OUTPUT_TOKEN_MAX, 1.18.31)
+OPENCODE_OUTPUT_MAX = 32000
 
 
 def tool_name(name):
     """What opencode calls the registry's tool `name` (Survey 5)."""
-    return "cousin_%s" % name
+    return "%s%s" % (OWN_PREFIX, name)
+
+
+def sdk_tool_name(name):
+    """opencode's tool name in the SDK lane's form: `bash` -> `Bash`,
+    `cousin_reply` -> `mcp__cousin__reply`; any other name is its own."""
+    name = str(name or "")
+    if name in SDK_NAMES:
+        return SDK_NAMES[name]
+    if name.startswith(OWN_PREFIX):
+        return _policy.OWN_TOOL_PREFIX + name[len(OWN_PREFIX):]
+    return name
+
+
+def render_policy(policy, *, nonce, ack):
+    """policy.toml as the plugin reads it (R9): the same lists, each
+    pattern with the reason Policy.decide gives, the name table, and this
+    start's nonce and acknowledgement path."""
+    return {
+        "version": 1, "nonce": nonce, "ack": str(ack), "file": _policy.FILE,
+        "source": policy.source,
+        "deny_tools": list(policy.deny_tools),
+        "deny_bash_patterns": [{"source": rx.pattern,
+                                "reason": "%s: deny_bash_patterns %r matches"
+                                          % (_policy.FILE, rx.pattern)}
+                               for rx in policy.deny_bash_patterns],
+        "ask": list(policy.ask),
+        "own_tool_prefix": _policy.OWN_TOOL_PREFIX,
+        "names": dict(SDK_NAMES),
+        "prefixes": {OWN_PREFIX: _policy.OWN_TOOL_PREFIX},
+    }
+
+
+def endpoint_limit(account):
+    """The endpoint model's `limit` block, or None when the account names no
+    `endpoint_context`: the output defaults to a quarter of the context,
+    capped at opencode's own maximum (opencode compacts at context minus
+    output, so an output near the context would compact every turn)."""
+    context = getattr(account, "endpoint_context", None)
+    if not context:
+        return None
+    output = getattr(account, "endpoint_output", None) or min(context // 4, OPENCODE_OUTPUT_MAX)
+    return {"context": context, "output": output}
 
 
 def _agent_table(home):
@@ -130,10 +199,14 @@ def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLU
     if account.providers:
         config["enabled_providers"] = list(account.providers)
     if account.endpoint:
+        model = {"name": account.endpoint_model}
+        limit = endpoint_limit(account)
+        if limit:
+            model["limit"] = limit
         config["provider"] = {ENDPOINT_PROVIDER: {
             "npm": "@ai-sdk/openai-compatible", "name": "local endpoint (%s)" % account.name,
             "options": {"baseURL": account.endpoint},
-            "models": {account.endpoint_model: {"name": account.endpoint_model}}}}
+            "models": {account.endpoint_model: model}}}
     return config
 
 
@@ -147,6 +220,7 @@ def server_env(account, root, *, home, environ=None, models_fetch=True):
     env.update(accounts.account_env(account, root))
     env["COUSIN_HOME"] = str(home)
     env["FRAMEWORK_ROOT"] = str(root)
+    env[POLICY_ENV] = str(Path(account.data_dir) / POLICY_NAME)      # the plugin's (R9)
     if not models_fetch:
         env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"          # R21
     return env
@@ -252,10 +326,12 @@ class OpencodeRunner:
     reader_backoff_s = 0.5
     mcp_timeout_s = 10.0
     connect_timeout_s = 10.0
+    plugin_timeout_s = PLUGIN_TIMEOUT_S
 
     def __init__(self, home, *, server_factory=None, account=None, model=None, small_model=None,
                  policy=None, registry=None, idle_timeout_s=600.0,
-                 health_timeout_s=HEALTH_TIMEOUT_S, handoff_deadline_s=None, environ=None):
+                 health_timeout_s=HEALTH_TIMEOUT_S, handoff_deadline_s=None, environ=None,
+                 recorder=None):
         self.home = Path(os.path.abspath(home))
         from cousin_lib.runner.main import export_environment, root_for
         export_environment(self.home, overwrite=False)
@@ -309,6 +385,10 @@ class OpencodeRunner:
         self.handoff_box = _rollover.HandoffBox()
         self.hysteresis = _rollover.Hysteresis()
         self.tool_context.on_handoff = self.handoff_box.set
+        # R10: the SDK lane's recording library, fed hook payloads from SSE
+        self.recorder = recorder or (lambda payload: recording.handle(
+            payload, self.home, self.root, slug=slug))
+        self._policy_nonce = None
         self._limit = None            # (model, limit.context or None), read once per start
         self.fatal = None
         self._server = self._client = self._reader = self._mcp = None
@@ -462,8 +542,8 @@ class OpencodeRunner:
             self._mcp.stop()
         raise RunnerError("the MCP server could not get a port other than %d" % BRIDGE_PORT)
 
-    def _write_config(self, config):
-        path = Path(self.account.data_dir) / CONFIG_NAME
+    def _write_config(self, config, name=CONFIG_NAME):
+        path = Path(self.account.data_dir) / name
         tmp = path.with_suffix(".tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w") as f:
@@ -471,6 +551,75 @@ class OpencodeRunner:
         os.chmod(tmp, 0o600)
         tmp.replace(path)
         return path
+
+    def _write_policy(self):
+        """The plugin's policy file for this start (R9), a fresh nonce, and no
+        acknowledgement left from an earlier start."""
+        ack = Path(self.account.data_dir) / POLICY_ACK
+        ack.unlink(missing_ok=True)
+        self._policy_nonce = uuid.uuid4().hex
+        return self._write_config(render_policy(self.policy, nonce=self._policy_nonce, ack=ack),
+                                  POLICY_NAME)
+
+    def _check_plugin_listed(self):
+        """The veto's first half (R9, Review Focus 3): opencode's config
+        lists the plugin pack. This is also the instance's first request,
+        on which opencode bootstraps the instance and loads its plugins, so
+        it is bounded by `plugin_timeout_s` (without seed_plugin_dependency
+        that bootstrap waited 24-47 s online for opencode's own npm install,
+        and the event stream's 10 s connect bound failed first). The listing
+        alone proves nothing: see `_await_plugin_ack`."""
+        entry = plugin_entry(PLUGIN)
+        try:
+            listed = (self._client.request("GET", "/config", timeout=self.plugin_timeout_s)
+                      or {}).get("plugin") or []
+        except OpencodeError as err:
+            raise RunnerError("GET /config: %s: the policy plugin cannot be checked, so no turn"
+                              " runs" % err)
+        names = [p if isinstance(p, str) else (p[0] if isinstance(p, list) and p else None)
+                 for p in listed]
+        if entry not in names:
+            raise RunnerError("opencode's config does not list the policy plugin %s (it lists %s):"
+                              " policy.toml would not apply, so no turn runs"
+                              % (entry, names or "none"))
+
+    def _await_plugin_ack(self):
+        """The veto's second half: the plugin acknowledged THIS start's
+        policy file (its nonce). opencode lists a configured plugin whether
+        or not it loaded (measured on 1.18.31: a missing file, a syntax error
+        and an init that throws are all listed, and a call they would have
+        denied runs), so only the plugin's own word proves it is in force."""
+        entry = plugin_entry(PLUGIN)
+        path = Path(self.account.data_dir) / POLICY_ACK
+        deadline = time.monotonic() + self.plugin_timeout_s
+        ack = None
+        while True:
+            try:
+                ack = json.loads(path.read_text())
+            except (OSError, ValueError):
+                ack = None
+            if isinstance(ack, dict) and ack.get("nonce") == self._policy_nonce:
+                break
+            if time.monotonic() >= deadline or self._stop.is_set():
+                raise RunnerError("the policy plugin did not load: opencode lists %s but no"
+                                  " acknowledgement of this start's %s arrived within %.0fs:"
+                                  " policy.toml would not apply, so no turn runs"
+                                  % (entry, POLICY_NAME, self.plugin_timeout_s))
+            time.sleep(0.1)
+        if ack.get("fatal"):
+            raise RunnerError("the policy plugin cannot apply the policy (%s): it would deny"
+                              " every call, so no turn runs" % str(ack["fatal"])[:300])
+        errors = ack.get("errors") if isinstance(ack.get("errors"), list) else []
+        self.stream.append("system", {"subtype": "policy_plugin", "plugin": entry,
+                                      "deny_tools": ack.get("deny_tools"),
+                                      "deny_bash_patterns": ack.get("deny_bash_patterns"),
+                                      "ask": ack.get("ask"), "errors": errors})
+        for e in errors:
+            e = e if isinstance(e, dict) else {}
+            self.stream.append("error", {"error": "%s: deny_bash_patterns %r is not a valid"
+                                         " JavaScript RegExp (%s): on opencode every command is"
+                                         " denied until it is rewritten"
+                                         % (_policy.FILE, e.get("source"), e.get("error"))})
 
     def _boot(self):
         """MCP server, config, guard, server, event reader, MCP check.
@@ -481,6 +630,7 @@ class OpencodeRunner:
             config, env = self._render(mcp_url=self._mcp.url, mcp_token=self._mcp.token)
             path = self._write_config(config)
             seed_plugin_dependency(Path(env["XDG_CONFIG_HOME"]) / "opencode")
+            self._write_policy()
             self._system = prompt.compose_system_prompt(self.home, root=self.root,
                                                         registry=self._mcp.registry,
                                                         tool_name=tool_name)
@@ -493,6 +643,7 @@ class OpencodeRunner:
                 return False
             self._client = OpencodeClient(self._server.url, self._server.password)
             self._limit = None
+            self._check_plugin_listed()
             self._reader = EventReader(self._server.url, self._server.password, self._events.put,
                                        stop_event=self._reader_stop,
                                        backoff=self.reader_backoff_s)
@@ -501,6 +652,7 @@ class OpencodeRunner:
                 raise RunnerError("no event stream from opencode within %.0fs: %s"
                                   % (self.connect_timeout_s, self._reader.last_error))
             self._check_mcp()
+            self._await_plugin_ack()
         except Exception as exc:  # noqa: BLE001 - a runner that cannot start says why
             if not self._stop.is_set():
                 self._fail_start("opencode start: %s: %s" % (type(exc).__name__, exc))
@@ -934,6 +1086,8 @@ class OpencodeRunner:
                                               "next": status.get("next")})
         elif kind == "permission.asked":
             self._on_permission(p)
+        elif kind == "session.compacted":
+            self._on_compacted()
 
     def _on_message(self, run, info):
         mid, role = info.get("id"), info.get("role")
@@ -1000,12 +1154,69 @@ class OpencodeRunner:
             run.emitted.add((call, "tool"))
             self.stream.append("tool", {"id": call, "name": part.get("tool"),
                                         "input": state.get("input") or {}})
+            self._record("PreToolUse", part, state)
         if status in ("completed", "error") and (call, "result") not in run.emitted:
             run.emitted.add((call, "result"))
             text = state.get("output") if status == "completed" else state.get("error")
             self.stream.append("tool_result", {"tool_use_id": call,
                                                "is_error": status == "error",
                                                "text": str(text or "")[:TEXT_CHARS]})
+            if status == "error" and str(text or "").startswith(DENIED):
+                self.stream.append("policy", {"tool": sdk_tool_name(part.get("tool")),
+                                              "decision": "deny",
+                                              "reason": str(text)[len(DENIED):],
+                                              "opencode_tool": part.get("tool")})
+            self._record("PostToolUse" if status == "completed" else "PostToolUseFailure",
+                         part, state)
+
+    def _record(self, event, part, state):
+        """R10: one tool part as the SDK lane's hook payload, to the recording
+        library (activity line, subagent job for `task`), with its arguments.
+        A PreToolUse the policy denies is not recorded (hooks.recorder_for's
+        rule: the call never ran). A recorder failure is a `hook` event."""
+        name = sdk_tool_name(part.get("tool"))
+        args = state.get("input") if isinstance(state.get("input"), dict) else {}
+        if event == "PreToolUse" and self.policy.decide(name, args)[0] != "allow":
+            return
+        payload = {"hook_event_name": event, "tool_name": name, "tool_input": dict(args),
+                   "tool_use_id": part.get("callID") or part.get("id"),
+                   "session_id": self.opencode_session, "cwd": str(self.home),
+                   "opencode_tool": part.get("tool")}
+        if event == "PostToolUse":
+            payload["tool_response"] = state.get("output")
+        elif event == "PostToolUseFailure":
+            payload["error"] = state.get("error")
+            payload["is_interrupt"] = bool(self._interrupt_requested)
+        try:
+            self.recorder(payload)
+        except Exception as exc:  # noqa: BLE001 - a recorder never fails the turn
+            self.stream.append("hook", {"event": event, "error": "%s: %s"
+                                        % (type(exc).__name__, exc)})
+
+    def _checkpoint(self, kind, **extra):
+        """The SDK lane's Stop (`session`) and PreCompact (`pre_compact`)
+        checkpoint files; a failure is a `hook` event, never the turn's."""
+        write = (checkpoints.write_session_checkpoint if kind == "session"
+                 else checkpoints.write_pre_compact_checkpoint)
+        try:
+            path = write(self.home, slug=self.tool_context.slug)
+        except Exception as exc:  # noqa: BLE001 - never the turn's failure
+            self.stream.append("hook", {"event": kind, "error": "%s: %s"
+                                        % (type(exc).__name__, exc)})
+            return None
+        self.stream.append("checkpoint", dict({"kind": kind, "path": str(path)}, **extra))
+        return path
+
+    def _on_compacted(self):
+        """opencode compacted the session (R10): the pre-compact checkpoint,
+        then, as the SDK lane's PreCompact does, a rollover at the next turn
+        boundary (a fresh generation with a handoff beats a summary)."""
+        self._checkpoint("pre_compact", trigger="session.compacted")
+        try:
+            self._request_rollover("compacted")
+        except Exception as exc:  # noqa: BLE001 - the trigger never fails a turn
+            self.stream.append("error", {"error": "rollover trigger: %s: %s"
+                                         % (type(exc).__name__, exc)})
 
     def _on_echo(self, run, mid, text):
         """opencode announced a user message: the prompt it stored."""
@@ -1092,6 +1303,7 @@ class OpencodeRunner:
             return False
         ok = self._drive(run)
         self._end_turn(run)
+        self._checkpoint("session")             # the SDK lane's Stop hook
         if ok and not self._interrupt_requested and run.tokens:
             self._pressure(run)
         return ok

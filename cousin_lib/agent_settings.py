@@ -201,6 +201,11 @@ def _check_value(key, value, lane, home):
         for name in value:
             if not _ENV_NAME.match(name):
                 raise ValueError("%r is not a variable name" % name)
+        if key == "env_allow":
+            # the runner's own check (the hard deny beats env_allow): a name
+            # the pane would never get is refused where it is set
+            from cousin_lib.runner.tmux_launch import env_allow_of
+            env_allow_of({"env_allow": list(value)})
         return list(value)
     if not isinstance(value, str):
         raise ValueError("must be a string")

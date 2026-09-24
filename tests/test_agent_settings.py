@@ -193,6 +193,14 @@ class Validate(_Case):
                                                    "small_model": None})
         self.assertIn("opencode", self.refused(home, {"account": "fleet"}, "account"))
 
+    def test_the_tmux_kinds_env_allow_refuses_what_the_hard_deny_takes(self):
+        """Review minor: the console's check is the runner's (env_allow_of),
+        so a name the pane would never get is refused where it is set."""
+        home = self.cousin('runner = "tmux"\n')
+        for name in ("GH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_ENTRYPOINT"):
+            self.assertIn("hard deny", self.refused(home, {"env_allow": [name]}, "env_allow"), name)
+        agent_settings.validate(home, self.root, {"env_allow": ["PGHOST", "LANG"]})
+
     def test_a_tmux_kind_cousin_refuses_a_key_account(self):
         home = self.cousin('runner = "tmux"\n')
         self.assertIn("subscription login", self.refused(home, {"account": "metered"}, "account"))

@@ -551,8 +551,7 @@ function McpServersEditor({ cousin }) {
 // ---- cousin-mcp: approve, selftest, last connection ------------------------------
 
 function McpDiagnostics({ cousin }) {
-  const base = `/api/cousins/${cousin.slug}/mcp`;
-  const [status, , loadStatus] = useMcpResource(base + "/status");
+  const [status, , loadStatus] = useMcpResource(`/api/cousins/${cousin.slug}/mcp/status`);
   const [selftest, setSelftest] = React.useState(null);
   const [last, setLast] = React.useState(undefined);
   const [busy, setBusy] = React.useState(null);
@@ -570,17 +569,17 @@ function McpDiagnostics({ cousin }) {
     setBusy(what); setMsg(null);
     try {
       if (what === "selftest") {
-        const d = await apiGet(base + "/selftest");
+        const d = await apiGet(`/api/cousins/${cousin.slug}/mcp/selftest`);
         if (!d) throw new Error("selftest unavailable");
         setSelftest(d);
       } else if (what === "last") {
-        const d = await apiGet(base + "/last-connection");
+        const d = await apiGet(`/api/cousins/${cousin.slug}/mcp/last-connection`);
         if (!d) throw new Error("last connection unavailable");
         setLast(d.last);
       } else if (what === "approve") {
         if (!confirm) { setConfirm(true); return; }
         setConfirm(false);
-        const { r, d } = await apiSend("POST", base + "/approve", {});
+        const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/mcp/approve`, {});
         if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
         setMsg({ ok: true, text: `approved in ${d.settings_file}: ${d.note}` });
         loadStatus();

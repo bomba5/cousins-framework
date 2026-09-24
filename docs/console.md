@@ -212,6 +212,9 @@ Click a card to open the inspector drawer. From top to bottom:
   prompt, on/off, remove. "+ loop" adds one, "save" writes the whole list.
   Daily and cron loops show their schedule here but are edited on the Loops
   page. If the loops daemon is down, it says so above the list.
+- **MCP.** Three tabs: the tool registry, the `.mcp.json` servers and
+  `cousin-mcp`. See [MCP and policy](#mcp-and-policy).
+- **Policy.** The cousin's `policy.toml`. See [MCP and policy](#mcp-and-policy).
 - **Flip.** The last flip the console ran (idle, running, done, failed, or a
   stale marker from a crashed flip) with its generation, and any pending
   timed flip with a cancel button.
@@ -222,6 +225,45 @@ Click a card to open the inspector drawer. From top to bottom:
 
 The model has no editor in the inspector yet. Set `[runtime] model` in
 `cousin.toml` (or respawn), then restart.
+
+### MCP and policy
+
+Two inspector panels and one Settings panel edit what a cousin's model can
+reach. Each change is checked by the parser the runner reads the file with,
+keeps every line it does not touch, and applies at the next start: after a
+save the panel says so and, on a running cousin, offers "restart now" (a
+second click confirms). A file that changed on disk since the panel loaded it
+is never overwritten; reload and make the change again.
+
+- **Tool registry** (`<home>/mcp-registry.toml`): a switch per tool, and the
+  ceiling, timeout and output cap. More enabled tools than the ceiling is
+  refused, and so is enabling a tool the runner has no handler for. Adding a
+  tool is a file edit. A cousin without a registry of its own shows the one
+  it reads and offers "copy the install default here".
+- **Servers** (`<home>/.mcp.json`): stdio servers (command, args, env) and
+  http or sse servers (url, headers). The runner passes these to the agent CLI
+  on its command line, which any user on the host can read, so a value that
+  looks like a secret is refused and the panel offers the `${VAR}` reference
+  to write instead; set the variable in the runner's environment. A literal
+  secret already in the file is never shown. The `cousin` entry and entries
+  of no known shape are kept as they are. The panel also shows what the
+  runner loaded and skipped at its last start.
+- **cousin-mcp**: selftest (the registry, where each command resolves, the
+  SDK), last connection (what the harness logged, its stderr included) and
+  approve (trusts the home and enables `cousin` in the harness settings file
+  `config/harness.toml` names; only the tmux lane needs it).
+- **Policy** (`<home>/policy.toml`): `deny_tools` and `ask` as chips,
+  `deny_bash_patterns` one per line (compiled on save; on opencode a pattern
+  JavaScript cannot compile is flagged, since it would deny every command),
+  and `outbound_filter`. `mcp__cousin__handoff` can never be denied: every
+  generation ends through it. A change that removes a deny entry or turns the
+  filter off lists what it removes and needs "save and loosen". A guardrail,
+  not a sandbox: the model can rewrite the file.
+- **Settings > mcp tool registry**: the install default,
+  `config/mcp-registry.toml`, with "copy from example" while it is absent.
+
+Replacing a registry with the default, or a broken `.mcp.json` or
+`policy.toml`, asks you to type "replace".
 
 ### Flipping from the console
 
@@ -538,6 +580,8 @@ See [meetings](meetings.md).
   service manager to start it again (about 4 seconds). Logins survive the
   restart. If it isn't running under a supervisor, it warns you that restart
   means stop. Cousins are restarted from their inspector.
+- **mcp tool registry**: the install default registry, see
+  [MCP and policy](#mcp-and-policy).
 - **account**: who you're logged in as, change password, log out. Without a
   users file it shows the `cousin-console adduser` line instead.
 
@@ -545,8 +589,7 @@ See [meetings](meetings.md).
 
 - A page can lag its store by its poll interval (2 to 15 seconds depending on
   the page). When they disagree, the store is right.
-- There's no model editor and no way to create a cousin's first login or
-  approve its MCP server from the page; those are `cousin.toml`,
-  the pane, and `cousin-mcp approve`.
+- There's no model editor and no way to create a cousin's first login from
+  the page; those are `cousin.toml` and the pane.
 - The pane is a terminal over HTTP, not a real PTY. Normal typing, arrows,
   Ctrl keys and F1 to F4 work; exotic key sequences don't.

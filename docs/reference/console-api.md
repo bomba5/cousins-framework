@@ -91,6 +91,71 @@ Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge:
 
 `getMe` with the stored token: `{"ok", "bot"?, "error"?}`.
 
+## MCP and policy
+
+A cousin's MCP tool registry, its `.mcp.json` servers, `cousin-mcp`'s diagnostics and its `policy.toml`, plus the install's default registry (`cousin_lib/console/routes_mcp.py`). Every edit is checked by the parser that reads the file: the registry by `mcp_server.parse_registry` (strict, the runner's reading; on a runner cousin also the in-process handlers, `runner/tools.missing_handlers`), `.mcp.json` by `runner/mcp_config.parse`, `policy.toml` by `runner/policy.Policy.parse`. A TOML file is edited through `console/toml_edit.write_file`, so every line the change does not touch is kept.
+
+- **etag.** Every read answers `etag` (a hash of the file, `"absent"` when there is none). A write sends it back; a file that changed meanwhile is `409 {"error", "etag"}` and nothing is written. The model can rewrite all of these files.
+- **Applies at the next start.** Every write answers the fresh read plus `restart_required: true`. The runner reads `.mcp.json`, `policy.toml` and its registry once, at start; a tmux cousin's harness reads `.mcp.json` and the registry at session start. The inspector offers `POST /api/cousins/<slug>/restart`.
+- **Secrets in `.mcp.json`.** The runner hands the servers to the agent CLI as a `--mcp-config` command-line argument, which any user on the host can read. A value that looks like a secret (a known key prefix, an opaque mixed-case token, eight or more literal characters under a name that says secret, a password in a URL, a secret-named flag's value) is refused with `problems: [{"server", "field", "key", "reason", "suggest"}]`, where `suggest` is the `${VAR}` reference to write instead. A literal already in the file is never answered: it reads as `value: null, masked: true`, and a save that sends it back as null is refused until it is replaced. A reference to an account variable (`accounts.AUTH_VARS`) is refused: the runner skips such a server.
+- **The handoff.** `policy.toml` can never deny `mcp__cousin__handoff`, in `deny_tools` or in `ask` (enforced as a deny), exactly or as a prefix (`mcp__cousin__*`, `*`): `400` naming the entry. Every generation ends through it.
+
+### `GET /api/cousins/<slug>/mcp/registry`
+
+`{"scope": "cousin", "file", "exists", "etag", "source": "own" | "install" | "example" | "shipped", "shown", "lane", "ceiling", "timeout", "max_output", "limits", "tools": [{"name", "kind", "enabled", "description", "commands", "editable"}], "enabled_count", "error", "skipped": [{"name", "reason"}]}`. With no registry in the home, `exists` is false and the tools shown are the one the cousin reads instead (`shown`). `error` is the strict parser's (the runner refuses to start with it); `skipped` the tools `cousin-mcp` would skip. Read from the raw TOML, so a registry over its ceiling still lists its tools.
+
+### `POST /api/cousins/<slug>/mcp/registry`
+
+Body `{"etag", "ceiling"?, "timeout"?, "max_output"?, "tools"?: {"<name>": true|false}}`. Numbers are whole, within `limits` (ceiling 1 to 50, timeout 5 to 3600 s, max_output 1000 to 1000000 characters). Only what differs is written: a tool's `enabled` key, a top-level number. `400` for a bad value, an unknown tool (adding a tool is a file edit), a result the strict parser refuses (more enabled tools than the ceiling) or, on a runner cousin, a tool with no in-process handler. `409` with no registry in the home.
+
+### `POST /api/cousins/<slug>/mcp/registry/copy-default`
+
+Writes the install default (`mcp_server.shipped_default_registry`, the operator filled in, as spawn does) into the home. Body `{}` when there is none yet; `{"replace": true, "etag"}` to overwrite one (`409` otherwise). The browser asks for a typed "replace".
+
+### `GET /api/mcp/registry`
+
+The install default, `config/mcp-registry.toml`, in the same shape (`scope: "install"`), plus `example_exists`. Absent, it shows `config/mcp-registry.toml.example`.
+
+### `POST /api/mcp/registry`
+
+As the cousin's, on `config/mcp-registry.toml`; `409` while it does not exist.
+
+### `POST /api/mcp/registry/copy-example`
+
+Copies `config/mcp-registry.toml.example` (else the checkout's) to `config/mcp-registry.toml`. `{}` when absent, `{"replace": true, "etag"}` to overwrite.
+
+### `GET /api/cousins/<slug>/mcp/servers`
+
+`{"file": ".mcp.json", "exists", "etag", "lane", "parse_error", "reserved": "cousin", "servers": [...], "kept": [{"name", "reason"}], "last_event"}`. A server: `{"name", "type": "stdio" | "http" | "sse", "command", "args": [{"value", "masked"}], "env": [{"name", "value", "masked"}]}` or `{"name", "type", "url", "url_masked", "headers": [{"name", "value", "masked"}]}`, plus `ignored_keys` (keys the runner drops, kept on save), `account_vars`, `unset_vars` (a `${VAR}` with no default that the console's environment does not set: a hint, the runner's environment decides) and `masked`. `kept` lists the entries this editor does not model (the reserved `cousin`, an entry of no known shape): a save keeps them as they are. `last_event` is the newest `mcp_config` event of the runner's primary stream (`{"ts", "seq", "payload": {"file", "servers", "skipped"}, "stream"}`), or null.
+
+### `POST /api/cousins/<slug>/mcp/servers`
+
+Body `{"etag", "servers": [...], "drop"?: ["<kept name>"], "replace_broken"?: true}`, every editable server, in the GET's shape (an arg may be a plain string; empty lists may be left out). Names are 1 to 64 of `A-Za-z0-9_-`, unique, never `cousin` (which can never be dropped either). `400 {"problems"}` for any refusal; nothing is written. Keys the editor does not model, and the file's other top-level keys, are kept. A file that does not parse needs `replace_broken` (`409` otherwise). The new text must load every server through `mcp_config.parse`.
+
+### `GET /api/cousins/<slug>/mcp/selftest`
+
+`cousin-mcp --selftest` as data: `{"ok", "registry", "ceiling", "timeout", "max_output", "tools": [{"name", "kind", "commands", "operators"?}], "commands": [{"command", "where", "found"}], "missing", "skipped", "sdk": {"present", "versions"}, "missing_handlers", "error"}`. `missing_handlers` only on a runner cousin.
+
+### `GET /api/cousins/<slug>/mcp/last-connection`
+
+`{"last": null | {"state": "connected" | "failed" | "unrecorded", "when", "session_id", "detail", "stderr", "earlier", "path"}}`: what the harness recorded the last time it connected the cousin's MCP server (`mcp_logs.last_connection`), each text cut at 4000 characters.
+
+### `GET /api/cousins/<slug>/mcp/status`
+
+`{"lane", "mcp_json", "settings_file", "approved": true | false | null, "reason"}`: whether the harness settings file `config/harness.toml` names trusts this home and enables `cousin` for it.
+
+### `POST /api/cousins/<slug>/mcp/approve`
+
+`cousin-mcp approve`: trusts the home and enables `cousin` in that settings file (`mcp_server.approve_registration`), editing only this home's entry. `409` with no `.mcp.json`, no `settings_file`, or a settings file that cannot be edited. Read at the cousin's next session start; a runner cousin does not need it.
+
+### `GET /api/cousins/<slug>/policy`
+
+`{"file": "policy.toml", "exists", "etag", "error", "lane", "protected": "mcp__cousin__handoff", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "template", "last_event"}`. `error` is `Policy.parse`'s (the runner refuses to start with it). `template` holds `templates/policy.toml.example`'s values, for "fill from the template". `last_event` is the start's `policy` `describe` event.
+
+### `POST /api/cousins/<slug>/policy`
+
+Body `{"etag", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "confirm_loosening"?, "replace_broken"?}`. The lists are non-empty one-line strings (a repeat is dropped). Each pattern is compiled (`400 {"problems": [{"key", "index", "entry", "reason"}]}`); the whole text must pass `Policy.parse`; the handoff rule above. A change that removes a `deny_tools`, `deny_bash_patterns` or `ask` entry, or turns `outbound_filter` off, answers `409 {"needs_confirm": true, "removed": {...}}` until it is sent again with `confirm_loosening: true`. Only the keys that change are rewritten; an absent file is created with a short header. A file the runner cannot read needs `replace_broken` (`409` otherwise). On opencode the plugin runs the patterns as JavaScript RegExp: the browser warns about a pattern JavaScript cannot compile.
+
 ## Meetings
 
 A chat shared by the signed-in user and several running cousins, in rounds ([meetings](../meetings.md)). The store is `data/meetings.db`; cousins speak through `cousin-meeting`, so changes also arrive from outside the console and the event stream reports them as `meeting-change` (`{"id", "op"}`). A refusal (not your floor, a stopped or remote participant, a closed meeting) is `400` with the reason in `error`; an unknown id is `404`. The user's entries carry the signed-in user name.

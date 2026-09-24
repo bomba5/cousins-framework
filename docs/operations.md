@@ -161,7 +161,9 @@ anywhere else, is yours.
 runs `cousin-supervisor run` as one user unit in place of
 `cousin-console.service` and `cousin-loops.service`, never beside them.
 `cousin-loops run` holds `run/loops.lock`, so a second loops daemon (a second
-clock) exits 2 and leaves the supervisor's loops child `failing`. And the
+clock) exits 5 (busy): whichever started second never ticks. When that is the
+supervisor's loops child, it waits in `backoff` (never `failing`) and becomes
+the clock once the old daemon stops, so no clock ticks until then. And the
 supervisor's console listens on `127.0.0.1:8600` unless its unit carries the
 old console's `--host` and `--port`, which the migration in the units README
 does. `systemctl --user reload cousin-supervisor.service` is the rescan. Its

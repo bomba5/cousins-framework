@@ -572,9 +572,12 @@ class TestDeliveryDocs(unittest.TestCase):
                        "start --name loops", "exits 5",
                        # why never beside the old units: the clock and the address
                        "run/loops.lock", "`--host` and `--port`",
-                       "pip is removed from the image", "at least once"):
+                       "pip is removed from the image", "at least once",
+                       # round 2 N1: a second clock is busy, waited out
+                       "exits 5 (busy)", "waits in `backoff`"):
             self.has(needle, section, "operations.md, The container")
         self.hasnt("two consoles cannot share the port", section, "operations.md")
+        self.hasnt("`failing`. And", section, "operations.md")
 
     def test_operations_backup_is_at_least_once(self):
         section = _section(self.read("docs/operations.md"), "## Backups")
@@ -604,16 +607,21 @@ class TestDeliveryDocs(unittest.TestCase):
         entry = text[start:text.index("\n## ", start + 1)]
         for needle in ("cousin-supervisor", "run/held", "exits 5", "run/loops.lock",
                        "202 `stopping`", "--no-wait", "--name", "at least once",
-                       "pip removed from the image", "200 with `\"runner\": \"not running\""):
+                       "pip removed from the image", "200 with `\"runner\": \"not running\"",
+                       # round 2: N1 busy uncounted, O9 the hold, #79 the retry, N7 the 502
+                       "never counted toward `failing`", "for a runner and for the loops daemon",
+                       "`\"held\": true`", "#79", "is_running", "502"):
             self.has(needle, entry, "the top CHANGELOG entry")
         self.hasnt("answers the row once", entry, "the top CHANGELOG entry")
+        self.hasnt("exits 2 with \"another loops", entry, "the top CHANGELOG entry")
 
     def test_the_master_plan_locks_the_supervisor_interfaces(self):
         section = _section(self.read("docs/design/plans/agent-loop-runner-plan.md"),
                            "## Interfaces locked across phases")
         for needle in ("# cousin_lib/supervisor.py (P6)",
                        "def request(root, op, *, timeout=10.0, **args)",
-                       'HELD = "run/held"', "LOCK_HELD_EXIT = 5", "def hold_loops_lock(root)"):
+                       'HELD = "run/held"', "LOCK_HELD_EXIT = 5", "def hold_loops_lock(root)",
+                       "`run` exits 5 (busy) if held", "LOCK_TAKE_S = 1.0"):
             self.has(needle, section, "the locked interfaces")
 
     def test_the_master_plan_marks_phase_6_done_at_this_version(self):

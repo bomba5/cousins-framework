@@ -14,8 +14,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `runner:wren | `). A child that exits is restarted after 1, 2, 4 ... up
   to 60 seconds, and five exits inside a minute mark it `failing` and leave
   it down with one loud line; a configuration exit (2) is `failing` at
-  once, a runner's exit 5 (another runner holds the lock) is restarted with
-  backoff, and the console's own restart (exit 75) comes back at once. It
+  once, and the console's own restart (exit 75) comes back at once. Exit 5
+  is busy, for a runner and for the loops daemon (another runner holds the
+  cousin's lock, another loops daemon the install's): the child waits in
+  `backoff`, retried after 1, 2, 4 ... 60 seconds with one line per
+  attempt, and a busy exit is never counted toward `failing`, so it starts
+  as soon as the holder is gone, however long that takes. It
   reaps every child and orphan, so it is a correct PID 1. On SIGTERM it
   stops the runners together (35 seconds each to finish the turn:
   `runner.main.STOP_TIMEOUT_S` plus 5), then the loops daemon, then the
@@ -43,10 +47,16 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   is down. With no supervisor running, a start answers 503 (the console,
   a restart's start half included) or exits 1 (`cousin-spawn --start`); a
   stop answers 200 with `"runner": "not running", "supervisor": "not
-  running"`.
+  running"` and still holds: it writes `<home>/run/held` itself and says
+  `"held": true`, so a supervisor started later leaves the cousin down
+  until `start` (a restart whose start is refused removes that hold
+  again). A stop the supervisor refused is a 502 with its reason in the
+  console, never `stopped`.
 - `cousin-loops run` holds `run/loops.lock` for its life: a second loops
-  daemon on the same root (a second clock) exits 2 with "another loops
-  daemon holds <path>", and the first keeps running.
+  daemon on the same root (a second clock) exits 5 (busy) with "another
+  loops daemon holds <path>", and the first keeps running. A supervisor's
+  loops child that meets such a holder waits for it and becomes the clock
+  once it is gone.
 - `cousin-spawn --runner sdk|fake [--account <name>]`, and `runner` and
   `account` in the console's `POST /api/cousins`, create a runner cousin;
   `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` supply them when left
@@ -103,6 +113,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   binary: its deliveries are inbox rows, so a node's `[tell-home]` and a peer's
   message reach the runner on a host without tmux.
 - The console API reference said the restart route exits 0; it exits 75.
+- `cousin-runner` retries its lock for about a second before it exits 5
+  (#79): `is_running` probes by taking the same lock for microseconds (the
+  loops tick, the fleet poll, the console's stream), and a runner starting
+  inside a probe was refused. This closes the race for every prober.
 
 ## 1.15.0 - 2026-09-24
 

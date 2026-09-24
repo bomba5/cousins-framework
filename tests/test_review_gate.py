@@ -143,6 +143,19 @@ class TestTheCursor(HermeticCase):
         self.assertEqual((len(done), list(errors)), (3, [rows[0]["id"]]))
         self.assertEqual(review_gate.pending(home), [])
 
+    def test_a_settle_reads_what_is_held_once_under_one_lock(self):
+        # 20 verdicts once read the whole history 20 times (a console "mark
+        # all" on a large home took seconds per id).
+        home = _home(self)
+        _write(home, 6)
+        rows = review_gate.hold_new(home)
+        real = review_gate.pending
+        with mock.patch.object(review_gate, "pending", side_effect=real) as seen:
+            done, errors = review_gate.settle(home, rows, _keep_all(rows))
+        self.assertEqual((len(done), errors), (6, {}))
+        self.assertEqual(seen.call_count, 1)
+        self.assertEqual(review_gate.pending(home), [])
+
     def test_the_gate_reads_only_new_files_never_the_archives(self):
         """Review M1: a gate after every result must not scan the history."""
         home = _home(self)

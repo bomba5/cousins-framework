@@ -225,11 +225,19 @@ def release(home, entry_id, verdict, *, why="", by=None):
     if verdict not in VERDICTS:
         raise ValueError("a verdict is keep or drop, not %r" % (verdict,))
     home = Path(home)
-    why = " ".join(str(why or "").split())
     with lock(home):
         row = next((r for r in pending(home) if r["id"] == entry_id), None)
         if row is None:
             raise NotHeld("%s is not held for review" % entry_id)
+        return _release_row(home, row, verdict, why=why, by=by)
+
+
+def _release_row(home, row, verdict, *, why="", by=None):
+    """The write half of release: `row` is held (the caller checked, under
+    the lock it still holds)."""
+    entry_id = row["id"]
+    why = " ".join(str(why or "").split())
+    with lock(home):
         extra = {"by": str(by)} if by else {}
         if verdict == "drop":
             memory._append_raw(home, {
@@ -251,19 +259,29 @@ def settle(home, rows, verdicts, *, by=None, why="", model=False):
     the operator's (`cousin-memory review --drop`), and the entry stays
     held (ruling P7b-1). Returns ({id: verdict} applied, {id: error})."""
     done, errors = {}, {}
-    for r in rows:
-        verdict = verdicts.get(r["id"])
-        if verdict not in VERDICTS:
-            continue
-        if model and verdict == "drop" and \
-                memory.normalize_level(r.get("truth_level")) == memory.OPERATOR_LEVEL:
-            errors[r["id"]] = "an operator-level entry is the operator's to drop; left held"
-            continue
-        try:
-            release(home, r["id"], verdict, why=why, by=by)
-            done[r["id"]] = verdict
-        except Exception as exc:  # noqa: BLE001 - one id, the rest go on
-            errors[r["id"]] = "%s: %s" % (type(exc).__name__, exc)
+    home = Path(home)
+    # One read of what is held, under one hold of the lock: a verdict per
+    # id used to re-read the whole history per id.
+    with lock(home):
+        held = {r["id"]: r for r in pending(home)}
+        for r in rows:
+            verdict = verdicts.get(r["id"])
+            if verdict not in VERDICTS:
+                continue
+            row = held.get(r["id"])
+            # the level is read from what is held, not from the caller's row
+            if model and verdict == "drop" and row is not None and \
+                    memory.normalize_level(row.get("truth_level")) == memory.OPERATOR_LEVEL:
+                errors[r["id"]] = "an operator-level entry is the operator's to drop; left held"
+                continue
+            try:
+                row = held.pop(r["id"], None)
+                if row is None:
+                    raise NotHeld("%s is not held for review" % r["id"])
+                _release_row(home, row, verdict, why=why, by=by)
+                done[r["id"]] = verdict
+            except Exception as exc:  # noqa: BLE001 - one id, the rest go on
+                errors[r["id"]] = "%s: %s" % (type(exc).__name__, exc)
     return done, errors
 
 

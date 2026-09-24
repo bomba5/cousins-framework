@@ -63,12 +63,13 @@ def gate(policy, payload):
     return policy.decide(tool_name, tool_input)
 
 
-def default_recall(home):
+def default_recall(home, root=None):
     """`recall(body) -> (context text or None, hit count)`: the chat
-    server's gates and line (memory_search.recall_context's parts)."""
+    server's gates and line (memory_search.recall_context's parts),
+    reading the runner's `root`, never the environment's."""
     def recall(body):
         from cousin_lib import memory_search
-        entries = memory_search.recall_entries(home, body)
+        entries = memory_search.recall_entries(home, body, root=root)
         return memory_search.recall_line(entries), len(entries)
     return recall
 
@@ -100,7 +101,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     rollover at the next turn boundary. Run on a worker thread."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
-    recall = recall or default_recall(home)
+    recall = recall or default_recall(home, root)
     recorder = recorder or (lambda payload: recording.handle(payload, home, root, slug=slug))
     body_for_prompt = body_for_prompt or (lambda prompt: prompt)
     lock = lock if lock is not None else contextlib.nullcontext()

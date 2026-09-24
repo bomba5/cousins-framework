@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.13.1 - 2026-09-24
+
+### Fixed
+- A hit strong in both the keyword and semantic legs could vanish at a
+  small `top`. `search()` asked each leg for exactly `top` candidates
+  before fusion, so a document ranked just past the cut in BOTH legs
+  never reached `_fuse`, although its fused score would have beaten a
+  single-leg hit inside the cut (measured on a real replay: fused
+  0.0326, rank 3 at top=10, absent at top=5). `search()` now asks each
+  leg for `max(20, 4 * top)` candidates and still cuts the fused
+  result to `top`.
+- `captures_for` (and its sibling `read_capture`) called `.get()` on
+  whatever `json.loads` returned; a capture file that held valid JSON
+  that was not an object (a list, a number) raised `AttributeError`.
+  `captures_for` runs on every operator message (`server/inbound.py`
+  `divert_login_code`), so a single malformed capture file broke login
+  diversion for every account. Both readers now treat non-object JSON
+  like unparsable data: skipped, never raised.
+
 ## 1.13.0 - 2026-09-24
 
 ### Added

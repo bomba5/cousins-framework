@@ -846,7 +846,8 @@ class OpencodeRunner:
             self._system = prompt.compose_system_prompt(self.home, root=self.root,
                                                         registry=self._mcp.registry,
                                                         tool_name=tool_name,
-                                                        runner="the opencode runner")
+                                                        runner="the opencode runner",
+                                                        other_servers=None)
             if self._stop.is_set():
                 return False
             self._server = self.server_factory(argv0=self.binary, cwd=self.home, env=env,

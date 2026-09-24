@@ -94,6 +94,45 @@ cousin-account login fleet --via wren
 cousin-account token nightly --via wren
 ```
 
+For an `opencode` account, `cousin-account login <name> --provider <id>` puts
+one provider's credential into the account's `auth.json`
+(`<data_dir>/data/opencode/auth.json`). The provider must be one the account
+names in `providers`. An API key never travels through chat, so `--via` is
+refused here: the key is read from stdin (hidden when stdin is a terminal,
+otherwise one line, so it can come on a pipe) or from `--key-file <path>`,
+which is read as strictly as a secret file (a 0700 directory and a 0600
+regular file of yours, no symlink, one line). It is written the way
+`opencode auth login` writes it (`{"<id>": {"type": "api", "key": ...}}`),
+merged with the providers already there, file 0600 in a 0700 directory,
+through a temporary file and a rename; no opencode process runs, and the
+key is never printed. Only the key is stored: a provider whose own opencode
+login asks for more than the key (an Azure resource name, a Cloudflare
+account id, a GitLab instance URL) needs the rest in its configuration. `--method <label>` instead runs `opencode auth login
+--pure --provider <id> --method <label>` in a terminal under the account's
+`HOME` and XDG directories, for an OAuth method (the labels are opencode's,
+for example `ChatGPT Pro/Plus (headless)`). opencode 1.18.31 shows a URL and
+one instruction line (a device code to enter, or "complete authorization in
+your browser") and then waits; nothing is pasted back. Those are printed, or
+with `--via <slug>` posted to that cousin's operator in its chat (no code
+capture is armed), and the login counts once the account's `auth.json` holds
+the provider, not when the screen says so. A method that asks for an API
+key, or asks another question first, ends the flow and says so. A browser
+method redirects to `localhost` on the host, so it only completes from a
+browser on the host; a device-code method completes from any device.
+Refused (exit 2): `anthropic` or any method named Claude or Anthropic by
+OAuth (a Claude subscription; an Anthropic API key is fine), the provider
+`opencode` (the hosted service the runner disables), a provider or method
+that names the Claude-subscription bridge, an `endpoint` account, and these
+flags on any other kind of account. The binary is `COUSIN_OPENCODE_BIN`
+(an absolute path), else `opencode` on `PATH`. `--timeout` bounds the wait
+for an OAuth login.
+
+```
+cousin-account login keyed --provider openai --key-file ~/keys/openai.key
+pass show openai | cousin-account login keyed --provider openai
+cousin-account login keyed --provider openai --method "ChatGPT Pro/Plus (headless)" --via wren
+```
+
 `cousin-flip` ends the cousin's current generation and starts the next one on
 a fresh session with a boot packet. `--dry-run` runs the checks only;
 `--confirm` asks the new generation to post one line when it is oriented. On

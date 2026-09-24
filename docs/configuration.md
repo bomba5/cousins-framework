@@ -203,9 +203,11 @@ cousin you trust with it.
 The `opencode` kind. The data dir and its four subdirectories are created
 0700 when the account is first used (a looser mode is tightened; a symlink,
 or a directory that is not yours, refuses the start). opencode keeps the
-providers' keys in `<data_dir>/data/opencode/auth.json` (mode 0600), which
-it writes itself (`opencode auth login` run with the account's `HOME` and XDG
-variables above puts a key there). That `auth.json` is held to the secret file rules: open to group or
+providers' keys in `<data_dir>/data/opencode/auth.json` (mode 0600, its
+directory 0700). `cousin-account login <name> --provider <id>` puts one
+there: an API key from stdin or `--key-file`, written directly (never
+through chat), or an OAuth login with `--method <label>` through opencode's
+own `auth login` (see [commands](commands.md)). That `auth.json` is held to the secret file rules: open to group or
 others, a symlink or not yours refuses the start (exit 2, the message names
 the file and the `chmod`); a missing one is a login to do. An Anthropic
 OAuth login in it (a Claude subscription) refuses the start: an `anthropic`
@@ -226,7 +228,8 @@ the runner's session store.
 `cousin-account list` shows every account (name, kind, where its credentials
 live, never a secret); `cousin-account status <name>` says whether it is
 logged in, with no model call; `cousin-account login|token <name> --via
-<slug>` puts credentials into an account. See [commands](commands.md).
+<slug>` puts credentials into an account, and `cousin-account login <name>
+--provider <id>` into an `opencode` one. See [commands](commands.md).
 
 The login code capture: while `cousin-account login|token <name> --via <slug>`
 waits for a code, it keeps `<root>/run/login-capture-<name>.json` (mode 0600
@@ -265,7 +268,7 @@ rows back in the queue, emits an `auth` event and writes
 | `reason` | `login_required` or `billing` |
 | `detail` | what the CLI said, cut to 300 characters, never a secret |
 | `since` | when this stop began (UTC); a new stop gets a new one |
-| `action` | what to run: `cousin-account login <name> --via <slug>`, `cousin-account token <name> --via <slug>`, "write the key to <file>", `claude auth login` as the host user on the host, or for billing a check of the plan or credits |
+| `action` | what to run: `cousin-account login <name> --via <slug>`, `cousin-account token <name> --via <slug>`, `cousin-account login <name> --provider <id>` for an `opencode` account (the key on stdin or with `--key-file`; `--method <label> --via <slug>` for an OAuth method), "write the key to <file>", `claude auth login` as the host user on the host, or for billing a check of the plan or credits |
 
 `cousin-chat list` marks the cousin `LOGIN REQUIRED (account <name> on
 <host>)` or `BILLING (account <name> on <host>)` while the file exists, and a

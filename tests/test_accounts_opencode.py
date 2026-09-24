@@ -230,7 +230,11 @@ class TestStatusAndCheck(OpencodeCase):
         rc, line = accounts.check(self.home, self.root, run=_never_run)
         self.assertEqual(rc, 4)
         self.assertIn("account=keyed kind=opencode", line)
-        self.assertIn("cousin-account login keyed --provider mistral --via wren", line)
+        # an API key never travels through chat: the action names the key's
+        # way in, and --via only with an OAuth --method (phase 9 R12')
+        self.assertIn("`cousin-account login keyed --provider mistral`", line)
+        self.assertIn("--key-file", line)
+        self.assertIn("--method <label> --via wren", line)
         self.cousin('account = "local"\n')
         rc, line = accounts.check(self.home, self.root, run=_never_run)
         self.assertEqual(rc, 0, line)
@@ -239,9 +243,12 @@ class TestStatusAndCheck(OpencodeCase):
         self.write(TOML)
         acc = accounts.load(self.root)
         self.assertEqual(accounts.login_action(acc["keyed"]),
-                         "`cousin-account login keyed --provider openai`")
+                         "`cousin-account login keyed --provider openai` (the API key on"
+                         " stdin or with --key-file; an OAuth method: add --method <label>)")
         self.assertEqual(accounts.login_action(acc["keyed"], "wren", provider="mistral"),
-                         "`cousin-account login keyed --provider mistral --via wren`")
+                         "`cousin-account login keyed --provider mistral` (the API key on"
+                         " stdin or with --key-file; an OAuth method: add --method <label>"
+                         " --via wren)")
         self.assertIn("check the endpoint http://127.0.0.1:11434/v1",
                       accounts.login_action(acc["local"]))
 

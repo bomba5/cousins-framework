@@ -378,6 +378,22 @@ def _auth_entries(account):
     symlink, no group or other bits. The keys never leave this function.
     An Anthropic OAuth login in it is a Claude subscription: refused."""
     path = account.data_dir.joinpath(*AUTH_JSON)
+    return _entry_types(_read_auth_json(path), path)
+
+
+def _entry_types(data, path):
+    entries = {str(k): (v.get("type") if isinstance(v, dict) else None) for k, v in data.items()}
+    if entries.get("anthropic") == "oauth":
+        raise AccountsError("%s holds an Anthropic OAuth login, a Claude subscription; the"
+                            " opencode lane never carries subscription traffic: remove it and"
+                            " use an API key" % path)
+    return entries
+
+
+def _read_auth_json(path):
+    """The whole auth.json as a dict ({} when there is none), strictly: a
+    regular file of ours, no symlink, no group or other bits, a JSON
+    object. The message never holds the content."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
@@ -400,12 +416,7 @@ def _auth_entries(account):
         raise AccountsError("%s is not JSON" % path)
     if not isinstance(data, dict):
         raise AccountsError("%s is not a JSON object" % path)
-    entries = {str(k): (v.get("type") if isinstance(v, dict) else None) for k, v in data.items()}
-    if entries.get("anthropic") == "oauth":
-        raise AccountsError("%s holds an Anthropic OAuth login, a Claude subscription; the"
-                            " opencode lane never carries subscription traffic: remove it and"
-                            " use an API key" % path)
-    return entries
+    return data
 
 
 def scrub(env):
@@ -481,17 +492,17 @@ def _missing_hint(account):
 def login_action(account, via=None, provider=None):
     """What the operator runs to fix this account's login. opencode: the
     provider to log in (the first named when none is given), or the
-    endpoint to check. `cousin-account login <name> --provider <id>` is
-    phase 9 Task 8's (`opencode auth login` through the pty driver); until
-    it lands the key is written by opencode itself under the account's
-    HOME and XDG directories."""
+    endpoint to check. An API key never travels through chat (R12'): it
+    goes on stdin or in a key file, and `--via` is named only with an
+    OAuth `--method`."""
     tail = " --via %s" % via if via else ""
     if account.kind == "opencode":
         if account.endpoint:
             return ("check the endpoint %s (a local OpenAI-compatible model: nothing to log"
                     " in)" % account.endpoint)
-        return "`cousin-account login %s --provider %s%s`" % (
-            account.name, provider or account.providers[0], tail)
+        return ("`cousin-account login %s --provider %s` (the API key on stdin or with"
+                " --key-file; an OAuth method: add --method <label>%s)"
+                % (account.name, provider or account.providers[0], tail))
     if account.kind == "claude-login":
         return ("`claude auth login` as the host user" if account.config_dir is None
                 else "`cousin-account login %s%s`" % (account.name, tail))
@@ -698,6 +709,210 @@ def token_flow(account, root, *, relay, await_code, spawn=None, timeout=CAPTURE_
     return {"ok": True, "saved": str(account.secret_file), "status": st}
 
 
+# ------------------------------------------------------------ opencode login (phase 9 R12')
+#
+# An API key never travels through chat: it comes from stdin (hidden on a
+# terminal) or a strict key file and is written straight into the account's
+# auth.json in the shape `opencode auth login` writes (measured on 1.18.31:
+# {"<provider>": {"type": "api", "key": "..."}}, 0600). No opencode process.
+# An OAuth method runs `opencode auth login` in a pty. Every OAuth method of
+# 1.18.31 is "auto": the CLI shows `Go to: <url>`, one instruction line (a
+# device code, or "complete authorization in your browser") and waits; nothing
+# is pasted back. The URL and the instructions are relayed; auth.json decides.
+
+OC_FIRST_RX = (r"Go to:\s*(?P<url>\S+)(?P<instr>[\s\S]*?)Waiting for authorization"
+               r"|(?P<key>Enter your API key)"
+               r"|(?P<error>Error:[^\n]*)"
+               r"|\u25c6[ \t]*(?![ \t]|Enter your API key)(?P<prompt>[^\n]+)")   # a prompt
+OC_DONE_RX = r"(Login successful)|(Failed to authorize[^\n]*|Error:[^\n]*)"
+_OC_DECOR = re.compile(r"^[\s|\u2502\u250c\u2514\u25cf\u2022\u25c6\u25c7\u25d2\u25d0\u25d3\u25d1]+")
+# What the login child may inherit: everything else (OPENCODE_CONFIG_CONTENT,
+# a provider's *_API_KEY, the Claude variables) stays out, so the account's
+# data dir is its only source (Task 1 finding 1).
+OPENCODE_PASS_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "SSL_CERT_FILE",
+                     "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "HTTPS_PROXY", "HTTP_PROXY",
+                     "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
+OPENCODE_FLOW_VARS = {"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_DISABLE_SHARE": "1",
+                      "OPENCODE_DISABLE_CLAUDE_CODE": "1", "BROWSER": "/bin/false"}
+
+
+def opencode_bin():
+    """The opencode binary as an absolute path: COUSIN_OPENCODE_BIN, else
+    `opencode` on PATH, resolved (the pty driver execs a path)."""
+    import shutil
+    named = os.environ.get("COUSIN_OPENCODE_BIN")
+    if named:
+        if not os.path.isabs(named):
+            raise AccountsError("COUSIN_OPENCODE_BIN must be an absolute path")
+        return named
+    found = shutil.which("opencode")
+    if not found:
+        raise AccountsError("no opencode binary: set COUSIN_OPENCODE_BIN or put `opencode` on"
+                            " PATH")
+    return str(Path(found).resolve())
+
+
+def check_opencode_login(account, provider, method=None):
+    """R12' refusals, before any key is read or any process runs: a Claude
+    subscription (Anthropic, or any method named Claude, by OAuth),
+    opencode's own hosted service, a bridge marker, a provider the account
+    does not name, and every account that is not an opencode providers
+    account."""
+    from cousin_lib.runner import opencode_guard
+    if account.kind != "opencode":
+        raise AccountsError("--provider, --method and --key-file are for kind opencode"
+                            " accounts; %s is %s" % (account.name, account.kind))
+    if account.endpoint:
+        raise AccountsError("account %s is a local endpoint (%s): nothing to log in"
+                            % (account.name, account.endpoint))
+    if not isinstance(provider, str) or not _PROVIDER.match(provider):
+        raise AccountsError("name the provider to log in with --provider <id>, one of %s"
+                            " (a provider id matches %s)"
+                            % (", ".join(account.providers), _PROVIDER.pattern))
+    if provider == "opencode":
+        raise AccountsError("'opencode' is opencode's own hosted service, which the runner"
+                            " always disables: log in the providers whose keys you hold")
+    for what, text in (("provider", provider), ("method", method or "")):
+        marker = opencode_guard.bridge_marker(text)
+        if marker:
+            raise AccountsError("the %s names the Claude-subscription bridge (marker %r); the"
+                                " opencode lane never carries subscription traffic"
+                                % (what, marker.pattern))
+    if method is not None and (provider == "anthropic"
+                               or re.search("claude|anthropic", method, re.IGNORECASE)):
+        raise AccountsError("an Anthropic or Claude login by OAuth is a Claude subscription;"
+                            " the opencode lane never carries one: use an Anthropic API key"
+                            " (no --method)")
+    if provider not in account.providers:
+        raise AccountsError("account %s does not name provider %r in its providers (%s): add"
+                            " it to config/accounts.toml first"
+                            % (account.name, provider, ", ".join(account.providers)))
+
+
+def _api_key(text):
+    """One word of printable characters, at most agent_auth.KEY_MAX_CHARS;
+    the message never repeats it."""
+    from cousin_lib import agent_auth
+    text = (text or "").strip()
+    if not text:
+        raise AccountsError("the key is empty")
+    if len(text) > agent_auth.KEY_MAX_CHARS or not agent_auth._KEY_RE.match(text):
+        raise AccountsError("the key must be one word of printable characters (at most %d)"
+                            % agent_auth.KEY_MAX_CHARS)
+    return text
+
+
+def read_api_key(provider, *, key_file=None, stdin=None):
+    """The key from `key_file` (read as strictly as a secret file: a 0700
+    directory and a 0600 regular file of ours, no symlink, one line), else
+    from stdin: hidden with getpass on a terminal, one line otherwise."""
+    import getpass
+    from cousin_lib import agent_auth
+    if key_file:
+        try:
+            raw = agent_auth.read_private_file(key_file, what="key file")
+        except agent_auth.AuthError as err:
+            raise AccountsError(str(err))
+        lines = [ln for ln in raw.decode("utf-8", "replace").splitlines() if ln.strip()]
+        if len(lines) != 1:
+            raise AccountsError("key file %s must hold one line" % key_file)
+        return _api_key(lines[0])
+    stdin = sys.stdin if stdin is None else stdin
+    if stdin.isatty():
+        return _api_key(getpass.getpass("API key for %s (not echoed): " % provider))
+    return _api_key(stdin.readline())
+
+
+def _auth_dir(account):
+    """The data dir, its XDG subdirs and data/opencode, each 0700 and ours
+    (opencode itself makes data/opencode 0755: tightened)."""
+    path = _opencode_dir(account).joinpath(*AUTH_JSON)
+    _private_dir(path.parent, "the opencode auth dir")
+    return path
+
+
+def store_api_key(account, provider, key):
+    """Merge {"<provider>": {"type": "api", "key": key}} into the account's
+    auth.json (every other entry kept as it is), 0600, tmp + rename.
+    Nothing is written into a file that would still hold a Claude
+    subscription. Returns the path; never the key."""
+    check_opencode_login(account, provider)
+    key = _api_key(key)
+    path = _auth_dir(account)
+    data = _read_auth_json(path)
+    data[provider] = {"type": "api", "key": key}
+    _entry_types(data, path)
+    _write_private_text(path, json.dumps(data, indent=2))
+    return path
+
+
+def _instructions(text):
+    lines = (_OC_DECOR.sub("", ln).strip() for ln in text.splitlines())
+    return " ".join(ln for ln in lines if ln)
+
+
+def _opencode_flow_env(account):
+    from cousin_lib.runner import opencode_guard
+    env = {k: v for k, v in os.environ.items() if k in OPENCODE_PASS_ENV}
+    env.setdefault("TERM", "xterm-256color")
+    env.update(account_env(account, None), **OPENCODE_FLOW_VARS)
+    try:
+        opencode_guard.refuse_bridge({}, env)
+    except opencode_guard.BridgeRefused as err:
+        raise AccountsError(err.reason)
+    return env
+
+
+def opencode_login_flow(account, root, *, provider, method, relay, spawn=None, binary=None,
+                        timeout=CAPTURE_TTL_S):
+    """`opencode auth login --pure --provider <id> --method <label>` under
+    the account's HOME and XDG dirs, in a pty. relay(url, instructions)
+    once the CLI shows them; then the CLI waits on its own (a device code
+    entered on the provider's page, or a browser callback) for `timeout`
+    seconds. An API-key prompt, an error or any other prompt ends the
+    flow before the relay. The CLI's `Login successful` is not the
+    verdict: the account's auth.json holding the provider is."""
+    from cousin_lib.pty_driver import PtyTimeout
+    check_opencode_login(account, provider, method)
+    argv = [binary or opencode_bin(), "auth", "login", "--pure", "--provider", provider,
+            "--method", method]
+    env = _opencode_flow_env(account)
+    _auth_dir(account)
+    session = _pty(spawn)(argv, env)
+    try:
+        try:
+            first = session.read_until(OC_FIRST_RX, 60)
+        except PtyTimeout as err:
+            return {"ok": False, "reason": "opencode showed no sign-in URL (%s); its last"
+                    " words: %s" % (err, _last_words(session))}
+        if first.group("key"):
+            return {"ok": False, "reason": "method %r of %s asks for an API key: run without"
+                    " --method (the key on stdin or with --key-file; a key never goes"
+                    " through the pty)" % (method, provider)}
+        if first.group("error"):
+            return {"ok": False, "reason": "opencode said: %s" % first.group("error").strip()}
+        if first.group("prompt"):
+            return {"ok": False, "reason": "method %r of %s asks %r before its URL, which this"
+                    " flow does not answer" % (method, provider, first.group("prompt").strip())}
+        relay(first.group("url"), _instructions(first.group("instr")))
+        try:
+            done = session.read_until(OC_DONE_RX, timeout)
+        except PtyTimeout:
+            return {"ok": False, "reason": "no login within %ds" % timeout}
+        if done.group(1) is None:
+            return {"ok": False, "reason": "opencode said: %s" % done.group(2).strip()}
+    finally:
+        session.close()
+    try:
+        entries = _auth_entries(account)
+    except AccountsError as err:
+        return {"ok": False, "reason": str(err)}
+    if provider not in entries:
+        return {"ok": False, "reason": "opencode said %r, but %s holds no %s entry"
+                % (done.group(1), account.data_dir.joinpath(*AUTH_JSON), provider)}
+    return {"ok": True, "cli_said": done.group(1), "status": _opencode_status(account)}
+
+
 # ------------------------------------------------------------ the one-shot code capture (R18)
 
 def capture_path(root, name):
@@ -878,7 +1093,6 @@ def _span(seconds):
 def relay_notice(home, *, operator, account_name, url, timeout=CAPTURE_TTL_S):
     """One framework-authored row to the operator on this cousin's chat
     surface (R18); Telegram's outbound pump relays it like any cousin row."""
-    from cousin_lib.server.storage import ChatStore, normalize_chat_user
     slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
     text = ("Login for account %s: open %s , sign in, and reply HERE with the whole code the"
             " page shows. It looks like `code#state`: paste all of it, the part after # included."
@@ -886,6 +1100,26 @@ def relay_notice(home, *, operator, account_name, url, timeout=CAPTURE_TTL_S):
             " delivered to %s and never kept in this history. If you did not start this login"
             " from a host shell yourself, do not answer this."
             % (account_name, url, _span(timeout), slug))
+    return _operator_row(home, operator, slug, text)
+
+
+def relay_url_notice(home, *, operator, account_name, provider, url, instructions,
+                     timeout=CAPTURE_TTL_S):
+    """The opencode OAuth notice (R12'): the URL and opencode's own
+    instruction line. Nothing is taken back from the chat: no capture is
+    armed, the login finishes on the provider's side."""
+    slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
+    text = ("Login for account %s (provider %s): open %s and sign in.%s Nothing to paste"
+            " back here: opencode finishes the login by itself, and waits %s. If you did"
+            " not start this login from a host shell yourself, ignore this."
+            % (account_name, provider, url,
+               " opencode says: %s." % instructions.rstrip(".") if instructions else "",
+               _span(timeout)))
+    return _operator_row(home, operator, slug, text)
+
+
+def _operator_row(home, operator, slug, text):
+    from cousin_lib.server.storage import ChatStore, normalize_chat_user
     store = ChatStore(Path(home) / "data" / "chat.db")
     try:
         row = store.add_message(chat_user=normalize_chat_user(operator), user="cousin-account",
@@ -955,22 +1189,17 @@ def _exit_on_hangup():
 def _login_cmd(args, account, root):
     """`cousin-account login|token <name> [--via <slug>]`: exit 0 done, 4
     the flow failed, 2 refused."""
+    if args.cmd == "login" and (account.kind == "opencode" or args.provider or args.method
+                                or args.key_file):
+        return _opencode_login_cmd(args, account, root)
     if args.cmd == "login" and account.name == HOST:
         print("cousin-account: warning: this re-logs the host's own login in ~/.claude, the"
               " one every cousin without an account runs on and the operator's own"
               " `claude` uses", file=sys.stderr)
     flow = login_flow if args.cmd == "login" else token_flow
     if args.via:
-        from cousin_lib.config import CousinConfig
-        via = Path(root) / "cousins" / args.via
-        if not (via / "cousin.toml").is_file():
-            print("cousin-account: no cousin %r under %s" % (args.via, Path(root) / "cousins"),
-                  file=sys.stderr)
-            return 2
-        operator = CousinConfig.load(via).operator_name   # what storage.is_operator compares
-        if not operator:
-            print("cousin-account: %s has no [operator] name: nobody to relay the URL to"
-                  % args.via, file=sys.stderr)
+        via, operator = _via_operator(args, root)
+        if via is None:
             return 2
 
         def relay(url):
@@ -1015,6 +1244,86 @@ def _login_cmd(args, account, root):
     return 0 if out["ok"] else 4
 
 
+def _via_operator(args, root):
+    """(the via cousin's home, its operator's name), or (None, None) after
+    saying why on stderr."""
+    from cousin_lib.config import CousinConfig
+    via = Path(root) / "cousins" / args.via
+    if not (via / "cousin.toml").is_file():
+        print("cousin-account: no cousin %r under %s" % (args.via, Path(root) / "cousins"),
+              file=sys.stderr)
+        return None, None
+    operator = CousinConfig.load(via).operator_name   # what storage.is_operator compares
+    if not operator:
+        print("cousin-account: %s has no [operator] name: nobody to relay the URL to"
+              % args.via, file=sys.stderr)
+        return None, None
+    return via, operator
+
+
+def _opencode_login_cmd(args, account, root):
+    """`cousin-account login <name> --provider <id> [--key-file <path>]` (an
+    API key: stdin or the file, never chat) or `... --method <label> [--via
+    <slug>]` (OAuth through the pty). Exit 0 done, 4 the flow failed, 2
+    refused."""
+    try:
+        check_opencode_login(account, args.provider, args.method)
+        if args.method is None and args.via:
+            raise AccountsError("an API key never travels through chat: --via goes with an"
+                                " OAuth --method only; give the key on stdin or with"
+                                " --key-file")
+        if args.method is not None and args.key_file:
+            raise AccountsError("--key-file is for an API key; an OAuth --method takes none")
+        if args.method is None:
+            key = read_api_key(args.provider, key_file=args.key_file)
+            path = store_api_key(account, args.provider, key)
+            del key
+    except AccountsError as err:
+        print("cousin-account: %s" % err, file=sys.stderr)
+        return 2
+    if args.method is None:
+        missing = _opencode_status(account).get("missing") or []
+        print("login %s: ok (%s: an API key in %s%s)" % (
+            account.name, args.provider, path,
+            "; still missing: %s" % ", ".join(missing) if missing else ""))
+        return 0
+    if not sys.stdin.isatty():
+        print("cousin-account: an OAuth login wants a terminal: run it from a shell on the"
+              " host", file=sys.stderr)
+        return 2
+    if args.via:
+        via, operator = _via_operator(args, root)
+        if via is None:
+            return 2
+
+        def relay(url, instructions):
+            relay_url_notice(via, operator=operator, account_name=account.name,
+                             provider=args.provider, url=url, instructions=instructions,
+                             timeout=args.timeout)
+            print("cousin-account: the sign-in URL is in %s's chat; waiting up to %ds for the"
+                  " login" % (args.via, args.timeout), file=sys.stderr)
+    else:
+        def relay(url, instructions):
+            print("Open this URL and sign in:\n%s%s\nNothing to paste back: waiting up to"
+                  " %ds for the login." % (url, "\n" + instructions if instructions else "",
+                                           args.timeout))
+    restore = _exit_on_hangup()
+    try:
+        out = opencode_login_flow(account, root, provider=args.provider, method=args.method,
+                                  relay=relay, timeout=args.timeout)
+    except AccountsError as err:
+        print("cousin-account: %s" % err, file=sys.stderr)
+        return 2
+    except Exception as err:                 # noqa: BLE001 - a failed flow is exit 4, not a trace
+        print("cousin-account: login %s failed: %s: %s"
+              % (account.name, type(err).__name__, err), file=sys.stderr)
+        return 4
+    finally:
+        restore()
+    print("login %s: %s" % (account.name, "ok" if out["ok"] else out.get("reason", "failed")))
+    return 0 if out["ok"] else 4
+
+
 @traced_cli("cousin-account")
 def account_main(argv=None):
     """cousin-account list | status <name> | login|token <name> [--via <slug>].
@@ -1038,6 +1347,12 @@ def account_main(argv=None):
         c.add_argument("name")
         c.add_argument("--via", help="the cousin whose chat carries the URL and the code")
         c.add_argument("--timeout", type=int, default=CAPTURE_TTL_S)
+        if cmd == "login":
+            c.add_argument("--provider", help="opencode accounts: the provider to log in")
+            c.add_argument("--key-file", help="opencode accounts: read the API key from this"
+                                              " private file instead of stdin")
+            c.add_argument("--method", help="opencode accounts: an OAuth login method, by its"
+                                            " label (opencode auth login --method)")
     args = p.parse_args(argv)
     if args.cmd in ("login", "token"):
         # GUARDRAILS, not a boundary: the runner exports COUSIN_HOME to
@@ -1056,7 +1371,10 @@ def account_main(argv=None):
                   file=sys.stderr)
             return 2
         # A usability check, not a safeguard: anything can fake a terminal.
-        if not sys.stdin.isatty():
+        # An opencode API key may come on a pipe (R12'): that path checks
+        # its own flags once the account is known.
+        key_path = args.cmd == "login" and (args.provider or args.key_file) and not args.method
+        if not key_path and not sys.stdin.isatty():
             print("cousin-account: %s wants a terminal: run it from a shell on the host (R20)"
                   % args.cmd, file=sys.stderr)
             return 2

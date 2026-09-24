@@ -44,17 +44,21 @@ class SideCase(HermeticCase):
         self.home = temp_home(self)
         self.clients = []
 
-    def side(self, per_client=None, *, activity=BUSY, fail=(), runner=None, **kw):
+    def side(self, per_client=None, *, activity=BUSY, fail=(), login=(), runner=None, **kw):
         """A peer side session. Client n (0-based) plays per_client[n] (one
-        CLI turn per script); a connect of client n raises when n is in `fail`."""
+        CLI turn per script); a connect of client n raises when n is in `fail`,
+        and raises a logged-out error when n is in `login`."""
         per_client = per_client or [[_turn("s-1") for _ in range(4)]]
 
         def factory(options):
             n = len(self.clients)
             client = ScriptedClient(options, per_client[n] if n < len(per_client) else [])
-            if n in fail:
+            if n in fail or n in login:
+                error = "Not logged in - Please run /login" if n in login \
+                    else "the CLI did not start"
+
                 async def refuse(prompt=None):
-                    raise OSError("the CLI did not start")
+                    raise OSError(error)
                 client.connect = refuse
             self.clients.append(client)
             return client
@@ -233,6 +237,38 @@ class TestReset(SideCase):
         self.assertIn("no session after a reset", r.fatal)
         self.assertEqual(r.inbox.get(b.inbox_id)["state"], "queued")
 
+
+    def test_a_fallback_refused_for_the_login_waits_for_it_never_fatal(self):
+        """R15: a login is never fatal. The new session fails for another
+        reason, the fallback to the old one is refused for the login: the
+        side session waits for the login, back on the old session, and its
+        worker lives on."""
+        from cousin_lib import accounts
+        from cousin_lib.runner import auth
+        for patch in (mock.patch.object(accounts, "status", return_value={"loggedIn": False}),
+                      mock.patch.object(auth, "credential_mark", return_value=("m", 1))):
+            patch.start()
+            self.addCleanup(patch.stop)
+        r = self.side([[_turn("s-1")]], fail=(1,), login=(2,))
+        waiting = __import__("threading").Event()
+        real_await = r._await_login
+
+        async def await_login():
+            waiting.set()
+            return await real_await()
+        r._await_login = await_login
+        r.start()
+        a = r.enqueue(_peer("one"))
+        self.assertTrue(self.done(r, a))
+        r._request_rollover("context pressure 85%")
+        b = r.enqueue(_peer("two"))
+        self.assertTrue(_wait(lambda: waiting.is_set() or not r.worker_alive(), timeout=15))
+        self.assertIsNone(r.fatal)
+        self.assertTrue(r.login_required())
+        self.assertEqual(r.state(), "errored")
+        self.assertEqual(r._resume_id, "s-1")        # the login retry resumes it
+        self.assertTrue(r.worker_alive())
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "queued"))
 
 class TestStreamHead(SideCase):
     """The P8-2 rule: a side session's stream is headed `side_session`, never

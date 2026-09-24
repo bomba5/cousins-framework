@@ -305,6 +305,12 @@ class SideSession(SdkRunner):
                                             "session": self.kind, "old_session": old,
                                             "error": self._last_connect_error})
             return True
+        if self._login_blocked:
+            # the fallback was refused for the login: a login is never fatal
+            # (R15). Wait for it on the old session, as the fallback would
+            # have been: the login retry resumes it.
+            self._resume_id = old
+            return True
         self._fail_connect("side session %s has no session after a reset: %s"
                            % (self.kind, self._last_connect_error))
         return True

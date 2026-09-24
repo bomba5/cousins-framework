@@ -1907,7 +1907,7 @@ function ChatBubble({ msg, cousin, search, isLast, onReply, chatUser, mediaShown
              style={{
                position: "fixed", left: menu.x, top: menu.y,
                background: "var(--bg-1)", border: "1px solid var(--line)",
-               borderRadius: 4, padding: 6, zIndex: 9000,
+               borderRadius: 10, padding: 6, zIndex: 9000,
                boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
                display: "flex", flexDirection: "column", gap: 4,
                maxWidth: "92vw",

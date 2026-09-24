@@ -125,13 +125,6 @@ function JobsView() {
     return () => { cancelled = true; clearInterval(id); };
   }, [jobs.map(j => j.id + j.status).join(",")]);
 
-  const selStyle = {
-    marginLeft: 8, fontFamily: "var(--mono)", fontSize: 12,
-    padding: "2px 6px", background: "var(--bg-1)",
-    color: "var(--fg-1)", border: "1px solid var(--line)",
-    borderRadius: 3,
-  };
-
   return (
     <div className="wrap-pad">
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
@@ -150,10 +143,10 @@ function JobsView() {
             </button>
           ))}
         </div>
-        <select value={spawnedBy} onChange={e => setSpawnedBy(e.target.value)} style={selStyle} title="filter by cousin">
+        <select className="sel-inline" value={spawnedBy} onChange={e => setSpawnedBy(e.target.value)} title="filter by cousin">
           {spawnedByOptions.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={kind} onChange={e => setKind(e.target.value)} style={selStyle} title="filter by job kind">
+        <select className="sel-inline" value={kind} onChange={e => setKind(e.target.value)} title="filter by job kind">
           {kindOptions.map(k => <option key={k} value={k}>{k}</option>)}
         </select>
       </div>
@@ -164,11 +157,11 @@ function JobsView() {
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {jobs.map(j => (
           <div key={j.id} className="panel"
                onClick={() => setOpenJob({ id: j.id, title: j.title, log: "loading...", spawned_by: j.spawned_by, status: j.status, kind: j.kind })}
-               style={{ cursor: "pointer", padding: 10, borderLeft: `3px solid ${
+               style={{ cursor: "pointer", padding: "12px 16px", borderLeft: `3px solid ${
                  j.status === "running" ? "var(--accent)" :
                  j.status === "done" ? "var(--green, #4a7)" :
                  j.status === "failed" ? "var(--red, #d24)" : "var(--fg-3)"
@@ -177,11 +170,7 @@ function JobsView() {
               <CousinTag slug={j.spawned_by} />
               <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}>#{j.id}</span>
               <span style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}>[{j.kind}]</span>
-              <span style={{
-                fontSize: 10, fontFamily: "var(--mono)", padding: "1px 6px", borderRadius: 3,
-                background: j.status === "running" ? "var(--accent)" : "var(--bg-1)",
-                color: j.status === "running" ? "var(--bg-0)" : "var(--fg-2)",
-              }}>{j.status}</span>
+              <span className={"pill " + ({ running: "cyan", done: "green", failed: "red" }[j.status] || "")}>{j.status}</span>
               <span className="job-title" style={{ flex: 1, fontWeight: 500 }}>{j.title}</span>
               <span className="job-time" style={{ color: "var(--fg-3)", fontSize: 10, fontFamily: "var(--mono)" }}
                     title={j.started_at || ""}>
@@ -1073,16 +1062,17 @@ function TokensView({ cousins: allCousins }) {
                 <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)" }}>{c.type}</span>
               </div>
               <div className="panel-body">
-                <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 10 }}>
+                <div className="tok-grid">
                   <Stat small label="today" value={fmtTokens(c.tokensSpent)} />
                   <Stat small label="14 days" value={fmtTokens(twoWeeks)} />
                   <Stat small label="output" value={fmtTokens(output)} />
                   <Stat small label="cache today" value={fmtRate(cacheToday)} />
                   <Stat small label="cache 14 days" value={fmtRate(cache.rate)} />
-                  <div style={{ flex: 1 }} />
-                  {series.length > 1
-                    ? <Spark data={series.map(p => p.total)} width={100} height={28} />
-                    : <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)" }}>no series</span>}
+                  <div className="tok-spark">
+                    {series.length > 1
+                      ? <Spark data={series.map(p => p.total)} width={100} height={28} />
+                      : <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)" }}>no series</span>}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1211,10 +1201,6 @@ function TrackerView({ cousins }) {
     return [...set].sort();
   }, [items]);
 
-  const selStyle = {
-    fontFamily: "var(--mono)", fontSize: 11, padding: "2px 6px",
-    background: "var(--bg-1)", color: "var(--fg-1)", border: "1px solid var(--line)", borderRadius: 3,
-  };
   const stateTone = (s) => s === "active" ? "green" : s === "blocked" ? "red" : s === "open" ? "amber" : "gray";
 
   return (
@@ -1223,15 +1209,15 @@ function TrackerView({ cousins }) {
         <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)" }}>
           {visible.length} items{closedCount > 0 && !showClosed ? ` · ${closedCount} closed hidden` : ""}
         </span>
-        <select value={filters.owner} onChange={e => setFilters({ ...filters, owner: e.target.value })} style={selStyle} title="owner">
+        <select className="sel-inline" value={filters.owner} onChange={e => setFilters({ ...filters, owner: e.target.value })} title="owner">
           <option value="">any owner</option>
           {owners.map(o => <option key={o} value={o}>@{o}</option>)}
         </select>
-        <select value={filters.state} onChange={e => setFilters({ ...filters, state: e.target.value })} style={selStyle} title="state">
+        <select className="sel-inline" value={filters.state} onChange={e => setFilters({ ...filters, state: e.target.value })} title="state">
           <option value="">any state</option>
           {TRACKER_STATES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={filters.domain} onChange={e => setFilters({ ...filters, domain: e.target.value })} style={selStyle} title="domain">
+        <select className="sel-inline" value={filters.domain} onChange={e => setFilters({ ...filters, domain: e.target.value })} title="domain">
           <option value="">any domain</option>
           {domains.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
@@ -1291,7 +1277,7 @@ function TrackerView({ cousins }) {
                   <td data-label="owner">{it.owner ? <CousinTag slug={it.owner} /> : <span className="muted">-</span>}</td>
                   <td className="muted" data-label="domain">{it.domain || "-"}</td>
                   <td data-label="state">
-                    <select value={it.state} onChange={e => patch(it.id, { state: e.target.value })} style={{ ...selStyle, color: `var(--${stateTone(it.state)}, var(--fg-1))` }} disabled={busy}>
+                    <select className="sel-inline" value={it.state} onChange={e => patch(it.id, { state: e.target.value })} style={{ color: `var(--${stateTone(it.state)}, var(--fg-1))` }} disabled={busy}>
                       {TRACKER_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
@@ -1504,7 +1490,7 @@ function SettingsView({ auth, setAuth }) {
           <button className="btn" onClick={reset}>reset defaults</button></div>
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 18, padding: 18 }}>
           <div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>accent hue</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>accent hue</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
               {hues.map(h => (
                 <button key={h}
@@ -1525,7 +1511,7 @@ function SettingsView({ auth, setAuth }) {
           </div>
 
           <div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>accent saturation</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>accent saturation</div>
             <input type="range" min="0" max="0.28" step="0.01" value={s.accentChroma}
               onChange={e => update({ accentChroma: Number(e.target.value) })}
               style={{ width: "100%" }} />
@@ -1533,7 +1519,7 @@ function SettingsView({ auth, setAuth }) {
           </div>
 
           <div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>chat stream speed</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>chat stream speed</div>
             <div className="radio-row">
               {["off", "slow", "normal", "fast"].map(v => (
                 <button key={v} className={s.chatStreamSpeed === v ? "sel" : ""}
@@ -1543,7 +1529,7 @@ function SettingsView({ auth, setAuth }) {
           </div>
 
           <div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>chat stream effect</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>chat stream effect</div>
             <div className="radio-row">
               {[
                 ["plain", "word-by-word"],
@@ -1563,7 +1549,7 @@ function SettingsView({ auth, setAuth }) {
           </div>
 
           <div>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em" }}>font scale · {s.fontScale}%</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>font scale · {s.fontScale}%</div>
             <input type="range" min="85" max="140" step="5" value={s.fontScale}
               onChange={e => update({ fontScale: Number(e.target.value) })}
               style={{ width: "100%" }} />

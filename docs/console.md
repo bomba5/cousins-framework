@@ -142,8 +142,10 @@ page was open, newest first.
 
 ## Cousins
 
-One card per cousin. A card shows the name and slug, a status pill (`active`
-if the pane changed in the last minute, `idle`, or `stopped`), the role, and
+One card per cousin. A card shows the name and slug, its state in words, the
+same reading as the overview's (`working` if the pane changed in the last
+minute or the runner is mid-turn, `idle`, `needs you`, `enrolled` for a
+worker, or `stopped`), the role, and
 a row of facts: chat port, memory scope, operator, heartbeat, flip time,
 host, model, the agent's pid and uptime, the last activity line and tokens
 spent today. A runner cousin's card shows `chat · console` (the console

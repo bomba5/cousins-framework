@@ -1365,8 +1365,8 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 .mx-img img { max-width: 100%; max-height: 70vh; border: 1px solid var(--line); }
 .ft-modal { width: min(1280px, 96vw) !important; height: 88vh; max-height: 88vh !important; }
 .ft-wrap { display: grid; grid-template-columns: minmax(260px, 34%) 1fr; flex: 1; min-height: 0; width: 100%; }
-.ft-tree { border-right: 1px solid var(--line); overflow: auto; min-height: 0; font-family: var(--mono); font-size: 11px; }
-.ft-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg-1); }
+.ft-tree { border-right: 1px solid var(--hair); overflow: auto; min-height: 0; font-family: var(--mono); font-size: 11px; }
+.ft-bar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--hair); position: sticky; top: 0; background: var(--bg-1); }
 .ft-row { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 8px; align-items: center; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
 .ft-row:hover { background: var(--bg-2); }
 .ft-row.sel { background: var(--bg-3); }
@@ -1442,7 +1442,7 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 }
 
 /* === Jobs log (views.jsx JobLogPanel) === */
-.joblog-bar { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 10px; font-family: var(--mono); color: var(--fg-3); border-bottom: 1px solid var(--line); }
+.joblog-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; font-size: 10.5px; font-family: var(--mono); color: var(--fg-3); border-bottom: 1px solid var(--hair); }
 .joblog-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .joblog { margin: 0; padding: 12px; flex: 1; min-height: 0; overflow: auto; font-size: 11px; font-family: var(--mono); line-height: 1.4; color: var(--fg-2); background: var(--bg-0); white-space: pre-wrap; word-break: break-all; }
 .joblog-hint { padding: 24px; font-family: var(--mono); font-size: 12px; color: var(--fg-2); }
@@ -1461,18 +1461,18 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 .mt-list {
   display: flex; flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--hair);
   background: var(--bg-0);
 }
 .mt-list-hdr {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hair);
 }
 .mt-list-body { flex: 1; overflow: auto; min-height: 0; }
 .mt-item {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hair);
   cursor: pointer;
   display: flex; flex-direction: column; gap: 3px;
 }
@@ -1493,8 +1493,8 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 }
 .mt-thread-hdr {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--hair);
 }
 .mt-thread-topic { color: var(--fg-0); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .mt-back { display: none; }
@@ -1505,9 +1505,9 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 }
 .mt-banner {
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-  padding: 7px 14px;
-  font-family: var(--mono); font-size: 11px;
-  border-bottom: 1px solid var(--line);
+  padding: 8px 18px;
+  font-family: var(--sans); font-size: 12px;
+  border-bottom: 1px solid var(--hair);
   color: var(--fg-1);
   background: var(--bg-1);
 }
@@ -1518,14 +1518,14 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 .mt-banner-note { color: var(--fg-3); font-size: 10px; }
 .mt-transcript {
   flex: 1; overflow: auto; min-height: 0;
-  padding: 12px 14px;
-  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 10px;
 }
 .mt-entry {
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
   background: var(--bg-1);
-  padding: 8px 11px;
+  padding: 10px 14px;
   min-width: 0;
 }
 .mt-entry-head {
@@ -1533,7 +1533,7 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   margin-bottom: 4px;
   font-family: var(--mono); font-size: 10px;
 }
-.mt-entry-speaker { color: var(--fg-0); font-weight: 600; font-size: 11px; }
+.mt-entry-speaker { color: var(--fg-0); font-weight: 600; font-size: 12px; font-family: var(--sans); }
 .mt-entry-time { color: var(--fg-3); font-family: var(--mono); font-size: 10px; margin-left: auto; }
 .mt-entry-text { font-size: 13.5px; color: var(--fg-0); line-height: 1.55; overflow-wrap: anywhere; }
 .mt-entry.kind-user { border-left: 2px solid var(--accent); background: var(--bg-2); }
@@ -1552,8 +1552,8 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 }
 .mt-entry.kind-pass b { color: var(--fg-2); font-weight: 500; }
 .mt-composer {
-  border-top: 1px solid var(--line);
-  padding: 8px 14px 10px;
+  border-top: 1px solid var(--hair);
+  padding: 10px 18px 12px;
   background: var(--bg-0);
   display: flex; flex-direction: column; gap: 6px;
 }
@@ -1564,7 +1564,7 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
 .mt-layout .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .mt-pick-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .mt-pick-list {
-  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  border: 1px solid var(--hair); border-radius: var(--radius);
   background: var(--bg-0);
   max-height: 220px; overflow: auto;
   padding: 4px;
@@ -1939,6 +1939,23 @@ table.data th.num { font-family: var(--sans); font-size: 10.5px; }
 .mx-cite b { color: var(--fg-0); font-weight: 500; font-family: var(--mono); font-size: 11px; }
 .mx-cite.missing { color: var(--amber); }
 .btn.mx-clear { padding: 0 6px; font-size: 10.5px; min-height: 18px; }
+
+/* === The rest, on the same tokens === */
+.card-attention { font-size: 11.5px; color: var(--amber); overflow-wrap: anywhere; }
+.login-screen .login-mark { width: 40px; height: 40px; display: block; margin: 0 auto 14px; }
+.menu-pop {
+  position: fixed; z-index: 9000;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+  padding: 6px; display: flex; flex-direction: column; gap: 2px;
+}
+
+/* Tokens (views.jsx TokensView): a card's numbers on a three-column grid. */
+.tok-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; align-items: end; }
+.tok-spark { display: flex; align-items: flex-end; justify-content: flex-end; min-width: 0; }
+.stat-cell .eyebrow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Native controls take the accent too. */
+input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 /* Runner pane highlighting (chat.jsx, runnerEventBody): the kind label in
    the accent (the Settings hue slider moves it), the model's words in the

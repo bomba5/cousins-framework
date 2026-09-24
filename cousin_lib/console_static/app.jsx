@@ -228,7 +228,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
           style={{
             position: "fixed", left: groupMenu.x, top: groupMenu.y,
             background: "var(--bg-1)", border: "1px solid var(--line)",
-            borderRadius: 4, padding: 6, zIndex: 9000,
+            borderRadius: 10, padding: 6, zIndex: 9000,
             boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
             display: "flex", flexDirection: "column", gap: 2, minWidth: 160,
           }}>
@@ -253,7 +253,7 @@ function SidebarGroups({ cousins, activeCousin, view, showHidden, chatUserFor, o
           style={{
             position: "fixed", left: contextMenu.x, top: contextMenu.y,
             background: "var(--bg-1)", border: "1px solid var(--line)",
-            borderRadius: 4, padding: 6, zIndex: 9000,
+            borderRadius: 10, padding: 6, zIndex: 9000,
             boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
             display: "flex", flexDirection: "column", gap: 2, minWidth: 180,
           }}>
@@ -305,7 +305,8 @@ function LoginScreen({ onLogin }) {
   };
   return (
     <div className="login-screen" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-0)" }}>
-      <form className="panel" onSubmit={submit} style={{ width: "min(360px, 92vw)" }}>
+      <form className="panel" onSubmit={submit} style={{ width: "min(360px, 92vw)", paddingTop: 22 }}>
+        <img className="login-mark" src="favicon.svg" alt="" aria-hidden="true" />
         <div className="panel-hdr"><span className="title">console login</span></div>
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 10, padding: 18 }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--fg-3)" }}>

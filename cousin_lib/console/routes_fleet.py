@@ -659,13 +659,14 @@ def register():
                 return 200, _stop(server, slug)
             # A clean stop runs in the background and marks itself busy in
             # `flips` for as long as it runs (the correct pattern already,
-            # below): release this route's own mark first, under the same
-            # lock, so the two checks that follow see each other and not
-            # themselves; a race in the gap is still caught by that recheck.
-            hold.release()
+            # below): release this route's own mark first, inline under
+            # the same lock as the recheck-and-mark that follows, so the
+            # two never see each other's absence - one continuous locked
+            # section, not two, closes the gap between them.
             lock = server.state.setdefault("flip_lock", threading.Lock())
             flips = server.state.setdefault("flips", {})
             with lock:
+                hold.release_locked()
                 current = flips.get(slug)
                 if current and current["status"] == "running":
                     raise HttpError(409, "a flip or clean stop is already"
@@ -720,10 +721,14 @@ def register():
             stopped = _stop(server, slug)
             if stopped["status"] == "stopping":          # the runner lane only
                 # the second half runs after this route has answered: the
-                # mark stays held, released by that thread, not by us
+                # mark stays held, released by that thread, not by us -
+                # but only once its Thread.start() actually returns; a
+                # raise there must still hit our own `finally` below
+                thread = threading.Thread(
+                    target=_start_when_down, args=(server, slug, hold),
+                    daemon=True, name="console-restart-%s" % slug)
+                thread.start()
                 handed_off = True
-                threading.Thread(target=_start_when_down, args=(server, slug, hold),
-                                 daemon=True, name="console-restart-%s" % slug).start()
                 return 202, dict(stopped, target="cousin/%s" % slug)
             time.sleep(server.settle_seconds)
             try:

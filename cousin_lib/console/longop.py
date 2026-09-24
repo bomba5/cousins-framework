@@ -177,10 +177,23 @@ class Hold:
     """An exclusive mark a route holds on a cousin for the length of its
     own work (dismiss, start, stop, restart, set_auth in routes_fleet.py):
     it sits in the same table start() reads, so a migrate, a login or
-    another route's own hold all refuse while it stands. release() clears
-    it; calling it more than once is a no-op, so a route that hands the
-    mark to a background thread (a restart's start-when-down) can leave
-    its own `finally` releasing it too without a race."""
+    another route's own hold all refuse while it stands - but status()
+    hides it (a held entry is internal bookkeeping, never a reported op,
+    and it never emits a cousin-op event).
+
+    release() clears it and is idempotent, so a route can always release
+    it in a `finally` even when it also hands the mark to a background
+    thread along the way: restart flips its own `handed_off` flag only
+    once threading.Thread.start() has actually returned (never before -
+    a start() that raises must not leave the mark held with nothing left
+    to release it), and its `finally` still calls release() whenever that
+    handoff never happened. Once handed off, the background thread's own
+    `finally` releases it when its work ends; the route's `finally`
+    finding the flag set simply skips its own release.
+
+    release_locked() is release() for a caller that already holds the
+    same lock (server.state["flip_lock"]) as part of a larger locked
+    section - it must not (and does not) re-acquire it."""
 
     def __init__(self, server, slug):
         self._server = server
@@ -190,11 +203,16 @@ class Hold:
     def release(self):
         if self._released:
             return
-        self._released = True
         with _lock(self._server):
-            entry = _ops(self._server).get(self.slug)
-            if entry is not None and entry.get("held"):
-                del _ops(self._server)[self.slug]
+            self.release_locked()
+
+    def release_locked(self):
+        if self._released:
+            return
+        self._released = True
+        entry = _ops(self._server).get(self.slug)
+        if entry is not None and entry.get("held"):
+            del _ops(self._server)[self.slug]
 
     def __enter__(self):
         return self
@@ -223,9 +241,13 @@ def exclusive(server, slug, what):
 
 
 def status(server, slug):
-    """The cousin's current or last operation's public state, or None."""
+    """The cousin's current or last operation's public state, or None.
+    A route's own exclusive mark (a Hold, `held` in the entry) is
+    internal bookkeeping, never a reported op: it reads as no op here,
+    same as none running - op_running() still sees it, which is the
+    only thing that needs to."""
     entry = _ops(server).get(slug)
-    return None if entry is None else _public(entry)
+    return None if entry is None or entry.get("held") else _public(entry)
 
 
 def forget(server, slug):

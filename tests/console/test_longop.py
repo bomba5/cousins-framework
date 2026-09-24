@@ -208,6 +208,19 @@ class Exclusive(LongOpCase):
         gate.set()
         self.wait_done()
 
+    def test_a_held_mark_is_invisible_to_status_and_the_op_route(self):
+        # Fix round 3, Important 2: a held entry must not leak through as
+        # a fake running op, on either the function or the GET route -
+        # op_running() is the only thing that needs to see it.
+        hold = longop.exclusive(self.server, "wren", "dismiss")
+        self.assertIsNone(longop.status(self.server, "wren"))
+        self.assertEqual(longop.op_running(self.server, "wren"), "dismiss")
+        status, body = self.get("/api/cousins/wren/op")
+        self.assertEqual((status, body), (200, {"ok": True, "op": None}))
+        hold.release()
+        self.assertIsNone(longop.status(self.server, "wren"))
+        self.assertIsNone(self.get("/api/cousins/wren/op")[1]["op"])
+
     def test_two_holds_on_one_slug_the_second_refuses(self):
         first = longop.exclusive(self.server, "wren", "start")
         with self.assertRaises(longop.Busy):

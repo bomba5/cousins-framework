@@ -241,6 +241,34 @@ class TestRunnerLaneStartStop(_Case):
         self.assertIsNone(longop.op_running(server, "wren"))
         self.assertEqual(stub.ops(), [("stop", "wren"), ("status", None), ("start", "wren")])
 
+    def test_a_failed_handoff_releases_the_hold(self):
+        # Fix round 3, Important 1: handed_off must flip only once
+        # Thread.start() has actually returned; if it raises instead (a
+        # thread the OS refused, say), the mark must not leak forever.
+        self.cousin("wren", extra=RUNNER)
+        self.stub()                     # default: stop -> "stopping"
+        server = self.serve()
+        server.settle_seconds = 0
+        real_thread = threading.Thread
+
+        class Boom:
+            def start(self):
+                raise RuntimeError("no threads left")
+
+        def fake_thread(*a, **kw):
+            if str(kw.get("name", "")).startswith("console-restart-"):
+                return Boom()
+            return real_thread(*a, **kw)
+
+        with mock.patch("threading.Thread", side_effect=fake_thread):
+            status, body = self.post("/api/cousins/wren/restart")
+        self.assertEqual(status, 500, body)
+        self.assertIsNone(longop.op_running(server, "wren"))
+        # released, not stuck: a second restart goes through normally,
+        # never 409 "a restart is running on wren"
+        status, body = self.post("/api/cousins/wren/restart")
+        self.assertEqual(status, 202, body)
+
     def test_restart_with_nothing_to_stop_starts_at_once(self):
         self.cousin("wren", extra=RUNNER)
         stub = self.stub(stop={"ok": True, "name": "runner:wren", "state": "stopped"})

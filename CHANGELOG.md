@@ -3,6 +3,41 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.19.0 - 2026-09-24
+
+### Added
+- The console's runner pane highlights what it shows: the event kind in the
+  accent colour, text in white, tool calls and results in grey, diffs in diff
+  colours, and JSON and markdown rendered. Untrusted text stays linear: every
+  inline markdown pattern is bounded, markdown parsing stops after 20,000
+  characters (the rest is shown as is), and JSON above 64 KB is not parsed.
+- `[agent] effort` sets a runner cousin's effort (`--effort` on the CLI); an
+  unknown level is exit 2 at start.
+- `cousin-migrate` carries `[runtime] model`, `effort` and `auth` into
+  `[agent]`. `plan` prints the runner's bundled CLI version, and a carried
+  model or effort is written only after `--validate` ran one turn with it on
+  the cousin's own account: a model the runner's CLI can't run is never
+  written. `auth = "api_key"` becomes an `anthropic-key` account made from the
+  cousin's key file; rollback removes only what apply made. `check` reports a
+  `[runtime]` / `[agent]` mismatch.
+
+### Fixed
+- A runner cousin is told, in the fixed part of its contract, to reply, send,
+  remember and schedule through its tools, not through the terminal CLIs an
+  identity file may still name (#95). It applies at each cousin's next
+  rollover; a restart resumes the recorded prompt.
+- `validate` (`cousin-runner --check-auth --validate`, `cousin-migrate
+  --validate`) fails on an error inside the turn, a non-success result or an
+  HTTP error status, not only on a result flagged as an error: the "model not
+  supported" 400 used to pass. It never runs on credentials inherited from the
+  invoking shell.
+- A contract test no longer races the runner: it waits for the turn's result
+  event, not only for the row.
+
+### Changed
+- Requires `claude-agent-sdk` 0.2.159 (bundled CLI 2.1.281), the first that
+  runs `claude-opus-5-5`.
+
 ## 1.18.2 - 2026-09-24
 
 ### Fixed

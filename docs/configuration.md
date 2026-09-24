@@ -724,7 +724,11 @@ failed or the row could not be stored, and `queued` when the wait ran out (the
 row is kept; do not send it again). `delivered` means the model RECEIVED the
 item, not that it answered it: the rows of an interrupted turn are delivered.
 
-`model` names the model the runner asks for. `account` names the account the
+`model` names the model the runner asks for, and `effort` its effort (`low`,
+`medium`, `high`, `xhigh` or `max`; anything else is exit 2 at start). A runner
+reads only `[agent]`: `[runtime]` (model, effort, auth) is the tmux lane's, and
+`cousin-migrate` carries it over, validated (see [migrating](migrating.md)).
+`account` names the account the
 cousin runs on, one of `config/accounts.toml`'s (see
 [accounts.toml](#accountstoml)); with none, the cousin runs on `host`, the
 host's default login. The account is the only source of credentials:

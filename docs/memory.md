@@ -44,7 +44,7 @@ Everything below is relative to the cousin home.
 | Monthly digests | `memory/raw/YYYY-MM-digest.jsonl` | the raw fold | distiller, boot packet |
 | Raw archive | `memory/raw/archive/YYYY-MM.jsonl.gz` | the raw fold | nothing automatic (`zcat` it) |
 | Distilled views | `memory/distilled/*.md` | the distiller | boot packet |
-| Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the first `recall` in a home copies the decisions only this log holds into raw) |
+| Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the one-time backfill (triggered by recall, search, consolidate) copies the decisions only this log holds into raw) |
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
 | Corrections | `data/corrections.jsonl` | the chat server, from your messages | boot packet (calibration layer) |

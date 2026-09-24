@@ -204,7 +204,10 @@ def apply(home, *, root, now=None, sample=REPLAY_SAMPLE):
 def _logged_queries(home, base, sample):
     """(query, [harness file names], depth) for the newest `sample` logged
     searches that surfaced a file under `base`; depth is how many hits
-    that search returned."""
+    that search returned. One row per distinct query text: the log is
+    read newest-first, so the first event for a query text is kept and
+    every later (older) repeat is skipped, or a repeated query would fill
+    the sample and double-count kept/lost in the exit measurement."""
     from cousin_lib import reinforce
     try:
         lines = reinforce._log_path(home).read_text().splitlines()
@@ -212,15 +215,20 @@ def _logged_queries(home, base, sample):
         return []
     prefix = str(base) + os.sep
     out = []
+    seen_queries = set()
     for line in reversed(lines):
         try:
             event = json.loads(line)
         except ValueError:
             continue
+        query = event.get("query")
+        if not query or query in seen_queries:
+            continue
+        seen_queries.add(query)
         paths = [str(p) for p in event.get("paths") or []]
         names = sorted({Path(p).name for p in paths if p.startswith(prefix)})
-        if event.get("query") and names:
-            out.append((event["query"], names, len(paths)))
+        if names:
+            out.append((query, names, len(paths)))
         if len(out) >= sample:
             break
     return out
@@ -231,8 +239,19 @@ def _index_current(home, root):
     before a replay searches: a search embeds at most FOREGROUND_BUDGET
     stale chunks, and right after an import every copy is a new key, so a
     replay on a partly built index would measure the index filling in,
-    not the import (R19)."""
-    from cousin_lib import memory_search
+    not the import (R19). The one-time decisions backfill runs first, for
+    the same reason: a replay's first search runs it too (memory_search's
+    R2), and a home that reaches it here first would have the index
+    declared current, then re-staled by the raw entries that search's
+    backfill appends, caught up only FOREGROUND_BUDGET chunks at a time.
+    ensure_backfilled (not try_backfill) so a broken backfill fails loudly
+    in a command a person runs by hand, rather than silently leaving the
+    baseline or verify comparing against an incomplete import; it raises
+    only OSError/ValueError, never ManifestError, so import-auto's
+    ManifestError/exit-2 contract (plan()'s strict manifest read) is
+    untouched."""
+    from cousin_lib import memory, memory_search
+    memory.ensure_backfilled(home)
     memory_search.build_index(home, root)
     config = memory_search._embedding_config(root)
     if isinstance(config, dict):

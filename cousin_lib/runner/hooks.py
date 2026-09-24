@@ -83,7 +83,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
 
     recall: `recall(body) -> (text or None, hits)`, a blocking callable
     run on a worker thread; text becomes the prompt's additionalContext,
-    hits goes on the `recall` event. Default: default_recall(home).
+    hits goes on the `recall` event. Default: default_recall(home, root).
     body_for_prompt: `f(prompt) -> str`, the text to search for a
     submitted prompt (the runner passes the body of the row whose
     envelope matches the prompt, "" for a thread that is not operator

@@ -68,9 +68,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - A raw memory in the `[fw-recall]` line is named by its topic, not by the
   date of the file it sits in.
 - A failing decisions backfill (a read-only or full `data/`, a bad byte
-  in the log) no longer silences `search` or `recall`: it prints one
-  stderr line and writes no mark, so the next read retries; `consolidate`
-  keeps the unguarded, loud failure, since it is a command a person runs.
+  in the log, a truncated or corrupt gzip archive under `memory/raw/archive/`)
+  no longer silences `search` or `recall`: it prints one stderr line and
+  writes no mark, so the next read retries; `consolidate` keeps the
+  unguarded, loud failure, since it is a command a person runs. The same
+  truncated or corrupt archive no longer crashes a search or recall
+  outright either: the raw index and a raw hit's own lookup skip it like
+  any other unreadable file.
 
 ## 1.12.0 - 2026-09-24
 

@@ -964,7 +964,8 @@ custom tools from the `plugin(s)/` and `tool(s)/` dirs there; it does not
 read `.opencode/` or `opencode.json` in the cousin's home. So a runner
 refuses to start (exit 2 when found at start-up, exit 3 at a restart) while
 any of these exist: anything in `<data_dir>/config/opencode/` other than
-opencode's own `.gitignore` and the plugin library below, `<data_dir>/.opencode`,
+opencode's own `.gitignore` and the plugin library below (`node_modules` and
+a `package-lock.json` whose root names that library only), `<data_dir>/.opencode`,
 or `<home>/.opencode`. The message names each path: remove it. After the
 server starts, the runner reads the config opencode actually runs with
 (`GET /config`) and runs no turn unless it holds exactly the plugin pack,

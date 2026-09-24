@@ -83,7 +83,10 @@ class TestPluginDependencySeed(Case):
         self.assertEqual(self.lock()["packages"][""]["dependencies"],
                          {opencode.PLUGIN_DEPENDENCY: "*"})
 
-    def test_an_existing_lock_is_merged_never_replaced(self):
+    def test_an_existing_lock_naming_another_package_refuses_the_start(self):
+        """Review round 2, minor 4: a lock in opencode's config dir may name
+        only the plugin library (an online install names nothing else), so
+        one naming another package is a foreign source, never merged into."""
         r = self.runner()
         d = self.data_dir / "config" / "opencode"
         (d / "node_modules").mkdir(parents=True)
@@ -91,12 +94,10 @@ class TestPluginDependencySeed(Case):
             "name": "opencode", "lockfileVersion": 3,
             "packages": {"": {"dependencies": {"left-pad": "1.3.0"}},
                          "node_modules/left-pad": {"version": "1.3.0"}}}))
-        self.started(r)
-        lock = self.lock()
-        self.assertEqual(lock["lockfileVersion"], 3)
-        self.assertEqual(lock["packages"]["node_modules/left-pad"], {"version": "1.3.0"})
-        self.assertEqual(lock["packages"][""]["dependencies"],
-                         {"left-pad": "1.3.0", opencode.PLUGIN_DEPENDENCY: "*"})
+        r.start()
+        self.assertTrue(_wait(lambda: r.fatal is not None))
+        self.assertIn("it names left-pad", r.fatal)
+        self.assertEqual(self.lock()["packages"][""]["dependencies"], {"left-pad": "1.3.0"})
 
     def test_a_lock_that_names_the_dependency_is_left_alone(self):
         """A real install (an online start before this one) stays as it is."""

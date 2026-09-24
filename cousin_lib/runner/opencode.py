@@ -118,14 +118,14 @@ SDK_NAMES = {"bash": "Bash", "read": "Read", "write": "Write", "edit": "Edit",
 OWN_PREFIX = "cousin_"
 # The largest output opencode asks of any model (its OUTPUT_TOKEN_MAX, 1.18.31)
 OPENCODE_OUTPUT_MAX = 32000
-# What may sit in opencode's global config dir (<XDG_CONFIG_HOME>/opencode):
-# opencode's own .gitignore, and the plugin dependency seed_plugin_dependency
-# writes (or an online install would). Measured on 1.18.31, opencode MERGES
-# opencode.json there over the rendered config and LOADS plugin(s)/ and
+# What may sit in opencode's global config dir (<XDG_CONFIG_HOME>/opencode),
+# exactly what a clean start measured on 1.18.31: opencode's own .gitignore
+# and the plugin library seed_plugin_dependency writes (node_modules and a
+# package-lock.json whose root names PLUGIN_DEPENDENCY only). opencode MERGES
+# opencode.json(c) there over the rendered config and LOADS plugin(s)/ and
 # tool(s)/ (code in the server, which GET /config does not list), so the dir
 # is an allowlist: anything else there refuses the start.
-CONFIG_DIR_OWN = frozenset((".gitignore", "node_modules", "package.json", "package-lock.json",
-                            "bun.lock", "bun.lockb"))
+CONFIG_DIR_OWN = frozenset((".gitignore", "node_modules", "package-lock.json"))
 
 
 def tool_name(name):
@@ -291,9 +291,24 @@ def foreign_config_sources(account, root, home):
     except (FileNotFoundError, NotADirectoryError):
         names = []
     found = [config_dir / n for n in names if n not in CONFIG_DIR_OWN]
+    lock = config_dir / "package-lock.json"
+    if "package-lock.json" in names and _lock_names_others(lock):
+        found.append(lock)
     found += [p for p in (Path(env["HOME"]) / ".opencode", Path(home) / ".opencode")
               if os.path.lexists(p)]
     return sorted(found)
+
+
+def _lock_names_others(path):
+    """The lock is not the seed's: unreadable, or its root names a package
+    other than PLUGIN_DEPENDENCY (names: `foreign_config_sources` says which)."""
+    try:
+        lock = json.loads(path.read_text())
+        deps = lock["packages"][""].get("dependencies") or {}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return "unreadable"
+    others = sorted(set(deps) - {PLUGIN_DEPENDENCY}) if isinstance(deps, dict) else ["?"]
+    return ", ".join(others)
 
 
 def check_effective_config(config, env, *, account, model, small_model, plugin=PLUGIN):
@@ -329,7 +344,9 @@ def seed_plugin_dependency(config_dir):
     """Make opencode's own check (`Npm.install` in 1.18.31: skip a config
     dir that has `node_modules` and a package-lock.json whose root lists
     every dependency) find PLUGIN_DEPENDENCY installed. An existing lock is
-    merged, never replaced; one that already names it is left alone."""
+    merged, never replaced; one that already names it is left alone. (The
+    runner refuses a lock whose root names any other package before it
+    seeds: foreign_config_sources.)"""
     config_dir = Path(config_dir)
     (config_dir / "node_modules").mkdir(parents=True, exist_ok=True, mode=0o700)
     path = config_dir / "package-lock.json"
@@ -546,11 +563,15 @@ class OpencodeRunner:
         it: its shell's HOME is the account's data dir)."""
         found = foreign_config_sources(self.account, self.root, self.home)
         if found:
+            named = []
+            for p in found:
+                others = _lock_names_others(p) if p.name == "package-lock.json" else ""
+                named.append("%s (%s)" % (p, others if others == "unreadable"
+                                          else "it names " + others) if others else str(p))
             raise RunnerError("%s would be merged into opencode's config over the one the"
                               " runner renders (a plugin, a tool, a provider or a model could"
                               " come back that way): remove %s"
-                              % (", ".join(str(p) for p in found),
-                                 "it" if len(found) == 1 else "them"))
+                              % (", ".join(named), "it" if len(found) == 1 else "them"))
 
     def _check_models(self):
         """Both models well formed, on a provider this account reaches."""

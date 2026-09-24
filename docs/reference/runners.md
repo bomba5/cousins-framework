@@ -191,6 +191,11 @@ none is a contract item:
   made it. The containment is the container: a cousin's shell is the
   container ([the design](../design/agent-loop-runner.md)); on a bare host,
   run an opencode cousin as a user that can read nothing it should not.
+- **`node_modules` in opencode's config dir is checked by name only.** The
+  runner allows the directory (its plugin-library seed) and checks the lock's
+  root names only that library, but does not look inside `node_modules`;
+  opencode loads nothing from it unless a config names a plugin, which the
+  effective-config check refuses.
 - **`auth.json` is checked at every turn start, not during a turn.** A key
   or login changed without a 401 binds from the next turn, when the per-turn
   check reads the file again.

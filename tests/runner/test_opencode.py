@@ -416,9 +416,8 @@ class TestGuards(OpencodeCase):
         data = self.root / ".secrets" / "accounts" / "lab.opencode"
         g = data / "config" / "opencode"
         g.mkdir(parents=True)
-        for own in (".gitignore", "package-lock.json"):
-            (g / own).write_text("{}")
-        (g / "node_modules").mkdir()
+        opencode.seed_plugin_dependency(g)                    # node_modules, the seed's lock
+        (g / ".gitignore").write_text("node_modules\n")
         self.runner(home=home)                                # the own files start
         for path, kind in self.foreign_sources(home, data):
             with self.subTest(path=str(path)):
@@ -428,6 +427,35 @@ class TestGuards(OpencodeCase):
                 self.assertIn(str(path), str(err.exception))
                 self.assertIn("merged", str(err.exception))
                 shutil.rmtree(path) if kind == "dir" else path.unlink()
+
+    def test_the_config_dirs_own_files_are_the_measured_ones_and_the_lock_is_the_seeds(self):
+        """Review round 2, minor 4: names alone let a package.json (or a lock
+        naming other packages) sit in opencode's config dir. The allowlist is
+        what a clean start measured (.gitignore, and the seed's node_modules
+        and package-lock.json), and the lock's root may name only the plugin
+        library the seed writes."""
+        home = self.home()
+        g = self.root / ".secrets" / "accounts" / "lab.opencode" / "config" / "opencode"
+        opencode.seed_plugin_dependency(g)
+        (g / ".gitignore").write_text("node_modules\n")
+        self.runner(home=home)                                # the seed's lock starts
+        for name in ("package.json", "bun.lock", "bun.lockb"):
+            with self.subTest(name=name):
+                (g / name).write_text("{}")
+                with self.assertRaises(RunnerError) as err:
+                    self.runner(home=home)
+                self.assertIn(name, str(err.exception))
+                (g / name).unlink()
+        lock = json.loads((g / "package-lock.json").read_text())
+        lock["packages"][""]["dependencies"]["some-other-package"] = "*"
+        (g / "package-lock.json").write_text(json.dumps(lock))
+        with self.assertRaises(RunnerError) as err:
+            self.runner(home=home)
+        self.assertIn("some-other-package", str(err.exception))
+        (g / "package-lock.json").write_text("not json")
+        with self.assertRaises(RunnerError) as err:
+            self.runner(home=home)
+        self.assertIn("package-lock.json", str(err.exception))
 
     def test_a_config_source_written_after_construction_refuses_the_start(self):
         """The model can write one (its shell's HOME was the data dir): the

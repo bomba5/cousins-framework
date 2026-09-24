@@ -230,6 +230,25 @@ class TestCapture(LoginCase):
         self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_a_non_object_capture_file_is_skipped_never_raised(self):
+        # Tracker #84: captures_for runs on every operator message
+        # (server/inbound.py divert_login_code); a capture file that
+        # holds valid JSON that is not an object (here, a bare list)
+        # must never take the whole check down with an AttributeError.
+        self.arm()
+        (self.root / "run" / "login-capture-broken.json").write_text("[]")
+        caps = accounts.captures_for(self.root, "wren")
+        self.assertEqual(len(caps), 1)
+        self.assertEqual(caps[0]["account"], "fleet")
+
+    def test_read_capture_of_a_non_object_json_file_is_none_not_a_raise(self):
+        # Same shape, the sibling reader: read_capture is what
+        # store_code/take_code/retire_capture and divert_login_code's
+        # re-check all call.
+        (self.root / "run").mkdir(parents=True, exist_ok=True)
+        (self.root / "run" / "login-capture-broken.json").write_text("[]")
+        self.assertIsNone(accounts.read_capture(self.root, "broken"))
+
     def test_a_timeout_leaves_a_tombstone_that_stores_nothing(self):
         self.arm()
         self.assertIsNone(accounts.take_code(self.root, "fleet", timeout=0.1, poll=0.02))

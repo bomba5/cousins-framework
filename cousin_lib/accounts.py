@@ -520,9 +520,13 @@ def arm_capture(root, *, via, operator, account_name, ttl=CAPTURE_TTL_S, pid=Non
 
 def read_capture(root, name):
     try:
-        return json.loads(capture_path(root, name).read_text())
+        data = json.loads(capture_path(root, name).read_text())
     except (OSError, ValueError):
         return None
+    # Valid JSON that is not an object (a list, a number, ...) is not a
+    # capture: skip it like unparsable data (tracker #84), not an
+    # AttributeError on the .get() every caller does next.
+    return data if isinstance(data, dict) else None
 
 
 def captures_for(root, via):
@@ -532,6 +536,8 @@ def captures_for(root, via):
         try:
             data = json.loads(path.read_text())
         except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
             continue
         if data.get("via") == via:
             out.append(data)

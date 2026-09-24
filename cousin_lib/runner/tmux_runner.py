@@ -19,6 +19,7 @@ turn; the pane is killed only when the stop is a hold (run/held, P11-10).
 The structure is FakeRunner's (the reference runner): one worker thread,
 the wake socket, the state machine, `_fail_turn` never silent, the
 rollover row's sequence."""
+import collections
 import hashlib
 import json
 import os
@@ -51,6 +52,8 @@ BLOCKED_BASE_S = 0.5      # a screen that refuses typing is tried again after th
 BLOCKED_MAX_S = 5.0       # up to this
 PROBATION_S = 20.0        # a started pane that stays up this long has proven itself
 REOPEN_GIVE_UP = 5        # consecutive failed starts before the runner gives up (errored, exit 3)
+LOSS_MAX = 5              # more pane losses than this (proven panes or not) inside LOSS_WINDOW_S
+LOSS_WINDOW_S = 600.0     # ... and the runner gives up the same way
 LINE_REPLAYS = 3          # a transcript line whose handling raises is skipped after this many replays
 NOTICE_WAIT_S = 120.0     # a runner line owed at the first idle is tried this long, then said
 STOP_SETTLE_S = 15.0      # a stop waits this long (at most half its timeout) for the cut turn's end
@@ -160,6 +163,8 @@ class TmuxRunner:
         self._turn_offset = 0
         self._line_fails = {}            # a line's end -> how often its handling raised
         self._cut_prefix = None          # {"text", "clears_note"}: a notice that expired untyped
+        self._losses = collections.deque()   # monotonic times of pane losses, inside the window
+        self.loss_max, self.loss_window_s = LOSS_MAX, LOSS_WINDOW_S
         self.probation_s = PROBATION_S
         self.reopen_base_s = REOPEN_BASE_S
         self.notice_wait_s = NOTICE_WAIT_S
@@ -570,6 +575,15 @@ class TmuxRunner:
         self.stream.append("system", {"subtype": "pane_lost", "session_id": self._session_id,
                                       "cut": cut, "requeued": requeued,
                                       "on_probation": booting is not None})
+        now = time.monotonic()
+        self._losses.append(now)
+        while self._losses and now - self._losses[0] > self.loss_window_s:
+            self._losses.popleft()
+        if len(self._losses) > self.loss_max:
+            # a CLI that outlives its proof and dies, over and over (round 3)
+            self._give_up("%d pane losses within %.0f s" % (len(self._losses), self.loss_window_s),
+                          fatal="the runner gave up on its pane")
+            return
         if booting is not None:
             self._failed_start("the pane's CLI exited %.1f s after its start, before it proved"
                                " itself" % (time.monotonic() - booting["since"]))
@@ -591,10 +605,11 @@ class TmuxRunner:
         self.stream.append("error", {"error": "the pane did not come back (try %d): %s; next try"
                                               " in %.1fs" % (self._reopen_fails, why, delay)})
 
-    def _give_up(self, why):
+    def _give_up(self, why, fatal=None):
         """errored, said, and the worker ends: cousin-runner exits 3 and the
         supervisor counts it (MAX_EXITS makes the cousin `failing`)."""
-        self.fatal = "the pane failed %d starts in a row: %s" % (self._reopen_fails, why)
+        self.fatal = ("%s: %s" % (fatal, why) if fatal else
+                      "the pane failed %d starts in a row: %s" % (self._reopen_fails, why))
         self._lost, self._gave_up = None, True
         self.stream.append("system", {"subtype": "pane_failing", "session_id": self._session_id,
                                       "tries": self._reopen_fails, "reason": why})

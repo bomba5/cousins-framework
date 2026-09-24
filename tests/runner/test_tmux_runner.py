@@ -406,6 +406,26 @@ class TestBootLoop(Case):
         self.assertTrue(r.worker_alive())
         self.assertTrue(_wait(lambda: r._reopen_fails == 0, timeout=4))
 
+    def test_a_pane_that_passes_its_proof_and_dies_again_and_again_is_given_up_on(self):
+        """Round 3: a CLI that outlives the proof and then dies, over and
+        over, is capped by a sliding window: more than 5 losses in 10 min."""
+        class DiesLater(FakePane):
+            def start(self, argv, *, cwd, env_base):
+                super().start(argv, cwd=cwd, env_base=env_base)
+                if self._alive:
+                    threading.Timer(0.6, self.die).start()
+        r = self.runner(pane=lambda path: DiesLater(path, context_home=self.home))
+        r.probation_s = 0.3
+        r.start()
+        self.assertTrue(_wait(lambda: not r.worker_alive(), timeout=20))
+        self.assertEqual(self.starts(), 6)
+        self.assertEqual(r._reopen_fails, 0, "each pane had proven itself")
+        self.assertEqual(r.state(), "errored")
+        failing = self.failing(r)
+        self.assertEqual(len(failing), 1)
+        self.assertIn("6 pane losses within 600 s", failing[0]["reason"])
+        self.assertIn("6 pane losses", r.fatal)
+
     def test_a_pane_that_draws_its_box_and_dies_at_once_is_still_a_failed_start(self):
         """The re-review's probe D as it was run: the box shows at once."""
         r = self.runner(pane=lambda path: DiesAtBoot(path, context_home=self.home))

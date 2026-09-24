@@ -304,6 +304,7 @@ function SysPasswordReset({ user, onSubmit, onCancel }) {
   const [err, setErr] = React.useState(null);
   const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
   const send = () => {
+    if (!pw || !pw2) return;
     if (pw !== pw2) { setErr("the passwords differ"); return; }
     const value = pw;
     setPw(""); setPw2(""); setErr(null);

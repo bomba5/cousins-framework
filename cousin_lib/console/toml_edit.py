@@ -1,7 +1,9 @@
 """Targeted edits of a cousin.toml text that keep every other line:
 set or remove keys in a table (a dotted name like `agent.sessions` is a
-subtable), re-parsed before it is persisted. The same atomic
-rename-into-place the rest of the framework uses, the file's mode kept.
+subtable; "" is the top level, the keys before any header), re-parsed
+before it is persisted. The same atomic rename-into-place the rest of
+the framework uses, the file's mode kept. write_keys edits a home's
+cousin.toml; write_file any other TOML file (a registry, policy.toml).
 
 Values: str, int, bool, a finite float, and a list of those. A key's
 old value is replaced whole, a multi-line array or string included."""
@@ -40,7 +42,10 @@ def _literal(value):
 
 
 def _check_names(table, key):
-    parts = table.split(".") if isinstance(table, str) else [None]
+    if table == "":
+        parts = []                     # the top level
+    else:
+        parts = table.split(".") if isinstance(table, str) else [None]
     if not all(isinstance(p, str) and _BARE_KEY.match(p) for p in parts):
         raise ValueError("table %r is not a (dotted) bare TOML name" % (table,))
     if not isinstance(key, str) or not _BARE_KEY.match(key):
@@ -118,10 +123,23 @@ def _inline_comment(line):
     return ""
 
 
+def _root_body(statements):
+    """The top level's statements: those before the first header."""
+    body = []
+    for st in statements:
+        if st[2] is not None:
+            break
+        body.append(st)
+    return body
+
+
 def _rest(doc, table, key):
     """`doc` without table.key, and without an empty table left on that path."""
     import copy
     doc = copy.deepcopy(doc)
+    if table == "":
+        doc.pop(key, None)
+        return doc
     parts = table.split(".")
     chain, node = [], doc
     for part in parts:
@@ -158,7 +176,12 @@ def set_key(text, table, key, value):
     if before is not None and statements is None:
         raise ValueError("cannot find the statements of this cousin.toml")
     key_re = re.compile(r"^\s*%s\s*=" % re.escape(key))
-    found = _table_body(statements, table) if statements is not None else None
+    if table == "":
+        if before is None:
+            raise ValueError("cannot set the top-level key %s: the text does not parse" % key)
+        found = ((0, 0, None), _root_body(statements))
+    else:
+        found = _table_body(statements, table) if statements is not None else None
     if found is None:
         if literal is None:
             return text
@@ -176,10 +199,13 @@ def set_key(text, table, key, value):
                 lines[i:j] = [literal + comment + nl]
         elif literal is not None:
             # after the last non-blank statement of the body, so a trailing
-            # blank keeps separating this table from the next
+            # blank keeps separating this table from the next; on the top
+            # level after its leading comment block too, so a file's own
+            # header comment stays on top
             insert_at = hj
             for i, j, _ in body:
-                if lines[i].strip() and not lines[i].strip().startswith("#"):
+                stripped = lines[i].strip()
+                if stripped and (table == "" or not stripped.startswith("#")):
                     insert_at = j
             if insert_at > 0 and not lines[insert_at - 1].endswith("\n"):
                 lines[insert_at - 1] += nl
@@ -197,7 +223,7 @@ def set_key(text, table, key, value):
 
 def _lookup(parsed, table, key):
     node = parsed
-    for part in table.split("."):
+    for part in (table.split(".") if table else []):
         node = node.get(part) if isinstance(node, dict) else None
         if node is None:
             return False, None
@@ -232,26 +258,41 @@ def write_keys(home, changes, *, validate=None):
     rename. `changes` is a list of (table, key, value) or a mapping of
     (table, key) to value; value None removes the key. Nothing is
     written when any step fails. Returns the parsed document."""
-    path = Path(home) / "cousin.toml"
-    text = path.read_text()
+    return write_file(Path(home) / "cousin.toml", changes, validate=validate)
+
+
+def write_file(path, changes, *, validate=None, validate_text=None, initial=None):
+    """write_keys for any TOML file at `path`. `validate_text(text)` sees
+    the new text before `validate(parsed)` (a parser that takes text, such
+    as the MCP registry's). An absent file is FileNotFoundError, unless
+    `initial` gives the text to start from (created 0644)."""
+    path = Path(path)
+    if path.exists() or initial is None:
+        text = path.read_text()
+        mode = path.stat().st_mode & 0o7777
+    else:
+        text, mode = initial, 0o644
     items = _changes(changes)
     for table, key, value in items:
         text = set_key(text, table, key, value)
     try:
         parsed = tomllib.loads(text)
     except tomllib.TOMLDecodeError as err:
-        raise ValueError("the edited cousin.toml does not parse: %s" % err)
+        raise ValueError("the edited %s does not parse: %s" % (path.name, err))
     for table, key, value in items:
         present, got = _lookup(parsed, table, key)
+        name = "%s.%s" % (table, key) if table else key
         if value is None and present:
-            raise ValueError("%s.%s still present after removal" % (table, key))
+            raise ValueError("%s still present after removal" % name)
         if value is not None and (not present or not _same(got, list(value)
                                                           if isinstance(value, tuple) else value)):
-            raise ValueError("%s.%s did not round-trip" % (table, key))
+            raise ValueError("%s did not round-trip" % name)
+    if validate_text is not None:
+        validate_text(text)
     if validate is not None:
         validate(parsed)
-    mode = path.stat().st_mode & 0o7777
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".cousin.", suffix=".toml.tmp")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.stem + ".",
+                               suffix=".toml.tmp")
     try:
         with os.fdopen(fd, "w") as fh:
             fh.write(text)

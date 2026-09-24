@@ -213,5 +213,91 @@ class WriteKeys(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
 
 
+ROOTED = ('# a registry\n'
+          'ceiling = 12   # tools\n'
+          'deny = [\n'
+          '  "a",\n'
+          ']\n'
+          '\n'
+          '[tools.memory]\n'
+          'command = "cousin-memory"\n')
+
+
+class RootTable(unittest.TestCase):
+    """table "" is the document's top level: the keys before any header
+    (policy.toml's, a registry's ceiling)."""
+
+    def test_a_top_level_key_is_replaced_in_place(self):
+        out = toml_edit.set_key(ROOTED, "", "ceiling", 14)
+        self.assertIn("ceiling = 14   # tools\n", out)
+        self.assertEqual(tomllib.loads(out)["tools"], {"memory": {"command": "cousin-memory"}})
+
+    def test_a_new_top_level_key_lands_before_the_first_table(self):
+        out = toml_edit.set_key(ROOTED, "", "timeout", 60)
+        data = tomllib.loads(out)
+        self.assertEqual((data["timeout"], data["ceiling"]), (60, 12))
+        self.assertNotIn("timeout", data["tools"]["memory"])
+        self.assertLess(out.index("timeout"), out.index("[tools.memory]"))
+
+    def test_a_file_that_starts_with_a_table_gets_the_key_on_top(self):
+        out = toml_edit.set_key('[tools.x]\ncommand = "c"\n', "", "ceiling", 3)
+        data = tomllib.loads(out)
+        self.assertEqual((data["ceiling"], data["tools"]["x"]), (3, {"command": "c"}))
+
+    def test_a_top_level_list_is_replaced_whole_and_removed(self):
+        out = toml_edit.set_key(ROOTED, "", "deny", ["b"])
+        self.assertEqual(tomllib.loads(out)["deny"], ["b"])
+        out = toml_edit.set_key(ROOTED, "", "deny", None)
+        self.assertNotIn("deny", tomllib.loads(out))
+        self.assertIn("# a registry\n", out)
+
+    def test_an_empty_text_takes_top_level_keys(self):
+        out = toml_edit.set_key("", "", "outbound_filter", True)
+        self.assertEqual(tomllib.loads(out), {"outbound_filter": True})
+
+    def test_a_text_that_does_not_parse_is_refused_for_the_top_level(self):
+        with self.assertRaises(ValueError):
+            toml_edit.set_key("x = = 1\n", "", "ceiling", 1)
+
+
+class WriteFile(unittest.TestCase):
+    """write_file: write_keys for any TOML file (a registry, policy.toml)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.path = self.dir / "mcp-registry.toml"
+        self.path.write_text(ROOTED)
+        os.chmod(self.path, 0o600)
+
+    def test_keys_of_any_file_and_its_mode_kept(self):
+        parsed = toml_edit.write_file(self.path, [("", "ceiling", 4),
+                                                  ("tools.memory", "enabled", False)])
+        self.assertEqual((parsed["ceiling"], parsed["tools"]["memory"]["enabled"]), (4, False))
+        self.assertEqual(tomllib.loads(self.path.read_text()), parsed)
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+
+    def test_the_text_hook_sees_the_new_text_and_can_refuse_it(self):
+        seen = []
+
+        def hook(text):
+            seen.append(text)
+            raise ValueError("no")
+        with self.assertRaises(ValueError):
+            toml_edit.write_file(self.path, [("", "ceiling", 4)], validate_text=hook)
+        self.assertIn("ceiling = 4", seen[0])
+        self.assertEqual(self.path.read_text(), ROOTED)
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["mcp-registry.toml"])
+
+    def test_an_absent_file_is_created_only_when_asked(self):
+        path = self.dir / "policy.toml"
+        with self.assertRaises(FileNotFoundError):
+            toml_edit.write_file(path, [("", "ask", [])])
+        parsed = toml_edit.write_file(path, [("", "ask", ["Agent"])], initial="# new\n")
+        self.assertEqual(parsed, {"ask": ["Agent"]})
+        self.assertTrue(path.read_text().startswith("# new\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

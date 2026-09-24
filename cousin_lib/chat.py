@@ -37,6 +37,21 @@ from cousin_lib.trace import traced_cli
 
 EXTERNAL_PEERS_RELPATH = ("config", "external-peers.toml")
 DEFAULT_SEND_PATH = "/api/send"
+PEER_SEND_PATH = "/peer/send"
+
+
+def peer_signature(secret, sender, to, sent_at, msg_id, message):
+    """HMAC-SHA256, hex, of one /peer/send message with the secret the two
+    installs share (ruling P10a-2): over the sender's name, the target,
+    the send time to the millisecond, the id and the message's sha256, so
+    a captured request can be neither altered nor sent from anyone else,
+    and the secret itself never crosses the wire."""
+    import hashlib
+    import hmac
+    canonical = "\n".join([sender, to, "%.3f" % float(sent_at), msg_id,
+                            hashlib.sha256(message.encode("utf-8")).hexdigest()])
+    return hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"),
+                    hashlib.sha256).hexdigest()
 
 
 class NoContextError(Exception):
@@ -49,9 +64,23 @@ class PeerAddressRefused(ValueError):
 
 @dataclass(frozen=True)
 class ExternalPeer:
+    """One entry of config/external-peers.toml. Outbound: `url` +
+    `send_path`, and, for a peer whose console takes POST /peer/send,
+    `token_file` (the secret that peer's install shares with this one) and
+    `sender` (the name that peer knows this install by): each message is
+    signed with the secret, which never travels (ruling P10a-2). Inbound
+    (phase 10a): `inbound_token_file`, the secret shared with that peer,
+    which our POST /peer/send checks its signatures with; `name`, how its
+    messages are shown here; `reach`, the local cousins it may write to,
+    required (ruling P10a-3: no reach, no entry)."""
     slug: str
     url: str
     send_path: str = DEFAULT_SEND_PATH
+    token_file: str = ""
+    inbound_token_file: str = ""
+    name: str = ""
+    sender: str = ""
+    reach: tuple = ()
 
     @property
     def send_url(self):
@@ -86,12 +115,24 @@ def load_external_peers(root):
             raise MissingConfigError(
                 "%s url must be an http(s) base URL such as"
                 " http://127.0.0.1:8085, got %r" % (where, url))
-        send_path = entry.get("send_path", DEFAULT_SEND_PATH)
+        # a peer we sign for takes /peer/send, not the legacy chat route (M6)
+        send_path = entry.get("send_path", PEER_SEND_PATH if entry.get("token_file")
+                              else DEFAULT_SEND_PATH)
         if not isinstance(send_path, str) or not send_path.startswith("/"):
             raise MissingConfigError(
                 "%s send_path must start with '/', got %r"
                 % (where, send_path))
-        out[slug] = ExternalPeer(slug=slug, url=url, send_path=send_path)
+        extra = {}
+        for key in ("token_file", "inbound_token_file", "name", "sender"):
+            value = entry.get(key, "")
+            if not isinstance(value, str):
+                raise MissingConfigError("%s %s must be a string" % (where, key))
+            extra[key] = value
+        reach = entry.get("reach", [])
+        if not isinstance(reach, list) or not all(isinstance(r, str) for r in reach):
+            raise MissingConfigError("%s reach must be a list of slugs" % where)
+        out[slug] = ExternalPeer(slug=slug, url=url, send_path=send_path,
+                                 reach=tuple(reach), **extra)
     return out
 
 
@@ -136,14 +177,50 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # a redirect is an error: it would leave the guard
 
 
-def _post_external(peer, payload, guard):
+def read_secret(root, rel, what):
+    """A secret file under the install: a single line, owned by us and
+    readable by nobody else (mode 0600 or tighter), or MissingConfigError."""
+    path = FrameworkConfig(root).root / rel
+    try:
+        st = path.stat()
+        if st.st_mode & 0o077:
+            raise MissingConfigError("%s %s is readable by group or others: chmod 600 it"
+                                     % (what, path))
+        value = path.read_text().strip()
+    except OSError as err:
+        raise MissingConfigError("%s %s is unreadable: %s" % (what, path, err))
+    if not value:
+        raise MissingConfigError("%s %s is empty" % (what, path))
+    return value
+
+
+def _post_external(peer, payload, guard, *, root=None):
+    """One message to an external peer. With a `token_file` (a peer whose
+    console takes POST /peer/send) the message is signed with it
+    (`Authorization: HMAC <sender>:<hex>`, peer_signature; the secret never
+    travels) and the body carries what that route needs: `to`, a `msg_id`
+    and a `sent_at` (its replay window). Without one, the legacy body,
+    {user, message}, to the peer's chat server."""
+    import time
+    import uuid
     check_peer_address(peer, guard)
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), _NoRedirect())
+    headers = {"Content-Type": "application/json"}
+    if peer.token_file:
+        if not peer.sender:
+            raise MissingConfigError("external peer %s: token_file needs sender, the name that"
+                                     " peer knows this install by" % peer.slug)
+        secret = read_secret(root, peer.token_file, "external peer %s token_file" % peer.slug)
+        payload = {"to": peer.slug, "message": payload["message"], "msg_id": uuid.uuid4().hex,
+                   "sent_at": round(time.time(), 3)}
+        headers["Authorization"] = "HMAC %s:%s" % (peer.sender, peer_signature(
+            secret, peer.sender, peer.slug, payload["sent_at"], payload["msg_id"],
+            payload["message"]))
     req = urllib.request.Request(
         peer.send_url,
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with opener.open(req, timeout=5) as r:
@@ -232,7 +309,7 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
         if guard is None:
             from cousin_lib.server.netguard import NetGuard
             guard = NetGuard.from_config(fw.root)
-        return _post_external(target, payload, guard)
+        return _post_external(target, payload, guard, root=fw.root)
     return deliver_to(target, payload)
 
 

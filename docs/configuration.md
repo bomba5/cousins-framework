@@ -403,8 +403,30 @@ send_path = "/api/send"
 
 | key | default | meaning |
 |---|---|---|
-| `url` | required | the peer's chat server, `http` or `https`, no credentials, query or fragment |
-| `send_path` | `/api/send` | the route that takes `{"user", "message"}`; must start with `/` |
+| `url` | required | the peer's chat server, or its console, `http` or `https`, no credentials, query or fragment |
+| `send_path` | `/api/send`, or `/peer/send` with a `token_file` | the route that takes the message; must start with `/` |
+| `token_file` | none | outbound: the secret this install shares with that peer, in a file under the root (mode 0600). Each message to its console's `POST /peer/send` is signed with it; the secret itself is never sent |
+| `sender` | none, required with `token_file` | outbound: the name that peer knows this install by (its own entry for us) |
+| `inbound_token_file` | none | inbound: the secret shared with that peer, in a file under the root (mode 0600). This console's `POST /peer/send` checks that peer's signatures with it |
+| `name` | the slug | how that peer's messages are shown here; never the operator's name or a local cousin's |
+| `reach` | none, required for inbound | the local cousins that peer may write to; anything else answers as if it did not exist |
+
+A peer reaches a cousin here through the console's `POST /peer/send`
+(`docs/reference/console-api.md`): behind the network guard, with no
+console login. Each message is signed (`Authorization: HMAC
+<sender>:<hex>`, over the sender, the target, the send time, the id and
+the message) with the secret the two installs share, so the secret never
+crosses the network: a captured request can be neither altered nor sent
+again after five minutes, and inside those five minutes its id is
+refused. A peer may send 30 messages a minute. The entry is the identity,
+one per install: every cousin there that sends to us is shown under the
+same `name`, and `to` in their messages is our cousin's slug. An inbound
+entry with no `reach`, an entry whose slug is a local cousin's, or a
+secret file others can read is refused: the caller gets a plain `503`,
+and the console's log says why (`chmod 600` it, add a `reach`). Keep a
+private cousin out of every `reach`, and set `peer_visible = false` for it
+too. Exchange a secret out of band, one per pair of installs, and rotate
+it by replacing its file on both.
 
 Every address the host resolves to must pass the network guard. A slug that
 is also a local cousin is ignored (the local one wins, with a warning). A

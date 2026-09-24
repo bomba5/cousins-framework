@@ -343,6 +343,23 @@ class _Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length) if length else b""
             console_hive.serve(self, method, parsed.path, parsed.query, body)
             return
+        # The external peers' door (cousin_lib/console/peer_routes.py):
+        # another install's cousin, with its per-peer bearer token and no
+        # session, behind the network guard; the body is bounded before
+        # it is read. A session is worth nothing there, a peer token
+        # nothing under /api/.
+        from cousin_lib.console import peer_routes
+        if peer_routes.is_peer_path(parsed.path):
+            if server.guard is not None and not server.guard(self.client_address[0]):
+                self.send_json(403, {"error": "address not allowed"})
+                return
+            if length < 0 or length > peer_routes.MAX_BODY_BYTES:
+                self.close_connection = True
+                self.send_json(413, {"error": "body too large"})
+                return
+            body = self.rfile.read(length) if length else b""
+            peer_routes.serve(self, method, parsed.path, body)
+            return
         length = max(0, length)
         body = self.rfile.read(length) if length else b""
         if server.guard is not None and not server.guard(

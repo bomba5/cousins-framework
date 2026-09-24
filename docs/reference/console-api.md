@@ -713,6 +713,18 @@ Revokes every live token the node has; from then on the queen answers it `401`. 
 
 Forget a revoked node: its node and token rows go, its memory and inbox rows stay. `200 {"ok": true, "slug", ...}`. `409` it still has a live token (revoke first), `404` unknown.
 
+## External peers
+
+### `POST /peer/send`
+
+Another install's cousin writes to one of these cousins. Outside `/api/`: no console session is read, and a session or a bearer token opens nothing here. The network guard applies. `Authorization: HMAC <sender>:<hex>`: `<sender>` names an entry of `config/external-peers.toml`, and `<hex>` is the HMAC-SHA256, keyed with that entry's `inbound_token_file`, of the lines `<sender>`, `<to>`, `<sent_at>` to three decimals, `<msg_id>` and the hex sha256 of the message (`chat.peer_signature`). The entry is the sender; the secret never travels.
+
+```json
+{"to": "wren", "message": "the greenhouse report is ready", "msg_id": "kestrel-7f3a2c1b", "sent_at": 1790000000.5}
+```
+
+`to` is one of the peer's `reach` and a local, peer-visible cousin. `msg_id` is 8-128 letters, digits, `-` or `_`; `sent_at` is finite epoch seconds within 300 s of this host's clock. The message, stripped of control characters, is stored in that cousin's chat under the peer's `name` and delivered to it. `200 {"ok": true, "to", "id"}`; `400` bad body, stale, future or non-finite `sent_at`, empty or overlong (16000) message; `401` no signature, a wrong one, or not a peer's; `403` a peer `name` the cousin would take for its operator or a local cousin; `404` outside the peer's `reach`, no such cousin, or one that is not peer-visible (one answer for all three); `409` that peer already delivered that `msg_id` (kept 15 minutes); `413` a body over 64 KiB; `429` past 30 messages a minute from one peer; `502` the delivery failed (the id is freed for a retry); `503 {"error": "external peers unavailable"}` when the entry or its secret file is unusable (the console's log says why); `504` the delivery timed out (the id is kept: it may have landed). The receiving cousin's chat hooks run in the console's process for this route.
+
 ## Routes the older console had
 
 If you're coming from the older console these routes are gone, and nothing in this one calls them: `/api/agents`, `/api/agents/<cousin>/<id>/log`, `/api/backlog`, `/api/backlog/<id>`, `/api/chat/presence`, `/api/chat/engagement`, `/api/chat/audio/...`, `/api/chat/image/...`, `/api/chat/video/...`, `/api/cousins/<slug>/budget`, `/api/peer-messages`, `/api/sidebar`, `/api/liveness`, `/api/network-devices`, `/api/logs`, `/api/admin/restart/cousin/<slug>` (use `POST /api/cousins/<slug>/restart`) and `POST /api/jobs` (jobs are created with `cousin-job`).

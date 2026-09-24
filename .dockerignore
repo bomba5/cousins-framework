@@ -1,0 +1,19 @@
+# The build context is an allowlist: everything is left out, then the code
+# and the files it finds beside the package are let back in. A checkout is
+# often also a live root (cousins/, config/ with keys, .secrets/, run/,
+# data/, shared/, secrets/ for the compose secret); a denylist leaks the
+# next secret-bearing path the framework learns to write, an allowlist
+# cannot. Left out with everything else: .git, tests, docs, examples (a
+# rendered home for tests/test_examples.py; nothing in cousin_lib reads it),
+# systemd (bare-host units), CI and compose files.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!cousin_lib
+!templates
+!hooks
+!config/*.example
+!docker/entrypoint.sh
+**/__pycache__
+**/*.pyc

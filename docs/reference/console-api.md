@@ -395,7 +395,7 @@ A server-sent event stream over the runner's primary stream: the newest `data/st
 
 ### `POST /api/cousins/<slug>/interrupt`
 
-No body. Puts an `interrupt` item in the cousin's inbox and waits up to 5 s for the runner to close it: `200 {"ok": true, "outcome": "delivered"}` when the live turn was interrupted, `{"ok": false, "outcome": "failed"}` when no turn was running, `{"ok": false, "outcome": "queued"}` when the runner did not answer in time. `409 {"ok": false, "error": "no runner is running"}` when no runner holds the cousin's lock (nothing is put).
+No body. Puts an `interrupt` item in the cousin's inbox and waits up to 5 s for the runner to close it: `200 {"ok": true, "outcome": "delivered"}` when the live turn was interrupted, `{"ok": false, "outcome": "failed"}` when no turn was running or the agent refused the interrupt (the reason is in the inbox row's detail), `{"ok": false, "outcome": "queued"}` when the runner did not answer in time. `409 {"ok": false, "error": "no runner is running"}` when no runner holds the cousin's lock (nothing is put).
 
 ### `POST /api/cousins/<slug>/say`
 

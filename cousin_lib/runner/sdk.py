@@ -142,6 +142,10 @@ def _tool_result_text(content):
 
 class SdkRunner:
     kind = "sdk"          # what runner/status.py reports (the `runner` event)
+    # The console's interrupt row (thread `system`) targets the primary
+    # session's live turn (phase 5 ruling P5-2). A session class that must
+    # never take it (phase 8's SideSession) sets this False.
+    takes_interrupts = True
     # After this many consecutive failed turns the loop waits before its
     # next claim: backoff_base_s, doubling, capped; a good turn resets it.
     backoff_after = 3
@@ -1008,7 +1012,8 @@ class SdkRunner:
         interrupt (the CLI raised) fails its own row and never the turn,
         as the in-process path records it and goes on; the turn is then
         not marked interrupted."""
-        if not self._live or self.machine.state not in LIVE_STATES:
+        if not self.takes_interrupts or not self._live \
+                or self.machine.state not in LIVE_STATES:
             return
         for row in self.inbox.open_rows(INTERRUPT):
             if row["state"] != "queued" or \

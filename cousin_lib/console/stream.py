@@ -3,24 +3,29 @@ docs/reference/console-api.md, "The runner stream"): its event stream
 live, an interrupt, and a "say" box that enqueues. Three routes, runner
 cousins only (a tmux cousin has the tmux pane, `/api/pane/*`: 409 here):
 
-- `GET /api/cousins/{slug}/stream[?after=N]`: SSE over the newest
-  `data/stream/<session>.jsonl`. Each event of the file is one frame,
-  `event: runner-event`, `id: <seq>`, data the event as written
-  (`{seq, ts, kind, payload}`); `after` (or `Last-Event-ID` on a
-  reconnect) skips what the client has. A new stream file (the runner
-  restarted) is announced with `event: session` and read from its first
-  event. `: ping` after 15 s of silence. The file is read from a byte
-  offset, never re-read whole.
+- `GET /api/cousins/{slug}/stream`: SSE over the runner's primary stream
+  (runner.status.primary_stream: the newest `data/stream/<session>.jsonl`
+  headed by a `runner` event). A fresh connect starts at the newest
+  TAIL_EVENTS events. Each event is one frame, `event: runner-event`,
+  `id: <session>:<seq>`, data the event as written (`{seq, ts, kind,
+  payload}`). A reconnect's `Last-Event-ID` (or `after`) resumes right after
+  that event; one whose session is no longer the primary gets `event:
+  session` first and the new stream from its newest TAIL_EVENTS. A runner
+  that restarts while connected is followed after its old file is drained.
+  `: ping` after 15 s of silence. Reads come from a byte offset, at most
+  runner.status.READ_BYTES at a time.
 - `POST /api/cousins/{slug}/interrupt`: an `interrupt` inbox row
-  (runner/base.INTERRUPT), waited on up to 5 s: `delivered` means the
-  live turn was interrupted, `failed` that no turn was running,
-  `queued` that the runner did not answer in time. 409 when no runner
-  holds the cousin's lock: an interrupt left for a later start would
-  interrupt nothing.
+  (runner/base.INTERRUPT), waited on up to 5 s: `delivered` means the live
+  turn was interrupted; `failed` that no turn was running, or that the
+  agent refused the interrupt (the error is in the row's detail); `queued`
+  that the runner did not answer in time. 409 when no runner holds the
+  cousin's lock: an interrupt left for a later start would interrupt
+  nothing.
 - `POST /api/cousins/{slug}/say {text}`: a chat item on the operator's
   thread (`operator:<name>`), not stored in chat.db: the pane's input, as
-  typing into a tmux pane is. Answers `queued` (the runner folds it into a
-  live turn, or takes it next).
+  typing into a tmux pane is. A login code is diverted first, as on every
+  operator send path (`diverted`, nothing delivered); anything else answers
+  `queued` (the runner folds it into a live turn, or takes it next).
 """
 from __future__ import annotations
 
@@ -42,7 +47,7 @@ def _runner_cousin(req, slug):
     return cousin
 
 
-TAIL_EVENTS = 200
+from cousin_lib.runner.status import TAIL_EVENTS  # noqa: E402 - one number, one place
 
 
 def _resume(req):

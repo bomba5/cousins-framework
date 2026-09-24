@@ -62,6 +62,39 @@ class TestContinuation(Case):
         self.assertTrue(_results(r)[-1]["interrupted"])
 
 
+class TestASessionThatTakesNoInterrupts(Case):
+    """Ruling P5-2 (phase 5 review round 2, N1): the console's interrupt
+    targets the primary session's live turn. A runner class that sets
+    `takes_interrupts = False` (phase 8's SideSession) leaves an interrupt
+    row alone during its live turn; at the turn boundary it is closed
+    NO_TURN, never taken as that session's interrupt."""
+
+    def test_a_live_turn_of_such_a_session_leaves_the_row_alone(self):
+        from cousin_lib.runner.base import NO_TURN
+
+        class NoInterrupts(SdkRunner):
+            takes_interrupts = False
+        made = {}
+
+        def factory(options):
+            made["client"] = ScriptedClient(options, [[init_msg(), assistant(text="working"),
+                                                       ("SLOW", 1.0), result()]])
+            return made["client"]
+        r = NoInterrupts(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(_op("slow"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        stop = r.enqueue(_interrupt())
+        time.sleep(0.6)                                 # several polls of the live turn
+        self.assertEqual(r.inbox.get(stop.inbox_id)["state"], "queued")
+        self.assertEqual(made["client"].interrupts, 0)
+        self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", timeout=5))
+        row = r.inbox.get(stop.inbox_id)
+        self.assertEqual((row["outcome"], row["detail"]), ("failed", NO_TURN))
+        self.assertFalse(_results(r)[-1].get("interrupted"))
+
+
 class _RefusingClient(ScriptedClient):
     async def interrupt(self):
         raise RuntimeError("the CLI refused the interrupt")

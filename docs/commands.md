@@ -473,7 +473,10 @@ cousin-mcp --last-connection      # why it failed, with the server's stderr
 ## Maintenance
 
 `cousin-backup` snapshots one cousin's databases (through `VACUUM INTO`),
-`memory/` and core markdown into `<dest>/<slug>/<date>/`.
+the runner's event stream (`data/stream/`) and state files (the resume
+sessions, generation count and mining cursors), `memory/` and core markdown into
+`<dest>/<slug>/<date>/`. The inbox is copied first, so a restore answers a
+mid-turn message at least once and never loses it.
 
 ```
 cousin-backup --home cousins/wren --dest /var/backups/cousins

@@ -118,10 +118,33 @@ cousin-backup --home cousins/wren --dest /srv/backups/cousins
 
 That writes `<dest>/wren/<YYYY-MM-DD>/`. Every SQLite database under the
 cousin's `data/` is copied with `VACUUM INTO` (a plain file copy of a
-database another process has open can come out torn), plus `memory/`,
-`MEMORY.md`, `STATUS.md` and `CLAUDE.md`. Search indexes are skipped; they're
-rebuilt on the next search. A second run on the same day overwrites that
-day's snapshot.
+database another process has open can come out torn), the runner's
+`inbox.db`, `sessions.db` and `usage.db` included, plus `memory/`,
+`MEMORY.md`, `STATUS.md` and `CLAUDE.md`. The runner's event stream,
+`data/stream/*.jsonl`, is copied too, each file cut in the copy to its last
+complete line (the runner may be mid-line when the snapshot runs), and so
+are the runner's small state files, as plain copies: the sessions it resumes
+(`data/runner-session*.json`), its generation count (`data/generation.txt`)
+and the cursors and window of its per-turn mining and proposals
+(`data/extract-cursor.json`, `data/propose-cursor.json`,
+`data/proposals.json`). Without them a restored cousin starts a fresh
+session, resets its generation and mines turns again. Search indexes are
+skipped; they're rebuilt on the next search. A second run on the same day
+overwrites that day's snapshot.
+
+The order is fixed: `inbox.db` first, then the other databases, then the
+streams, then the state files. A turn commits its reply to `chat.db`
+before it marks its row `done` in `inbox.db`, so with the inbox copied first
+a row that is `done` in the snapshot has its reply in the snapshot too. The
+other way round, a reply written while `chat.db` was being copied could be
+missing while its row reads `done`, and nothing would answer it again.
+
+A snapshot taken while the runner is mid-turn restores cleanly: the row it
+was answering is `claimed` in the copy, and the runner's start puts every
+claim back in the queue (it holds the home's lock, so no other runner owns
+one), then answers it. That is at-least-once, not once: if the turn had
+already replied when the snapshot ran, the restored runner answers that row
+a second time. No message is lost.
 
 What it doesn't copy: `cousin.toml`, `notes/`, the other files in `data/`
 (`decisions.jsonl`, `corrections.jsonl`, `handoff.md` and friends), and

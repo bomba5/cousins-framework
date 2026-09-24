@@ -78,6 +78,39 @@ class TestSearch(SearchCase):
         self.assertIn("fresh.md", hits[0]["path"])
 
 
+class TestBonusReach(SearchCase):
+    def test_a_bonus_beyond_top_never_displaces_a_path_ranked_within_top(self):
+        # Ruling P1131-1: the #83 fusion-depth fix widened each leg's
+        # candidate list past `top` so a path just past the old cut
+        # could be fused at all, but _bonuses must not widen with it -
+        # _fuse's contract is "nudged up, never carried past a better
+        # match". Reproduces the reviewer's case through search():
+        # keyword ranks 0..19 for widget*.md, a near-MAX_BONUS bonus
+        # recorded on the rank-10 file (kw10.md), which the pre-#83
+        # top=5 leg could never even fetch. kw10 must not displace
+        # kw4 (rank 4, inside top=5).
+        build_index()
+        for i in range(20):
+            (self.home / "memory" / ("kw%d.md" % i)).write_text(
+                "# KW %d\n\n%s\n" % (i, " ".join(["widget"] * (20 - i))))
+        from cousin_lib import reinforce
+        target = str(self.home / "memory" / "kw10.md")
+        (self.home / "memory" / ".recall-counts.json").write_text(json.dumps({
+            target: {"count": 10 ** 9, "last": reinforce._iso(time.time())}
+        }))
+        self.assertGreater(reinforce.bonus(self.home, target), 0.14,
+                           "fixture bonus must be near MAX_BONUS")
+        hits, _ = search("widget", top=5)
+        names = [pathlib.Path(h["path"]).name for h in hits]
+        self.assertEqual(len(names), 5)
+        self.assertNotIn("kw10.md", names,
+                         "a bonus on a path beyond top must not reach"
+                         " into the fused result (ruling P1131-1)")
+        self.assertIn("kw4.md", names,
+                      "the rank-4 path must not be displaced by a"
+                      " deeper path's bonus")
+
+
 class TestCliWiring(SearchCase):
     def _main(self, argv):
         import contextlib

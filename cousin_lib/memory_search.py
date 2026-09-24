@@ -978,8 +978,16 @@ def search(query, *, top=5, home=None, collection=None, root=None, record=True):
                           " text unranked by meaning" % failed)
     # An explicit collection filter is never overridden: the caller
     # asked for one collection and gets one.
+    # Bonuses are computed from each leg's first `top` entries only
+    # (the pre-#83 reach): the depth-widened lists feed _fuse's rank
+    # sums so a hit strong in both legs can still be found, but a
+    # bonus must never let a path _fuse could not have fetched at
+    # `top` before #83 (a low keyword-only or semantic-only rank)
+    # outrank a path that was already within `top` on its own merit -
+    # that would carry it past a better match, which _fuse's contract
+    # forbids (ruling P1131-1).
     hits = _fuse(keyword_hits, semantic_hits, top,
-                 _bonuses(home, keyword_hits, semantic_hits))
+                 _bonuses(home, keyword_hits[:top], semantic_hits[:top]))
     if collection is None:
         hits = _curated_floor(hits, top, query, home, root)
     if record:

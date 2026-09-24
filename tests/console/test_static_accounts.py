@@ -74,7 +74,7 @@ class AccountsJsx(unittest.TestCase):
         self.assertIn('const ACCOUNT_OP_PREFIX = "account:";', self.src)
 
     def test_no_em_dash_and_no_colour_literal(self):
-        self.assertNotIn("—", self.src)
+        self.assertNotIn("\u2014", self.src)
         self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,6}\b|rgb\(|oklch\(", self.src))
 
     def test_every_route_is_documented(self):

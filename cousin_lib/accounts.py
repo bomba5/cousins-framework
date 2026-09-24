@@ -12,17 +12,19 @@ import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from cousin_lib.trace import traced_cli
 
-KINDS = ("claude-login", "claude-token", "anthropic-key")
-RESERVED_KINDS = ("opencode",)
+KINDS = ("claude-login", "claude-token", "anthropic-key", "opencode")
+RESERVED_KINDS = ()
 HOST = "host"
 # Every variable that can pick the credentials or the provider the CLI
 # uses: the CLI's own list of auth variables, the base URL, the config dir
@@ -46,7 +48,16 @@ LOGIN_KEYS = ("claudeAiOauth",)
 _NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _ALLOWED = {"claude-login": {"kind", "config_dir"},
             "claude-token": {"kind", "secret_file"},
-            "anthropic-key": {"kind", "secret_file"}}
+            "anthropic-key": {"kind", "secret_file"},
+            "opencode": {"kind", "data_dir", "providers", "endpoint", "endpoint_model"}}
+# An opencode account (phase 9 R12): opencode's HOME and its four XDG
+# directories live in the account's data dir, so its auth.json (the
+# provider keys, 0600, written by opencode itself) never leaves it.
+_PROVIDER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_MODEL = re.compile(r"^\S{1,200}$")
+XDG_DIRS = (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
+            ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state"))
+AUTH_JSON = ("data", "opencode", "auth.json")
 EXPECTED_SOURCE = {"claude-login": "none", "claude-token": "none",
                    "anthropic-key": "ANTHROPIC_API_KEY"}
 # What `claude auth status --json` reads for each kind (R16: a fake key read
@@ -57,7 +68,7 @@ EXPECTED_SOURCE = {"claude-login": "none", "claude-token": "none",
 # must be free to diverge.
 _CLI_KEY_METHOD = "_".join(("api", "key"))
 WANTED_METHOD = {"claude-login": "claude.ai", "claude-token": "oauth_token",
-                 "anthropic-key": _CLI_KEY_METHOD}
+                 "anthropic-key": _CLI_KEY_METHOD, "opencode": "opencode"}
 
 
 class AccountsError(Exception):
@@ -77,6 +88,12 @@ class Account:
     secret_file: Path | None
     implicit: bool = False
     secret_value: str | None = field(default=None, repr=False)
+    # kind = "opencode" only (phase 9 R12): exactly one of providers or
+    # endpoint (with endpoint_model) is set.
+    data_dir: Path | None = None
+    providers: tuple = ()
+    endpoint: str | None = None
+    endpoint_model: str | None = None
 
 
 def root_of(home):
@@ -123,7 +140,7 @@ def load(root):
                                 % (where, _NAME.pattern, HOST))
         kind = table.get("kind")
         if kind in RESERVED_KINDS:
-            raise AccountsError("%s kind %r is reserved for phase 9 (opencode)" % (where, kind))
+            raise AccountsError("%s kind %r is reserved" % (where, kind))
         if kind not in KINDS:
             raise AccountsError("%s kind must be one of %s, got %r" % (where, ", ".join(KINDS), kind))
         unknown = set(table) - _ALLOWED[kind]
@@ -134,11 +151,90 @@ def load(root):
             cfg = _under(root, table.get("config_dir", "data/accounts/%s" % name),
                          "config_dir", where)
             out[name] = Account(name, kind, cfg, None)
+        elif kind == "opencode":
+            out[name] = _load_opencode(root, name, table, where)
         else:
             secret = _under(root, table.get("secret_file", "%s/%s" % (SECRETS_DIR, name)),
                             "secret_file", where)
             out[name] = Account(name, kind, None, secret)
     return out
+
+
+def _load_opencode(root, name, table, where):
+    """kind = "opencode": a data dir (default .secrets/accounts/<name>.opencode,
+    under the root) and exactly one of `providers` (the ids whose keys
+    opencode keeps in <data_dir>/data/opencode/auth.json) or `endpoint`
+    plus `endpoint_model` (a local OpenAI-compatible model)."""
+    data_dir = _under(root, table.get("data_dir", "%s/%s.opencode" % (SECRETS_DIR, name)),
+                      "data_dir", where)
+    if ("providers" in table) == ("endpoint" in table):
+        raise AccountsError("%s: kind opencode takes exactly one of providers (the providers"
+                            " whose keys opencode keeps in the data dir) or endpoint (a local"
+                            " OpenAI-compatible model)" % where)
+    if "providers" in table:
+        provs = table["providers"]
+        if not isinstance(provs, list) or not provs \
+                or not all(isinstance(p, str) and _PROVIDER.match(p) for p in provs):
+            raise AccountsError("%s providers must be a non-empty list of provider ids matching"
+                                " %s" % (where, _PROVIDER.pattern))
+        if len(set(provs)) != len(provs):
+            raise AccountsError("%s providers names a provider twice" % where)
+        if "opencode" in provs:
+            raise AccountsError("%s providers: 'opencode' is opencode's own hosted service,"
+                                " which the runner always disables; name the providers whose"
+                                " keys you hold" % where)
+        if "endpoint_model" in table:
+            raise AccountsError("%s endpoint_model goes with endpoint, not providers" % where)
+        return Account(name, "opencode", None, None, data_dir=data_dir, providers=tuple(provs))
+    endpoint, model = table["endpoint"], table.get("endpoint_model")
+    _check_endpoint(endpoint, where)
+    if not isinstance(model, str) or not _MODEL.match(model):
+        raise AccountsError("%s endpoint_model (the model id the endpoint serves) is required"
+                            " with endpoint: one word, no spaces" % where)
+    return Account(name, "opencode", None, None, data_dir=data_dir, endpoint=endpoint,
+                   endpoint_model=model)
+
+
+def _check_endpoint(endpoint, where):
+    """An http(s) base URL with a host and no credentials in it, that does
+    not name the subscription bridge (R13's account half). The message
+    never repeats the URL: it might hold a password."""
+    from cousin_lib.runner import opencode_guard
+    bad = AccountsError("%s endpoint must be an http(s) base URL with a host, for example"
+                        " http://127.0.0.1:11434/v1" % where)
+    if not isinstance(endpoint, str):
+        raise bad
+    try:
+        parts = urlsplit(endpoint)
+        parts.port                                  # a malformed port raises here
+    except ValueError:
+        raise bad
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise bad
+    if parts.username is not None or parts.password is not None:
+        raise AccountsError("%s endpoint must not carry credentials (user:password@); a local"
+                            " endpoint needs none" % where)
+    marker = opencode_guard.bridge_marker(endpoint)
+    if marker:
+        raise AccountsError("%s endpoint names the Claude-subscription bridge (marker %r)%s"
+                            % (where, marker.pattern, opencode_guard.move_hint(marker)))
+
+
+def check_lane(account, runner_kind):
+    """R12: an opencode runner runs on an opencode account only, and an
+    opencode account on an opencode runner only. The Claude kinds (a login,
+    a token, an Anthropic key, the host's login) never reach the opencode
+    lane; opencode's data dir never reaches the SDK."""
+    if runner_kind == "opencode":
+        if account.kind != "opencode":
+            raise AccountsError(
+                "runner = \"opencode\" runs on a kind = \"opencode\" account only (its"
+                " providers' keys or a local endpoint); account %s is %s: name an opencode"
+                " account in [agent] account" % (account.name, account.kind))
+    elif account.kind == "opencode":
+        raise AccountsError(
+            "account %s is kind opencode: it runs with runner = \"opencode\" only, not"
+            " runner = \"%s\"" % (account.name, runner_kind))
 
 
 def for_cousin(home, root):
@@ -212,18 +308,88 @@ def preflight(account, root):
     dir is AccountsError (exit 2). A missing secret is SecretMissing."""
     if account.kind == "claude-login":
         return
+    if account.kind == "opencode":
+        _opencode_dir(account)
+        _auth_entries(account)
+        return
     _login_free_dir(root, account)
     if account.secret_value is None:
         _read_secret(account)
 
 
 def account_env(account, root):
-    """The variables to SET for this account (after scrub)."""
+    """The variables to SET for this account (after scrub). opencode: HOME
+    and the four XDG directories inside its data dir and nothing else; its
+    keys stay in auth.json, never in the environment."""
+    if account.kind == "opencode":
+        d = _opencode_dir(account)
+        return {"HOME": str(d), **{var: str(d / sub) for var, sub in XDG_DIRS}}
     if account.kind == "claude-login":
         return {} if account.config_dir is None else {"CLAUDE_CONFIG_DIR": str(account.config_dir)}
     secret = account.secret_value or _read_secret(account)
     var = "CLAUDE_CODE_OAUTH_TOKEN" if account.kind == "claude-token" else "ANTHROPIC_API_KEY"
     return {var: secret, "CLAUDE_CONFIG_DIR": str(_login_free_dir(root, account))}
+
+
+def _private_dir(path, what):
+    """A directory of ours, created 0700, tightened to 0700, never a symlink."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise AccountsError("%s %s is a symlink; it must be a directory of this user"
+                            % (what, path))
+    if not stat.S_ISDIR(st.st_mode):
+        raise AccountsError("%s %s is not a directory" % (what, path))
+    if st.st_uid != os.getuid():
+        raise AccountsError("%s %s is not owned by this user" % (what, path))
+    os.chmod(path, 0o700)
+
+
+def _opencode_dir(account):
+    """The account's data dir and its four XDG subdirectories, each 0700."""
+    _private_dir(account.data_dir, "the opencode data dir")
+    for _, sub in XDG_DIRS:
+        _private_dir(account.data_dir / sub, "the opencode data dir's")
+    return account.data_dir
+
+
+def _auth_entries(account):
+    """{provider id: entry type} from the account's auth.json ({} when there
+    is none), read as strictly as a secret file: a regular file of ours, no
+    symlink, no group or other bits. The keys never leave this function.
+    An Anthropic OAuth login in it is a Claude subscription: refused."""
+    path = account.data_dir.joinpath(*AUTH_JSON)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return {}
+    except OSError as err:
+        raise AccountsError("cannot open %s: %s" % (path, err.strerror))
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise AccountsError("%s is not a regular file" % path)
+        if st.st_uid != os.getuid():
+            raise AccountsError("%s is not owned by this user" % path)
+        if st.st_mode & 0o077:
+            raise AccountsError("%s is readable by group or others (mode %o); chmod 600 it"
+                                % (path, st.st_mode & 0o777))
+        raw = fh.read(1 << 20)
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise AccountsError("%s is not JSON" % path)
+    if not isinstance(data, dict):
+        raise AccountsError("%s is not a JSON object" % path)
+    entries = {str(k): (v.get("type") if isinstance(v, dict) else None) for k, v in data.items()}
+    if entries.get("anthropic") == "oauth":
+        raise AccountsError("%s holds an Anthropic OAuth login, a Claude subscription; the"
+                            " opencode lane never carries subscription traffic: remove it and"
+                            " use an API key" % path)
+    return entries
 
 
 def scrub(env):
@@ -258,7 +424,10 @@ def _cli():
 
 
 def status(account, root, *, run=subprocess.run):
-    """`claude auth status --json` under the account: presence, no model call."""
+    """`claude auth status --json` under the account: presence, no model call.
+    opencode: presence only, no process (_opencode_status)."""
+    if account.kind == "opencode":
+        return _opencode_status(account)
     try:
         env = {**scrub(os.environ), **account_env(account, root)}
         proc = run([_cli(), "auth", "status", "--json"], capture_output=True, text=True,
@@ -270,6 +439,21 @@ def status(account, root, *, run=subprocess.run):
         return {"error": "%s: %s" % (type(err).__name__, err)}
 
 
+def _opencode_status(account):
+    """An endpoint account is logged in by its configuration; a providers
+    account when auth.json holds every provider it names. Nothing is run,
+    nothing is created, no key is returned."""
+    if account.endpoint:
+        return {"loggedIn": True, "authMethod": "opencode", "endpoint": account.endpoint}
+    try:
+        entries = _auth_entries(account)
+    except AccountsError as err:
+        return {"error": str(err)}
+    missing = [p for p in account.providers if p not in entries]
+    return {"loggedIn": not missing, "authMethod": "opencode",
+            "providers": [p for p in account.providers if p in entries], "missing": missing}
+
+
 def _missing_hint(account):
     """How a missing secret gets written, per kind (login_action's wording)."""
     if account.kind == "claude-token":
@@ -278,9 +462,20 @@ def _missing_hint(account):
     return "write the key to it: mode 0600, directory 0700"
 
 
-def login_action(account, via=None):
-    """What the operator runs to fix this account's login."""
+def login_action(account, via=None, provider=None):
+    """What the operator runs to fix this account's login. opencode: the
+    provider to log in (the first named when none is given), or the
+    endpoint to check. `cousin-account login <name> --provider <id>` is
+    phase 9 Task 8's (`opencode auth login` through the pty driver); until
+    it lands the key is written by opencode itself under the account's
+    HOME and XDG directories."""
     tail = " --via %s" % via if via else ""
+    if account.kind == "opencode":
+        if account.endpoint:
+            return ("check the endpoint %s (a local OpenAI-compatible model: nothing to log"
+                    " in)" % account.endpoint)
+        return "`cousin-account login %s --provider %s%s`" % (
+            account.name, provider or account.providers[0], tail)
     if account.kind == "claude-login":
         return ("`claude auth login` as the host user" if account.config_dir is None
                 else "`cousin-account login %s%s`" % (account.name, tail))
@@ -305,7 +500,9 @@ def _check_account(account, root, *, run=subprocess.run, via=None):
         account.name, account.kind, bool(st.get("loggedIn")), st.get("authMethod") or "-")
     ok = bool(st.get("loggedIn")) and st.get("authMethod") == WANTED_METHOD[account.kind]
     if not ok:
-        line += " -> %s" % (st.get("error") or "run " + login_action(account, via))
+        missing = st.get("missing") or [None]
+        line += " -> %s" % (st.get("error")
+                            or "run " + login_action(account, via, provider=missing[0]))
     return (0 if ok else 4), line
 
 
@@ -864,7 +1061,8 @@ def account_main(argv=None):
     if args.cmd == "list":
         print("%-12s %-14s %s" % (HOST, "claude-login", "~/.claude (the host's default login)"))
         for name, a in sorted(known.items()):
-            where = a.config_dir if a.kind == "claude-login" else a.secret_file
+            where = {"claude-login": a.config_dir, "opencode": a.data_dir}.get(
+                a.kind, a.secret_file)
             print("%-12s %-14s %s" % (name, a.kind, where))
         return 0
     account = (Account(HOST, "claude-login", None, None, implicit=True) if args.name == HOST

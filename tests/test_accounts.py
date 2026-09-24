@@ -62,7 +62,7 @@ class TestLoad(AccountsCase):
     def test_fail_closed(self):
         bad = {
             '[accounts.x]\nkind = "gcp"\n': "kind",
-            '[accounts.x]\nkind = "opencode"\n': "phase 9",
+            '[accounts.x]\nkind = "opencode"\n': "providers",
             '[accounts.x]\nkind = "claude-login"\ncolour = "red"\n': "colour",
             '[accounts.X]\nkind = "claude-login"\n': "name",
             '[accounts.x]\nkind = "claude-token"\nsecret_file = ""\n': "relative",

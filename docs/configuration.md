@@ -85,7 +85,7 @@ files. There's no built-in vendor default.
 ## accounts.toml
 
 `config/accounts.toml` names the accounts a runner cousin (`[agent] runner =
-"sdk"`) can run on. A cousin picks one with `[agent] account` in its
+"sdk"`, or `"opencode"` for an `opencode` account) can run on. A cousin picks one with `[agent] account` in its
 `cousin.toml`. A cousin that names none runs on `host`, the host's default
 login in `~/.claude`, shared by every such cousin, exactly as before this file
 existed. A cousin never obtains credentials itself: it runs on what it is
@@ -109,6 +109,16 @@ kind = "claude-token"            # a long-lived token from `claude setup-token`
 [accounts.metered]
 kind = "anthropic-key"           # an API key: metered billing, no login
 # secret_file = ".secrets/accounts/metered"   (the default: git-ignored)
+
+[accounts.keyed]
+kind = "opencode"                # opencode on the providers whose keys you hold
+providers = ["openai"]           # keys in <data_dir>/data/opencode/auth.json
+# data_dir = ".secrets/accounts/keyed.opencode"   (the default: git-ignored)
+
+[accounts.local]
+kind = "opencode"                # opencode on a local OpenAI-compatible model
+endpoint = "http://127.0.0.1:11434/v1"
+endpoint_model = "qwen3-coder"
 ```
 
 | kind | credentials live in | keys |
@@ -116,16 +126,28 @@ kind = "anthropic-key"           # an API key: metered billing, no login
 | `claude-login` | its own `.credentials.json` in `config_dir` (default `data/accounts/<name>`), refreshed by the CLI | `config_dir` |
 | `claude-token` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
 | `anthropic-key` | one line in `secret_file` (default `.secrets/accounts/<name>`) | `secret_file` |
+| `opencode` | opencode's own `auth.json` in `data_dir` (default `.secrets/accounts/<name>.opencode`), or none for a local endpoint | `data_dir`, and `providers` or `endpoint` plus `endpoint_model` |
 
 The rules, all checked when the file is read, and a broken entry is an error
 that names the key, never a secret:
 
 - A name matches `^[a-z0-9][a-z0-9_-]{0,31}$` and is not `host`.
-- `kind` is one of the three above. `opencode` is reserved and refused.
+- `kind` is one of the four above.
 - `claude-login` takes `config_dir` and nothing else; the two secret kinds
-  take `secret_file` and nothing else. An unknown key is refused.
-- Both paths are relative to the framework root. An absolute path, or one
+  take `secret_file` and nothing else; `opencode` takes `data_dir`,
+  `providers`, `endpoint` and `endpoint_model` and nothing else. An unknown
+  key is refused.
+- Every path is relative to the framework root. An absolute path, or one
   that leaves the root, is refused.
+- An `opencode` account takes exactly one of `providers` or `endpoint`.
+  `providers` is a non-empty list of distinct opencode provider ids (`openai`,
+  `mistral`, ...), never `opencode` itself (opencode's own hosted service,
+  which the runner always disables). `endpoint` is an http(s) base URL with a
+  host and no `user:password@`, and needs `endpoint_model`, the model id the
+  endpoint serves; `endpoint_model` without `endpoint` is refused.
+- An `endpoint` that names the Claude-subscription bridge (its package or
+  proxy names, or port 3456, the bridge proxy's port) is refused: move a
+  legitimate local proxy on 3456 to another port.
 
 The secret files default to `.secrets/accounts/<name>` because the checkout's
 `.gitignore` covers `.secrets/`: a secret is never visible to git and never
@@ -154,6 +176,7 @@ and `CLAUDE_CODE_USE_FOUNDRY`.
 | `claude-login` (`host`) | nothing | the host's `~/.claude` |
 | `claude-token` | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the token and a config dir that holds no login (so a login cannot win over the token) |
 | `anthropic-key` | `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the key and the same no-login dir (a CLI that finds a login and a key may bill the login) |
+| `opencode` | `HOME=<data_dir>`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` = `<data_dir>/config`, `/data`, `/cache`, `/state` | everything opencode writes (its config, its session database, its `auth.json`) stays in the account's data dir; no key is ever put in the environment |
 
 A no-login directory that holds a login (a `.credentials.json` carrying one)
 refuses the start: remove the file.
@@ -165,6 +188,24 @@ permission mode to `default` and requires the sandbox for every Bash call, so
 a runner cousin could run no tool at all (1.18.2). Treat a key or token account
 the way you treat the host login a cousin can already read: give it only to a
 cousin you trust with it.
+
+The `opencode` kind. The data dir and its four subdirectories are created
+0700 when the account is first used (a looser mode is tightened; a symlink,
+or a directory that is not yours, refuses the start). opencode keeps the
+providers' keys in `<data_dir>/data/opencode/auth.json` (mode 0600), which
+it writes itself (`opencode auth login` run with the account's `HOME` and XDG
+variables above puts a key there). That `auth.json` is held to the secret file rules: open to group or
+others, a symlink or not yours refuses the start (exit 2, the message names
+the file and the `chmod`); a missing one is a login to do. An Anthropic
+OAuth login in it (a Claude subscription) refuses the start: an `anthropic`
+provider on this lane takes an API key. `cousin-account status <name>`
+reads presence only, with no process run: a `providers` account is logged
+in when `auth.json` holds every provider it names, an `endpoint` account
+by its configuration. The lanes do not mix: an opencode cousin (`[agent]
+runner = "opencode"`) runs on an `opencode` account only, never on `host`,
+a `claude-login`, `claude-token` or `anthropic-key` account or an `[agent]
+api_key_file`, and an `sdk` or `fake` cousin never runs on an `opencode`
+account. Either mismatch refuses the start (exit 2).
 
 Resume per kind: a `claude-login` account refreshes its own token, so a
 restarted runner resumes its session through the CLI's own `--resume`; a

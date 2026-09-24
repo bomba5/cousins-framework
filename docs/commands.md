@@ -50,7 +50,9 @@ from `config/accounts.toml` (see [configuration](configuration.md)). `list`
 prints every account's name, kind and where its credentials live, never a
 secret; `status <name>` asks the agent CLI whether that account is logged in,
 with no model call, and exits 0 when it is, 4 when it is not (the line names
-what to run). `host` is the host's default login. `--root R` picks the
+what to run). For an `opencode` account it runs nothing: it reads whether
+the account's `auth.json` holds every provider it names (an `endpoint`
+account is logged in by its configuration). `host` is the host's default login. `--root R` picks the
 install; without it the root comes from `FRAMEWORK_ROOT`, then the checkout
 you are in.
 

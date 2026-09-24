@@ -553,6 +553,12 @@ def _cmd_start(args):
     cfg = CousinConfig.from_env()
     slug = cfg.slug
     cmd = list(args.cmdline or [])
+    if cmd and cmd[0].startswith("-"):
+        # A program is never named like an option; refusing it keeps a
+        # command line from ever standing in for cousin-job's own flags.
+        print("cousin-job: the command's program %r must not start with '-'"
+              % cmd[0], file=sys.stderr)
+        return 2
     if getattr(args, "home_log", None):
         # The job tool's log: confined to the home before any row exists.
         from cousin_lib.home_files import PathRefused
@@ -721,10 +727,39 @@ def _cmd_tail(args):
         time.sleep(1)
 
 
+def _title_after_separator(argv):
+    """True for the `start KIND [options] -- TITLE [CMD...]` shape, the one
+    the job tool uses: every option comes before the first `--`, and the
+    title after it. Decided by parsing only what precedes that `--`, with
+    the same options (so a prefix such as --js counts the same way): no
+    title there means the title came after it."""
+    argv = list(argv)
+    if "--" not in argv:
+        return False
+    head = argv[1:argv.index("--")]
+    p = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    p.add_argument("kind", nargs="?")
+    p.add_argument("title", nargs="?")
+    p.add_argument("--desc")
+    p.add_argument("--log")
+    p.add_argument("--home-log")
+    p.add_argument("--json", action="store_true")
+    try:
+        known, _rest = p.parse_known_args(head)
+    except (argparse.ArgumentError, SystemExit):
+        return False
+    return known.kind is not None and known.title is None
+
+
 def _reparse_start_remainder(args):
-    """argparse.REMAINDER hoovers cousin-job's own options into the
-    to-be-forked command when they follow the title without a `--`;
-    re-parse them back onto args so register-only mode keeps working."""
+    """The legacy, title-first shape (`start KIND TITLE [options] [--]
+    [CMD...]`), which operators type: argparse.REMAINDER hoovers
+    cousin-job's own options into the to-be-forked command when they
+    follow the title; re-parse them back onto args so register-only mode
+    and `TITLE --log L -- CMD` keep working. Never used for the separated
+    shape (_title_after_separator), where nothing after `--` is an option:
+    that is the shape a model's arguments reach, so a command line from a
+    model never sets cousin-job's --log."""
     cl = list(args.cmdline or [])
     if cl and cl[0].startswith("--") and cl[0] != "--":
         opts = argparse.ArgumentParser(add_help=False)
@@ -781,8 +816,9 @@ def jobs_main(argv=None):
     p.add_argument("id", type=int)
     p.add_argument("--lines", type=int, default=40)
     p.add_argument("--follow", "-f", action="store_true")
-    args = parser.parse_args(argv)
-    if args.cmd == "start":
+    raw = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw)
+    if args.cmd == "start" and not _title_after_separator(raw):
         _reparse_start_remainder(args)
     handlers = {
         "start": _cmd_start,

@@ -41,9 +41,14 @@ without a command still gets a log in the same place: its title and
 `--log` at a file the command itself reads, or it will read its own
 output forever. `--home-log REL` is `--log` confined to the cousin's
 home: it's refused, with no row made, when it's absolute, starts with
-`~`, climbs out with `..` or lands in `.secrets`. The options go before
-`--`, so `cousin-job start shell --json -- "--weird title" CMD...`
-keeps any title a title.
+`~`, climbs out with `..` or lands in `.secrets`. The options can also go before
+`--`, with the title after it: `cousin-job start shell --json --
+"--weird title" CMD...`. In that shape nothing after `--` is ever read
+as an option, so any title stays a title and the command can't set
+`--log`; it's the shape the `job` tool uses. The title-first shape
+(`start shell TITLE --log L -- CMD`) still takes its options after the
+title, as before. Either way, a command whose program starts with `-`
+is refused.
 
 A cousin does the same through its `job` tool without a shell: `run`
 with `title` and `argv` (the command as an array, never a shell string),

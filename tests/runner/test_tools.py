@@ -465,6 +465,10 @@ class TestJobRun(HermeticCase):
                      {"title": "t", "argv": ["echo", 3]},
                      {"title": "t", "argv": ["", "x"]},
                      {"title": "t", "argv": ["--desc", "x"]},
+                     {"title": "t", "argv": ["--log=/tmp/escape.log", "x"]},
+                     {"title": "t", "argv": ["--lo=/tmp/escape.log", "x"]},
+                     {"title": "t", "argv": ["--desc=x", "x"]},
+                     {"title": "t", "argv": ["--json", "x"]},
                      {"argv": ["echo", "hi"]}):
             text, err = tools.call(ctx, "job", dict({"command": "run"}, **args))
             self.assertTrue(err, args)

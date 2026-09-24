@@ -1214,6 +1214,33 @@ class ParityCase(unittest.TestCase):
         self.assertEqual(self._job_rows(), [])
         self.assertFalse(outside.exists())
 
+    def test_job_run_never_reads_the_command_as_cousin_job_options(self):
+        escape = self.root / "escape.log"
+        for first in ("--log=%s" % escape, "--lo=%s" % escape, "--desc=x",
+                      "--json"):
+            text, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "run", "title": "t",
+                                  "argv": [first, "x"]}, self.env)
+            self.assertTrue(is_error, first)
+        self.assertEqual(self._job_rows(), [])
+        self.assertFalse(escape.exists())
+
+    def test_job_start_takes_any_title_literally(self):
+        escape = self.root / "escape.log"
+        for title in ("--log=%s" % escape, "--lo=%s" % escape, "--", "-x"):
+            text, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "start", "kind": "other",
+                                  "title": title, "json": True}, self.env)
+            self.assertFalse(is_error, text)
+            job_id = json.loads(text)["job_id"]
+            shown, _ = mcp_server.call_tool(
+                self.reg, "job", {"command": "show", "id": job_id,
+                                  "json": True}, self.env)
+            job = json.loads(shown)
+            self.assertEqual(job["title"], title)
+            self.assertNotEqual(job["log_path"], str(escape))
+        self.assertFalse(escape.exists())
+
     def test_job_run_writes_a_relative_log_under_the_home(self):
         text, is_error = mcp_server.call_tool(
             self.reg, "job", {"command": "run", "title": "t",

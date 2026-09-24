@@ -117,7 +117,8 @@ argv = { type = "array", items = "string", description = "the command as a list,
 log = { type = "string", optional = true, description = "log file, relative to your home (not absolute, no .., not in .secrets); default: the job's own log under data/job-logs (run)" }
 
 [tools.job.commands.start]
-argv = ["start", "{kind}", "{title}"]
+# The title after `--`: whatever it says, it is never read as an option.
+argv = ["start", "{kind}", "--", "{title}"]
 options = { desc = "--desc", json = "--json" }
 
 [tools.job.commands.run]

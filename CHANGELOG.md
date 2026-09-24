@@ -24,6 +24,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `items` type, not empty unless optional), and a command's options go
   before a literal `--` in its argv.
 
+- `cousin-job start KIND [options] -- TITLE [CMD...]`: with the title after
+  `--`, nothing after it is re-read as cousin-job's own options (the job
+  tool's `start` and `run` both use this shape, so a model's title or
+  command can never set `--log`). The title-first shape keeps its options
+  as before. A command whose program starts with `-` is refused, exit 2,
+  no row.
 - `cousin-job start --home-log REL`: a log path confined to the cousin's
   home with the console's own rule (home_files.resolve_in): absolute, `~`,
   `..` and `.secrets` are refused, exit 2, no row.

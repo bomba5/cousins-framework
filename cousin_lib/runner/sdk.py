@@ -1291,17 +1291,19 @@ class SdkRunner:
         from `_turn` once per result, right after `_close`: the usage
         record, then extraction of the session's new transcript entries
         (the SDK flushed the store before it yielded the result, so the
-        whole turn is there). Each step runs off the loop (blocking sqlite
-        and file work) and never raises into it: a failure is a `usage`
-        or `extract` event, never a broken turn, and a failed usage record
-        does not stop the extraction. Last, the context pressure check
-        (rollover.pressure_due, held back by the hysteresis): a rollover
-        is requested, never run here; the loop claims it at the boundary.
-        First of all, the session id this result (or its init) named goes
-        to runner-session.json, off the loop."""
+        whole turn is there), then the memory proposal (`_propose`). Each
+        step runs off the loop (blocking sqlite and file work) and never
+        raises into it: a failure is a `usage`, `extract` or `propose`
+        event, never a broken turn, and a failed step does not stop the
+        next one. Last, the context pressure check (rollover.pressure_due,
+        held back by the hysteresis): a rollover is requested, never run
+        here; the loop claims it at the boundary. First of all, the
+        session id this result (or its init) named goes to
+        runner-session.json, off the loop."""
         await self._flush_session()
         await self._record_usage(msg)
         await self._mine(self._resume_id)
+        await self._propose(self._resume_id)
         try:
             usage_now = await self._context_usage()
             armed = self.hysteresis.allow(usage_now, self.rollover_at_percent)
@@ -1342,6 +1344,27 @@ class SdkRunner:
         except Exception as exc:  # noqa: BLE001 - extraction must never fail a turn
             payload.update(written=-1, error="%s: %s" % (type(exc).__name__, exc))
         self.stream.append("extract", payload)
+
+    async def _propose(self, sid):
+        """Ask the model whether to keep what the turn concluded
+        (extract.propose_turn), as a `propose` row the loop runs when
+        nothing else waits; the outcome is a `propose` event (`proposal`:
+        the row's inbox id, or None), never a raise."""
+        store = getattr(self, "session_store", None)
+        if not sid or store is None:
+            return
+        payload = {"session_id": sid, "turn": self._turn_seq}
+        try:
+            body = await asyncio.to_thread(extract.propose_turn, self.home, sid, store=store,
+                                           turn_bodies=self.turn.bodies)
+            payload["proposal"] = None
+            if body:
+                payload["proposal"] = self.enqueue(Item(
+                    thread_id="system", source=extract.PROPOSAL_SOURCE, body=body,
+                    sender="framework")).inbox_id
+        except Exception as exc:  # noqa: BLE001 - a proposal must never fail a turn
+            payload.update(proposal=None, error="%s: %s" % (type(exc).__name__, exc))
+        self.stream.append("propose", payload)
 
     async def _context_usage(self):
         """The client's context usage, or None when it cannot say."""

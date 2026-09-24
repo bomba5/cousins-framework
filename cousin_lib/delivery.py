@@ -22,7 +22,7 @@ THREAD_KINDS = ("operator", "person", "peer", "meeting", "loop",
                 "schedule", "system")
 _BARE_KINDS = ("schedule", "system")
 SOURCES = ("chat", "reaction", "hook", "loop", "schedule", "meeting",
-           "flip", "boot")
+           "flip", "boot", "propose")
 DELIVERED, QUEUED, FAILED = "delivered", "queued", "failed"
 
 

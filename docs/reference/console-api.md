@@ -223,6 +223,46 @@ Body `{"etag", "servers": [...], "drop"?: ["<kept name>"], "replace_broken"?: tr
 
 Body `{"etag", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "confirm_loosening"?, "replace_broken"?}`. The lists are non-empty one-line strings (a repeat is dropped). Each pattern is compiled (`400 {"problems": [{"key", "index", "entry", "reason"}]}`); the whole text must pass `Policy.parse`; the handoff rule above. A change that removes a `deny_tools`, `deny_bash_patterns` or `ask` entry, or turns `outbound_filter` off, answers `409 {"needs_confirm": true, "removed": {...}}` until it is sent again with `confirm_loosening: true`. Only the keys that change are rewritten; an absent file is created with a short header. A file the runner cannot read (not UTF-8, not TOML, or not a policy) needs `replace_broken` (`409` otherwise); what it lists as TOML still counts for the loosening check. On opencode the plugin runs the patterns as JavaScript RegExp: the browser warns about a pattern JavaScript cannot compile.
 
+## Kind switch and migration
+
+`cousin-migrate` from the console (`cousin_lib/console/routes_migrate.py`), through the migrate library only: the tmux-lane migration to the sdk runner (plan, apply, check, rollback; the runbook is [migrating](../migrating.md)) and the phase 11 kind switch between the `sdk` and `tmux` runner kinds (`--to`). apply and rollback change a live cousin: each is the cousin's long operation (`GET /api/cousins/<slug>/op`), its steps reported as stages as the library writes them to `data/migration.json` or `data/kind-switch.json`, and they run one at a time across the whole fleet: another cousin's migration, switch or rollback makes them `409 {"busy": true}`, as does a flip, a clean stop or another op on the cousin. A plan or a check with `validate` spends one model turn, so it is an op too (kinds `migrate-plan`, `migrate-check`); without it, it answers at once. Who started an op is its `params.by`. Not built, because phase 11 defers them: adopt and `--all --keep-going`; the state says so in `deferred`.
+
+### `GET /api/cousins/<slug>/migrate`
+
+`{"ok", "slug", "lane" ("tmux-legacy" or the [agent] runner kind), "kinds" (the switch's kinds), "steps", "switch_steps", "migration", "switch", "loginScreen", "supervisor", "running", "deferred"}`. `migration` and `switch` are the records (`state`, `steps`, `rollback_steps`, `warnings`, the times, `from`/`to` for a switch, ...), never the saved cousin.toml bytes or mode; null when there is none. `loginScreen` is `{"screen", "kind", "reason"}` from `data/login-required.json` (a tmux-kind runner writes the screen its pane waits on: `trust`, `login`, `onboarding`, `bypass`, `mcp_approval`), never its detail; null when there is none. `supervisor` says a cousin-supervisor answers for the root. `running` is `{"slug", "kind"}` of the migration, switch or rollback running on the fleet, or null. `deferred` is `[{"id", "label", "why"}]`.
+
+### `POST /api/cousins/<slug>/migrate/plan`
+
+Body `{"account"?, "validate"?}` for the tmux-lane migration, `{"to": "sdk" | "tmux"}` for the kind switch (an account or validate with `to` is `400`). Writes nothing. `200 {"ok": true, "plan"}`: the library's plan, `{"slug", "checks": [{"check", "ok", "detail"}], "steps", "ready", ...}` (the migration adds `account`, `carry`, `cli`, `notes`; the switch `from`, `to`, `warnings`). With `validate: true` it is an op (`202 {"ok": true, "op"}`, kind `migrate-plan`) whose result is `{"plan"}`: one smallest model turn on the model, effort and account the runner will run. `400` a bad `to`, account name or flag.
+
+### `POST /api/cousins/<slug>/migrate/apply`
+
+Body as for the plan, plus `"confirm": true` (`400` without). `202 {"ok": true, "op"}`, kind `migrate` or `kind-switch`, `params.steps` the stages it plans: `plan, close, handover, import, toml, start, verify` for the migration (`plan` runs the checks again, with the model turn when `validate`: a carried model is never written unvalidated), `trust` (tmux only), `close, toml, cursor, start, notice, verify` for the switch. A plan that is not ready fails the op with the reasons and changes nothing; a failed step fails it with the step and its detail, to be rolled back. While the switch's verify runs, the pane is watched: when it waits on a person, the verify stage says so, `waiting for the operator to accept the trust dialog in the pane (screen: trust)` for the trust dialog, and the browser offers the pane (below) to answer it in. `409` when no cousin-supervisor runs for the root, or busy (above).
+
+### `POST /api/cousins/<slug>/migrate/check`
+
+Body `{"since"?: "<ISO time>", "validate"?: bool}`. The exit criterion, `200 {"ok": true, "check"}`: `inbox` (done, failed, open, stale), `inbox_readable`, `tool_calls`, `unrecorded`, `hook_errors`, `config`, `mismatches`, `warnings`, `cli`, `chat_ok`/`chat`, `ok`. With `validate` it is an op (kind `migrate-check`) whose result is `{"check"}`, with `validate_ok` and `validate`. `400` a `since` that is not an ISO time.
+
+### `POST /api/cousins/<slug>/migrate/rollback`
+
+Body `{"which": "migration" | "switch", "confirm": true, ...}`. `"switch"` takes `to`, the kind the switch came from (the library refuses another: the op fails saying which), and no force. `"migration"` takes `force` (inbox rows still waiting, or an inbox that cannot be read), which asks a second time: `"force_confirm": true` too, else `400`. `202 {"ok": true, "op"}`, kind `migrate-rollback` or `kind-switch-rollback`, its stages the library's rollback steps. A refusal from the library (already rolled back, rows waiting, a runner that will not let go) fails the op with its words.
+
+## Lifecycle
+
+`cousin-reincarnate` and `cousin-transplant` from the console (`cousin_lib/console/routes_lifecycle.py`), through `cousin_lib.lifecycle`, each a long operation. The library keeps its own audit (`data/lifecycle/audit.jsonl`) and snapshots (`data/lifecycle/<slug>/<ts>/`); a refusal changes nothing.
+
+### `GET /api/lifecycle/modes`
+
+`{"ok", "modes": [{"id", "confirm": "second" | "typed", "what"}], "timeout", "timeout_range", "role_max"}`: the transplant modes (soul-donation, body-swap, merge) and what each does, and reincarnate's bequest wait and role limits.
+
+### `POST /api/cousins/<slug>/reincarnate`
+
+Body `{"new_role", "confirm": true, "timeout"?}`: one line of at most 200 characters, the bequest wait in whole seconds (10 to 600, default 300). `202 {"ok": true, "op"}`, kind `reincarnate`, stages `snapshot`, `bequest` (the tmux lane asks the cousin for `data/handoff.md` and waits; a runner cousin's bequest rides the flip's own handoff request), `rewrite` (the role in CLAUDE.md and cousin.toml), `flip`. The op fails when the flip does. `400` a bad role or timeout, or no confirm; `409` busy.
+
+### `POST /api/lifecycle/transplant`
+
+Body `{"donor", "recipient", "mode", "confirm"}`. `confirm` is `true`, or for `body-swap` (it trades the two identities) the typed phrase `"swap <donor> <recipient>"`. It runs as the recipient's op (kind `transplant`, `params.donor`) while the donor is held (`longop.exclusive`), so nothing else starts on either until it ends: stages `snapshot`, `apply`, `flip <donor>`, `flip <recipient>`. `400` an unknown mode, the same cousin twice, or no (or a wrong) confirm; `404` an unknown cousin; `409` a flip, a clean stop or an op on either.
+
 ## Meetings
 
 A chat shared by the signed-in user and several running cousins, in rounds ([meetings](../meetings.md)). The store is `data/meetings.db`; cousins speak through `cousin-meeting`, so changes also arrive from outside the console and the event stream reports them as `meeting-change` (`{"id", "op"}`). A refusal (not your floor, a stopped or remote participant, a closed meeting) is `400` with the reason in `error`; an unknown id is `404`. The user's entries carry the signed-in user name.
@@ -502,6 +542,8 @@ One generated file from `<home>/chat/<folder>/`, folder `images`, `audio` or `vi
 ## The pane (the tmux terminal)
 
 All four resolve the cousin's tmux session (`[chat] tmux_session`, default the slug) through the console's `--tmux-bin` and `--tmux-socket`. For a cousin with `[chat] host` they run tmux over `ssh <host>` with the remote user's default socket. `404` unknown cousin, `400` no tmux session configured, `409 session not running`.
+
+A tmux-kind runner cousin (`[agent] runner = "tmux"`) is addressed where its runner keeps its pane instead: the framework's own socket (`<root>/run/tmux.sock`) and the session `tmux-<slug>`, matched exactly. Its runner types into that pane itself, from its own process, so `input` there is `409` unless the pane shows a screen that waits on a person (the trust dialog, the login menu, onboarding, the bypass or MCP dialog), where the runner never types; a person answers such a screen here (the kind switch's trust step is the case this is for), and writes to the cousin through the chat otherwise. `resize` is `409`: the runner reads its screen at a fixed size.
 
 ### `GET /api/pane`
 

@@ -277,6 +277,59 @@ the console.)
 Replacing a registry with the default, or a broken `.mcp.json` or
 `policy.toml`, asks you to type "replace".
 
+### Kind and migration
+
+The inspector's "kind and migration" panel shows the cousin's lane and its
+migration and kind switch records, and opens the switch dialog: "migrate to
+the runner" on a tmux-lane cousin (`cousin-migrate`), "switch kind" on a
+runner cousin (`cousin-migrate --to sdk|tmux`). The agent panel's switch
+button opens the same dialog. The routes are in
+[the API reference](reference/console-api.md#kind-switch-and-migration).
+
+- **plan**: a checklist of every check with its detail, the steps, and
+  ready or not. It writes nothing. For the migration you pick the account
+  and whether to validate; validate spends one model turn (the smallest
+  one, on the model, effort and account the runner will run), and a
+  carried model is never written without it. The kind switch keeps the
+  cousin's account and its session: the source stops at idle and the
+  target resumes it.
+- **apply**: only after a ready plan for the same options, with the
+  supervisor up, and a second click. It runs in the background with its
+  steps as they happen (close, handover, import, toml, start, verify for
+  the migration; trust, close, toml, cursor, start, notice, verify for the
+  switch), one migration or switch at a time across the fleet. When the
+  switch's verify finds the tmux pane waiting on the trust dialog, the step
+  says so and a button opens the pane: accept the dialog there (arrows and
+  Enter). Keys go into a tmux-kind pane only while it waits on a person;
+  everywhere else the runner types, and the chat is the way in.
+- **check**: the exit criterion as a report (inbox rows, tool calls with no
+  result, recorder hook errors, the runner's config against the cousin's,
+  the chat server), optionally since a time and with one validating turn.
+- **roll back**: offered while a record allows it, the kind switch back to
+  the kind it came from, the migration back to the tmux lane. A second click
+  confirms; forcing the migration's rollback past waiting inbox rows asks a
+  third time.
+
+Not there yet, because phase 11 defers them, and the panel says so: adopting
+a live pane, and switching the whole fleet (`--all --keep-going`).
+
+### Lifecycle
+
+The inspector's "lifecycle" panel runs `cousin-reincarnate` and
+`cousin-transplant`, each in the background with its steps:
+
+- **reincarnate**: a new one-line role, the memory kept. A snapshot, the
+  bequest (the cousin is asked for its handoff and the console waits, up to
+  the wait you set; a runner cousin answers it on the flip's own handoff
+  request), the role rewritten in CLAUDE.md and cousin.toml, then a flip. A
+  second click confirms.
+- **transplant**: a donor, a recipient and a mode: soul-donation (the
+  recipient carries the donor's memory), body-swap (the two trade identity
+  files, name and role) or merge (the donor's memory braided into the
+  recipient's). Both are snapshotted, the mode applied, both flipped. It runs
+  on the recipient while the donor is held, so nothing else starts on either.
+  A second click confirms; a body swap wants `swap <donor> <recipient>` typed.
+
 ### Flipping from the console
 
 "flip" opens a dialog. Type the slug to confirm, then pick when: now, in 1
@@ -422,6 +475,11 @@ deliveries never interleave. Keys are batched for 40 ms and mapped to tmux
 key names; unusual escape sequences are dropped rather than sent as a stray
 Escape. The pane fits itself to the browser and resizes the tmux window to
 match.
+
+A tmux-kind runner cousin's pane is shown this way only from its kind switch
+and migration panel, to answer a screen that waits on a person (the trust
+dialog): its runner types into it, so keys go in only while such a screen
+shows, and it keeps its fixed size.
 
 Scrolling works both ways:
 

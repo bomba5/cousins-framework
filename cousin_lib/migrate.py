@@ -663,11 +663,9 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
                              % ", ".join(conflicts)))
     except Exception as err:  # noqa: BLE001 - ManifestError, an unreadable source
         checks.append(_check("import", False, "%s: %s" % (type(err).__name__, err)))
-    # what 2.0.0 will reject (removed_keys): a warning, never a blocker on 1.x
-    from cousin_lib import removed_keys
     return {"slug": home.name, "account": name, "checks": checks, "steps": list(STEPS),
             "ready": all(c["ok"] for c in checks), "carry": moved, "cli": cli,
-            "warnings": removed_keys.scan(root, home), "notes": notes}
+            "notes": notes}
 
 
 # ------------------------------------------------------------ apply
@@ -1186,8 +1184,6 @@ def _print_plan(p):
                 print("        %-7s %s" % (r["action"], r["detail"]))
             continue
         print("  %s %-10s %s" % ("ok " if c["ok"] else "NO ", c["check"], c["detail"]))
-    for w in p.get("warnings") or ():
-        print("  warn 2.0.0 %s %s: %s" % (w["where"], w["key"], w["line"]))
     for line in p.get("notes") or ():
         print("  note %s" % line)
     print("steps: %s" % " -> ".join(p["steps"]))

@@ -19,6 +19,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   it. `plan` says the conversation does not carry, `apply` prints the
   recorded paths, and `apply` warns, with the file's age, when the handoff it
   leaves was not written during the close or is the emergency one.
+- `cousin-migrate plan` no longer prints `warn 2.0.0` lines telling the
+  operator to delete the tmux lane's keys (`[chat] port`, `tmux_session`, the
+  harness's pane patterns, `config/agent-cmd`, a missing `[agent] runner`).
+  The tmux lane stays a supported lane, so those keys are not deprecated and
+  following the advice would break a tmux cousin. The removal table
+  (`removed_keys`) is withdrawn with them.
 
 ## 1.20.0 - 2026-09-24
 

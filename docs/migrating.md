@@ -325,11 +325,7 @@ same dir).
 
 A key file already at `.secrets/accounts/<slug>-key` is used as it is when
 it holds the cousin's key, and never removed by a rollback; with another
-key there, the plan says `NO carry`. It also lists, as `warn 2.0.0` lines, every key the cousin
-or the install still carries that 2.0.0 will reject (a `[chat] port`, a
-`config/agent-cmd`, the harness's tmux patterns), with what to do: they
-are warnings, not blockers, and the cleanup belongs to the upgrade, after
-the fleet's week. When the plan says ready, and at a moment the cousin is
+key there, the plan says `NO carry`. When the plan says ready, and at a moment the cousin is
 between tasks:
 
 ```
@@ -405,7 +401,8 @@ settle them with `cousin-memory review`. After a rollback, `plan` and
 By hand, if `cousin-migrate` itself is the problem: `cousin-supervisor stop
 wren` and wait until `cousin-supervisor status` shows it `stopped`, put the
 old file back (its bytes are `prior_toml_b64` in `data/migration.json`, or
-set `runner = "tmux"` in the `[agent]` table), delete
+delete the `runner` line from the `[agent]` table: no `runner` is the tmux
+lane), delete
 `data/pending-boot.json` if one is there (the tmux session would boot on an
 old packet otherwise), then `cousin-spawn wren --start`.
 

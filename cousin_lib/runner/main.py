@@ -471,6 +471,11 @@ def _serve(runner, once):
 
     def _signal(signum, frame):
         stop.set()
+        # at once, not when _forever next polls: a runner asked to stop
+        # claims nothing new (live proofs 09-25, finding 3)
+        begin = getattr(runner, "begin_stop", None)
+        if begin is not None:
+            begin()
 
     previous_term = previous_int = _UNSET
     try:

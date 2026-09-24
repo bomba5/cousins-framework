@@ -705,6 +705,34 @@ class TestStopTimeout(HermeticCase):
         self.assertEqual(seen, [7.5])
 
 
+class TestSignalBeginsTheStop(HermeticCase):
+    def test_sigterm_tells_the_runner_to_claim_nothing_before_stop_runs(self):
+        """Finding 3: between the signal and runner.stop() the loop polls
+        (up to 0.2 s); the handler itself tells the runner a stop began."""
+        home = temp_home(self, runner="fake")
+        runner = runner_main.runner_for(home)
+        calls, handlers = [], {}
+        real_signal = signal.signal
+
+        def capture(signum, handler):
+            handlers[signum] = handler
+            return real_signal(signum, signal.getsignal(signum))
+        real_start, real_stop = runner.start, runner.stop
+
+        def start():
+            real_start()
+            handlers[signal.SIGTERM](signal.SIGTERM, None)
+
+        def stop(timeout=None):
+            calls.append("stop")
+            return real_stop(timeout=timeout)
+        runner.start, runner.stop = start, stop
+        runner.begin_stop = lambda: calls.append("begin_stop")
+        with mock.patch.object(runner_main.signal, "signal", side_effect=capture):
+            self.assertEqual(runner_main._serve(runner, False), 0)
+        self.assertEqual(calls, ["begin_stop", "stop"])
+
+
 class TestRestartMark(HermeticCase):
     def test_a_claim_a_dead_runner_left_marks_the_restart(self):
         """#98: a runner killed without its teardown left its row claimed;

@@ -217,6 +217,13 @@ class TmuxRunner:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    def begin_stop(self):
+        """A stop was asked for (cousin-runner's signal handler, before
+        stop() runs): nothing new is claimed from now on (live proofs
+        09-25, finding 3); the live turn is finished or settled by stop()."""
+        self._stopping.set()
+        wake.poke(self.home)
+
     def stop(self, *, timeout=30.0):
         """End the live turn and stop at idle (R21, R17's close): no new
         claim, one Escape on a live turn, then the worker reads the turn's
@@ -1337,6 +1344,10 @@ class TmuxRunner:
             return
         rows = self.inbox.claim(limit=1, claimant=self.runner_id)
         if not rows:
+            return
+        if self._stopping.is_set():                 # the stop raced the claim: back, untyped
+            for row in rows:
+                self.inbox.requeue(row["id"])
             return
         row = rows[0]
         if row["source"] == INTERRUPT:

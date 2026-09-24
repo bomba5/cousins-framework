@@ -105,6 +105,38 @@ class TestTyping(Case):
         self.assertEqual(self.panes[0].typed, [])
 
 
+class TestStoppingClaimsNothing(Case):
+    """Live proofs 09-25, finding 3: a runner asked to stop (held or not)
+    claims nothing new; it only finishes or settles what it has."""
+
+    def test_a_runner_asked_to_stop_types_no_queued_row(self):
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: r.state() == "idle" and self.panes))
+        r.begin_stop()
+        rec = r.enqueue(Item("operator:wren", "chat", "queued at the stop", sender="Wren"))
+        time.sleep(0.5)
+        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        self.assertEqual(self.panes[0].typed, [])
+
+    def test_a_claim_that_races_the_stop_goes_back_untyped(self):
+        r = self.runner()
+        real = r.inbox.claim
+
+        def claim(**kw):
+            rows = real(**kw)
+            if rows:
+                r.begin_stop()                 # the stop lands while the claim runs
+            return rows
+        r.inbox.claim = claim
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "raced", sender="Wren"))
+        self.assertTrue(_wait(lambda: r._stopping.is_set()))
+        time.sleep(0.3)
+        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        self.assertEqual(self.panes[0].typed, [])
+
+
 class TestTurns(Case):
     def test_a_turn_start_nobody_typed_is_a_foreign_turn(self):
         r = self.runner()

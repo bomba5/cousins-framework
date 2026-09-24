@@ -458,6 +458,13 @@ class Sessions:
             self._watcher = threading.Thread(target=self._watch, daemon=True)
             self._watcher.start()
 
+    def begin_stop(self):
+        """A stop was asked for: no session claims anything new, and nothing
+        is rebuilt; stop() does the rest."""
+        self._stopping.set()
+        for r in list(self.sessions().values()):
+            r.begin_stop()
+
     def stop(self, *, timeout=30.0):
         """The watcher first (nothing is rebuilt during a stop), then every
         session at once. `timeout` bounds the WHOLE stop, the watcher's join

@@ -1987,6 +1987,28 @@ class SdkRunner:
             self.stream.append("other", {"type": type(msg).__name__})
 
 
+class _ScrubbedAuthEnv:
+    """os.environ without accounts.AUTH_VARS for the life of the block,
+    each put back after. The SDK starts the CLI with {**os.environ,
+    **options.env}: an overlay cannot unset a variable, so a key, a token,
+    a config dir, a base URL or a provider switch inherited from the
+    invoking shell would pick the credentials or the provider (cousin-runner
+    removes them for good; a one-off caller such as cousin-migrate gets
+    them back afterwards)."""
+
+    def __enter__(self):
+        import os
+        self.saved = {k: os.environ.pop(k) for k in accounts.AUTH_VARS if k in os.environ}
+        return self
+
+    def __exit__(self, *exc):
+        import os
+        for key in accounts.AUTH_VARS:
+            os.environ.pop(key, None)
+        os.environ.update(self.saved)
+        return False
+
+
 def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
                      client_factory=None):
     """`cousin-runner --check-auth --validate` (R13): ONE smallest model
@@ -1995,7 +2017,10 @@ def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
     hooks, max_turns=1, a temporary cwd, a timeout. Never the cousin's own
     SdkRunner: no inbox row, no transcript in sessions.db, nothing mined,
     no usage row. (exit code, line): 0 the turn answered, 4 it did not
-    (the account's own words), 2 a configuration error."""
+    (the account's own words), 2 a configuration error. The account is
+    the only source of credentials: every accounts.AUTH_VARS variable of
+    the calling process is out of the environment while the turn runs
+    (_ScrubbedAuthEnv), for every caller."""
     import shutil
     import tempfile
     sdk = _sdk()
@@ -2037,6 +2062,11 @@ def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
                     signal = signal or auth.result_signal(
                         bool(msg.is_error), getattr(msg, "api_error_status", None),
                         getattr(msg, "result", None), getattr(msg, "errors", None))
+                    if not failed and (msg.subtype != "success"
+                                       or getattr(msg, "api_error_status", None)):
+                        # an API error or a stopped turn that was not flagged is_error
+                        failed = "result %s%s" % (msg.subtype, "" if not getattr(
+                            msg, "api_error_status", None) else " (HTTP %s)" % msg.api_error_status)
                     if signal or failed or msg.is_error:
                         return 4, "validate: %s" % ((signal or {}).get("detail") or failed
                                                     or msg.result or "an error result")
@@ -2046,7 +2076,8 @@ def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
             await client.disconnect()
 
     try:
-        return asyncio.run(asyncio.wait_for(one_turn(), timeout))
+        with _ScrubbedAuthEnv():
+            return asyncio.run(asyncio.wait_for(one_turn(), timeout))
     except asyncio.TimeoutError:
         return 4, "validate: no answer within %.0fs" % timeout
     except Exception as exc:  # noqa: BLE001 - any failure to answer is the answer

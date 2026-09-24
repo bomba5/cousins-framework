@@ -546,24 +546,76 @@ class TestValidate(HermeticCase):
                                         client_factory=lambda o: ScriptedClient(o, [turn]))
             self.assertEqual(rc, 4, line)
 
-    def test_a_typed_turn_error_fails_validate_with_its_words_and_carries_the_effort(self):
+    def _one(self, account, turn, **kw):
+        from cousin_lib.runner.sdk import validate_account
+        from tests.runner.test_sdk import ScriptedClient
+        home = temp_home(self)
+        seen = []
+        rc, line = validate_account(account, home.parent.parent, timeout=5,
+                                    client_factory=lambda o: seen.append(
+                                        (o, {**os.environ, **o.env})) or ScriptedClient(o, [turn]),
+                                    **kw)
+        return rc, line, seen
+
+    def test_a_typed_turn_error_fails_validate_with_its_words(self):
         """#96: a model the bundled CLI is too old for answers with an
         invalid_request 400 in the turn, and a result not flagged is_error."""
         from claude_agent_sdk import TextBlock
-        from cousin_lib.runner.sdk import validate_account
-        from tests.runner.test_sdk import ScriptedClient, init_msg, result
-        home = temp_home(self)
+        from tests.runner.test_sdk import init_msg, result
         host = accounts.Account("host", "claude-login", None, None, implicit=True)
         said = "API Error: 400 Claude Code 2.1.277 does not support this model"
-        turn = [init_msg(), AssistantMessage(content=[TextBlock(text=said)], model="<synthetic>",
-                                             error="invalid_request"), result()]
-        seen = []
-        rc, line = validate_account(host, home.parent.parent, model="opus", effort="max",
-                                    timeout=5, client_factory=lambda o: seen.append(o)
-                                    or ScriptedClient(o, [turn]))
+        rc, line, _ = self._one(host, [init_msg(), AssistantMessage(
+            content=[TextBlock(text=said)], model="<synthetic>", error="invalid_request"),
+            result()], model="opus")
         self.assertEqual(rc, 4, line)
         self.assertIn("invalid_request", line); self.assertIn("does not support this model", line)
-        self.assertEqual((seen[0].model, seen[0].effort), ("opus", "max"))
+
+    def test_a_result_that_is_not_a_success_fails_validate_even_unflagged(self):
+        from claude_agent_sdk import ResultMessage
+        from tests.runner.test_sdk import assistant, init_msg
+        host = accounts.Account("host", "claude-login", None, None, implicit=True)
+        for subtype, status in (("error_during_execution", None), ("success", 500)):
+            with self.subTest(subtype=subtype, status=status):
+                res = ResultMessage(subtype=subtype, duration_ms=1, duration_api_ms=1,
+                                    is_error=False, num_turns=1, session_id="s-1",
+                                    api_error_status=status)
+                rc, line, _ = self._one(host, [init_msg(), assistant(text="OK"), res])
+                self.assertEqual(rc, 4, line)
+                self.assertIn(subtype, line)
+
+    def test_validate_carries_the_effort(self):
+        from tests.runner.test_sdk import assistant, init_msg, result
+        host = accounts.Account("host", "claude-login", None, None, implicit=True)
+        rc, line, seen = self._one(host, [init_msg(), assistant(text="OK"), result()],
+                                   model="opus", effort="max")
+        self.assertEqual(rc, 0, line)
+        self.assertEqual((seen[0][0].model, seen[0][0].effort), ("opus", "max"))
+
+    def test_validate_never_inherits_the_shells_credentials(self):
+        """#96 review I1: the SDK starts the CLI with {**os.environ,
+        **options.env}; an inherited key, token or config dir would bill
+        the wrong account, for every caller (cousin-migrate included)."""
+        from tests.runner.test_sdk import assistant, init_msg, result
+        shell = {"ANTHROPIC_API_KEY": "sk-shell", "CLAUDE_CODE_OAUTH_TOKEN": "oauth-shell",
+                 "CLAUDE_CONFIG_DIR": "/shell/dir", "ANTHROPIC_BASE_URL": "http://shell.invalid",
+                 "ANTHROPIC_AUTH_TOKEN": "tok-shell", "CLAUDE_CODE_USE_BEDROCK": "1"}
+        os.environ.update(shell)
+        turn = [init_msg(), assistant(text="OK"), result()]
+        host = accounts.Account("host", "claude-login", None, None, implicit=True)
+        rc, line, seen = self._one(host, turn)
+        self.assertEqual(rc, 0, line)
+        self.assertEqual({k: seen[0][1].get(k) for k in shell}, {k: None for k in shell})
+        key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-own")
+        rc, line, seen = self._one(key, turn)
+        self.assertEqual(rc, 0, line)
+        child = seen[0][1]
+        self.assertEqual(child["ANTHROPIC_API_KEY"], "k-own")
+        self.assertNotEqual(child.get("CLAUDE_CONFIG_DIR"), "/shell/dir")
+        for k in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN",
+                  "CLAUDE_CODE_USE_BEDROCK"):
+            self.assertIsNone(child.get(k), k)
+        # the caller gets its environment back
+        self.assertEqual({k: os.environ.get(k) for k in shell}, shell)
 
     def test_a_login_accounts_401_retry_waits_for_the_refresh(self):
         # W11-1: the CLI refreshes a login's token at its next attempt

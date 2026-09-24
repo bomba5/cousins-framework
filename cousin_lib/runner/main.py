@@ -82,6 +82,19 @@ def _agent_table(home):
     return data.get("agent") or {}
 
 
+def effort_of(agent):
+    """[agent] effort, checked: it reaches the CLI as
+    ClaudeAgentOptions.effort (its --effort), and a level the CLI would
+    refuse is configuration (RunnerError, exit 2), not a connect or a
+    validating turn that fails."""
+    from cousin_lib.config import EFFORT_LEVELS
+    effort = agent.get("effort")
+    if effort is not None and effort not in EFFORT_LEVELS:
+        raise RunnerError("cousin.toml [agent] effort must be one of %s, got %r"
+                          % (", ".join(EFFORT_LEVELS), effort))
+    return effort
+
+
 def account_for(home):
     """The account this cousin runs on, checked before anything starts: an
     unknown account, a secret file that is open to group or others, not
@@ -162,16 +175,8 @@ def runner_for(home, *, kind=None):
         from cousin_lib.runner import tools
         from cousin_lib.runner.sdk import SdkRunner
         tools.validate_registry(Path(home), root_for(home))
-        # [agent] effort reaches the CLI as ClaudeAgentOptions.effort (its
-        # --effort); a level the CLI would refuse is configuration (exit 2),
-        # not a connect that fails forever
-        from cousin_lib.config import EFFORT_LEVELS
-        effort = agent.get("effort")
-        if effort is not None and effort not in EFFORT_LEVELS:
-            raise RunnerError("cousin.toml [agent] effort must be one of %s, got %r"
-                              % (", ".join(EFFORT_LEVELS), effort))
-        common = dict(account=account_for(home), model=agent.get("model"), effort=effort,
-                      policy=policy)
+        common = dict(account=account_for(home), model=agent.get("model"),
+                      effort=effort_of(agent), policy=policy)
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)
@@ -362,13 +367,14 @@ def _check_auth(home, *, validate=False):
     try:
         account = accounts.for_cousin(home, root)
         agent = _agent_table(home)
+        effort = effort_of(agent)
     except (accounts.AccountsError, RunnerError) as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
     from cousin_lib.runner import sdk
     try:
         rc, line = sdk.validate_account(account, root, model=agent.get("model"),
-                                        effort=agent.get("effort"))
+                                        effort=effort)
     except RunnerError as err:        # the sdk extra is not installed
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2

@@ -687,6 +687,20 @@ class TestCheckAuthAndLogin(HermeticCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             runner_main.runner_main(["--home", str(home), "--validate"])   # --validate alone
 
+    def test_validate_refuses_an_effort_the_cli_would_refuse(self):
+        from cousin_lib import accounts
+        from cousin_lib.runner import sdk
+        home = temp_home(self)
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text() + 'effort = "ludicrous"\n')
+        err = io.StringIO()
+        with mock.patch.object(accounts, "check", return_value=(0, "account=host ok")), \
+                mock.patch.object(sdk, "validate_account") as val, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = runner_main.runner_main(["--home", str(home), "--check-auth", "--validate"])
+        self.assertEqual(rc, 2)
+        self.assertIn("effort", err.getvalue())
+        val.assert_not_called()
+
     def test_a_missing_key_file_is_a_login_to_do_not_a_config_error(self):
         """Replaces test_a_missing_key_file_under_a_real_root_is_a_config_error."""
         import json

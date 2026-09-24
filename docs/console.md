@@ -328,7 +328,8 @@ The header has:
 - **search**: searches the thread (the archive too while you're in archived
   mode), highlights matches and gives you up and down arrows to step
   through them.
-- **pane**: opens the live terminal.
+- **terminal** (a tmux cousin) or **reasoning** (a runner cousin): opens
+  the pane beside the chat, when it is closed.
 - **fullscreen**: hides the rest of the console.
 
 A remote cousin's chat has only send, history and the media toggle; its node
@@ -347,9 +348,18 @@ Escape or a click outside closes it.
 placeholder like `[image hidden]`. The choice is stored in your browser.
 Generating media is a separate, optional thing: see [media](media.md).
 
+### Beside the chat: the pane
+
+The pane sits beside the chat rather than in place of it, so you watch the
+cousin work while you talk to it: a runner cousin's reasoning stream, or a
+tmux cousin's terminal. Where the window is wide enough for both it opens by
+default; its "x" closes it and the header's button brings it back, and the
+choice is kept in your browser. On a phone the open pane takes the whole
+width, as it always did.
+
 ### The terminal pane
 
-"pane" slides the cousin's tmux session in from the right, rendered with
+For a tmux cousin the pane is its tmux session, rendered with
 xterm. It's interactive: what you type goes to the session, through the same
 lock the chat server uses to inject messages, so keystrokes and chat
 deliveries never interleave. Keys are batched for 40 ms and mapped to tmux
@@ -372,17 +382,19 @@ The pane header shows the tmux session and when the pane last changed. The
 ### The reasoning pane (a runner cousin)
 
 A cousin on the runner (`[agent] runner` in its `cousin.toml`) has no tmux
-session, so for it "pane" opens its reasoning stream instead: every state
+session, so for it the pane is its reasoning stream instead: every state
 change, turn, text, thinking block, tool call and tool output the runner
 records, live, as it records them (read from the cousin's own
 `data/stream/`). It opens at the newest 200 events, not the whole history;
 a dropped connection picks up where it left off, and a runner that
 restarted meanwhile is marked with a new-session line. When no runner is
 running, the header says "not running" beside the last state it recorded.
-"interrupt" ends the running turn, past its first answer too; the button is
-live only while a turn runs, and the header says what came of it
-(`delivered`, or `failed` when the turn had already finished or the agent
-refused). The box at the bottom says
+A tool call and its output read as structure: the call, then its result
+hung under it; a turn opens under a rule. "interrupt", beside the say box
+at the foot of the stream, ends the running turn, past its first answer
+too; the button is live only while a turn runs, and the foot says what came
+of it (`delivered`, or `failed` when the turn had already finished or the
+agent refused). The box at the bottom says
 something to the running turn as its operator: the runner writes it into the
 live turn, or takes it next. What you say there is not stored in the chat,
 as typing into a tmux pane is not; a login code typed there while a login

@@ -39,6 +39,7 @@
   --radius-sm: 7px;
   --radius: 10px;
   --radius-lg: 14px;
+  --shadow: oklch(0.05 0.01 250 / 0.5);
 
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -583,7 +584,7 @@ select.sel-inline:focus { border-color: var(--accent); }
   height: calc(100vh - 36px);
   background: var(--bg-1);
   border-left: 1px solid var(--hair);
-  box-shadow: -24px 0 48px oklch(0.05 0.01 250 / 0.45);
+  box-shadow: -24px 0 48px var(--shadow);
   z-index: 20;
   display: flex; flex-direction: column;
   animation: slidein 0.22s ease-out;
@@ -713,7 +714,7 @@ select.sel-inline:focus { border-color: var(--accent); }
   border: 1px solid var(--line);
   padding: 10px 16px;
   border-radius: var(--radius);
-  box-shadow: 0 12px 32px oklch(0.05 0.01 250 / 0.5);
+  box-shadow: 0 12px 32px var(--shadow);
   font-family: var(--sans);
   font-size: 12.5px;
   color: var(--fg-0);
@@ -736,7 +737,7 @@ select.sel-inline:focus { border-color: var(--accent); }
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  box-shadow: 0 24px 64px oklch(0.05 0.01 250 / 0.55);
+  box-shadow: 0 24px 64px var(--shadow);
   width: 580px;
   max-height: 86vh;
   display: flex; flex-direction: column;
@@ -850,21 +851,21 @@ select.sel-inline:focus { border-color: var(--accent); }
 .chat-bubble {
   max-width: 78%;
   padding: 10px 14px 6px;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid transparent;
   background: var(--bg-2);
 }
 .chat-bubble-user {
-  background: var(--accent);
-  border-color: var(--accent-bright);
-  color: #fff;
-  border-top-right-radius: 3px;                /* tail corner */
+  background: oklch(from var(--accent) l c h / 0.16);
+  border-color: oklch(from var(--accent) l c h / 0.38);
+  color: var(--fg-0);
+  border-top-right-radius: 4px;                /* tail corner */
 }
 .chat-bubble-assistant {
-  background: var(--bg-2);
-  border-color: var(--line);
+  background: var(--bg-1);
+  border-color: var(--hair);
   color: var(--fg-0);
-  border-top-left-radius: 3px;                 /* tail corner */
+  border-top-left-radius: 4px;                 /* tail corner */
 }
 
 /* Streaming cursor + subtle glow while message is revealing */
@@ -889,8 +890,7 @@ select.sel-inline:focus { border-color: var(--accent); }
 .chat-bubble > .chat-meta {
   font-family: var(--mono);
   font-size: 10px;
-  color: var(--fg-1);
-  opacity: 0.85;
+  color: var(--fg-3);
   margin-top: 5px;
   text-align: right;
   user-select: none;
@@ -1717,48 +1717,6 @@ body.chat-fullscreen .chat-fullscreen-toggle { display: inline-flex; }
   .topbar .build { display: none; }
 }
 
-/* Runner pane highlighting (chat.jsx, runnerEventBody): the kind label in
-   the accent (the Settings hue slider moves it), the model's words in the
-   primary foreground, tool executions muted, the runner's bookkeeping
-   dimmest, errors red; diffs, JSON and light markdown on top. Theme
-   variables only. */
-.runner-ev { display: flex; gap: 8px; }
-.runner-ev .rp-kind { flex: none; min-width: 11ch; color: var(--accent); }
-.runner-ev .rp-body { flex: 1; min-width: 0; }
-.rp-text .rp-body { color: var(--fg-0); }
-.rp-thinking .rp-body { color: var(--fg-1); font-style: italic; }
-.rp-tool .rp-body { color: var(--fg-2); }
-.rp-meta .rp-body { color: var(--fg-3); }
-.rp-error .rp-body { color: var(--red); }
-.rp-tool-name { font-weight: 600; }
-.rp-err { color: var(--red); }
-.rp-dim { color: var(--fg-3); }
-
-.rp-diff-add { color: var(--green); }
-.rp-diff-del { color: var(--red); }
-.rp-diff-hunk { color: var(--accent); }
-.rp-diff-file { color: var(--fg-1); font-weight: 700; }
-
-.rp-json-key { color: var(--assistant); }
-.rp-json-str { color: var(--green); }
-.rp-json-num { color: var(--amber); }
-.rp-json-bool, .rp-json-null { color: var(--violet); }
-.rp-json-punc { color: var(--fg-3); }
-
-.rp-md-h { font-weight: 700; }
-.rp-md-h1, .rp-md-h2 { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
-.rp-md-code { background: var(--bg-2); color: var(--fg-1); padding: 0 3px; border-radius: var(--radius-sm); }
-.rp-md-pre {
-  margin: 2px 0; padding: 4px 8px;
-  background: var(--bg-1); border-left: 2px solid var(--line);
-  font: inherit; color: var(--fg-1);
-  white-space: pre-wrap; word-break: break-word;
-}
-.rp-md-bullet { color: var(--fg-3); }
-.rp-md-a { color: var(--accent); }
-.rp-md-quote { color: var(--fg-2); border-left: 2px solid var(--line); padding-left: 6px; }
-.rp-md-hr { border-top: 1px solid var(--line); margin: 5px 0; }
-.rp-md-gap { height: 0.6em; }
 
 /* A number and its label (views.jsx Stat): the number in mono, tabular,
    the label above it in words. */
@@ -1854,3 +1812,131 @@ table.data th.num { font-family: var(--sans); font-size: 10.5px; }
   table.data.fleet-table td > div { display: inline-block; margin-right: 8px; }
   table.data.fleet-table td.fleet-who > div { display: block; }
 }
+
+/* === Chat view (chat.jsx ChatView) ===
+   The chat and its pane side by side: the runner's reasoning stream (the
+   interrupt sits on its side) or a tmux cousin's terminal. On a phone
+   the open pane takes the whole width. */
+.chat-split { position: absolute; inset: 0; display: flex; flex-direction: row; overflow: hidden; }
+.chat-col {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  position: relative;              /* anchor for the jump-to-bottom button */
+  display: flex; flex-direction: column;
+  transition: flex 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pane-col {
+  flex: 0 0 0; min-width: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--bg-0);
+  border-left: 1px solid transparent;
+  transition: flex 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.chat-split.pane-open .chat-col { flex: 1 1 0; }
+.chat-split.pane-open .pane-col { flex: 1 1 0; border-left-color: var(--hair); }
+@media (max-width: 820px) {
+  .chat-split.pane-open .chat-col { flex: 0 0 0; }
+  .chat-split.pane-open .pane-col { flex: 1 1 auto; border-left-color: transparent; }
+}
+.chat-toast {
+  position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-2); color: var(--fg-0);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 7px 14px; font-family: var(--sans); font-size: 12px; z-index: 10;
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.chat-header {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 16px 10px 24px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg-0);
+  font-family: var(--sans); font-size: 12px; color: var(--fg-3);
+}
+.chat-header .btn { padding: 0 10px; }
+.ch-title { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.ch-name { color: var(--fg-0); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.ch-sub { font-family: var(--mono); font-size: 11px; color: var(--fg-3); }
+.ch-state { font-size: 12px; align-self: center; }
+.ch-effort { display: inline-flex; align-items: center; gap: 6px; }
+.chat-header input.chat-search {
+  font-family: var(--sans); font-size: 12px;
+  background: var(--bg-1); color: var(--fg-0);
+  border: 1px solid var(--hair); border-radius: var(--radius-sm);
+  padding: 0 10px; width: 150px; max-width: 40vw; box-sizing: border-box; outline: none;
+}
+.chat-header input.chat-search:focus { border-color: var(--accent); }
+.chat-composer { border-top: 1px solid var(--hair); padding: 12px 24px 14px; display: flex; flex-direction: column; gap: 6px; }
+
+.pane-hdr {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; min-height: 49px;
+  border-bottom: 1px solid var(--hair);
+  font-family: var(--mono); font-size: 11px; color: var(--fg-3);
+  background: var(--bg-0);
+}
+.pane-title { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--fg-0); }
+.pane-chip { font-family: var(--mono); font-size: 10.5px; color: var(--fg-2); background: var(--bg-2); border-radius: 5px; padding: 2px 7px; }
+.pane-x { padding: 0 8px; min-height: 24px; }
+.pane-foot { border-top: 1px solid var(--hair); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--bg-0); }
+.pane-foot-row { display: flex; gap: 8px; align-items: center; }
+.pane-note { font-family: var(--mono); font-size: 10.5px; color: var(--fg-2); }
+.btn.rp-interrupt:not(:disabled) { color: var(--accent-bright); border-color: oklch(from var(--accent) l c h / 0.55); background: oklch(from var(--accent) l c h / 0.10); }
+.btn.rp-interrupt:not(:disabled):hover { background: oklch(from var(--accent) l c h / 0.2); }
+.rp-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 10px 14px 14px;
+  background: oklch(from var(--bg-0) calc(l - 0.02) c h);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--fg-2);
+  white-space: pre-wrap; word-break: break-word;
+}
+.rp-empty { color: var(--fg-3); font-family: var(--sans); font-size: 12px; padding: 8px 0; }
+
+/* Runner pane highlighting (chat.jsx, runnerEventBody): the kind label in
+   the accent (the Settings hue slider moves it), the model's words in the
+   primary foreground, tool executions muted, the runner's bookkeeping
+   dimmest, errors red; diffs, JSON and light markdown on top. Theme
+   variables only. */
+.runner-ev { display: flex; gap: 10px; padding: 3px 0; }
+.runner-ev .rp-kind { flex: none; min-width: 11ch; color: var(--accent); }
+.runner-ev .rp-body { flex: 1; min-width: 0; }
+/* Structure, not pasted output: a turn opens under a rule, a tool's
+   result hangs under its call on a hairline, the model's words read in
+   the text face. */
+.runner-ev-turn_start { margin-top: 8px; padding-top: 9px; border-top: 1px solid var(--hair); }
+.runner-ev-turn_start:first-child { margin-top: 0; border-top: none; padding-top: 3px; }
+.runner-ev-tool_result .rp-kind, .runner-ev-output .rp-kind, .rp-meta .rp-kind { color: var(--fg-3); }
+.runner-ev-tool_result .rp-body, .runner-ev-output .rp-body { border-left: 1px solid var(--line); padding-left: 10px; }
+.rp-text .rp-body, .rp-thinking .rp-body { font-family: var(--sans); font-size: 12.5px; line-height: 1.55; }
+.rp-text .rp-body { color: var(--fg-0); }
+.rp-thinking .rp-body { color: var(--fg-1); font-style: italic; }
+.rp-tool .rp-body { color: var(--fg-2); }
+.rp-meta .rp-body { color: var(--fg-3); }
+.rp-error .rp-body { color: var(--red); }
+.rp-tool-name { font-weight: 600; }
+.rp-err { color: var(--red); }
+.rp-dim { color: var(--fg-3); }
+
+.rp-diff-add { color: var(--green); }
+.rp-diff-del { color: var(--red); }
+.rp-diff-hunk { color: var(--accent); }
+.rp-diff-file { color: var(--fg-1); font-weight: 700; }
+
+.rp-json-key { color: var(--assistant); }
+.rp-json-str { color: var(--green); }
+.rp-json-num { color: var(--amber); }
+.rp-json-bool, .rp-json-null { color: var(--violet); }
+.rp-json-punc { color: var(--fg-3); }
+
+.rp-md-h { font-weight: 700; }
+.rp-md-h1, .rp-md-h2 { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.rp-md-code { background: var(--bg-2); color: var(--fg-1); padding: 0 3px; border-radius: var(--radius-sm); }
+.rp-md-pre {
+  margin: 2px 0; padding: 4px 8px;
+  background: var(--bg-1); border-left: 2px solid var(--line);
+  font: inherit; color: var(--fg-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.rp-md-bullet { color: var(--fg-3); }
+.rp-md-a { color: var(--accent); }
+.rp-md-quote { color: var(--fg-2); border-left: 2px solid var(--line); padding-left: 6px; }
+.rp-md-hr { border-top: 1px solid var(--line); margin: 5px 0; }
+.rp-md-gap { height: 0.6em; }

@@ -333,6 +333,42 @@ class PaneScrollsTheProgram(unittest.TestCase):
                         body.index("mouseTrackingMode"))
 
 
+class ChatBesideThePane(unittest.TestCase):
+    """The chat and the pane side by side (design A, 2026-09-22): the
+    runner's reasoning stream or the tmux terminal sits beside the chat,
+    never in its place, on a screen wide enough for both; the interrupt
+    is on the stream's side."""
+
+    def setUp(self):
+        self.chat = (_STATIC / "chat.jsx").read_text()
+        self.css = (_STATIC / "styles.css").read_text()
+
+    def test_both_columns_share_one_row(self):
+        view = _function_body(self.chat, "ChatView")
+        self.assertIn('className={"chat-split" + (paneShown ? " pane-open" : "")}', view)
+        self.assertIn('className="chat-col"', view)
+        self.assertIn('className={`pane-col ${paneShown ? "open" : ""}`}', view)
+        self.assertIn(".chat-split.pane-open .chat-col { flex: 1 1 0; }", self.css)
+        self.assertIn(".chat-split.pane-open .pane-col { flex: 1 1 0;", self.css)
+
+    def test_a_phone_still_gives_the_open_pane_the_width(self):
+        phone = self.css[self.css.index("/* === Chat view (chat.jsx ChatView)"):]
+        phone = phone[phone.index("@media (max-width: 820px)"):]
+        self.assertIn(".chat-split.pane-open .chat-col { flex: 0 0 0; }", phone)
+
+    def test_the_pane_opens_by_default_where_both_fit(self):
+        view = _function_body(self.chat, "ChatView")
+        self.assertIn('localStorage.getItem("fw_pane_side")', view)
+        self.assertIn("window.innerWidth > 1100", view)
+
+    def test_the_interrupt_is_in_the_streams_foot(self):
+        pane = self.chat[self.chat.index("function RunnerPaneView("):]
+        pane = pane[:pane.index("\n}\n")]
+        foot = pane[pane.index('className="pane-foot"'):]
+        self.assertIn("onClick={interrupt}", foot)
+        self.assertIn("onClick={say}", foot)
+
+
 class ChatMediaViewer(unittest.TestCase):
     """The media port (docs/reference/console-api.md, "The chat media viewer"):
     the on/off toggle and its browser key, kind detection, the inline

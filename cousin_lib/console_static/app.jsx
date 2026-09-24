@@ -657,6 +657,8 @@ function App() {
 
 function MainHeader({ view, cousins, activeCousin }) {
   const c = cousins.find(x => x.slug === activeCousin);
+  // The cousin's state in words beside its dot (views.jsx fleetState).
+  const st = c && window.fleetState ? fleetState(c) : null;
   const titles = {
     chat: c ? (c.name || c.slug) : "Chat",
     cousins: "Cousins",
@@ -688,8 +690,8 @@ function MainHeader({ view, cousins, activeCousin }) {
       <span className="spacer" />
       {view === "chat" && c && (
         <span className="hdr-meta">
-          <Led state={c.status === "running" ? "running" : "stopped"} pulse={c.status === "running"} />
-          {c.status === "running" ? "running" : "stopped"} · {c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
+          <span className={"led " + (st ? st.tone : "gray") + (st && st.pulse ? " pulse" : "")} />
+          <span className={"fleet-state tone-" + (st ? st.tone : "gray")}>{st ? st.word : c.status}</span> · {c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}
         </span>
       )}
     </div>

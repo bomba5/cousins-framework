@@ -110,20 +110,19 @@ class TestEnvironment(AccountsCase):
     def test_the_host_login_sets_nothing(self):
         self.assertEqual(accounts.account_env(accounts.for_cousin(self.home, self.root), self.root), {})
 
-    def test_claude_token_sets_the_token_a_login_free_dir_and_the_subprocess_scrub(self):
+    def test_claude_token_sets_the_token_and_a_login_free_dir_and_no_scrub(self):
         self.write(); self.secret(".secrets/accounts/nightly", "tok-nightly")
         env = accounts.account_env(accounts.load(self.root)["nightly"], self.root)
-        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "tok-nightly")
-        self.assertEqual(env["CLAUDE_CONFIG_DIR"], str(self.root / "data" / "accounts" / "nightly"))
-        self.assertEqual(env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"], "1")
-        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertEqual(env, {"CLAUDE_CODE_OAUTH_TOKEN": "tok-nightly",
+                               "CLAUDE_CONFIG_DIR": str(self.root / "data" / "accounts" / "nightly")})
 
-    def test_anthropic_key_sets_the_key_a_login_free_dir_and_the_subprocess_scrub(self):
+    def test_anthropic_key_sets_the_key_and_a_login_free_dir_and_no_scrub(self):
+        # The scrub forces the CLI's permission mode to `default` and the
+        # sandbox on every Bash call: a runner could run no tool (1.18.2).
         self.write(); self.secret(".secrets/accounts/metered", "key-metered")
         env = accounts.account_env(accounts.load(self.root)["metered"], self.root)
-        self.assertEqual(env["ANTHROPIC_API_KEY"], "key-metered")
-        self.assertIn("CLAUDE_CONFIG_DIR", env)
-        self.assertEqual(env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"], "1")
+        self.assertEqual(env, {"ANTHROPIC_API_KEY": "key-metered",
+                               "CLAUDE_CONFIG_DIR": str(self.root / "data" / "accounts" / "metered")})
 
     def test_scrub_then_set(self):
         self.write(); self.secret(".secrets/accounts/nightly", "tok-nightly")

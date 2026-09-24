@@ -176,11 +176,13 @@ class TestLivePrompt(HermeticCase):
         self.assertEqual(inits[0], saved["session_id"])            # the first init proves it
         self.assertIn("kestrel", _texts(r).lower())
 
-    def test_a_bash_env_in_a_turn_does_not_show_the_account_variable(self):
-        """Task 14: a key account sets CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1, and
-        the CLI then strips ANTHROPIC_API_KEY from every subprocess it starts,
-        the model's own Bash included. An effect, not the option (finding 7).
-        Skips before Task 14 (no accounts module yet); run once in Task 14."""
+    def test_a_key_account_runs_its_tools(self):
+        """1.18.2: a key account's turn runs a tool. With the CLI's
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 set (phase 4 Task 14) the CLI forced
+        the permission mode to `default` and the sandbox on every Bash call,
+        so no tool ran and this proof was never run until a cousin moved to
+        a key. An effect, not the option (finding 7): the Bash output itself.
+        The key now reaches the command's environment, by design."""
         try:
             from cousin_lib import accounts
         except ImportError:
@@ -189,12 +191,13 @@ class TestLivePrompt(HermeticCase):
         home, root = self._home("Wren runs a command when asked.")
         acc = accounts.Account("metered", "anthropic-key", None, None, secret_value=key)
         r = self._run_lane(home, root, "Run exactly this with your Bash tool: "
-                           "env | grep -c '^ANTHROPIC_API_KEY='; env | grep -c '^PATH=' "
+                           "echo ran-$((6*7)); env | grep -c '^PATH=' "
                            "and then reply only DONE.", account=acc)
-        outputs = [e["payload"]["text"] for e in r.events() if e["kind"] == "tool_result"]
-        self.assertTrue(outputs, "no Bash call ran")
-        self.assertEqual(outputs[0].split(), ["0", "1"])     # no key variable; PATH is there
-        self.assertFalse(any(key in text for text in outputs))
+        results = [e["payload"] for e in r.events() if e["kind"] == "tool_result"]
+        self.assertTrue(results, "no tool call ran")
+        self.assertFalse(results[0].get("is_error"), results[0].get("text"))
+        self.assertEqual(results[0]["text"].split(), ["ran-42", "1"])
+        self.assertFalse([e for e in r.events() if e["kind"] == "permission"])
 
     def test_report_whether_the_clis_auto_memory_reaches_the_first_user_message(self):
         """A REPORT, not a pass/fail on the behaviour (the controller's round-3

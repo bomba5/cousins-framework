@@ -33,11 +33,13 @@ AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
              "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_FOUNDRY_API_KEY",
              "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_AWS_API_KEY",
              "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
-# Set for the two secret kinds: the bundled CLI then strips ANTHROPIC_API_KEY,
-# CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_AUTH_TOKEN and the cloud credential
-# variables (AWS, Google, Azure) from every subprocess it starts, the
-# model's own Bash included.
-SUBPROCESS_SCRUB = {"CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1"}
+# Never set for any kind (1.18.2): CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 puts
+# the bundled CLI in its CI hardening mode, which forces the permission
+# mode to `default` (every tool asks, and a runner has nobody to answer)
+# and requires the sandbox for every Bash call. Measured on CLI 2.1.277 and
+# 2.1.281: a key account with it set could run no tool at all. A secret
+# account's variable therefore reaches the commands the CLI starts, as it
+# did on the tmux billing lane.
 SECRETS_DIR = ".secrets/accounts"
 LOGIN_FILES = (".credentials.json",)
 LOGIN_KEYS = ("claudeAiOauth",)
@@ -221,8 +223,7 @@ def account_env(account, root):
         return {} if account.config_dir is None else {"CLAUDE_CONFIG_DIR": str(account.config_dir)}
     secret = account.secret_value or _read_secret(account)
     var = "CLAUDE_CODE_OAUTH_TOKEN" if account.kind == "claude-token" else "ANTHROPIC_API_KEY"
-    return {var: secret, "CLAUDE_CONFIG_DIR": str(_login_free_dir(root, account)),
-            **SUBPROCESS_SCRUB}
+    return {var: secret, "CLAUDE_CONFIG_DIR": str(_login_free_dir(root, account))}
 
 
 def scrub(env):

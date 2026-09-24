@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.18.2 - 2026-09-24
+
+### Fixed
+- A runner cousin on an `anthropic-key` or `claude-token` account can use
+  its tools again. The account no longer sets
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`: with it the bundled CLI forced the
+  permission mode to `default` (every tool call asked, and a runner has
+  nobody to answer) and required the sandbox for every Bash call. Measured
+  on CLI 2.1.277 and 2.1.281. The account's key or token now reaches the
+  commands the CLI starts, the cousin's own Bash included
+  (docs/configuration.md, "No subprocess scrub").
+- The live key-lane proof is now `test_a_key_account_runs_its_tools`: a
+  Bash call on a key account must succeed with no permission prompt. It
+  fails with the scrub set and passes without it.
+
 ## 1.18.1 - 2026-09-24
 
 ### Fixed

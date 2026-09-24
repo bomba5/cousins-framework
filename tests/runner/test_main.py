@@ -259,7 +259,6 @@ class TestAuthLane(HermeticCase):
         self.assertEqual(seen["options_env"], {
             "ANTHROPIC_API_KEY": "sk-from-file",
             "CLAUDE_CONFIG_DIR": str(root / "data" / "accounts" / "wren"),
-            "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB": "1",
             "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
 

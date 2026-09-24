@@ -327,7 +327,7 @@ class TestAccountWiring(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         opts = r.options(resume="s-1")
         self.assertEqual(opts.env["CLAUDE_CODE_OAUTH_TOKEN"], "tok-n")
-        self.assertEqual(opts.env["CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"], "1")
+        self.assertNotIn("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", opts.env)
         self.assertNotIn("COUSIN_HOME", opts.env)       # the runner's process env carries it already
         self.assertEqual(opts.resume, "s-1")                      # a token never refreshes: the store
         self.assertNotIn("resume", opts.extra_args)

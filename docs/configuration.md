@@ -152,18 +152,19 @@ and `CLAUDE_CODE_USE_FOUNDRY`.
 |---|---|---|
 | `claude-login` (named) | `CLAUDE_CONFIG_DIR=<root>/<config_dir>` | its own `.credentials.json`, its own refresh |
 | `claude-login` (`host`) | nothing | the host's `~/.claude` |
-| `claude-token` | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` | the token, a config dir that holds no login (so a login cannot win over the token), and the token kept out of every command the CLI starts |
-| `anthropic-key` | `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` | the key, the same no-login dir (a CLI that finds a login and a key may bill the login), and the key kept out of every command |
+| `claude-token` | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the token and a config dir that holds no login (so a login cannot win over the token) |
+| `anthropic-key` | `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR=<root>/data/accounts/<name>` | the key and the same no-login dir (a CLI that finds a login and a key may bill the login) |
 
 A no-login directory that holds a login (a `.credentials.json` carrying one)
 refuses the start: remove the file.
 
-The subprocess scrub: for a token or key account the CLI strips
-`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN` and the
-AWS, Google and Azure credential variables from every command it starts, so
-those cannot reach a cousin's own commands through the environment. A cousin
-on a token or key account cannot hand cloud credentials to its own commands
-that way either.
+No subprocess scrub: a token or key account's variable reaches every command
+the CLI starts, the cousin's own Bash included (`env` shows it). The CLI's
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` would keep it out, but it also forces the
+permission mode to `default` and requires the sandbox for every Bash call, so
+a runner cousin could run no tool at all (1.18.2). Treat a key or token account
+the way you treat the host login a cousin can already read: give it only to a
+cousin you trust with it.
 
 Resume per kind: a `claude-login` account refreshes its own token, so a
 restarted runner resumes its session through the CLI's own `--resume`; a

@@ -322,6 +322,17 @@ class TestRollover(Case):
         self.assertTrue(_wait(lambda: self.panes and self.panes[0].started))
         self.assertEqual(self.panes[0].started[0][0], ["claude", sid, "--fresh"])
 
+    def test_the_fresh_mark_is_dropped_once_the_cli_has_written_the_session(self):
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        saved = lambda: json.loads((self.home / "data" / "runner-session.json").read_text())
+        self.assertTrue(saved().get("fresh"))
+        rec = r.enqueue(Item("operator:priya", "chat", "hello", sender="priya"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        self.assertNotIn("fresh", saved())
+        self.assertEqual(saved()["session_id"], r.session_id())
+
     def test_a_normal_turn_end_mines_the_transcript(self):
         r = self.runner()
         r.start()

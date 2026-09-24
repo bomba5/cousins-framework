@@ -414,6 +414,11 @@ class TmuxRunner:
         return None
 
     def _begin_turn(self, e):
+        if self._fresh:
+            # the CLI has written the session: it resumes from here on, and
+            # runner-session.json loses its "fresh" mark (a kind switch reads it)
+            self._fresh = False
+            self._save_session()
         content = (e.raw.get("message") or {}).get("content")
         text = blocks.user_events(content)[0][1]["text"] if content else "[inbox:%s]" % e.nonce
         inbox_id = self._row_for_nonce(e.nonce) if e.nonce else None

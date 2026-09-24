@@ -157,11 +157,13 @@ class TestApply(SwitchCase):
         rec = migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
         self.assertEqual(rec["state"], "switched")
         self.assertEqual([s["step"] for s in rec["steps"]],
-                         ["trust", "close", "toml", "start", "notice", "verify", "cursor"])
+                         ["trust", "close", "toml", "cursor", "start", "notice", "verify"])
         self.assertEqual(self.agent()["runner"], "tmux")
         self.assertEqual(json.loads(settings_path(self.home).read_text())["editorMode"], "normal")
-        self.assertEqual(self.calls, ["close", "start", ("verify", "s-live", "tmux"),
-                                      ("cursor", "s-live", "tmux")])
+        # the cursor before the start (review minor): the target's first
+        # turn end mines from the switch's EOF, never from the other kind's
+        self.assertEqual(self.calls, ["close", ("cursor", "s-live", "tmux"), "start",
+                                      ("verify", "s-live", "tmux")])
         notice = [r for r in (Inbox(self.home).get(i) for i in range(1, 5)) if r]
         self.assertEqual(len(notice), 1)
         self.assertEqual((notice[0]["thread_id"], notice[0]["source"]), ("system", "boot"))
@@ -177,7 +179,7 @@ class TestApply(SwitchCase):
         migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
         rec = migrate.switch_apply(self.home, root=self.root, to="sdk", **self.live())
         self.assertEqual([s["step"] for s in rec["steps"]],
-                         ["close", "toml", "start", "notice", "verify", "cursor"])
+                         ["close", "toml", "cursor", "start", "notice", "verify"])
         self.assertEqual(self.agent()["runner"], "sdk")
         self.assertNotIn("editorMode", json.loads(settings_path(self.home).read_text()))
 
@@ -210,7 +212,7 @@ class TestRollback(SwitchCase):
         self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
         self.assertNotIn("editorMode", json.loads(settings_path(self.home).read_text()))
         self.assertEqual((self.home / "data" / "runner-session.json").read_bytes(), session)
-        self.assertEqual(self.calls, ["close", "start", ("cursor", "s-live", "sdk")])
+        self.assertEqual(self.calls, ["close", ("cursor", "s-live", "sdk"), "start"])
         with self.assertRaises(migrate.MigrateError) as err:
             migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
         self.assertIn("already", str(err.exception))

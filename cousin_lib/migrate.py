@@ -1423,6 +1423,10 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
         harness_settings.remove_kind_settings(home)
     step("toml", "[agent] runner = %r, the kind's settings %s"
          % (to, "written" if to == "tmux" else "removed"))
+    # the mining cursor BEFORE the start (P11-9): the target's first turn end
+    # mines from here, never from an offset in the other kind's record
+    extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
+    step("cursor", "the mining cursor at the end of the %s kind's record" % to)
     since = clock()
     start(home, root)
     step("start", "the %s runner resumes %s" % (to, sid))
@@ -1435,8 +1439,6 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
         raise MigrateError("verify: %s (roll back with --to %s, or look at it first)"
                            % (detail, p["from"]))
     step("verify", detail)
-    extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
-    step("cursor", "the mining cursor at the end of the %s kind's record" % to)
     rec.update(state="switched", switched_at=_now())
     _write_switch_record(home, rec)
     return rec
@@ -1474,12 +1476,12 @@ def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
     else:
         harness_settings.remove_kind_settings(home)
     step("restore", "cousin.toml as it was, byte for byte; the %s kind's settings" % to)
-    start(home, root)
-    step("start", "the %s runner resumes %s" % (to, rec.get("session_id")))
     sid = rec.get("session_id")
-    if sid:
+    if sid:                                  # before the start, as the switch sets it
         extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
         step("cursor", "the mining cursor at the end of the %s kind's record" % to)
+    start(home, root)
+    step("start", "the %s runner resumes %s" % (to, rec.get("session_id")))
     rec.update(state="rolled_back", rolled_back_at=_now())
     _write_switch_record(home, rec)
     return rec

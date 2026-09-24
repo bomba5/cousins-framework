@@ -553,6 +553,10 @@ def _cmd_start(args):
     cfg = CousinConfig.from_env()
     slug = cfg.slug
     cmd = list(args.cmdline or [])
+    if cmd and not cmd[0].strip():
+        # an empty program registers a job that dies 127 (#115)
+        print("cousin-job: the command's program is empty", file=sys.stderr)
+        return 2
     if cmd and cmd[0].startswith("-"):
         # A program is never named like an option; refusing it keeps a
         # command line from ever standing in for cousin-job's own flags.
@@ -727,6 +731,21 @@ def _cmd_tail(args):
         time.sleep(1)
 
 
+def _start_options(p, *, help_text=False):
+    """`start`'s own options, the one set every parser of the start line
+    reads (#115: the separated shape's check and the title-first re-parse
+    had copies)."""
+    p.add_argument("--desc")
+    p.add_argument("--log")
+    if help_text:
+        p.add_argument("--home-log", metavar="REL",
+                       help="log file relative to COUSIN_HOME, confined to it"
+                            " (refused: absolute, ~, .., .secrets)")
+    else:
+        p.add_argument("--home-log")
+    p.add_argument("--json", action="store_true")
+
+
 def _title_after_separator(argv):
     """True for the `start KIND [options] -- TITLE [CMD...]` shape, the one
     the job tool uses: every option comes before the first `--`, and the
@@ -740,10 +759,7 @@ def _title_after_separator(argv):
     p = argparse.ArgumentParser(add_help=False, exit_on_error=False)
     p.add_argument("kind", nargs="?")
     p.add_argument("title", nargs="?")
-    p.add_argument("--desc")
-    p.add_argument("--log")
-    p.add_argument("--home-log")
-    p.add_argument("--json", action="store_true")
+    _start_options(p)
     try:
         known, _rest = p.parse_known_args(head)
     except (argparse.ArgumentError, SystemExit):
@@ -763,10 +779,7 @@ def _reparse_start_remainder(args):
     cl = list(args.cmdline or [])
     if cl and cl[0].startswith("--") and cl[0] != "--":
         opts = argparse.ArgumentParser(add_help=False)
-        opts.add_argument("--desc")
-        opts.add_argument("--log")
-        opts.add_argument("--home-log")
-        opts.add_argument("--json", action="store_true")
+        _start_options(opts)
         try:
             known, rest = opts.parse_known_args(cl)
             args.desc = args.desc or known.desc
@@ -791,12 +804,7 @@ def jobs_main(argv=None):
     p = sub.add_parser("start")
     p.add_argument("kind", choices=["subagent", "shell", "build", "other"])
     p.add_argument("title")
-    p.add_argument("--desc")
-    p.add_argument("--log")
-    p.add_argument("--home-log", metavar="REL",
-                   help="log file relative to COUSIN_HOME, confined to it"
-                        " (refused: absolute, ~, .., .secrets)")
-    p.add_argument("--json", action="store_true")
+    _start_options(p, help_text=True)
     p.add_argument("cmdline", nargs=argparse.REMAINDER)
     for name in ("done", "fail", "cancel"):
         p = sub.add_parser(name)

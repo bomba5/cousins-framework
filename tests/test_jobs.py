@@ -202,6 +202,34 @@ class TestBackgroundCommand(JobsCase):
                          os.path.realpath(home / "data" / "ok.log"))
         self.assertIn("into-home", pathlib.Path(job["log_path"]).read_text())
 
+    def test_an_empty_program_is_refused_before_any_row(self):
+        """#115: an empty argv[0] registered a job that died 127 (the runner
+        lane already refuses it)."""
+        for program in ("", " ", "\t"):
+            with self.subTest(program=program):
+                rc, _, err = self._main(["start", "shell", "--", "t", program, "x"])
+                self.assertEqual(rc, 2)
+                self.assertIn("program", err)
+        self.assertEqual(list_jobs(), [])
+
+    def test_one_option_set_serves_every_start_parser(self):
+        """#115: the separated shape's check and the title-first re-parse
+        read the start options from the same builder as the start parser,
+        so an option added there cannot drift from them."""
+        import argparse
+        from cousin_lib import jobs
+        def options(build):
+            p = argparse.ArgumentParser(add_help=False)
+            build(p)
+            return sorted(o for a in p._actions for o in a.option_strings)
+        self.assertEqual(options(jobs._start_options),
+                         ["--desc", "--home-log", "--json", "--log"])
+        # the separated shape counts an option given before `--` the same way
+        self.assertTrue(jobs._title_after_separator(
+            ["start", "shell", "--home-log", "logs/x.log", "--", "t"]))
+        self.assertFalse(jobs._title_after_separator(
+            ["start", "shell", "t", "--home-log", "logs/x.log", "--", "cmd"]))
+
     def test_after_the_separator_nothing_is_read_as_an_option(self):
         # `start shell [options] -- TITLE CMD`: the title and the command
         # come after `--`, and neither is ever re-parsed as cousin-job's

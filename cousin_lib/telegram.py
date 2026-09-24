@@ -173,7 +173,7 @@ def load_bridge_config(home):
              for op in operators if "user_id" in op}
     return BridgeConfig(
         slug=data["cousin"]["slug"], token=token, operator_ids=ids,
-        operator_name=names, port=data["chat"]["port"], home=home)
+        operator_name=names, port=(data.get("chat") or {}).get("port"), home=home)
 
 
 def _default_chat_send(cfg, *, user, message, attachment=None):
@@ -191,6 +191,8 @@ def _default_chat_send(cfg, *, user, message, attachment=None):
 
 
 def _post_to_chat_server(cfg, *, user, message, attachment=None):
+    if not cfg.port:
+        raise TelegramConfigError("a tmux cousin's bridge needs its [chat] port")
     body = {"user": user, "message": message}
     if attachment:
         body["image"] = attachment  # a data: URI, decoded by the server
@@ -451,15 +453,16 @@ def _tg_upload(cfg, kind, fields, path, *, timeout=120):
 
 
 def _history(cfg, thread, since=None):
-    """One operator thread's rows from the cousin's chat server, oldest
+    """One operator thread's rows from the cousin's own chat store, oldest
     first: those after `since`, or with since None the newest row only
-    (to start a fresh cursor at the end of the thread). An unreachable
-    server raises, and the caller retries."""
-    url = ("http://127.0.0.1:%d/api/history?user=%s"
-           % (cfg.port, urllib.parse.quote(thread)))
-    url += "&limit=1" if since is None else "&since=%d" % since
-    with urllib.request.urlopen(url, timeout=10) as resp:
-        return json.loads(resp.read()).get("messages", [])
+    (to start a fresh cursor at the end of the thread). It reads the
+    store in this process (chat_api.history, what the chat server's
+    /api/history runs), so no chat server has to run (phase 10a). A
+    store that cannot be read raises, and the caller retries."""
+    from cousin_lib.server import chat_api
+    query = {"user": thread}
+    query.update({"limit": "1"} if since is None else {"since": str(since)})
+    return chat_api.history(cfg.home, query).get("messages", [])
 
 
 def relay_login_notice(cfg, state, *, tg_send_text):

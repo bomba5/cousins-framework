@@ -16,9 +16,9 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
   and posts the cousin's replies back. It opens no port and needs no
   public URL or webhook. Everything in the Telegram chat passes through
   Telegram's servers.
-- **What it touches locally:** for a tmux cousin, only the cousin's own
-  chat server on `127.0.0.1:<[chat] port>`, through `POST /api/send` and
-  `GET /api/history` ([reference/chat-api.md](reference/chat-api.md)).
+- **What it touches locally:** for a tmux cousin, the cousin's own
+  chat server on `127.0.0.1:<[chat] port>`, through `POST /api/send`
+  ([reference/chat-api.md](reference/chat-api.md)), and its chat store.
   It never types into the cousin's terminal and keeps no chat history of
   its own. The chat server owns all of that: recall, typing the line into
   the terminal, the presence marker, correction capture and chat hooks.
@@ -26,14 +26,16 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
   terminal: the bridge stores an inbound message in the cousin's
   `data/chat.db` and delivers it to the runner's inbox itself, then
   touches the presence marker, captures a correction and fires chat
-  hooks, the steps `/api/send` takes. Replies are read back through
-  `GET /api/history` on both lanes.
+  hooks, the steps `/api/send` takes. Replies are read back from the
+  cousin's `data/chat.db` on both lanes (what `GET /api/history` returns,
+  read in the bridge's own process), so a runner cousin needs no chat
+  server and no `[chat] port` for the bridge.
 - **Its only state:** where it is, in `data/telegram-bridge.json`
   ([below](#the-state-file)).
 - **What it depends on:** the bridge belongs to its cousin, like the
   chat server. It starts and stops with the cousin
-  ([when it runs](#6-when-it-runs)). If the chat server is down, the
-  bridge retries until it is back.
+  ([when it runs](#6-when-it-runs)). If a tmux cousin's chat server is
+  down, the bridge retries until it is back.
 
 One bridge serves one cousin. For two cousins on Telegram, create two
 bots and run two bridges.

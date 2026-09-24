@@ -1813,6 +1813,13 @@ class OpencodeRunner:
                else "manual retry" if (self._login_file_seen and not present) else None)
         if why is None:
             return
+        # Review Important 7: opencode reads auth.json live, so the changed
+        # file is held to the start's checks before any turn runs on it
+        try:
+            accounts.preflight(self.account, self.root)
+        except accounts.AccountsError as err:
+            self._fail_start("opencode login retry (%s): %s" % (why, err))
+            return
         self._login_blocked = False
         with self._lock:
             if self.machine.state == "errored":

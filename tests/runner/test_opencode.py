@@ -713,6 +713,32 @@ class TestTurns(OpencodeCase):
                          ["manual retry", None])
         self.assertTrue(self.payloads(r, "auth")[-1]["restored"])
 
+    def test_a_credential_change_is_checked_before_the_login_block_lifts(self):
+        """Review Important 7: opencode reads auth.json live, so the retry that
+        a credential change starts must not run on a file the start would
+        have refused (here a `wellknown` entry): the check is made before the
+        block lifts, and a refusal is fatal (the runner gives up, exit 3; its
+        restart then refuses before the lock, exit 2). No turn runs."""
+        home = self.home(model="openai/gpt-x")
+        account = self.account(endpoint=None, endpoint_model=None, providers=("openai",))
+        auth = Path(account.data_dir).joinpath(*accounts.AUTH_JSON)
+        auth.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        auth.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k1"}}))
+        auth.chmod(0o600)
+        r = self.started(self.runner([[("AUTH_401",)], [("text", "back")]], home=home,
+                                     account=account))
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: r.login_required()))
+        auth.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k2"},
+                                    "https://corp.example": {"type": "wellknown",
+                                                             "key": "fake-wk"}}))
+        self.assertTrue(_wait(lambda: r.fatal is not None, 8), "the retry ran unchecked")
+        self.assertIn("wellknown", r.fatal)
+        self.assertNotIn("fake-", r.fatal)
+        self.assertEqual(len(self.prompts()), 1, "no turn after the refused change")
+        self.assertEqual(r.inbox.get(a.inbox_id)["state"], "queued")
+        self.assertTrue(_wait(lambda: not r.worker_alive()))
+
     def test_classify(self):
         self.assertEqual(opencode.classify({"name": "ProviderAuthError",
                                             "data": {"message": "no"}})[0], "auth")

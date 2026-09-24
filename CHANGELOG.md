@@ -3,6 +3,74 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.12.0 - 2026-09-24
+
+### Added
+- The composed system prompt on the SDK lane: the law, a contract generated
+  from the tool registry and the version, the authored identity (a missing
+  one is a named degraded state, never an improvised persona) and the shared
+  operator rules, byte-stable across generations so a rollover and a restart
+  keep the prompt cache; passed as the `claude_code` preset with
+  `exclude_dynamic_sections` and `snapshot`. The volatile layers (active
+  state, task packet, retrieved memories, tool trace, calibration, the shared
+  index) ride a state digest under the boot packet's own budgets and
+  truncation order (`boot.fit`, shared with the tmux lane) as the first
+  message of a generation.
+- The framework owns the transcript: `SqliteSessionStore` over
+  `data/sessions.db` implements the SDK's session store protocol (its
+  conformance suite runs in the tests); a key-lane cousin resumes through
+  the store, a login-lane cousin through the CLI's own resume; the first
+  init after a resume must name the saved session or the runner starts fresh
+  from the digest, loudly. A restart (`data/runner-session.json`) resumes
+  the session and costs no generation.
+- Usage per result into `data/usage.db` (cost as the per-client difference),
+  the console token view reads both lanes; every turn is mined into raw
+  memory, deduplicated against the flip miner and capped per rolling day
+  (`extract.py`); mirror errors are recorded.
+- Rollover as one awaited structured `handoff` call (STATUS open loops,
+  threads, memories, the handoff file, in the ritual's order), the session
+  bookends, a new session on the same prompt bytes, the digest first; on
+  context pressure with hysteresis, at the daily cadence (`max_age`, the
+  stagger kept), on `cousin-flip`, reincarnate and transplant (a bequest
+  rides the handoff request); coalesced, never interrupting a live turn,
+  never losing a row, an unanswered handoff ends in an emergency handoff
+  from the real transcript, a failure before the new session ends
+  `errored -> idle` with the generation unmoved.
+- `rate_limited` is a state: nothing is claimed while a limit holds, a limit
+  during the handoff postpones the rollover.
+- Accounts: `config/accounts.toml` names `claude-login`, `claude-token` and
+  `anthropic-key` accounts; `[agent] account` picks one; the environment per
+  kind (`CLAUDE_CONFIG_DIR` under the account, the secret from a 0600 file
+  under `.secrets/accounts/`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` for the
+  secret kinds, twelve auth and provider variables scrubbed from the shell);
+  `cousin-account list|status|login|token`: the operator logs in through the
+  framework from a host shell (the CLI's own flow in a pty, the URL relayed
+  through chat, the code captured once under `<root>/run/`, never stored in
+  chat.db, a late or second code diverted); a cousin never obtains a
+  credential. A dying login is detected in the turn (the typed
+  authentication error, a 401 retry, the 401 result, a refused connect),
+  written to `data/login-required.json`, shown by `cousin-chat list` and the
+  Telegram bridge, waited out without a turn and without failing a row, and
+  the runner reconnects when the credential changes;
+  `cousin-runner --check-auth [--validate]` (exit 4).
+
+### Changed
+- `boot.py`'s budget engine is `boot.fit`, its shared tier `boot.shared_parts`;
+  `trace` readers take an explicit root. `Inbox` gains `claim_id`, `open_rows`,
+  `replace_body`, `done_if_queued`. `flip.flip` takes `reason` and
+  `queue_if_stopped`; the loops daemon names its reasons. `api_key_file` is
+  deprecated for `[agent] account`. The `handoff` tool's schema is the
+  structured one (position, next_action, status, active_threads, learned).
+- The event stream gains `usage`, `extract`, `rollover`, `rate_limit`,
+  `auth` and the `system` subtypes `resumed`, `fresh`, `resume_failed`,
+  `connect_failed`.
+
+### Fixed
+- Two timing-based runner tests (the mid-turn fold, the fake runner's state
+  stream) now wait for the event they assert instead of sleeping.
+- The usage tests evaluate today's date per call, so a suite that crosses
+  UTC midnight no longer compares against yesterday.
+
 ## 1.11.0 - 2026-09-23
 
 ### Added

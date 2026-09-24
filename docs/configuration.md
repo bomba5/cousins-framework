@@ -922,7 +922,13 @@ it reads is rendered at every start into `<data_dir>/opencode.runner.json`
 disabled, the model and small model above, `permission` allow-all (the
 cousin's `policy.toml` is the policy), the plugin pack, and one MCP server,
 the runner's own on loopback behind a per-start token, through which the
-model reaches the framework's tools as `cousin_<tool>`. A config or an
+model reaches the framework's tools as `cousin_<tool>`. With any plugin
+configured, opencode would first install its plugin library from npm into
+its config dir and load no plugin until that ends (a network fetch, and a
+start that hangs offline); the pack imports nothing, so the runner marks
+the library present (`<data_dir>/config/opencode/node_modules` and
+`package-lock.json`, an existing lock merged) and opencode installs
+nothing. A config or an
 environment that names the Claude-subscription bridge is refused before
 anything starts. The runner checks that opencode reports that MCP server
 connected before its first turn; when it does not, no turn runs (the runner

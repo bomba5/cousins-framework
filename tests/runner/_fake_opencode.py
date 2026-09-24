@@ -22,6 +22,13 @@ Each prompt consumes the next script (a list of steps); when the scripts
 run out a turn says "ok". Steps:
 
   ("text", s)                         a text part, streamed as deltas
+  ("PARTIAL", s)                      a text part streamed and left open (a
+                                      reply cut by an abort: the part ends
+                                      only after the first idle pair)
+  ("PREP", seconds)                   silence BEFORE the assistant message
+                                      exists (the real server's first-prompt
+                                      setup); an abort in it ends the run with
+                                      one idle pair, no error, no answer
   ("reasoning", s)                    a reasoning part, streamed as deltas
   ("tool", name, input, output)       pending -> running {input} -> completed
   ("tool_error", name, input, error)  pending -> running {input} -> error
@@ -38,6 +45,13 @@ Measured semantics it keeps: a tool call ends the assistant message
 session.error first and the idle pair twice; a prompt sent while the
 session is busy is stored at once and answered by the SAME run after the
 current one (one session.idle for both); an abort drops a queued prompt.
+Measured by Task 7's live proof (the real binary, a fake provider): an
+abort mid-text closes the open text part after the first idle pair; an
+abort before the model call emits only `session.status idle` and
+`session.idle`. Not reproduced (the runner reads neither): the real
+server also emits session.updated, session.diff, plugin.added and
+catalog/reference/integration.updated, and its first `finish` update of
+an answer already carries `time.completed`.
 """
 import base64
 import hmac
@@ -69,7 +83,7 @@ AUTH_401 = {"name": "APIError", "data": {
         "code": "invalid_api_key"}}),
     "metadata": {"url": "http://127.0.0.1:9/v1/chat/completions"}}}
 _ARITY = {"text": 2, "reasoning": 2, "tool": 4, "tool_error": 4, "ASK": 4, "SLOW": 2,
-          "HANG": 1, "FAIL": 3, "AUTH_401": 1}
+          "HANG": 1, "FAIL": 3, "AUTH_401": 1, "PARTIAL": 2, "PREP": 2}
 _ROUTES = [
     ("GET", re.compile(r"^/global/health$"), "health"),
     ("POST", re.compile(r"^/session$"), "create"),
@@ -112,6 +126,7 @@ class _Session:
         self.pending = []
         self.abort = threading.Event()
         self.step = None        # the open step's snapshot hash, None before step-start
+        self.open = []          # text parts streamed and not ended (PARTIAL)
 
 
 class FakeOpencode:
@@ -360,6 +375,7 @@ class FakeOpencode:
         with self._lock:
             self._emit("session.error", {"sessionID": sid, "error": error})
             self._idle(sid)
+            self._close_open(sid, state)
             info["error"] = error
             info["time"]["completed"] = _now_ms()
             self._message_updated(sid, info)
@@ -367,7 +383,14 @@ class FakeOpencode:
             state.pending.clear()
             state.busy = False
 
+    def _close_open(self, sid, state):
+        for part in state.open:
+            part["time"]["end"] = _now_ms()
+            self._part_updated(sid, part)
+        state.open = []
+
     def _finish(self, sid, state, info, reason):
+        self._close_open(sid, state)
         start = state.step
         if start is not None:
             self._part_updated(sid, {"id": self._id("prt"), "sessionID": sid,
@@ -388,7 +411,7 @@ class FakeOpencode:
                                      "messageID": info["id"], "type": "step-start",
                                      "snapshot": state.step})
 
-    def _stream_part(self, sid, state, info, kind, text):
+    def _stream_part(self, sid, state, info, kind, text, *, leave_open=False):
         self._open_step(sid, state, info)
         part = {"id": self._id("prt"), "sessionID": sid, "messageID": info["id"], "type": kind,
                 "text": "", "time": {"start": _now_ms()}}
@@ -398,6 +421,9 @@ class FakeOpencode:
                                               "partID": part["id"], "field": "text",
                                               "delta": chunk})
         part["text"] = text
+        if leave_open:
+            state.open.append(part)
+            return
         part["time"]["end"] = _now_ms()
         self._part_updated(sid, part)
 
@@ -448,6 +474,16 @@ class FakeOpencode:
         return answer["reply"]
 
     def _play(self, sid, state, user_info, script):
+        script = list(script)
+        while script and script[0][0] == "PREP":
+            if self._sleep(state, script.pop(0)[1]):
+                if self._closing.is_set():
+                    return "closed"
+                with self._lock:            # measured: one idle pair, nothing else
+                    self._idle(sid)
+                    state.pending.clear()
+                    state.busy = False
+                return "aborted"
         info = self._new_assistant(sid, user_info)
         state.step = None
         for step in script:
@@ -458,6 +494,8 @@ class FakeOpencode:
             kind = step[0]
             if kind in ("text", "reasoning"):
                 self._stream_part(sid, state, info, kind, step[1])
+            elif kind == "PARTIAL":
+                self._stream_part(sid, state, info, "text", step[1], leave_open=True)
             elif kind in ("tool", "tool_error", "ASK"):
                 if not self._tool(sid, state, info, step):
                     break

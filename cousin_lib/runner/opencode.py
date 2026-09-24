@@ -71,6 +71,12 @@ HEALTH_TIMEOUT_S = 60.0         # R3': a fresh HOME measured 13.6 s
 BRIDGE_PORT = 3456              # the bridge guard refuses a URL on it (R13')
 THINKING_CHARS = 8000           # SdkRunner's bound on a thinking block
 TEXT_CHARS = 2000               # a tool result's, a user echo's bound
+# opencode installs this package from npm into its config dir whenever any
+# plugin is configured, and loads no plugin (answers no /event) until the
+# install ends: 71 s and a failure offline, npm egress online (measured on
+# 1.18.31, Task 7). The pack imports nothing, so the runner marks it
+# present (seed_plugin_dependency) and opencode installs nothing.
+PLUGIN_DEPENDENCY = "@opencode-ai/plugin"
 
 
 def tool_name(name):
@@ -144,6 +150,31 @@ def server_env(account, root, *, home, environ=None, models_fetch=True):
     if not models_fetch:
         env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"          # R21
     return env
+
+
+def seed_plugin_dependency(config_dir):
+    """Make opencode's own check (`Npm.install` in 1.18.31: skip a config
+    dir that has `node_modules` and a package-lock.json whose root lists
+    every dependency) find PLUGIN_DEPENDENCY installed. An existing lock is
+    merged, never replaced; one that already names it is left alone."""
+    config_dir = Path(config_dir)
+    (config_dir / "node_modules").mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = config_dir / "package-lock.json"
+    try:
+        lock = json.loads(path.read_text())
+    except (OSError, ValueError):
+        lock = None
+    lock = lock if isinstance(lock, dict) else {}
+    packages = lock.get("packages") if isinstance(lock.get("packages"), dict) else {}
+    root = packages.get("") if isinstance(packages.get(""), dict) else {}
+    deps = root.get("dependencies") if isinstance(root.get("dependencies"), dict) else {}
+    if PLUGIN_DEPENDENCY in deps and path.exists():
+        return
+    lock["packages"], packages[""], root["dependencies"] = packages, root, deps
+    deps[PLUGIN_DEPENDENCY] = "*"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(lock, indent=2))
+    tmp.replace(path)
 
 
 def classify(error):
@@ -449,6 +480,7 @@ class OpencodeRunner:
             self._start_mcp()
             config, env = self._render(mcp_url=self._mcp.url, mcp_token=self._mcp.token)
             path = self._write_config(config)
+            seed_plugin_dependency(Path(env["XDG_CONFIG_HOME"]) / "opencode")
             self._system = prompt.compose_system_prompt(self.home, root=self.root,
                                                         registry=self._mcp.registry,
                                                         tool_name=tool_name)
@@ -1125,6 +1157,16 @@ class OpencodeRunner:
             except queue.Empty:
                 continue
             self._on_event(event)
+            drain_until = time.monotonic() + self.poll_s
+            # every event already read before the next poll (bounded, so a
+            # flood never starves the interrupt rows): a slow poll must not
+            # leave one event per poll cycle
+            while not run.over and time.monotonic() < drain_until:
+                try:
+                    event = self._events.get_nowait()
+                except queue.Empty:
+                    break
+                self._on_event(event)
         return run.error is None or run.error[0] == "aborted"
 
     def _bounds(self, run, now):

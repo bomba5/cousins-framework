@@ -347,6 +347,29 @@ class TestRollback(HermeticCase):
         rec = json.loads((home / migrate.RECORD).read_text())
         self.assertEqual(rec["rollback_attempts"][-1]["failed"], "start_tmux")
 
+    def test_a_retried_rollback_never_stops_the_tmux_session_it_restored(self):
+        """Execution review I1: a rollback that failed after the file was
+        back on tmux is retried; stopping again would take the tmux lane
+        and kill the live session with no handoff."""
+        root, home = _root(self)
+        live = Live(start_error="no child")
+        migrate.apply(home, root=root, account="team", **live.kw())
+        good_start = live.start_tmux
+
+        def broken(home_, root_):
+            live.calls.append(("start_tmux_failed",))
+            live.tmux = False
+            raise RuntimeError("tmux new-session failed")
+        live.start_tmux = broken
+        with self.assertRaises(migrate.MigrateError):
+            migrate.rollback(home, root=root, **live.kw())
+        self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
+        calls = len(live.calls)
+        live.start_tmux = good_start
+        back = migrate.rollback(home, root=root, **live.kw())
+        self.assertEqual(back["state"], "rolled_back")
+        self.assertEqual([c[0] for c in live.calls[calls:]], ["start_tmux", "release"])
+
     def test_the_file_is_restored_even_when_the_record_missed_the_toml_step(self):
         """Review round 2 m2: a Ctrl-C between the write and the record."""
         root, home = _root(self)

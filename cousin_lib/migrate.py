@@ -330,9 +330,16 @@ def fresh_packet(home):
 def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, release,
              new_packet=fresh_packet, force=False, sleep=time.sleep, clock=time.monotonic,
              **_unused):
-    """Back to the tmux lane, undoing only what `apply` did. The lane is
-    judged by the file too, not only the record: an interrupted `apply`
-    can have written the file and not yet recorded it."""
+    """Back to the tmux lane, undoing only what `apply` did. Process
+    actions follow what IS, not what was recorded: the runner is stopped
+    only while the file still names the runner lane (it differs from the
+    saved bytes) or a runner still holds the lock, and the file is
+    restored only while it differs. A retry after a failed rollback
+    therefore never stops the tmux session the first attempt restored
+    (spawn.stop_cousin on a tmux-lane file is the tmux lane's stop), and
+    the steps a failed attempt completed (recorded as `rollback_done`)
+    are not run again. An interrupted `apply` can have written the file
+    and not recorded it: the bytes decide."""
     home, root = Path(home), Path(root)
     rec = read_record(home)
     if rec is None or "prior_toml_b64" not in rec:
@@ -341,7 +348,9 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
         raise MigrateError("already rolled back at %s; nothing to undo" % rec.get("rolled_back_at"))
     ran = {s["step"] for s in rec.get("steps", []) if s.get("ok")}
     prior = base64.b64decode(rec["prior_toml_b64"])
-    flipped = "toml" in ran or (home / "cousin.toml").read_bytes() != prior
+    differs = (home / "cousin.toml").read_bytes() != prior
+    flipped = "toml" in ran or differs         # the runner lane existed at some point
+    done = set(rec.get("rollback_done") or ())
     rows = _inbox_rows(home)
     if rows is None and not force:
         raise MigrateError("data/inbox.db cannot be read, so whether rows wait is unknown;"
@@ -352,7 +361,11 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
                            " reads them. Let them finish, or pass --force" % waiting)
     steps = []
 
-    def step(name, fn, detail=None):
+    def step(name, fn, detail=None, once=True):
+        # `once`: a step a failed attempt completed is not run again; the
+        # stop and the restore follow the state instead (once=False)
+        if once and name in done:
+            return None
         try:
             out = fn()
         except Exception as err:  # noqa: BLE001 - recorded, then the operator decides
@@ -363,10 +376,13 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
             raise MigrateError("rollback step %s failed: %s: %s (recorded in %s)"
                                % (name, type(err).__name__, err, RECORD))
         steps.append({"step": name, "detail": detail(out) if detail else "done", "at": _now()})
+        done.add(name)
+        rec["rollback_done"] = sorted(done)
+        _write_record(home, rec)
         return out
 
-    if flipped:
-        step("stop", lambda: stop(home, root), json.dumps)
+    if differs or runner_alive(home):
+        step("stop", lambda: stop(home, root), json.dumps, once=False)
         deadline = clock() + DOWN_S
         while runner_alive(home) and clock() < deadline:
             sleep(1.0)
@@ -377,8 +393,10 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
             raise MigrateError("the runner still holds its lock after %ds; nothing restored."
                                " Stop it (`cousin-supervisor stop %s`), then roll back again"
                                % (DOWN_S, home.name))
+    if differs:
         step("restore", lambda: _write_toml(home, prior, int(rec["prior_mode"])),
-             lambda _: "cousin.toml as it was, byte for byte")
+             lambda _: "cousin.toml as it was, byte for byte", once=False)
+    if flipped:
         step("reload", lambda: reload(root))
     if "close" in ran or flipped:
         if flipped:

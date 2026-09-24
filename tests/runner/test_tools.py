@@ -372,12 +372,18 @@ class TestJobRun(HermeticCase):
     def test_a_failing_command_runs_then_closes_failed_with_its_exit_code(self):
         from cousin_lib import jobs
         ctx = self._ctx()
-        code = "import time; print('hello from run', flush=True); time.sleep(0.5); raise SystemExit(3)"
+        # The command holds until the test says go (a file in its working
+        # directory, the home), so "running" is observed, not raced.
+        code = ("import os, time\nprint('hello from run', flush=True)\n"
+                "deadline = time.time() + 20\n"
+                "while not os.path.exists('go') and time.time() < deadline:\n"
+                "    time.sleep(0.02)\nraise SystemExit(3)")
         out = self._run(ctx, title="exit three", argv=[sys.executable, "-c", code])
         job = jobs.get_job(out["job_id"])
         self.assertEqual((job["status"], job["kind"], job["spawned_by"]), ("running", "shell", "wren"))
         self.assertEqual(job["log_path"], out["log_path"])
         self.assertTrue(job["pgid"])
+        (ctx.home / "go").write_text("")
         job = self._wait(out["job_id"])
         self.assertEqual((job["status"], job["exit_code"]), ("failed", 3))
         self.assertIn("hello from run", pathlib.Path(out["log_path"]).read_text())
@@ -411,9 +417,44 @@ class TestJobRun(HermeticCase):
         ctx = self._ctx()
         out = self._run(ctx, title="logged", log="data/my-run.log",
                         argv=[sys.executable, "-c", "print('into my log')"])
-        self.assertEqual(out["log_path"], str(ctx.home / "data" / "my-run.log"))
+        self.assertEqual(out["log_path"], os.path.realpath(ctx.home / "data" / "my-run.log"))
         self._wait(out["job_id"])
         self.assertIn("into my log", (ctx.home / "data" / "my-run.log").read_text())
+
+    def test_a_log_outside_the_home_or_in_secrets_is_refused_and_no_row_is_made(self):
+        from cousin_lib import jobs
+        ctx = self._ctx()
+        outside = ctx.root / "escape.log"
+        for log in (str(outside), "../escape.log", "data/../../escape.log",
+                    "~/escape.log", ".secrets/x.log", "data/.secrets/x.log"):
+            text, err = tools.call(ctx, "job", {"command": "run", "title": "t", "log": log,
+                                                "argv": [sys.executable, "-c", "print(1)"]})
+            self.assertTrue(err, log)
+            self.assertIn("log", text, log)
+        self.assertEqual(jobs.list_jobs(), [])
+        self.assertFalse(outside.exists())
+        self.assertFalse((ctx.root / "cousins" / "escape.log").exists())
+
+    def test_a_title_that_looks_like_an_option_is_only_a_title(self):
+        ctx = self._ctx()
+        for title in ("--", "-x", "--json"):
+            out = self._run(ctx, title=title, argv=[sys.executable, "-c", "print('titled')"])
+            job = self._wait(out["job_id"])
+            self.assertEqual((job["title"], job["status"]), (title, "done"), title)
+            self.assertEqual(job["command"], "%s -c print('titled')" % sys.executable)
+
+    def test_a_launcher_answer_without_a_job_id_is_an_error_naming_it(self):
+        ctx = self._ctx()
+        for stdout in ("[3]", "not json", '{"log_path": "x"}', "7"):
+            done = subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+            with mock.patch.object(subprocess, "run", return_value=done):
+                text, err = tools.call(ctx, "job", {"command": "run", "title": "t",
+                                                    "argv": ["true"]})
+            self.assertTrue(err, stdout)
+            self.assertIn(stdout, text)
+
+    def test_the_launch_handshake_is_bounded_tightly(self):
+        self.assertLessEqual(tools._LAUNCH_TIMEOUT, 15)
 
     def test_empty_or_invalid_argv_and_a_missing_title_are_refused(self):
         from cousin_lib import jobs
@@ -423,6 +464,7 @@ class TestJobRun(HermeticCase):
                      {"title": "t", "argv": "echo hi"},
                      {"title": "t", "argv": ["echo", 3]},
                      {"title": "t", "argv": ["", "x"]},
+                     {"title": "t", "argv": ["--desc", "x"]},
                      {"argv": ["echo", "hi"]}):
             text, err = tools.call(ctx, "job", dict({"command": "run"}, **args))
             self.assertTrue(err, args)

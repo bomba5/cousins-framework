@@ -55,13 +55,17 @@ job without a shell of its own: it takes `title`, `argv` (the command as
 an array, one element per argument, never a shell string), and
 optionally `desc` and `log` (a path relative to the cousin's home;
 without it, the job's own log under `data/job-logs/`). It runs
-`cousin-job start shell TITLE --json -- ARGV...`, so it's the same
-launcher: the command runs detached in its own process group, from the
+`cousin-job start shell --json [--desc D] [--home-log L] -- TITLE
+ARGV...`, so it's the same launcher. The title comes after `--`, so a
+title like `--json` is only a title. `--home-log` confines the log to
+the home: an absolute path, `~`, `..` or anything under `.secrets` is
+refused before a row exists. From there it's the usual launcher: the command runs detached in its own process group, from the
 cousin's home, its output streams into the row's log for the console's
 Jobs view, and the row closes `done` or `failed` with the command's exit
 code. The call returns at once with `{"job_id": ..., "log_path": ...}`
-and never waits for the command. An empty `argv`, or one with an element
-that isn't a string, is refused before anything runs. The row records
+and never waits for the command. An empty `argv`, one with an element
+that isn't a string, or a program starting with `-`, is refused before
+anything runs. The row records
 the command line as given, so a secret in `argv` ends up in the jobs
 store: pass secrets some other way.
 

@@ -541,9 +541,33 @@ def _spawn_tracked(cmd, log_path, job_id):
         os._exit(0)
 
 
+def home_log_path(home, rel):
+    """A `--home-log` value as an absolute path inside `home`, or
+    PathRefused: never absolute, never `~`, never through `..`, never in
+    `.secrets` (home_files.resolve_in, the console's own boundary)."""
+    from cousin_lib.home_files import resolve_in
+    return str(resolve_in(home, rel))
+
+
 def _cmd_start(args):
-    slug = CousinConfig.from_env().slug
+    cfg = CousinConfig.from_env()
+    slug = cfg.slug
     cmd = list(args.cmdline or [])
+    if getattr(args, "home_log", None):
+        # The job tool's log: confined to the home before any row exists.
+        from cousin_lib.home_files import PathRefused
+        if args.log:
+            print("cousin-job: give --log or --home-log, not both",
+                  file=sys.stderr)
+            return 2
+        try:
+            args.log = home_log_path(cfg.home, args.home_log)
+            os.makedirs(os.path.dirname(args.log), exist_ok=True)
+        except PathRefused as err:
+            print("cousin-job: --home-log %r refused: %s (a path relative to"
+                  " the home, outside .secrets)" % (args.home_log, err),
+                  file=sys.stderr)
+            return 2
     job_id = register_job(
         kind=args.kind, title=args.title, description=args.desc or "",
         spawned_by=slug, log_path=args.log,
@@ -706,11 +730,13 @@ def _reparse_start_remainder(args):
         opts = argparse.ArgumentParser(add_help=False)
         opts.add_argument("--desc")
         opts.add_argument("--log")
+        opts.add_argument("--home-log")
         opts.add_argument("--json", action="store_true")
         try:
             known, rest = opts.parse_known_args(cl)
             args.desc = args.desc or known.desc
             args.log = args.log or known.log
+            args.home_log = args.home_log or known.home_log
             args.json = args.json or known.json
             cl = rest
         except SystemExit:
@@ -732,6 +758,9 @@ def jobs_main(argv=None):
     p.add_argument("title")
     p.add_argument("--desc")
     p.add_argument("--log")
+    p.add_argument("--home-log", metavar="REL",
+                   help="log file relative to COUSIN_HOME, confined to it"
+                        " (refused: absolute, ~, .., .secrets)")
     p.add_argument("--json", action="store_true")
     p.add_argument("cmdline", nargs=argparse.REMAINDER)
     for name in ("done", "fail", "cancel"):

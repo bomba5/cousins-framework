@@ -181,6 +181,26 @@ class TestBackgroundCommand(JobsCase):
         self.assertEqual(job["log_path"], str(self.root / "mine.log"))
         self.assertIn("into-mine", (self.root / "mine.log").read_text())
 
+    def test_a_home_log_is_confined_to_the_home(self):
+        home = pathlib.Path(os.environ["COUSIN_HOME"])
+        for bad in (str(self.root / "escape.log"), "../escape.log",
+                    "~/escape.log", ".secrets/x.log"):
+            rc, _, err = self._main([
+                "start", "shell", "--home-log", bad, "--", "t",
+                "sh", "-c", "echo no",
+            ])
+            self.assertEqual(rc, 2, bad)
+            self.assertIn("--home-log", err)
+        self.assertEqual(list_jobs(), [])
+        _, out, _ = self._main([
+            "start", "shell", "--home-log", "data/ok.log", "--", "t",
+            "sh", "-c", "echo into-home",
+        ])
+        job = self._wait_status(int(out.strip()), ("done",))
+        self.assertEqual(job["log_path"],
+                         os.path.realpath(home / "data" / "ok.log"))
+        self.assertIn("into-home", pathlib.Path(job["log_path"]).read_text())
+
     def test_failing_command_marks_failed_with_its_exit_code(self):
         _, out, _ = self._main([
             "start", "shell", "fails", "--", "sh", "-c", "exit 7",

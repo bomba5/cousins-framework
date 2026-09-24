@@ -171,7 +171,7 @@ def _j_start(ctx, a):
 # same code; the command's own environment is not touched.
 _JOB_LAUNCHER = ("import sys; sys.path.insert(0, sys.argv.pop(1));"
                  " from cousin_lib.jobs import jobs_main; sys.exit(jobs_main())")
-_LAUNCH_TIMEOUT = 60
+_LAUNCH_TIMEOUT = 15   # the launcher's double fork answers at once
 
 
 def _j_run(ctx, a):
@@ -183,6 +183,7 @@ def _j_run(ctx, a):
     import subprocess
     import sys
     from cousin_lib import jobs
+    from cousin_lib.home_files import PathRefused
     title = str(_required(a, "title", "run"))
     argv = a.get("argv")
     if not isinstance(argv, list) or not argv:
@@ -193,15 +194,26 @@ def _j_run(ctx, a):
             raise ValueError("run: every element of argv must be a string, not %r" % (element,))
     if not argv[0].strip():
         raise ValueError("run: argv[0], the program, must not be empty")
+    if argv[0].startswith("-"):
+        raise ValueError("run: argv[0], the program, must not start with '-'")
+    # Options first, then `--`, then the title and the command: after the
+    # separator nothing is read as an option, so any title stays a title.
     package = str(Path(jobs.__file__).resolve().parents[1])
-    cli = [sys.executable, "-c", _JOB_LAUNCHER, package, "start", "shell", title, "--json"]
+    cli = [sys.executable, "-c", _JOB_LAUNCHER, package, "start", "shell", "--json"]
     desc = _str(a, "desc")
     if desc:
         cli += ["--desc", desc]
     log = _str(a, "log")
     if log:
-        cli += ["--log", str(Path(ctx.home) / log)]
-    cli += ["--"] + argv
+        # Checked here for a clear error before anything runs; the launcher
+        # checks --home-log again against the same home.
+        try:
+            jobs.home_log_path(ctx.home, log)
+        except PathRefused as err:
+            raise ValueError("run: log %r refused: %s (a path relative to your home,"
+                             " outside .secrets)" % (log, err))
+        cli += ["--home-log", log]
+    cli += ["--", title] + argv
     env = dict(os.environ, FRAMEWORK_ROOT=str(ctx.root), COUSIN_HOME=str(ctx.home),
                COUSIN_SLUG=ctx.slug)
     proc = subprocess.run(cli, cwd=str(ctx.home), env=env, stdin=subprocess.DEVNULL,
@@ -212,9 +224,14 @@ def _j_run(ctx, a):
     try:
         info = json.loads(proc.stdout)
     except ValueError:
-        info = {}
-    if not info.get("job_id"):
-        raise RuntimeError("run: the job launcher registered no job: %s" % said)
+        info = None
+    if not isinstance(info, dict) or not info.get("job_id"):
+        # Whatever came back is named: if a job did start, its row is in
+        # `job list --active` and the text here is how to find it.
+        raise RuntimeError("run: the job launcher answered without a job id, so the job"
+                           " may be running untracked by this call (see `job list`"
+                           " with active): stdout %r, stderr %r"
+                           % (proc.stdout[-500:], (proc.stderr or "")[-500:]))
     return json.dumps({"job_id": info["job_id"], "log_path": info.get("log_path")})
 
 

@@ -39,12 +39,16 @@ without a command still gets a log in the same place: its title and
 `--desc` at start, its outcome and summary at `done`, `fail` or
 `cancel`. Don't point
 `--log` at a file the command itself reads, or it will read its own
-output forever.
+output forever. `--home-log REL` is `--log` confined to the cousin's
+home: it's refused, with no row made, when it's absolute, starts with
+`~`, climbs out with `..` or lands in `.secrets`. The options go before
+`--`, so `cousin-job start shell --json -- "--weird title" CMD...`
+keeps any title a title.
 
 A cousin does the same through its `job` tool without a shell: `run`
 with `title` and `argv` (the command as an array, never a shell string),
-and optionally `desc` and `log` (relative to its home). It's this same
-launcher, run from the cousin's home, and it answers at once with the
+and optionally `desc` and `log` (relative to its home, passed as
+`--home-log`). It's this same launcher, run from the cousin's home, and it answers at once with the
 job id and the log path ([MCP tools](mcp.md#what-a-cousin-gets)). The
 tool's `start` refuses `shell`, since it takes no command and the row
 would never close. The row keeps the command line as given, secrets

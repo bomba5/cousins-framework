@@ -1172,6 +1172,60 @@ class ParityCase(unittest.TestCase):
         self.assertEqual(job["log_path"], started["log_path"])
         self.assertIn("ran via mcp", pathlib.Path(job["log_path"]).read_text())
 
+    def _job_rows(self):
+        text, is_error = mcp_server.call_tool(
+            self.reg, "job", {"command": "list", "json": True}, self.env)
+        self.assertFalse(is_error, text)
+        return json.loads(text)
+
+    def _settled(self, job_id):
+        deadline = time.monotonic() + 20
+        while True:
+            shown, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "show", "id": job_id,
+                                  "json": True}, self.env)
+            self.assertFalse(is_error, shown)
+            job = json.loads(shown)
+            if job["status"] != "running" and not job["live_processes"]:
+                return job
+            self.assertLess(time.monotonic(), deadline, job)
+            time.sleep(0.05)
+
+    def test_job_run_titles_that_look_like_options_are_only_titles(self):
+        for title in ("--", "-x", "--json"):
+            text, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "run", "title": title,
+                                  "argv": [sys.executable, "-c", "print(1)"]},
+                self.env)
+            self.assertFalse(is_error, text)
+            job = self._settled(json.loads(text)["job_id"])
+            self.assertEqual((job["title"], job["status"]), (title, "done"))
+
+    def test_job_run_refuses_a_log_outside_the_home_and_makes_no_row(self):
+        outside = self.root / "escape.log"
+        for log in (str(outside), "../escape.log", "~/escape.log",
+                    ".secrets/x.log"):
+            text, is_error = mcp_server.call_tool(
+                self.reg, "job", {"command": "run", "title": "t", "log": log,
+                                  "argv": [sys.executable, "-c", "print(1)"]},
+                self.env)
+            self.assertTrue(is_error, log)
+            self.assertIn("log", text)
+        self.assertEqual(self._job_rows(), [])
+        self.assertFalse(outside.exists())
+
+    def test_job_run_writes_a_relative_log_under_the_home(self):
+        text, is_error = mcp_server.call_tool(
+            self.reg, "job", {"command": "run", "title": "t",
+                              "log": "data/run.log",
+                              "argv": [sys.executable, "-c", "print('homed')"]},
+            self.env)
+        self.assertFalse(is_error, text)
+        job = self._settled(json.loads(text)["job_id"])
+        want = os.path.realpath(self.home / "data" / "run.log")
+        self.assertEqual(job["log_path"], want)
+        self.assertIn("homed", pathlib.Path(want).read_text())
+
     def test_send_discovers_peers_through_the_shipped_list_command(self):
         (self.root / "cousins" / "kestrel").mkdir()
         (self.root / "cousins" / "kestrel" / "cousin.toml").write_text(
@@ -1268,15 +1322,20 @@ class JobRunCase(unittest.TestCase):
     def test_the_command_array_becomes_trailing_elements(self):
         self.assertEqual(
             self._argv({"title": "rebuild", "argv": ["make", "-j4", "a b"]}),
-            ["cousin-job", "start", "shell", "rebuild", "--json", "--",
+            ["cousin-job", "start", "shell", "--json", "--", "rebuild",
              "make", "-j4", "a b"])
 
     def test_desc_and_log_go_before_the_separator(self):
         self.assertEqual(
             self._argv({"title": "t", "desc": "why", "log": "data/t.log",
                         "argv": ["sh", "--desc", "x"]}),
-            ["cousin-job", "start", "shell", "t", "--json", "--desc", "why",
-             "--log", "data/t.log", "--", "sh", "--desc", "x"])
+            ["cousin-job", "start", "shell", "--json", "--desc", "why",
+             "--home-log", "data/t.log", "--", "t", "sh", "--desc", "x"])
+
+    def test_a_title_that_looks_like_an_option_sits_after_the_separator(self):
+        for title in ("--", "-x", "--json"):
+            argv = self._argv({"title": title, "argv": ["true"]})
+            self.assertEqual(argv[argv.index("--") + 1:], [title, "true"])
 
     def test_an_empty_or_mixed_or_scalar_argv_is_refused(self):
         for bad in ([], ["echo", 3], "echo hi", None):

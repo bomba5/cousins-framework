@@ -185,6 +185,76 @@ class AgentDefaultsSeam(unittest.TestCase):
             config.agent_config(self._root('[agent]\nmodels = [1, 2]\n'))
 
 
+class CommitAttributionSeam(unittest.TestCase):
+    """config/harness.toml [agent] commit_attribution, overridden by a
+    cousin's own cousin.toml [agent] commit_attribution (tracker #112):
+    whether a commit or PR this cousin makes carries Claude Code's own
+    injected attribution. Unset anywhere: True, the CLI's stock
+    behaviour - the framework is public and does not impose one
+    operator's policy on every install."""
+
+    def _root(self, text=None):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        if text is not None:
+            (root / "config").mkdir()
+            (root / "config" / "harness.toml").write_text(text)
+        return root
+
+    def test_unset_anywhere_is_true(self):
+        self.assertIs(config.commit_attribution(self._root()), True)
+
+    def test_install_default_false(self):
+        root = self._root('[agent]\ncommit_attribution = false\n')
+        self.assertIs(config.commit_attribution(root), False)
+
+    def test_install_default_true_is_explicit(self):
+        root = self._root('[agent]\ncommit_attribution = true\n')
+        self.assertIs(config.commit_attribution(root), True)
+
+    def test_cousin_override_wins_over_install_default(self):
+        root = self._root('[agent]\ncommit_attribution = false\n')
+        self.assertIs(
+            config.commit_attribution(root, {"commit_attribution": True}), True)
+        root = self._root('[agent]\ncommit_attribution = true\n')
+        self.assertIs(
+            config.commit_attribution(root, {"commit_attribution": False}), False)
+
+    def test_cousin_table_with_no_key_falls_back_to_install(self):
+        root = self._root('[agent]\ncommit_attribution = false\n')
+        self.assertIs(config.commit_attribution(root, {"runner": "sdk"}), False)
+
+    def test_a_non_boolean_install_value_is_loud_not_coerced(self):
+        # "false" the string is truthy under bool(); it must never win
+        for text in ('[agent]\ncommit_attribution = "false"\n',
+                    '[agent]\ncommit_attribution = 0\n',
+                    '[agent]\ncommit_attribution = 1\n',
+                    '[agent]\ncommit_attribution = ["false"]\n',
+                    '[agent]\ncommit_attribution = {x = 1}\n'):
+            root = self._root(text)
+            with self.assertRaises(config.MissingConfigError):
+                config.commit_attribution(root)
+
+    def test_a_non_boolean_cousin_value_is_loud_not_coerced(self):
+        root = self._root()
+        for bad in ("false", 0, 1, ["false"], {"x": 1}):
+            with self.assertRaises(config.MissingConfigError):
+                config.commit_attribution(root, {"commit_attribution": bad})
+
+    def test_cousin_type_error_names_cousin_toml_not_the_install_file(self):
+        root = self._root('[agent]\ncommit_attribution = false\n')
+        with self.assertRaises(config.MissingConfigError) as cm:
+            config.commit_attribution(root, {"commit_attribution": "nope"})
+        self.assertIn("cousin.toml", str(cm.exception))
+
+    def test_install_type_error_names_harness_toml(self):
+        root = self._root('[agent]\ncommit_attribution = "nope"\n')
+        with self.assertRaises(config.MissingConfigError) as cm:
+            config.commit_attribution(root)
+        self.assertIn("config/harness.toml", str(cm.exception))
+
+
 class TestClaudeCodePreset(unittest.TestCase):
     """The shipped Claude Code preset (config/harness.toml.claude-code.example).
 

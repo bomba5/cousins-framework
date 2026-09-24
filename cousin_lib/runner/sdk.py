@@ -66,6 +66,19 @@ LIVE_STATES = ("running", "waiting_permission")
 # no account kind can drop it; proven by effect in
 # tests/runner/test_live_prompt.py, with a control run (phase 7).
 AUTO_MEMORY_OFF = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+# Tracker #112: config.commit_attribution decides whether the CLI's own
+# injected attribution (a Co-Authored-By trailer, a "Generated with
+# Claude Code" line) reaches a commit or PR this cousin makes. False
+# composes into options.settings, the CLI's --settings (the highest-
+# priority user-controlled layer per claude_agent_sdk's ClaudeAgentOptions
+# docstring); True passes no `settings` at all, so nothing here overrides
+# the CLI's stock behaviour.
+ATTRIBUTION_OFF_SETTINGS = json.dumps({"includeCoAuthoredBy": False,
+                                       "attribution": {"commit": "", "pr": ""}})
+
+
+def _attribution_settings(commit_attribution):
+    return None if commit_attribution else ATTRIBUTION_OFF_SETTINGS
 # The session a runner is (phase 8, runner/sessions.py): the primary holds
 # the generation; a side session is named by the thread kind it answers.
 PRIMARY = "primary"
@@ -184,7 +197,8 @@ class SdkRunner:
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
                  effort=None, cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
                  drain_timeout_s=30.0, policy=None, registry=None, handoff_deadline_s=None,
-                 session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None):
+                 session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None,
+                 commit_attribution=None):
         self.home = Path(home)
         # Which rows this session claims (phase 8): claim_kinds None is every
         # kind but exclude_kinds; a side session names its own kind.
@@ -278,6 +292,13 @@ class SdkRunner:
         slug, name = self._identity()
         from cousin_lib.runner.main import root_for
         self.root = root_for(self.home)
+        # [agent] commit_attribution (tracker #112; runner_for checked it,
+        # like effort): resolved once here, not per options() call, so a
+        # cousin.toml edited mid-session never changes it mid-turn. A
+        # caller that builds a runner directly (most tests) leaves it
+        # unset and gets it resolved from cousin.toml / config/harness.toml.
+        self.commit_attribution = (self._commit_attribution() if commit_attribution is None
+                                   else bool(commit_attribution))
         self.tool_context = tools.ToolContext(home=self.home, slug=slug, name=name,
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
@@ -311,14 +332,26 @@ class SdkRunner:
         except Exception:  # noqa: BLE001 - a thin toml still runs; the dir names it
             return self.home.name, self.home.name.capitalize()
 
-    def _agent_value(self, key, default):
-        """A value from cousin.toml [agent], else default."""
+    def _agent_table(self):
+        """cousin.toml [agent], or {} when unreadable (a thin toml still
+        runs)."""
         import tomllib
         try:
-            agent = tomllib.loads((self.home / "cousin.toml").read_text()).get("agent") or {}
+            return tomllib.loads((self.home / "cousin.toml").read_text()).get("agent") or {}
         except (OSError, tomllib.TOMLDecodeError):
-            return default
-        return agent.get(key, default)
+            return {}
+
+    def _agent_value(self, key, default):
+        """A value from cousin.toml [agent], else default."""
+        return self._agent_table().get(key, default)
+
+    def _commit_attribution(self):
+        """config.commit_attribution (tracker #112), resolved for this
+        cousin: its own cousin.toml [agent] commit_attribution wins,
+        else the install's config/harness.toml [agent] commit_attribution,
+        else True."""
+        from cousin_lib.config import commit_attribution as resolve_commit_attribution
+        return resolve_commit_attribution(self.root, self._agent_table())
 
     # -- options -----------------------------------------------------------
     def options(self, *, resume=None):
@@ -364,6 +397,7 @@ class SdkRunner:
                                       effort=self.effort,
                                       permission_mode="bypassPermissions",
                                       setting_sources=[], resume=store_resume,
+                                      settings=_attribution_settings(self.commit_attribution),
                                       system_prompt=system_prompt, session_store=self.session_store,
                                       mcp_servers=self._mcp_servers(server),
                                       hooks=hook_table,
@@ -2141,7 +2175,7 @@ class _ScrubbedAuthEnv:
 
 
 def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
-                     client_factory=None):
+                     client_factory=None, commit_attribution=True):
     """`cousin-runner --check-auth --validate` (R13): ONE smallest model
     turn on a bare, throwaway client under the account's environment:
     setting_sources=[], no session store, no tools, no MCP server, no
@@ -2165,6 +2199,7 @@ def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
     # no-session-persistence: no transcript under the account's config dir
     options = sdk.ClaudeAgentOptions(cwd=cwd, model=model, effort=effort, env=env,
                                      setting_sources=[], tools=[], mcp_servers={}, max_turns=1,
+                                     settings=_attribution_settings(commit_attribution),
                                      extra_args={"no-session-persistence": None})
     factory = client_factory or (lambda o: sdk.ClaudeSDKClient(options=o))
 

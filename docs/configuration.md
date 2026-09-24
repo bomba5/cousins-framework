@@ -351,6 +351,7 @@ path out.
 | `default_model` | none | what `{model}` renders to for a cousin without its own |
 | `default_effort` | none | what `{effort}` renders to; one of `low`, `medium`, `high`, `xhigh`, `max` |
 | `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list, which follows code updates. |
+| `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux lane (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` stream event, so it is observable without reading either toml file. |
 
 `[agent.resume]`: how `agent-cmd` resumes a session instead of starting a new
 one. Switching a running cousin's auth mode restarts it on the same session
@@ -836,6 +837,16 @@ The runner waits at most 10 minutes for the next message of a turn (a stream
 gone silent fails the turn) and puts no limit on a whole turn. These are
 constructor defaults of the SDK runner (`idle_timeout_s`, `turn_timeout_s`),
 not cousin.toml keys in this phase.
+
+`commit_attribution` overrides `config/harness.toml [agent]
+commit_attribution` for this cousin alone (tracker #112, see the table
+above): `false` turns off the CLI's own injected attribution on this
+cousin's commits and PRs, whatever the install default says; `true` or
+absent falls back to the install default (itself `true` when unset).
+The resolved value composes into the SDK runner's `options()` (and
+`validate_account`'s), and into the tmux lane's
+`<home>/.claude/settings.json` (`apply_project_settings`), and rides
+the runner's head `runner` stream event.
 
 `rollover_at_percent` (number, default 80) is the context percentage at which
 the runner rolls the cousin over at its next idle: it asks the model for its

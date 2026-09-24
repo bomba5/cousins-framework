@@ -127,6 +127,29 @@ def _stream_says(home, text):
     return False
 
 
+def _head_payload(home):
+    from cousin_lib.runner import status
+    path = status.primary_stream(home)
+    return json.loads(path.read_text().splitlines()[0])["payload"]
+
+
+class TestHeadEventAttribution(HermeticCase):
+    """Tracker #112: the head `runner` event says commit_attribution, so
+    it is observable without reading cousin.toml or config/harness.toml."""
+
+    def test_true_by_default(self):
+        home = temp_home(self, runner="fake")
+        self.assertEqual(runner_main.runner_main(["--home", str(home), "--once"]), 0)
+        self.assertIs(_head_payload(home)["commit_attribution"], True)
+
+    def test_false_reflects_a_cousin_override(self):
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + "commit_attribution = false\n")
+        self.assertEqual(runner_main.runner_main(["--home", str(home), "--once"]), 0)
+        self.assertIs(_head_payload(home)["commit_attribution"], False)
+
+
 class TestRunnerSelection(HermeticCase):
     def test_a_cousin_with_no_runner_key_is_refused_not_given_an_sdk_session(self):
         home = temp_home(self)
@@ -293,6 +316,37 @@ class TestAuthLane(HermeticCase):
         rc, err = _run(["--home", str(home), "--once"])
         self.assertEqual(rc, 2)
         self.assertIn("effort", err)
+
+    def test_a_non_boolean_cousin_commit_attribution_is_exit_2_at_start(self):
+        # tracker #112, Critical 2: bool("false") is True, so this must
+        # be refused, not silently accepted, at the same runner-start
+        # point as an effort the CLI would refuse.
+        home = temp_home(self, runner="sdk")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + 'commit_attribution = "off"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+        self.assertIn("cousin.toml", err)
+
+    def test_a_non_boolean_install_commit_attribution_is_exit_2_at_start(self):
+        home = temp_home(self, runner="sdk")
+        root = home.parent.parent
+        (root / "config").mkdir()
+        (root / "config" / "harness.toml").write_text(
+            '[agent]\ncommit_attribution = "off"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
+        self.assertIn("config/harness.toml", err)
+
+    def test_a_non_boolean_commit_attribution_is_exit_2_for_a_fake_runner_too(self):
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + 'commit_attribution = "off"\n')
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("commit_attribution", err)
 
 
 class TestAccountBeforeTheLock(HermeticCase):

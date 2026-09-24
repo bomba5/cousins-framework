@@ -98,6 +98,20 @@ def effort_of(agent):
     return effort
 
 
+def commit_attribution_of(agent, root):
+    """config.commit_attribution (tracker #112), checked eagerly at
+    runner start like effort_of: a cousin.toml or config/harness.toml
+    value that is not a real boolean is configuration (RunnerError,
+    exit 2), never something that reaches a live turn or the head
+    stream event only to blow up there."""
+    from cousin_lib.config import MissingConfigError
+    from cousin_lib.config import commit_attribution as resolve
+    try:
+        return resolve(root, agent)
+    except MissingConfigError as err:
+        raise RunnerError(str(err))
+
+
 def account_for(home):
     """The account this cousin runs on, checked before anything starts: an
     unknown account, a secret file that is open to group or others, not
@@ -165,6 +179,10 @@ def runner_for(home, *, kind=None):
     if kind not in KINDS:
         raise RunnerError("cousin.toml [agent] runner must be one of %s, got %r"
                           % (", ".join(KINDS), kind))
+    # tracker #112: checked eagerly, for every kind, so a value neither
+    # true nor false is exit 2 at runner start, like effort_of - never
+    # a MissingConfigError that reaches a live turn or the head event.
+    commit_attribution = commit_attribution_of(agent, root_for(home))
     from cousin_lib.runner import sessions
     from cousin_lib.runner.policy import Policy
     policy = Policy.load(home)
@@ -193,7 +211,8 @@ def runner_for(home, *, kind=None):
     if kind == "sdk":
         from cousin_lib.runner.sdk import SdkRunner
         common = dict(account=account, model=agent.get("model"),
-                      effort=effort_of(agent), policy=policy)
+                      effort=effort_of(agent), commit_attribution=commit_attribution,
+                      policy=policy)
         if side:
             return sessions.Sessions(home, kinds=side, **common)
         return SdkRunner(home, **common)
@@ -404,13 +423,15 @@ def _check_auth(home, *, validate=False):
         account = accounts.for_cousin(home, root)
         agent = _agent_table(home)
         effort = effort_of(agent)
+        attribution = commit_attribution_of(agent, root)
     except (accounts.AccountsError, RunnerError) as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
     from cousin_lib.runner import sdk
     try:
-        rc, line = sdk.validate_account(account, root, model=agent.get("model"),
-                                        effort=effort)
+        rc, line = sdk.validate_account(
+            account, root, model=agent.get("model"), effort=effort,
+            commit_attribution=attribution)
     except RunnerError as err:        # the sdk extra is not installed
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
@@ -438,9 +459,17 @@ def _serve(runner, once):
                 pass
         # Before start: the head of this process's stream says what runs
         # here, for a reader with no runner object (runner/status.py).
+        # commit_attribution (tracker #112) rides along so a reader can
+        # see whether this cousin's commits carry the CLI's own injected
+        # attribution without reading cousin.toml or config/harness.toml
+        # itself. runner_for already validated it (exit 2 before this
+        # point on a bad value); commit_attribution_of here is a second,
+        # cheap read - never the first place a bad value can surface.
         runner.stream.append("runner", {"kind": getattr(runner, "kind", None),
                                         "pid": os.getpid(),
-                                        "unsupported": list(runner.unsupported())})
+                                        "unsupported": list(runner.unsupported()),
+                                        "commit_attribution": commit_attribution_of(
+                                            _agent_table(runner.home), runner.root)})
         runner.start()
         policy = getattr(runner, "policy", None)
         if policy is not None:

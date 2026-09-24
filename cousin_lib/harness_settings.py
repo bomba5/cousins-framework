@@ -18,7 +18,10 @@ import pathlib
 import shlex
 import sys
 import tempfile
+import tomllib
 
+from cousin_lib.config import MissingConfigError
+from cousin_lib.config import commit_attribution as resolve_commit_attribution
 from cousin_lib.mcp_server import SERVER_NAME
 
 PROJECT_SETTINGS = pathlib.Path(".claude") / "settings.json"
@@ -43,6 +46,21 @@ JOB_HOOK_EVENTS = (("PreToolUse", JOB_HOOK_MATCHERS),
                    ("PostToolUseFailure", (None,)),
                    ("SubagentStop", (None,)))
 JOB_HOOK_TIMEOUT = 10
+
+# Tracker #112: what this module writes to turn Claude Code's own
+# injected attribution (a Co-Authored-By trailer, a "Generated with
+# Claude Code" line) off, for the tmux lane (the SDK runner reaches the
+# same outcome through options.settings, sdk.py's ATTRIBUTION_OFF_SETTINGS).
+ATTRIBUTION_OFF = {"commit": "", "pr": ""}
+# The ownership marker's own path: a sidecar under data/, never a key
+# inside settings.json itself. settings.json has the harness's OWN
+# schema - the harness reads it every session - so a private bookkeeping
+# key there risks the harness choking on or surfacing something it does
+# not recognise. data/ already holds this module's kind of private,
+# per-cousin state elsewhere in the framework (the runner's
+# runner-session.json, login-required.json), so a sidecar there is the
+# framework's own convention, not a new one.
+ATTRIBUTION_MARKER = pathlib.Path("data") / "harness-attribution-owned.json"
 
 
 class SettingsError(Exception):
@@ -107,6 +125,80 @@ def desired_hooks(home, *, root, python=None, hooks_root=None):
                 group = {"matcher": matcher, **group}
             wanted.setdefault(event, []).append(group)
     return wanted, missing
+
+
+def _cousin_agent_table(home):
+    """cousin.toml [agent], or {} when the file is missing or unreadable
+    (a home mid-spawn, or a thin toml): never raises, this is a read for
+    a default, not a required key."""
+    try:
+        data = tomllib.loads((pathlib.Path(home) / "cousin.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    return data.get("agent") or {}
+
+
+def _marker_path(home):
+    return pathlib.Path(home) / ATTRIBUTION_MARKER
+
+
+def _read_owned_attribution(home):
+    """{key: value} this module itself wrote last time, for the keys
+    _apply_attribution owns (includeCoAuthoredBy, attribution); {} when
+    the sidecar is absent, unreadable or not an object - never a reason
+    to treat an operator's key as ours."""
+    try:
+        data = json.loads(_marker_path(home).read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_owned_attribution(home, owned):
+    """The sidecar recording exactly what _apply_attribution wrote this
+    run; removed (not left as `{}`) when nothing is owned any more, so
+    its mere presence answers "does this module own anything here"."""
+    path = _marker_path(home)
+    if not owned:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(owned))
+    os.replace(tmp, path)
+
+
+def _apply_attribution(home, data, commit_attribution):
+    """includeCoAuthoredBy / attribution, added when commit_attribution
+    is False, removed again when it is True - but ownership is never
+    decided by matching the framework's own shape (Critical 1, review
+    round 1: an operator who happens to write includeCoAuthoredBy:
+    false by hand is not this module). A sidecar under data/
+    (_read_owned_attribution) records the exact key/value pairs this
+    module itself wrote last time; turning on removes a key only when
+    it is still in that record AND still holds the recorded value. A
+    key an operator wrote, or edited after this module wrote it, is
+    left exactly as it is, whichever direction commit_attribution
+    moves, and drops out of the record either way."""
+    owned = _read_owned_attribution(home)
+    if commit_attribution:
+        for key, written in owned.items():
+            if data.get(key) == written:
+                del data[key]
+        _write_owned_attribution(home, {})
+        return data
+    to_write = {"includeCoAuthoredBy": False, "attribution": dict(ATTRIBUTION_OFF)}
+    new_owned = {}
+    for key, value in to_write.items():
+        if key not in data or (key in owned and data[key] == owned[key]):
+            data[key] = value
+            new_owned[key] = value
+    _write_owned_attribution(home, new_owned)
+    return data
 
 
 def _load(path):
@@ -176,6 +268,20 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None):
                                 % (path, event))
         hooks[event] = current + groups
     data["hooks"] = hooks
+    # Tracker #112: the install's config/harness.toml [agent]
+    # commit_attribution, overridden by this cousin's own cousin.toml
+    # [agent] commit_attribution - the tmux lane's reach for the same
+    # outcome the SDK runner gets through options.settings. A value
+    # that is not a real boolean at either level is config.py's
+    # MissingConfigError; wrapped as this module's own SettingsError so
+    # every caller (cousin-spawn's create and --repair-settings paths)
+    # keeps catching what it already catches, and the settings file is
+    # left as it is, same as any other SettingsError here.
+    try:
+        commit_attribution = resolve_commit_attribution(root, _cousin_agent_table(home))
+    except MissingConfigError as err:
+        raise SettingsError(str(err))
+    data = _apply_attribution(home, data, commit_attribution)
     text = json.dumps(data, indent=2) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text() != text:

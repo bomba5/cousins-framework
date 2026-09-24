@@ -3,6 +3,38 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Added
+- `[agent] commit_attribution` (tracker #112): install-wide in
+  `config/harness.toml`, overridable per cousin in `cousin.toml`. `false`
+  turns off the harness's own injected commit/PR attribution (a
+  Co-Authored-By trailer, a "Generated with Claude Code" line); unset
+  anywhere, `true`, the harness's stock behaviour. The SDK runner composes
+  it into `options.settings` (and `validate_account`'s), side sessions get
+  the same, and the tmux lane's `apply_project_settings` writes
+  `includeCoAuthoredBy: false` and an empty `attribution` object into
+  `<home>/.claude/settings.json`, idempotently and without touching an
+  operator's own keys there. The resolved value rides the runner's head
+  `runner` stream event.
+
+### Fixed
+- The template sync now corrects a cousin's `mcp-registry.toml` when a
+  `description` field still holds text an earlier framework release
+  shipped, not just what it lacks entirely (#110). The `job` tool's `run`
+  command shipped with new wording for its own tool description and its
+  `kind`, `title` and `desc` property descriptions, but the sync only ever
+  ADDED missing tables and keys: a cousin spawned before `run` kept the
+  old text pointing at `cousin-job start shell` through Bash forever. A
+  small table of previously shipped values per field (`_KNOWN_TEXT` in
+  `cousin_lib/template_sync.py`) tells a framework value the sync may
+  still replace from the cousin's own edit of the same field, which never
+  matches and is left alone; the correction is idempotent. The tmux-lane
+  CLAUDE.md template now teaches the `job` tool's `run` as the doctrine
+  for a tracked shell command, with `cousin-job start shell` through Bash
+  named only as the fallback when the tool is missing; `examples/wren`
+  regenerated to match.
+
 ## 1.21.0 - 2026-09-24
 
 ### Added
@@ -57,21 +89,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   is the operator's own flag.
 
 ### Fixed
-- The template sync now corrects a cousin's `mcp-registry.toml` when a
-  `description` field still holds text an earlier framework release
-  shipped, not just what it lacks entirely (#110). The `job` tool's `run`
-  command shipped with new wording for its own tool description and its
-  `kind`, `title` and `desc` property descriptions, but the sync only ever
-  ADDED missing tables and keys: a cousin spawned before `run` kept the
-  old text pointing at `cousin-job start shell` through Bash forever. A
-  small table of previously shipped values per field (`_KNOWN_TEXT` in
-  `cousin_lib/template_sync.py`) tells a framework value the sync may
-  still replace from the cousin's own edit of the same field, which never
-  matches and is left alone; the correction is idempotent. The tmux-lane
-  CLAUDE.md template now teaches the `job` tool's `run` as the doctrine
-  for a tracked shell command, with `cousin-job start shell` through Bash
-  named only as the fallback when the tool is missing; `examples/wren`
-  regenerated to match.
 - A long chat message on the tmux lane no longer reaches the cousin as a bare
   paste (#111). Claude Code reads one keyboard read of more than 800
   characters as a paste and wraps it in a pasted-content block its system

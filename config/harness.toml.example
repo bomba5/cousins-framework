@@ -67,6 +67,16 @@
 #default_effort = "high"
 #models = ["some-model", "another-model"]
 #
+# Whether a commit or pull request a cousin makes carries the harness's
+# own injected attribution (a Co-Authored-By trailer, a "Generated
+# with Claude Code" line). A cousin's own cousin.toml [agent]
+# commit_attribution overrides this per cousin. Absent here and in the
+# cousin: true, which keeps the harness's stock behaviour - the
+# framework is public and does not impose one operator's attribution
+# policy on every install. Set it false to have the SDK runner and the
+# tmux lane's <home>/.claude/settings.json both turn it off.
+#commit_attribution = true
+#
 # Pane text (regular expressions, searched in the agent's visible
 # pane) that means the agent is mid-turn. `cousin-auth` and the
 # console refuse to restart a busy cousin unless forced. Absent: no

@@ -1,5 +1,6 @@
 """SdkRunner against a scripted client: the whole loop, no model."""
 import asyncio
+import json
 import os
 import time
 import unittest
@@ -341,6 +342,43 @@ class TestSdkRunner(HermeticCase):
         r, _ = self._runner([])
         self.assertIn("replay-user-messages", r.options().extra_args)
         self.assertIsNone(r.options().extra_args["replay-user-messages"])
+
+    # -- commit attribution (tracker #112) --------------------------------
+    def test_options_carry_no_settings_by_default(self):
+        r, _ = self._runner([])
+        self.assertIsNone(r.options().settings)
+
+    def test_options_carry_attribution_settings_when_the_cousin_turns_it_off(self):
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + "commit_attribution = false\n")
+        r, _ = self._runner([])
+        settings = json.loads(r.options().settings)
+        self.assertIs(settings["includeCoAuthoredBy"], False)
+        self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
+
+    def test_options_carry_no_settings_when_explicitly_on(self):
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + "commit_attribution = true\n")
+        r, _ = self._runner([])
+        self.assertIsNone(r.options().settings)
+
+    def test_the_real_transport_puts_it_on_the_cli_argv(self):
+        # Not the SDK's own dataclass, the actual argv SubprocessCLITransport
+        # would exec: options.settings is a free-form field several SDK
+        # layers could still drop before it reaches the CLI (review round 1
+        # minor). _cli_path is set by hand so _build_command runs without
+        # connect()'s real CLI discovery / subprocess spawn.
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        (self.home / "cousin.toml").write_text(
+            (self.home / "cousin.toml").read_text() + "commit_attribution = false\n")
+        r, _ = self._runner([])
+        transport = SubprocessCLITransport("hi", r.options())
+        transport._cli_path = "/bin/true"
+        argv = transport._build_command()
+        self.assertIn("--settings", argv)
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        self.assertIs(settings["includeCoAuthoredBy"], False)
+        self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
 
     # -- one turn ----------------------------------------------------------------
     def test_a_turn_records_init_text_tool_and_result_and_closes_the_row(self):

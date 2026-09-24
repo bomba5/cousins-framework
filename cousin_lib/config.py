@@ -316,6 +316,43 @@ def agent_config(root):
     }
 
 
+def commit_attribution(root, agent_table=None):
+    """Whether a commit or pull request this cousin makes carries Claude
+    Code's own injected attribution (a Co-Authored-By trailer, a
+    "Generated with Claude Code" line): config/harness.toml [agent]
+    commit_attribution sets the install default; a cousin's own
+    cousin.toml [agent] commit_attribution overrides it - pass that
+    table as `agent_table`, read the same way runner/main.py's
+    `_agent_table` and runner/sdk.py's `_agent_value` already read it.
+    Unset anywhere: True, which keeps the CLI's stock behaviour - the
+    framework is public and does not impose one operator's attribution
+    policy on every install. Set but not a real boolean, at either
+    level: MissingConfigError naming the file, the key and the value -
+    bool() coerces "false" (the string) to True, and a value that loud
+    a mistake must never silently win."""
+    agent_table = agent_table or {}
+    if "commit_attribution" in agent_table:
+        own = agent_table["commit_attribution"]
+        if not isinstance(own, bool):
+            raise MissingConfigError(
+                "cousin.toml [agent] commit_attribution must be true or"
+                " false, got %r" % (own,))
+        return own
+    data = _read_harness_toml(root) or {}
+    agent = data.get("agent") or {}
+    if not isinstance(agent, dict):
+        raise MissingConfigError(
+            "config/harness.toml [agent] must be a table")
+    if "commit_attribution" in agent:
+        install = agent["commit_attribution"]
+        if not isinstance(install, bool):
+            raise MissingConfigError(
+                "config/harness.toml [agent] commit_attribution must be"
+                " true or false, got %r" % (install,))
+        return install
+    return True
+
+
 def harness_config(root):
     """config/harness.toml: where the agent harness keeps this install's
     session transcripts and its own auto-memory directory, and the

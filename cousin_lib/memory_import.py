@@ -20,10 +20,22 @@ since is never overwritten (a conflict, listed by name), and a copy the
 cousin removed is `dropped`: never imported again, whatever its source
 does.
 memory_search skips a harness file whose imported copy is current, so
-one memory is one hit."""
+one memory is one hit.
+
+verify() is the check (master task 5's recall regression test), before
+against after. The queries are the cousin's own (memory/.recall-log.jsonl,
+written by reinforce.record on every search). Just before apply() writes,
+take_baseline() replays the newest logged queries that surfaced a
+harness file and keeps what each surfaces NOW; verify() replays the same
+query text and reports any that lost a memory the baseline had (a
+`dropped` copy is not a loss). The log is only where the queries come
+from: its own results are history, and ranking and usage bonuses move.
+A logged query is at most 120 characters (reinforce keeps no more), and
+before and after replay that same text."""
 import hashlib
 import json
 import re
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +43,8 @@ from cousin_lib.config import expand_harness_path, harness_config
 
 TARGET = ("memory", "imported", "auto")
 MANIFEST = ".manifest.json"
+BASELINE = ".baseline.json"
+REPLAY_SAMPLE = 50           # how many of the newest logged queries a baseline replays
 ACTIONS = ("import", "update", "skip", "conflict", "dropped", "ignore")
 # A frontmatter block: `---`, its lines, `---` closing at a line end or at
 # the end of the file (a file with no final newline).
@@ -155,14 +169,16 @@ def plan(home, *, root):
     return rows
 
 
-def apply(home, *, root, now=None):
-    """plan(), then write every import and update, each file and the
-    manifest atomically. Returns the plan's rows."""
+def apply(home, *, root, now=None, sample=REPLAY_SAMPLE):
+    """plan(), then, when anything is to be written, take_baseline()
+    first and write every import and update, each file and the manifest
+    atomically. Returns the plan's rows."""
     home = Path(home)
     rows = plan(home, root=root)
     todo = [r for r in rows if r["action"] in ("import", "update")]
     if not todo:
         return rows
+    take_baseline(home, root=root, sample=sample)
     src = source_dir(home, root=root)
     tdir = target_dir(home)
     tdir.mkdir(parents=True, exist_ok=True)
@@ -183,6 +199,118 @@ def apply(home, *, root, now=None):
     from cousin_lib import reinforce
     reinforce.carry(home, {str(src / r["name"]): str(tdir / r["name"]) for r in todo})
     return rows
+
+
+def _logged_queries(home, base, sample):
+    """(query, [harness file names], depth) for the newest `sample` logged
+    searches that surfaced a file under `base`; depth is how many hits
+    that search returned."""
+    from cousin_lib import reinforce
+    try:
+        lines = reinforce._log_path(home).read_text().splitlines()
+    except OSError:
+        return []
+    prefix = str(base) + os.sep
+    out = []
+    for line in reversed(lines):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        paths = [str(p) for p in event.get("paths") or []]
+        names = sorted({Path(p).name for p in paths if p.startswith(prefix)})
+        if event.get("query") and names:
+            out.append((event["query"], names, len(paths)))
+        if len(out) >= sample:
+            break
+    return out
+
+
+def _index_current(home, root):
+    """Both indexes brought fully current, with no foreground budget,
+    before a replay searches: a search embeds at most FOREGROUND_BUDGET
+    stale chunks, and right after an import every copy is a new key, so a
+    replay on a partly built index would measure the index filling in,
+    not the import (R19)."""
+    from cousin_lib import memory_search
+    memory_search.build_index(home, root)
+    config = memory_search._embedding_config(root)
+    if isinstance(config, dict):
+        memory_search.ensure_index(home, config, root=root, wait=True)
+
+
+def _surfaced(home, root, query, top, src):
+    """The names of the harness files, or their imported copies, that
+    `query` surfaces now within `top` hits. record=False: a replay must
+    not reinforce what it measures."""
+    from cousin_lib import memory_search
+    bases = (str(src) + os.sep, str(target_dir(home)) + os.sep)
+    hits, _notice = memory_search.search(query, top=top, home=Path(home), root=root,
+                                         record=False)
+    return {Path(h["path"]).name for h in hits if str(h["path"]).startswith(bases)}
+
+
+def take_baseline(home, *, root, sample=REPLAY_SAMPLE):
+    """Before an import writes: replay the newest `sample` logged queries
+    that surfaced a harness file and keep, per query, what it surfaces
+    from that directory NOW. A query that surfaces none of it now cannot
+    regress and is left out. Written to memory/imported/auto/.baseline.json."""
+    home = Path(home)
+    src = source_dir(home, root=root)
+    rows = []
+    if src:
+        _index_current(home, root)
+    for query, _names, depth in (_logged_queries(home, src, sample) if src else []):
+        found = _surfaced(home, root, query, max(depth, 1), src)
+        if found:
+            rows.append({"query": query, "top": max(depth, 1), "names": sorted(found)})
+    base = {"taken_at": datetime.now(timezone.utc).isoformat(), "queries": rows}
+    tdir = target_dir(home)
+    tdir.mkdir(parents=True, exist_ok=True)
+    tmp = tdir / (BASELINE + ".tmp")
+    tmp.write_text(json.dumps(base, indent=1) + "\n")
+    tmp.replace(tdir / BASELINE)
+    return base
+
+
+def verify(home, *, root):
+    """Replay the baseline's queries now. A query is KEPT when every name
+    it surfaced in the baseline is surfaced again, as the harness file or
+    as its imported copy, within the same number of hits; a `dropped`
+    copy is not a loss. Returns {"baseline": bool, "queries", "kept",
+    "lost": [{"query", "missing": [names]}]}."""
+    home = Path(home)
+    src = source_dir(home, root=root)
+    try:
+        base = json.loads((target_dir(home) / BASELINE).read_text())
+    except (OSError, ValueError):
+        return {"baseline": False, "queries": 0, "kept": 0, "lost": []}
+    dropped = {r["name"] for r in plan(home, root=root) if r["action"] == "dropped"}
+    _index_current(home, root)
+    kept, lost = 0, []
+    for row in base.get("queries") or []:
+        found = _surfaced(home, root, row["query"], int(row["top"]), src)
+        missing = [n for n in row["names"] if n not in found and n not in dropped]
+        if missing:
+            lost.append({"query": row["query"], "missing": missing})
+        else:
+            kept += 1
+    return {"baseline": True, "queries": kept + len(lost), "kept": kept, "lost": lost}
+
+
+def format_verify(report):
+    if not report["baseline"]:
+        return ("no baseline: run import-auto --apply first; it replays your logged"
+                " queries before it writes anything")
+    n = report["queries"]
+    if not n:
+        return ("replayed 0 queries: nothing in your recall log reached that memory,"
+                " so this check proved nothing")
+    lines = ["replayed %d logged %s: %d kept, %d lost" % (
+        n, "query" if n == 1 else "queries", report["kept"], len(report["lost"]))]
+    lines += ["  lost: %r no longer surfaces %s" % (row["query"], ", ".join(row["missing"]))
+              for row in report["lost"]]
+    return "\n".join(lines)
 
 
 def format_plan(rows, *, applied):

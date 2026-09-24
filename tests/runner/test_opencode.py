@@ -172,6 +172,17 @@ class OpencodeCase(HermeticCase):
         row = r.inbox.get(receipt.inbox_id)
         return row["outcome"] if row and row["state"] == "done" else None
 
+    def settled(self, r, receipt):
+        """The row's outcome once the stream also holds the result that
+        closed it. The runner closes the row first and appends the result
+        after (as the SDK lane does), so a test that reads the stream must
+        wait for this, not for the row alone."""
+        out = self.outcome(r, receipt)
+        if out is None:
+            return None
+        closed = [i for p in self.payloads(r, "result") for i in p.get("inbox_ids", [])]
+        return out if receipt.inbox_id in closed else None
+
     def prompts(self):
         return [q for q in self.factory.fake.requests if q["path"].endswith("/prompt_async")]
 
@@ -376,7 +387,7 @@ class TestTurns(OpencodeCase):
                                        ("tool", "cousin_memory", {"command": "search"}, "found"),
                                        ("text", "all done here")]]))
         a = r.enqueue(_op("look it up"))
-        self.assertTrue(_wait(lambda: self.outcome(r, a) is not None))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
         self.assertEqual(self.outcome(r, a), "delivered")
         kinds = [k for k in self.kinds(r) if k in ("turn_start", "thinking", "tool",
                                                    "tool_result", "text", "result")]
@@ -420,7 +431,7 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: r.state() == "running"))
         b = r.enqueue(_op("second, mid-turn", "sam"))
         self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
-        self.assertTrue(_wait(lambda: self.outcome(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
         time.sleep(0.3)
         results = self.payloads(r, "result")
         self.assertEqual(len(results), 1, "one idle closes both (R14')")
@@ -452,7 +463,7 @@ class TestTurns(OpencodeCase):
         stop = r.enqueue(Item("system", "interrupt", "stop it", sender="Priya"))
         self.assertTrue(_wait(lambda: self.outcome(r, stop) is not None))
         self.assertEqual(self.outcome(r, stop), "delivered")
-        self.assertTrue(_wait(lambda: self.outcome(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
         results = self.payloads(r, "result")
         self.assertEqual(results[0]["inbox_ids"], [a.inbox_id])
         self.assertEqual(results[0]["requeued"], [b.inbox_id])
@@ -471,7 +482,7 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("hang"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
-        self.assertTrue(_wait(lambda: self.outcome(r, a) is not None, 3))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
         self.assertTrue(self.payloads(r, "result")[-1]["interrupted"])
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertFalse(r.interrupt())
@@ -485,7 +496,7 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("one"))
         self.assertTrue(_wait(lambda: self.outcome(r, a) is not None))
         b = r.enqueue(_op("two"))
-        self.assertTrue(_wait(lambda: self.outcome(r, b) is not None, 8))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
         self.assertEqual((self.outcome(r, a), self.outcome(r, b)), ("failed", "delivered"))
         results = self.payloads(r, "result")
         self.assertEqual([x["inbox_ids"] for x in results], [[a.inbox_id], [b.inbox_id]])
@@ -518,7 +529,7 @@ class TestTurns(OpencodeCase):
         time.sleep(0.5)
         self.assertEqual(len(self.prompts()), 1, "no turn while the login waits")
         (home / "data" / "login-required.json").unlink()   # the operator's manual retry
-        self.assertTrue(_wait(lambda: self.outcome(r, a) is not None, 8))
+        self.assertTrue(_wait(lambda: any(p.get("restored") for p in self.payloads(r, "auth")), 8))
         self.assertEqual(self.outcome(r, a), "delivered")
         self.assertFalse(r.login_required())
         self.assertEqual([p.get("retry") for p in self.payloads(r, "auth")][-2:],

@@ -193,7 +193,10 @@ fresh session carrying the state digest as its first message when it cannot
 flight, and the agent CLI records that as the user's stop ("stop what you
 are doing and wait for the user"), so when the last runner stopped (or died)
 mid-turn, a resumed session's first line is the runner's own: the runner
-restarted, that was not the operator, continue where you were
+restarted, that was not the operator, continue where you were. A stop that
+was asked for (the console's stop, `cousin-supervisor stop`) is named as
+that stop instead, and the console's restart as a requested restart, with
+the same "continue where you were"
 (`data/runner-restart.json` marks it; a fresh start just drops the mark). It runs until
 SIGTERM or SIGINT, then stops the runner with a 30 second timeout
 (`runner.main.STOP_TIMEOUT_S`). `--once`

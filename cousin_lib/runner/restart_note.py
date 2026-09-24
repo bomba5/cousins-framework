@@ -15,7 +15,9 @@ drops the mark.
 A stop the operator asked for (console, cousin-supervisor stop) writes
 run/held BEFORE it signals the runner, so a stop that finds the hold marks
 it as held, and the line then says who stopped the turn. Only an unheld stop
-or a death is told "not the operator"."""
+or a death is told "not the operator". A restart that was asked for holds
+under a name ending in "restart" (the console's is REQUESTED_RESTART_BY):
+its line says a requested restart cut the turn, and to continue it."""
 import json
 import os
 from datetime import datetime, timezone
@@ -25,6 +27,8 @@ FILE = ("data", "runner-restart.json")
 SOURCE = "boot"             # the framework's start-up line (thread `system`, sender `runner`)
 MARKER = "[runner] the runner restarted"
 HELD_MARKER = "[runner] a requested stop cut your last turn"
+RESTART_HELD_MARKER = "[runner] a requested restart cut your last turn"
+REQUESTED_RESTART_BY = "console restart"   # the hold the console's restart writes
 
 
 def _path(home):
@@ -78,8 +82,20 @@ def clear(home):
     _path(home).unlink(missing_ok=True)
 
 
+def requested_restart(held):
+    """The hold (`<ISO time> <who>`) is a restart's: its who ends in
+    "restart". An unreadable hold is a stop's."""
+    who = str(held).strip().split(" ", 1)[-1]
+    return who.endswith("restart")
+
+
 def body(note):
     """The line the resumed session gets."""
+    if note.get("held") and requested_restart(note["held"]):
+        return (RESTART_HELD_MARKER + " (at %s: %s). A restart interrupts the turn in flight,"
+                " and your agent CLI records that as \"[Request interrupted by user]\": that was"
+                " the restart that was asked for, not a request to stop. Nothing was lost:"
+                " continue where you were." % (note.get("at", "unknown"), note["held"]))
     if note.get("held"):
         return (HELD_MARKER + " (at %s: %s). Your agent CLI records that stop as"
                 " \"[Request interrupted by user]\"; it was the stop that was asked for."

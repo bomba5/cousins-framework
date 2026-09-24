@@ -204,6 +204,9 @@ class TestRunnerLaneStartStop(_Case):
         while ("start", "wren") not in stub.ops() and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertEqual(stub.ops(), [("stop", "wren"), ("status", None), ("start", "wren")])
+        # #98 review: the hold a restart writes names the restart, so the
+        # resumed session is told to continue, not that a stop cut it
+        self.assertEqual(stub.requests[0]["by"], "console restart")
         self.assertEqual(self.tmux_calls(), "")
 
     def test_restart_with_nothing_to_stop_starts_at_once(self):

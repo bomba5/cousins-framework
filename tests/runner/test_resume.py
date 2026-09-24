@@ -243,7 +243,8 @@ class TestRestartNote(HermeticCase):
     @staticmethod
     def is_note(row):
         body = row.get("body") or ""
-        return "the runner restarted" in body or "a requested stop cut your last turn" in body
+        return any(m in body for m in ("the runner restarted", "a requested stop cut your last turn",
+                                       "a requested restart cut your last turn"))
 
     def test_a_stop_mid_turn_puts_the_restart_line_first_in_the_resumed_session(self):
         # an established session (an earlier turn recorded its id): the case
@@ -298,6 +299,32 @@ class TestRestartNote(HermeticCase):
         self.assertNotIn("continue where you were", note["body"])
         self.assertIn("a requested stop cut your last turn", note["body"])
         self.assertIn("priya from the console", note["body"])
+
+    def test_a_requested_restart_mid_turn_is_told_to_continue(self):
+        """#98 review: the console's restart holds the runner with its own
+        name ("console restart") before it signals; the resumed session is
+        told a requested restart cut its turn and to continue it, never
+        that a requested stop did."""
+        from cousin_lib import supervisor
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login"}))
+        r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
+        r1.start()
+        r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
+        self.assertTrue(_wait(lambda: r1.state() == "running"))
+        supervisor.hold(self.home, "console restart")
+        r1.stop(timeout=5)
+        supervisor.release(self.home)
+        r2 = self.runner([init_msg(session="s-live"), assistant(text="continuing"),
+                          result(session="s-live")])
+        r2.start()
+        self.assertTrue(_wait(lambda: any(self.is_note(row) and row["state"] == "done"
+                                          for row in self.rows(r2))), self.rows(r2))
+        note = next(row for row in self.rows(r2) if self.is_note(row))
+        self.assertIn("a requested restart cut your last turn", note["body"])
+        self.assertIn("continue", note["body"])
+        self.assertNotIn("a requested stop", note["body"])
+        self.assertNotIn("not the operator", note["body"])
 
     def test_a_clean_stop_leaves_no_mark_and_no_line(self):
         r1 = self.runner([init_msg(session="s-live"), assistant(text="ok"),

@@ -38,6 +38,23 @@ _REPO = pathlib.Path(__file__).resolve().parents[1]
 _COMPOSE = _REPO / "compose.yml"
 _SIZE = _REPO / "docker" / "image-size.sh"
 _VERSION = tomllib.loads((_REPO / "pyproject.toml").read_text())["project"]["version"]
+# Phase 6's CHANGELOG entry is found by what it says, never by its
+# number or its place: a release landing before or after it renumbers it
+# and moves the top of the file, never what phase 6 shipped.
+_PHASE6_NEEDLE = "cousin-supervisor"
+
+
+def _phase6_entry(text):
+    """(version, body, the version of the entry right below it) of the
+    CHANGELOG entry whose body names cousin-supervisor."""
+    heads = list(re.finditer(r"^## (\d+\.\d+\.\d+) - .*$", text, re.M))
+    for i, head in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        body = text[head.end():end]
+        if _PHASE6_NEEDLE in body:
+            below = heads[i + 1].group(1) if i + 1 < len(heads) else None
+            return head.group(1), body, below
+    raise AssertionError("no CHANGELOG entry names %s" % _PHASE6_NEEDLE)
 _UP_S = 120          # compose up until the console answers /api/version
 _ANSWER_S = 90       # a delivered row until the fake runner closes it
 _DOWN_S = 120        # compose down: the ordered stop is at most 45 s
@@ -596,15 +613,16 @@ class TestDeliveryDocs(unittest.TestCase):
         self.assertNotIn("exits 0", section)
 
     def test_the_changelog_top_entry_is_one_minor_above_the_last(self):
+        """Phase 6's entry (found by content: the top one when it closed) is
+        one MINOR above the entry right below it and says what phase 6
+        shipped."""
         text = self.read("CHANGELOG.md")
-        versions = re.findall(r"^## (\d+\.\d+\.\d+) - ", text, re.M)
-        self.assertEqual(versions[0], _VERSION)
-        top, last = _semver(versions[0]), _semver(versions[1])
+        version, entry, below = _phase6_entry(text)
+        self.assertGreaterEqual(_semver(_VERSION), _semver(version))
+        top, last = _semver(version), _semver(below)
         # SemVer: the next MINOR resets PATCH; MAJOR stays.
         self.assertEqual(top, (last[0], last[1] + 1, 0),
-                         "%s is not one MINOR above %s" % (versions[0], versions[1]))
-        start = text.index("## %s - " % versions[0])
-        entry = text[start:text.index("\n## ", start + 1)]
+                         "%s is not one MINOR above %s" % (version, below))
         for needle in ("cousin-supervisor", "run/held", "exits 5", "run/loops.lock",
                        "202 `stopping`", "--no-wait", "--name", "at least once",
                        "pip removed from the image", "200 with `\"runner\": \"not running\"",
@@ -629,7 +647,7 @@ class TestDeliveryDocs(unittest.TestCase):
         row = next(line for line in text.splitlines()
                    if line.startswith("| 6 | Supervisor and docker delivery |"))
         self.has("**DONE**", row, "the phase 6 row")
-        self.has("v%s," % _VERSION, row, "the phase 6 row")
+        self.has("v%s," % _phase6_entry(self.read("CHANGELOG.md"))[0], row, "the phase 6 row")
         self.assertRegex(row, r"v[0-9.]+, [0-9]+ tests")
         phase6 = text.index("\n## Phase 6")
         criteria = text[text.index("**Exit criteria**", phase6):

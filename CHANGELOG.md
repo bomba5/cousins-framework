@@ -3,6 +3,48 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.17.0 - 2026-09-24
+
+### Added
+- `cousin-migrate plan|apply|rollback|check <slug>`: one running cousin from
+  the tmux lane to the SDK runner as recorded operator steps (a clean stop,
+  the auto-memory import, `[agent] runner = "sdk"`, the supervisor's start
+  plus the cousin's chat server, a check that both stay up), the prior
+  `cousin.toml` kept in `data/migration.json` byte for byte. `rollback`
+  undoes exactly the steps that ran and starts tmux on a fresh boot packet.
+  `apply` and `rollback` need `--yes`; nothing else migrates a cousin.
+  `check` measures the week on the runner: inbox rows not done after an
+  hour, tool calls with no recorded result, failed recorder hooks, the chat
+  server. The runbook and the fleet's order are in `docs/migrating.md`.
+- Valid time for memory claims, derived from raw: `cousin-memory history
+  <topic>` lists each claim's id and when it was valid; `cousin-memory
+  obsolete <topic> --entry <id>` (and the console's obsolete route with
+  `entry`) retires one claim and keeps the topic.
+- `cousin-memory tensions` (and `GET /api/memory/{slug}/tensions`): authored
+  topics with two or more live claims of different content, to settle.
+- A review gate: when more than `[memory] review_batch` (default 3) entries
+  on authored topics were written since it last looked, they are held out
+  of the distilled views, the boot packet and the runner's digest until
+  kept. On the SDK lane it looks after every turn and at start, and a
+  second model (`[memory] review_model`, default the cousin's own) reviews
+  in the background (a `review_gate` event). `cousin-memory review` lists
+  what is held; its `--keep`/`--drop` are the operator's, refused inside a
+  cousin's own process tree.
+
+### Changed
+- `cousin-chat-watchdog` judges a runner cousin as running by its runner's
+  lock, not a tmux session, so it brings a runner cousin's chat server back
+  after a reboot or a crash (the supervisor runs none).
+- The monthly raw fold no longer puts an entry-level obsolete mark, a
+  retired or held entry, or a review gate record into a month's digest, and
+  distill reads a topic with such entries from the whole history.
+
+### Downgrade
+- Raw memory written by 1.17.0 reads differently under 1.16.x and earlier: an
+  entry-level obsolete mark that is its topic's newest line retires the
+  whole topic, and held entries and the gate's records are distilled.
+  Nothing in raw changes, and upgrading again restores the views.
+
 ## 1.16.0 - 2026-09-24
 
 ### Added

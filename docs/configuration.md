@@ -211,7 +211,9 @@ own `auth login` (see [commands](commands.md)). That `auth.json` is held to the 
 others, a symlink or not yours refuses the start (exit 2, the message names
 the file and the `chmod`); a missing one is a login to do. An Anthropic
 OAuth login in it (a Claude subscription) refuses the start, and so does any
-entry but an `api` key and another vendor's `oauth` login. Claude cousins
+entry but an `api` key and another vendor's `oauth` login, and any entry
+whose provider id says claude or anthropic, of any type (an Anthropic API
+key included: ruling P9-1). Claude cousins
 run on the Agent SDK and nowhere else (ruling P9-1): an opencode account that
 names the `anthropic` provider, or an `endpoint_model`, `[agent] model` or
 `small_model` whose id says claude or anthropic (in any case), is refused at

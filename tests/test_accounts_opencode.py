@@ -182,8 +182,24 @@ class TestEnvironment(OpencodeCase):
             accounts.preflight(acc, self.root)
         self.assertIn("subscription", str(cm.exception))
         self.assertNotIn("fake-a", str(cm.exception))
-        self.auth_json("oc", {"anthropic": {"type": "api", "key": "fake-anthropic-key"}})
-        accounts.preflight(acc, self.root)                    # a metered key is a key
+
+    def test_an_auth_json_entry_named_for_claude_refuses_the_start_whatever_its_type(self):
+        """Review round 2, minor 3: ruling P9-1 reaches auth.json. opencode
+        reads every entry live, so an Anthropic key (or any entry whose id
+        says claude or anthropic) on this lane is refused, not only an OAuth
+        login."""
+        self.write('[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
+        acc = accounts.load(self.root)["oc"]
+        for pid, entry in (("anthropic", {"type": "api", "key": "fake-anthropic-key"}),
+                           ("my-claude-proxy", {"type": "api", "key": "fake-k"}),
+                           ("Anthropic-Vertex", {"type": "oauth", "refresh": "fake-r"})):
+            with self.subTest(provider=pid):
+                self.auth_json("oc", {"openai": {"type": "api", "key": "fake-openai"}, pid: entry})
+                with self.assertRaises(accounts.AccountsError) as cm:
+                    accounts.preflight(acc, self.root)
+                self.assertIn(pid, str(cm.exception))
+                self.assertIn("Agent SDK", str(cm.exception))
+                self.assertNotIn("fake-", str(cm.exception))
 
     def test_auth_json_holds_api_keys_and_non_anthropic_oauth_only(self):
         """Review Critical 1: opencode reads every auth.json entry live, and

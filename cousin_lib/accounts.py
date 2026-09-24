@@ -415,6 +415,7 @@ def _entry_types(data, path):
                             " opencode lane never carries subscription traffic: remove it and"
                             " use an API key" % path)
     for provider, kind in sorted(entries.items()):
+        refuse_claude_name("%s entry" % path, provider)       # P9-1, whatever its type
         if kind not in AUTH_TYPES:
             raise AccountsError("%s entry %s is of type %s; an opencode account holds only %s"
                                 " entries (a key, or another vendor's OAuth login): remove it"

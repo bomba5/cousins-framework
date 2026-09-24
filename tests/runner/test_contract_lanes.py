@@ -18,10 +18,21 @@ from tests.runner.test_tools import TRACKER_TOML
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-# sha256 of contract.render(<shipped registry>, "1.12.0") at the base of
-# this change (30a6df4). A registry edit changes it on purpose: update the
-# hash in the same commit, knowing every SDK cousin's prompt cache resets.
-SDK_CONTRACT_SHA256 = "a3be089738718815623a24c81cbecada982c08bae8ae7146bbfcdfdb1f631363"
+# sha256 of contract.render(<shipped registry>, "1.12.0") on main 84d1a67
+# (1.19.0, whose 5e8b72f added "Tools, not the terminal CLIs"), the bytes
+# main's own renderer produces. A registry or static-text edit changes it on
+# purpose: update the hash in the same commit, knowing every SDK cousin's
+# prompt cache resets.
+SDK_CONTRACT_SHA256 = "d74ff87d7313ffd8e448102bb1f6e9f3dc871063f6f9693233f1ec4477c036b2"
+
+
+def as_opencode(sdk_text):
+    """The SDK lane's contract or prompt with only the lane's names changed:
+    the tool lines, the three names in "Tools, not the terminal CLIs", and
+    which runner that section says the cousin is on."""
+    return (sdk_text.replace("- `mcp__cousin__", "- `cousin_")
+            .replace("(`mcp__cousin__", "(`cousin_")
+            .replace("You run on the SDK runner,", "You run on the opencode runner,"))
 
 
 def opencode_name(name):
@@ -50,17 +61,22 @@ class TestContractLanes(HermeticCase):
         for d in tools.tool_definitions(reg):
             self.assertIn("- `cousin_%s`: " % d["name"], text, d["name"])
         self.assertNotIn("mcp__", text)
-        # Only the names differ: same header, same static text, same commands.
+        # Only the lane's names differ: same header, same text, same commands.
         sdk = contract.render(reg, "1.12.0")
-        self.assertEqual(sdk.replace("- `mcp__cousin__", "- `cousin_"), text)
+        self.assertEqual(as_opencode(sdk), text)
+        self.assertIn("(`cousin_reply`), never with `cousin-reply`", text)
+        self.assertIn("You run on the opencode runner,", text)
 
     def test_every_tool_line_uses_the_naming_function(self):
         reg = _registry(TRACKER_TOML)
         seen = []
         text = contract.render(reg, "1.12.0", tool_name=lambda n: seen.append(n) or "X-%s" % n)
-        self.assertEqual(seen, [d["name"] for d in tools.tool_definitions(reg)])
+        # the three the "Tools, not the terminal CLIs" section names, then every tool line
+        self.assertEqual(seen, ["reply", "send", "memory"]
+                         + [d["name"] for d in tools.tool_definitions(reg)])
+        self.assertNotIn("mcp__", text)
         lines = [l for l in text.splitlines() if l.startswith("- `")]
-        self.assertEqual(len(lines), len(seen))
+        self.assertEqual(len(lines), len(seen) - 3)
         self.assertTrue(all(re.match(r"- `X-[a-z_]+`: ", l) for l in lines), lines)
 
     def test_the_opencode_contract_is_deterministic_and_ascii(self):
@@ -79,7 +95,7 @@ class TestPromptLanes(PromptCase):
         self.assertIn("- `cousin_reply`: ", oc)
         self.assertIn("- `cousin_handoff`: ", oc)
         self.assertNotIn("mcp__cousin__", oc)
-        self.assertEqual(sdk.replace("- `mcp__cousin__", "- `cousin_"), oc)
+        self.assertEqual(as_opencode(sdk), oc)
 
 
 if __name__ == "__main__":

@@ -51,18 +51,18 @@ more.
 
 ## Tools, not the terminal CLIs
 
-You run on the SDK runner, not in a terminal. Your identity text, your
+You run on {runner}, not in a terminal. Your identity text, your
 memories and your notes may tell you to reply with `cousin-reply`, to
 message a peer with `cousin-chat send`, or to write memory with
 `cousin-memory`: that is the terminal lane's habit, and it is not the
 way on this lane. Here:
 
 - A person on your chat surface is answered with the `reply` tool
-  (`mcp__cousin__reply`), never with `cousin-reply` through Bash.
+  (`{reply}`), never with `cousin-reply` through Bash.
 - A peer cousin is messaged with the `send` tool
-  (`mcp__cousin__send`), never with `cousin-chat send`.
+  (`{send}`), never with `cousin-chat send`.
 - Memory (search, decide, remember, recall, obsolete, activity) goes
-  through the `memory` tool (`mcp__cousin__memory`), never through
+  through the `memory` tool (`{memory}`), never through
   `cousin-memory`.
 - Jobs, schedules and meetings go through the `job`, `schedule` and
   `meeting` tools.
@@ -113,10 +113,15 @@ def render(registry, version, *, tool_name=None):
 
     `tool_name(name) -> str` is the name the model sees for a tool on its
     lane (phase 9 R7): None is the SDK lane's (sdk_tool_name), whose bytes
-    the prompt cache keys on; the opencode lane passes `cousin_<name>`."""
+    the prompt cache keys on; the opencode lane passes `cousin_<name>`. It
+    names the tools in "Tools, not the terminal CLIs" too, where a lane
+    whose names are not the SDK's is the opencode runner."""
     from cousin_lib.runner.tools import tool_definitions
     tool_name = tool_name or sdk_tool_name
+    named = {n: tool_name(n) for n in ("reply", "send", "memory")}
+    sdk = named["reply"] == sdk_tool_name("reply")
+    static = STATIC.format(runner="the SDK runner" if sdk else "the opencode runner", **named)
     blocks = [_tool_block(d, registry, tool_name) for d in tool_definitions(registry)]
-    text = "\n\n".join([HEADER.format(version=major_minor(version)), STATIC,
+    text = "\n\n".join([HEADER.format(version=major_minor(version)), static,
                         "## Your tools\n\n" + "\n".join(blocks)])
     return text.rstrip("\n") + "\n"

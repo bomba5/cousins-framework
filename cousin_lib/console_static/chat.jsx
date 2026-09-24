@@ -171,7 +171,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
             transition: "flex 240ms cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
-          {paneShown && <PaneView cousin={c} onClose={() => setPaneOpen(false)} />}
+          {paneShown && (c.runner
+            ? <RunnerPaneView cousin={c} onClose={() => setPaneOpen(false)} />
+            : <PaneView cousin={c} onClose={() => setPaneOpen(false)} />)}
         </div>
       </div>
     </div>
@@ -1202,6 +1204,139 @@ function PaneView({ cousin, onClose }) {
   );
 }
 
+// The reasoning pane of a runner cousin (docs/reference/console-api.md,
+// "The runner stream"): its event stream live, an interrupt and a say box.
+// A runner cousin has no tmux session; its fleet row carries `runner`.
+const RUNNER_PANE_KEEP = 500;
+
+function runnerEventLine(ev) {
+  const p = ev.payload || {};
+  const cut = (s, n) => { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 3) + "..." : s; };
+  switch (ev.kind) {
+    case "state": return p.from + " -> " + p.to + (p.detail ? " (" + p.detail + ")" : "");
+    case "turn_start": return (p.thread_id || "") + ": " + cut((p.bodies || [""])[0], 200);
+    case "text": case "user": return String(p.text || "");
+    case "thinking": return p.text ? p.text + (p.truncated ? " [truncated]" : "") : "(" + p.length + " chars, not recorded)";
+    case "tool": return (p.name || "") + " " + cut(JSON.stringify(p.input), 300);
+    case "tool_result": return (p.is_error ? "error: " : "") + cut(p.text, 600);
+    case "tool_call": return (p.tool || "") + " " + (p.command || "") + (p.is_error ? " error" : "") + " (" + p.ms + " ms)";
+    case "result": return "rows " + JSON.stringify(p.inbox_ids || []) + (p.interrupted ? " interrupted" : "") + (p.is_error ? " is_error" : "");
+    case "error": return String(p.error || "");
+    default: return cut(JSON.stringify(p), 300);
+  }
+}
+
+function RunnerPaneView({ cousin, onClose }) {
+  const slug = cousin && cousin.slug;
+  const runner = (cousin && cousin.runner) || {};
+  const [events, setEvents] = React.useState([]);
+  const [status, setStatus] = React.useState("connecting");
+  const [state, setState] = React.useState(runner.state || null);
+  const [said, setSaid] = React.useState("");
+  const [note, setNote] = React.useState(null);
+  const listRef = React.useRef(null);
+  const alive = runner.alive !== false;
+
+  React.useEffect(() => {
+    if (!slug) return undefined;
+    setEvents([]);
+    // A burst of events (a fresh connect sends the newest 200) is ONE render
+    // per animation frame, not one per SSE message.
+    let batch = [], frame = null;
+    const flush = () => {
+      frame = null;
+      const add = batch;
+      batch = [];
+      setEvents(prev => prev.concat(add).slice(-RUNNER_PANE_KEEP));
+    };
+    const push = (ev) => {
+      batch.push(ev);
+      if (frame === null) frame = window.requestAnimationFrame(flush);
+    };
+    // The server starts a fresh connect at the stream's tail; an automatic
+    // reconnect resends the last `<session>:<seq>` id and resumes after it.
+    const es = new EventSource(`/api/cousins/${encodeURIComponent(slug)}/stream`);
+    es.onopen = () => setStatus("live");
+    es.onerror = () => setStatus("reconnecting");
+    es.addEventListener("runner-event", (m) => {
+      let ev;
+      try { ev = JSON.parse(m.data); } catch (e) { return; }
+      if (ev.kind === "state" && ev.payload) setState(ev.payload.to);
+      push(ev);
+    });
+    es.addEventListener("session", () => push({ kind: "session", payload: {} }));
+    return () => { es.close(); if (frame !== null) window.cancelAnimationFrame(frame); };
+  }, [slug]);
+
+  React.useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events]);
+
+  const post = async (path, body) => {
+    try {
+      const r = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      const d = await r.json();
+      setNote(r.ok ? d.outcome : (d.error || `HTTP ${r.status}`));
+      return r.ok;
+    } catch (e) {
+      setNote(String(e.message || e));
+      return false;
+    }
+  };
+  const interrupt = () => post(`/api/cousins/${encodeURIComponent(slug)}/interrupt`);
+  const say = async () => {
+    const text = said.trim();
+    if (!text) return;
+    if (await post(`/api/cousins/${encodeURIComponent(slug)}/say`, { text })) setSaid("");
+  };
+  const unsupported = runner.unsupported || [];
+
+  return (
+    <React.Fragment>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 0,
+        padding: "6px 14px", borderBottom: "1px solid var(--line)",
+        fontFamily: "var(--mono)", fontSize: 11, color: "var(--fg-3)",
+        background: "var(--bg-1)",
+      }}>
+        <span>runner {runner.kind || "?"} &middot; </span>
+        <span style={{ color: status === "live" ? "var(--green)" : "var(--amber)" }}>{status}</span>
+        <span style={{ marginLeft: 10, color: "var(--fg-2)" }}>{!alive ? "not running (last: " + (state || "none") + ")" : (state || "no state yet")}</span>
+        {unsupported.length > 0 && <span style={{ marginLeft: 10 }}>unsupported: {unsupported.join(", ")}</span>}
+        {note && <span style={{ marginLeft: 10 }}>{note}</span>}
+        <span style={{ flex: 1 }} />
+        <button className="btn ghost" onClick={interrupt} title="interrupt the running turn"
+                disabled={!alive || (state !== "running" && state !== "waiting_permission")}
+                style={{ padding: "0 6px", minHeight: 20, marginRight: 6 }}>interrupt</button>
+        {onClose && <button className="btn ghost" onClick={onClose} title="collapse the pane" style={{ padding: "0 6px", minHeight: 20 }}>x</button>}
+      </div>
+      <div ref={listRef} style={{
+        flex: 1, minHeight: 0, overflowY: "auto",
+        padding: "6px 10px", background: "#0a0a0a",
+        fontFamily: "var(--mono)", fontSize: 11, lineHeight: 1.45, color: "var(--fg-2)",
+        whiteSpace: "pre-wrap", wordBreak: "break-word",
+      }}>
+        {events.map((ev, i) => (
+          <div key={i} className={"runner-ev runner-ev-" + ev.kind}>
+            <span style={{ color: "var(--fg-3)", marginRight: 8 }}>{ev.kind}</span>{runnerEventLine(ev)}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, padding: "6px 10px", borderTop: "1px solid var(--line)", background: "var(--bg-1)" }}>
+        <input className="input" value={said} onChange={e => setSaid(e.target.value)}
+               onKeyDown={e => { if (e.key === "Enter") say(); }}
+               placeholder="say to the running turn" style={{ flex: 1 }} />
+        <button className="btn" onClick={say} disabled={!said.trim()}>say</button>
+      </div>
+    </React.Fragment>
+  );
+}
+
 // Track which messages have already been fully revealed, keyed by msg.id.
 // Survives re-renders; uses a plain Set on window so fresh components do not
 // re-animate an old message.
@@ -1604,4 +1739,4 @@ function fmtShortTime(ts) {
   } catch (e) { return ""; }
 }
 
-Object.assign(window, { ChatView, ChatBubble, PaneView, renderMarkdown, resolveChatUser, groupReactions });
+Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, renderMarkdown, resolveChatUser, groupReactions });

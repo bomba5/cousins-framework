@@ -188,6 +188,7 @@ function CousinCard({ c, onClick, onAct, onChat }) {
       </div>
       <div className="stats">
         <div>chat · <b>{c.chat === "ok" ? `:${c.port}` : c.chat}</b></div>
+        {c.runner && <div>runner · <b>{c.runner.alive ? (c.runner.state || "no state yet") : "(not running)"}</b>{c.runner.unsupported && c.runner.unsupported.length ? ` · unsupported: ${c.runner.unsupported.join(", ")}` : ""}</div>}
         <div>scope · <b>{c.memoryScope}</b></div>
         <div>operator · <b>{c.operator || "-"}</b></div>
         <div>beat · <b>{c.heartbeat}s</b></div>

@@ -157,14 +157,15 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `model`, `effort` | what the next start will use: the cousin's `[runtime]` value, else `config/harness.toml [agent]` default, else null |
 | `hidden` | `[cousin] hidden` |
 | `auth` | `claude` or `api_key`; null if cousin.toml holds a mode the framework doesn't know |
-| `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. Worker: always `running`. |
+| `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. Worker: always `running`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). |
 | `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
-| `chat` | `ok`, `down` or `none` (no port) from the chat server's `/health` |
-| `active` | the last 20 pane lines changed in the last 60 seconds |
-| `pid`, `uptime_seconds` | the agent process in the tmux pane and its age; null when unknown, never 0 |
+| `chat` | `ok`, `down` or `none` (no port) from the chat server's `/health`; `console` for a runner cousin, whose chat the console serves itself |
+| `active` | the last 20 pane lines changed in the last 60 seconds; for a runner cousin, a live turn (`running` or `waiting_permission`) |
+| `pid`, `uptime_seconds` | the agent process in the tmux pane and its age (a runner cousin: the `cousin-runner` process); null when unknown, never 0 |
 | `activity` | first 200 characters of `data/last-activity.txt` |
 | `lastMsgTs` | unix time of the cousin's newest reply in your thread (the `[operator] name`, last 20 rows), 0 if none |
 | `tokensSpent` | today's token total, 0 when token counting isn't set up |
+| `runner` | null for a tmux cousin. A runner cousin: `{"alive", "state", "since", "session", "kind", "pid", "unsupported"}` from its own stores: `alive` whether a runner holds its lock, `state` the last state its primary event stream recorded (with `since`, that event's time; it stays the last one recorded after the runner is gone, so read it with `alive`), `kind` (`sdk` or `fake`), `pid` and `unsupported` (the contract items the runner declares it does not support) from the `runner` event `cousin-runner` writes at start |
 
 With the hive on, remote nodes follow the local rows. They carry the same keys (the local-only ones null or 0) plus `remote: true`, `remoteState` (`online`, `offline`, `pending` = built but never checked in, `revoked`), `online`, `revoked`, `checkedIn`, `lastSeen`, `version`. For a remote row `status` is `running` when online, and `chat` is derived (`ok` online, `down` offline, `none` before the first checkin), never probed. If a slug is both local and a node, the local row wins.
 
@@ -307,11 +308,13 @@ Token use per cousin per day for the last 14 days (UTC), read from the harness t
   "series": [{"day": "2026-09-18", "total": 812345, "output": 20311}]}]}
 ```
 
+Each cousin also carries `cache`: the prompt-cache hit rate, `cache_read / (cache_read + cache_creation + input)` from the usage the model reported, `{"rate": <the 14 days>, "days": [{"day", "read", "creation", "input", "rate"}]}`, one row per day oldest first. `rate` is null when the window (or the day) holds no usage; a result that carried no usage adds nothing to either side, so it is left out rather than counted as a miss. A runner cousin (`[agent] runner = "sdk"`) is read from its own `data/usage.db` only, with no transcript seam needed.
+
 It needs `transcripts_dir` in `config/harness.toml`. Every transcript in the cousin's transcripts directory touched in the window is read, its sessions (a cousin that flips daily has one per day) and their subagents, and each message counts once (the harness writes one line per content block, each repeating the usage). The total adds input, output, cache read and cache creation tokens. Without the config: `{"available": false, "reason": "...", "cousins": []}`. The transcripts are read incrementally, so the first call after a console start is the slow one.
 
 ## Chat (proxied to each cousin)
 
-These forward to the cousin's own chat server ([chat API](chat-api.md)). The console stores no messages. The cousin comes from `cousin` in the query or body. `400` bad slug, `404` unknown cousin, `502 {"ok": false, "error": ...}` if the chat server is unreachable, has no port, or answers non-JSON. Any JSON answer from the chat server comes back with its own status.
+These forward to the cousin's own chat server ([chat API](chat-api.md)). A runner cousin (`[agent] runner`, its home on this machine) runs no chat server: for it the console answers the same routes itself over the cousin's `data/chat.db`, through the library the chat server answers with, so the body and the `400` texts are the same on both lanes. Its send stores the row and delivers it to the cousin's inbox (a `chat` item on the sender's thread, an image handed on as its file), then fires the cousin's chat hooks; a reaction tells the cousin with a `reaction` item. The console stores no messages. The cousin comes from `cousin` in the query or body. `400` bad slug, `404` unknown cousin, `502 {"ok": false, "error": ...}` if the chat server is unreachable, has no port, or answers non-JSON. Any JSON answer from the chat server comes back with its own status.
 
 For a slug that isn't local but is a hive node, the console proxies to where the node last checked in from and sends the node's token as a bearer. A revoked node is `404`, one that never checked in is `502`. Remote cousins have no pane, no inbox files and no media folders on this machine.
 
@@ -373,6 +376,30 @@ Body `{"cousin": "wren", "data": "ls\r"}`: the raw bytes the browser terminal pr
 ### `POST /api/pane/resize`
 
 Body `{"cousin", "cols", "rows"}`. Clamped to 20..400 columns and 5..200 rows, `400` if not integers. Resizes window 0. `200 {"ok": true, "cols", "rows"}`.
+
+## The runner stream (a runner cousin's reasoning pane)
+
+A runner cousin's view: its event stream live, an interrupt, and a say box. All three are for a runner cousin only; a tmux cousin is `409` (its view is the pane above). `404` unknown cousin.
+
+### `GET /api/cousins/<slug>/stream`
+
+A server-sent event stream over the runner's primary stream: the newest `data/stream/<session>.jsonl` whose first event is `runner` (`cousin-runner` writes it before anything else; a side session's stream never starts with one). A fresh connect starts at the newest 200 events, not the whole file. A reconnect resumes: its `Last-Event-ID` (or the `after` query parameter) is `<session>:<seq>`, and the stream continues right after that event; if that session is no longer the primary one (the runner restarted meanwhile), a `session` frame comes first and the new stream starts at its newest 200 events. `after=<seq>` alone applies to the current stream. The file is read from a byte offset, at most 1 MB at a time:
+
+| event | data | when |
+|---|---|---|
+| `runner-event` | the event as written: `{"seq", "ts", "kind", "payload"}`; the frame's `id` is `<session>:<seq>` | the starting events, then each one as it is appended |
+| `session` | `{"session"}` | the runner restarted: its new stream is read from its first event (the old one is read to its end first) |
+| `: ping` | comment | 15 s without either |
+
+`kind` is what the runner recorded: `state`, `turn_start`, `text`, `thinking` (`{"length", "text"[, "truncated"]}`, the text bounded at 8000 characters), `tool`, `tool_result`, `tool_call`, `result`, `user`, `error`, `auth`, `rate_limit`, `rollover`, `usage`, `system` and the rest the runner writes. `400` for an `after` that is neither `<seq>` nor `<session>:<seq>`.
+
+### `POST /api/cousins/<slug>/interrupt`
+
+No body. Puts an `interrupt` item in the cousin's inbox and waits up to 5 s for the runner to close it: `200 {"ok": true, "outcome": "delivered"}` when the live turn was interrupted, `{"ok": false, "outcome": "failed"}` when no turn was running, `{"ok": false, "outcome": "queued"}` when the runner did not answer in time. `409 {"ok": false, "error": "no runner is running"}` when no runner holds the cousin's lock (nothing is put).
+
+### `POST /api/cousins/<slug>/say`
+
+Body `{"text": "..."}`. A `chat` item on the operator's thread (`operator:<[operator] name>`), put in the cousin's inbox: the runner writes it into a live turn, or takes it next. Not stored in `chat.db`: it is the pane's input, as typing into a tmux pane is. A login code while a login flow waits on this cousin is diverted first, as on every operator send path, and never delivered: `200 {"ok": true, "outcome": "diverted"}`. Otherwise `200 {"ok": true, "outcome": "queued"}`; `400` no text; `409` no operator configured.
 
 ## Jobs
 

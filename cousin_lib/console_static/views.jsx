@@ -1016,6 +1016,13 @@ function TokensView({ cousins: allCousins }) {
     const row = (tok?.cousins || []).find(c => c.slug === slug);
     return row ? row.series || [] : [];
   };
+  // The prompt-cache hit rate the route measured (cache_read over everything
+  // cacheable); null when the window held no usage, shown as "-".
+  const cacheFor = (slug) => {
+    const row = (tok?.cousins || []).find(c => c.slug === slug);
+    return row && row.cache ? row.cache : { rate: null, days: [] };
+  };
+  const fmtRate = (r) => (r == null ? "-" : Math.round(r * 100) + "%");
   const fleetSeries = React.useMemo(() => {
     const byDay = {};
     for (const c of (tok?.cousins || [])) {
@@ -1055,6 +1062,8 @@ function TokensView({ cousins: allCousins }) {
           const series = seriesFor(c.slug);
           const twoWeeks = series.reduce((s, p) => s + (p.total || 0), 0);
           const output = series.reduce((s, p) => s + (p.output || 0), 0);
+          const cache = cacheFor(c.slug);
+          const cacheToday = cache.days.length ? cache.days[cache.days.length - 1].rate : null;
           return (
             <div className="panel" key={c.slug}>
               <div className="panel-hdr">
@@ -1068,6 +1077,8 @@ function TokensView({ cousins: allCousins }) {
                   <Stat small label="today" value={fmtTokens(c.tokensSpent)} />
                   <Stat small label="14 days" value={fmtTokens(twoWeeks)} />
                   <Stat small label="output" value={fmtTokens(output)} />
+                  <Stat small label="cache today" value={fmtRate(cacheToday)} />
+                  <Stat small label="cache 14 days" value={fmtRate(cache.rate)} />
                   <div style={{ flex: 1 }} />
                   {series.length > 1
                     ? <Spark data={series.map(p => p.total)} width={100} height={28} />

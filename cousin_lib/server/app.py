@@ -19,13 +19,13 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cousin_lib import chat_hooks, delivery, memory_search
+from cousin_lib import memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError)
-from cousin_lib.server.inbound import after_inbound_stored, divert_login_code
+from cousin_lib.server import chat_api
 from cousin_lib.server.netguard import NetGuard
 from cousin_lib.server.storage import (ChatStore, is_operator,
-                                       normalize_chat_user, save_data_uri)
+                                       normalize_chat_user)
 
 
 class _BadRequest(Exception):
@@ -53,17 +53,6 @@ _STATIC_TYPES = {
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
 }
-
-
-def persist_inbound_file(home, message_id, data_uri):
-    """Decode an inbound data: image to <home>/chat/inbound/<id>.<ext> and
-    return the delivery marker for it. The terminal line cannot carry
-    megabytes of base64; the file is the handoff."""
-    path = save_data_uri(home, data_uri, folder="inbound",
-                         name=str(message_id))
-    if path is None:
-        return "[image attached, decode failed]"
-    return "[image attached -> Read %s]" % path
 
 
 # Proactive recall: a colleague remembers without being asked. An
@@ -115,15 +104,9 @@ def _recall_context(config, user, message):
     return box.get("line") or ""
 
 
-# Chat-pattern hooks: <home>/chat-hooks.json reacts to a message after
-# it is stored and delivered. An inject: handler rides the same deliver
-# seam as the message, as its own line under a fixed author, with the
-# triggering message's id. Best-effort by contract: nothing here may
-# turn into a failed send.
-def _fire_hooks(server, user, message, message_id):
-    chat_hooks.on_message(server.config.home, user=user, message=message,
-                          message_id=message_id, slug=server.config.slug,
-                          deliver=server.deliver)
+def _first(query):
+    """parse_qs's lists as the first value of each: chat_api's mapping."""
+    return {key: values[0] for key, values in query.items() if values}
 
 
 class ChatServer:
@@ -186,25 +169,12 @@ def build_server(home, *, framework_root=None, tmux_bin=None,
                     socket=os.environ.get("COUSIN_TMUX_SOCKET"),
                     root=Path(root) if root else None)
 
-        def deliver(*, user, message, message_id, attachments=(),
-                    context=""):
-            # wait=False: the line is composed here, in the request
-            # thread, because its time prefix reads the presence marker
-            # before after_inbound_stored touches it; only the typing
-            # happens on a background thread.
-            source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"
-            thread = (delivery.thread_id("system") if source == "hook"
-                      else delivery.thread_for_chat(config, user))
-            item = delivery.Item(
-                thread_id=thread, source=source, sender=user, body=message,
-                attachments=tuple(attachments), context=context,
-                message_id=message_id)
-            return delivery.deliver(config.home, item, wait=False, **opts)
-
-        def notify(text):
-            item = delivery.Item(thread_id=delivery.thread_id("system"),
-                                 source="reaction", body=text)
-            return delivery.deliver(config.home, item, wait=False, **opts)
+        # wait=False inside make_deliver: the line is composed here, in
+        # the request thread, because its time prefix reads the presence
+        # marker before after_inbound_stored touches it; only the typing
+        # happens on a background thread.
+        deliver = chat_api.make_deliver(config, **opts)
+        notify = chat_api.make_notify(config, **opts)
     try:
         return ChatServer(config, deliver=deliver, guard=guard,
                           notify=notify)
@@ -301,7 +271,7 @@ class _ChatHandler(BaseHTTPRequestHandler):
                 self._handle_search(urllib.parse.parse_qs(parsed.query))
             else:
                 self._serve_static(parsed.path)
-        except _BadRequest as err:
+        except (_BadRequest, chat_api.BadRequest) as err:
             self._send_json(400, {"error": str(err)})
 
     def do_POST(self):
@@ -318,59 +288,14 @@ class _ChatHandler(BaseHTTPRequestHandler):
                 self._handle_archive()
             else:
                 self._send_json(404, {"error": "not found"})
-        except _BadRequest as err:
+        except (_BadRequest, chat_api.BadRequest) as err:
             self._send_json(400, {"error": str(err)})
 
     def _handle_send(self):
-        body = self._read_json()
-        user = body.get("user")
-        message = body.get("message")
-        if not user or not message:
-            raise _BadRequest("user and a non-empty message are required")
-        # R18: a login code is stored redacted and delivered to nobody;
-        # no recall, no marker, no hook ever sees it.
-        diverted = divert_login_code(self.chat_server.config, user, message)
-        if diverted is not None:
-            row = self._with_store(lambda store: store.add_message(
-                chat_user=normalize_chat_user(user), user=user, message=diverted,
-                msg_type="user"))
-            self._send_json(200, {"ok": True, "id": row["id"], "timestamp": row["timestamp"],
-                                  "diverted": True})
-            return
-        reply_to = body.get("reply_to")
-        row = self._with_store(lambda store: store.add_message(
-            chat_user=normalize_chat_user(user),
-            user=user,
-            message=message,
-            msg_type="user",
-            reply_to=json.dumps(reply_to) if reply_to is not None else None,
-        ))
         server = self.chat_server
-        attachments = []
-        image = body.get("image")
-        if image:
-            attachments.append(persist_inbound_file(
-                server.config.home, row["id"], image
-            ))
-        if server.deliver is not None:
-            # The recall line rides as context, in the DELIVERED item
-            # only: the row above already holds the message as the
-            # operator wrote it. Fire-and-forget by design: the outcome
-            # (delivered/queued/failed) is not read here.
-            server.deliver(user=user, message=message,
-                           message_id=row["id"], attachments=attachments,
-                           context=_recall_context(server.config, user,
-                                                   message))
-        # After delivery composed its text: the marker's mtime is the
-        # gap baseline for the NEXT message, not this one, and the
-        # correction capture rides along on the same call.
-        after_inbound_stored(server.config, user, message)
-        # Hooks last: the message is stored and its delivery composed,
-        # so a hook's inject line is unambiguously the second line.
-        _fire_hooks(server, user, message, row["id"])
-        self._send_json(200, {
-            "ok": True, "id": row["id"], "timestamp": row["timestamp"],
-        })
+        self._send_json(200, chat_api.send(
+            server.config, self._read_json(), deliver=server.deliver,
+            context=_recall_context))
 
     def _handle_reply(self):
         # The cousin's own outbound: stored under the recipient's thread,
@@ -408,66 +333,17 @@ class _ChatHandler(BaseHTTPRequestHandler):
         })
 
     def _handle_history(self, query):
-        user = (query.get("user") or [None])[0]
-        if not user:
-            raise _BadRequest("user is required")
-
-        def _int(name):
-            raw = (query.get(name) or [None])[0]
-            if raw is None:
-                return None
-            try:
-                return int(raw)
-            except ValueError:
-                raise _BadRequest("%s must be an integer" % name)
-
-        out = self._with_store(lambda store: store.history(
-            user,
-            since=_int("since"),
-            before=_int("before"),
-            limit=_int("limit") or 200,
-            archived=(query.get("archived") or ["0"])[0],
-        ))
-        self._send_json(200, out)
+        self._send_json(200, chat_api.history(self.chat_server.config.home,
+                                              _first(query)))
 
     def _handle_reactions(self):
-        body = self._read_json()
-        message_id = body.get("message_id")
-        user = body.get("user")
-        emoji = body.get("emoji")
-        action = body.get("action")
-        if not isinstance(message_id, int) or isinstance(message_id, bool):
-            raise _BadRequest("message_id must be an integer")
-        if not user or not emoji:
-            raise _BadRequest("user and emoji are required")
-        if action not in ("tap", "remove"):
-            raise _BadRequest("action must be 'tap' or 'remove'")
-        out = self._with_store(lambda store: store.react(
-            message_id, user=user, emoji=emoji, action=action
-        ))
         server = self.chat_server
-        if out["op"] in ("added", "bumped") and server.notify is not None:
-            mine = next(r for r in out["reactions"]
-                        if r["user"] == user and r["emoji"] == emoji)
-            server.notify(
-                "[fw-reaction] msg-id=%d emoji=%s user=%s tap_count=%d"
-                " op=%s" % (message_id, emoji, user, mine["tap_count"],
-                            out["op"])
-            )
-        self._send_json(200, out)
+        self._send_json(200, chat_api.react(server.config.home, self._read_json(),
+                                            notify=server.notify))
 
     def _handle_archive(self):
-        body = self._read_json()
-        user = body.get("user")
-        keep = body.get("keep", 0)
-        if not user:
-            raise _BadRequest("user is required")
-        if not isinstance(keep, int) or isinstance(keep, bool) or keep < 0:
-            raise _BadRequest("keep must be a non-negative integer")
-        archived = self._with_store(
-            lambda store: store.archive(user, keep=keep)
-        )
-        self._send_json(200, {"ok": True, "archived": archived})
+        self._send_json(200, chat_api.archive(self.chat_server.config.home,
+                                              self._read_json()))
 
     def _serve_static(self, path):
         """Serve <home>/www for the extension allowlist. The resolved path
@@ -495,16 +371,8 @@ class _ChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _handle_search(self, query):
-        q = (query.get("q") or [None])[0]
-        if not q:
-            raise _BadRequest("q is required")
-        user = (query.get("user") or [None])[0]
-        hits = self._with_store(lambda store: store.search(
-            q,
-            user=user,
-            archived=(query.get("archived") or ["0"])[0],
-        ))
-        self._send_json(200, {"messages": hits})
+        self._send_json(200, chat_api.search(self.chat_server.config.home,
+                                             _first(query)))
 
 
 if __name__ == "__main__":

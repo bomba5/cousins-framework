@@ -24,9 +24,13 @@ data/claude-md-backups/, like the console's CLAUDE.md editor.
 The MCP registry gets the same treatment, additively and at every level:
 a table the shipped registry has and the cousin's lacks is appended whole,
 and a key inside a table they share is added to it. A value the cousin
-already has is never changed, so an edited description or argv survives.
+already has is never changed, so an edited description or argv survives -
+except a `description` field still holding text a past release shipped
+(_KNOWN_TEXT below): that one gets the current wording, because it is the
+framework's own text, not the cousin's.
 """
 import difflib
+import json
 import re
 import time
 import tomllib
@@ -231,18 +235,77 @@ def _place(blocks, path):
     return at
 
 
+# Framework-owned text the sync may correct in a cousin's existing
+# registry: earlier shipped wording for a "description" field, safe to
+# replace because only a framework release could have put it there. A
+# cousin's own edit is never one of these exact strings, so it is never
+# touched; anything that is not this precise old wording (including the
+# cousin's own rewrite of it) stays untouched. Keyed by "<table
+# path>.<entry key>" - "description" as the entry key for a table's own
+# plain `description = "..."` line, or the property name ("kind", ...)
+# for an inline table's own `description = "..."` field.
+_KNOWN_TEXT = {
+    "tools.job.description": (
+        "Track sub-agents and background work: start, done, fail, list,"
+        " show.",
+    ),
+    "tools.job.properties.kind": (
+        "(start) not shell: start takes no command, so a shell row would"
+        " never close. For long shell work use a Bash call with"
+        " run_in_background (tracked automatically by the job hooks), or"
+        " run `cousin-job start shell TITLE -- CMD` from a shell, which"
+        " launches CMD and closes the row with its exit code",
+    ),
+    "tools.job.properties.title": ("(start)",),
+    "tools.job.properties.desc": ("context for the job (start)",),
+}
+
+_DESC = re.compile(r"(\bdescription\s*=\s*)(" + _STR.pattern + r")")
+
+
+def _entry_description(lines):
+    """The string value of a `description = "..."` field found anywhere
+    in an entry's raw lines (its own line, or inside an inline table),
+    or None when the entry has no such field."""
+    m = _DESC.search("".join(lines))
+    if not m:
+        return None
+    return tomllib.loads("x = %s" % m.group(2))["x"]
+
+
+def _correct_entry(path, key, lines, shipped_lines):
+    """(lines, changed): `lines` with its description field replaced by
+    the shipped one, when the cousin's current text is still a value an
+    earlier framework release shipped for "<path>.<key>"; otherwise
+    `lines` unchanged."""
+    known = _KNOWN_TEXT.get("%s.%s" % (path, key))
+    if not known:
+        return lines, False
+    mine = _entry_description(lines)
+    if mine not in known:
+        return lines, False
+    shipped = _entry_description(shipped_lines)
+    if shipped is None or shipped == mine:
+        return lines, False
+    text = _DESC.sub(lambda m: m.group(1) + json.dumps(shipped),
+                     "".join(lines), count=1)
+    return [text], True
+
+
 def _registry_sync(home, root, *, apply=False):
-    """Bring the cousin's mcp-registry.toml up to the shipped one, additively
-    and at every level: a table it lacks is appended whole, and a key the
-    shipped table has and its table lacks is added to that table. A value the
-    cousin already has is never touched, so an edited description or argv
-    stays. Returns {"path", "added"} with added as dotted paths."""
+    """Bring the cousin's mcp-registry.toml up to the shipped one,
+    additively at every level: a table it lacks is appended whole, and a
+    key the shipped table has and its table lacks is added to that
+    table. A value the cousin already has is never touched, except a
+    `description` field still holding a value the framework shipped
+    earlier (_KNOWN_TEXT): that one is corrected to the current wording.
+    Returns {"path", "added", "corrected"}, both lists of dotted paths."""
     reg = Path(home) / "mcp-registry.toml"
     if not reg.is_file():
-        return {"path": None, "added": []}
+        return {"path": None, "added": [], "corrected": []}
     from cousin_lib.mcp_server import shipped_default_registry
     mine = _blocks(reg.read_text())
-    added = []
+    added, corrected = [], []
     for path, body in _blocks(shipped_default_registry(root)):
         if path is None:
             continue
@@ -252,19 +315,30 @@ def _registry_sync(home, root, *, apply=False):
             mine.insert(_place(mine, path),
                         (path, ["".join(body).strip("\n") + "\n\n"]))
             continue
-        lines = list(mine[at][1])
-        known = {k for k, _ in _entries(lines) if k}
+        entries = _entries(list(mine[at][1]))
+        shipped_entries = {k: ls for k, ls in _entries(body) if k}
+        known = {k for k, _ in entries if k}
         extra = [(k, ls) for k, ls in _entries(body) if k and k not in known]
-        if not extra:
+        new_entries, table_changed = [], False
+        for key, entry_lines in entries:
+            if key and key in shipped_entries:
+                entry_lines, did = _correct_entry(
+                    path, key, entry_lines, shipped_entries[key])
+                if did:
+                    table_changed = True
+                    corrected.append("%s.%s" % (path, key))
+            new_entries.append((key, entry_lines))
+        if not extra and not table_changed:
             continue
+        lines = [one for _, ls in new_entries for one in ls]
         end = len(lines)
         while end and not lines[end - 1].strip():
             end -= 1
         lines[end:end] = [one for _, ls in extra for one in ls]
         mine[at] = (path, lines)
         added.extend("%s.%s" % (path, k) for k, _ in extra)
-    if not added:
-        return {"path": reg, "added": []}
+    if not added and not corrected:
+        return {"path": reg, "added": [], "corrected": []}
     text = "".join(("" if p is None else "[%s]\n" % p) + "".join(b)
                    for p, b in mine)
     tomllib.loads(text)
@@ -272,18 +346,19 @@ def _registry_sync(home, root, *, apply=False):
         tmp = reg.with_suffix(".toml.sync-tmp")
         tmp.write_text(text)
         tmp.replace(reg)
-    return {"path": reg, "added": added}
+    return {"path": reg, "added": added, "corrected": corrected}
 
 
 def sync(home, root=None, *, apply=False):
-    """Plan, and with apply write, one cousin. Returns
-    {"changed", "notes", "backup", "registry_added"}."""
+    """Plan, and with apply write, one cousin. Returns {"changed",
+    "notes", "backup", "registry_added", "registry_corrected"}."""
     home = Path(home)
     root = Path(root) if root else FrameworkConfig.root_from_home(home)
     old, new, notes = plan(home, root)
+    reg_result = _registry_sync(home, root, apply=apply)
     out = {"changed": new != old, "notes": notes, "backup": None,
-           "registry_added": _registry_sync(home, root,
-                                            apply=apply)["added"]}
+           "registry_added": reg_result["added"],
+           "registry_corrected": reg_result["corrected"]}
     if not apply or new == old:
         return out
     out["backup"] = str(_backup(home, old))

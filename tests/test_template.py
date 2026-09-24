@@ -121,6 +121,17 @@ class TestShippedTemplate(unittest.TestCase):
         self.assertIn("tracked automatically", out)
         self.assertIn("run_in_background", out)
 
+    def test_job_run_is_the_doctrine_and_the_cli_is_only_the_fallback(self):
+        # tracker #110: a tracked shell command goes through the job
+        # tool's `run` command first; `cousin-job start shell` through
+        # Bash is named only as what to use when the tool is missing.
+        out = self._render()
+        self.assertIn("mcp__cousin__job` - start, done, fail, list, show,"
+                      " run", out)
+        self.assertIn("goes through the job tool's `run` command", out)
+        self.assertIn("When the tool is missing, the fallback", out)
+        self.assertIn("cousin-job start shell", out)
+
 
 if __name__ == "__main__":
     unittest.main()

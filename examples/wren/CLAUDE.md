@@ -118,7 +118,7 @@ home. Its tools are the preferred way to reach the framework:
 - `mcp__cousin__memory` - search, decide, recall, activity
 - `mcp__cousin__send` - a peer cousin by slug, or your operator by name
   (the destination picks the delivery path; unknown is an error)
-- `mcp__cousin__job` - start, done, fail, list, show
+- `mcp__cousin__job` - start, done, fail, list, show, run
 - `mcp__cousin__schedule` - add, list, cancel
 
 Arguments travel as JSON straight into the CLI's argv, so backticks,
@@ -129,14 +129,18 @@ tool is missing, erroring, or does not cover what you need.
 Subagent calls and Bash calls with `run_in_background` are
 tracked automatically: your harness hooks record them in the jobs store
 (the console's Jobs view) and close them when they finish. A backgrounded
-shell closes its own row when the command exits, with its exit code. Anything else
-long-running that you start goes through the job tool (`start`, then
-`done` or `fail`); a shell command you want launched and closed for
-you is `cousin-job start shell "<title>" -- <cmd>` from a shell.
-A build or command on another host goes through the same form,
-`cousin-job start shell "<title>" -- ssh <host> '<command>'`, so its output
-streams into a live log the console shows and the row closes with the real
-exit code; a job registered by hand without `--log` has nothing to show.
+shell closes its own row when the command exits, with its exit code.
+Anything else long-running that you start goes through the job tool
+(`start`, then `done` or `fail`); a shell command you want launched and
+closed for you goes through the job tool's `run` command (title, and
+argv as a list, never a shell string): it launches the command detached,
+its output goes to the row's log, and the row closes with its exit code.
+A build or command on another host goes through the same form, argv
+`["ssh", "<host>", "<command>"]`. When the tool is missing, the fallback
+is `cousin-job start shell "<title>" -- <cmd>` from a shell (a remote
+host the same way: `cousin-job start shell "<title>" -- ssh <host>
+'<command>'`); a job registered by hand without `--log` has nothing to
+show.
 
 ## Framework CLI surface (cousin-* on PATH)
 
@@ -146,7 +150,7 @@ exit code; a job registered by hand without `--log` has nothing to show.
 | `cousin-reply` | post a reply to your own chat surface | `cousin-reply --user <name> <<'EOF' ...` |
 | `cousin-chat-server` | your chat daemon (normally started for you) | `cousin-chat-server --home <your home>` |
 | `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
-| `cousin-job` | track sub-agents and background commands (subagents and backgrounded Bash calls are tracked for you by hooks) | `cousin-job start subagent "<title>"` · `cousin-job done <id>` · `cousin-job start shell "<title>" -- <cmd>` |
+| `cousin-job` | track sub-agents and background commands (subagents and backgrounded Bash calls are tracked for you by hooks); for a tracked shell command prefer the `job` tool's `run`, this CLI is the fallback | `cousin-job start subagent "<title>"` · `cousin-job done <id>` · `cousin-job start shell "<title>" -- <cmd>` |
 | `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker list --state blocked` |
 | `cousin-meeting` | meetings: a chat with the user and several cousins, in rounds; speak only on your turn | `cousin-meeting say <id> "<text>"` · `cousin-meeting pass <id>` · `cousin-meeting show <id>` |
 | `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |

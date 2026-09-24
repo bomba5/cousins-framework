@@ -82,7 +82,9 @@ class TmuxRunner:
                  pane_factory=None, config_dir=None, launch_argv=None, socket=None,
                  handoff_deadline_s=None, env_allow=()):
         from cousin_lib.runner import rollover as _rollover
+        from cousin_lib.runner.main import root_for
         self.home = Path(home)
+        self.root = root_for(self.home)       # _serve's head event and the context block read it
         self.account = account
         self.model, self.effort = model, effort
         self.policy = policy
@@ -242,9 +244,7 @@ class TmuxRunner:
     def _make_pane(self, path):
         if self._pane_factory is not None:
             return self._pane_factory(path)
-        from cousin_lib.config import FrameworkConfig
-        root = FrameworkConfig.root_from_home(self.home) or self.home.parent.parent
-        sock = self._socket or (Path(root) / "run" / "tmux.sock")
+        sock = self._socket or (Path(self.root) / "run" / "tmux.sock")
         return TmuxPane(sock, "tmux-%s" % self.home.name)
 
     def _argv(self, fresh):
@@ -901,10 +901,8 @@ class TmuxRunner:
         except Exception as exc:  # noqa: BLE001 - named in the detail
             problems.append("start hooks: %s: %s" % (type(exc).__name__, exc))
         try:
-            from cousin_lib.config import FrameworkConfig
-            root = FrameworkConfig.root_from_home(self.home) or self.home.parent.parent
             try:
-                digest = prompt.state_digest(self.home, root=root, slug=self.home.name,
+                digest = prompt.state_digest(self.home, root=self.root, slug=self.home.name,
                                              generation=generation)["text"]
             except Exception as exc:  # noqa: BLE001 - degraded, never none
                 digest = _rollover.degraded_digest(self.home, slug=self.home.name,

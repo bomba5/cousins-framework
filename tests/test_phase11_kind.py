@@ -101,6 +101,21 @@ class TestServeRecovery(HermeticCase):
             self.assertEqual(runner_main._serve(plain, True), 0)
         sweep.assert_called_once_with(older_than_s=0.0)
 
+    def test_serve_runs_a_real_tmux_runner(self):
+        """Review C1: _serve's head event reads runner.root, so a real
+        TmuxRunner (a fake pane only) must have one; --once drains a row."""
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        from tests.runner._fake_pane import FakePane
+        home = temp_home(self, runner="tmux")
+        r = TmuxRunner(home, account=None, pane_factory=lambda p: FakePane(p),
+                       config_dir=home / ".cfg", launch_argv=lambda sid, fresh: ["claude", sid])
+        self.addCleanup(lambda: r.stop(timeout=5))
+        rec = r.enqueue(Item("operator:wren", "chat", "hello", sender="Wren"))
+        self.assertEqual(runner_main._serve(r, True), 0)
+        self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
+        head = next(e for e in r.events() if e["kind"] == "runner")
+        self.assertEqual(head["payload"]["kind"], "tmux")
+
 
 class TestSpawn(_CreateCase):
     def test_spawn_takes_the_tmux_kind(self):

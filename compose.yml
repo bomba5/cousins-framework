@@ -1,0 +1,64 @@
+# The framework in one container: the supervisor starts the console, the
+# loops daemon and one runner per runner cousin. All state is on the
+# framework-data volume, so `docker compose down && docker compose up`
+# keeps every cousin, message and session.
+#
+#   docker compose up -d --build        then open http://127.0.0.1:8600
+#   docker compose logs -f framework    every child's lines, prefixed
+#
+# Auth, one of two lanes:
+#   - API key: put the key in secrets/anthropic_api_key (chmod 700 secrets,
+#     chmod 644 the file: the container's user, uid 10001, must read it),
+#     then: cp compose.api-key.yml compose.override.yml
+#   - Login: docker compose exec framework cousin-account login <name>
+#     (a claude-login account in config/accounts.toml; its credentials stay
+#     on the volume).
+# The terms risk of using a subscription login from a container is yours.
+name: cousins-framework
+
+services:
+  framework:
+    build: .
+    image: cousins-framework:local
+    restart: unless-stopped
+    # The supervisor gives the runners runner.main.STOP_TIMEOUT_S + 5 = 35 s
+    # to finish a turn after SIGTERM, then the loops daemon and the console
+    # 10 s each, but neither of those handles SIGTERM (both exit at once), so
+    # the real worst case is 35 s and 45 s covers it; compose's default of
+    # 10 s would kill a runner mid-turn.
+    stop_grace_period: 45s
+    ports:
+      # Loopback only: with no config/console-users.json the console is
+      # open. For the LAN, add a user first, then publish "8600:8600".
+      - "127.0.0.1:8600:8600"
+    volumes:
+      - framework-data:/data
+      # The login lane from a host credential directory instead of
+      # `cousin-account login`: mount it read-write as the account's
+      # config_dir (default data/accounts/<name> under the root). Its files
+      # must be readable and writable by uid 10001.
+      # - /path/to/credentials:/data/data/accounts/host-login
+    environment:
+      # A cousin created in the container runs on the SDK runner.
+      COUSIN_DEFAULT_RUNNER: sdk
+
+  # Semantic memory search (profile "embeddings"): docker compose --profile
+  # embeddings up -d, then pull the model once:
+  #   docker compose exec embeddings ollama pull nomic-embed-text
+  # and turn it on in config/embedding.toml:
+  #   url = "http://embeddings:11434/api/embeddings"
+  #   model = "nomic-embed-text"
+  # Without it, memory search is keyword only.
+  embeddings:
+    image: ollama/ollama:0.34.4
+    profiles: ["embeddings"]
+    restart: unless-stopped
+    volumes:
+      - embeddings-models:/root/.ollama
+
+  # Profile "opencode" (the OpencodeRunner lane) arrives with that runner;
+  # the default image stays free of node and bun.
+
+volumes:
+  framework-data:
+  embeddings-models:

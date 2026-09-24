@@ -36,3 +36,8 @@ cousins/
 # gate refuses; cousin-spawn-node writes it where --out says, and it
 # must never stage from a checkout.
 *-node.tar.gz
+
+# The compose API key lane: the key file beside compose.yml, and the
+# operator's own override that turns the lane on (compose.api-key.yml).
+/secrets/
+/compose.override.yml

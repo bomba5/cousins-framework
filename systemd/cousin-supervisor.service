@@ -1,0 +1,26 @@
+[Unit]
+Description=cousins-framework supervisor (the console, the loops daemon and one runner per runner cousin)
+After=network.target
+
+[Service]
+Type=simple
+# SIGTERM goes to the supervisor alone, which stops its children in order
+# (runners, then loops, then the console); whatever is still alive at the
+# timeout is killed. The timeout covers the slowest ordered stop, each step
+# its stop timeout plus the 5 s grace after a SIGKILL (KILL_GRACE_S): the
+# runners runner.main.STOP_TIMEOUT_S + 5 = 35 s, + 5; loops 10 + 5; the
+# console 10 + 5; 40 + 15 + 15 = 70 s, and 5 s for the supervisor's exit.
+KillMode=mixed
+TimeoutStopSec=75
+WorkingDirectory={{ROOT}}
+Environment=FRAMEWORK_ROOT={{ROOT}}
+Environment=PATH={{USER_BIN}}:%h/.local/bin:{{SYSTEM_PATH}}
+Environment=PYTHONUNBUFFERED=1
+# The console on loopback, port 8600; a drop-in moves it (README).
+ExecStart={{USER_BIN}}/cousin-supervisor run --console-port 8600
+ExecReload={{USER_BIN}}/cousin-supervisor reload
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

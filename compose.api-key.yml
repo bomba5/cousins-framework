@@ -1,0 +1,22 @@
+# The API key lane, as a compose override. Enable it once:
+#
+#   mkdir -p secrets && chmod 700 secrets
+#   (umask 022; printf '%s' "<your key>" > secrets/anthropic_api_key)
+#   cp compose.api-key.yml compose.override.yml
+#   docker compose up -d
+#
+# compose merges compose.override.yml by itself. The entrypoint installs the
+# secret as the api-key account's key on every start (a rotated key needs a
+# restart) and declares [accounts.api-key] in config/accounts.toml; new
+# cousins use that account. The key file must be readable by the container's
+# user (uid 10001), hence 644 inside a 700 directory.
+services:
+  framework:
+    secrets:
+      - anthropic_api_key
+    environment:
+      COUSIN_DEFAULT_ACCOUNT: api-key
+
+secrets:
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key

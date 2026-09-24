@@ -30,6 +30,15 @@ _DOCKERFILE = _REPO / "Dockerfile"
 _DOCKERIGNORE = _REPO / ".dockerignore"
 _CMD = ["cousin-supervisor", "run", "--console-host", "0.0.0.0"]
 _TIMEOUT = 60
+_COMPOSE = _REPO / "compose.yml"
+_COMPOSE_KEY = _REPO / "compose.api-key.yml"
+_UNIT = _REPO / "systemd" / "cousin-supervisor.service"
+# R5': a runner gets runner.main.STOP_TIMEOUT_S + 5 = 35 s after SIGTERM;
+# then the loops daemon and the console get 10 s each, one after the
+# other; each step adds the supervisor's KILL_GRACE_S after a SIGKILL.
+_RUNNER_STOP_S = 35
+_CHILD_STOP_S = 10
+_KILL_GRACE_S = 5
 
 
 def _stand_in_image(case):
@@ -516,6 +525,207 @@ class TestImage(unittest.TestCase):
                 break
             time.sleep(1)
         self.assertEqual(rc, 0)
+
+
+
+def _live_lines(path):
+    """The file's lines without comment lines and blank lines."""
+    return [l for l in path.read_text().splitlines()
+            if l.strip() and not l.lstrip().startswith("#")]
+
+
+def _services(path):
+    """{service name: its block's live lines}, from a compose file written
+    with two-space indentation (this repository's own files)."""
+    out, current, inside = {}, None, False
+    for line in _live_lines(path):
+        if not line.startswith(" "):
+            inside = line.rstrip() == "services:"
+            current = None
+            continue
+        if inside and re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):
+            current = line.strip()[:-1]
+            out[current] = []
+        elif inside and current:
+            out[current].append(line.strip())
+    return out
+
+
+class TestCompose(unittest.TestCase):
+    def setUp(self):
+        self.services = _services(_COMPOSE)
+        self.framework = self.services["framework"]
+
+    def test_compose_grace_period_covers_the_runner_stop(self):
+        found = [l for l in self.framework if l.startswith("stop_grace_period:")]
+        self.assertEqual(len(found), 1, self.framework)
+        seconds = int(re.fullmatch(r"stop_grace_period:\s*(\d+)s", found[0]).group(1))
+        self.assertGreaterEqual(seconds, _RUNNER_STOP_S + _CHILD_STOP_S)
+
+    def test_the_console_port_binds_loopback(self):
+        ports = [l for l in self.framework if l.startswith("- ") and "8600" in l]
+        self.assertEqual(ports, ['- "127.0.0.1:8600:8600"'])
+
+    def test_state_lives_on_one_volume_at_data(self):
+        self.assertIn("- framework-data:/data", self.framework)
+        mounts = [l for l in self.framework if re.match(r"- [^\s:]+:/", l)]
+        self.assertEqual(mounts, ["- framework-data:/data"])
+        self.assertIn("  framework-data:", _live_lines(_COMPOSE))
+
+    def test_the_framework_builds_this_checkout_and_defaults_to_the_runner(self):
+        self.assertIn("build: .", self.framework)
+        self.assertIn("COUSIN_DEFAULT_RUNNER: sdk", self.framework)
+        self.assertIn("restart: unless-stopped", self.framework)
+
+    def test_the_login_lane_needs_no_secret_file(self):
+        # A secret whose file is missing fails `docker compose up`, so the
+        # key lane is an override file; the base file declares no secret
+        # and no default account.
+        live = "\n".join(_live_lines(_COMPOSE))
+        self.assertNotIn("secrets:", live)
+        self.assertNotIn("COUSIN_DEFAULT_ACCOUNT", live)
+
+    def test_the_api_key_lane_is_one_override_file(self):
+        key = _services(_COMPOSE_KEY)["framework"]
+        self.assertIn("- anthropic_api_key", key)
+        self.assertIn("COUSIN_DEFAULT_ACCOUNT: api-key", key)
+        live = _live_lines(_COMPOSE_KEY)
+        self.assertIn("  anthropic_api_key:", live)
+        self.assertIn("    file: ./secrets/anthropic_api_key", live)
+
+    def test_heavier_lanes_are_opt_in_profiles(self):
+        for name, block in self.services.items():
+            if name != "framework":
+                self.assertTrue(any(l.startswith("profiles:") for l in block), name)
+        embeddings = self.services["embeddings"]
+        self.assertIn('profiles: ["embeddings"]', embeddings)
+        self.assertTrue(any(l.startswith("image: ollama/ollama:") for l in embeddings))
+        self.assertFalse(any(l.startswith("ports:") for l in embeddings),
+                         "the embedding service is reached on the compose network only")
+
+    def test_the_key_file_never_reaches_git_or_the_image(self):
+        ignored = (_REPO / ".gitignore").read_text().splitlines()
+        self.assertIn("/secrets/", ignored)
+        self.assertIn("/compose.override.yml", ignored)
+        patterns = [l.strip() for l in _DOCKERIGNORE.read_text().splitlines()
+                    if l.strip() and not l.strip().startswith("#")]
+        self.assertTrue(_dockerignored("secrets/anthropic_api_key", patterns))
+
+    def test_ascii_and_no_home_path(self):
+        for path in (_COMPOSE, _COMPOSE_KEY, _UNIT):
+            text = path.read_text()
+            text.encode("ascii")
+            self.assertNotIn("/home/", text, path.name)
+
+
+def _unit():
+    import configparser
+    parser = configparser.ConfigParser(strict=False, interpolation=None)
+    parser.optionxform = str
+    parser.read_string(_UNIT.read_text())
+    return parser
+
+
+class TestSupervisorUnit(unittest.TestCase):
+    def test_it_runs_the_supervisor_and_reloads_through_it(self):
+        service = _unit()["Service"]
+        self.assertEqual(service["ExecStart"],
+                         "{{USER_BIN}}/cousin-supervisor run --console-port 8600")
+        self.assertEqual(service["ExecReload"], "{{USER_BIN}}/cousin-supervisor reload")
+        self.assertEqual(service["Restart"], "on-failure")
+        self.assertEqual(service["Type"], "simple")
+
+    def test_the_stop_is_the_supervisors_ordered_stop(self):
+        service = _unit()["Service"]
+        # mixed: SIGTERM to the supervisor alone, which stops its children
+        # in order; SIGKILL to whatever is left only at the timeout.
+        self.assertEqual(service["KillMode"], "mixed")
+        # The true worst case: every step's timeout plus its kill grace.
+        worst = (_RUNNER_STOP_S + _KILL_GRACE_S) + 2 * (_CHILD_STOP_S + _KILL_GRACE_S)
+        self.assertEqual(worst, 70)
+        self.assertGreaterEqual(int(service["TimeoutStopSec"]), worst)
+
+    def test_the_readme_says_it_replaces_the_console_and_loops_units(self):
+        readme = (_REPO / "systemd" / "README.md").read_text()
+        row = [l for l in readme.splitlines() if l.startswith("| `cousin-supervisor.service`")]
+        self.assertEqual(len(row), 1)
+        self.assertIn("instead of", row[0])
+        for name in ("cousin-console.service", "cousin-loops.service",
+                     "--no-console --no-loops"):
+            self.assertIn(name, readme)
+
+    def test_the_readme_migration_keeps_the_console_address_and_can_go_back(self):
+        readme = (_REPO / "systemd" / "README.md").read_text()
+        section = readme.split("## One unit instead of two", 1)[1].split("\n## ", 1)[0]
+        # the old console's address, read and carried into a drop-in
+        self.assertIn("systemctl --user cat cousin-console.service", section)
+        self.assertIn("cousin-supervisor.service.d/", section)
+        dropin = [l for l in section.splitlines()
+                  if l.startswith("ExecStart=") and "--console-host" in l]
+        self.assertEqual(len(dropin), 1, section)
+        self.assertIn("--console-port", dropin[0])
+        self.assertIn("ExecStart=\n" + dropin[0], section)
+        # the switch and its exact reverse
+        self.assertIn("systemctl --user disable --now cousin-console.service"
+                      " cousin-loops.service\nsystemctl --user enable --now"
+                      " cousin-supervisor.service", section)
+        self.assertIn("systemctl --user disable --now cousin-supervisor.service &&"
+                      " systemctl --user enable --now cousin-console.service"
+                      " cousin-loops.service", section)
+
+
+def _compose(*args):
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        empty = pathlib.Path(tmp.name) / "empty.env"
+        empty.write_text("")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("COMPOSE_")}
+        return subprocess.run(["docker", "compose", "--project-directory", str(_REPO),
+                               "--env-file", str(empty)] + list(args),
+                              capture_output=True, text=True, timeout=_TIMEOUT, env=env)
+    finally:
+        tmp.cleanup()
+
+
+@unittest.skipUnless(_docker_enabled(), "opt-in: COUSIN_DOCKER=1 and docker on PATH")
+class TestComposeConfig(unittest.TestCase):
+    def config(self, *args):
+        r = _compose(*(list(args) + ["config", "--format", "json"]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_the_file_is_valid_with_and_without_profiles(self):
+        for extra in ([], ["--profile", "embeddings"], ["-f", str(_COMPOSE),
+                                                          "-f", str(_COMPOSE_KEY)]):
+            with self.subTest(extra=extra):
+                args = extra if extra[:1] == ["-f"] else ["-f", str(_COMPOSE)] + extra
+                r = _compose(*(args + ["config", "-q"]))
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_default_set_is_the_framework_alone(self):
+        cfg = self.config("-f", str(_COMPOSE))
+        self.assertEqual(sorted(cfg["services"]), ["framework"])
+        fw = cfg["services"]["framework"]
+        self.assertEqual(fw["stop_grace_period"], "45s")
+        self.assertEqual([(p["host_ip"], p["published"], p["target"]) for p in fw["ports"]],
+                         [("127.0.0.1", "8600", 8600)])
+        self.assertEqual([(v["type"], v["source"], v["target"]) for v in fw["volumes"]],
+                         [("volume", "framework-data", "/data")])
+        self.assertEqual(fw["environment"]["COUSIN_DEFAULT_RUNNER"], "sdk")
+        self.assertNotIn("secrets", fw)
+
+    def test_the_embeddings_profile_adds_the_embedding_service(self):
+        cfg = self.config("-f", str(_COMPOSE), "--profile", "embeddings")
+        self.assertEqual(sorted(cfg["services"]), ["embeddings", "framework"])
+
+    def test_the_key_override_adds_the_secret_and_the_default_account(self):
+        cfg = self.config("-f", str(_COMPOSE), "-f", str(_COMPOSE_KEY))
+        fw = cfg["services"]["framework"]
+        self.assertEqual([s["source"] for s in fw["secrets"]], ["anthropic_api_key"])
+        self.assertEqual(fw["environment"]["COUSIN_DEFAULT_ACCOUNT"], "api-key")
+        self.assertEqual(fw["environment"]["COUSIN_DEFAULT_RUNNER"], "sdk")
+        self.assertTrue(cfg["secrets"]["anthropic_api_key"]["file"].endswith(
+            "/secrets/anthropic_api_key"))
 
 
 if __name__ == "__main__":

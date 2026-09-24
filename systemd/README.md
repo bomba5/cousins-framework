@@ -23,6 +23,7 @@ here).
 |---|---|---|
 | `cousin-loops.service` | `cousin-loops run --interval 30`: heartbeats, loops, one-shot schedules, timed flips, the daily `flip_at` | always |
 | `cousin-console.service` | `cousin-console --port 8600`: the web console, on loopback | always |
+| `cousin-supervisor.service` | `cousin-supervisor run --console-port 8600`: the console (on loopback), the loops daemon and one `cousin-runner` per runner cousin, restarted with backoff and stopped in order | instead of `cousin-console.service` and `cousin-loops.service`, never beside them (see below) |
 | `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: starts a missing chat server for any running cousin, logs an alert for a sick one, never kills | every 10 minutes |
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
@@ -94,6 +95,75 @@ To change a unit later, use a drop-in (`systemctl --user edit <unit>`)
 rather than editing the rendered file: re-running the loop above overwrites
 the file but leaves drop-ins alone. That's how you put the console on the
 LAN, see [install](../docs/install.md#reaching-the-console-from-the-lan).
+
+## One unit instead of two: the supervisor
+
+`cousin-supervisor.service` runs the supervisor the container runs. It starts
+the console and the loops daemon itself, so it replaces
+`cousin-console.service` and `cousin-loops.service`. Enable one set, never
+both: two consoles would serve one root, and the second loops daemon is
+refused by the first one's lock, which leaves the supervisor's loops child
+`failing`.
+
+The supervisor's console listens on `127.0.0.1:8600` unless told otherwise,
+not where your old console did. First read the old console's address: the
+last `ExecStart=` that `systemctl --user cat` prints is the one that runs,
+drop-ins included.
+
+```
+systemctl --user cat cousin-console.service | grep '^ExecStart='
+```
+
+If it has a `--host` or a `--port` (the LAN drop-in from
+[install](../docs/install.md#reaching-the-console-from-the-lan), or a port
+that hive nodes on other machines call), carry both into a drop-in for the
+supervisor before you switch. With `USER_BIN` set as in the install loop
+above, and the old console's `--host 0.0.0.0 --port 8087` as the example:
+
+```
+mkdir -p ~/.config/systemd/user/cousin-supervisor.service.d
+cat > ~/.config/systemd/user/cousin-supervisor.service.d/console.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=$USER_BIN/cousin-supervisor run --console-host 0.0.0.0 --console-port 8087
+EOF
+systemctl --user daemon-reload
+```
+
+The supervisor hands its console only the host and the port. If the old
+`ExecStart=` has any other flag (`--secure-cookie`, `--tmux-bin`), keep the
+old units for now. Otherwise switch:
+
+```
+systemctl --user disable --now cousin-console.service cousin-loops.service
+systemctl --user enable --now cousin-supervisor.service
+```
+
+and check that the console answers where it did (`curl -fsS
+http://127.0.0.1:8087/api/version` in the example). To go back, the old
+units and their drop-ins are untouched:
+
+```
+systemctl --user disable --now cousin-supervisor.service && systemctl --user enable --now cousin-console.service cousin-loops.service
+```
+
+`systemctl --user reload cousin-supervisor.service` rescans `cousins/`: a new
+runner cousin gets its runner, and nothing healthy restarts.
+
+Its `KillMode=mixed` stops the supervisor's whole control group. A chat
+server or a tmux server that the console started for a tmux cousin lives in
+that group, and stopping or restarting the unit kills it. While you still
+have tmux cousins, keep the two old units and run the supervisor beside them
+for the runner cousins only, with a drop-in (`systemctl --user edit
+cousin-supervisor.service`):
+
+```
+[Service]
+ExecStart=
+ExecStart={{USER_BIN}}/cousin-supervisor run --no-console --no-loops
+```
+
+Replace `{{USER_BIN}}` there as in the loop above.
 
 ## Telegram bridge
 

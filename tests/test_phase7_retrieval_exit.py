@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest import mock
 
-from cousin_lib import memory, memory_import, memory_search
+from cousin_lib import memory, memory_import
 from cousin_lib.runner import hooks
 from cousin_lib.runner.state import StateMachine
 from cousin_lib.runner.stream import EventStream

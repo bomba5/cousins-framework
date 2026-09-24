@@ -126,7 +126,9 @@ class RunnerContract:
         r = self._runner()
         r.start()
         a = r.enqueue(_op("one"))
-        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        # a runner closes the row, then appends the result naming it (#102)
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None
+                              and any(a.inbox_id in x["inbox_ids"] for x in _results(r))))
         self.assertEqual(self._row_outcome(r, a), "delivered")
         self.assertEqual(_results(r)[-1]["inbox_ids"], [a.inbox_id])
         self.assertFalse(_results(r)[-1]["is_error"])
@@ -136,7 +138,9 @@ class RunnerContract:
         r = self._runner(fail_first=True)
         r.start()
         a = r.enqueue(_op("one"))
-        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        # a runner closes the row, then appends the result naming it (#102)
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None
+                              and any(a.inbox_id in x["inbox_ids"] for x in _results(r))))
         self.assertEqual(self._row_outcome(r, a), "failed")
         failed = [x for x in _results(r) if a.inbox_id in x["inbox_ids"]]
         self.assertTrue(failed and failed[0]["is_error"])

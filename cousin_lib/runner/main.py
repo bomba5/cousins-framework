@@ -173,6 +173,12 @@ def runner_for(home, *, kind=None):
         if side:
             raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
                               " runner = \"sdk\"" % ", ".join(side))
+        try:
+            # the lanes do not mix for the fake either (an opencode account's
+            # data dir never reaches another runner); no preflight: it runs no model
+            accounts.check_lane(accounts.for_cousin(home, root_for(home)), kind)
+        except accounts.AccountsError as err:
+            raise RunnerError(str(err))
         from cousin_lib.runner.fake import FakeRunner
         return FakeRunner(home, policy=policy)
     from cousin_lib.runner import tools

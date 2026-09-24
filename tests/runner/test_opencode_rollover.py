@@ -190,6 +190,15 @@ class TestWiring(OpencodeCase):
         with self.assertRaises(RunnerError) as err:
             runner_main.runner_for(sdk_home)
         self.assertIn('runs with runner = "opencode" only', str(err.exception))
+        # review minor: a fake cousin too (runners.md says so; it returned
+        # before the lane check)
+        fake_home = self.home(extra='account = "lab"\n')
+        (fake_home / "cousin.toml").write_text((fake_home / "cousin.toml").read_text()
+                                               .replace('runner = "opencode"', 'runner = "fake"'))
+        self.accounts_toml(self.LAB)
+        with self.assertRaises(RunnerError) as err:
+            runner_main.runner_for(fake_home)
+        self.assertIn('runs with runner = "opencode" only, not runner = "fake"', str(err.exception))
 
     def test_a_cousin_without_a_model_or_on_the_bridge_exits_2(self):
         for model, needle in ((None, "[agent] model is required"),

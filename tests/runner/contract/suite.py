@@ -21,7 +21,7 @@ CONTRACT_ITEMS = ("enqueue_receipt", "priority_order", "consume_after_start",
                   "interrupt_ends_turn", "turn_events", "unsupported_list",
                   "midturn_fold", "outcome_delivered", "outcome_failed",
                   "outcome_interrupted", "failure_recovers", "stop_ends_turn",
-                  "peer_waits", "state_events", "events_after",
+                  "loop_waits", "state_events", "events_after",
                   "interrupt_idle_false", "enqueue_type_error", "rollover_shape",
                   "rollover_generation", "interrupt_row", "interrupt_row_idle")
 
@@ -104,13 +104,15 @@ class RunnerContract:
     @item("priority_order")
     def test_items_are_consumed_in_priority_order(self):
         r = self._runner()
+        # none of these three folds into another's turn (a peer would fold
+        # into the operator's, #118), so each is a turn of its own
         r.enqueue(Item("loop:heartbeat", "loop", "loop"))
-        r.enqueue(Item("peer:testa", "chat", "peer", sender="Testa"))
+        r.enqueue(Item("schedule", "schedule", "schedule"))
         r.enqueue(_op("op"))
         r.start()
         self.assertTrue(_wait(lambda: len(_results(r)) >= 3))
         bodies = [e["payload"]["bodies"][0] for e in r.events() if e["kind"] == "turn_start"]
-        self.assertEqual(bodies, ["op", "peer", "loop"])
+        self.assertEqual(bodies, ["op", "schedule", "loop"])
 
     @item("consume_after_start")
     def test_an_item_put_while_stopped_is_consumed_after_start(self):
@@ -292,29 +294,32 @@ class RunnerContract:
         self.assertIsInstance(out.get("reason"), str)
 
     @item("midturn_fold")
-    def test_a_midturn_operator_message_is_closed_by_the_same_result(self):
+    def test_a_midturn_operator_or_peer_message_is_closed_by_the_same_result(self):
+        """Operator chat and, since #118, a peer's (a cousin's STOP) reach a
+        running turn, not the turn after it."""
         r = self._runner(slow=True)
         r.start()
         first = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         second = r.enqueue(_op("second, mid-turn"))
+        peer = r.enqueue(Item("peer:testa", "chat", "peer, mid-turn", sender="Testa"))
         self.assertTrue(_wait(lambda: "result" in _kinds(r), timeout=8.0))
         time.sleep(0.3)
         results = _results(r)
-        self.assertEqual(len(results), 1, "one result closes both items (finding 1)")
+        self.assertEqual(len(results), 1, "one result closes all three (finding 1)")
         self.assertEqual(sorted(results[0]["inbox_ids"]),
-                         sorted([first.inbox_id, second.inbox_id]))
+                         sorted([first.inbox_id, second.inbox_id, peer.inbox_id]))
 
-    @item("peer_waits")
-    def test_a_peer_message_put_mid_turn_waits_for_its_own_turn(self):
+    @item("loop_waits")
+    def test_a_loop_row_put_mid_turn_waits_for_its_own_turn(self):
         r = self._runner(slow=True)
         r.start()
         first = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
-        peer = r.enqueue(Item("peer:testa", "chat", "peer", sender="Testa"))
+        beat = r.enqueue(Item("loop:heartbeat", "loop", "beat", sender=""))
         self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=10.0))
         self.assertEqual([x["inbox_ids"] for x in _results(r)],
-                         [[first.inbox_id], [peer.inbox_id]])
+                         [[first.inbox_id], [beat.inbox_id]])
 
     @item("rollover_generation")
     def test_a_rollover_moves_the_generation_and_loses_no_row(self):

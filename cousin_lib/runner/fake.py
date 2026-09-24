@@ -8,7 +8,7 @@ a runner that behaves exactly as the spec says, deterministically.
 "fail_once" (the first time any turn reaches it, the turn body raises;
 afterwards it is a tool step), or any other name, recorded as that
 tool. `turn_seconds` holds the first step open that long, folding
-operator/person chat in while it waits.
+operator/person/peer chat in while it waits.
 """
 import threading
 import time
@@ -142,7 +142,7 @@ class FakeRunner:
                     self._fail_turn([], exc)
 
     def _fold_midturn(self, consumed):
-        """Claim operator/person chat rows that arrived during the turn
+        """Claim operator/person/peer chat rows that arrived during the turn
         (finding 1: they are folded into it and closed by its result).
         The caller folds only while the turn is live: never once an
         interrupt is asked (`base.folds_into_turn`)."""

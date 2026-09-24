@@ -29,7 +29,7 @@ from pathlib import Path
 
 from cousin_lib import mcp_server
 from cousin_lib.delivery import parse_thread, thread_for_chat
-from cousin_lib.runner.base import RunnerError
+from cousin_lib.runner.base import SURFACE_KINDS, RunnerError
 
 
 @dataclass
@@ -491,7 +491,10 @@ def _pick_thread(ctx, thread):
     able to reach its operator, as `cousin-reply --user` can; the live
     thread's spelling is used when one matches. The live
     turn decides only the implicit default: one live thread, that one;
-    two, refused with the list; none, refused."""
+    two, refused with the list; none, refused. Only the chat-surface
+    threads (operator, person) are candidates: a peer folded into an
+    operator's turn (#118) leaves one candidate, the operator's, and a
+    turn whose only live threads are peers is refused with the send hint."""
     turn = ctx.turn
     if turn is None:
         active, live = False, ()
@@ -513,10 +516,22 @@ def _pick_thread(ctx, thread):
     if not live:
         raise ValueError("no turn is live; name the thread (thread=operator:<name>"
                          " or person:<name>)")
-    if len(live) > 1:
-        raise ValueError("%d threads are live in this turn; name one with thread: %s"
-                         % (len(live), ", ".join(live)))
-    return live[0]
+    surface = [t for t in live if _thread_kind(t) in SURFACE_KINDS]
+    if not surface:
+        # a peer, schedule or loop turn: reply's own kind check refuses it,
+        # a peer with the send hint
+        return live[0]
+    if len(surface) > 1:
+        raise ValueError("%d chat threads are live in this turn; name one with thread: %s"
+                         % (len(surface), ", ".join(surface)))
+    return surface[0]
+
+
+def _thread_kind(thread):
+    try:
+        return parse_thread(thread)[0]
+    except Exception:  # noqa: BLE001 - a malformed live id is no candidate
+        return None
 
 
 def _check_attachment(kind, value):
@@ -763,13 +778,15 @@ def handoff(ctx, args):
 
 RUNNER_TOOLS = [
     {"name": "reply",
-     "description": "Answer on the chat surface. Routes by the live thread of this turn; with two"
-                    " live threads, name one. Operator and person threads only; a peer is answered"
-                    " with send. The only tool that writes the chat surface.",
+     "description": "Answer on the chat surface. Routes by the live operator or person thread of"
+                    " this turn; with two such threads live, name one. Operator and person threads"
+                    " only; a peer (a [peer:<slug>] message, folded or not) is answered with send."
+                    " The only tool that writes the chat surface.",
      "inputSchema": {"type": "object", "properties": {
          "text": {"type": "string"},
          "thread": {"type": "string",
-                    "description": "operator:<name> or person:<name>; required when two threads are live"},
+                    "description": "operator:<name> or person:<name>; required when two such"
+                                   " threads are live"},
          "reply_to": {"type": "integer", "description": "the chat message id you answer"},
          "image": {"type": "string", "description": "path to a PNG, JPEG, GIF or WebP"},
          "video": {"type": "string", "description": "path to an MP4, WebM, MOV or M4V"}},

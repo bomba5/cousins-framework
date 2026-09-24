@@ -499,16 +499,80 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual((res[0]["inbox_ids"], res[0]["interrupted"]), ([a.inbox_id], True))
         self.assertEqual((res[1]["inbox_ids"], res[1]["interrupted"]), ([b.inbox_id], False))
 
-    def test_a_peer_message_waits_for_the_turn_boundary(self):
-        r, made = self._runner([[init_msg(), assistant(tool="Bash"), result()],
-                                [assistant(text="second turn"), result()]], delay=0.15)
+    def test_a_midturn_peer_message_is_queried_into_the_live_turn(self):
+        """#118: a peer (a cousin, thread peer:<slug>) folds like an
+        operator: a coordinator's STOP must reach a peer in a long turn.
+        It goes through the same write as an operator fold (`_send`), with
+        its thread in the envelope header."""
+        r, made = self._runner([[init_msg(), assistant(tool="Bash"), "PAUSE",
+                                 assistant(text="x"), result()]])
+        r.start()
+        a = r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5),
+                        "the peer row was query()'d mid-turn")
+        text = made["client"].queries[1]["message"]["content"][0]["text"]
+        self.assertTrue(text.startswith("[peer:testa] chat from Testa"), text)
+        self.assertIn("STOP", text)
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events()), timeout=5))
+        res = _results(r)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(sorted(res[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
+
+    def test_meeting_loop_and_schedule_rows_wait_for_the_turn_boundary(self):
+        """What stays unfolded (#118 kept it): a meeting line is a round's
+        turn, a loop or a schedule is the cousin's own timer; each is a
+        turn of its own, never written into someone else's."""
+        r, made = self._runner([[init_msg(), assistant(tool="Bash"), "PAUSE",
+                                 assistant(text="x"), result()]])
+        r.start()
+        a = r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        # each its own turn, in priority order: meeting, schedule, loop
+        waiting = [r.enqueue(Item("meeting:7", "meeting", "your turn", sender="")),
+                   r.enqueue(Item("schedule", "schedule", "timer", sender="")),
+                   r.enqueue(Item("loop:heartbeat", "loop", "beat", sender=""))]
+        time.sleep(4 * r.poll_s + 0.2)   # several folds had their chance
+        self.assertEqual(len(made["client"].queries), 1)
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: len(_results(r)) == 4, timeout=8))
+        self.assertEqual([x["inbox_ids"] for x in _results(r)],
+                         [[a.inbox_id]] + [[w.inbox_id] for w in waiting])
+
+    def test_with_a_peer_folded_reply_never_targets_the_peer_and_send_does(self):
+        """#118: an operator turn with a peer folded has two live threads.
+        reply is the chat surface only: named, the peer thread is refused
+        with the send hint; unnamed, it goes to the one surface thread
+        (the peer is no candidate). send reaches the peer."""
+        from unittest import mock
+        from cousin_lib.runner import tools
+        from tests.runner.test_tools import _install
+        _, self.home = _install(self)
+        r, made = self._runner([[init_msg(), assistant(tool="Bash"), "PAUSE",
+                                 assistant(text="x"), result()]])
         r.start()
         r.enqueue(self._op("first"))
-        self.assertTrue(_wait(lambda: r.state() == "running"))
-        r.enqueue(Item("peer:testa", "chat", "peer", sender="Testa"))
-        self.assertTrue(_wait(lambda: len(_results(r)) == 2, timeout=6))
-        self.assertEqual(len(made["client"].queries), 2)
-        self.assertEqual([len(x["inbox_ids"]) for x in _results(r)], [1, 1])
+        self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
+        r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5))
+        self.assertEqual(r.turn.snapshot(), (True, ("operator:priya", "peer:testa")))
+        ctx = r.tool_context
+        text, err = tools.call(ctx, "reply", {"text": "stopping", "thread": "peer:testa"})
+        self.assertTrue(err, text)
+        self.assertIn("send", text)
+        text, err = tools.call(ctx, "reply", {"text": "on it"})
+        self.assertFalse(err, text)
+        self.assertIn("replied to priya", text)
+        with mock.patch("cousin_lib.chat.send_message", return_value={"ok": True}) as sm:
+            text, err = tools.call(ctx, "send", {"to": "testa", "text": "stopping"})
+        self.assertFalse(err, text)
+        self.assertEqual(sm.call_args.args[2], "testa")
+        made["client"].resume()
+        self.assertTrue(_wait(lambda: len(_results(r)) == 1, timeout=5))
 
     # -- interrupt ---------------------------------------------------------------
     def test_interrupt_calls_the_client_and_marks_the_result(self):
@@ -803,8 +867,8 @@ class TestSdkRunner(HermeticCase):
         r, _ = self._runner([[result(is_error=True)] for _ in range(5)]
                             + [[assistant(text="fine"), result()]])
         r.backoff_base_s, r.backoff_cap_s = 0.1, 0.3
-        for i in range(5):   # peers: never folded, so one turn each
-            r.enqueue(Item("peer:testa", "chat", "fails %d" % i, sender="Testa"))
+        for i in range(5):   # loop rows: never folded, so one turn each
+            r.enqueue(Item("loop:heartbeat", "loop", "fails %d" % i, sender=""))
         r.start()
         self.assertTrue(_wait(lambda: len(_results(r)) == 5, timeout=8))
         ok = r.enqueue(self._op("works"))
@@ -842,7 +906,7 @@ class TestSdkRunner(HermeticCase):
         r.start()
         a = r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
-        b = r.enqueue(Item("peer:testa", "chat", "waiting", sender="Testa"))
+        b = r.enqueue(Item("loop:heartbeat", "loop", "waiting", sender=""))   # never folded
         self.assertTrue(_wait(lambda: not r.worker_alive(), timeout=8))
         self.assertTrue(any(e.startswith("reconnect failed:") for e in _errors(r)))
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")

@@ -10,7 +10,7 @@ cousin whose account did not take effect is visible.
 
 One thread owns one asyncio loop, and that loop owns the client. The
 loop's shape is FakeRunner's (the reference runner): claim one row, run
-one turn, fold operator/person chat that lands mid-turn into it, close
+one turn, fold operator/person/peer chat that lands mid-turn into it, close
 every consumed row with a result, and route every failure through
 `_fail_turn` so nothing dies silently.
 
@@ -36,7 +36,7 @@ from pathlib import Path
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import auth, envelope, extract, hooks, rollover, tools, wake
-from cousin_lib.runner.base import (FOLDED_KINDS, INTERRUPT, NO_TURN, Receipt, RunnerError,
+from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.policy import Policy
@@ -166,7 +166,7 @@ class SdkRunner:
     # A login retry failing this many times in a row for another reason
     # gives up the session on file and starts fresh (_login_retry_failed).
     RETRY_FAILURES_TO_FRESH = 3
-    # How often a live turn looks for operator/person rows to fold in, and
+    # How often a live turn looks for operator/person/peer rows to fold in, and
     # how long an idle loop sleeps when the doorbell is a Poller.
     poll_s = 0.2
 
@@ -541,7 +541,7 @@ class SdkRunner:
             kind, _ = parse_thread(match["thread_id"])
         except DeliveryError:
             return ""
-        return (match.get("body") or "") if kind in FOLDED_KINDS else ""
+        return (match.get("body") or "") if kind in SURFACE_KINDS else ""
 
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})
@@ -1102,8 +1102,10 @@ class SdkRunner:
         open_rows.append((row, text))
 
     async def _fold(self, sdk, open_rows):
-        """Operator/person chat that arrived during the live turn is
-        written into it (finding 1); anything else goes back to the queue."""
+        """Operator, person and peer chat that arrived during the live
+        turn is written into it (finding 1, #118), each through `_send`,
+        the one write every fold takes; anything else goes back to the
+        queue (`base.FOLDED_KINDS` says why)."""
         rows = self._claim(10)
         for i, row in enumerate(rows):
             if row["source"] == INTERRUPT or self._interrupt_requested \
@@ -1311,7 +1313,7 @@ class SdkRunner:
             await _aclose(responses)
 
     async def _turn(self, first):
-        """One runner turn: write `first`, fold operator/person chat while
+        """One runner turn: write `first`, fold operator/person/peer chat while
         the turn is live, and read until every written row is closed.
         Returns False when the turn failed or a result was an error."""
         self._interrupt_requested = False

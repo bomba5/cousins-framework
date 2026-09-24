@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- A peer's message (another cousin, thread `peer:<slug>`) that arrives while
+  a turn runs is folded into that turn, as an operator's or a person's is,
+  on the `sdk`, `opencode` and `fake` runners (#118). It used to wait for the
+  turn to end, and a turn has no length bound: a coordinator's 13 messages,
+  two of them STOP, sat queued behind one 60-minute turn while the peer
+  duplicated finished work. Meeting, loop and schedule rows still wait for a
+  turn of their own. The claim order at a turn boundary is unchanged. `reply`
+  still never answers a peer thread; with a peer folded into an operator's
+  turn, an unnamed `reply` goes to the operator's thread (a peer thread is no
+  candidate). The contract item `peer_waits` is now `loop_waits`, and
+  `midturn_fold` covers a peer message too.
+
 ## 1.21.0 - 2026-09-24
 
 ### Added

@@ -18,9 +18,10 @@ row with a result, route every failure to an outcome. A turn is one
 the first `session.idle` that follows a prompt the runner sent and whose
 user message opencode announced (R2'): an idle with nothing outstanding
 is ignored (opencode doubles the idle pair after an abort or a failure).
-While the run is busy, operator and person chat is sent at once and
-opencode folds it into the same run (R14', measured), so it closes at the
-same idle; peer rows wait for their own turn. An abort drops a prompt
+While the run is busy, operator, person and peer chat is sent at once
+and opencode folds it into the same run (R14', measured), so it closes at
+the same idle; meeting, loop and schedule rows wait for their own turn
+(#118, `base.FOLDED_KINDS`). An abort drops a prompt
 queued behind the running one, so every row sent into an aborted run
 that the model never started is requeued. A `session.error` classifies
 the turn (R2): an auth error puts the rows back and waits for the login,
@@ -1567,7 +1568,7 @@ class OpencodeRunner:
         return sent
 
     def _turn(self, first):
-        """One runner turn: send `first`, fold operator/person chat while it
+        """One runner turn: send `first`, fold operator/person/peer chat while it
         is live, and read events until every prompt sent is closed."""
         self._pump()                        # the last run's tail is not this turn's
         run = _Run()
@@ -1719,9 +1720,10 @@ class OpencodeRunner:
                 self.inbox.done(row["id"], FAILED, "opencode refused the abort")
 
     def _fold(self, run):
-        """Operator/person chat that lands during the live turn is sent at
-        once: opencode folds it into the running run (R14'). Anything else
-        goes back to the queue; a peer waits for its own turn."""
+        """Operator, person and peer chat that lands during the live turn
+        is sent at once: opencode folds it into the running run (R14',
+        #118). Anything else goes back to the queue (`base.FOLDED_KINDS`
+        says why)."""
         if self._interrupt_requested or run.over or not run.fold:
             return
         rows = self.inbox.claim(limit=10, claimant=self.session_id)

@@ -30,8 +30,8 @@ class Unknown:
 
 
 class Both:
-    UNSUPPORTED = ("peer_waits",)
-    PLUGIN_ITEMS = ("peer_waits",)
+    UNSUPPORTED = ("loop_waits",)
+    PLUGIN_ITEMS = ("loop_waits",)
 
 
 class Silent:
@@ -75,7 +75,7 @@ class TestDeclarations(HermeticCase):
             table = ct.cells(("test", "bare"))
         self.assertEqual(table["test"]["midturn_fold"], ct.DECLARED)
         self.assertEqual(table["test"]["turn_events"], ct.PLUGIN)
-        self.assertEqual(table["test"]["peer_waits"], ct.IMPLEMENTED)
+        self.assertEqual(table["test"]["loop_waits"], ct.IMPLEMENTED)
         self.assertEqual(set(table["bare"].values()), {ct.IMPLEMENTED})
         with _with(test=Declares):
             text = ct.render(("test",))

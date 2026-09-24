@@ -21,8 +21,10 @@ class Receipt:
 
 
 # Lower claims first. Chat ranks by whom it is from: an operator or a
-# person is streamed into a live turn, a peer waits (spec, "The store
-# is the bus"). A flip's handoff goes ahead of everything.
+# person is claimed ahead of a meeting, a peer after it (spec, "The store
+# is the bus"). A flip's handoff goes ahead of everything. The rank is
+# only the order of claims at a turn boundary; what folds into a live
+# turn is FOLDED_KINDS below.
 SOURCE_PRIORITY = {
     "flip": 0,
     "interrupt": 0,   # phase 5: the out-of-process interrupt, ahead of everything
@@ -37,7 +39,24 @@ SOURCE_PRIORITY = {
 }
 
 
-FOLDED_KINDS = ("operator", "person")
+# The chat-surface kinds: the threads `reply` answers, the ones the chat
+# server recalls memory for, and the chat that ranks first at a boundary.
+SURFACE_KINDS = ("operator", "person")
+
+# The chat a runner writes into the turn already running. A peer folds
+# like an operator (#118): a turn has no length bound, and a coordinator's
+# STOP that waits for the turn to end arrives after the work it meant to
+# stop. What does NOT fold, and why:
+# - meeting rows: a meeting line is the cousin's turn in a round, answered
+#   once with `meeting say`; folded into someone else's turn it would be
+#   answered late or mixed into an unrelated answer;
+# - loop and schedule rows: the cousin's own timers, which nobody is
+#   waiting on; a heartbeat written into an operator's turn only derails it;
+# - system rows (flip, interrupt, reaction, hook, boot, propose): a flip
+#   is a turn of its own (the handoff), an interrupt has its own path
+#   (`_take_interrupts`), the rest are bookkeeping for the boundary.
+# Only `source == "chat"` folds, so a reaction on an operator thread waits.
+FOLDED_KINDS = SURFACE_KINDS + ("peer",)
 
 # Phase 5: the interrupt a process without the runner object asks for
 # (the console's interrupt route, and any process that enqueues one; not
@@ -52,8 +71,8 @@ NO_TURN = "no turn was running"
 
 def folds_into_turn(source, thread_id):
     """True for an item a runner writes into the turn already running
-    (operator or person chat), False for one that waits for the next
-    turn. Every runner folds by this one rule, and only while the turn
+    (operator, person or peer chat), False for one that waits for the
+    next turn. Every runner folds by this one rule, and only while the turn
     is live: never once an interrupt is requested, never after the
     turn's result was read (spec, "The store is the bus")."""
     kind, _ = parse_thread(thread_id)
@@ -61,7 +80,8 @@ def folds_into_turn(source, thread_id):
 
 
 def priority(source, thread_id):
-    if folds_into_turn(source, thread_id):
+    kind, _ = parse_thread(thread_id)
+    if source == "chat" and kind in SURFACE_KINDS:
         return 1
     return SOURCE_PRIORITY.get(source, 3)
 

@@ -172,6 +172,25 @@ class TestReply(HermeticCase):
         self.assertFalse(err, text)
         self.assertEqual(self._rows(ctx.home)[0][0], "sam")
 
+    def test_a_folded_peer_is_no_reply_candidate(self):
+        """#118: operator:priya with peer:testa folded in. The peer thread
+        is refused by name; unnamed, the reply goes to the operator."""
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "operator:priya", "sender": "Priya"})
+        turn.add({"id": 2, "thread_id": "peer:testa", "sender": "Testa"})
+        ctx = _ctx(self, turn)
+        text, err = tools.call(ctx, "reply", {"text": "hi", "thread": "peer:testa"})
+        self.assertTrue(err); self.assertIn("send", text)
+        self.assertEqual(self._rows(ctx.home), [])
+        text, err = tools.call(ctx, "reply", {"text": "hi"})
+        self.assertFalse(err, text)
+        self.assertEqual([(r[0], r[2]) for r in self._rows(ctx.home)], [("priya", "hi")])
+
+    def test_a_peer_turn_with_another_peer_folded_still_refuses_an_unnamed_reply(self):
+        turn = Turn(); turn.begin({"id": 1, "thread_id": "peer:testa", "sender": "Testa"})
+        turn.add({"id": 2, "thread_id": "peer:sam", "sender": "Sam"})
+        text, err = tools.call(_ctx(self, turn), "reply", {"text": "hi"})
+        self.assertTrue(err); self.assertIn("send", text)
+
     def test_reply_outside_a_turn_is_refused(self):
         ctx = _ctx(self)
         text, err = tools.call(ctx, "reply", {"text": "hi"})

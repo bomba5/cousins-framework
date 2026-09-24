@@ -990,5 +990,179 @@ class TestCli(HermeticCase):
             self.assertIn("migrated", out)
 
 
+SID = "5e55a0de-0000-4000-8000-00000000abcd"
+OLD_SID = "0ld5e55a-0000-4000-8000-000000000001"
+
+
+def _transcripts(case, root, home, *, write_last=True, write_before=True):
+    """config/harness.toml pointing at a scratch transcripts dir, the
+    tmux lane's last session id in [runtime], and its transcript files.
+    The dir is what the framework's resolver names for this home."""
+    base = root / "transcripts"
+    (root / "config" / "harness.toml").write_text(
+        'transcripts_dir = "%s/{home_encoded}"\n' % base)
+    (home / "cousin.toml").write_bytes(TOML.encode() + ('session_id = "%s"\r\n' % SID).encode())
+    tdir = base / str(home).replace("/", "-")
+    tdir.mkdir(parents=True)
+    if write_before:
+        (tdir / ("%s.jsonl" % OLD_SID)).write_text('{"type": "user"}\n')
+        os.utime(tdir / ("%s.jsonl" % OLD_SID), (1000, 1000))
+    if write_last:
+        (tdir / ("%s.jsonl" % SID)).write_text('{"type": "assistant"}\n')
+    return tdir
+
+
+class TestHandover(HermeticCase):
+    """#103: the working conversation does not carry across the move; the
+    tmux lane's transcript path is recorded for the runner's first session."""
+
+    def test_apply_records_the_transcripts_the_framework_resolves(self):
+        root, home = _root(self)
+        tdir = _transcripts(self, root, home)
+        rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        saved = json.loads((home / "data" / "previous-transcript.json").read_text())
+        self.assertEqual([t["path"] for t in saved["transcripts"]],
+                         [str(tdir / ("%s.jsonl" % SID)), str(tdir / ("%s.jsonl" % OLD_SID))])
+        self.assertEqual(saved["session_id"], SID)
+        self.assertIsNone(saved["missing"])
+        self.assertTrue(saved["ended_at"])
+        self.assertIn("handover", [s["step"] for s in rec["steps"]])
+        # recorded after the close, before the runner's first start
+        order = [s["step"] for s in rec["steps"]]
+        self.assertLess(order.index("close"), order.index("handover"))
+        self.assertLess(order.index("handover"), order.index("start"))
+
+    def test_the_record_is_written_before_the_runner_starts(self):
+        root, home = _root(self)
+        _transcripts(self, root, home)
+        live = Live()
+        seen = []
+        orig = live.start
+
+        def start(home_, root_):
+            seen.append((home_ / "data" / "previous-transcript.json").exists())
+            return orig(home_, root_)
+        live.start = start
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
+        self.assertEqual(seen, [True])
+
+    def test_a_missing_transcript_is_recorded_and_does_not_fail_the_migration(self):
+        root, home = _root(self)
+        _transcripts(self, root, home, write_last=False, write_before=False)
+        rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        saved = json.loads((home / "data" / "previous-transcript.json").read_text())
+        self.assertEqual(saved["transcripts"], [])
+        self.assertIn("not on disk", saved["missing"])
+
+    def test_no_harness_seam_is_recorded_as_missing(self):
+        root, home = _root(self)
+        rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        saved = json.loads((home / "data" / "previous-transcript.json").read_text())
+        self.assertEqual(saved["transcripts"], [])
+        self.assertIn("transcripts_dir", saved["missing"])
+
+    def test_a_resolver_that_raises_is_recorded_not_fatal(self):
+        root, home = _root(self)
+        _transcripts(self, root, home)
+        from cousin_lib import transcript_mine
+        with mock.patch.object(transcript_mine, "transcripts_dir",
+                               side_effect=OSError("the disk went away")):
+            rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertEqual(rec["state"], "migrated", rec)
+        saved = json.loads((home / "data" / "previous-transcript.json").read_text())
+        self.assertIn("the disk went away", saved["missing"])
+
+    def test_rollback_removes_the_record(self):
+        root, home = _root(self)
+        _transcripts(self, root, home)
+        live = Live(start_error="no child")
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
+        self.assertTrue((home / "data" / "previous-transcript.json").exists())
+        back = migrate.rollback(home, root=root, **live.kw())
+        self.assertEqual(back["state"], "rolled_back")
+        self.assertFalse((home / "data" / "previous-transcript.json").exists())
+        self.assertIn("handover", [s["step"] for s in back["rollback_steps"]])
+
+    def test_rollback_after_the_runner_consumed_it_removes_that_too(self):
+        root, home = _root(self)
+        _transcripts(self, root, home)
+        live = Live()
+        migrate.apply(home, root=root, validate=True, account="team", **live.kw())
+        os.replace(home / "data" / "previous-transcript.json",
+                   home / "data" / "previous-transcript.json.consumed")
+        migrate.rollback(home, root=root, **live.kw())
+        self.assertFalse((home / "data" / "previous-transcript.json.consumed").exists())
+
+    def test_plan_prints_the_cost_line_and_apply_prints_the_paths(self):
+        root, home = _root(self)
+        tdir = _transcripts(self, root, home)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = migrate.migrate_main(["plan", "wren", "--account", "team", "--validate"])
+            plan_text = out.getvalue()
+            rc2 = migrate.migrate_main(["apply", "wren", "--account", "team", "--validate",
+                                        "--yes"])
+        self.assertEqual((rc, rc2), (0, 0), err.getvalue())
+        self.assertIn("The working conversation does not carry: the new session starts from"
+                      " the state digest, the handoff and memory, and is handed the previous"
+                      " transcript path", plan_text)
+        applied = out.getvalue()[len(plan_text):]
+        self.assertIn(str(tdir / ("%s.jsonl" % SID)), applied)
+        self.assertIn(str(tdir / ("%s.jsonl" % OLD_SID)), applied)
+
+
+class TestHandoffFreshness(HermeticCase):
+    """#103: the runner starts from the handoff; apply says so when the
+    close did not leave one written during it."""
+
+    def test_a_handoff_written_during_the_close_is_fresh(self):
+        root, home = _root(self)
+        handoff = home / "data" / "handoff.md"
+        handoff.write_text("# old\n")
+        os.utime(handoff, (1000, 1000))
+        live = Live()
+        orig = live.close
+
+        def close(slug, root_):
+            handoff.write_text("# H\nnew\n")
+            return orig(slug, root_)
+        live.close = close
+        rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
+        self.assertEqual(rec.get("warnings") or [], [])
+        close_step = next(s for s in rec["steps"] if s["step"] == "close")
+        self.assertIn("handoff written during the close", close_step["detail"])
+
+    def test_a_stale_handoff_is_warned_with_its_age(self):
+        root, home = _root(self)
+        handoff = home / "data" / "handoff.md"
+        handoff.write_text("# old\n")
+        os.utime(handoff, (time.time() - 7200, time.time() - 7200))
+        rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertEqual(rec["state"], "migrated")          # a warning, never a blocker
+        self.assertEqual(len(rec["warnings"]), 1)
+        self.assertIn("not written during the close", rec["warnings"][0])
+        self.assertIn("2.0h old", rec["warnings"][0])
+
+    def test_no_handoff_at_all_is_warned(self):
+        root, home = _root(self)
+        rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
+        self.assertIn("no data/handoff.md", rec["warnings"][0])
+
+    def test_apply_prints_the_warning(self):
+        root, home = _root(self)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = migrate.migrate_main(["apply", "wren", "--account", "team", "--validate",
+                                       "--yes"])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertIn("warn", out.getvalue())
+        self.assertIn("handoff", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

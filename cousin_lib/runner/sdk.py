@@ -33,7 +33,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import accounts, boot, review_gate, session, usage
+from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
 from cousin_lib.runner import auth, envelope, extract, hooks, rollover, tools, wake
 from cousin_lib.runner.base import (FOLDED_KINDS, INTERRUPT, NO_TURN, Receipt, RunnerError,
@@ -464,6 +464,7 @@ class SdkRunner:
         digest, _ = await self._digest(generation)   # never raises; degraded when it must
         if digest is None:
             return
+        digest, handed = self._handover(digest)
         try:
             digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
                                             sender="runner"))
@@ -471,6 +472,11 @@ class SdkRunner:
             self.stream.append("error", {"error": "the digest row could not be stored: %s: %s"
                                          % (type(exc).__name__, exc)})
             return
+        if handed:
+            # The row is durable: it carries the paragraph now. A crash between
+            # the put and this rename hands the paragraph twice at the next
+            # fresh start (never zero times): safe, and accepted.
+            handover.consume(self.home)
         await self._wait_rate_limit()   # a claim by id skips the loop's wait
         if self._stop.is_set():
             return      # the row stays queued (durable): the next start runs it
@@ -1863,12 +1869,15 @@ class SdkRunner:
         digest, digest_state = await self._digest(generation)
         digest_id = None
         if digest is not None:
+            digest, handed = self._handover(digest)
             try:
                 digest_id = self.inbox.put(Item(thread_id="system", source="boot", body=digest,
                                                 sender="runner"))
             except Exception as exc:  # noqa: BLE001 - the session runs on without it
                 digest_state = "none: the digest row could not be stored: %s: %s" \
                                % (type(exc).__name__, exc)
+            if digest_id is not None and handed:
+                handover.consume(self.home)
         detail = {"reason": reason, "handoff": handoff, "generation": generation,
                   "old_session": old_sid, "digest": digest_state}
         if problems:
@@ -1891,6 +1900,21 @@ class SdkRunner:
         if first is not None:
             return await self._turn(first)
         return True
+
+    def _handover(self, digest):
+        """(digest, handed): the digest with the previous-transcript
+        paragraph appended when a move from the tmux lane left its record
+        (handover.py, #103). The caller consumes the record once the row
+        holding the paragraph is stored. Never raises."""
+        try:
+            extra = handover.note(self.home)
+        except Exception as exc:  # noqa: BLE001 - the digest goes without it
+            self.stream.append("error", {"error": "the previous transcript note: %s: %s"
+                                         % (type(exc).__name__, exc)})
+            return digest, False
+        if extra is None:
+            return digest, False
+        return digest + extra, True
 
     async def _digest(self, generation):
         """(text or None, state): the state digest ("built"); the last

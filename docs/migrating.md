@@ -277,12 +277,25 @@ cousin-migrate plan wren --account team --validate
 #   ok  supervisor a cousin-supervisor answers for /srv/fw
 #   ok  sdk        claude-agent-sdk is installed
 #   ok  import     3 auto-memory file(s) to fold in
-# steps: close -> import -> toml -> start -> verify
+#   note The working conversation does not carry: the new session starts from the state digest, the handoff and memory, and is handed the previous transcript path
+#   note data/handoff.md is 3.2h old now; the close asks for a new one and waits for it
+# steps: close -> handover -> import -> toml -> start -> verify
 # wren: ready (run: cousin-migrate apply wren --validate --yes)
 ```
 
 `plan` writes nothing. Leave out `--account` and the cousin runs on the
 host's own login, unless its `[runtime] auth` is `"api_key"`.
+
+**The working conversation does not carry.** The runner starts a new
+session: it knows what the state digest, the handoff and memory tell it,
+and nothing else of the conversation it was having on the tmux lane. That
+conversation stays on disk as Claude Code's transcript of the last tmux
+session (`<transcripts_dir>/<session id>.jsonl`, the directory
+`config/harness.toml` names), and the new session is told where: its first
+message ends with the path, and asks it to have a subagent read the file
+from the end and rebuild its active work into STATUS.md, the handoff and
+memory. Tell the cousin what matters before you migrate it, and expect to
+remind it of the rest.
 
 The runner reads only `[agent]`, so the `carry` lines say what of the tmux
 lane's `[runtime]` moves there: `model` and `effort` (or, when `[runtime]`
@@ -328,14 +341,22 @@ It saves the current `cousin.toml` (its exact bytes and mode) in
 
 | step | what happens |
 |---|---|
-| `close` | a clean stop of the tmux session: the cousin writes its handoff, the transcript is mined, the generation moves on |
+| `close` | a clean stop of the tmux session: the cousin writes its handoff, the transcript is mined, the generation moves on. The close waits (up to 5 minutes) for a handoff written during it, else writes an emergency one; `apply` warns, with the file's age, when the handoff it leaves was not written during the close, and when it is the emergency one |
+| `handover` | the path of the last tmux session's transcript, and of the newest other transcript in the same directory, is written to `data/previous-transcript.json` with the time the session ended. A transcript it cannot find is recorded as missing, with why; it never fails the migration |
 | `import` | Claude Code's own memory for the cousin is folded into `memory/imported/auto/` (`cousin-memory import-auto --apply`), with a recall baseline first |
 | `toml` | `[agent] runner = "sdk"`, `account` when you named one, and what the plan's `carry` lines listed (the key account is made first); nothing else in the file changes. Refused if the tmux session came back meanwhile (a scheduled flip, a console start) |
 | `start` | the migration day's boot packet is set aside (the runner starts on its own digest), the supervisor starts the cousin's runner, and the cousin's chat server is started: the supervisor runs none, and other cousins' messages reach the inbox through it |
 | `verify` | the runner stays up and holds its lock for 10 seconds, and the chat server answers `/health` for the cousin |
 
-It stops at the first step that fails and says so. The runner's first
-session starts fresh, on a digest of the cousin's state.
+It stops at the first step that fails and says so. At the end it prints
+the recorded transcript path(s) (`previous transcript (last): ...`), or why
+there are none. The runner's first session starts fresh, on a digest of the
+cousin's state, with a closing paragraph that names those paths: the
+conversation from before the move, read-only, to be read from the end by a
+subagent that extracts only the user and assistant text, never read whole
+into the session. That start renames the record to
+`data/previous-transcript.json.consumed`, so a later rollover does not
+repeat it.
 
 Then check it, the same day and each day after:
 
@@ -366,7 +387,8 @@ even when `apply` stopped half-way through making it: exactly the bytes it
 appended to `config/accounts.toml` (the rest of the file comes back byte
 for byte), and the secret copy unless another account there still points
 at it. When another cousin names the account, all of it is kept and the
-step says who. has the supervisor rescan, writes a fresh
+step says who. It removes `data/previous-transcript.json` (and the
+`.consumed` one), has the supervisor rescan, writes a fresh
 boot packet from the cousin's state now, starts the tmux session (unless it
 is already up) and releases the supervisor's hold on the runner. If
 `apply` failed before `toml`, it changes nothing but the record. A step

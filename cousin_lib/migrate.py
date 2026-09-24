@@ -12,7 +12,14 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             runner cousin), so it is started first or left alone.
   apply     the steps, in order, stopping at the first that fails:
               close    a clean stop of the tmux session (flip.close_session:
-                       the handoff, the transcript mined, the generation bumped)
+                       the handoff, the transcript mined, the generation bumped);
+                       a handoff not written during the close is a warning
+                       with its age (handoff_freshness)
+              handover the tmux lane's transcript path(s) recorded in
+                       data/previous-transcript.json (handover.py, #103): the
+                       working conversation does not carry, and the runner's
+                       first fresh session is handed the path. Never fails:
+                       a transcript that cannot be found is recorded missing
               import   the agent CLI's own auto-memory folded in
                        (memory_import.apply: idempotent, a baseline first)
               toml     cousin.toml [agent] runner = "sdk", the account, and
@@ -35,14 +42,16 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
                        for STABLE_S, and the chat server answers /health for
                        the slug
             data/migration.json holds the prior cousin.toml, its exact
-            bytes and mode, before the first step, and every step's outcome
+            bytes and mode, before the first step, every step's outcome,
+            the handover record and the warnings
   rollback  undo exactly the steps that ran, and refuse what would be
             unsafe: a record already rolled back, inbox rows still
             waiting (nobody reads the inbox on the tmux lane) or an inbox
             that cannot be read (both unless --force), a runner that is not
             down after its stop. When `toml` ran: stop the runner, wait
             until it is down, put the saved bytes and mode back, have the
-            supervisor rescan. A key account the migration made is
+            supervisor rescan. The handover record (and a consumed one) is
+            removed. A key account the migration made is
             removed with its secret when no other cousin names it (else
             kept, and why). Then a fresh boot packet (the cousin's state
             now, not the migration day's) and the tmux session started,
@@ -81,7 +90,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 RECORD = "data/migration.json"
-STEPS = ("close", "import", "toml", "start", "verify")
+STEPS = ("close", "handover", "import", "toml", "start", "verify")
 STALE_S = 3600.0          # an inbox row not done after this long is a lost message
 TOOL_GRACE_S = 600.0      # a tool call this recent may still be running
 VERIFY_S = 90.0           # how long verify waits for a stable runner
@@ -126,6 +135,62 @@ def _write_record(home, rec):
 
 def _check(name, ok, detail):
     return {"check": name, "ok": bool(ok), "detail": detail}
+
+
+HANDOFF = "data/handoff.md"
+
+
+def _age(seconds):
+    seconds = max(0.0, float(seconds))
+    if seconds < 120:
+        return "%ds" % seconds
+    if seconds < 7200:
+        return "%dm" % (seconds // 60)
+    if seconds < 172800:
+        return "%.1fh" % (seconds / 3600)
+    return "%.1fd" % (seconds / 86400)
+
+
+def _handoff_mtime_ns(home):
+    try:
+        return (Path(home) / HANDOFF).stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def handoff_age(home, now=None):
+    """How old data/handoff.md is now, as text, or None when there is none."""
+    try:
+        mtime = (Path(home) / HANDOFF).stat().st_mtime
+    except OSError:
+        return None
+    return _age((time.time() if now is None else now) - mtime)
+
+
+def handoff_freshness(home, before_ns, stages=()):
+    """(fresh, detail, warning or None) after the close: the runner starts
+    from the handoff, so it must be one written during this close (its
+    mtime moved past `before_ns`, the mtime before the close; None when
+    there was no file). flip.close_session waits for exactly that, else
+    writes an emergency handoff; a cousin whose session was already gone
+    gets neither, which this catches."""
+    after = _handoff_mtime_ns(home)
+    if after is None:
+        return False, "no %s after the close" % HANDOFF, (
+            "no %s after the close: the runner starts from STATUS.md and memory alone"
+            % HANDOFF)
+    if before_ns is not None and after <= before_ns:
+        age = handoff_age(home)
+        return False, "%s not written during the close (%s old)" % (HANDOFF, age), (
+            "%s was not written during the close: it is %s old, and the runner starts"
+            " from it" % (HANDOFF, age))
+    names = {st.get("stage"): st for st in stages or () if isinstance(st, dict)}
+    if "emergency_handoff" in names:
+        return True, "handoff written during the close (the framework's emergency one)", (
+            "the handoff is the framework's emergency one: the cousin did not write it"
+            " in time, so the runner starts from a degraded handoff")
+    clean = (names.get("wait_handoff") or {}).get("wrote_clean")
+    return True, "handoff written during the close%s" % (" (clean)" if clean else ""), None
 
 
 # ------------------------------------------------------------ what [runtime] carries (#96)
@@ -520,7 +585,7 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     """{"slug", "checks": [...], "steps", "ready", "carry", "cli"}; writes
     nothing. A model to be written makes the plan not ready until
     `validate` ran one model turn with it and passed (NEVER_UNRUN)."""
-    from cousin_lib import accounts, memory_import
+    from cousin_lib import accounts, handover, memory_import
     home, root = Path(home), Path(root)
     checks = []
     agent = _agent(home)
@@ -559,6 +624,11 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     model = moved["values"].get("model") or agent.get("model")
     effort = moved["values"].get("effort") or agent.get("effort")
     blocked = [c["check"] for c in checks if not c["ok"]]
+    notes = [handover.COST_LINE]
+    age = handoff_age(home)
+    notes.append("%s is %s old now; the close asks for a new one and waits for it"
+                 % (HANDOFF, age) if age is not None else
+                 "no %s yet; the close asks for one and waits for it" % HANDOFF)
     if validate and blocked:
         checks.append(_check("validate", False, "not run: fix %s first; %s"
                              % (", ".join(blocked), NEVER_UNRUN)))
@@ -597,7 +667,7 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
     from cousin_lib import removed_keys
     return {"slug": home.name, "account": name, "checks": checks, "steps": list(STEPS),
             "ready": all(c["ok"] for c in checks), "carry": moved, "cli": cli,
-            "warnings": removed_keys.scan(root, home)}
+            "warnings": removed_keys.scan(root, home), "notes": notes}
 
 
 # ------------------------------------------------------------ apply
@@ -641,7 +711,7 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
     MigrateError when the plan is not ready (nothing is written then):
     among others, a model to be written that `validate` did not pass in
     this very run (NEVER_UNRUN)."""
-    from cousin_lib import accounts
+    from cousin_lib import accounts, handover
     home, root = Path(home), Path(root)
     p = plan(home, root=root, account=account, tmux_alive=tmux_alive, validate=validate,
              **checks)
@@ -653,7 +723,7 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
     mode = path.stat().st_mode & 0o7777
     rec = {"slug": home.name, "state": "applying", "started_at": _now(), "account": p["account"],
            "was_running": True, "prior_toml_b64": base64.b64encode(prior).decode("ascii"),
-           "prior_mode": mode, "steps": [], "cli": p["cli"],
+           "prior_mode": mode, "steps": [], "warnings": [], "cli": p["cli"],
            "validated": next((c["detail"] for c in p["checks"] if c["check"] == "validate"),
                              None)}
     _write_record(home, rec)
@@ -672,8 +742,21 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
 
     def run(step):
         if step == "close":
+            before = _handoff_mtime_ns(home)
             out = close(home.name, root)
-            return bool(out.get("ok")), out.get("error") or "closed cleanly"
+            if not out.get("ok"):
+                return False, out.get("error") or "the clean stop failed"
+            _fresh, detail, warning = handoff_freshness(home, before, out.get("stages"))
+            if warning:
+                rec["warnings"].append(warning)
+            return True, "closed cleanly; %s" % detail
+        if step == "handover":
+            got = handover.record(home, root, ended_at=_now())
+            rec["handover"] = got
+            paths = [t["path"] for t in got["transcripts"]]
+            return True, "%s: %s%s" % (handover.RECORD, ", ".join(paths) or "no transcript",
+                                       "; missing: %s" % got["missing"] if got["missing"]
+                                       else "")
         if step == "import":
             return True, json.dumps(import_auto(home, root))
         if step == "toml":
@@ -869,6 +952,10 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
     else:
         steps.append({"step": "none", "detail": "close never ran: nothing was changed",
                       "at": _now()})
+    from cousin_lib import handover
+    if any((home / rel).exists() for rel in (handover.RECORD, handover.CONSUMED)):
+        step("handover", lambda: handover.remove(home),
+             lambda gone: "removed %s" % ", ".join(gone), once=False)
     step("release", lambda: release(home),
          lambda _: "no runner hold left on the tmux cousin (run/held)")
     rec.update(state="rolled_back", rolled_back_at=_now(), rollback_steps=steps,
@@ -1101,6 +1188,8 @@ def _print_plan(p):
         print("  %s %-10s %s" % ("ok " if c["ok"] else "NO ", c["check"], c["detail"]))
     for w in p.get("warnings") or ():
         print("  warn 2.0.0 %s %s: %s" % (w["where"], w["key"], w["line"]))
+    for line in p.get("notes") or ():
+        print("  note %s" % line)
     print("steps: %s" % " -> ".join(p["steps"]))
     print("%s: %s" % (p["slug"], "ready (run: cousin-migrate apply %s%s --yes)" % (
         p["slug"], " --validate" if any(c["check"] == "validate" for c in p["checks"]) else "")
@@ -1187,6 +1276,15 @@ def migrate_main(argv=None):
         return 2
     for s in rec.get("steps", []) if args.cmd == "apply" else rec.get("rollback_steps", []):
         print("  %s %-10s %s" % ("ok " if s.get("ok", True) else "NO ", s["step"], s["detail"]))
+    if args.cmd == "apply":
+        for line in rec.get("warnings") or ():
+            print("  warn %s" % line)
+        got = rec.get("handover")
+        if got is not None:
+            for t in got["transcripts"]:
+                print("previous transcript (%s): %s" % (t["which"], t["path"]))
+            if got["missing"]:
+                print("previous transcript missing: %s" % got["missing"])
     print("%s: %s" % (args.slug, rec["state"]))
     if rec["state"] == "failed":
         print("undo with: cousin-migrate rollback %s --yes" % args.slug)

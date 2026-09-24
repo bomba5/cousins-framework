@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- A cousin moved to the runner by `cousin-migrate apply` is handed its
+  conversation from before the move (#103). The working conversation does not
+  carry: the runner starts a new session from the state digest, the handoff
+  and memory. A new `handover` step, after `close`, records the tmux lane's
+  last transcript (and the newest other one in the same directory) in
+  `data/previous-transcript.json`, resolved through `config/harness.toml
+  transcripts_dir`; a transcript it cannot find is recorded as missing and
+  never fails the migration. The runner's first fresh start appends a fixed
+  paragraph to its digest naming the path(s), read-only, to be read from the
+  end by a subagent, and renames the record to `.consumed`; a rollback removes
+  it. `plan` says the conversation does not carry, `apply` prints the
+  recorded paths, and `apply` warns, with the file's age, when the handoff it
+  leaves was not written during the close or is the emergency one.
+
 ## 1.20.0 - 2026-09-24
 
 ### Added

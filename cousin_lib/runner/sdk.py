@@ -35,7 +35,7 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import auth, envelope, extract, hooks, rollover, tools, wake
+from cousin_lib.runner import auth, envelope, extract, hooks, restart_note, rollover, tools, wake
 from cousin_lib.runner.base import (FOLDED_KINDS, INTERRUPT, NO_TURN, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -158,6 +158,9 @@ class SdkRunner:
     # per home does, or each would review the same rows (phase 8's
     # SideSession sets it False; phase 7b review round 2, N2).
     sweeps_at_start = True
+    # #98: the primary takes the restart mark and says so to its resumed
+    # session; a side session (SideSession) leaves it to the primary
+    takes_restart_note = True
     # After this many consecutive failed turns the loop waits before its
     # next claim: backoff_base_s, doubling, capped; a good turn resets it.
     backoff_after = 3
@@ -557,8 +560,14 @@ class SdkRunner:
         if self.machine.state == "stopped":
             return
         # A running turn is interrupted first, so the join below does not
-        # wait on a turn nobody will end (FakeRunner does the same).
-        self.interrupt()
+        # wait on a turn nobody will end (FakeRunner does the same). The CLI
+        # records that as the user's stop: leave the mark the next resume
+        # answers (#98).
+        if self.interrupt() and self.takes_restart_note:
+            try:
+                restart_note.mark(self.home, "a stop interrupted the turn in flight")
+            except OSError as exc:
+                self.stream.append("error", {"error": "restart mark: %s" % exc})
         self._stop.set()
         wake.poke(self.home)
         if self._thread is not None:
@@ -878,6 +887,20 @@ class SdkRunner:
             self._fresh_pending = True
         return False
 
+    def _restart_line(self, resumed):
+        """#98: a resumed session whose last turn a restart cut gets one
+        runner line first (the restart_note row); a fresh one only drops the
+        mark. The primary's alone."""
+        if not self.takes_restart_note:
+            return
+        note = restart_note.take(self.home)
+        if note is None or not resumed:
+            return
+        self.inbox.put(Item(thread_id="system", source=restart_note.SOURCE,
+                            body=restart_note.body(note), sender="runner"))
+        self.stream.append("system", {"subtype": "restart_note", "at": note.get("at"),
+                                      "why": note.get("why")})
+
     # -- the loop ------------------------------------------------------------
     def _run_loop(self):
         # asyncio.Runner's close cancels leftover tasks, finalizes async
@@ -907,6 +930,7 @@ class SdkRunner:
                     self._expect_session = saved    # the first init must name it (R12)
                 if resumed:
                     self.stream.append("system", {"subtype": "resumed", "session_id": saved})
+            await asyncio.to_thread(self._restart_line, resumed)
             if not resumed and not self._login_blocked:
                 if not await self._connect() and not self._login_blocked:
                     return

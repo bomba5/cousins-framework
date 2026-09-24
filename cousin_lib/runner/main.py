@@ -47,6 +47,7 @@ from pathlib import Path
 
 from cousin_lib import accounts
 from cousin_lib.delivery import RUNNER_KINDS
+from cousin_lib.runner import restart_note
 from cousin_lib.runner.base import RunnerError
 
 KINDS = RUNNER_KINDS      # the runners runner_for builds, one list (delivery)
@@ -428,8 +429,13 @@ def _serve(runner, once):
         previous_term = signal.signal(signal.SIGTERM, _signal)
         previous_int = signal.signal(signal.SIGINT, _signal)
         # a claim from a runner that died is ours now (the lock says no
-        # other runner is alive on this home)
-        runner.inbox.requeue_stale(older_than_s=0.0)
+        # other runner is alive on this home). That runner died in a turn:
+        # the resumed session is told so (#98, restart_note)
+        if runner.inbox.requeue_stale(older_than_s=0.0):
+            try:
+                restart_note.mark(runner.home, "the last runner died with a row claimed")
+            except OSError:
+                pass
         # Before start: the head of this process's stream says what runs
         # here, for a reader with no runner object (runner/status.py).
         runner.stream.append("runner", {"kind": getattr(runner, "kind", None),

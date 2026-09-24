@@ -189,7 +189,12 @@ inbox is the bus and the wake socket is the doorbell, no port. At start it
 resumes the session saved in `data/runner-session.json`, falling back to a
 fresh session carrying the state digest as its first message when it cannot
 (no saved session, or the CLI does not recognise the saved one: a
-`resume_failed` event either way, never a crash). It runs until
+`resume_failed` event either way, never a crash). A stop cuts the turn in
+flight, and the agent CLI records that as the user's stop ("stop what you
+are doing and wait for the user"), so when the last runner stopped (or died)
+mid-turn, a resumed session's first line is the runner's own: the runner
+restarted, that was not the operator, continue where you were
+(`data/runner-restart.json` marks it; a fresh start just drops the mark). It runs until
 SIGTERM or SIGINT, then stops the runner with a 30 second timeout
 (`runner.main.STOP_TIMEOUT_S`). `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or

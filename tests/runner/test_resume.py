@@ -203,3 +203,92 @@ class TestResume(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRestartNote(HermeticCase):
+    """#98: a runner restart interrupts the turn in flight, and the agent CLI
+    records that as the user's stop ("[Request interrupted by user]", "stop
+    and wait for the user"), so a resumed cousin read it as the operator's
+    and parked. A stop that interrupted a live turn leaves a mark; the next
+    runner that resumes the session puts one runner line first: the runner
+    restarted, continue where you were."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = temp_home(self)
+        root = self.home.parent.parent
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "law.md").write_text("1. The law.\n")
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"})
+        p.start(); self.addCleanup(p.stop)
+        self.clients = []
+
+    def runner(self, first_turn):
+        def factory(options):
+            turns = [first_turn] + [[init_msg(session="s-live"), assistant(text="ok"),
+                                     result(session="s-live")] for _ in range(4)]
+            client = ScriptedClient(options, turns)
+            self.clients.append(client)
+            return client
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r
+
+    def mark(self):
+        return self.home / "data" / "runner-restart.json"
+
+    def rows(self, r):
+        return [row for row in (r.inbox.get(i) for i in range(1, 30)) if row]
+
+    @staticmethod
+    def is_note(row):
+        return "the runner restarted" in (row.get("body") or "")
+
+    def test_a_stop_mid_turn_puts_the_restart_line_first_in_the_resumed_session(self):
+        r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
+        r1.start()
+        r1.enqueue(Item("operator:priya", "chat", "start the long job", sender="Priya"))
+        self.assertTrue(_wait(lambda: r1.state() == "running"))
+        r1.stop(timeout=5)
+        self.assertTrue(self.mark().exists(), "a stop that interrupted a turn leaves a mark")
+        r2 = self.runner([init_msg(session="s-live"), assistant(text="continuing"),
+                          result(session="s-live")])
+        r2.start()
+        self.assertTrue(_wait(lambda: any(self.is_note(row) and row["state"] == "done"
+                                          for row in self.rows(r2))), self.rows(r2))
+        note = next(row for row in self.rows(r2) if self.is_note(row))
+        self.assertEqual(note["source"], "boot")
+        self.assertEqual((note["thread_id"], note["sender"]), ("system", "runner"))
+        self.assertIn("the runner restarted", note["body"])
+        self.assertIn("continue where you were", note["body"])
+        self.assertIn("not the operator", note["body"])
+        self.assertIn("continue where you were", json.dumps(self.clients[-1].queries[0]))
+        self.assertFalse(self.mark().exists(), "the mark is taken once")
+
+    def test_a_clean_stop_leaves_no_mark_and_no_line(self):
+        r1 = self.runner([init_msg(session="s-live"), assistant(text="ok"),
+                          result(session="s-live")])
+        r1.start()
+        rec = r1.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertTrue(_wait(lambda: r1.inbox.get(rec.inbox_id)["state"] == "done"
+                              and r1.state() == "idle"))
+        r1.stop(timeout=5)
+        self.assertFalse(self.mark().exists())
+        r2 = self.runner([init_msg(session="s-live"), assistant(text="ok"),
+                          result(session="s-live")])
+        r2.start()
+        self.assertTrue(_wait(lambda: r2.state() == "idle"))
+        time.sleep(0.3)
+        self.assertEqual([row for row in self.rows(r2) if self.is_note(row)], [])
+
+    def test_a_fresh_start_discards_the_mark(self):
+        """No session to resume: nothing in a new session was interrupted
+        (the digest carries the state), so the mark goes and no line is put."""
+        self.mark().write_text(json.dumps({"at": "2026-09-24T12:57:00+00:00",
+                                           "why": "a stop interrupted a turn"}))
+        r = self.runner([init_msg(session="s-live"), assistant(text="ok"),
+                         result(session="s-live")])
+        r.start()
+        self.assertTrue(_wait(lambda: not self.mark().exists()))
+        time.sleep(0.3)
+        self.assertEqual([row for row in self.rows(r) if self.is_note(row)], [])

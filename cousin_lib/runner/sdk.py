@@ -1039,12 +1039,17 @@ class SdkRunner:
         """The next message, or `_END` when the stream stops. The idle
         timeout bounds the wait for THIS message (a stream gone silent);
         the optional turn timeout bounds the whole turn. `control` (the
-        interrupt rows) and then `fold` (None once folding is over) run
-        once immediately on every call, i.e. on every message received (the
-        caller calls `_next` again per message), and then again every
-        `poll_s` while this call waits for the next one, so a row that
-        lands during a long generation is acted on when it lands, not when
-        the next message happens to arrive."""
+        interrupt rows) runs once immediately on every call, i.e. on every
+        message received (its throttle, `last_control`, is local to this
+        call, so it always fires right away), and then again every
+        `poll_s` while this call waits for the next one. `fold` (None once
+        folding is over) is throttled by `self._last_fold`, turn-instance
+        state reset once at the start of the turn, not per call: it fires
+        immediately on the first message after that reset, but from then
+        on only every `poll_s` of real time, whether that spans one
+        message or several. Either way, a row that lands during a long
+        generation is acted on when it lands, not when the next message
+        happens to arrive."""
         task = asyncio.ensure_future(it.__anext__())
         idle_deadline = time.monotonic() + self.idle_timeout_s
         last_control = 0.0

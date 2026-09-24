@@ -10,6 +10,8 @@ Search and reindex dispatch to the keyword search module
 (cousin_lib.memory_search): keyword always, semantic when configured.
 """
 import argparse
+import fcntl
+import gzip
 import json
 import re
 import os
@@ -384,39 +386,214 @@ def remember(home, topic, fact, *, level=None, cite=None):
     return "Remembered [%s] (%s): %s" % (topic, resolved, fact)
 
 
-def recall_entries(home, keyword="", last=10):
-    keyword = (keyword or "").lower()
-    entries = []
+RECALL_ALL = 50           # a keyword recall with last=0 ("all") still stops somewhere
+_BACKFILL_MARK = ("data", ".decisions-backfilled")   # data/, not memory/: a transplant copies memory/
+
+
+def _decision_rows(home):
+    """Every decision row of data/decisions.jsonl and of its rotated
+    archives (data/decisions-archive-*.jsonl), oldest file first."""
+    data = Path(home) / "data"
+    for path in sorted(data.glob("decisions-archive-*.jsonl")) + [data / "decisions.jsonl"]:
+        try:
+            lines = path.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("topic") and row.get("decision"):
+                yield row
+
+
+def _raw_memories(home):
+    """{(topic, content)} over every raw entry, daily files, digests and
+    archives alike, whitespace-normalised: what a twin is compared on."""
+    from cousin_lib import memory_search
+    seen = set()
+    for path in memory_search._raw_files(home):
+        opener = gzip.open if path.suffix == ".gz" else open
+        try:
+            with opener(path, "rt", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                seen.add((str(entry.get("topic") or "").strip(),
+                          " ".join(str(entry.get("content") or "").split())))
+    return seen
+
+
+def _trashed_memories(home):
+    """{(topic, content)} of every raw line still in the memory trash
+    (memory/.trash/<id>/manifest.json, items of kind "line"), normalised
+    as _raw_memories normalises: removed on purpose, so never a twin to
+    bring back. A restored batch leaves the trash, so it is not here."""
+    from cousin_lib import memory_trash
+    seen = set()
+    for manifest in memory_trash.list_trash(home):
+        for item in manifest.get("items") or []:
+            if not isinstance(item, dict) or item.get("kind") != "line":
+                continue
+            try:
+                entry = json.loads(item.get("line") or "")
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                seen.add((str(entry.get("topic") or "").strip(),
+                          " ".join(str(entry.get("content") or "").split())))
+    return seen
+
+
+def backfill_decisions(home, *, dry_run=False):
+    """Every decision in data/decisions.jsonl (and its rotated archives)
+    with no raw twin becomes a raw entry: source "decision", its original
+    timestamp kept, in the raw file of its own day, so the raw fold treats
+    it like any entry of that day. Decisions logged before the raw store
+    existed live only in that log, and recall reads raw: without this they
+    become unreachable. A twin is the same topic and the same
+    "<decision> - why: <reasoning>" content anywhere in raw. Idempotent.
+    Returns the number written, or with dry_run the number that would be
+    (dry_run writes nothing)."""
+    home = Path(home)
+    # A raw line the cousin or its operator trashed is not an orphan: the
+    # old log still holds it, and backfilling it would undo the removal.
+    have = _raw_memories(home) | _trashed_memories(home)
+    todo = []
+    for row in _decision_rows(home):
+        content = "%s - why: %s" % (row["decision"], row.get("reasoning", ""))
+        key = (str(row["topic"]).strip(), " ".join(content.split()))
+        if key in have:
+            continue
+        have.add(key)
+        todo.append({"timestamp": str(row.get("timestamp") or ""), "topic": row["topic"],
+                     "content": content, "truth_level": DEFAULT_TRUTH_LEVEL,
+                     "source": "decision", "backfilled": True})
+    if dry_run or not todo:
+        return len(todo)
+    rdir = raw_dir(home)
+    rdir.mkdir(parents=True, exist_ok=True)
+    by_day = {}
+    for entry in todo:
+        day = entry["timestamp"][:10]
+        by_day.setdefault(day if re.match(r"\d{4}-\d{2}-\d{2}$", day) else "undated",
+                          []).append(entry)
+    for day, entries in sorted(by_day.items()):
+        with open(rdir / ("%s.jsonl" % day), "a") as fh:
+            fh.writelines(json.dumps(e) + "\n" for e in entries)
+    return len(todo)
+
+
+def ensure_backfilled(home):
+    """backfill_decisions once per home, from the first recall or search:
+    the mark (data/.decisions-backfilled) records that it ran, and an
+    exclusive lock keeps two processes from writing the same decisions. A
+    home with no decisions log gets no mark and no write."""
+    home = Path(home)
+    mark = home.joinpath(*_BACKFILL_MARK)
+    if mark.exists():
+        return
+    data = home / "data"
+    if not (data / "decisions.jsonl").exists() and not any(data.glob("decisions-archive-*.jsonl")):
+        return
+    mark.parent.mkdir(parents=True, exist_ok=True)
+    with open(mark.with_name(mark.name + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if mark.exists():
+            return
+        count = backfill_decisions(home)
+        mark.write_text("%s backfilled %d decision(s) from data/decisions.jsonl\n"
+                        % (datetime.now(timezone.utc).isoformat(), count))
+
+
+def try_backfill(home):
+    """ensure_backfilled for a reader (search, recall): a failure (a
+    read-only or full data/, an unreadable log) costs the backfill, never
+    the read. It says so on stderr and writes no mark, so the next read
+    tries again."""
     try:
-        with open(Path(home) / "data" / "decisions.jsonl") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not keyword or any(keyword in str(entry.get(k, "")).lower()
-                                      for k in ("topic", "decision", "reasoning")):
-                    entries.append(entry)
-    except FileNotFoundError:
-        pass
-    return entries[-int(last):] if last else entries
+        ensure_backfilled(home)
+    except (OSError, ValueError) as err:
+        print("memory: decisions backfill skipped: %s: %s" % (type(err).__name__, err),
+              file=sys.stderr)
+
+
+def _relevant(home, keyword, hits, top, root):
+    """The hits recall prints: those the keyword leg found, and those the
+    semantic leg ranks at or above [recall] min_score. The semantic leg
+    returns the nearest entries whatever they are, so without this floor
+    a keyword that matches nothing still prints `top` unrelated entries."""
+    from cousin_lib import memory_search
+    if all(h.get("similarity") is None for h in hits):
+        return hits                       # keyword leg only: every hit matched a word
+    words = {h["path"] for h in memory_search._keyword_search(keyword, home, top, "raw", root)}
+    floor = float(memory_search.recall_thresholds(root)[0]["min_score"])
+    return [h for h in hits if h["path"] in words
+            or (h.get("similarity") is not None and h["similarity"] >= floor)]
+
+
+def recall_entries(home, keyword="", last=10, *, root=None):
+    """Recall over the one store (master plan phase 7 task 4): raw
+    memory, through the index `search` reads, so a fact written by
+    `remember` is as recallable as a decision. With a keyword: the
+    `last` best-ranked raw entries. Without one: the newest `last`
+    authored entries (distill.MACHINE_PREFIXES topics are the log, not
+    memory). Either way oldest first, so the reading order stays
+    chronological. data/decisions.jsonl is not read here: the first recall
+    in a home backfills the decisions only it holds into raw (R2), and
+    `decide` keeps appending it for its other readers, until phase 10.
+    Recall is not a search the cousin made: it records nothing in the
+    recall log. `root` as in memory_search.search: None discovers it, the
+    runner passes its own."""
+    from cousin_lib import distill, memory_search
+    home = Path(home)
+    try_backfill(home)
+    last = int(last or 0)
+    keyword = str(keyword or "").strip()
+    if keyword:
+        top = last or RECALL_ALL
+        hits, _notice = memory_search.search(keyword, top=top, home=home,
+                                             collection="raw", root=root, record=False)
+        hits = _relevant(home, keyword, hits, top, root)
+        entries = [e for e in (memory_search.raw_entry(h["path"]) for h in hits) if e]
+    else:
+        entries = [e for e in list_raw(home, since_days=36500)
+                   if e.get("topic") and e.get("content")
+                   and not distill.is_machine_topic(e.get("topic"))]
+        entries.sort(key=lambda e: entry_timestamp(e) or 0.0)
+        entries = entries[-last:] if last else entries
+    return sorted(entries, key=lambda e: entry_timestamp(e) or 0.0)
 
 
 def format_recall(entries, keyword=""):
-    """Exactly the old CLI's printed wording: each entry as two lines
-    plus a blank line AFTER IT (including the last), never trimmed - a
-    single `print()` of this string reproduces byte-for-byte what the
-    old per-line `print()` loop wrote."""
+    """Each entry as two lines plus a blank line AFTER IT (including the
+    last), never trimmed. A decision prints as the old CLI printed it:
+    its raw content splits at the first " - why: " (decide's own
+    separator) into the decision and a `  Why:` line; so does a monthly
+    digest (raw_fold), which carries a decision's content under source
+    "digest". Any other entry prints its content and `  (level, source)`.
+    Timestamps are the raw entry's own: UTC for what decide writes now,
+    the original local stamp for a backfilled decision."""
     if not entries:
-        return "No decisions found matching '%s'" % (keyword or "(all)")
+        return "No memories found matching '%s'" % (keyword or "(all)")
     out = []
     for entry in entries:
-        out.append("[%s] %s: %s" % (entry.get("timestamp", "?")[:16],
-                                    entry.get("topic", "?"), entry.get("decision", "")))
-        out.append("  Why: %s" % entry.get("reasoning", ""))
+        when = str(entry.get("timestamp") or "?")[:16]
+        topic, content = entry.get("topic", "?"), str(entry.get("content", ""))
+        if entry.get("source") in ("decision", "digest") and " - why: " in content:
+            decision, why = content.split(" - why: ", 1)
+            out.append("[%s] %s: %s" % (when, topic, decision))
+            out.append("  Why: %s" % why)
+        else:
+            out.append("[%s] %s: %s" % (when, topic, content))
+            out.append("  (%s, %s)" % (entry.get("truth_level", "?"), entry.get("source", "?")))
         out.append("")
     return "\n".join(out)
 
@@ -538,14 +715,15 @@ def _cmd_distill(args):
 
 
 def _cmd_consolidate(args):
-    """Topics with 3+ entries across the real memory sources - the
-    decisions log and memory/raw - are promotion candidates. (Counting
-    sources nothing writes reports 'no candidates' forever; that was a
-    real bug, and why the sources here are exactly the two the
-    producers feed.) Consolidation is a mechanism, not a reminder: the
-    distiller then rebuilds memory/distilled/ from raw right here, so
-    consolidate promotes instead of only suggesting."""
+    """Topics with 3+ entries in memory/raw are promotion candidates.
+    Raw holds every decision (decide writes it there too, and the
+    backfill brings the ones only the old log held), so counting
+    data/decisions.jsonl as well would count each decision twice.
+    Consolidation is a mechanism, not a reminder: the distiller then
+    rebuilds memory/distilled/ from raw right here, so consolidate
+    promotes instead of only suggesting."""
     home = _home(args)
+    ensure_backfilled(home)
     counts = Counter()
     latest = defaultdict(str)
 
@@ -555,16 +733,6 @@ def _cmd_consolidate(args):
             counts[topic] += 1
             latest[topic] = sample[:90]
 
-    try:
-        with open(home / "data" / "decisions.jsonl") as fh:
-            for line in fh:
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                feed(entry.get("topic"), entry.get("decision", ""))
-    except OSError:
-        pass
     raw_dir = home / "memory" / "raw"
     if raw_dir.is_dir():
         for path in sorted(raw_dir.glob("*.jsonl")):
@@ -579,8 +747,8 @@ def _cmd_consolidate(args):
                 continue
     candidates = [(t, n) for t, n in counts.most_common() if n >= 3]
     if not candidates:
-        print("no promotion candidates (topics with 3+ entries across"
-              " decisions.jsonl + memory/raw/)")
+        print("no promotion candidates (topics with 3+ entries in"
+              " memory/raw/)")
     else:
         print("promotion candidates (3+ entries; consider promoting to"
               " the memory index):")

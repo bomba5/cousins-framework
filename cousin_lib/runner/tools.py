@@ -116,7 +116,7 @@ def _m_recall(ctx, a):
     keyword = _str(a, "keyword")
     last = a.get("last")
     last = 20 if last is None else int(last)
-    return memory.format_recall(memory.recall_entries(ctx.home, keyword, last),
+    return memory.format_recall(memory.recall_entries(ctx.home, keyword, last, root=ctx.root),
                                 keyword.lower())
 
 

@@ -95,7 +95,7 @@ class TestRecallAndActivity(HermeticCase):
         self.assertEqual([e["topic"] for e in entries], ["beta"])
         text = memory.format_recall(entries, "beta")
         self.assertIn("beta: two", text); self.assertIn("Why: since", text)
-        self.assertIn("No decisions found matching 'zzz'", memory.format_recall([], "zzz"))
+        self.assertIn("No memories found matching 'zzz'", memory.format_recall([], "zzz"))
 
     def test_note_activity_writes_the_file(self):
         home = _home(self)
@@ -124,9 +124,16 @@ class TestCliStillWorks(HermeticCase):
             {"timestamp": "2030-01-01T12:00:00+01:00", "topic": "beta",
              "decision": "three", "reasoning": "unrelated"},
         ]
-        with open(home / "data" / "decisions.jsonl", "w") as fh:
+        # Recall reads raw memory now (phase 7 task 4): the same three
+        # decisions as `decide` stores them there. The printed bytes are
+        # unchanged, which is what this test pins.
+        (home / "memory" / "raw").mkdir(parents=True, exist_ok=True)
+        with open(home / "memory" / "raw" / "2030-01-01.jsonl", "w") as fh:
             for row in rows:
-                fh.write(json.dumps(row) + "\n")
+                fh.write(json.dumps({
+                    "timestamp": row["timestamp"], "topic": row["topic"],
+                    "content": "%s - why: %s" % (row["decision"], row["reasoning"]),
+                    "truth_level": "L3_COUSIN_CONCLUSION", "source": "decision"}) + "\n")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             rc = memory.memory_main(["--home", str(home), "recall", "alpha"])

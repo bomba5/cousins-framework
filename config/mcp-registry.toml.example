@@ -25,7 +25,7 @@ max_output = 16000    # characters of stdout returned per call; the rest is cut 
 
 [tools.memory]
 command = "cousin-memory"
-description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall past decisions, checkpoint your current activity."
+description = "Durable memory: search what you wrote, log a decision with its reasoning, remember a fact with its truth level (operator = the operator said it, needs cite), mark a topic obsolete when something superseded it (why required; it leaves the distilled views, raw keeps the history), recall what you wrote (the best matches for a keyword, or the newest entries), checkpoint your current activity."
 
 [tools.memory.properties]
 query = { type = "string", description = "search text (search)" }
@@ -40,7 +40,7 @@ level = { type = "string", optional = true, enum = ["operator", "framework", "to
 cite = { type = "string", optional = true, description = "where it comes from: chat message id, quote, file, date (decide, remember); required for level operator" }
 why = { type = "string", description = "what superseded the topic (obsolete); required, non-empty" }
 force = { type = "boolean", description = "mark a topic that has no raw entries yet (obsolete)" }
-keyword = { type = "string", optional = true, description = "filter (recall)" }
+keyword = { type = "string", optional = true, description = "what to recall; empty lists the newest entries (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
 text = { type = "string", description = "what you are doing now (activity)" }
 

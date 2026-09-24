@@ -195,7 +195,7 @@ cousin-runner --home cousins/wren --check-auth --validate
 | `remember TOPIC FACT [--level L] [--cite SRC]` | one fact into raw memory with its truth level |
 | `decide TOPIC DECISION REASONING [--level L] [--cite SRC] [--stdin]` | log a decision (and a raw copy of it) |
 | `obsolete TOPIC --why REASON [--force]` | retire a topic (L5): out of the distilled views, history kept |
-| `recall [KEYWORD] [--last N]` | past decisions, filtered |
+| `recall [KEYWORD] [--last N]` | raw memory through the search index: with a keyword the best-ranked N entries, without one the newest N you wrote (the framework's own log left out); a decision prints with its `Why:` line |
 | `activity TEXT` | set the "what I'm doing now" line |
 | `distill [--max-lines N]` | rebuild `memory/distilled/` from raw |
 | `consolidate` | list recurring topics, then distill |

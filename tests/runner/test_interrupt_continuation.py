@@ -87,7 +87,9 @@ class TestASessionThatTakesNoInterrupts(Case):
         self.assertTrue(_wait(lambda: r.state() == "running"))
         stop = r.enqueue(_interrupt())
         time.sleep(0.6)                                 # several polls of the live turn
-        self.assertEqual(r.inbox.get(stop.inbox_id)["state"], "queued")
+        # not taken: no outcome yet. (The state itself can read `claimed` for
+        # an instant, while the live turn's fold claims and hands back rows.)
+        self.assertIsNone(r.inbox.get(stop.inbox_id)["outcome"])
         self.assertEqual(made["client"].interrupts, 0)
         self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", timeout=5))
         row = r.inbox.get(stop.inbox_id)
@@ -117,6 +119,8 @@ class TestRefusedInterrupt(Case):
         self.assertEqual(r.inbox.get(more.inbox_id)["outcome"], "delivered")
         self.assertEqual(r.inbox.unfinished(), 0)
         self.assertNotIn("errored", [e["payload"]["to"] for e in r.events() if e["kind"] == "state"])
+        # the refused interrupt is forgotten: no result claims the turn was interrupted
+        self.assertFalse(any(p.get("interrupted") for p in _results(r)), _results(r))
 
 
 if __name__ == "__main__":

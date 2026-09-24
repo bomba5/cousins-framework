@@ -125,14 +125,22 @@ def candidates(texts, *, max_entries=MAX_ENTRIES):
     return kept
 
 
+def transcripts_dir(home, root):
+    """The directory the harness keeps this cousin's session transcripts
+    in, or None when the seam is unset."""
+    cfg = harness_config(root)
+    if not cfg or not cfg.get("transcripts_dir"):
+        return None
+    return expand_harness_path(cfg["transcripts_dir"], home)
+
+
 def transcript_path(home, root, session_id):
     """Where the harness keeps this session's transcript, or None when
     the seam is unset."""
-    cfg = harness_config(root)
-    if not cfg or not cfg.get("transcripts_dir") or not session_id:
+    if not session_id:
         return None
-    base = expand_harness_path(cfg["transcripts_dir"], home)
-    return base / ("%s.jsonl" % session_id)
+    base = transcripts_dir(home, root)
+    return None if base is None else base / ("%s.jsonl" % session_id)
 
 
 def mine(home, root, session_id, *, max_entries=MAX_ENTRIES):

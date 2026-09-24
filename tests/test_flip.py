@@ -432,6 +432,22 @@ class TestCloseSession(FlipCase):
         self.assertFalse(
             (self.home / "data" / ".flip-in-progress.json").exists())
 
+    def test_a_handoff_already_there_does_not_count_as_written(self):
+        """#103: cousin-migrate's runner starts from the handoff, so the
+        close must wait for one written during it: an older file never
+        satisfies the wait, and a silent cousin gets the emergency one."""
+        handoff = self.home / "data" / "handoff.md"
+        handoff.write_text("# yesterday's handoff\n")
+        os.utime(handoff, (time.time() - 3600, time.time() - 3600))
+        before = handoff.stat().st_mtime_ns
+        out = self._close()
+        self.assertTrue(out["ok"], out)
+        stages = {s["stage"]: s for s in out["stages"]}
+        self.assertFalse(stages["wait_handoff"]["wrote_clean"])
+        self.assertTrue(stages["emergency_handoff"]["written"])
+        self.assertGreater(handoff.stat().st_mtime_ns, before)
+        self.assertIn("EMERGENCY HANDOFF", handoff.read_text())
+
     def test_a_stopped_cousin_is_just_stopped(self):
         os.environ["FAKE_TMUX_RC"] = "1"
         self.addCleanup(os.environ.pop, "FAKE_TMUX_RC", None)

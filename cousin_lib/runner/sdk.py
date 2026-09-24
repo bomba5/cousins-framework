@@ -375,10 +375,15 @@ class SdkRunner:
         tmp = path.with_suffix(".tmp")
         lane = self._lane
         tmp.write_text(json.dumps({"session_id": session_id, "lane": lane,
-                                   "generation": boot.read_generation(self.home),
+                                   "generation": self._session_generation(),
                                    "updated": time.time()}))
         tmp.replace(path)
         self._saved, self._saved_lane = session_id, lane
+
+    def _session_generation(self):
+        """The generation the session file records: the home's current one.
+        A side session records the generation it BELONGS to (sessions.py)."""
+        return boot.read_generation(self.home)
 
     async def _flush_session(self):
         """The pending write, off the loop. A failed write is an `error`

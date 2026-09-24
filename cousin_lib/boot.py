@@ -18,6 +18,7 @@ each earned against a real incident in an earlier version:
 """
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,10 +101,15 @@ def read_generation(home):
 
 
 def bump_generation(home):
+    """The next generation, written through a tmp file and a rename: a
+    reader in another session (a side session's boundary) sees the old
+    number or the new one, never an empty file read as 0."""
     path = Path(home) / "data" / "generation.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
     generation = read_generation(home) + 1
-    path.write_text(str(generation))
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(str(generation))
+    os.replace(tmp, path)
     return generation
 
 

@@ -114,6 +114,10 @@ def _tool_block(definition, registry, tool_name):
     return "\n".join(lines)
 
 
+# The tmux kind's name in "Tools, not the terminal CLIs" (phase 11 I8, R10).
+PANE_RUNNER = "an interactive Claude Code pane"
+
+
 def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS):
     """The contract for this registry at this release. Same inputs, same bytes.
 

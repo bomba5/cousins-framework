@@ -619,6 +619,62 @@ def _sdk_versions():
 
 # ------------------------------------------------------------------ serve
 
+PANE_TOOLS = ("reply", "handoff")
+
+
+def _is_pane_home(home):
+    if not home:
+        return False
+    from cousin_lib.delivery import _runner_kind
+    return _runner_kind(pathlib.Path(home)) == "tmux"
+
+
+def pane_tools(home):
+    """`reply` and `handoff` for a tmux-kind home (phase 11 R11): its pane's
+    CLI reaches the framework through this stdio server, which has no live
+    turn of its own. Any other home gets none: the SDK and opencode
+    runners serve them in-process."""
+    if not _is_pane_home(home):
+        return []
+    from cousin_lib.runner.tools import RUNNER_TOOLS
+    return [dict(t) for t in RUNNER_TOOLS if t["name"] in PANE_TOOLS]
+
+
+class _PaneTurn:
+    """The live turn as run/turn.json says, read at the call (tmux_turn)."""
+
+    def __init__(self, home):
+        self.home = home
+
+    def snapshot(self):
+        from cousin_lib.runner import tmux_turn
+        return tmux_turn.live(self.home)
+
+
+def call_pane_tool(home, name, args):
+    """One `reply` or `handoff` call from a tmux-kind pane: (text, is_error),
+    through the runner's own tool code with the turn file as the turn."""
+    if name not in PANE_TOOLS or not _is_pane_home(home):
+        return "%s is served here for a tmux-kind home only" % name, True
+    from cousin_lib.config import CousinConfig, FrameworkConfig
+    from cousin_lib.runner import tools
+    from cousin_lib.runner.policy import Policy
+    home = pathlib.Path(home)
+    try:
+        cfg = CousinConfig.load(home)
+        slug, display = cfg.slug, cfg.name
+    except Exception:  # noqa: BLE001 - a thin toml still answers; the dir names it
+        slug, display = home.name, home.name.capitalize()
+    try:
+        policy = Policy.load(home)
+    except Exception as err:  # noqa: BLE001 - a broken policy is a tool error, never a pass
+        return "policy.toml: %s" % err, True
+    ctx = tools.ToolContext(home=home, slug=slug, name=display,
+                            root=FrameworkConfig.root_from_home(home),
+                            turn=_PaneTurn(home), policy=policy)
+    return tools.call(ctx, name, dict(args or {}))
+
+
 def serve(registry, env, home):
     """Speak MCP over stdio. The only place the SDK is imported."""
     import anyio
@@ -653,11 +709,15 @@ def serve(registry, env, home):
         _record()
         return [types.Tool(name=t["name"], description=t["description"],
                            inputSchema=t["inputSchema"])
-                for t in list_tools(registry)]
+                for t in list_tools(registry) + pane_tools(home)]
 
     @server.call_tool(validate_input=False)
     async def _call(name, arguments):
         _record()
+        if name in PANE_TOOLS and _is_pane_home(home):
+            text, is_error = call_pane_tool(home, name, arguments or {})
+            return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
+                                        isError=is_error)
         text, is_error, attachments = call_tool_rich(
             registry, name, arguments or {}, env, peers)
         content = [types.TextContent(type="text", text=text)]

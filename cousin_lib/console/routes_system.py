@@ -41,6 +41,7 @@ import json
 import math
 import os
 import re
+import stat
 import tempfile
 import threading
 import time
@@ -266,6 +267,11 @@ def check_backup_dest(root, dest, slugs=()):
         raise ValueError("%s is not an existing directory" % real)
     if not os.access(real, os.W_OK | os.X_OK):
         raise ValueError("%s is not writable by the console" % real)
+    mode = os.stat(real).st_mode
+    if mode & (stat.S_IWGRP | stat.S_IWOTH) and not mode & stat.S_ISVTX:
+        raise ValueError("%s is writable by other users and not sticky: another user"
+                         " could swap the backup's directory; use a directory only you"
+                         " can write, or one with the sticky bit (chmod +t)" % real)
     return real
 
 
@@ -287,7 +293,14 @@ def _slug_dir(root, dest, slug):
     that handle, and checked with its realpath: directly under the real
     destination and not inside the live root. Returns (path, handle, its
     stat); the caller closes the handle. ValueError or OSError otherwise,
-    before anything is written or chmodded through a link."""
+    before anything is written or chmodded through a link.
+
+    Out of scope: a race that swaps <dest>/<slug> for a link between these
+    checks and the copy. Winning it needs write access to the destination
+    directory, and check_backup_dest refuses one other users can write
+    unless it is sticky, so only the operator's own uid can; that uid
+    already reads and writes the homes and config/ directly. The check
+    after the copy detects such a swap and reports it."""
     top = os.path.join(dest, slug)
     try:
         os.mkdir(top, 0o700)
@@ -310,10 +323,20 @@ def _slug_dir(root, dest, slug):
     return top, fd, st
 
 
-def _backup_work(root, home, slug, dest):
-    def work(op):
-        import shutil
+def system_audit(root, record):
+    """One line in <root>/data/system/audit.jsonl for a system action worth
+    a trail (like data/lifecycle/audit.jsonl): the time, then `record`."""
+    path = Path(root) / "data" / "system" / "audit.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    row.update(record)
+    with open(path, "a") as fh:
+        fh.write(json.dumps(row, default=str) + "\n")
+    return row
 
+
+def _backup_work(root, home, slug, dest, user=None):
+    def work(op):
         from cousin_lib import backup, jobs
         from cousin_lib.config import CousinConfig, MissingConfigError
         from cousin_lib.console.longop import OpError
@@ -343,20 +366,18 @@ def _backup_work(root, home, slug, dest):
                 now = os.lstat(top)
                 if (not _under(real_snap, real_top) or real_snap == real_top
                         or (now.st_dev, now.st_ino) != (held.st_dev, held.st_ino)):
-                    # remove it only when it is plainly the destination's and
-                    # nowhere near the live install
-                    removed = False
+                    # Never delete: what is there may be another cousin's
+                    # backup or anything else. Say exactly where it went.
                     try:
-                        _refuse_in_root(root, real_snap)
-                        if _under(real_snap, os.path.realpath(dest)) \
-                                and real_snap != os.path.realpath(dest):
-                            shutil.rmtree(real_snap)
-                            removed = True
-                    except (OSError, ValueError):
+                        system_audit(root, {"action": "backup-misplaced", "user": user,
+                                            "cousin": slug, "expected": top,
+                                            "landed": real_snap})
+                    except OSError:
                         pass
-                    raise OpError("backup of %s failed: the snapshot landed outside %s (%s)%s"
-                                  % (slug, top, real_snap,
-                                     "; removed" if removed else "; left in place"))
+                    raise OpError("backup of %s failed: the copy landed at %s, outside %s;"
+                                  " nothing was removed. Check %s by hand, and whether %s"
+                                  " was replaced during the backup"
+                                  % (slug, real_snap, top, real_snap, top))
                 _owner_only(top)
             finally:
                 os.close(fd)
@@ -1062,7 +1083,8 @@ def register():
         for slug in slugs:
             try:
                 ops[slug] = longop.start(server, slug, "backup",
-                                         _backup_work(server.root, homes[slug], slug, dest),
+                                         _backup_work(server.root, homes[slug], slug, dest,
+                                                      req.user),
                                          params={"dest": dest})
             except longop.Busy as err:
                 busy[slug] = str(err)

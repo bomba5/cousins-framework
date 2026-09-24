@@ -424,26 +424,48 @@ class Backup(ConsoleCase):
             op = wait_op(self, "wren")
         self.assertEqual(op["status"], "failed", op)
         self.assertIn("outside", op["error"])
-        # outside the checked destination: not ours to delete
-        self.assertTrue((elsewhere / "wren").is_dir())
+        # never deleted, whatever it is; the error names where it landed
+        self.assertTrue((elsewhere / "wren" / date.today().isoformat() / "MEMORY.md").is_file())
+        self.assertIn(str(elsewhere / "wren" / date.today().isoformat()), op["error"])
 
-    def test_a_snapshot_under_dest_but_not_its_directory_is_removed(self):
+    def test_a_mismatch_never_deletes_a_siblings_backup_and_is_audited(self):
         self.cousin("wren")
         dest = self.dest()
-        self.serve()
         from datetime import date
+        sibling = Path(dest) / "robin" / date.today().isoformat()
+        sibling.mkdir(parents=True)
+        (sibling / "MEMORY.md").write_text("robin's backup\n")
+        self.serve()
         from cousin_lib import backup
 
-        def sideways(home, dest_root=None, *, target=None):
-            snap = Path(dest) / "other" / date.today().isoformat()
-            snap.mkdir(parents=True)
-            (snap / "MEMORY.md").write_text("x\n")
-            return snap
-        with mock.patch.object(backup, "snapshot", sideways):
+        def onto_the_sibling(home, dest_root=None, *, target=None):
+            return sibling
+        with mock.patch.object(backup, "snapshot", onto_the_sibling):
             self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
             op = wait_op(self, "wren")
         self.assertEqual(op["status"], "failed", op)
-        self.assertFalse((Path(dest) / "other" / date.today().isoformat()).exists())
+        self.assertIn(str(sibling), op["error"])
+        self.assertEqual((sibling / "MEMORY.md").read_text(), "robin's backup\n")
+        rows = [json.loads(line) for line in
+                (self.root / "data" / "system" / "audit.jsonl").read_text().splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "backup-misplaced")
+        self.assertEqual(rows[0]["cousin"], "wren")
+        self.assertEqual(rows[0]["landed"], str(sibling))
+        self.assertIn("user", rows[0])
+
+    def test_a_shared_writable_destination_needs_the_sticky_bit(self):
+        self.cousin("wren")
+        self.serve()
+        for mode, code in ((0o777, 400), (0o775, 400), (0o1777, 202), (0o755, 202)):
+            dest = self.dest()
+            os.chmod(dest, mode)
+            status, body = self.post("/api/system/backup", {"dest": dest, "slugs": ["wren"]})
+            self.assertEqual(status, code, (oct(mode), body))
+            if code == 202:
+                wait_op(self, "wren")
+            else:
+                self.assertIn("sticky", body["error"])
 
     def test_a_snapshot_dir_may_not_land_in_the_live_root(self):
         self.cousin("config")  # a slug named like a protected directory

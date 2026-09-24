@@ -397,6 +397,16 @@ background shell as a job on the Jobs page. Errors go to
 `data/job-hooks.log`. On another harness, wire the scripts by hand; they only
 need a POSIX `sh`.
 
+A cousin on the `tmux` runner kind carries one more:
+`cousin_lib.runner.tmux_hook`, wired on UserPromptSubmit, Stop, Notification
+and SessionStart. It only pokes the runner's wake socket and, on
+SessionStart, records the pane's session id; it decides nothing itself. The
+boundary is the uid: the socket is 0600 in a `run/` created 0700, and on
+Linux every datagram carries its sender's credentials (SO_PASSCRED), so one
+from another uid wakes nothing. Nothing closes an inbox row or ends a turn
+on a hook alone; the runner only ever confirms that against the pane's own
+transcript. A hook is a wake-up, never an instruction.
+
 The bookends are your own list of commands in `cousin.toml`, run by
 `cousin-session start` and `cousin-session end` (the template tells the
 cousin to call them):

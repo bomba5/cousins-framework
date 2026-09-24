@@ -302,16 +302,42 @@ def _policy_deny(home):
     return list(Policy.load(home).deny_tools)
 
 
+def _policy_gap_warnings(home):
+    """One line per policy.toml rule the tmux pane cannot enforce (I5):
+    under --dangerously-skip-permissions the CLI never consults
+    can_use_tool, so only deny_tools, rendered into permissions.deny,
+    still holds; deny_bash_patterns and ask need that live veto and are
+    silently absent on this kind otherwise. Declared here so the
+    operator sees it at the moment the gap starts to matter, not buried
+    in docs/reference/runners.md alone."""
+    from cousin_lib.runner.policy import Policy
+    policy = Policy.load(home)
+    warnings = []
+    if policy.deny_bash_patterns:
+        warnings.append("policy.toml's %d deny_bash_patterns rule(s) do not reach the tmux"
+                        " pane: only deny_tools does (docs/reference/runners.md, Known gaps"
+                        " on tmux)" % len(policy.deny_bash_patterns))
+    if policy.ask:
+        warnings.append("policy.toml's %d ask rule(s) do not reach the tmux pane: it runs"
+                        " with --dangerously-skip-permissions, so only deny_tools does"
+                        " (docs/reference/runners.md, Known gaps on tmux)" % len(policy.ask))
+    return warnings
+
+
 def apply_project_settings(home, *, root, python=None, hooks_root=None, kind=None):
     """Create or merge <home>/.claude/settings.json: this cousin's hooks
     and its `cousin` MCP server approved; for kind "tmux", also the kind's
     keys, the policy's deny rules and the bridge hooks (TMUX_*). Returns
-    {path, events, missing}. Idempotent."""
+    {path, events, missing, warnings}: `warnings` is only ever non-empty
+    for kind "tmux", one line per policy.toml rule the pane cannot
+    enforce (`_policy_gap_warnings`). Idempotent."""
     home = pathlib.Path(home)
     path = settings_path(home)
     data = _load(path)
     kind_owned = None
+    warnings = []
     if kind == "tmux":
+        warnings = _policy_gap_warnings(home)
         kind_owned = _read_owned(home)
         for key, value in TMUX_KEYS.items():
             data[key] = value
@@ -397,7 +423,7 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None, kind=Non
         _write_settings_file(path, data)
     if kind_owned is not None:
         _write_owned(home, kind_owned)
-    return {"path": path, "events": sorted(wanted), "missing": missing}
+    return {"path": path, "events": sorted(wanted), "missing": missing, "warnings": warnings}
 
 
 def _read_owned(home):

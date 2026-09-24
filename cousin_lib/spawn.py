@@ -1340,6 +1340,8 @@ def _repair_settings(root, slug):
     for missing in out["missing"]:
         print("cousin-spawn: hook script not found, not wired: %s"
               % missing, file=sys.stderr)
+    for warning in out.get("warnings") or ():
+        print("cousin-spawn: warning: %s" % warning, file=sys.stderr)
     return 0
 
 

@@ -202,7 +202,7 @@ class TestTheClock(HermeticCase):
                                 "--interval", "1", "--ticks", "1"],
                                env=env, cwd=REPO, capture_output=True, text=True,
                                timeout=30)
-        self.assertEqual(stray.returncode, 2, stray.stderr)
+        self.assertEqual(stray.returncode, 5, stray.stderr)
         self.assertIn("another loops daemon holds", stray.stderr)
         time.sleep(2)                   # the supervisor's clock kept ticking alone
         rows = self.inbox()

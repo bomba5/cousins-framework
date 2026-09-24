@@ -17,7 +17,7 @@ import time
 import unittest
 from unittest import mock
 
-from cousin_lib import delivery, supervisor
+from cousin_lib import delivery, loops, supervisor
 from cousin_lib.runner import main as runner_main
 from cousin_lib.supervisor import ChildSpec, RestartPolicy, Supervisor
 from tests._hermetic import HermeticCase
@@ -108,6 +108,15 @@ class TestRestartPolicy(unittest.TestCase):
         policy.reset()
         self.assertEqual(policy.on_exit(now=10.0, ran_for=0.1), 1)
 
+    def test_a_busy_exit_backs_off_to_the_cap_and_is_never_counted(self):
+        policy = RestartPolicy()
+        delays = [policy.on_busy(ran_for=0.1) for _ in range(9)]
+        self.assertEqual(delays, [1, 2, 4, 8, 16, 32, 60, 60, 60])
+        self.assertEqual(len(policy.exits), 0)
+        self.assertEqual(policy.on_busy(ran_for=61.0), 1)      # a healthy run resets it too
+        # busy exits leave the crash count alone: four crashes are still not failing
+        self.assertNotIn(None, [policy.on_exit(now=float(i), ran_for=0.1) for i in range(4)])
+
 
 class TestRestarts(_Case):
     def test_a_child_that_exits_is_restarted(self):
@@ -153,23 +162,78 @@ class TestRestarts(_Case):
         self.assertEqual(sup.status()["children"]["runner:wren"]["reason"],
                          "login required (exit 4)")
 
-    def test_exit_5_lock_held_backs_off_and_comes_back(self):
-        # R2': another runner holds the home's lock (a leftover, one started
-        # by hand) is busy, not configuration: retried after the backoff
+    def test_classify_exit_table(self):
+        # N1/N2: a lock-held exit (5) is busy for a runner and for the loops
+        # daemon alike: waited out after the backoff, never counted, never
+        # `failing`; 2 stays configuration for every kind
         self.assertEqual(supervisor.RUNNER_BUSY_EXIT, runner_main.LOCK_HELD_EXIT)
-        self.assertEqual(supervisor.classify_exit("runner", 5),
-                         ("restart", "another runner holds its lock (exit 5)"))
-        self.assertEqual(supervisor.classify_exit("runner", 2),
-                         ("failing", "configuration (exit 2)"))
+        self.assertEqual(supervisor.LOOPS_BUSY_EXIT, loops.LOCK_HELD_EXIT)
+        rows = [
+            (("runner", 5), ("busy", "another runner holds its lock (exit 5)")),
+            (("loops", 5), ("busy", "another loops daemon holds its lock (exit 5)")),
+            (("console", 5), ("restart", None)),
+            (("runner", 2), ("failing", "configuration (exit 2)")),
+            (("loops", 2), ("failing", "configuration (exit 2)")),
+            (("console", 2), ("failing", "configuration (exit 2)")),
+            (("runner", 4), ("stopped", "login required (exit 4)")),
+            (("loops", 4), ("restart", None)),
+            (("console", 75), ("now", "restart requested (exit 75)")),
+            (("runner", 3), ("restart", None)),
+            (("loops", -9), ("restart", None)),
+        ]
+        for (kind, code), expected in rows:
+            with self.subTest(kind=kind, code=code):
+                self.assertEqual(supervisor.classify_exit(kind, code), expected)
+
+    def _busy_six_times(self, name, kind, holder):
+        """A stub that exits 5 on its first six starts (a holder has the
+        lock), then runs: six busy exits inside a minute, where five
+        counted exits would be `failing`."""
         starts = self.dir / "starts"
-        sup, out = self.supervise([_stub("runner:wren", "runner", _EXIT_WITH, starts, 5)],
-                                  max_exits=100)
-        self.assertTrue(_wait_for(lambda: len(_lines(starts)) >= 3, step=sup.step))
-        child = sup.status()["children"]["runner:wren"]
-        self.assertNotEqual(child["state"], "failing")
+        body = """
+            import os, sys, time
+            with open(sys.argv[1], "a") as fh:
+                fh.write("%d\\n" % os.getpid())
+            if len(open(sys.argv[1]).read().split()) <= 6:
+                sys.exit(5)
+            time.sleep(30)
+        """
+        sup, out = self.supervise([_stub(name, kind, body, starts)])   # FAST: 0.05, 0.1 s
+        states = set()
+
+        def _watch():
+            sup.step()
+            states.add(sup.status()["children"][name]["state"])
+        self.assertTrue(_wait_for(lambda: len(_lines(starts)) >= 7, step=_watch),
+                        out.getvalue())
+        self.assertTrue(_wait_for(
+            lambda: sup.status()["children"][name]["state"] == "running", step=_watch))
+        self.assertNotIn("failing", states, out.getvalue())
+        self.assertIn("backoff", states)
+        child = sup.status()["children"][name]
+        self.assertEqual(child["restarts"], 6)
         self.assertEqual(child["last_exit"], "code 5")
-        self.assertIn("supervisor: runner:wren exited (another runner holds its lock (exit 5)),"
-                      " restarting in", out.getvalue())
+        self.assertEqual(len(sup.children[name].policy.exits), 0)   # none counted
+        self.assertEqual(out.getvalue().count(
+            "supervisor: %s busy: another %s holds its lock (exit 5), retrying in" % (name, holder)),
+            6, out.getvalue())
+        self.assertIn("; not counted toward failing", out.getvalue())
+        self.assertNotIn("supervisor: %s failing" % name, out.getvalue())
+
+    def test_a_busy_runner_waits_in_backoff_uncounted_and_runs_when_free(self):
+        self._busy_six_times("runner:wren", "runner", "runner")
+
+    def test_a_busy_loops_daemon_waits_in_backoff_uncounted_and_runs_when_free(self):
+        self._busy_six_times("loops", "loops", "loops daemon")
+
+    def test_a_busy_child_says_why_while_it_waits(self):
+        starts = self.dir / "starts"
+        sup, _ = self.supervise([_stub("loops", "loops", _EXIT_WITH, starts, 5)],
+                                backoff=(30.0,))
+        self.assertTrue(_wait_for(
+            lambda: sup.status()["children"]["loops"]["state"] == "backoff", step=sup.step))
+        self.assertEqual(sup.status()["children"]["loops"]["reason"],
+                         "another loops daemon holds its lock (exit 5)")
 
     def test_exit_3_restarts_a_runner(self):
         starts = self.dir / "starts"

@@ -1098,8 +1098,12 @@ def _default_deliver(slug, text):
     return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
 
 
+LOCK_HELD_EXIT = 5    # `run`: another loops daemon holds <root>/run/loops.lock (busy)
+
+
 class LoopsLockHeld(Exception):
-    """Another loops daemon runs on this root."""
+    """Another loops daemon runs on this root: `run` exits LOCK_HELD_EXIT,
+    busy, not 2 (configuration), so a supervisor waits for the holder."""
 
 
 def hold_loops_lock(root):
@@ -1125,8 +1129,8 @@ def hold_loops_lock(root):
 def loops_main(argv=None):
     """cousin-loops: run the daemon, or inspect its state. Exit codes:
     status returns 0 healthy / 1 down-or-never-run, everything else
-    0 ok / 2 usage, and `run` exits 2 when another loops daemon holds
-    the root's lock."""
+    0 ok / 2 usage, and `run` exits LOCK_HELD_EXIT (5, busy) when another
+    loops daemon holds the root's lock."""
     import argparse
     import os
     import sys
@@ -1188,7 +1192,7 @@ def loops_main(argv=None):
         lock_fd = hold_loops_lock(FrameworkConfig.from_env().root)
     except LoopsLockHeld as err:
         print("cousin-loops: %s" % err, file=sys.stderr)
-        return 2
+        return LOCK_HELD_EXIT
     try:
         count = 0
         while True:

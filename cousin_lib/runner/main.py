@@ -64,6 +64,7 @@ ERRORED_GIVE_UP_S = 10.0
 STOP_TIMEOUT_S = 30.0
 
 LOCK_HELD_EXIT = 5    # another runner holds <home>/run/runner.lock
+LOCK_TAKE_S = 1.0     # hold_lock retries this long: an is_running() probe holds the lock for microseconds
 
 _UNSET = object()
 
@@ -172,18 +173,30 @@ def hold_lock(home):
     held for the life of this context (the kernel drops it when the
     process dies, even on SIGKILL). Taken before anything else, because a
     second runner's `requeue_stale` would steal the first one's live
-    claims."""
+    claims. A held lock is retried for LOCK_TAKE_S before LockHeld:
+    is_running() probes by taking the same lock for microseconds (the
+    loops tick, the fleet poll, the console's stream), and a runner
+    starting inside that probe must not be refused (#79)."""
     path = Path(home) / "run" / "runner.lock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as err:
         raise RunnerError("cannot open the runner lock %s: %s" % (path, err))
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        os.close(fd)
-        raise LockHeld("another cousin-runner holds %s" % path)
+    deadline = time.monotonic() + LOCK_TAKE_S
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() < deadline:
+                time.sleep(0.02)
+                continue
+            os.close(fd)
+            raise LockHeld("another cousin-runner holds %s" % path)
+        except OSError:
+            os.close(fd)
+            raise LockHeld("another cousin-runner holds %s" % path)
     try:
         yield
     finally:

@@ -181,7 +181,7 @@ it. An install script can gate on `cousin-runner --home H --check-auth`.
 | 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler |
 | 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across rebuilds that fail to connect; a rebuild that connects ends it); the long-running mode keeps rebuilding a side session and never exits for one |
 | 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner, or any of its side sessions, waiting for a login. A supervisor must not restart on it |
-| 5 | busy: another runner holds `<home>/run/runner.lock`. Not a configuration problem: a supervisor retries after its backoff |
+| 5 | busy: another runner holds `<home>/run/runner.lock` (tried for about a second first, so a status probe of the lock never refuses a runner). Not a configuration problem: a supervisor retries after its backoff and never counts it |
 
 ```
 cousin-runner --home cousins/wren
@@ -216,9 +216,13 @@ init and a bare host's single unit. Each child's output goes to its stdout,
 every line prefixed with the child's name (`console | ...`, `runner:wren |
 ...`). A child that exits is restarted after 1, 2, 4 ... up to 60 seconds; five
 exits inside a minute mark it `failing` and leave it down, loudly. A runner's
-exit 2 (configuration) is `failing` at once, its exit 4 (a login to do) is
-never restarted and its exit 5 (another runner holds the cousin's lock) is
-retried after the backoff; the console's own restart (exit 75) comes back at
+exit 2 (configuration) is `failing` at once and its exit 4 (a login to do) is
+never restarted. Exit 5 is busy, for a runner (another runner holds the
+cousin's lock) and for the loops daemon (another loops daemon holds the
+install's): the child waits in `backoff`, retried after 1, 2, 4 ... 60
+seconds with one line per attempt, and a busy exit is never counted toward
+`failing`, so the child starts as soon as the holder is gone, however long
+it stayed. The console's own restart (exit 75) comes back at
 once. On SIGTERM or SIGINT it stops the runners first (together, 35 seconds
 each: the runner's own 30 second stop, `runner.main.STOP_TIMEOUT_S`, plus 5),
 then the loops daemon, then the console, and exits 0. On
@@ -400,8 +404,10 @@ cousin-job start shell "rebuild the index" -- cousin-memory reindex
 [--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each
 cousin's daily flip time and where it comes from), `fire SLUG LOOP`. One
 clock per install: `run` holds a lock on `<root>/run/loops.lock` for its life,
-and a second `run` on the same root exits 2 with "another loops daemon holds
-<path>" (two daemons would fire every one-shot, heartbeat and flip twice). See
+and a second `run` on the same root exits 5 (busy) with "another loops daemon
+holds <path>" (two daemons would fire every one-shot, heartbeat and flip
+twice). Under `cousin-supervisor` that exit leaves its loops child waiting in
+`backoff`, not `failing`: it becomes the clock once the other daemon stops. See
 [jobs and loops](jobs-and-loops.md).
 
 ```

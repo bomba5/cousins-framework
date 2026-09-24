@@ -552,6 +552,53 @@ class TestHoldLock(HermeticCase):
         self.assertIn("runner.lock", err)
 
 
+class TestHoldLockRetry(HermeticCase):
+    """#79 (review N4): is_running probes by taking the lock for
+    microseconds; hold_lock retries LOCK_EX|LOCK_NB for LOCK_TAKE_S before
+    LockHeld, so a runner starting inside a probe is never refused."""
+
+    _HOLDER = ("import fcntl, os, sys, time\n"
+               "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"
+               "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+               "print('locked', flush=True)\n"
+               "time.sleep(float(sys.argv[2]))\n")
+
+    def _holder(self, lock, hold_for):
+        proc = subprocess.Popen([sys.executable, "-c", self._HOLDER, str(lock), str(hold_for)],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.addCleanup(proc.wait, 5)
+        self.addCleanup(proc.kill)
+        self.addCleanup(proc.stdout.close)
+        self.assertEqual(proc.stdout.readline(), b"locked\n")
+        return proc
+
+    def test_the_retry_window_is_about_a_second(self):
+        self.assertEqual(runner_main.LOCK_TAKE_S, 1.0)
+
+    def test_a_holder_that_lets_go_inside_the_window_is_waited_for(self):
+        home = temp_home(self, runner="fake")
+        lock = home / "run" / "runner.lock"
+        self._holder(lock, 0.3)
+        started = time.monotonic()
+        with runner_main.hold_lock(home):
+            waited = time.monotonic() - started
+            self.assertTrue(runner_main.is_running(home))
+        self.assertLess(waited, runner_main.LOCK_TAKE_S + 0.5)
+
+    def test_a_holder_that_keeps_it_is_lock_held_after_the_window(self):
+        home = temp_home(self, runner="fake")
+        lock = home / "run" / "runner.lock"
+        self._holder(lock, 30)
+        started = time.monotonic()
+        with self.assertRaises(runner_main.LockHeld) as caught:
+            with runner_main.hold_lock(home):
+                self.fail("took a lock another process holds")
+        waited = time.monotonic() - started
+        self.assertGreaterEqual(waited, runner_main.LOCK_TAKE_S * 0.9)
+        self.assertLess(waited, runner_main.LOCK_TAKE_S + 2.0)
+        self.assertIn(str(lock), str(caught.exception))
+
+
 class TestStopTimeout(HermeticCase):
     def test_serve_stops_the_runner_with_the_one_constant(self):
         # R5': the supervisor's runner budget is STOP_TIMEOUT_S + 5, so _serve

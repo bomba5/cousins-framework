@@ -24,9 +24,13 @@ Exits, by the child's documented exit codes (classify_exit):
     restarting it would only bury the line that says what is wrong;
   - a runner's 4 is a login to do: `stopped`, never restarted
     (runner/main.py: "a supervisor must NOT restart on 4");
-  - a runner's 5 is busy, another runner holds the home's lock (a
-    leftover of a crashed supervisor, or one started by hand): restarted
-    after the backoff, so the child comes back once the holder is gone;
+  - 5 is busy, for a runner (another runner holds the home's lock) and
+    for the loops daemon (another loops daemon holds the root's): a
+    leftover of a crashed supervisor, one started by hand, a unit still
+    enabled. Restarted after the backoff (1, 2, 4 ... 60 s), one line per
+    attempt, and never counted toward `failing`: a busy child is waiting
+    for a holder, not crash-looping, so it comes back whenever the holder
+    goes, however long that takes;
   - the console's 75 is its own restart route: restarted at once and
     not counted (console/routes_admin.py RESTART_EXIT_CODE);
   - anything else (a runner's 3 "gave up", 0, a signal) restarts after
@@ -88,6 +92,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import loops
 from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
 from cousin_lib.runner.main import LOCK_HELD_EXIT, STOP_TIMEOUT_S
 
@@ -115,6 +120,7 @@ KILL_GRACE_S = 5.0       # after a SIGKILL, before the ordered stop writes a chi
 CONFIG_EXIT = 2              # every child: a configuration problem
 RUNNER_LOGIN_EXIT = 4        # cousin-runner: a person must log in
 RUNNER_BUSY_EXIT = LOCK_HELD_EXIT  # cousin-runner: another runner holds the home's lock (5)
+LOOPS_BUSY_EXIT = loops.LOCK_HELD_EXIT  # cousin-loops run: another loops daemon holds the root's lock (5)
 CONSOLE_RESTART_EXIT = 75    # cousin-console's restart route (routes_admin.RESTART_EXIT_CODE)
 
 AUTO_START_DEFAULT = True        # R4: a runner cousin starts with the supervisor unless it opts out
@@ -183,7 +189,8 @@ def runner_spec(home):
 def classify_exit(kind, code):
     """(action, reason) for a child that exited without being asked to.
     `code` is os.waitstatus_to_exitcode's: the exit status, or -N for
-    signal N. Actions: "restart" (after the backoff, counted), "now" (at
+    signal N. Actions: "restart" (after the backoff, counted), "busy"
+    (after the backoff, not counted: a holder has its lock), "now" (at
     once, not counted), "failing" (left down), "stopped" (left down,
     not an error of ours). The reason is None for a plain crash."""
     if code == CONFIG_EXIT:
@@ -191,7 +198,9 @@ def classify_exit(kind, code):
     if kind == "runner" and code == RUNNER_LOGIN_EXIT:
         return "stopped", "login required (exit %d)" % code
     if kind == "runner" and code == RUNNER_BUSY_EXIT:
-        return "restart", "another runner holds its lock (exit %d)" % code
+        return "busy", "another runner holds its lock (exit %d)" % code
+    if kind == "loops" and code == LOOPS_BUSY_EXIT:
+        return "busy", "another loops daemon holds its lock (exit %d)" % code
     if kind == "console" and code == CONSOLE_RESTART_EXIT:
         return "now", "restart requested (exit %d)" % code
     return "restart", None
@@ -236,6 +245,17 @@ class RestartPolicy:
             self.exits.popleft()
         if len(self.exits) >= self.max_exits:
             return None
+        return self._next_delay()
+
+    def on_busy(self, ran_for):
+        """A busy exit (another process holds the child's lock): the
+        same backoff, capped at its last step, and never counted, so a
+        busy child is never `failing`, however long the holder stays."""
+        if ran_for >= self.healthy_after:
+            self.step = 0
+        return self._next_delay()
+
+    def _next_delay(self):
         delay = self.backoff[min(self.step, len(self.backoff) - 1)]
         self.step += 1
         return delay
@@ -440,6 +460,12 @@ class Supervisor:
             self.say("%s exited (%s): %s, restarting now" % (child.name, how, reason))
             child.restarts += 1
             self._start(child)
+        elif action == "busy":
+            delay = child.policy.on_busy(now - (child.started_at or now))
+            child.next_start = now + delay
+            child.set_state("backoff", reason)
+            self.say("%s busy: %s, retrying in %gs; not counted toward failing"
+                     % (child.name, reason, delay))
         else:
             delay = child.policy.on_exit(now, now - (child.started_at or now))
             if delay is None:

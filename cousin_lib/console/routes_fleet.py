@@ -606,6 +606,11 @@ def register():
         # runner mid-turn is answered 202 and started again in the
         # background once the supervisor reports it down.
         server = req.server
+        home = cousin_home(server, slug)
+        # an earlier stop's hold is the operator's decision: remember it, so
+        # a refused start below puts it back as it was instead of dropping it
+        held_path = supervisor.held_path(home)
+        earlier_hold = held_path.read_text() if held_path.is_file() else None
         stopped = _stop(server, slug)
         if stopped["status"] == "stopping":          # the runner lane only
             threading.Thread(target=_start_when_down, args=(server, slug),
@@ -617,8 +622,14 @@ def register():
         except HttpError as err:
             if stopped.get("held"):
                 # the stop half held a cousin no supervisor ran (O9); a
-                # restart asked for it running, so a refused start leaves no hold
-                supervisor.release(cousin_home(server, slug))
+                # restart asked for it running, so a refused start leaves no
+                # hold of its own - but an earlier hold stays, word for word
+                if earlier_hold is None:
+                    supervisor.release(home)
+                else:
+                    tmp = held_path.with_name(held_path.name + ".tmp")
+                    tmp.write_text(earlier_hold)
+                    os.replace(tmp, held_path)
             return err.status, {"ok": False, "target": "cousin/%s" % slug,
                                 "stop": stopped, "start": err.body}
         return 200, {"ok": True, "target": "cousin/%s" % slug,

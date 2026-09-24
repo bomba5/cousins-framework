@@ -154,6 +154,21 @@ class TestRunnerLaneStartStop(_Case):
         self.assertTrue(body["stop"]["held"])
         self.assertFalse(supervisor.is_held(home))
 
+    def test_a_refused_restart_keeps_an_earlier_operator_hold(self):
+        # the cousin was already held by an earlier stop (the operator's
+        # decision): a restart that cannot start it (no supervisor) must not
+        # cancel that hold, nor rewrite who made it and when
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        supervisor.hold(home, "cousin-supervisor stop")
+        before = supervisor.held_path(home).read_text()
+        server = self.serve()
+        server.settle_seconds = 0
+        status, body = self.post("/api/cousins/wren/restart")
+        self.assertEqual(status, 503, body)
+        self.assertTrue(supervisor.is_held(home))
+        self.assertEqual(supervisor.held_path(home).read_text(), before)
+
     def test_restart_on_the_runner_lane_is_202_then_started_when_down(self):
         self.cousin("wren", extra=RUNNER)
         stub = self.stub()                     # status: no child left, so down at once

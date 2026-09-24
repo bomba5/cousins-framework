@@ -1,0 +1,149 @@
+"""The tmux kind's in-pane launcher (phase 11 Task 6; I6, R3, R13).
+
+The pane's command is `exec env -i <env_base> <python> <this file> --home H
+[--fresh] -- claude ...`: tmux's own environment is rebuilt by the login
+shell, so the allowlist is applied INSIDE the pane, by `env -i`, and this
+launcher then
+
+  - reads the cousin's account (accounts.for_cousin) and adds its
+    variables (a named login's CLAUDE_CONFIG_DIR; `host` adds none);
+    `claude-token` and `anthropic-key` accounts are refused (P11-6);
+  - adds CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 and DISABLE_AUTOUPDATER=1;
+  - on a fresh start (--fresh) appends `--append-system-prompt` with the
+    text of data/run/tmux-context.md (R10), read here so it never passes
+    through tmux's parser;
+  - applies the hard deny again (DENY_PREFIXES), except the variables it
+    set itself, and refuses the print-mode flags;
+  - execs the CLI.
+
+No secret is ever on an argv: the account's values go to the environment
+only, and a key or token account never gets this far."""
+import argparse
+import os
+import sys
+from pathlib import Path
+
+BASE_ENV = ("HOME", "PATH", "USER", "LOGNAME", "SHELL", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS", "LANG", "LOCALE_ARCHIVE", "TZ", "COLORTERM", "TMPDIR")
+            # plus every LC_*; TERM comes from tmux
+DENY_PREFIXES = ("CLAUDE", "ANTHROPIC", "CLAUDE_AGENT_SDK_")
+FORBIDDEN = ("-p", "--print", "--output-format", "--input-format", "--strict-mcp-config")
+SWITCHES = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1", "DISABLE_AUTOUPDATER": "1"}
+CONTEXT = ("data", "run", "tmux-context.md")
+SESSION_FLAGS = {"new": "--session-id", "resume": "--resume"}
+REFUSED_KINDS = ("claude-token", "anthropic-key")
+
+
+def _denied(name):
+    return name.startswith(DENY_PREFIXES)
+
+
+def env_base(shell_env, *, env_allow=()):
+    """The pane's `env -i` allowlist from the runner's environment: BASE_ENV,
+    every LC_*, and the names `[agent] env_allow` lists; then the hard deny,
+    which beats env_allow (no CLAUDE* or ANTHROPIC* name passes)."""
+    names = set(BASE_ENV) | set(env_allow)
+    out = {k: v for k, v in shell_env.items() if k in names or k.startswith("LC_")}
+    return {k: v for k, v in out.items() if not _denied(k)}
+
+
+def env_allow_of(agent):
+    """`[agent] env_allow` as a tuple of variable names (default none): a list
+    of names, never one the hard deny takes (it would be dropped anyway, so
+    naming one is a mistake to say). ValueError naming the key."""
+    names = agent.get("env_allow", [])
+    if not isinstance(names, list) or not all(
+            isinstance(n, str) and n and (n[0].isalpha() or n[0] == "_")
+            and all(c.isalnum() or c == "_" for c in n) for n in names):
+        raise ValueError("cousin.toml [agent] env_allow must be a list of variable names")
+    denied = [n for n in names if _denied(n)]
+    if denied:
+        raise ValueError("cousin.toml [agent] env_allow names %s: CLAUDE* and ANTHROPIC*"
+                         " never reach the pane (the hard deny)" % ", ".join(denied))
+    return tuple(names)
+
+
+def argv(*, launcher, home, session, model, effort, fresh):
+    """The pane's command after `env -i <base>`: this launcher, run by
+    absolute path, then the CLI's argv. `session` is (mode, id): "new"
+    mints the session (--session-id), "resume" resumes it (--resume).
+    `fresh` asks the launcher to append the context block. A model or an
+    effort left unset is the CLI's own default."""
+    mode, session_id = session
+    if mode not in SESSION_FLAGS:
+        raise ValueError("session mode must be one of %s, got %r"
+                         % (", ".join(SESSION_FLAGS), mode))
+    cmd = [sys.executable, str(Path(launcher).resolve()), "--home", str(home)]
+    if fresh:
+        cmd.append("--fresh")
+    cmd += ["--", "claude"]
+    if model:
+        cmd += ["--model", str(model)]
+    if effort:
+        cmd += ["--effort", str(effort)]
+    cmd += [SESSION_FLAGS[mode], str(session_id), "--dangerously-skip-permissions",
+            "--setting-sources", "project,local"]
+    return cmd
+
+
+def _say(message):
+    print("tmux-launch: %s" % message, file=sys.stderr, flush=True)
+
+
+def main(argv=None):
+    """Exec the CLI with the account, the switches and the deny applied;
+    2 (never an exec) on a refused account or argv."""
+    from cousin_lib import accounts
+    from cousin_lib.config import FrameworkConfig
+    args = list(sys.argv[1:] if argv is None else argv)
+    if "--" not in args:
+        _say("usage: tmux_launch --home H [--fresh] -- claude ...")
+        return 2
+    at = args.index("--")
+    parser = argparse.ArgumentParser(prog="tmux_launch", add_help=False)
+    parser.add_argument("--home", required=True)
+    parser.add_argument("--fresh", action="store_true")
+    opts = parser.parse_args(args[:at])
+    cli = args[at + 1:]
+    if not cli or any(a in FORBIDDEN or a.startswith(("--output-format=", "--input-format="))
+                      for a in cli):
+        _say("refused: the tmux kind runs the interactive CLI, never %s"
+             % ", ".join(FORBIDDEN))
+        return 2
+    home = Path(opts.home)
+    root = FrameworkConfig.root_from_home(home)
+    try:
+        account = accounts.for_cousin(home, root)
+    except accounts.AccountsError as err:
+        _say(str(err))
+        return 2
+    if account.kind in REFUSED_KINDS:
+        _say("the tmux kind runs on a subscription login (host or a claude-login account);"
+             " %s accounts are refused until a login-free config dir is shown to start with"
+             " no menu (phase 11 P11-6; A4: onboarding is skippable by seeding, but a"
+             " token's login screen is not measured)" % account.kind)
+        return 2
+    try:
+        own = accounts.account_env(account, root)
+    except accounts.AccountsError as err:
+        _say(str(err))
+        return 2
+    env = dict(os.environ)
+    env.update(own)
+    env.update(SWITCHES)
+    keep = set(own) | set(SWITCHES)
+    env = {k: v for k, v in env.items() if k in keep or not _denied(k)}
+    if opts.fresh:
+        try:
+            context = home.joinpath(*CONTEXT).read_text()
+        except OSError as err:
+            _say("fresh start without its context block %s: %s"
+                 % (home.joinpath(*CONTEXT), err))
+            return 2
+        cli += ["--append-system-prompt", context]
+    os.execvpe(cli[0], cli, env)
+    return 0   # not reached
+
+
+if __name__ == "__main__":
+    sys.exit(main())

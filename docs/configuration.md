@@ -782,7 +782,16 @@ session with no settings files and `bypassPermissions`; `policy.toml`
 (`deny_tools`, `deny_bash_patterns`, `ask`, `outbound_filter`) is what stands
 in for a settings file's deny rules, read once at start and enforced by a
 `PreToolUse` hook, and a malformed one is a config error, exit 2, naming the
-key. `runner = "fake"` is for tests. Absent: the tmux path, unchanged
+key. `runner = "fake"` is for tests. `runner = "tmux"` (phase 11) runs the
+host's interactive Claude Code in a tmux pane on the framework's own socket,
+fed by the same inbox; it runs on `host` or a named `claude-login` account only
+(`claude-token` and `anthropic-key` accounts are refused, exit 2), and the pane
+starts from a fixed allowlist of the runner's environment (`HOME`, `PATH`,
+`USER`, `LOGNAME`, `SHELL`, `SSH_AUTH_SOCK`, `XDG_RUNTIME_DIR`,
+`DBUS_SESSION_BUS_ADDRESS`, `LANG`, `LOCALE_ARCHIVE`, `TZ`, `COLORTERM`,
+`TMPDIR`, every `LC_*`) plus the names `[agent] env_allow` lists (a list of
+variable names; a `CLAUDE*` or `ANTHROPIC*` name is refused, since those never
+reach the pane). Absent: the tmux path, unchanged
 (and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
 cousin.toml that does not parse is also the tmux path, and `cousin-runner`
 refuses it the same way).

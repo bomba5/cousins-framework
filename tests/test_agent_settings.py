@@ -186,6 +186,46 @@ class Validate(_Case):
         self.assertIn("tmux", self.refused(home, {"model": "m"}, "runner"))
 
 
+class RunnerStartChecks(_Case):
+    """Fix round 1, Important 1: what validate lets through, the runner's
+    start must not refuse: the opencode bridge guard on the rendered config,
+    and the account's preflight (a missing secret is a login to do, allowed)."""
+
+    def refused(self, home, changes, key):
+        with self.assertRaises(agent_settings.SettingsError) as cm:
+            agent_settings.validate(home, self.root, changes)
+        self.assertIn(key, cm.exception.errors, cm.exception.errors)
+        return cm.exception.errors[key]
+
+    def test_an_opencode_model_naming_the_bridge_is_refused(self):
+        home = self.cousin('runner = "opencode"\naccount = "oc"\nmodel = "openai/gpt-5"\n')
+        self.assertIn("bridge", self.refused(home, {"model": "openai/meridian-large"}, "model"))
+        self.assertIn("bridge", self.refused(home, {"small_model": "openai/meridian-s"},
+                                             "small_model"))
+
+    def test_an_account_the_preflight_refuses_is_refused(self):
+        home = self.cousin('runner = "sdk"\n')
+        secret = self.root / ".secrets" / "accounts" / "metered"
+        # missing: a login to do, allowed
+        agent_settings.validate(home, self.root, {"account": "metered"})
+        secret.parent.mkdir(parents=True)
+        secret.parent.chmod(0o700)
+        secret.write_text("bad key with spaces\n")
+        secret.chmod(0o600)
+        self.assertIn("malformed", self.refused(home, {"account": "metered"}, "account"))
+        secret.write_text("sk-ant-api03-goodkeygoodkeygood\n")
+        secret.parent.chmod(0o755)
+        self.assertIn("open to group", self.refused(home, {"account": "metered"}, "account"))
+        secret.parent.chmod(0o700)
+        agent_settings.validate(home, self.root, {"account": "metered"})
+
+    def test_the_model_error_names_the_agent_key(self):
+        home = self.cousin('runner = "sdk"\n')
+        text = self.refused(home, {"model": "two words"}, "model")
+        self.assertIn("agent.model", text)
+        self.assertNotIn("runtime.", text)
+
+
 class Apply(_Case):
     def test_writes_every_key_in_one_write_and_keeps_the_rest(self):
         home = self.cousin('runner = "sdk"   # the lane\n', extra='\n[memory]\nscope = "shared"\n')

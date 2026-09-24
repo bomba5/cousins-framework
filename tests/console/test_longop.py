@@ -53,7 +53,7 @@ class Lifecycle(LongOpCase):
     def test_a_raise_or_ok_false_is_failed_with_its_error(self):
         def boom(op):
             op.stage("close", "running")
-            raise RuntimeError("the supervisor is gone")
+            raise longop.OpError("the supervisor is gone")
         longop.start(self.server, "wren", "migrate", boom)
         op = self.wait_done()
         self.assertEqual(op["status"], "failed")
@@ -92,6 +92,69 @@ class Lifecycle(LongOpCase):
         status, body = self.post("/api/cousins/wren/flip", {"confirm": True})
         self.assertEqual(status, 409, body)
         self.assertIn("migrate", body["error"])
+        gate.set()
+        self.wait_done()
+
+
+class Robustness(LongOpCase):
+    """Fix round 1, Importants 2 and 3."""
+
+    def test_a_system_exit_still_ends_the_op_failed(self):
+        def work(op):
+            op.stage("parse", "running")
+            import argparse
+            import contextlib
+            import io
+            with contextlib.redirect_stderr(io.StringIO()):
+                argparse.ArgumentParser().parse_args(["--bogus"])
+        longop.start(self.server, "wren", "migrate", work)
+        op = self.wait_done()
+        self.assertEqual(op["status"], "failed")
+        self.assertIsNone(longop.running(self.server, "wren"))
+        longop.start(self.server, "wren", "migrate", lambda op: {})    # not locked
+        self.wait_done()
+
+    def test_only_an_op_error_says_its_words(self):
+        import contextlib
+        import io
+
+        def leaky(op):
+            op.stage("login", "running")
+            raise RuntimeError("login failed for key sk-ant-SECRET123456")
+        log = io.StringIO()
+        with contextlib.redirect_stderr(log):
+            longop.start(self.server, "wren", "login", leaky)
+            op = self.wait_done()
+        self.assertEqual(op["status"], "failed")
+        self.assertNotIn("SECRET", str(op))
+        self.assertNotIn("SECRET", str(self.events))
+        self.assertIn("RuntimeError", op["error"])
+        self.assertIn("console log", op["error"])
+        self.assertIn("SECRET123456", log.getvalue())     # the host's log keeps it
+
+        def said(op):
+            raise longop.OpError("the account has no login yet")
+        longop.start(self.server, "wren", "login", said)
+        op = self.wait_done()
+        self.assertEqual(op["error"], "the account has no login yet")
+
+
+class FleetRefusesDuringAnOp(LongOpCase):
+    """Fix round 1, Important 4: dismiss, start, stop and restart are 409
+    while an op runs on the cousin, as the flip is."""
+
+    def test_each_is_409(self):
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        longop.start(self.server, "wren", "migrate", lambda op: gate.wait(5) and {})
+        for method, path in (("POST", "/api/cousins/wren/start"),
+                             ("POST", "/api/cousins/wren/stop"),
+                             ("POST", "/api/cousins/wren/restart"),
+                             ("DELETE", "/api/cousins/wren")):
+            status, body = self.request(method, path, {} if method == "POST" else None)
+            self.assertEqual(status, 409, (path, body))
+            self.assertIn("migrate", body["error"])
+        self.assertTrue((self.root / "cousins" / "wren").is_dir())
         gate.set()
         self.wait_done()
 

@@ -1404,6 +1404,10 @@ function SpawnModal({ onClose, onSpawn }) {
   const runners = options?.runners || [];
   const laneAccounts = (options?.accounts || []).filter(a => runner && (a.lanes || []).includes(runner));
   const laneReads = (key) => !runner || ((options?.lane_keys || {})[runner] || []).includes(key);
+  // how the lane takes a model (lane_models): required or not, and whether
+  // the harness catalogue is a valid suggestion there (never on a lane
+  // that refuses those models)
+  const laneModelRule = (runner && (options?.lane_models || {})[runner]) || null;
   React.useEffect(() => {
     // a lane change keeps the account only when it still runs there
     setAccount(a => laneAccounts.some(x => x.name === a) ? a : (laneAccounts[0]?.name || ""));
@@ -1424,7 +1428,8 @@ function SpawnModal({ onClose, onSpawn }) {
   }, [name]);
 
   // voice is required: the template refuses to render without it.
-  const valid = name.trim() && slug.trim() && role.trim() && voice.trim();
+  const valid = name.trim() && slug.trim() && role.trim() && voice.trim()
+    && !(laneModelRule && laneModelRule.required && !laneModel.trim());
 
   const [error, setError] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
@@ -1438,7 +1443,9 @@ function SpawnModal({ onClose, onSpawn }) {
       if (roleParagraph.trim()) body.role_paragraph = roleParagraph.trim();
       if (String(port).trim()) body.port = Number(port);
       if (operator.trim()) body.operator = operator.trim();
-      if (runner) body.runner = runner;
+      // the lane is always named: "" sends the tmux lane's own name, so an
+      // install's COUSIN_DEFAULT_RUNNER cannot turn it into a runner cousin
+      body.runner = runner || options?.tmux_lane || "tmux-legacy";
       if (runner && account) body.account = account;
       const chosenModel = runner ? laneModel.trim() : model;
       if (chosenModel && laneReads("model")) body.model = chosenModel;
@@ -1544,9 +1551,13 @@ function SpawnModal({ onClose, onSpawn }) {
                 </select>
               </FormField>
             ) : laneReads("model") ? (
-              <FormField label="model" hint="[agent] model, the one the runner reads; blank is the runner's default.">
-                <input className="txt" list="spawn-lane-models" value={laneModel} onChange={e => setLaneModel(e.target.value)} placeholder="the runner's default" />
-                <datalist id="spawn-lane-models">{models.map(m => <option key={m} value={m} />)}</datalist>
+              <FormField label="model" hint={"[agent] model, the one the runner reads: " + ((laneModelRule && laneModelRule.hint) || "a model name")}>
+                <input className="txt" list={laneModelRule && laneModelRule.catalogue ? "spawn-lane-models" : undefined}
+                       value={laneModel} onChange={e => setLaneModel(e.target.value)}
+                       placeholder={laneModelRule && laneModelRule.required ? "<provider>/<model>" : "the runner's default"} />
+                {laneModelRule && laneModelRule.catalogue && (
+                  <datalist id="spawn-lane-models">{models.map(m => <option key={m} value={m} />)}</datalist>
+                )}
               </FormField>
             ) : (
               <FormField label="model" hint="This lane reads no model."><span className="muted">-</span></FormField>

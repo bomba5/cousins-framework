@@ -132,16 +132,25 @@ function seamsChanged() {
   try { window.dispatchEvent(new CustomEvent("fw-seams-changed")); } catch (_e) { /* no DOM */ }
 }
 
+// `order`: absent is 100; anything that is not a finite number sorts last.
+function seamOrder(order) {
+  if (order === undefined) return 100;
+  return typeof order === "number" && Number.isFinite(order) ? order : Infinity;
+}
+function seamCompare(a, b) {
+  return a.order === b.order ? 0 : (a.order < b.order ? -1 : 1);
+}
+
 function registerSlot(name, entry) {
   if (typeof name !== "string" || !name) throw new Error("registerSlot: a slot name is required");
   if (!entry || typeof entry.id !== "string" || !entry.id || typeof entry.render !== "function") {
     throw new Error("registerSlot(" + name + "): an entry needs an id and a render function");
   }
   const list = SEAM_SLOTS[name] || (SEAM_SLOTS[name] = []);
-  const row = Object.assign({ order: 100 }, entry);
+  const row = Object.assign({}, entry, { order: seamOrder(entry.order) });
   const at = list.findIndex(e => e.id === row.id);
   if (at >= 0) list[at] = row; else list.push(row);
-  list.sort((a, b) => a.order - b.order);
+  list.sort(seamCompare);
   seamsChanged();
 }
 
@@ -155,10 +164,10 @@ function registerView(entry) {
     throw new Error("registerView: an entry needs an id, a label and a render function");
   }
   if (RESERVED_VIEW_IDS.includes(entry.id)) throw new Error("registerView: " + entry.id + " is a built-in view");
-  const row = Object.assign({ order: 100 }, entry);
+  const row = Object.assign({}, entry, { order: seamOrder(entry.order) });
   const at = SEAM_VIEWS.findIndex(v => v.id === row.id);
   if (at >= 0) SEAM_VIEWS[at] = row; else SEAM_VIEWS.push(row);
-  SEAM_VIEWS.sort((a, b) => a.order - b.order);
+  SEAM_VIEWS.sort(seamCompare);
   seamsChanged();
 }
 
@@ -207,7 +216,9 @@ function Slot({ name, ...props }) {
   return (
     <>
       {entries.map(e => (
-        <SlotBoundary key={e.id} label={name + "/" + e.id}>
+        // keyed by the cousin too: another cousin's inspector starts the
+        // entry (and a boundary that caught an error) over
+        <SlotBoundary key={e.id + "@" + ((props.cousin && props.cousin.slug) || "")} label={name + "/" + e.id}>
           <SlotEntry entry={e} props={props} />
         </SlotBoundary>
       ))}
@@ -237,7 +248,7 @@ function SecretField({ onSubmit, status, placeholder = "paste the secret", submi
   const blocked = busy || sending || disabled;
   const send = async () => {
     if (blocked || !draft.trim()) return;
-    const value = draft;
+    const value = draft.trim();
     setDraft("");
     setSending(true);
     try { await onSubmit(value); } finally { setSending(false); }

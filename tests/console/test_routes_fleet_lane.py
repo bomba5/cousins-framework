@@ -78,6 +78,44 @@ class SpawnARunnerCousin(ConsoleCase):
         self.assertFalse((self.root / "cousins" / "toki").exists())
 
 
+class SpawnTheTmuxLaneExplicitly(ConsoleCase):
+    """Fix round 1, Important 7: the dialog's tmux-legacy choice is sent as
+    runner "tmux-legacy", so COUSIN_DEFAULT_RUNNER cannot override it."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "templates").mkdir()
+        (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
+            "# {{NAME}}\n{{ROLE_ONE_LINE}}\n{{VOICE_GUIDE}}\n")
+
+    def test_the_sentinel_beats_the_env_default(self):
+        self.serve()
+        with mock.patch.dict("os.environ", {"COUSIN_DEFAULT_RUNNER": "sdk"}):
+            status, body = self.post("/api/cousins", {
+                "slug": "toki", "role": "tester", "voice": "plain", "port": 8123,
+                "runner": "tmux-legacy", "model": "m-one"})
+            self.assertEqual(status, 201, body)
+            data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
+            self.assertNotIn("agent", data)
+            self.assertEqual(data["runtime"]["model"], "m-one")
+            status, body = self.post("/api/cousins", {
+                "slug": "toko", "role": "tester", "voice": "plain", "port": 8124,
+                "runner": "tmux-legacy", "account": "fleet"})
+            self.assertEqual(status, 400, body)
+            self.assertIn("needs a runner", body["error"])
+
+    def test_options_say_how_each_lane_takes_a_model(self):
+        self.serve()
+        body = self.get("/api/spawn/options")[1]
+        self.assertEqual(body["tmux_lane"], "tmux-legacy")
+        self.assertTrue(body["lane_models"]["opencode"]["required"])
+        self.assertFalse(body["lane_models"]["opencode"]["catalogue"])
+        self.assertIn("<provider>/<model>", body["lane_models"]["opencode"]["hint"])
+        self.assertTrue(body["lane_models"]["sdk"]["catalogue"])
+        self.assertFalse(body["lane_models"]["sdk"]["required"])
+        self.assertNotIn("fake", body["lane_models"])
+
+
 class RowLaneFields(ConsoleCase):
     def row(self, slug):
         return next(c for c in self.get("/api/cousins")[1]["cousins"] if c["slug"] == slug)

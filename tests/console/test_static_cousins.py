@@ -81,6 +81,15 @@ class SpawnDialogLane(unittest.TestCase):
         for kind in ('"sdk"', '"fake"', '"opencode"', '"tmux"'):
             self.assertNotIn(kind, self.src, kind)
 
+    def test_the_tmux_lane_is_sent_explicitly(self):
+        body = self.src[self.src.index("const body"):]
+        self.assertIn("body.runner = runner || options?.tmux_lane", body)
+
+    def test_the_model_rule_is_the_lanes(self):
+        self.assertIn("lane_models", self.src)
+        self.assertIn("laneModelRule.catalogue", self.src)
+        self.assertIn("laneModelRule.required", self.src)
+
     def test_model_and_effort_only_where_the_lane_reads_them(self):
         body = self.src[self.src.index("const body"):]
         self.assertIn("laneReads(\"model\")", body)

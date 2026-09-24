@@ -44,6 +44,11 @@ class SetKey(unittest.TestCase):
             with self.assertRaises(TypeError):
                 toml_edit.set_key(BASE, "agent", "rollover_at_percent", bad)
 
+    def test_control_characters_and_del_are_escaped(self):
+        for v in ("x\x7f", "a\nb", "tab\there", 'q"uote'):
+            text = toml_edit.set_key(BASE, "agent", "model", v)
+            self.assertEqual(tomllib.loads(text)["agent"]["model"], v)
+
     def test_a_list_of_strings_is_written(self):
         text = toml_edit.set_key(BASE, "agent", "env_allow", ["LANG", 'A"B'])
         self.assertEqual(tomllib.loads(text)["agent"]["env_allow"], ["LANG", 'A"B'])
@@ -93,6 +98,47 @@ class SetKey(unittest.TestCase):
         text = toml_edit.set_key(crlf, "agent", "model", "m")
         self.assertNotIn("\n", text.replace("\r\n", ""))
         self.assertEqual(tomllib.loads(text)["agent"]["model"], "m")
+
+
+class KeepsWhatIsNotTheKey(unittest.TestCase):
+    """Fix round 1 minors: an inline comment survives a replace; a key's
+    name inside a multi-line string or a nested array is never taken for
+    the key."""
+
+    DOC = ('[agent]\nrunner = "sdk"\nmodel = "a"  # keep me\n'
+           'prompt = """\nline\nmodel = "inside"\n[fake]\n"""\n'
+           'x = [\n  [1, 2],\n]\n\n[other]\nk = 1\n')
+
+    def test_an_inline_comment_is_kept(self):
+        text = toml_edit.set_key(self.DOC, "agent", "model", "b")
+        self.assertIn('model = "b"  # keep me\n', text)
+        self.assertEqual(tomllib.loads(text)["agent"]["model"], "b")
+
+    def test_a_key_only_inside_a_multi_line_string_is_not_touched(self):
+        doc = '[agent]\nrunner = "sdk"\nprompt = """\nmodel = "inside"\n"""\n'
+        self.assertEqual(toml_edit.set_key(doc, "agent", "model", None), doc)
+        text = toml_edit.set_key(doc, "agent", "model", "m")
+        data = tomllib.loads(text)
+        self.assertEqual(data["agent"]["model"], "m")
+        self.assertEqual(data["agent"]["prompt"], 'model = "inside"\n')
+
+    def test_an_array_of_tables_ends_the_table_before_it(self):
+        doc = '[agent]\nrunner = "sdk"\n\n[[loops]]\nname = "a"\n'
+        text = toml_edit.set_key(doc, "agent", "model", "m")
+        data = tomllib.loads(text)
+        self.assertEqual(data["agent"]["model"], "m")
+        self.assertEqual(data["loops"], [{"name": "a"}])
+
+    def test_the_rest_of_the_document_is_unchanged(self):
+        before = tomllib.loads(self.DOC)
+        for value in ("b", None):
+            text = toml_edit.set_key(self.DOC, "agent", "effort", "high")
+            text = toml_edit.set_key(text, "agent", "model", value)
+            after = tomllib.loads(text)
+            self.assertEqual(after["agent"]["prompt"], before["agent"]["prompt"])
+            self.assertEqual(after["agent"]["x"], [[1, 2]])
+            self.assertEqual(after["other"], {"k": 1})
+            self.assertEqual(after["agent"]["effort"], "high")
 
 
 class WriteKeys(unittest.TestCase):

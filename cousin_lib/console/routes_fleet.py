@@ -376,8 +376,10 @@ def spawn_lane_options(root):
     `default_runner` (COUSIN_DEFAULT_RUNNER, else null), `accounts` (host,
     then config/accounts.toml's by name, each with its kind and the kinds
     it runs on, accounts.check_lane's rule; no secret is in that file)
-    with `accounts_error` when the file cannot be read, and `lane_keys`,
-    the [agent] keys each kind reads (agent_settings)."""
+    with `accounts_error` when the file cannot be read, `lane_keys`, the
+    [agent] keys each kind reads, and `lane_models`, how each kind that
+    reads a model takes it (agent_settings.model_rule). `tmux_lane` is the
+    runner value that names the tmux lane explicitly."""
     from cousin_lib import accounts, agent_settings
     kinds = agent_settings.kinds()
     error = None
@@ -397,7 +399,9 @@ def spawn_lane_options(root):
                 continue
             lanes.append(kind)
         rows.append({"name": account.name, "kind": account.kind, "lanes": lanes})
-    return {"runners": kinds,
+    return {"runners": kinds, "tmux_lane": agent_settings.TMUX_LEGACY,
+            "lane_models": {kind: rule for kind in kinds
+                            for rule in [agent_settings.model_rule(kind)] if rule},
             "default_runner": os.environ.get("COUSIN_DEFAULT_RUNNER") or None,
             "accounts": rows, "accounts_error": error,
             "lane_keys": {kind: agent_settings.lane_keys(kind) for kind in kinds}}
@@ -527,6 +531,15 @@ def _flip_state(server, slug):
     return server.state.setdefault("flips", {}).get(slug)
 
 
+def _refuse_during_op(server, slug):
+    """409 while a long operation (console/longop.py) runs on the cousin:
+    a start, stop, restart or dismiss under it would race its own steps,
+    as a flip would."""
+    kind = longop.op_running(server, slug)
+    if kind:
+        raise HttpError(409, "a %s is running on %s" % (kind, slug), busy=True)
+
+
 def register():
     @router.route("GET", "/api/cousins")
     def list_cousins(req):
@@ -556,9 +569,10 @@ def register():
             value = body.get(key)
             if value is not None and value != "":
                 runtime[key] = value
-        # The lane: `runner` (sdk or fake) and the `account` it runs on;
-        # absent or empty, COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT
-        # apply (unset: the tmux lane).
+        # The lane: `runner` (one of RUNNER_KINDS, or "tmux-legacy" for the
+        # tmux lane by name) and the `account` it runs on; absent or empty,
+        # COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT apply (unset: the
+        # tmux lane). The dialog always names the lane.
         for key in ("runner", "account"):
             value = body.get(key)
             if value is None or value == "":
@@ -585,6 +599,7 @@ def register():
     @router.route("DELETE", "/api/cousins/{slug}")
     def dismiss(req, slug):
         cousin_home(req.server, slug)
+        _refuse_during_op(req.server, slug)
         req.server.emit("cousin-status", {"slug": slug, "status": "stopping"})
         try:
             out = spawn.dismiss_cousin(req.server.root, slug=slug,
@@ -600,6 +615,8 @@ def register():
 
     @router.route("POST", "/api/cousins/{slug}/start")
     def start(req, slug):
+        cousin_home(req.server, slug)
+        _refuse_during_op(req.server, slug)
         return 200, _start(req.server, slug)
 
     @router.route("POST", "/api/cousins/{slug}/stop")
@@ -615,6 +632,7 @@ def register():
         when there was nothing to stop)."""
         server = req.server
         config = load_cousin(server, slug)
+        _refuse_during_op(server, slug)
         clean = req.body.get("clean", True)
         if not isinstance(clean, bool):
             raise HttpError(400, "clean must be a boolean")
@@ -668,6 +686,7 @@ def register():
         # background once the supervisor reports it down.
         server = req.server
         home = cousin_home(server, slug)
+        _refuse_during_op(server, slug)
         # an earlier stop's hold is the operator's decision: remember it, so
         # a refused start below puts it back as it was instead of dropping it
         held_path = supervisor.held_path(home)
@@ -704,8 +723,10 @@ def register():
     def set_auth(req, slug):
         """Switch the auth mode; a running agent restarts on the same
         session unless restart is false. 409 when it is mid-turn (force
-        overrides), 400 when the mode cannot be used."""
+        overrides) or a long operation runs on it, 400 when the mode
+        cannot be used."""
         cousin_home(req.server, slug)
+        _refuse_during_op(req.server, slug)
         mode = req.body.get("mode")
         if mode not in agent_auth.AUTH_MODES:
             raise HttpError(400, "mode must be one of %s"

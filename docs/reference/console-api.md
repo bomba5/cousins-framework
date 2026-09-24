@@ -186,7 +186,7 @@ Spawn a cousin. Body:
  "memory_scope": "private", "runner": "sdk", "account": "metered"}
 ```
 
-`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk`, `fake` or `opencode`) and `account` go to `[agent]`, and so do a runner cousin's `model` and `effort` (a tmux cousin's go to `[runtime]`), checked by the lane first: the account must run on it and a key it does not read (an effort off the `sdk` lane, a model on `fake`) is a `400`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
+`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk`, `fake` or `opencode`, or `tmux-legacy` to name the tmux lane so the install's default runner does not apply) and `account` go to `[agent]`, and so do a runner cousin's `model` and `effort` (a tmux cousin's go to `[runtime]`), checked by the lane first: the account must run on it and a key it does not read (an effort off the `sdk` lane, a model on `fake`) is a `400`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
 
 ### `GET /api/spawn/options`
 
@@ -202,7 +202,7 @@ What the spawn dialog offers:
  "accounts_error": null, "lane_keys": {"sdk": ["runner", "account", ...], ...}}
 ```
 
-`runners` are the runner kinds (none chosen is the tmux lane); `default_runner` is `COUSIN_DEFAULT_RUNNER`, else null. `accounts` lists `host` and `config/accounts.toml`'s entries with their kind and the kinds each runs on (`accounts_error` says why the file could not be read, and the list is then `host` alone). `lane_keys` names the `[agent]` keys each kind reads.
+`runners` are the runner kinds (none chosen is the tmux lane); `default_runner` is `COUSIN_DEFAULT_RUNNER`, else null. `accounts` lists `host` and `config/accounts.toml`'s entries with their kind and the kinds each runs on (`accounts_error` says why the file could not be read, and the list is then `host` alone). `lane_keys` names the `[agent]` keys each kind reads, and `lane_models` how each kind that reads a model takes it: `{"required", "catalogue", "hint"}` (`catalogue`: the `models` list is a valid suggestion there; never on `opencode`, where a model is required and is `"<provider>/<model>"`). `tmux_lane` is the `runner` value that names the tmux lane.
 
 `models`, `default_model` and `default_effort` come from `config/harness.toml [agent]`. No `models` there means the built-in list; no `default_model` means the first model in the list. `500` if harness.toml exists but can't be read.
 
@@ -318,7 +318,7 @@ Cancels a pending timed flip. `200 {"ok": true, "slug", "was_pending": bool}`. A
 
 ### `GET /api/cousins/<slug>/op`
 
-The cousin's long operation (a kind switch, an account login: whatever a route runs through `console/longop.py`), running or the last one finished since the console started: `200 {"ok": true, "op": null}` before any, else `{"ok": true, "op": {"id", "slug", "kind", "status": "running" | "done" | "failed", "started_at", "finished_at", "params", "stages": [{"name", "status": "running" | "done" | "failed" | "skipped", "detail", "at"}], "result", "error"}}`. One operation runs per cousin at a time, and never beside a flip or a clean stop: a route that starts one answers `202 {"ok": true, "op"}`, or `409 {"busy": true}`. Progress comes as `cousin-op` events. `404` unknown cousin.
+The cousin's long operation (a kind switch, an account login: whatever a route runs through `console/longop.py`), running or the last one finished since the console started: `200 {"ok": true, "op": null}` before any, else `{"ok": true, "op": {"id", "slug", "kind", "status": "running" | "done" | "failed", "started_at", "finished_at", "params", "stages": [{"name", "status": "running" | "done" | "failed" | "skipped", "detail", "at"}], "result", "error"}}`. One operation runs per cousin at a time, and never beside a flip or a clean stop: a route that starts one answers `202 {"ok": true, "op"}`, or `409 {"busy": true}`. While one runs, the cousin's start, stop, restart, dismiss and auth switch are `409` too. A failure an operation words for the operator is its `error`; any other exception is `"failed: <ExceptionType>, see the console log"`, its text on the console's stderr only. Progress comes as `cousin-op` events. `404` unknown cousin.
 
 ### `GET /api/tokens`
 

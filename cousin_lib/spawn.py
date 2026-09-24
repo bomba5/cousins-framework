@@ -199,12 +199,21 @@ def _write_identity_files(home, *, claude_md, name, role):
 def spawn_lane(root, runner=None, account=None):
     """(runner, account) a new cousin is created with. runner None reads
     COUSIN_DEFAULT_RUNNER, where unset or empty is the tmux lane (None,
-    nothing written); a runner must be sdk or fake. account None reads
+    nothing written), and "tmux-legacy" names the tmux lane explicitly (no
+    default read); a runner must be one of RUNNER_KINDS. account None reads
     COUSIN_DEFAULT_ACCOUNT, which applies only to a runner cousin; an
     explicit account needs a runner. An account must be `host` or one of
     config/accounts.toml's. SpawnError on anything else, before any
     write."""
     from cousin_lib import accounts
+    from cousin_lib.agent_settings import TMUX_LEGACY
+    if runner == TMUX_LEGACY:
+        # the tmux lane asked for by name (the console's spawn dialog): the
+        # COUSIN_DEFAULT_RUNNER and COUSIN_DEFAULT_ACCOUNT defaults do not apply
+        if account is not None:
+            raise SpawnError("account %r needs a runner: an account is what a runner cousin"
+                             " runs on, and %s is the tmux lane" % (account, TMUX_LEGACY))
+        return None, None
     runner_from = "runner"
     if runner is None:
         runner = os.environ.get("COUSIN_DEFAULT_RUNNER") or None
@@ -224,8 +233,8 @@ def spawn_lane(root, runner=None, account=None):
                          % (account_from, account))
     if runner is None:
         raise SpawnError("account %r needs a runner: an account is what a"
-                         " runner cousin runs on (runner = sdk or fake)"
-                         % account)
+                         " runner cousin runs on (runner = %s)"
+                         % (account, " or ".join(RUNNER_KINDS)))
     if account != accounts.HOST:
         try:
             known = accounts.load(root)
@@ -440,7 +449,7 @@ class NoSupervisor(SpawnError):
 
 
 def runner_lane(home):
-    """The cousin runs on cousin-runner (`[agent] runner` is sdk or fake),
+    """The cousin runs on cousin-runner (`[agent] runner` is one of RUNNER_KINDS),
     the test every runner-lane caller uses; its start and stop are the
     supervisor's (R10). A cousin.toml that is missing or does not parse
     is the tmux lane, as delivery reads it."""

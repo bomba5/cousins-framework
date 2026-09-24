@@ -147,10 +147,14 @@ def _check_value(key, value, lane, home):
         if not isinstance(value, str) or not value:
             raise ValueError("must be a model name")
         if lane == "opencode":
-            from cousin_lib.runner import opencode
+            from cousin_lib.runner import opencode, opencode_guard
             try:
                 accounts.refuse_claude_name("cousin.toml [agent] %s" % key, value)
                 opencode.split_model(value, key)
+                # the runner's bridge guard (R13), on the value as it is rendered
+                opencode_guard.refuse_bridge({key: value}, {})
+            except opencode_guard.BridgeRefused as err:
+                raise ValueError(err.reason)
             except (accounts.AccountsError, RunnerError) as err:
                 raise ValueError(str(err))
             return value
@@ -158,7 +162,8 @@ def _check_value(key, value, lane, home):
         try:
             spawn.check_runtime_value("model", value)
         except spawn.SpawnError as err:
-            raise ValueError(str(err))
+            # the shape check is [runtime]'s; the key here is [agent]'s
+            raise ValueError(str(err).replace("runtime.model", "agent.model"))
         return value
     if kind == "account":
         if not isinstance(value, str) or not value:
@@ -228,6 +233,13 @@ def _cross(root, agent, home=None):
     try:
         account = _account(root, agent, home)
         accounts.check_lane(account, lane)
+        # the runner's preflight before its lock (runner/main.account_for): a
+        # secret open to others, not ours, a symlink or malformed is exit 2;
+        # a missing one is a login to do, which the runner waits for
+        try:
+            accounts.preflight(account, root)
+        except accounts.SecretMissing:
+            pass
     except accounts.AccountsError as err:
         errors.setdefault("account", str(err))
         account = None
@@ -249,6 +261,19 @@ def _cross(root, agent, home=None):
                 key = "small_model" if text.startswith("cousin.toml [agent] small_model") \
                     else "model"
                 errors[key] = text
+        if account is not None and "model" not in errors and "small_model" not in errors:
+            from cousin_lib.runner import opencode, opencode_guard
+            config = opencode.render_config(
+                account, model=agent["model"],
+                small_model=agent.get("small_model") or agent["model"],
+                mcp_url="http://127.0.0.1:0/mcp", mcp_token="-")
+            try:
+                # the constructor's guard (OpencodeRunner._render) on the whole
+                # config as it would be written; the environment is the
+                # runner's own at start and is checked there
+                opencode_guard.refuse_bridge(config, {})
+            except opencode_guard.BridgeRefused as err:
+                errors["model"] = err.reason
     return errors
 
 
@@ -295,6 +320,20 @@ def _suggestions(key, lane, root, agent):
             return ["%s/%s" % (ENDPOINT_PROVIDER, account.endpoint_model)]
         return ["%s/" % p for p in account.providers]
     return None
+
+
+def model_rule(lane):
+    """How `lane` takes [agent] model, for a form: {required, catalogue,
+    hint}. `catalogue`: config/harness.toml's model list are valid
+    suggestions (the sdk lane's Claude models; never on opencode, which
+    refuses them). None when the lane reads no model."""
+    if "model" not in lane_keys(lane):
+        return None
+    if lane == "opencode":
+        return {"required": True, "catalogue": False,
+                "hint": "required: \"<provider>/<model>\" on a provider the account holds"}
+    return {"required": False, "catalogue": True,
+            "hint": "a model name; blank is the runner's default"}
 
 
 def _default(key, agent):

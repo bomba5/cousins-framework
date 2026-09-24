@@ -132,6 +132,16 @@ catch (err) { errs.push("refused"); }
 process.stdout.write(JSON.stringify(errs));""")
         self.assertEqual(got, ["refused"] * 4)
 
+    def test_a_non_numeric_order_sorts_last(self):
+        got = self.run_node("""
+registerSlot("z", {id: "late", order: "soon", render: () => 1});
+registerSlot("z", {id: "first", order: 1, render: () => 1});
+registerSlot("z", {id: "dflt", render: () => 1});
+registerSlot("z", {id: "nan", order: NaN, render: () => 1});
+process.stdout.write(JSON.stringify(slotEntries("z").map(e => e.id)));""")
+        self.assertEqual(got[:2], ["first", "dflt"])
+        self.assertEqual(sorted(got[2:]), ["late", "nan"])
+
     def test_views_register_in_order(self):
         got = self.run_node("""
 registerView({id: "system", label: "System", order: 60, render: () => 1});
@@ -153,6 +163,15 @@ class SecretFieldPin(unittest.TestCase):
         # the draft is only ever the input's value, never rendered as text
         self.assertEqual(re.findall(r"\{draft\}", self.src), ["{draft}"])
         self.assertIn("value={draft}", self.src)
+
+    def test_the_trimmed_value_is_sent(self):
+        send = self.src[self.src.index("const send"):]
+        self.assertIn("const value = draft.trim();", send)
+
+    def test_a_slot_entry_starts_over_for_another_cousin(self):
+        slot = _component(_read("ui.jsx"), "Slot")
+        self.assertIn("props.cousin", slot)
+        self.assertRegex(slot, r"key=\{[^}]*props\.cousin")
 
     def test_shows_set_or_the_last_four_only(self):
         text = _component(_read("ui.jsx"), "secretStateText")

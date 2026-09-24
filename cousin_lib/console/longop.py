@@ -24,17 +24,23 @@ The API a route module uses:
         return longop.start_response(req.server, slug, "migrate", work,
                                      params={"to": "sdk"})   # 202, or 409 busy
 
-A raise inside `work` fails the op with the exception's text (and the
-last running stage with it). Never put a secret in a stage detail, the
-params or the result: all three are served and broadcast as they are.
+A raise inside `work` fails the op, whatever it raises (a SystemExit
+from an argparse main included): an OpError with its own words, anything
+else with "failed: <ExceptionType>, see the console log" while the full
+text and traceback go to the console's stderr only (an exception's text
+can carry a secret). Never put a secret in an OpError, a stage detail,
+the params or the result: all of them are served and broadcast as they
+are.
 
 The event: `cousin-op` {slug, id, kind, phase: started|stage|done|failed,
 stage?, error?}; the browser gets it as a window `fw-cousin-op` event
 (app.jsx), and ui.jsx's useLongOp(slug) and <LongOpStatus> read it."""
 from __future__ import annotations
 
+import sys
 import threading
 import time
+import traceback
 import uuid
 
 from cousin_lib.console import router
@@ -46,6 +52,11 @@ DETAIL_MAX = 500
 
 class Busy(Exception):
     """Another operation, a flip or a clean stop runs on this cousin."""
+
+
+class OpError(Exception):
+    """A failure `work` words for the operator: its message is served and
+    broadcast as it is, so it must never hold a secret."""
 
 
 def _lock(server):
@@ -127,13 +138,23 @@ def start(server, slug, kind, work, *, params=None):
     op = Op(server, entry)
 
     def run():
+        result, error = None, "failed: the operation ended without a result"
         try:
             result = work(op)
             error = None
             if isinstance(result, dict) and result.get("ok") is False:
                 error = str(result.get("error") or "the operation failed")
-        except Exception as err:  # noqa: BLE001 - reported on the op
-            result, error = None, "%s: %s" % (type(err).__name__, err)
+        except OpError as err:
+            result, error = None, str(err)
+        except BaseException as err:  # noqa: BLE001 - SystemExit too: the op must end
+            result, error = None, "failed: %s, see the console log" % type(err).__name__
+            print("cousin-console: op %s %s on %s failed:\n%s" % (
+                entry["kind"], entry["id"], slug, traceback.format_exc()),
+                file=sys.stderr, flush=True)
+        finally:
+            _finish(result, error)
+
+    def _finish(result, error):
         if error:
             for s in entry["stages"]:
                 if s["status"] == "running":

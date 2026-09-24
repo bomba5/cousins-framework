@@ -16,7 +16,6 @@ import tomllib
 from pathlib import Path
 
 _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
-_ANY_HEADER = re.compile(r"^\s*\[")
 
 
 def _scalar(value):
@@ -29,7 +28,8 @@ def _scalar(value):
             raise TypeError("unsupported TOML value %r (not finite)" % (value,))
         return repr(value)
     if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
+        # json escapes what TOML forbids in a basic string but DEL
+        return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
     raise TypeError("unsupported TOML value %r" % (value,))
 
 
@@ -47,65 +47,152 @@ def _check_names(table, key):
         raise ValueError("key %r is not a bare TOML key" % (key,))
 
 
-def _table_span(lines, table):
-    """(start, end) line indexes of `[table]`'s body, or None."""
-    header = re.compile(r"^\s*\[%s\]\s*(#.*)?$" % re.escape(table))
-    for i, line in enumerate(lines):
-        if header.match(line):
-            end = len(lines)
-            for j in range(i + 1, len(lines)):
-                if _ANY_HEADER.match(lines[j]):
-                    end = j
+_HEADER = re.compile(r"^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$")
+
+
+def _statements(lines):
+    """[(start, end, header)] for the text's statements: a line range that
+    parses on its own (a table header, a key and its whole value, a
+    multi-line array or string included), a blank or a comment line.
+    `header` is the dotted table name for a `[table]` line (the raw line
+    for an `[[array]]` header), else None. A
+    line inside a multi-line value is never a statement of its own, so a
+    key's name or a `[x]` inside a string is never taken for one. None
+    when a line starts nothing that parses (the caller then refuses)."""
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("#"):
+            out.append((i, i + 1, None))
+            i += 1
+            continue
+        for j in range(i + 1, n + 1):
+            try:
+                tomllib.loads("".join(lines[i:j]))
+            except tomllib.TOMLDecodeError:
+                continue
+            header = None
+            if j == i + 1 and stripped.startswith("[["):
+                header = stripped              # an array of tables: never a [table] name
+            elif j == i + 1 and stripped.startswith("["):
+                m = _HEADER.match(lines[i])
+                header = ".".join(part.strip() for part in m.group(1).split(".")) \
+                    if m else stripped
+            out.append((i, j, header))
+            i = j
+            break
+        else:
+            return None
+    return out
+
+
+def _table_body(statements, table):
+    """(header index, [statements of its body]) of `[table]`, or None."""
+    for n, (_i, _j, header) in enumerate(statements):
+        if header == table:
+            body = []
+            for st in statements[n + 1:]:
+                if st[2] is not None:
                     break
-            return i + 1, end
+                body.append(st)
+            return statements[n], body
     return None
 
 
-def _value_end(lines, i, end):
-    """The index after the last line of the `key = value` starting at
-    line i: the fewest lines that parse on their own (a multi-line array
-    or string spans several). One line when nothing parses, as before."""
-    for j in range(i + 1, end + 1):
+def _inline_comment(line):
+    """The whitespace and `# comment` after a one-line `key = value`, or ""."""
+    text = line.rstrip("\r\n")
+    try:
+        whole = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return ""
+    for pos, ch in enumerate(text):
+        if ch != "#":
+            continue
         try:
-            tomllib.loads("".join(lines[i:j]))
-            return j
+            if tomllib.loads(text[:pos]) == whole:
+                head = text[:pos]
+                return head[len(head.rstrip()):] + text[pos:]
         except tomllib.TOMLDecodeError:
             continue
-    return i + 1
+    return ""
+
+
+def _rest(doc, table, key):
+    """`doc` without table.key, and without an empty table left on that path."""
+    import copy
+    doc = copy.deepcopy(doc)
+    parts = table.split(".")
+    chain, node = [], doc
+    for part in parts:
+        if not isinstance(node, dict) or part not in node:
+            return doc
+        chain.append((node, part))
+        node = node[part]
+    if isinstance(node, dict):
+        node.pop(key, None)
+    for parent, part in reversed(chain):
+        if parent[part] == {}:
+            del parent[part]
+        else:
+            break
+    return doc
 
 
 def set_key(text, table, key, value):
     """Return the text with `key = value` in `[table]` (value None
-    removes the key). The table is created at the end when absent."""
+    removes the key). The table is created at the end when absent. The
+    key's old value is replaced whole and its inline comment kept; every
+    other statement is kept byte for byte. When the text parses, the
+    result is checked: the rest of the document must read back the same,
+    else ValueError and nothing is changed."""
     _check_names(table, key)
     nl = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines(keepends=True)
+    try:
+        before = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        before = None
+    literal = None if value is None else "%s = %s" % (key, _literal(value))
+    statements = _statements(lines) if before is not None else None
+    if before is not None and statements is None:
+        raise ValueError("cannot find the statements of this cousin.toml")
     key_re = re.compile(r"^\s*%s\s*=" % re.escape(key))
-    span = _table_span(lines, table)
-    new_line = None if value is None else "%s = %s%s" % (key, _literal(value), nl)
-    if span is None:
-        if new_line is None:
+    found = _table_body(statements, table) if statements is not None else None
+    if found is None:
+        if literal is None:
             return text
         body = "".join(lines).rstrip("\r\n")
-        return (body + nl + nl if body else "") + "[%s]%s%s" % (table, nl, new_line)
-    start, end = span
-    for i in range(start, end):
-        if key_re.match(lines[i]):
-            stop = _value_end(lines, i, end)
-            lines[i:stop] = [] if new_line is None else [new_line]
-            break
+        out = (body + nl + nl if body else "") + "[%s]%s%s%s" % (table, nl, literal, nl)
     else:
-        if new_line is not None:
-            # Insert after the last non-blank body line so a trailing
-            # blank keeps separating this table from the next.
-            insert_at = start
-            for i in range(start, end):
-                if lines[i].strip():
-                    insert_at = i + 1
+        (hi, hj, _h), body = found
+        target = next(((i, j) for i, j, _ in body if key_re.match(lines[i])), None)
+        if target is not None:
+            i, j = target
+            if literal is None:
+                lines[i:j] = []
+            else:
+                comment = _inline_comment(lines[i]) if j == i + 1 else ""
+                lines[i:j] = [literal + comment + nl]
+        elif literal is not None:
+            # after the last non-blank statement of the body, so a trailing
+            # blank keeps separating this table from the next
+            insert_at = hj
+            for i, j, _ in body:
+                if lines[i].strip() and not lines[i].strip().startswith("#"):
+                    insert_at = j
             if insert_at > 0 and not lines[insert_at - 1].endswith("\n"):
                 lines[insert_at - 1] += nl
-            lines.insert(insert_at, new_line)
-    return "".join(lines)
+            lines.insert(insert_at, literal + nl)
+        out = "".join(lines)
+    if before is not None:
+        try:
+            after = tomllib.loads(out)
+        except tomllib.TOMLDecodeError as err:
+            raise ValueError("setting %s.%s would break the file: %s" % (table, key, err))
+        if _rest(after, table, key) != _rest(before, table, key):
+            raise ValueError("setting %s.%s would change more than that key" % (table, key))
+    return out
 
 
 def _lookup(parsed, table, key):

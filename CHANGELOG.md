@@ -3,6 +3,46 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.18.0 - 2026-09-24
+
+### Added
+- `POST /peer/send` on the console: another install's cousin writes to one
+  of these with a message signed by the secret the two installs share
+  (`Authorization: HMAC <sender>:<hex>`; `config/external-peers.toml`
+  `inbound_token_file`, a 0600 file): the secret never travels. Behind the
+  network guard, no console session. `reach` (required) limits where a
+  peer may write, and anything outside it answers like a cousin that does
+  not exist; `name` is how it is shown. The sending side signs with
+  `token_file` and `sender`.
+- `POST /hive/tell-home` on the queen: a node's `[tell-home: ...]` with its
+  own token, to `config/hive.toml`'s `home_cousin` only, under the name its
+  token was minted with (never the name it checks in with). A node built
+  with home chat gets `TELL_HOME=1`; `home_chat_url` stays as the legacy,
+  unauthenticated path.
+- Both go through one gate (`cousin_lib/peer_inbound.py`): a plain sender
+  name that is never the cousin's operator or a local cousin; a `msg_id`
+  and a finite `sent_at` within five minutes, an id delivered once (a
+  repeat is a `409`); control characters stripped; 30 messages a minute
+  per sender; 16000 characters at most.
+- `cousin-migrate plan` warns (`warn 2.0.0 ...`) about every key a cousin
+  or the install still carries that 2.0.0 will reject, from one table
+  (`cousin_lib/removed_keys.py`).
+
+### Changed
+- A message to a local runner cousin (`cousin-chat send`, the runner's
+  `send` tool, the console's peer route) is written into its chat and inbox
+  in the sender's own process: a runner cousin needs no chat server to be
+  reached. A tmux cousin is still reached through its chat server.
+- `cousin-reply` and the media `chat` commands store the reply themselves
+  (`chat_api.reply`, what the chat server's reply route runs), with or
+  without a chat server.
+- The Telegram bridge reads replies from the cousin's chat store, not over
+  HTTP, and a runner cousin's bridge needs no `[chat] port`.
+
+### Fixed
+- Control characters in a chat message or a sender's name are no longer
+  typed into a tmux cousin's pane (the chat server's `/api/send` included).
+
 ## 1.17.0 - 2026-09-24
 
 ### Added

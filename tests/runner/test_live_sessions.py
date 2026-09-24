@@ -118,6 +118,8 @@ class TestLiveSideSession(HermeticCase):
                          "the primary's long task finished first: nothing was proven")
         self.assertTrue(_wait(lambda: s.inbox.get(person.inbox_id)["state"] == "done", 60))
         self.assertTrue(_wait(lambda: s.inbox.get(op.inbox_id)["state"] == "done", LONG_S + 180))
+        # the row closes before its result is appended (#102)
+        self.assertTrue(_wait(lambda: primary_events("result"), 30))
         result_ts = primary_events("result")[0]["ts"]
         print("\nREPORT ordering: side reply seen %.1f s before the primary's result"
               % (result_ts - seen["at"]))

@@ -221,7 +221,9 @@ class TestRunnerWaitsForALogin(HermeticCase):
         rec = self.op(r)
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None, 5))
         self.assertGreaterEqual(self.clients[0].interrupts, 1)     # the runner cut the retries
-        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"))
+        # the row goes back to the queue before its result is appended (#102)
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"
+                              and any(e.get("requeued") for e in self.events(r, "result"))))
         requeued = [e for e in self.events(r, "result") if e.get("requeued")]
         self.assertTrue(requeued[0]["repeat_in_transcript"])
         time.sleep(0.3)
@@ -410,6 +412,9 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"))
         r._request_rollover("max_age")
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        # the flip row is requeued before the postponed phase is appended (#102)
+        self.assertTrue(_wait(lambda: ("postponed", auth.LOGIN) in [
+            (e.get("phase"), e.get("why")) for e in self.events(r, "rollover")]))
         phases = [(e.get("phase"), e.get("why")) for e in self.events(r, "rollover")]
         self.assertIn(("postponed", auth.LOGIN), phases)
         self.assertFalse(any(e.get("handoff") == "emergency" for e in self.events(r, "rollover")))

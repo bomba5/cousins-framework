@@ -82,8 +82,11 @@ class TestRateLimited(HermeticCase):
         r = self.build([init_msg(), _limit("rejected", resets_in=5.0), result(is_error=True)])
         r.start()
         rec = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        # the row goes back to the queue before its result is appended (#102)
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"
-                              and r.state() == "rate_limited"))
+                              and r.state() == "rate_limited"
+                              and any(e["kind"] == "result" and e["payload"].get("requeued")
+                                      for e in r.events())))
         self.assertIsNone(r.inbox.get(rec.inbox_id)["outcome"])
         requeued = [e["payload"] for e in r.events()
                     if e["kind"] == "result" and e["payload"].get("requeued")]

@@ -57,7 +57,10 @@ class TestResume(HermeticCase):
 
     def one_turn(self, r, body="hi"):
         rec = r.enqueue(Item("operator:priya", "chat", body, sender="Priya"))
-        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"))
+        # the runner closes a turn's rows, then appends the result and runs its post-turn
+        # work (the session file, usage, mining, the proposal), then goes idle (#102)
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"
+                              and r.state() == "idle"))
 
     def inits(self, r):
         return [e["payload"]["session_id"] for e in r.events() if e["kind"] == "session_init"]

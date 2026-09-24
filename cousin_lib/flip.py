@@ -262,8 +262,8 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     except MissingConfigError as err:
         result["error"] = str(err)
         return result
-    from cousin_lib.delivery import _runner_kind
-    if _runner_kind(home) in ("sdk", "fake"):
+    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind
+    if _runner_kind(home) in RUNNER_KINDS:
         if dry_run:
             result.update(ok=True, lane="runner",
                           stages=[{"stage": "rollover", "skipped": "dry-run"}])

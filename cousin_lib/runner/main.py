@@ -12,13 +12,15 @@ inbox, or when `--check-auth` found the account logged in; 2 for a
 configuration problem (no or a bad `[agent] runner`, an unknown account,
 or a secret file that is open to others or malformed, all checked before
 the lock; a malformed policy.toml, an MCP registry that does not parse or
-names a command with no in-process handler) or when another runner holds
-the home's lock; 3 when the runner gave up (its worker ended, e.g. it
-could not connect, or `--once` found it `errored` for longer than
-ERRORED_GIVE_UP_S), so a supervisor restarts it; 4 when `--check-auth`
+names a command with no in-process handler); 3 when the runner gave up
+(its worker ended, e.g. it could not connect, or `--once` found it
+`errored` for longer than ERRORED_GIVE_UP_S), so a supervisor restarts
+it; 4 when `--check-auth`
 found the account not logged in (or `--validate`'s one turn did not
 answer), or `--once` found the runner waiting for a login (R15): a
-supervisor must NOT restart on 4, a person must log in.
+supervisor must NOT restart on 4, a person must log in; 5 when another
+runner holds the home's lock (busy, not broken: a supervisor retries it
+after its backoff, since the holder may be a leftover about to go).
 
 A missing secret file is not a configuration problem: it is a login to
 do. The runner starts, says so (data/login-required.json, an `auth`
@@ -41,9 +43,10 @@ import tomllib
 from pathlib import Path
 
 from cousin_lib import accounts
+from cousin_lib.delivery import RUNNER_KINDS
 from cousin_lib.runner.base import RunnerError
 
-KINDS = ("sdk", "fake")
+KINDS = RUNNER_KINDS      # the runners runner_for builds, one list (delivery)
 
 # The credentials a runner must never inherit from the shell that started
 # it: the SDK builds the CLI's environment as {**os.environ, **options.env},
@@ -55,7 +58,18 @@ AUTH_ENV = accounts.AUTH_VARS
 # `--once` gives up on a runner that stays `errored` this long.
 ERRORED_GIVE_UP_S = 10.0
 
+# How long a stopping runner gives its current turn (runner.stop's
+# timeout on SIGTERM/SIGINT). The one number every budget above it is
+# built from: cousin-supervisor waits STOP_TIMEOUT_S + 5 before SIGKILL.
+STOP_TIMEOUT_S = 30.0
+
+LOCK_HELD_EXIT = 5    # another runner holds <home>/run/runner.lock
+
 _UNSET = object()
+
+
+class LockHeld(RunnerError):
+    """Another runner holds this home's lock: exit LOCK_HELD_EXIT, not 2."""
 
 
 def _agent_table(home):
@@ -169,7 +183,7 @@ def hold_lock(home):
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         os.close(fd)
-        raise RunnerError("another cousin-runner holds %s" % path)
+        raise LockHeld("another cousin-runner holds %s" % path)
     try:
         yield
     finally:
@@ -291,6 +305,9 @@ def runner_main(argv=None):
             for name in AUTH_ENV:
                 os.environ.pop(name, None)
             return _serve(runner, args.once)
+    except LockHeld as err:
+        print("cousin-runner: %s" % err, file=sys.stderr)
+        return LOCK_HELD_EXIT
     except RunnerError as err:
         print("cousin-runner: %s" % err, file=sys.stderr)
         return 2
@@ -359,7 +376,7 @@ def _serve(runner, once):
             runner.stream.append("policy", {"describe": policy.describe()})
         return _once(runner, stop) if once else _forever(runner, stop)
     finally:
-        runner.stop(timeout=30)
+        runner.stop(timeout=STOP_TIMEOUT_S)
         if previous_term is not _UNSET:
             signal.signal(signal.SIGTERM, previous_term)
         if previous_int is not _UNSET:

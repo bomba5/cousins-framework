@@ -146,6 +146,8 @@ class TestRunnerSelection(HermeticCase):
 
 class TestLock(HermeticCase):
     def test_a_second_runner_on_the_same_home_is_refused(self):
+        # exit 5 (busy), not 2 (configuration): a supervisor retries a busy
+        # runner after its backoff instead of leaving it `failing`
         home = temp_home(self, runner="fake")
         lock = home / "run" / "runner.lock"
         holder = ("import fcntl, os, sys, time\n"
@@ -159,13 +161,22 @@ class TestLock(HermeticCase):
                 self.assertEqual(proc.stdout.readline(), b"locked\n")
                 for argv in (["--home", str(home)], ["--home", str(home), "--once"]):
                     rc, err = _run(argv)
-                    self.assertEqual(rc, 2)
+                    self.assertEqual(rc, runner_main.LOCK_HELD_EXIT)
+                    self.assertEqual(rc, 5)
                     self.assertIn(str(lock), err)
             finally:
                 proc.kill()
                 proc.wait(5)
         rc, _ = _run(["--home", str(home), "--once"])   # released: ours now
         self.assertEqual(rc, 0)
+
+    def test_a_lock_that_cannot_be_opened_is_still_configuration(self):
+        # only a HELD lock is busy; a lock path that cannot be opened is exit 2
+        home = temp_home(self, runner="fake")
+        (home / "run" / "runner.lock").mkdir(parents=True)
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn("cannot open the runner lock", err)
 
 
 AUTH = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
@@ -537,8 +548,29 @@ class TestHoldLock(HermeticCase):
         home = temp_home(self, runner="fake")
         with runner_main.hold_lock(home):
             rc, err = _run(["--home", str(home), "--once"])
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, 5)
         self.assertIn("runner.lock", err)
+
+
+class TestStopTimeout(HermeticCase):
+    def test_serve_stops_the_runner_with_the_one_constant(self):
+        # R5': the supervisor's runner budget is STOP_TIMEOUT_S + 5, so _serve
+        # must give the turn exactly STOP_TIMEOUT_S, read at stop time
+        self.assertEqual(runner_main.STOP_TIMEOUT_S, 30.0)
+        home = temp_home(self, runner="fake")
+        runner = runner_main.runner_for(home)
+        seen = []
+        real_stop = runner.stop
+
+        def stop(timeout=None):
+            seen.append(timeout)
+            return real_stop(timeout=timeout)
+
+        runner.stop = stop
+        with mock.patch.object(runner_main, "STOP_TIMEOUT_S", 7.5):
+            rc = runner_main._serve(runner, True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(seen, [7.5])
 
 
 @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "claude-agent-sdk not installed")

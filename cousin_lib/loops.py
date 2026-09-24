@@ -1098,11 +1098,37 @@ def _default_deliver(slug, text):
     return delivery.accepted(delivery.deliver(home, item, wait=wait), home)
 
 
+class LoopsLockHeld(Exception):
+    """Another loops daemon runs on this root."""
+
+
+def hold_loops_lock(root):
+    """One clock per root: an exclusive, non-blocking flock on
+    <root>/run/loops.lock, held until the returned descriptor is closed
+    (the kernel drops it when the process dies, even on SIGKILL). Two
+    daemons on one root would each fire every due one-shot, heartbeat,
+    [[loops]] entry and daily flip: nothing else claims them. Raises
+    LoopsLockHeld when another process holds it."""
+    import fcntl
+    import os
+    path = Path(root) / "run" / "loops.lock"
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise LoopsLockHeld("another loops daemon holds %s" % path)
+    return fd
+
+
 def loops_main(argv=None):
     """cousin-loops: run the daemon, or inspect its state. Exit codes:
     status returns 0 healthy / 1 down-or-never-run, everything else
-    0 ok / 2 usage."""
+    0 ok / 2 usage, and `run` exits 2 when another loops daemon holds
+    the root's lock."""
     import argparse
+    import os
     import sys
 
     parser = argparse.ArgumentParser(prog="cousin-loops")
@@ -1157,17 +1183,30 @@ def loops_main(argv=None):
         print("request #%d pending; the daemon consumes it on its"
               " next tick" % request_id)
         return 0
-    # run
-    count = 0
-    while True:
-        report = tick(deliver=_default_deliver,
-                      is_alive=_default_is_alive, index_refresh=True)
-        for slug, out in report.get("indexed", []):
-            print("cousin-loops: index %s: %s" % (slug, out),
-                  file=sys.stderr)
-        for error in report["errors"]:
-            print("cousin-loops: %s" % error, file=sys.stderr)
-        count += 1
-        if args.ticks and count >= args.ticks:
-            return 0
-        time.sleep(args.interval)
+    # run: the one clock of this root, for as long as it runs
+    try:
+        lock_fd = hold_loops_lock(FrameworkConfig.from_env().root)
+    except LoopsLockHeld as err:
+        print("cousin-loops: %s" % err, file=sys.stderr)
+        return 2
+    try:
+        count = 0
+        while True:
+            report = tick(deliver=_default_deliver,
+                          is_alive=_default_is_alive, index_refresh=True)
+            for slug, out in report.get("indexed", []):
+                print("cousin-loops: index %s: %s" % (slug, out),
+                      file=sys.stderr)
+            for error in report["errors"]:
+                print("cousin-loops: %s" % error, file=sys.stderr)
+            count += 1
+            if args.ticks and count >= args.ticks:
+                return 0
+            time.sleep(args.interval)
+    finally:
+        os.close(lock_fd)
+
+
+if __name__ == "__main__":  # `python -m cousin_lib.loops`: how cousin-supervisor starts it
+    import sys
+    sys.exit(loops_main())

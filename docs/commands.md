@@ -145,7 +145,8 @@ resumes the session saved in `data/runner-session.json`, falling back to a
 fresh session carrying the state digest as its first message when it cannot
 (no saved session, or the CLI does not recognise the saved one: a
 `resume_failed` event either way, never a crash). It runs until
-SIGTERM or SIGINT, then stops the runner with a 30 second timeout. `--once`
+SIGTERM or SIGINT, then stops the runner with a 30 second timeout
+(`runner.main.STOP_TIMEOUT_S`). `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or
 SIGINT, or when the runner gives up. `--runner sdk|fake` overrides the
 cousin's `[agent] runner`. One runner per cousin: it holds a lock on
@@ -174,9 +175,10 @@ it. An install script can gate on `cousin-runner --home H --check-auth`.
 | exit | meaning |
 |---|---|
 | 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox, or `--check-auth` found the account logged in (and `--validate`'s turn answered) |
-| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler; or another runner holds the lock |
+| 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler |
 | 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across rebuilds that fail to connect; a rebuild that connects ends it); the long-running mode keeps rebuilding a side session and never exits for one |
 | 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner, or any of its side sessions, waiting for a login. A supervisor must not restart on it |
+| 5 | busy: another runner holds `<home>/run/runner.lock`. Not a configuration problem: a supervisor retries after its backoff |
 
 ```
 cousin-runner --home cousins/wren
@@ -351,7 +353,10 @@ cousin-job start shell "rebuild the index" -- cousin-memory reindex
 
 `cousin-loops` is the loops daemon and its controls. Subcommands: `run
 [--interval S] [--ticks N]` (the daemon), `status`, `requests`, `flips` (each
-cousin's daily flip time and where it comes from), `fire SLUG LOOP`. See
+cousin's daily flip time and where it comes from), `fire SLUG LOOP`. One
+clock per install: `run` holds a lock on `<root>/run/loops.lock` for its life,
+and a second `run` on the same root exits 2 with "another loops daemon holds
+<path>" (two daemons would fire every one-shot, heartbeat and flip twice). See
 [jobs and loops](jobs-and-loops.md).
 
 ```

@@ -25,6 +25,11 @@ SOURCES = ("chat", "reaction", "hook", "loop", "schedule", "meeting",
            "flip", "boot", "propose", "interrupt")
 DELIVERED, QUEUED, FAILED = "delivered", "queued", "failed"
 
+# The `[agent] runner` values that put a cousin on the runner lane: the
+# one list (backend_for, spawn, the supervisor, the flip and the lifecycle
+# read it), so a new runner kind is added here once.
+RUNNER_KINDS = ("sdk", "fake")
+
 
 class DeliveryError(ValueError):
     pass
@@ -162,7 +167,7 @@ def _runner_kind(home):
 
 def backend_for(home):
     """tmux unless cousin.toml [agent] runner names a runner."""
-    if _runner_kind(home) in ("sdk", "fake"):
+    if _runner_kind(home) in RUNNER_KINDS:
         return InboxBackend()
     return TmuxBackend()
 

@@ -308,9 +308,9 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
     result["steps"].append({"step": "snapshot", "path": str(snap)})
     _audit(root, dict(base, step="snapshot", path=str(snap)))
 
-    from cousin_lib.delivery import _runner_kind
+    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind
     bequest_reason = None
-    if _runner_kind(home) in ("sdk", "fake"):
+    if _runner_kind(home) in RUNNER_KINDS:
         from cousin_lib.runner.rollover import HANDOFF_DEADLINE_S
         bequest_reason = BEQUEST_PROMPT_RUNNER.format(timeout=int(HANDOFF_DEADLINE_S))
         step = {"step": "bequest", "sent": False, "carried": True,

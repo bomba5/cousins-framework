@@ -3,6 +3,107 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.16.0 - 2026-09-24
+
+### Added
+- `cousin-supervisor run` keeps an install's daemons up in one process:
+  the console, the loops daemon and one `cousin-runner` per runner cousin
+  (`[agent] runner = "sdk"` or `"fake"`, unless `[agent] auto_start =
+  false` or a stop holds it; tmux cousins are never its). Every child's
+  output goes to its stdout prefixed with the child's name (`console | `,
+  `runner:wren | `). A child that exits is restarted after 1, 2, 4 ... up
+  to 60 seconds, and five exits inside a minute mark it `failing` and leave
+  it down with one loud line; a configuration exit (2) is `failing` at
+  once, a runner's exit 5 (another runner holds the lock) is restarted with
+  backoff, and the console's own restart (exit 75) comes back at once. It
+  reaps every child and orphan, so it is a correct PID 1. On SIGTERM it
+  stops the runners together (35 seconds each to finish the turn:
+  `runner.main.STOP_TIMEOUT_S` plus 5), then the loops daemon, then the
+  console, and exits 0; SIGHUP rescans `cousins/` without touching a
+  healthy child. One supervisor per install (`run/supervisor.lock`).
+- `cousin-supervisor status [--json] | start <slug> | start --name
+  console|loops | stop <slug> [--no-wait] | stop --name console|loops |
+  reload` talk to the running supervisor over `run/supervisor.sock`; a slug
+  only ever names a runner cousin, `--name` the console or the loops
+  daemon. `stop` answers once the child is down, `--no-wait` at once.
+  `run/supervisor.json` holds the same status for readers that want a
+  file, read only while a supervisor holds the lock. The console's fleet
+  row gains `supervisor: {state}`, null when no supervisor runs (unknown,
+  never stopped).
+- A stop of a runner cousin holds it: the supervisor writes
+  `<home>/run/held` (the time and who asked) and `start` removes it, and a
+  held cousin is not started by a new supervisor, so the stop survives a
+  supervisor restart, a `docker compose down` and `up`, an upgrade and a
+  reboot until the next `start`, as a stopped tmux cousin stays stopped.
+- A runner cousin's start and stop go through the supervisor: the console's
+  start, stop and restart routes and `cousin-spawn --start` ask it instead
+  of tmux and need no `config/agent-cmd`. The console's stop does not wait:
+  it answers 202 `stopping` (200 `stopped` when nothing ran), and its
+  restart answers 202 and starts the runner again in the background once it
+  is down. With no supervisor running, a start answers 503 (the console,
+  a restart's start half included) or exits 1 (`cousin-spawn --start`); a
+  stop answers 200 with `"runner": "not running", "supervisor": "not
+  running"`.
+- `cousin-loops run` holds `run/loops.lock` for its life: a second loops
+  daemon on the same root (a second clock) exits 2 with "another loops
+  daemon holds <path>", and the first keeps running.
+- `cousin-spawn --runner sdk|fake [--account <name>]`, and `runner` and
+  `account` in the console's `POST /api/cousins`, create a runner cousin;
+  `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` supply them when left
+  out (unset: a tmux cousin, as before). The console's spawn dialog sends
+  neither, so those two variables decide for it.
+- The framework as a Docker image: `Dockerfile` (the source tree installed
+  in place at `/opt/framework` with the `sdk` extra, pip removed from the
+  image (the venv's and the base image's), uid 10001, all state on the
+  `/data` volume, `HOME=/data/home`, a health check on `/api/version`,
+  `cousin-supervisor` as the command), `docker/entrypoint.sh` (makes the
+  volume a framework root on every start, links `templates/` into the
+  image, refreshes `config/*.example`, creates only `config/harness.toml`,
+  installs the API key secret privately and declares `[accounts.api-key]`,
+  warns while the console has no user) and an allowlist `.dockerignore`,
+  so a checkout that is also a live root never leaks its state into the
+  build.
+- `compose.yml`: the `framework` service with the console on
+  `127.0.0.1:8600`, the `framework-data` volume, `COUSIN_DEFAULT_RUNNER=sdk`
+  and a 45 second stop grace period; the `embeddings` profile (Ollama).
+  `compose.api-key.yml` is the API key lane, turned on with `cp
+  compose.api-key.yml compose.override.yml`; `secrets/` and
+  `compose.override.yml` are git-ignored.
+- `systemd/cousin-supervisor.service` (`TimeoutStopSec=75`): the supervisor
+  as one user unit in place of the console and loops units, never beside
+  them. `systemd/README.md` gives the migration, which carries the old
+  console's `--host` and `--port` into a drop-in, and the way back.
+- CI builds the image, runs the runner contract suite inside it and fails
+  over 180 MB compressed (`docker/image-size.sh`, `docker save | gzip -6`;
+  the image is 162.2 MB).
+- `docs/install.md` leads with the Docker install; `docs/operations.md`
+  covers the container (what runs, holds, logs, the volume, backup,
+  upgrade, extending the image, both auth lanes).
+
+### Changed
+- `cousin-runner` exits 5, not 2, when another runner holds the home's
+  lock; 2 is configuration only.
+- `cousin-backup` snapshots `data/inbox.db` first, then the other
+  databases, then the runner's event stream (`data/stream/*.jsonl`, each
+  copy cut to its last complete line), then the runner's state files as
+  plain copies (`data/runner-session*.json`, `generation.txt`,
+  `extract-cursor.json`, `propose-cursor.json`, `proposals.json`). A
+  snapshot taken mid-turn restores to a runner that answers the row at
+  least once: never lost, possibly answered twice.
+- The console's restart route reports `supervised` under `cousin-supervisor`
+  too (`COUSIN_SUPERVISED`, set for every child it starts).
+- `docs/reference/loops.md` says how the loops daemon treats a runner
+  cousin: alive while its runner holds the lock, and every delivery one
+  inbox row.
+
+### Fixed
+- `python -m cousin_lib.loops run` ran nothing and exited 0: the module had
+  no `__main__` block (the `cousin-loops` script calls it directly).
+- A runner cousin's chat server no longer refuses to start without a tmux
+  binary: its deliveries are inbox rows, so a node's `[tell-home]` and a peer's
+  message reach the runner on a host without tmux.
+- The console API reference said the restart route exits 0; it exits 75.
+
 ## 1.15.0 - 2026-09-24
 
 ### Added

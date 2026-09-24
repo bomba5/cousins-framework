@@ -2,7 +2,179 @@
 
 Running an install day to day: what each service does, where the logs are,
 backups, the weekly sweep, upgrades, and what to check when something looks
-wrong. It assumes you've done [install](install.md).
+wrong. It assumes you've done [install](install.md). The first section is the
+Docker install; the rest is a bare host, where the same pieces run as systemd
+units.
+
+## The container
+
+**What runs.** One container, `framework`, whose main process is
+`cousin-supervisor` (the entrypoint prepares the volume, then hands over to
+it). The supervisor starts the console, the loops daemon and one
+`cousin-runner` per runner cousin, restarts a child that exits (backing off
+up to 60 seconds), and stops them in order when the container stops: the
+runners first, each given 35 seconds to finish its turn, then the loops daemon,
+then the console. compose waits 45 seconds before it kills anything
+(`stop_grace_period`). Every cousin in the container is a runner cousin; tmux
+cousins need a bare host. See each child:
+
+```
+docker compose exec framework cousin-supervisor status
+docker compose exec framework cousin-supervisor stop wren     # held down until start
+docker compose exec framework cousin-supervisor start wren    # lifts the hold
+docker compose exec framework cousin-supervisor start --name loops
+docker compose exec framework cousin-supervisor reload        # rescan cousins/
+```
+
+A runner cousin starts with the container unless its `cousin.toml` says
+`[agent] auto_start = false` or a stop holds it. A stop of a runner cousin
+(`cousin-supervisor stop` or the console's stop button) writes
+`cousins/<slug>/run/held`, with the time and who asked, and the hold lasts
+until `start`: across `docker compose restart`, `down` and `up`, an upgrade or
+a reboot, as a stopped tmux cousin stays stopped. `stop` answers once the
+runner is down (it finishes its turn first, up to 35 seconds); `stop
+--no-wait` answers at once. The console's stop button does not wait either:
+it answers 202 `stopping` and the fleet row shows when the runner is down;
+its restart button answers 202 too and starts the runner again once it is
+down. A child that exits five times inside a minute is `failing` and left
+down; `status` shows the reason, and `start <slug>` (or `start --name
+console`, `start --name loops`) tries again once you've fixed it. A runner
+that exits 5 found another runner holding its cousin's lock and is restarted
+with backoff; a runner's configuration error (exit 2) is `failing` at once.
+A runner whose account is not logged in does not exit: it says so in the
+console and waits, and resumes once the credentials change. The console's
+own restart button brings the console back at once.
+
+**Logs.** Everything goes to the container's output:
+
+```
+docker compose logs -f framework
+```
+
+Each line starts with who wrote it: `console | `, `loops | `,
+`runner:wren | `, `supervisor: ` for the supervisor itself and `entrypoint: `
+for the start-up steps. `supervisor: runner:wren failing: ...` is the line
+to look for when a cousin stays down. The files the bare host keeps (the loops fire
+log, job logs) are in the same places under `/data`.
+
+**Volumes.** The `framework-data` volume, mounted at `/data`, is the framework
+root and holds everything: `config/`, `cousins/`, `data/`, `shared/`, the
+installed secrets in `.secrets/`, the supervisor's socket in `run/`, and
+`home/`. The container runs as uid 10001 with `HOME=/data/home`; the agent
+CLI writes its own session transcripts there, a cache the framework never
+reads (a cousin's transcript is its `data/sessions.db`). `templates/` is a
+link into the image, so an upgrade brings new templates, and the
+`config/*.example` files are refreshed from the image on every start. compose
+pins the project name, so the volume is `cousins-framework_framework-data`
+whatever you called the checkout. `docker compose down` keeps it;
+`down -v` deletes it.
+
+**Backup.** `cousin-backup` works inside the container, then copy the
+snapshot out:
+
+```
+docker compose exec framework cousin-backup --home cousins/wren --dest /data/backups
+docker compose cp framework:/data/backups ./backups
+```
+
+What it copies, in what order, and why a restored runner answers a row at
+least once (never zero times, possibly twice) is in [Backups](#backups).
+
+For everything at once, snapshot the volume with the stack stopped, using
+the image's own `tar`:
+
+```
+docker compose down
+docker run --rm -u 0 --entrypoint tar -v cousins-framework_framework-data:/data:ro \
+    cousins-framework:local czf - -C /data . > framework-data.tgz
+docker compose up -d
+```
+
+To restore into an empty volume, the same with `xzf - -C /data` and the
+archive on stdin (`-i`, and the volume mounted read-write), with the stack
+stopped. `tar` run as root keeps the owners (uid 10001) and modes, the
+private `.secrets/` included, so keep the archive as private as the keys in
+it.
+
+**Upgrade.**
+
+```
+git pull
+docker compose build
+docker compose up -d
+```
+
+`up` recreates the container on the new image; the volume is untouched.
+Each runner resumes its session from the volume (`data/runner-session.json`
+and `data/sessions.db`), so a cousin picks up its conversation where it left
+off; a message that arrived while it was down is waiting in its inbox. A
+cousin you stopped stays stopped until you start it. The
+console's top bar shows the version it runs, as does
+`docker compose exec framework cousin-version`.
+
+**Extending the image.** pip is removed from the image (the venv's and the
+base image's own), and it has no compilers and few tools. For more, build on it and keep its user:
+
+```
+FROM cousins-framework:local
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends jq \
+ && rm -rf /var/lib/apt/lists/*
+USER 10001:10001
+```
+
+```
+docker build -t cousins-framework:local .
+docker build -t cousins-framework:mine -f Dockerfile.mine .
+```
+
+and run yours from `compose.override.yml`:
+
+```
+services:
+  framework:
+    image: cousins-framework:mine
+    build: !reset null
+```
+
+Keep `USER 10001:10001` last: the volume's files belong to that uid, and a
+cousin running as root can write anything in it. After a `git pull`, rebuild
+both images.
+
+**Auth.** Two lanes, the same as on a bare host.
+
+- The API key: a compose secret, `secrets/anthropic_api_key`, turned on by
+  `cp compose.api-key.yml compose.override.yml`
+  ([install](install.md#install-with-docker)). The entrypoint installs it as
+  the `api-key` account's key on every start, so a rotated key needs
+  `docker compose restart`, not a rebuild.
+- A Claude login: a `claude-login` account in `config/accounts.toml`, logged
+  in with `docker compose exec framework cousin-account login <name>`; its
+  credentials stay on the volume. Mounting a host's own credential directory
+  instead is possible (the commented `volumes:` line in `compose.yml`), but
+  not a good idea: two processes refreshing one login race on its token file.
+
+The terms risk of running cousins on a subscription login, in a container or
+anywhere else, is yours.
+
+**The same supervisor on a bare host.** `systemd/cousin-supervisor.service`
+runs `cousin-supervisor run` as one user unit in place of
+`cousin-console.service` and `cousin-loops.service`, never beside them.
+`cousin-loops run` holds `run/loops.lock`, so a second loops daemon (a second
+clock) exits 2 and leaves the supervisor's loops child `failing`. And the
+supervisor's console listens on `127.0.0.1:8600` unless its unit carries the
+old console's `--host` and `--port`, which the migration in the units README
+does. `systemctl --user reload cousin-supervisor.service` is the rescan. Its
+stop takes the unit's whole control group with it, so while you still have
+tmux cousins keep the two old units and run the supervisor beside them for
+the runner cousins only (`--no-console --no-loops`). The steps are in
+[the units](../systemd/README.md#one-unit-instead-of-two-the-supervisor).
+
+A few things the container does not do yet: a hive node's `[tell-home]` has
+no chat server to post to there ([remote cousins](remote-cousins.md)), and
+the loops daemon, like on a bare host, delivers at least once, so a stop that
+lands in the middle of its tick can deliver that tick's heartbeat or loop
+again after the start.
 
 ## What runs
 

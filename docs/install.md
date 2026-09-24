@@ -1,16 +1,137 @@
 # Install
 
+There are two ways to install, and this page covers both, and how to take
+each back out. [Install with Docker](#install-with-docker) runs the whole
+framework in one container: the console, the scheduler and every cousin, with
+all state on one volume. It needs git and Docker and nothing else, and its
+cousins run on the Agent SDK (`cousin-runner`), not in tmux.
+[Install on a bare host](#install-on-a-bare-host) is a checkout with a venv
+and systemd user units, where cousins run as Claude Code sessions in tmux (or
+on the runner beside them). The example cousin is `wren` and the console user
+is `ana`.
+
+## Install with Docker
+
+You need git and Docker with the compose plugin. I tested with Docker 29 and
+compose 5 on Linux.
+
+The image is 162 MB compressed and about 400 MB on disk. The first `up`
+builds it from the checkout: it pulls the `python:3.13-slim` base and
+downloads the Agent SDK, whose bundled Claude Code CLI is most of the size.
+Nothing else is pulled unless you turn on a profile (below).
+
+```
+git clone https://github.com/bomba5/cousins-framework.git
+cd cousins-framework
+```
+
+**Auth, before the first start.** A cousin needs a way to reach the model.
+Pick one lane.
+
+- An API key: put it in a file beside `compose.yml` and turn on the key
+  override, once:
+
+  ```
+  mkdir -p secrets && chmod 700 secrets
+  (umask 022; printf '%s' "<your key>" > secrets/anthropic_api_key)
+  cp compose.api-key.yml compose.override.yml
+  ```
+
+  compose reads `compose.override.yml` by itself. The key file is mode 644
+  inside a 700 directory because the container's user (uid 10001) must read
+  it; on every start the entrypoint copies it to a private file on the volume
+  and declares an `api-key` account, and new cousins use it. A rotated key is
+  picked up at the next start. Both `secrets/` and `compose.override.yml` are
+  in `.gitignore`.
+- A Claude login: skip the key and log in inside the container after the
+  first start (next step). The terms risk of running cousins on a
+  subscription login, in a container or anywhere else, is yours.
+
+**Start it.**
+
+```
+docker compose up -d
+docker compose logs framework
+```
+
+The first start prints a checklist of what to edit, and a warning that the
+console is open because no user exists yet. Add one now (it asks for the
+password twice):
+
+```
+docker compose exec framework cousin-console adduser ana
+```
+
+For the login lane, declare a login account and log it in; the sign-in URL is
+printed in your terminal and you paste back the code:
+
+```
+docker compose exec -T framework sh -c 'cat >> config/accounts.toml' <<'EOF'
+[accounts.mine]
+kind = "claude-login"
+EOF
+docker compose exec framework cousin-account login mine
+```
+
+Then make it the default account for new cousins, in `compose.override.yml`
+(create the file if you don't have one), and apply it with
+`docker compose up -d`:
+
+```
+services:
+  framework:
+    environment:
+      COUSIN_DEFAULT_ACCOUNT: mine
+```
+
+Its credentials stay on the volume, under `data/accounts/mine`.
+
+**Spawn a cousin.** Open `http://127.0.0.1:8600/`, log in, and spawn one from
+the console. The spawn dialog sets no runner and no account: the
+container's environment decides. `compose.yml` sets
+`COUSIN_DEFAULT_RUNNER=sdk`, so a cousin made in the container is a runner
+cousin and the console starts it through the supervisor, and
+`COUSIN_DEFAULT_ACCOUNT` (the key override, or the line above) names its
+account. Send it a message.
+
+The console's port is published on loopback only. From another machine, use
+an SSH tunnel (`ssh -L 8600:127.0.0.1:8600 <host>`), or publish it on the LAN
+once a user exists, in `compose.override.yml`:
+
+```
+services:
+  framework:
+    ports: !override
+      - "8600:8600"
+```
+
+That is plain HTTP; the notes in
+[Reaching the console from the LAN](#reaching-the-console-from-the-lan) apply.
+
+**Semantic search** is the `embeddings` profile: `docker compose --profile
+embeddings up -d`, then the steps in the comment in `compose.yml` (pull the
+model once, write `config/embedding.toml`). It pulls the Ollama image, several
+GB.
+
+Stop and start with `docker compose down` and `docker compose up -d`: every
+cousin, message and session is on the `framework-data` volume and survives,
+and a cousin you stopped stays stopped until you start it.
+`docker compose down -v` deletes the volume, and with it everything. Running
+it day to day, backups and upgrades are in
+[operations](operations.md#the-container).
+
+## Install on a bare host
+
 This takes you from a plain Linux box to a logged-in console with a first
 cousin answering chat, and back again. I wrote it against Ubuntu 24.04; any
-Linux with the same pieces works with its own package names. The example
-cousin is `wren` and the console user is `ana`.
+Linux with the same pieces works with its own package names.
 
 When you're done you have: the checkout (which is also the framework root),
 a venv inside it, one cousin under `cousins/wren`, its Claude Code session in
 a tmux session called `wren`, its chat server on a local port, and a handful
 of systemd user units that keep running whether or not you're logged in.
 
-## What you need
+### What you need
 
 - **Python 3.11 or newer.** The framework is Python and uses `tomllib`, which
   arrived in 3.11. Ubuntu 24.04 ships 3.12.
@@ -39,7 +160,7 @@ of systemd user units that keep running whether or not you're logged in.
   Babel, marked, mermaid and xterm from unpkg and jsdelivr. The backend
   fetches nothing.
 
-## 1. System packages
+### 1. System packages
 
 ```
 sudo apt-get update
@@ -49,7 +170,7 @@ sudo apt-get install -y python3-venv tmux git curl
 Run `apt-get update` first. On a box that hasn't refreshed its package
 lists, `python3.12-venv` can 404 on a stale `.deb`.
 
-## 2. Clone and install
+### 2. Clone and install
 
 ```
 git clone https://github.com/bomba5/cousins-framework.git ~/cousins-framework
@@ -73,7 +194,7 @@ in agreement. For the memory and job tools from a plain shell, also
 `export COUSIN_HOME=$PWD/cousins/<slug>`, otherwise they stop with "no cousin
 context". The systemd units set all of this themselves.
 
-## 3. Run the tests
+### 3. Run the tests
 
 ```
 python3 -m unittest discover -s tests
@@ -85,7 +206,7 @@ it, so look for `OK` near the end rather than on the very last line.
 Do it now, before any cousin exists, so a failure is the framework's and not
 your install's.
 
-## 4. Claude Code
+### 4. Claude Code
 
 ```
 curl -fsSL https://claude.ai/install.sh | bash     # puts claude in ~/.local/bin
@@ -158,7 +279,7 @@ console, transcript mining at flip, the transcript-size guard, the harness
 memory search collection, `cousin-mcp approve`, the `{model}`/`{effort}`
 defaults and the "needs attention" flag. Copy the preset.
 
-## 5. Optional: semantic search with Ollama
+### 5. Optional: semantic search with Ollama
 
 Search is keyword only until `config/embedding.toml` exists. With a local
 Ollama:
@@ -180,7 +301,7 @@ CPU without AVX one chunk took 32 seconds to embed, and a timeout shorter than
 one chunk makes every search wait it out and then fall back to keyword. With
 a GPU or a modern CPU, 30 is plenty.
 
-## 6. Make the first cousin
+### 6. Make the first cousin
 
 Before you do: from here on this costs money and runs unattended. A cousin is
 a live Claude Code session woken on a schedule, not only when you talk to it.
@@ -218,7 +339,7 @@ cousin-spawn wren --start
 
 More on all of this in [cousins](cousins.md).
 
-## 7. The systemd units
+### 7. The systemd units
 
 ```
 ROOT="$PWD"
@@ -258,7 +379,7 @@ the same port fails to bind and restarts every five seconds. The template
 unit is for when you want systemd to own the chat server instead; see
 [the units](../systemd/README.md).
 
-## 8. Open the console
+### 8. Open the console
 
 ```
 journalctl --user -u cousin-console.service -n 5
@@ -280,7 +401,7 @@ ssh -L 8600:127.0.0.1:8600 ana@192.0.2.10     # then open http://127.0.0.1:8600/
 Log in, open Wren and send a message. The card should say running with no
 "needs attention" line, and the reply shows up in the thread.
 
-## Reaching the console from the LAN
+### Reaching the console from the LAN
 
 Give the unit a drop-in. Re-running step 7 overwrites the unit files but
 leaves drop-ins alone.
@@ -305,7 +426,7 @@ Cousins on other machines need the console reachable too, since their nodes
 call it. That's off until `config/hive.toml` turns it on; see
 [remote cousins](remote-cousins.md).
 
-## After a reboot
+### After a reboot
 
 The units come back on their own (that's what linger is for). The cousins'
 tmux sessions don't: nothing restarts an agent by itself. Start each one,
@@ -315,7 +436,7 @@ from the console's start button or:
 cousin-spawn wren --start
 ```
 
-## Update
+### Update
 
 ```
 cd ~/cousins-framework
@@ -343,7 +464,7 @@ If you move the checkout to another path, the cousins' Claude Code settings
 still point at the old one. Fix each with `cousin-spawn <slug>
 --repair-settings`, then `cousin-mcp approve <slug>` again.
 
-## Uninstall
+### Uninstall
 
 The reverse, in order. Back up first if you might want the cousins again:
 `cousins/` holds all their memory and nothing else has a copy (see

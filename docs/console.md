@@ -218,6 +218,13 @@ itself is described in [cousins](cousins.md#generations-and-the-flip).
 start fails, the cousin exists and you can start it from its card once you
 fix the problem (usually `config/agent-cmd`).
 
+The dialog has no runner or account field: the environment the console runs
+in decides. `COUSIN_DEFAULT_RUNNER` (`sdk` or `fake`) makes the new cousin a
+runner cousin, started through `cousin-supervisor` (where no supervisor runs,
+the start answers 503), and `COUSIN_DEFAULT_ACCOUNT` names its account; unset,
+it is a tmux cousin as before. The Docker install's `compose.yml` sets the
+first.
+
 ### Remote cousins
 
 When `config/hive.toml` has `enabled = true`, the console is also the queen

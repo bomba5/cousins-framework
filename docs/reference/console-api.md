@@ -634,7 +634,7 @@ Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`),
 
 ### `POST /api/admin/restart/framework`
 
-Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 0 about 0.6 s later. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`) or under `cousin-supervisor` (`COUSIN_SUPERVISED`), which starts it again at once. If it's false, nothing will start it again: restart means stop.
+Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 75 (`EX_TEMPFAIL`) about 0.6 s later: non-zero on purpose, because the shipped unit restarts on failure only. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`), whose `Restart=on-failure` brings it back, or under `cousin-supervisor` (`COUSIN_SUPERVISED`), which starts it again at once and does not count the exit against it. If it's false, nothing will start it again: restart means stop.
 
 ## `GET /api/events`
 

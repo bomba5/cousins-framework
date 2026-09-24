@@ -176,6 +176,11 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             try:
                 # shielded: past the budget the work runs on, and its end is seen
                 return await asyncio.wait_for(asyncio.shield(work), RECORD_BUDGET_S)
+            except asyncio.CancelledError:
+                # the SDK cancelled the hook: nobody takes this answer either
+                cancelled.set()
+                work.add_done_callback(functools.partial(late, event))
+                raise
             except asyncio.TimeoutError:
                 cancelled.set()
                 work.add_done_callback(functools.partial(late, event))

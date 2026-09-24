@@ -210,6 +210,20 @@ def _register(cancelled, **fields):
     return job_id
 
 
+def _withdrawn(cancelled, home, tid, job_id):
+    """The last check, just before pre() remembers the row or returns the
+    rewrite: the store can be waited on again after _register (mint_log's
+    set_log_path), and a hook that answered meanwhile ran the call with no
+    rewrite and no trap. The row is deleted and the tool-use id forgotten,
+    so the Post finds no record. True when withdrawn."""
+    if cancelled is None or not cancelled.is_set():
+        return False
+    from cousin_lib import jobs
+    jobs.delete_job(job_id)
+    recall(home, "tool", tid)                # forgets it
+    return True
+
+
 def pre(home, slug, payload, *, cancelled=None):
     tool = payload.get("tool_name")
     tool_input = payload.get("tool_input") or {}
@@ -251,13 +265,15 @@ def pre(home, slug, payload, *, cancelled=None):
         root = os.environ.get("FRAMEWORK_ROOT") or ""
         wrapped = (wrap_background(command, home, root, job_id, log_path)
                    if command else None)
-        if wrapped is None:
+        if wrapped is None or _withdrawn(cancelled, home, tid, job_id):
             return None
         updated = dict(tool_input)
         updated["command"] = wrapped
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "updatedInput": updated}}
     else:
+        return None
+    if _withdrawn(cancelled, home, tid, job_id):
         return None
     remember(home, "tool", tid, job_id)
     prune(home)

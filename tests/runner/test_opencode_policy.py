@@ -94,6 +94,37 @@ class TestRenderedPolicy(OpencodeCase):
         self.assertNotEqual(json.loads(path.read_text())["nonce"], first)   # a fresh one
         self.assertIsNone(r2.fatal)
 
+    def test_the_models_shell_gets_the_cousins_home_and_not_the_servers_secrets(self):
+        """Review Important 4: opencode's bash inherits the server's
+        environment (HOME and XDG in the account's data dir, where auth.json
+        and the rendered config with the MCP token live; the server's
+        password). opencode merges the plugin's `shell.env` answer over that
+        environment, so the runner renders what to set: HOME to the cousin's
+        home, the XDG variables, the password and the config path empty, and
+        USER, LOGNAME and the variables `[agent] shell_env` names, from the
+        runner's own environment."""
+        os.environ.update(SSH_AUTH_SOCK="/run/user/1000/agent.sock", USER="sam",
+                          LOGNAME="sam")
+        os.environ.pop("GPG_AGENT_INFO", None)
+        home = self.home(extra='shell_env = ["SSH_AUTH_SOCK", "GPG_AGENT_INFO"]\n')
+        r = self.started(self.runner(home=home))
+        rendered = json.loads((r.account.data_dir / "cousin-policy.json").read_text())
+        self.assertEqual(rendered["shell_env"], {
+            "HOME": str(home), "USER": "sam", "LOGNAME": "sam",
+            "SSH_AUTH_SOCK": "/run/user/1000/agent.sock",           # GPG_AGENT_INFO is unset
+            "XDG_CONFIG_HOME": "", "XDG_DATA_HOME": "", "XDG_CACHE_HOME": "",
+            "XDG_STATE_HOME": "", "OPENCODE_SERVER_PASSWORD": "", "OPENCODE_CONFIG": ""})
+
+    def test_shell_env_names_what_the_runner_owns_or_a_secret_is_refused(self):
+        for bad in ('"HOME"', '"XDG_DATA_HOME"', '"OPENCODE_SERVER_PASSWORD"', '"OPENCODE_X"',
+                    '"ANTHROPIC_API_KEY"', '"bad-name"', "3"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(opencode.RunnerError) as err:
+                    self.runner(home=self.home(extra="shell_env = [%s]\n" % bad))
+                self.assertIn("shell_env", str(err.exception))
+        with self.assertRaises(opencode.RunnerError):
+            self.runner(home=self.home(extra='shell_env = "SSH_AUTH_SOCK"\n'))
+
     def test_no_policy_file_renders_an_empty_policy(self):
         r = self.started(self.runner())
         rendered = json.loads((r.account.data_dir / "cousin-policy.json").read_text())
@@ -430,6 +461,35 @@ class TestPluginUnderNode(HermeticCase):
         self.assertFalse((self.dir / "ack.json").exists())       # the runner then refuses
 
 
+SHELL_DRIVER = r"""
+const mod = (await import(process.argv[2])).default;
+const hooks = await mod.server({}, undefined);
+const output = {env: {}};
+await hooks["shell.env"]({cwd: "/x", sessionID: "ses_x", callID: "call_x"}, output);
+console.log(JSON.stringify(output.env));
+"""
+
+
+@unittest.skipUnless(NODE, "no node on PATH: the plugin's own test needs a JavaScript runtime")
+class TestShellEnvUnderNode(HermeticCase):
+    def test_the_plugin_answers_shell_env_with_the_rendered_variables(self):
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        d = Path(tmp.name)
+        (d / "driver.mjs").write_text(SHELL_DRIVER)
+        home = d / "home"; home.mkdir()
+        want = {"HOME": str(home), "SSH_AUTH_SOCK": "/run/a.sock", "XDG_DATA_HOME": "",
+                "OPENCODE_SERVER_PASSWORD": ""}
+        rendered = opencode.render_policy(Policy.load(home), nonce="n", ack=d / "ack.json",
+                                          shell_env=want)
+        (d / "p.json").write_text(json.dumps(rendered))
+        done = subprocess.run([NODE, str(d / "driver.mjs"), opencode.PLUGIN.as_uri()],
+                              env={"PATH": os.environ.get("PATH", ""),
+                                   "COUSIN_POLICY_FILE": str(d / "p.json")},
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), want)
+
+
 @unittest.skipUnless(os.environ.get("COUSIN_LIVE_OPENCODE") == "1" and os.environ.get("OPENCODE_BIN"),
                      "live opencode: set COUSIN_LIVE_OPENCODE=1 and OPENCODE_BIN")
 class TestLivePlugin(HermeticCase):
@@ -497,6 +557,45 @@ class TestLivePlugin(HermeticCase):
               % (os.environ["OPENCODE_BIN"], loaded[0]["plugin"], results[0]["text"][:80],
                  tool_msgs[0]["content"][:80], time.monotonic() - started, line[0],
                  provider.chats()[0]["body"].get("max_tokens")))
+
+    def test_the_models_shell_on_the_real_binary(self):
+        """Review Important 4, live: what a bash call sees on 1.18.31 with
+        the plugin's shell.env answer merged over the server's environment."""
+        from tests.runner._fake_provider import FakeProvider
+        probe = ("env | grep -E '^(HOME|XDG_[A-Z]+_HOME|OPENCODE_SERVER_PASSWORD|"
+                 "OPENCODE_CONFIG|USER|SSH_AUTH_SOCK)=' | sort")
+        provider = FakeProvider([("tool", "bash", {"command": probe, "description": "env"}),
+                                 ("text", "seen")]).start()
+        self.addCleanup(provider.close)
+        home = temp_home(self, runner="opencode")
+        with open(home / "cousin.toml", "a") as f:
+            f.write('model = "local/m1"\nopencode_bin = "%s"\nshell_env = ["SSH_AUTH_SOCK"]\n'
+                    % os.environ["OPENCODE_BIN"])
+        data = home.parent.parent / ".secrets" / "accounts" / "live.opencode"
+        account = accounts.Account("live", "opencode", None, None, data_dir=data,
+                                   endpoint=provider.url, endpoint_model="m1")
+        r = OpencodeRunner(home, account=account,
+                           environ={"PATH": os.defpath + ":/run/current-system/sw/bin",
+                                    "USER": "live", "SSH_AUTH_SOCK": "/run/live/agent.sock"})
+        self.addCleanup(lambda: r.stop(timeout=10))
+        a = r.enqueue(_op("show the env"))
+        r.start()
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline and r.fatal is None:
+            row = r.inbox.get(a.inbox_id)
+            if row and row["state"] == "done":
+                break
+            time.sleep(0.5)
+        self.assertIsNone(r.fatal)
+        results = [e["payload"] for e in r.events() if e["kind"] == "tool_result"]
+        self.assertTrue(results and not results[0]["is_error"], results)
+        seen = dict(line.split("=", 1) for line in results[0]["text"].splitlines() if "=" in line)
+        self.assertEqual(seen.get("HOME"), str(home))
+        self.assertEqual(seen.get("USER"), "live")
+        self.assertEqual(seen.get("SSH_AUTH_SOCK"), "/run/live/agent.sock")
+        for name in opencode.SHELL_BLANK:
+            self.assertEqual(seen.get(name, ""), "", name)
+        print("\nLIVE shell env: %s" % sorted(seen.items()))
 
 
 if __name__ == "__main__":

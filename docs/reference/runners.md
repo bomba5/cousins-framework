@@ -160,3 +160,11 @@ none is a contract item:
   writes `auth.json` atomically but takes no lock against a running
   `opencode serve` refreshing an OAuth token in the same file.
 - **Only x86-64 is pinned** in the image's opencode variant.
+- **The model's shell keeps part of the server's environment.** opencode
+  merges the plugin's `shell.env` answer over its own environment, so a
+  variable can be overridden (the plugin sets `HOME` to the cousin's home and
+  empties the XDG variables, the server's password and its config path) but
+  not removed: the shell still sees opencode's `OPENCODE_*` switches and
+  `COUSIN_POLICY_FILE` (neither a secret). Processes opencode starts other
+  than a shell (language servers, formatters) run with the server's own
+  environment, `HOME` in the account's data dir.

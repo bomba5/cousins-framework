@@ -23,6 +23,11 @@
 // the `u` flag, so an unknown escape is an error, not a literal) denies
 // every call that carries a command.
 //
+// The model's shell: opencode merges this plugin's `shell.env` answer over
+// the server's own environment (HOME and XDG in the account's data dir, the
+// server's password), so the hook sets the rendered `shell_env`: HOME the
+// cousin's home, those variables empty, and what the operator passes.
+//
 // Plain ES module, no import: opencode loads it as is and installs nothing
 // for it. Node's `process.getBuiltinModule` (Bun has it too) reaches `fs`.
 
@@ -62,6 +67,11 @@ function compile(policy) {
     });
     const names = policy.names && typeof policy.names === "object" ? policy.names : {};
     const prefixes = policy.prefixes && typeof policy.prefixes === "object" ? policy.prefixes : {};
+    const shellEnv = policy.shell_env === undefined ? {} : policy.shell_env;
+    if (!shellEnv || typeof shellEnv !== "object" || Array.isArray(shellEnv)
+        || !Object.values(shellEnv).every((v) => typeof v === "string")) {
+      throw new Error("shell_env must map names to strings");
+    }
     return {
       fatal: null,
       file: String(policy.file || "policy.toml"),
@@ -70,6 +80,7 @@ function compile(policy) {
       own_prefix: String(policy.own_tool_prefix || "mcp__cousin__"),
       names,
       prefixes,
+      shell_env: shellEnv,
       patterns,
       errors: patterns.filter((p) => p.rx === null).map((p) => ({ source: p.source, error: p.error })),
     };
@@ -170,6 +181,9 @@ async function server(_input, _options) {
     "tool.execute.before": async (input, output) => {
       const [decision, reason] = decide(compiled, input && input.tool, output && output.args);
       if (decision !== "allow") throw refusal(decision, reason);
+    },
+    "shell.env": async (_input, output) => {
+      if (!compiled.fatal && output && output.env) Object.assign(output.env, compiled.shell_env);
     },
   };
 }

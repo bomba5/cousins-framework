@@ -934,6 +934,7 @@ what this lane does not do yet are in [runners](reference/runners.md).
 | `small_model` | `model` | the model opencode uses for its own small calls (session titles); the same rules |
 | `opencode_bin` | `COUSIN_OPENCODE_BIN`, else `opencode` on `PATH` | the `opencode` binary |
 | `opencode_models_fetch` | `true` | `false` sets `OPENCODE_DISABLE_MODELS_FETCH=1`: opencode then does not fetch the models.dev catalog at start (an outbound request that carries no credential) |
+| `shell_env` | `[]` | variable names the model's shell gets from the runner's own environment (for example `["SSH_AUTH_SOCK"]`), beside `USER` and `LOGNAME`. Not `HOME`, `XDG_*`, `OPENCODE_*` or a credential (exit 2) |
 
 The runner starts one `opencode serve` on `127.0.0.1` with a fresh password,
 in the cousin's home, with `HOME` and the four XDG directories in the
@@ -965,6 +966,15 @@ exactly the one MCP server, no provider beyond the account's, the models
 `cousin.toml` names, and nothing the bridge guard refuses. A system-wide
 managed config opencode may also read is outside the cousin's reach and is
 checked the same way, through that effective config.
+
+The model's shell does not get the server's environment as it is. opencode
+merges the plugin pack's `shell.env` answer over it, so the runner has the
+plugin set `HOME` to the cousin's home (not the account's data dir, where
+`auth.json` and the rendered config live), set the four XDG variables,
+`OPENCODE_SERVER_PASSWORD` and `OPENCODE_CONFIG` empty, and pass `USER`,
+`LOGNAME` and the names `[agent] shell_env` lists (from the runner's own
+environment, where set; `SSH_AUTH_SOCK` for work over ssh). Measured on
+1.18.31 with a real `bash` call.
 
 The server dies with its runner: it is started with a death signal
 (`PR_SET_PDEATHSIG`, SIGKILL), so a runner killed without its teardown (the

@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import threading
 import time
 import tomllib
@@ -95,6 +96,15 @@ PLUGIN_DEPENDENCY = "@opencode-ai/plugin"
 POLICY_NAME = "cousin-policy.json"
 POLICY_ACK = "cousin-policy.ack.json"
 POLICY_ENV = "COUSIN_POLICY_FILE"
+# The model's shell (review Important 4): opencode merges the plugin's
+# `shell.env` answer over the server's environment, so what the shell must
+# not inherit is set empty (XDG says empty is unset), never deleted. HOME is
+# the cousin's home; SHELL_PASS and `[agent] shell_env` come from the runner's
+# own environment.
+SHELL_BLANK = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
+               "OPENCODE_SERVER_PASSWORD", "OPENCODE_CONFIG")
+SHELL_PASS = ("USER", "LOGNAME")
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ACCOUNT_HOLDER = "account.holder"   # the home of the runner holding the account (its flock)
 ACCOUNT_TAKE_S = 1.0                # a restarting runner's predecessor may still be exiting
 PLUGIN_TIMEOUT_S = 30.0         # GET /config (the instance's bootstrap), then the plugin's word
@@ -134,10 +144,11 @@ def sdk_tool_name(name):
     return name
 
 
-def render_policy(policy, *, nonce, ack):
+def render_policy(policy, *, nonce, ack, shell_env=None):
     """policy.toml as the plugin reads it (R9): the same lists, each
-    pattern with the reason Policy.decide gives, the name table, and this
-    start's nonce and acknowledgement path."""
+    pattern with the reason Policy.decide gives, the name table, this
+    start's nonce and acknowledgement path, and what the plugin's
+    `shell.env` hook sets for the model's shell (`shell_env`)."""
     return {
         "version": 1, "nonce": nonce, "ack": str(ack), "file": _policy.FILE,
         "source": policy.source,
@@ -150,7 +161,31 @@ def render_policy(policy, *, nonce, ack):
         "own_tool_prefix": _policy.OWN_TOOL_PREFIX,
         "names": dict(SDK_NAMES),
         "prefixes": {OWN_PREFIX: _policy.OWN_TOOL_PREFIX},
+        "shell_env": dict(shell_env or {}),
     }
+
+
+def shell_env(home, agent, environ=None):
+    """What the model's shell gets over the server's environment: HOME the
+    cousin's home, SHELL_BLANK empty, and SHELL_PASS plus `[agent]
+    shell_env` (a list of variable names) from `environ` where set. A name
+    the runner owns or a credential is refused, naming the key (exit 2)."""
+    environ = os.environ if environ is None else environ
+    named = agent.get("shell_env", [])
+    if not isinstance(named, list) or not all(isinstance(n, str) for n in named):
+        raise RunnerError("cousin.toml [agent] shell_env must be a list of variable names")
+    for name in named:
+        if (not _ENV_NAME.match(name) or name == "HOME" or name.startswith(("XDG_", "OPENCODE_"))
+                or name in accounts.AUTH_VARS or name.endswith(("_API_KEY", "_TOKEN"))):
+            raise RunnerError("cousin.toml [agent] shell_env names %r: HOME, XDG_*, OPENCODE_*"
+                              " and credentials are the runner's to set, never passed to the"
+                              " model's shell" % name)
+    env = {"HOME": str(home)}
+    for name in SHELL_PASS + tuple(named):
+        if name in environ:
+            env[name] = environ[name]
+    env.update({name: "" for name in SHELL_BLANK})
+    return env
 
 
 def endpoint_limit(account):
@@ -422,6 +457,7 @@ class OpencodeRunner:
         self.binary = opencode_bin(agent, environ)
         self.models_fetch = agent.get("opencode_models_fetch", True) is not False
         self._environ = environ
+        self.shell_env = shell_env(self.home, agent, environ)
         self.server_factory = server_factory or _default_server_factory
         self.idle_timeout_s = float(idle_timeout_s)
         self.health_timeout_s = float(health_timeout_s)
@@ -696,8 +732,8 @@ class OpencodeRunner:
         ack = Path(self.account.data_dir) / POLICY_ACK
         ack.unlink(missing_ok=True)
         self._policy_nonce = uuid.uuid4().hex
-        return self._write_config(render_policy(self.policy, nonce=self._policy_nonce, ack=ack),
-                                  POLICY_NAME)
+        return self._write_config(render_policy(self.policy, nonce=self._policy_nonce, ack=ack,
+                                                shell_env=self.shell_env), POLICY_NAME)
 
     def _check_plugin_listed(self, env):
         """The veto's first half (R9, Review Focus 3): opencode's config

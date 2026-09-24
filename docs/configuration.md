@@ -883,8 +883,9 @@ the generation's work arrives on operator threads, and the system thread
 carries the rollover, the state digest and the memory proposals. An unknown
 kind, another value, or either of those two as `"own"` is a configuration
 error: `cousin-runner` exits 2 naming it. Only `runner = "sdk"` has side
-sessions; `runner = "fake"` with a side session configured is refused the
-same way.
+sessions; `runner = "fake"` or `runner = "opencode"` with a kind mapped to
+`"own"` is refused the same way (exit 2, `side sessions need runner =
+"sdk"`), before the runner or its server starts.
 
 A kind mapped to `"own"` gets one side session for all its threads, in the
 same `cousin-runner` process: the same system prompt, tools and working
@@ -917,7 +918,8 @@ resident memory per interactive CLI on the reference host.
 agent loop (`OpencodeRunner`, phase 9) instead of the Claude Agent SDK: the
 same inbox, event stream, tools, policy and memory. It runs on a
 `kind = "opencode"` account (see [accounts.toml](#accountstoml)) and these
-`[agent]` keys:
+`[agent]` keys. How the kinds compare, the per-runner contract table and
+what this lane does not do yet are in [runners](reference/runners.md).
 
 | key | default | meaning |
 |---|---|---|
@@ -1039,7 +1041,7 @@ differences:
   `todowrite` `TodoWrite`, `skill` `Skill`, and the framework's
   `cousin_<tool>` `mcp__cousin__<tool>`. A tool only opencode has keeps its
   own name (`apply_patch` edits files: deny it by that name if `Edit` and
-  `Write` are denied).
+  `Write` are denied; a [known gap](reference/runners.md#known-gaps)).
 - `deny_bash_patterns` run as JavaScript regular expressions (with the `u`
   flag). A pattern Python accepts and JavaScript does not (`(?P<name>...)`,
   `(?i)`, `\A`, `\Z`) makes the plugin deny every call that carries a

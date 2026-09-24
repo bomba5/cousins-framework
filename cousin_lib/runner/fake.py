@@ -26,6 +26,10 @@ from cousin_lib.runner.turn import Turn
 
 class FakeRunner:
     kind = "fake"          # what runner/status.py reports (the `runner` event)
+    # The contract items this runner DECLARES unsupported, and those a
+    # plugin meets; read at class level by runner/contract_table.py (R19)
+    UNSUPPORTED = ()
+    PLUGIN_ITEMS = ()
     def __init__(self, home, *, turn_seconds=0.0, script=None, policy=None):
         self.home = home
         self.policy = policy     # held for symmetry with SdkRunner; no tools, no hooks
@@ -98,7 +102,12 @@ class FakeRunner:
         return self.stream.tail(after=after)
 
     def unsupported(self):
-        return []
+        return list(self.UNSUPPORTED)
+
+    def plugin_items(self):
+        """The contract items a plugin meets (none on this lane); optional in
+        the Runner protocol, read by contract_table."""
+        return list(self.PLUGIN_ITEMS)
 
     # -- phase-2 CLI conveniences, NOT in the Runner protocol --------------
     def worker_alive(self):

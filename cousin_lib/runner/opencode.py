@@ -316,6 +316,10 @@ class _Run:
 
 class OpencodeRunner:
     kind = "opencode"     # what runner/status.py reports (the `runner` event)
+    # The contract items this runner DECLARES unsupported, and those a
+    # plugin meets; read at class level by runner/contract_table.py (R19)
+    UNSUPPORTED = ()           # R14, measured in Task 7: none (midturn_fold folds)
+    PLUGIN_ITEMS = ()          # the plugin pack is the policy veto, not a contract item
     takes_interrupts = True
     poll_s = 0.2
     # how long a session.error with no announced prompt waits for one
@@ -512,7 +516,12 @@ class OpencodeRunner:
         return self.stream.tail(after=after)
 
     def unsupported(self):
-        return []
+        return list(self.UNSUPPORTED)
+
+    def plugin_items(self):
+        """The contract items a plugin meets (none on this lane); optional in
+        the Runner protocol, read by contract_table."""
+        return list(self.PLUGIN_ITEMS)
 
     # -- CLI conveniences, NOT in the Runner protocol ------------------------
     def worker_alive(self):

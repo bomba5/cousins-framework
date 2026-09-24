@@ -239,6 +239,23 @@ class TestConfig(OpencodeCase):
                                                     implicit=True))
         self.assertIn('runs on a kind = "opencode" account only', str(err.exception))
 
+    def test_side_sessions_on_the_opencode_runner_are_refused(self):
+        """[agent.sessions] mapping a kind to "own" is an SDK-lane feature:
+        runner_for refuses an opencode cousin with one (exit 2), as it
+        refuses the fake runner, before any runner or server exists."""
+        from cousin_lib.runner import main as runner_main
+        home = self.home(extra='account = "lab"\n\n[agent.sessions]\npeer = "own"\n')
+        (self.root / "config").mkdir(exist_ok=True)
+        (self.root / "config" / "accounts.toml").write_text(
+            '[accounts.lab]\nkind = "opencode"\nendpoint = "%s"\nendpoint_model = "m1"\n'
+            % ENDPOINT)
+        with self.assertRaisesRegex(RunnerError, 'peer.*side sessions need runner = "sdk"'):
+            runner_main.runner_for(home)
+        # the same cousin without the table is built (the refusal is the table's)
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text()
+                                          .replace('peer = "own"', 'peer = "primary"'))
+        self.assertIsInstance(runner_main.runner_for(home), OpencodeRunner)
+
     def test_the_binary_is_named_by_the_cousin_then_the_image_then_path(self):
         self.assertEqual(opencode.opencode_bin({"opencode_bin": "/opt/a"},
                                                {"COUSIN_OPENCODE_BIN": "/opt/b"}), "/opt/a")

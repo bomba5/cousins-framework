@@ -147,7 +147,7 @@ Nothing recovers a crashed flip automatically. A flip that fails after step 3 (s
 
 ### Runner lane
 
-A cousin with `[agent] runner` set (`sdk`, `fake` or `opencode`) is not flipped through tmux: its flip is a rollover. `cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's inbox (the same row `Runner.rollover` puts; a pending one is joined, not doubled) and wait for its answer, up to the handoff deadline plus a minute. None of the steps above run: no marker, no pane, no pending boot, no transcript mining (the runner mines every turn).
+A cousin with `[agent] runner` set (`sdk`, `fake` or `opencode`) is not flipped through tmux: its flip is a rollover. `cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's inbox (the same row `Runner.rollover` puts; a pending one is joined, not doubled) and wait for its answer, up to the handoff deadline plus a minute. None of the steps above run: no marker, no pane, no pending boot, no transcript mining (the SDK runner mines every turn; the opencode runner does not mine yet, see [runners](runners.md#known-gaps)).
 
 The row's body is the reason, and the model reads it in its handoff request: `cousin-flip` by hand, `max_age` from the daily `flip_at` cadence, `timed flip` from a timed flip, the bequest text from reincarnate. The result has `"lane": "runner"` and one `rollover` stage carrying the runner's answer.
 

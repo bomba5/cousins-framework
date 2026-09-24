@@ -157,6 +157,35 @@ both images.
 The terms risk of running cousins on a subscription login, in a container or
 anywhere else, is yours.
 
+**Cousins on opencode.** A cousin with `[agent] runner = "opencode"` runs its
+turns through `opencode serve` on another provider's API key or a local
+OpenAI-compatible model ([runners](reference/runners.md)). The default image
+has no opencode binary; run the framework service on the image's opencode
+variant with the override file, not a profile (a second service on the same
+volume would be a second supervisor, which the root's lock refuses):
+
+```
+docker compose -f compose.yml -f compose.opencode.yml up -d --build
+docker compose exec -T framework cousin-account login keyed --provider openai < openai.key
+```
+
+The account is a `kind = "opencode"` one in `config/accounts.toml`, and the
+cousin names its model (`[agent] model = "<provider>/<model>"`, required).
+An API key goes in from stdin or a key file, never through chat; log in
+while the cousin is stopped (the login takes no lock against a running
+`opencode serve`). Everything opencode writes, its `auth.json` included,
+stays in the account's data dir on the volume. On a bare host the same
+cousin needs only the `opencode` binary on `PATH` (or `[agent] opencode_bin`).
+
+This lane never carries a Claude subscription: a Claude account on it, an
+Anthropic OAuth login in its `auth.json`, or any config or environment that
+names the Claude-subscription bridge refuses the start (exit 2), and a live
+install that still carries the bridge removes it with the runbook in
+[migrating](migrating.md). What the lane does not do yet (usage records,
+transcript mining and memory proposals, image attachments as parts,
+`--check-auth --validate`, `apply_patch` under an `Edit`/`Write` deny, side
+sessions) is listed under [known gaps](reference/runners.md#known-gaps).
+
 **The same supervisor on a bare host.** `systemd/cousin-supervisor.service`
 runs `cousin-supervisor run` as one user unit in place of
 `cousin-console.service` and `cousin-loops.service`, never beside them.

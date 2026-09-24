@@ -3,6 +3,91 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.20.0 - 2026-09-24
+
+### Added
+- The opencode lane: `[agent] runner = "opencode"` runs a cousin's turns
+  through `opencode serve` (`OpencodeRunner`) instead of the Claude Agent
+  SDK, on the same inbox, event stream, tools, policy and memory. One
+  server per cousin on `127.0.0.1` with a fresh password per start, its
+  `HOME` and XDG directories in the account's data dir, an allowlisted
+  environment (no `OPENCODE_*` of the shell, no `*_API_KEY`), and a config
+  rendered at every start with nothing merged in: opencode's own hosted
+  provider disabled, the model named (`[agent] model = "<provider>/<model>"`
+  is required, no default; `small_model`), permission allow-all, the plugin
+  pack, and one MCP server. The framework's tools reach opencode as a
+  remote MCP server the runner itself serves on loopback behind a per-start
+  token, so every call runs in the runner against the live turn; the model
+  sees them as `cousin_<tool>` and the contract in the system prompt names
+  them so (`contract.render(..., tool_name=)`; the SDK lane's bytes do not
+  move). Turns use opencode's v1 routes and its event stream: a message
+  mid-turn is folded into the run, an interrupt aborts and requeues what the
+  abort dropped, an auth failure (401/403) puts the rows back and waits for
+  a login, a restart resumes the session opencode still holds, a rollover
+  asks for the handoff and starts a new session with the state digest, and
+  context pressure reads the model's limit. `[agent] opencode_bin`,
+  `COUSIN_OPENCODE_BIN` and `[agent] opencode_models_fetch = false` (no
+  models.dev fetch at start).
+- `kind = "opencode"` accounts in `config/accounts.toml`: a `data_dir`
+  (default `.secrets/accounts/<name>.opencode`, 0700) and either
+  `providers` (keys in opencode's own `auth.json` there) or `endpoint` plus
+  `endpoint_model` for a local OpenAI-compatible model (`endpoint_context`
+  and `endpoint_output` give it a context limit). The lanes do not mix: an
+  opencode cousin on a Claude account, or an SDK cousin on an opencode
+  account, is refused (exit 2).
+- The plugin pack, `plugins/opencode/cousin-policy.js` (plain JavaScript,
+  no dependency): it enforces `policy.toml` in opencode's
+  `tool.execute.before`, with opencode's tool names mapped to the SDK
+  lane's, and the runner runs no turn until the plugin has acknowledged
+  this start's policy file (opencode lists a configured plugin even when it
+  failed to load). The runner records from the event stream what the SDK
+  lane's hooks record: each tool call with its arguments, a `task` call as a
+  subagent job, a checkpoint per turn, and on `session.compacted` the
+  pre-compact checkpoint and a rollover. opencode installs nothing at boot:
+  the runner marks its plugin library present.
+- `cousin-account login <name> --provider <id>` for an opencode account: an
+  API key from stdin (hidden on a terminal) or `--key-file`, written
+  straight into the account's `auth.json` (0600, merged, tmp + rename),
+  never through chat; `--method <label> [--via <slug>]` runs an OAuth
+  method through the pty and relays its URL and instruction line one way
+  (opencode 1.18.31 takes no code back). Refused: Anthropic by OAuth (a
+  Claude subscription), the provider `opencode`, anything naming the
+  Claude-subscription bridge.
+- The image's opencode variant: `--target opencode` adds the pinned
+  opencode 1.18.31 binary (sha256-checked, x86-64 only; no node, no bun, no
+  npm) at `/opt/opencode/bin/opencode`, 223 MB compressed within a 240 MB
+  budget; `docker compose -f compose.yml -f compose.opencode.yml up -d`
+  runs the framework on it (an override file, not a profile). The default
+  image is unchanged.
+- The bridge guard: the opencode lane never carries Claude subscription
+  traffic. A config or environment naming the Claude-subscription bridge
+  (its plugin, package, proxy or header names, a base URL on port 3456), an
+  Anthropic provider or `ANTHROPIC_BASE_URL` on a loopback address, and an
+  Anthropic OAuth login in `auth.json` refuse the start (exit 2). A test
+  keeps every shipped file free of the bridge's names except the guard and
+  the operator's runbook, "Remove the subscription bridge from a live
+  install" in `docs/migrating.md`, which the framework never runs itself.
+- The per-runner contract table, `docs/reference/runners.md` (what a runner
+  is, the `sdk`, `fake` and `opencode` kinds, how to pick one, and the
+  opencode lane's known gaps): one row per contract item, one column per
+  kind, each IMPLEMENTED, PLUGIN or DECLARED, rendered by
+  `python3 -m cousin_lib.runner.contract_table --write` from each runner
+  class's `UNSUPPORTED` and `PLUGIN_ITEMS`; a test fails when the page is
+  stale. The contract suite passes 21/21 against `OpencodeRunner` with
+  nothing DECLARED. `plugin_items()` is an optional runner method.
+
+### Changed
+- `delivery.RUNNER_KINDS` gains `opencode`: `cousin-spawn --runner`,
+  `COUSIN_DEFAULT_RUNNER`, the console's spawn and the supervisor take it.
+- `cousin-runner` checks the account's lane for an `sdk` cousin too, and
+  refuses an `opencode` cousin with `[agent.sessions]` mapping a kind to
+  `"own"` (exit 2), as it refuses the fake runner: side sessions are the
+  SDK lane's.
+- `cousin-account status` on an opencode account reads presence only (no
+  process); `cousin-runner --check-auth --validate` is refused for one.
+- The Dockerfile's default target is an explicit last stage (`default`),
+  the same image as before; the build context now carries `plugins/`.
+
 ## 1.19.0 - 2026-09-24
 
 ### Added

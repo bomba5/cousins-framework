@@ -145,6 +145,10 @@ def _tool_result_text(content):
 
 class SdkRunner:
     kind = "sdk"          # what runner/status.py reports (the `runner` event)
+    # The contract items this runner DECLARES unsupported, and those a
+    # plugin meets; read at class level by runner/contract_table.py (R19)
+    UNSUPPORTED = ()
+    PLUGIN_ITEMS = ()
     # The console's interrupt row (thread `system`) targets the primary
     # session's live turn (phase 5 ruling P5-2). A session class that must
     # never take it (phase 8's SideSession) sets this False.
@@ -638,7 +642,12 @@ class SdkRunner:
         return True
 
     def unsupported(self):
-        return []
+        return list(self.UNSUPPORTED)
+
+    def plugin_items(self):
+        """The contract items a plugin meets (none on this lane); optional in
+        the Runner protocol, read by contract_table."""
+        return list(self.PLUGIN_ITEMS)
 
     # -- phase-2 CLI conveniences, NOT in the Runner protocol ------------------
     def worker_alive(self):

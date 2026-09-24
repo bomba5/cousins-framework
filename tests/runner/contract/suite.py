@@ -276,6 +276,12 @@ class RunnerContract:
         r = self._runner()
         for name in r.unsupported():
             self.assertIn(name, CONTRACT_ITEMS)
+        # plugin_items() is optional (R19): a PLUGIN item is still run by
+        # this suite, so it can never also be declared unsupported
+        plugin = getattr(r, "plugin_items", lambda: [])()
+        for name in plugin:
+            self.assertIn(name, CONTRACT_ITEMS)
+        self.assertFalse(set(plugin) & set(r.unsupported()))
 
     @item("rollover_shape")
     def test_rollover_answers_ok_and_a_reason(self):

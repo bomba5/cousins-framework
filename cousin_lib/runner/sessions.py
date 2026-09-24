@@ -495,6 +495,9 @@ class Sessions:
     def unsupported(self):
         return self.primary.unsupported()
 
+    def plugin_items(self):
+        return self.primary.plugin_items()
+
     def activity(self):
         return self.primary.activity()
 

@@ -19,7 +19,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cousin_lib import memory_search
+from cousin_lib import delivery, memory_search
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError)
 from cousin_lib.server import chat_api
@@ -147,8 +147,9 @@ class ChatServer:
 def build_server(home, *, framework_root=None, tmux_bin=None,
                  terminal_delivery=True):
     """Assemble a ChatServer with its real seams: the netguard from the
-    install's allowlist config, and tmux delivery unless disabled. All
-    startup problems surface here, before the socket accepts anything."""
+    install's allowlist config, and delivery unless disabled (tmux for a
+    tmux cousin, the runner's inbox for a runner cousin). All startup
+    problems surface here, before the socket accepts anything."""
     try:
         config = CousinConfig.load(home)
         config.require_chat_port()
@@ -159,8 +160,16 @@ def build_server(home, *, framework_root=None, tmux_bin=None,
     guard = NetGuard.from_config(Path(root)) if root else NetGuard()
     deliver = notify = None
     if terminal_delivery:
+        # Only a tmux-lane cousin types into a pane. A runner cousin's
+        # delivery is an inbox row (delivery.backend_for decides, the one
+        # place that knows the runner kinds), so its chat server needs no
+        # tmux binary: a host or a container without one still takes a
+        # node's [tell-home] and a peer's send.
+        runner_lane = isinstance(delivery.backend_for(config.home),
+                                 delivery.InboxBackend)
         tmux_bin = tmux_bin or shutil.which("tmux")
-        if not tmux_bin or not os.access(tmux_bin, os.X_OK):
+        if not runner_lane and (not tmux_bin
+                                or not os.access(tmux_bin, os.X_OK)):
             raise StartupError(
                 "tmux binary not found; terminal delivery is enabled and "
                 "cannot work without it"

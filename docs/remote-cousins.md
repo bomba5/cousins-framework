@@ -329,7 +329,11 @@ cousin can talk to it with a token (`cousin-hive mint wren`, then
 `cousin-hive send` and `cousin-hive recall`), but nothing reads a local
 cousin's hive inbox yet. If you want a node's words to land in a local
 cousin's chat, use `[tell-home: ...]` with `home_chat_url` pointing at
-that cousin's chat server.
+that cousin's chat server. That works for a runner cousin
+(`[agent] runner = "sdk"`) too: its chat server starts without a tmux
+binary and puts the node's message in the runner's inbox. In the
+container, `cousin-supervisor` starts no per-cousin chat server, so a
+`[tell-home]` has nothing to post to there yet.
 
 ```sh
 # from anywhere holding a token

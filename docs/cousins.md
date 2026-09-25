@@ -6,8 +6,21 @@ actually built and what you can do with it.
 
 ## What a cousin is
 
-A cousin is an agent session (Claude Code, in the setup I use) running in a
-tmux session, with a home directory that holds everything it is:
+A cousin is an agent session (Claude Code, in the setup I use) with a home
+directory that holds everything it is, and a **kind**, `[agent] runner` in
+`cousin.toml`, that says how its agent loop runs: `sdk` and `opencode` run
+under `cousin-runner`, with no tmux session at all; `tmux` also runs under
+`cousin-runner`, but drives the host's interactive Claude Code in a tmux pane
+on the framework's own socket; a cousin with no `[agent] runner` at all is on
+the **legacy tmux lane**, its agent running in its own tmux session, typed
+into by its chat server (the console calls this lane `tmux-legacy`). This
+page mostly describes the legacy lane, which
+most of `cousin-spawn`'s output still assumes; where a runner cousin (any of
+`sdk`, `opencode` or `tmux`) works differently, it says so. See
+[runners](reference/runners.md) for the kinds themselves and
+[agent-loop-runner](design/agent-loop-runner.md) for the design.
+
+Every cousin's home directory:
 
 ```
 cousins/wren/
@@ -24,11 +37,14 @@ cousins/wren/
   .claude/settings.json  its harness hooks
 ```
 
-Next to the tmux session each cousin has its own chat server on its own port
-(8090 to 8200 by default). People and other cousins talk to it through that
-server, which types incoming messages into the session. The agent answers
-with `cousin-reply`, and messages another cousin with `cousin-chat send`. See
-[chat](chat.md) and [memory](memory.md) for those two halves.
+Each cousin has its own chat server on its own port (8090 to 8200 by
+default). On the legacy lane, people and other cousins talk to it through
+that server, which types incoming messages into the tmux session. A runner
+cousin's chat and inbox are written directly (no chat server needed to
+receive a message), and its chat server serves the console's view of the
+same history. The agent answers with `cousin-reply`, and messages another
+cousin with `cousin-chat send`. See [chat](chat.md) and [memory](memory.md)
+for those two halves.
 
 A slug is a cousin if `cousins/<slug>/cousin.toml` exists. There is no other
 registry: the filesystem is the fleet.
@@ -83,9 +99,12 @@ Every option:
 | `--effort` | `[runtime] effort`: `low`, `medium`, `high`, `xhigh`, `max` |
 | `--heartbeat` | `[heartbeat] context_beat_seconds` (default 3600) |
 | `--memory-scope` | `[memory] scope`: `private` (default) or `shared` (may propose memories to the shared tier; the retired `both` is read as `shared`) |
-| `--runner` | `[agent] runner`: `sdk`, `fake` or `opencode` puts the cousin on `cousin-runner`, started by `cousin-supervisor` instead of in tmux; absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means tmux |
+| `--runner` | `[agent] runner`: `sdk`, `fake`, `opencode` or `tmux` puts the cousin on `cousin-runner`, started by `cousin-supervisor` instead of `cousin-spawn --start`'s own tmux session (the `tmux` kind still uses tmux, but a pane on the framework's own socket, driven by the runner, not the legacy lane's session); absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means the legacy tmux lane |
 | `--account` | `[agent] account`, one of `config/accounts.toml`'s (or `host`); a runner cousin only; absent, `COUSIN_DEFAULT_ACCOUNT` applies to a runner cousin |
 | `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. A runner cousin is started by asking the running `cousin-supervisor` (no `config/agent-cmd`, no tmux); with no supervisor the start fails, exit 1 |
+| `--resume` | with `--start` on an existing cousin: resume its last session (`config/harness.toml [agent.resume]`) instead of a new one; falls back to a new session when that isn't possible. What the start-at-boot unit uses |
+| `--sync-template` | create nothing; show how an existing cousin's CLAUDE.md framework part differs from the current template (see [the CLAUDE.md template](#the-claudemd-template)) |
+| `--apply` | with `--sync-template`: write the sync |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
 
 An option you leave out writes no key, so the default applies and can change
@@ -183,17 +202,29 @@ cousin-spawn wren --sync-template --apply
 cousin-spawn wren --start          # start an existing cousin (no-op if running)
 ```
 
-Start creates the tmux session named in `[chat] tmux_session`, with the home
-as working directory and `COUSIN_HOME` set, runs `config/agent-cmd` in it
-behind a small launcher that applies the auth mode, and starts the chat
-server if nothing answers on its port. The chat server's pid goes in
-`data/chat-server.pid` and its log in `data/chat-server.log`.
+This is the legacy lane's start. It creates the tmux session named in
+`[chat] tmux_session`, with the home as working directory and `COUSIN_HOME`
+set, runs `config/agent-cmd` in it behind a small launcher that applies the
+auth mode, and starts the chat server if nothing answers on its port. The
+chat server's pid goes in `data/chat-server.pid` and its log in
+`data/chat-server.log`.
 
-Stop and restart are in the console (card and inspector buttons). Stop is a
-clean stop: the cousin writes its handoff and saves what it learned, the
-transcript is mined, and the next start boots a fresh session on a packet
-built from all that ([lifecycle](reference/lifecycle.md#a-clean-stop)).
-There's no stop command yet; an immediate stop by hand is:
+A runner cousin (`[agent] runner` is `sdk`, `fake`, `opencode` or `tmux`)
+starts and stops a different way: `--start` (or the console) asks the running
+`cousin-supervisor` to start its `runner:<slug>` child instead, and it needs
+`cousin-supervisor run` up first (`NoSupervisor` otherwise). None of
+`config/agent-cmd`, the tmux commands above or `data/chat-server.pid` apply
+to it. Stop and restart for it are `cousin-supervisor stop|start <slug>`, or
+the console; a stop holds it down (`<home>/run/held`) across a supervisor
+restart until the next start. See [commands](commands.md#running-cousins)
+and [runners](reference/runners.md).
+
+Stop and restart for the legacy lane are in the console (card and inspector
+buttons). Stop is a clean stop: the cousin writes its handoff and saves what
+it learned, the transcript is mined, and the next start boots a fresh
+session on a packet built from all that
+([lifecycle](reference/lifecycle.md#a-clean-stop)). There's no stop command
+yet; an immediate stop by hand is:
 
 ```
 tmux kill-session -t wren
@@ -242,7 +273,18 @@ Both are read at start, so a change needs a restart or a flip. The chat
 header's effort select and the spawn dialog write these keys; for the model
 after spawn, edit `cousin.toml`.
 
+A runner cousin has no `config/agent-cmd` and no `{model}`/`{effort}`
+placeholders: it reads `[agent] model` and `[agent] effort` in `cousin.toml`
+directly (its `[runtime]` is the legacy lane's and is not read by
+`cousin-runner`). `cousin-spawn --model`/`--effort` write there instead, for
+a cousin created with `--runner`. See [`[agent] runner`](configuration.md#agent-runner).
+
 ## Auth: login or API key
+
+This is the legacy lane's auth switch: a runner cousin (`sdk`, `opencode` or
+`tmux`) instead names an account in `config/accounts.toml` (see
+[accounts.toml](configuration.md#accountstoml)); `[runtime] auth` is not read
+for it.
 
 Each cousin's agent logs in one of two ways, set in `cousin.toml [runtime]
 auth` and applied at every start (so flips and restarts keep it):
@@ -325,6 +367,14 @@ Ways to trigger one:
 If a flip crashes halfway it leaves a marker. Nothing recovers it on its own;
 the console shows "stale marker" and you look at it.
 
+A runner cousin's flip is a rollover instead: `cousin-flip` puts (or joins)
+the pending `flip` row on the running `cousin-runner` and waits for the
+handoff. None of the tmux steps above run (no marker, no pane, no pending
+boot, no transcript mining: the runner already mined every turn as it went),
+and it refuses a stopped runner cousin, since a rollover needs a runner to
+carry it out. See [`[agent] runner`](configuration.md#agent-runner) and
+[commands](commands.md#running-cousins).
+
 The boot packet includes the committed self-portrait: a description of the
 cousin drafted from its real sources and reviewed by a person before it
 counts.
@@ -350,10 +400,11 @@ Reincarnate snapshots the continuity files (MEMORY.md, STATUS.md, CLAUDE.md,
 `cousin.toml`, the self-portrait, `memory/`) to
 `data/lifecycle/wren/<timestamp>/`, asks the cousin through its chat server
 for a bequest and waits up to `--timeout` seconds (default 300) for
-`data/handoff.md` to change, rewrites the role in the CLAUDE.md title line (and
-a `## Role` section if there is one) and in `cousin.toml`, then flips. A
-cousin that doesn't answer is recorded, not fatal: the flip asks again and
-writes an emergency handoff if needed.
+`data/handoff.md` to change (a runner cousin skips this separate ask: its
+bequest rides the flip's own rollover handoff request instead), rewrites the
+role in the CLAUDE.md title line (and a `## Role` section if there is one)
+and in `cousin.toml`, then flips. A cousin that doesn't answer is recorded,
+not fatal: the flip asks again and writes an emergency handoff if needed.
 
 ```
 cousin-transplant --donor wren --recipient kestrel --mode merge

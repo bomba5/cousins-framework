@@ -253,15 +253,18 @@ def write_settings(home, root, changes):
                 except ValueError as err:
                     bad[name] = str(err)
         agent = parsed.get("agent") or {}
-        try:
-            fwconfig.commit_attribution(root, agent)
-        except fwconfig.MissingConfigError as err:
-            bad.setdefault("agent.commit_attribution", str(err))
-        if agent_settings.lane_of(agent) != agent_settings.TMUX_LEGACY:
-            # a runner cousin's [agent] as the runner reads it (the SCHEMA
-            # knows commit_attribution), the same check agent_settings.apply runs
-            for key, reason in agent_settings.check_table(root, agent, home).items():
-                bad.setdefault("agent." + key, reason)
+        # [agent] as a whole is checked only when this write touches it: a
+        # stale key there (an account since removed) must not block a rename
+        if any(name.startswith("agent.") for name in changed):
+            try:
+                fwconfig.commit_attribution(root, agent)
+            except fwconfig.MissingConfigError as err:
+                bad.setdefault("agent.commit_attribution", str(err))
+            if agent_settings.lane_of(agent) != agent_settings.TMUX_LEGACY:
+                # a runner cousin's [agent] as the runner reads it (the SCHEMA
+                # knows commit_attribution), the check agent_settings.apply runs
+                for key, reason in agent_settings.check_table(root, agent, home).items():
+                    bad.setdefault("agent." + key, reason)
         if bad:
             raise _Refused(bad)
     try:

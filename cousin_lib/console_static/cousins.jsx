@@ -1449,7 +1449,8 @@ function SpawnModal({ onClose, onSpawn }) {
   }, [name]);
 
   // voice is required: the template refuses to render without it.
-  const valid = name.trim() && slug.trim() && role.trim() && voice.trim()
+  // the options name the lanes, the tmux one included: nothing is sent before them
+  const valid = options && name.trim() && slug.trim() && role.trim() && voice.trim()
     && !(laneModelRule && laneModelRule.required && !laneModel.trim());
 
   const [error, setError] = React.useState(null);
@@ -1466,7 +1467,7 @@ function SpawnModal({ onClose, onSpawn }) {
       if (operator.trim()) body.operator = operator.trim();
       // the lane is always named: "" sends the tmux lane's own name, so an
       // install's COUSIN_DEFAULT_RUNNER cannot turn it into a runner cousin
-      body.runner = runner || options?.tmux_lane || "tmux-legacy";
+      body.runner = runner || options.tmux_lane;
       if (runner && account) body.account = account;
       const chosenModel = runner ? laneModel.trim() : model;
       if (chosenModel && laneReads("model")) body.model = chosenModel;
@@ -1483,7 +1484,7 @@ function SpawnModal({ onClose, onSpawn }) {
         tmuxSession: slug, operator: operator.trim() || null,
         memoryScope: scope || "private", heartbeat: Number(heartbeat) || 3600,
         model: (laneReads("model") && chosenModel) || null, effort: (laneReads("effort") && effort) || null,
-        lane: runner || "tmux-legacy", account: runner ? (account || null) : null,
+        lane: runner || options.tmux_lane, account: runner ? (account || null) : null,
         pid: null, uptime_seconds: null,
         flipAt: null, hidden: false, status: "running", chat: "ok", active: false,
         activity: "", lastMsgTs: 0, tokensSpent: 0,

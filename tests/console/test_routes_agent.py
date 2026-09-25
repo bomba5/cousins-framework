@@ -459,3 +459,32 @@ class Round1(AgentCase):
                                  {"changes": {"rollover_at_percent": 80}})
         self.assertEqual(status, 200, body)
         self.assertEqual(body["changed"], [])
+
+
+class Round2(AgentCase):
+    """Review round 2: the settings route checks the [agent] table only when
+    it writes an [agent] key; a stale [agent] never blocks a rename."""
+
+    def test_a_broken_agent_table_blocks_only_an_agent_write(self):
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\naccount = "gone"\n')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/settings", {"changes": {
+            "cousin.name": "Wrenna", "memory.review_batch": 4}})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["cousin"]["name"],
+                         "Wrenna")
+        before = (home / "cousin.toml").read_bytes()
+        status, body = self.post("/api/cousins/wren/settings",
+                                 {"changes": {"agent.commit_attribution": False}})
+        self.assertEqual(status, 400, body)
+        self.assertIn("agent.account", body["errors"])
+        self.assertIn("gone", body["errors"]["agent.account"])
+        self.assertEqual((home / "cousin.toml").read_bytes(), before)
+
+    def test_a_broken_install_attribution_blocks_only_an_attribution_write(self):
+        (self.root / "config" / "harness.toml").write_text('[agent]\ncommit_attribution = "x"\n')
+        self.cousin("wren")
+        self.serve()
+        status, body = self.post("/api/cousins/wren/settings",
+                                 {"changes": {"cousin.peer_visible": False}})
+        self.assertEqual(status, 200, body)

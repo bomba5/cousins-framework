@@ -83,7 +83,11 @@ class SpawnDialogLane(unittest.TestCase):
 
     def test_the_tmux_lane_is_sent_explicitly(self):
         body = self.src[self.src.index("const body"):]
-        self.assertIn("body.runner = runner || options?.tmux_lane", body)
+        # the server's name for it, never a literal; nothing is sent before
+        # the options have named it
+        self.assertIn("body.runner = runner || options.tmux_lane;", body)
+        self.assertIn("const valid = options &&", self.src)
+        self.assertNotIn('"tmux-legacy"', self.src)
 
     def test_the_model_rule_is_the_lanes(self):
         self.assertIn("lane_models", self.src)

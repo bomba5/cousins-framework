@@ -196,6 +196,46 @@ class TestResume(HermeticCase):
         self.one_turn(r)                                             # the next row runs
         self.assertIsNone(r.fatal)
 
+    def hanging_runner(self, sid):
+        """A runner whose CLI names `sid` in its init, then stays silent until
+        interrupted: a turn in flight, as a kill would find it."""
+        def factory(options):
+            self.options.append(options)
+            return ScriptedClient(options, [[init_msg(session=sid), "HANG", result(session=sid)]])
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r
+
+    def test_a_new_sessions_id_is_on_file_while_its_first_turn_runs(self):
+        # #119: a runner killed inside a brand-new session's first turn never
+        # reaches the turn's end nor its teardown; what is on file at that
+        # moment is what the next start resumes
+        r = self.hanging_runner("s-first")
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "a long first job", sender="Priya"))
+        self.assertTrue(_wait(lambda: "s-first" in self.inits(r)))
+        self.assertTrue(_wait(lambda: (self.home / "data" / "runner-session.json").exists()
+                              and self.session_file()["session_id"] == "s-first", 3.0),
+                        "the id the init named is not on file while the first turn runs")
+        self.assertEqual(r.state(), "running")               # still inside that turn
+        self.assertNotIn("fresh", self.session_file())       # the tmux kind's mark, never ours
+        self.assertEqual(self.session_file()["lane"], "login")
+
+    def test_a_lost_resume_leaves_the_file_alone_until_the_fresh_start(self):
+        # the init named another session than the resume asked for (R12): the
+        # fresh start with the digest runs at the boundary after this turn; a
+        # kill before it must find the old id, so the next start takes the
+        # lost-resume path again instead of resuming a session with no digest
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-old", "lane": "login", "generation": 0, "updated": 0}))
+        r = self.hanging_runner("s-other")
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "a job", sender="Priya"))
+        self.assertTrue(_wait(lambda: "s-other" in self.inits(r)))
+        time.sleep(0.5)
+        self.assertEqual(r.state(), "running")
+        self.assertEqual(self.session_file()["session_id"], "s-old")
+
     def test_a_brand_new_cousin_gets_no_digest(self):
         r = self.runner(); r.start(); self.one_turn(r)
         self.assertFalse(any("STATE DIGEST" in b for b in self.bodies(r)))
@@ -248,9 +288,8 @@ class TestRestartNote(HermeticCase):
 
     def test_a_stop_mid_turn_puts_the_restart_line_first_in_the_resumed_session(self):
         # an established session (an earlier turn recorded its id): the case
-        # a restart interrupts. A session cut in its very first turn has no
-        # recorded id until the worker's teardown, so its next start is
-        # fresh, and a fresh start only drops the mark.
+        # a restart interrupts. A session cut in its very first turn is on
+        # file from its init (#119), so it resumes the same way.
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login"}))
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])

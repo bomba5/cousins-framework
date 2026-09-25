@@ -1800,6 +1800,14 @@ class SdkRunner:
                                 if self.machine.state == "waiting_permission":
                                     self.machine.to("running", "message")
                         self._record(sdk, msg, echo_of=echo_of)
+                        if self._pending_save is not None and not self._resume_lost \
+                                and not isinstance(msg, sdk.ResultMessage):
+                            # #119: the id an init named goes on file now, not at the
+                            # result: a runner killed inside a new session's first turn
+                            # resumes it. A lost resume keeps the old id until the fresh
+                            # start after this turn (a kill before it takes that path
+                            # again); a result's id is _after_turn's.
+                            await self._flush_session()
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1
                             self._live = False

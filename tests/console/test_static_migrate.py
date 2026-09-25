@@ -83,7 +83,7 @@ class MigrateJsx(unittest.TestCase):
 
     def test_no_colour_literals_and_no_em_dashes(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(")
-        self.assertNotIn("—", self.src)
+        self.assertNotIn("\u2014", self.src)
 
     def test_index_loads_it_in_the_package_block(self):
         html = _read("index.html")

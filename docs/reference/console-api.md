@@ -169,7 +169,7 @@ A cousin's MCP tool registry, its `.mcp.json` servers, `cousin-mcp`'s diagnostic
 
 ### `GET /api/cousins/<slug>/mcp/registry`
 
-`{"scope": "cousin", "file", "exists", "etag", "source": "own" | "install" | "example" | "shipped", "shown", "lane", "ceiling", "timeout", "max_output", "limits", "tools": [{"name", "kind", "enabled", "description", "commands", "editable"}], "enabled_count", "error", "skipped": [{"name", "reason"}]}`. With no registry in the home, `exists` is false and the tools shown are the one the cousin reads instead (`shown`). `error` is the strict parser's (the runner refuses to start with it); `skipped` the tools `cousin-mcp` would skip. Read from the raw TOML, so a registry over its ceiling still lists its tools.
+`{"ok": true, "scope": "cousin", "file", "exists", "etag", "source": "own" | "install" | "example" | "shipped", "shown", "lane", "restart_note", "ceiling", "timeout", "max_output", "limits", "tools": [{"name", "kind", "enabled", "description", "commands", "editable"}], "enabled_count", "error", "skipped": [{"name", "reason"}]}`. With no registry in the home, `exists` is false and the tools shown are the one the cousin reads instead (`shown`). `error` is the strict parser's (the runner refuses to start with it); `skipped` the tools `cousin-mcp` would skip. Read from the raw TOML, so a registry over its ceiling still lists its tools. `restart_note` is the same fixed line every route in this section carries: "applies at the next start: restart the cousin to use it now".
 
 ### `POST /api/cousins/<slug>/mcp/registry`
 
@@ -193,7 +193,7 @@ Copies `config/mcp-registry.toml.example` (else the checkout's) to `config/mcp-r
 
 ### `GET /api/cousins/<slug>/mcp/servers`
 
-`{"file": ".mcp.json", "exists", "etag", "lane", "parse_error", "reserved": "cousin", "servers": [...], "kept": [{"name", "reason"}], "last_event"}`. A server: `{"name", "type": "stdio" | "http" | "sse", "command", "command_masked", "args": [{"value", "masked"}], "env": [{"name", "value", "masked"}]}` or `{"name", "type", "url", "url_masked", "headers": [{"name", "value", "masked"}]}`, plus `ignored_keys` (keys the runner drops, kept on save), `account_vars`, `unset_vars` (a `${VAR}` with no default that the console's environment does not set: a hint, the runner's environment decides) and `masked`. `kept` lists the entries this editor does not model (the reserved `cousin`, an entry of no known shape): a save keeps them as they are. `last_event` is the newest `mcp_config` event of the runner's primary stream (`{"ts", "seq", "payload": {"file", "servers", "skipped"}, "stream"}`), or null.
+`{"ok": true, "file": ".mcp.json", "exists", "etag", "lane", "restart_note", "parse_error", "reserved": "cousin", "servers": [...], "kept": [{"name", "reason"}], "last_event"}`. A server: `{"name", "type": "stdio" | "http" | "sse", "command", "command_masked", "args": [{"value", "masked"}], "env": [{"name", "value", "masked"}]}` or `{"name", "type", "url", "url_masked", "headers": [{"name", "value", "masked"}]}`, plus `ignored_keys` (keys the runner drops, kept on save), `account_vars`, `unset_vars` (a `${VAR}` with no default that the console's environment does not set: a hint, the runner's environment decides) and `masked`. `kept` lists the entries this editor does not model (the reserved `cousin`, an entry of no known shape): a save keeps them as they are. `last_event` is the newest `mcp_config` event of the runner's primary stream (`{"ts", "seq", "payload": {"file", "servers", "skipped"}, "stream"}`), or null.
 
 ### `POST /api/cousins/<slug>/mcp/servers`
 
@@ -217,7 +217,7 @@ Body `{"etag", "servers": [...], "drop"?: ["<kept name>"], "replace_broken"?: tr
 
 ### `GET /api/cousins/<slug>/policy`
 
-`{"file": "policy.toml", "exists", "etag", "error", "lane", "protected": "mcp__cousin__handoff", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "template", "last_event"}`. `error` is `Policy.parse`'s (the runner refuses to start with it). `template` holds `templates/policy.toml.example`'s values, for "fill from the template". `last_event` is the start's `policy` `describe` event.
+`{"ok": true, "file": "policy.toml", "exists", "etag", "error", "lane", "restart_note", "protected": "mcp__cousin__handoff", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "template", "last_event"}`. `error` is `Policy.parse`'s (the runner refuses to start with it). `template` holds `templates/policy.toml.example`'s values, for "fill from the template". `last_event` is the start's `policy` `describe` event.
 
 ### `POST /api/cousins/<slug>/policy`
 
@@ -398,12 +398,12 @@ What the spawn dialog offers:
  "default_effort": "high", "memory_scopes": ["private","shared"],
  "default_memory_scope": "private", "default_heartbeat": 3600,
  "heartbeat_bounds": [60, 2592000], "operator_max_chars": 64,
- "runners": ["sdk", "fake", "opencode"], "default_runner": null,
- "accounts": [{"name": "host", "kind": "claude-login", "lanes": ["sdk", "fake"]}, ...],
+ "runners": ["sdk", "fake", "opencode", "tmux"], "default_runner": null,
+ "accounts": [{"name": "host", "kind": "claude-login", "lanes": ["sdk", "fake", "tmux"]}, ...],
  "accounts_error": null, "lane_keys": {"sdk": ["runner", "account", ...], ...}}
 ```
 
-`runners` are the runner kinds (none chosen is the tmux lane); `default_runner` is `COUSIN_DEFAULT_RUNNER`, else null. `accounts` lists `host` and `config/accounts.toml`'s entries with their kind and the kinds each runs on, by the runner's own rule (`agent_settings.check_lane`: the `tmux` kind never offers a key or token account), and for an opencode account `models`, the `"<provider>/"` suggestions it offers (`accounts_error` says why the file could not be read, and the list is then `host` alone). `lane_keys` names the `[agent]` keys each kind reads, and `lane_models` how each kind that reads a model takes it: `{"required", "catalogue", "hint"}` (`catalogue`: the `models` list is a valid suggestion there; never on `opencode`, where a model is required and is `"<provider>/<model>"`). `tmux_lane` is the `runner` value that names the tmux lane.
+`runners` are the runner kinds, `delivery.RUNNER_KINDS` (none chosen is the tmux-legacy lane); `default_runner` is `COUSIN_DEFAULT_RUNNER`, else null. `accounts` lists `host` and `config/accounts.toml`'s entries with their kind and the kinds each runs on, by the runner's own rule (`agent_settings.check_lane`: the `tmux` kind never offers a key or token account), and for an opencode account `models`, the `"<provider>/"` suggestions it offers (`accounts_error` says why the file could not be read, and the list is then `host` alone). `lane_keys` names the `[agent]` keys each kind reads, and `lane_models` how each kind that reads a model takes it: `{"required", "catalogue", "provider_model", "placeholder", "hint"}` (`catalogue`: the `models` list is a valid suggestion there; `provider_model`: it takes `"<provider>/<model>"`, opencode only). `tmux_lane` is the `runner` value that names the tmux-legacy lane.
 
 `models`, `default_model` and `default_effort` come from `config/harness.toml [agent]`. No `models` there means the built-in list; no `default_model` means the first model in the list. `500` if harness.toml exists but can't be read.
 

@@ -286,9 +286,9 @@ The version is one number, `version` in `pyproject.toml`.
 metadata when not running from a checkout).
 
 ```sh
-cousin-version               # 0.2.0 (d729f0f)
-cousin-version bump          # patch: 0.2.0 -> 0.2.1
-cousin-version bump minor    # 0.2.0 -> 0.3.0
+cousin-version               # 1.24.0 (6fd4510)
+cousin-version bump          # patch: 1.24.0 -> 1.24.1
+cousin-version bump minor    # 1.24.0 -> 1.25.0
 ```
 
 `bump` edits only that line in `pyproject.toml`. The console shows the

@@ -92,7 +92,8 @@ and how to remove it all again, is in [install](docs/install.md).
 - [Remote cousins](docs/remote-cousins.md) - a cousin on another machine,
   like a Pi on your desk
 - [Runners](docs/reference/runners.md) - the agent loops a cousin can run on
-  (the Claude Agent SDK, opencode), how to pick one, and the contract table
+  (the Claude Agent SDK, a tmux pane, opencode), how to pick one, and the
+  contract table
 - [Configuration](docs/configuration.md) - every config file and key
 - [Commands](docs/commands.md) - every `cousin-*` command
 - [Operations](docs/operations.md) - running it day to day, and fixing it

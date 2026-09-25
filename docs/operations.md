@@ -401,7 +401,7 @@ per-cousin lines before you enable the timer. See [memory](memory.md).
 
 ```
 cousin-tool-surface
-#   wrote <root>/data/tool-surface.md (37 tools)
+#   wrote <root>/data/tool-surface.md (43 tools)
 ```
 
 Writes `<root>/data/tool-surface.md`: one line per `cousin-*` command with
@@ -467,6 +467,12 @@ recover.
   also logged by name.
 - Fix: fix the delivery (usually the tmux session, see below) or the loop
   entry. For a worker cousin, check that `config/worker-cmd` exists.
+- To test a fix without waiting for the schedule: `cousin-loops fire
+  <slug> <loop>` queues a request the daemon picks up on its next tick
+  and fires that one loop right away, named as it is in `[[loops]]`, or
+  `context-heartbeat` for the heartbeat itself. `cousin-loops requests`
+  shows it pending, then `done` or `failed` (with why: an unknown loop
+  name, or the delivery that failed).
 
 **A cousin looks stopped, but its tmux session is up**
 - Check: `tmux ls` shows the session, but the console card says stopped. The

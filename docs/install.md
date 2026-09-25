@@ -288,9 +288,10 @@ somewhere you can check:
 printf '%s\n' 'bash -lc "cat > $HOME/agent-input.txt"' > config/agent-cmd
 ```
 
-A chat message then shows up in `~/agent-input.txt` as `(Chat ana): ...`.
-Don't use something like `sleep infinity`: it never reads the terminal, the
-boot text fills the input buffer and later messages go nowhere.
+A chat message then shows up in `~/agent-input.txt` as
+`[now: 2026-01-01 12:00 UTC] (Chat ana): ...`. Don't use something like
+`sleep infinity`: it never reads the terminal, the boot text fills the
+input buffer and later messages go nowhere.
 
 Without `config/harness.toml`, a lot quietly stays off: token counts in the
 console, transcript mining at flip, the transcript-size guard, the harness

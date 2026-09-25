@@ -237,7 +237,11 @@ See [configuration](configuration.md) for the accounts file.
 A cousin on this framework runs on the tmux lane until you move it: an
 upgrade, a merge or a restart never changes the lane its `cousin.toml` names.
 `cousin-migrate` moves one cousin at a time, and every step it takes is
-recorded and can be undone. The fleet goes in this order:
+recorded and can be undone. This always lands on the `sdk` kind; a cousin
+already on the runner lane (`sdk` or `tmux`) is not on the tmux lane any
+more, and moves between those two kinds instead with `cousin-migrate
+--to sdk|tmux` ([below](#switching-between-runner-kinds)). The fleet goes
+in this order:
 
 1. **A test cousin.** Spawn a throwaway one on the tmux lane
    (`cousin-spawn testa --role "migration test"`), talk to it, then migrate
@@ -445,6 +449,103 @@ cousin-spawn wren --start
 
 Only then retire the old one. I keep the old home and the archives for a week
 or two before deleting anything.
+
+## Switching between runner kinds
+
+This is a different move from the section above: `cousin-migrate apply`
+(no `--to`) takes a cousin off the legacy tmux lane and onto the runner
+lane, always onto the `sdk` kind, once. `cousin-migrate --to sdk|tmux`
+switches a cousin that is already on the runner lane between the `sdk`
+kind and the `tmux` kind, live and reversibly, keeping the same session
+where both kinds can resume it. A cousin still on the legacy tmux lane
+has to go through `apply` first (`plan`/`apply` say so and point at
+this section).
+
+```
+cousin-migrate plan sam --to sdk
+#   sam: tmux -> sdk, steps close, toml, start, verify
+#     ok  kind       tmux -> sdk
+#     ok  account    team (claude-login)
+#     ok  session    session <id> continues
+#     ok  supervisor the supervisor runs
+#   ready
+cousin-migrate apply sam --to sdk --yes
+#     ok  close      the tmux runner stopped at idle; session <id> kept
+#     ok  toml       [agent] runner = 'sdk', the kind's settings removed
+#     ok  cursor     the mining cursor at the end of the sdk kind's record
+#     ok  notice     inbox row <n>, the first turn after the switch
+#     ok  start      the sdk runner resumes <id>
+#     ok  verify     the SDK's session_init names <id>
+#   switched
+```
+
+`plan` checks, and writes nothing: `kind` (the cousin is on the runner
+lane, in the other kind, and `--to` names one of `sdk` or `tmux`),
+`account` (a working account; see below for the `tmux` kind's own rule),
+`session` (`data/runner-session.json` names a session to hand over; a
+cousin that has never taken a turn on the runner lane has none, and a
+session mid-rollover, marked `"fresh"` in that file, needs one turn
+first), `supervisor` (a `cousin-supervisor` answers, since it stops and
+starts the runner), and, for `--to tmux`, `trust` (never a gate; see
+below). A cousin whose kind already matches `--to`, or whose runner is
+`opencode` or `fake`, cannot switch: those are not the kinds the switch
+moves between.
+
+**Switching to the `tmux` kind** starts the host's interactive Claude
+Code CLI in a tmux pane on the framework's own tmux socket
+(`<root>/run/tmux.sock`, session `tmux-<slug>`, separate from the legacy
+lane's tmux sessions). Its account has to be a subscription login
+(`claude-login`): a `claude-token` or `anthropic-key` account is refused
+at `plan`, because the tmux kind has no way yet to show that CLI a
+login-free config dir with no menu to click through. The CLI may show
+the trust dialog once for this home (the cursor can start on "No,
+exit"); `apply` waits at that dialog rather than failing on it, up to
+`TRUST_WAIT_S` (600 s) instead of the usual verify timeout, printing
+where to accept it: `tmux -S <root>/run/tmux.sock attach -t
+tmux-<slug>`, or the console's pane view. If the account's config dir
+already has this home recorded as trusted, `plan` says the pane should
+not ask. When the account's own config also names MCP servers
+(`.claude.json`'s `mcpServers`), `plan` warns that they load in the pane
+and not in the `sdk` kind; nothing stops the switch over it.
+
+**Either direction**, `apply`'s `close` stops the current kind's runner
+at idle, keeping the session id; `toml` writes `[agent] runner =
+"<kind>"` and nothing else, and writes or removes that kind's harness
+settings; then it sets the mining cursor to the end of the new kind's
+own record and queues one system message ahead of everything else
+waiting, so the cousin's first turn on the new kind is told it moved,
+and that instructions written for the old kind no longer apply; `start`
+asks the supervisor to run the new kind; `verify` waits for the new
+kind's own sign of life (a turn starting, for `tmux`; the SDK's
+`session_init`, for `sdk`) for up to `VERIFY_S` (90 s), or, for `tmux`,
+until the trust dialog is cleared. A `verify` that times out fails the
+apply (rollback or look at the pane first) but does not undo `close` or
+`toml`; if the operator accepts the trust dialog after `verify` gave up
+and the cousin takes the queued notice anyway, the switch did complete,
+late, and `cousin-migrate check` reports it as `switched` with that
+noted.
+
+```
+cousin-migrate rollback sam --to tmux --yes
+#     ok  close      the sdk runner stopped
+#     ok  notice     the switch's notice, never taken, dropped
+#     ok  restore    cousin.toml as it was, byte for byte; the tmux kind's settings
+#     ok  cursor     the mining cursor at the end of the tmux kind's record
+#     ok  start      the tmux runner resumes <id>
+#   rolled_back
+```
+
+`rollback --to <kind>` undoes exactly what `apply` did, and only that:
+`cousin.toml` restored byte for byte, the kind's settings written back
+for the restored kind, the queued notice dropped if nobody took it, a
+stale `tmux` trust flag cleared, the mining cursor set to the end of the
+restored kind's record, and the runner started again on the same
+session. `--to` has to name the kind the switch came from; it refuses a
+second rollback.
+
+`cousin-migrate check <slug>` shows a switch either way, once one is
+recorded: `kind switch: tmux -> sdk, switched`, or `..., failed (...)`
+for one that hasn't completed.
 
 ## Remove the subscription bridge from a live install
 

@@ -187,6 +187,17 @@ class Inbox:
                 (DONE, outcome, detail, time.time(), inbox_id, QUEUED, body))
             return cur.rowcount == 1
 
+    def done_if_open(self, inbox_id, outcome, detail=""):
+        """Close a row that is queued or claimed (never one already done);
+        False otherwise. A claimed row closed here is out of requeue_stale's
+        reach, so no later start runs it."""
+        with self._db() as conn:
+            cur = conn.execute(
+                "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
+                " WHERE id=? AND state IN (?, ?)",
+                (DONE, outcome, detail, time.time(), inbox_id, QUEUED, CLAIMED))
+            return cur.rowcount == 1
+
     def requeue(self, inbox_id):
         """Return one row to queued, clearing claim and outcome. Idempotent:
         a missing id is a no-op. Used to undo a claim without going through

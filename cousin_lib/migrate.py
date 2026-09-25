@@ -1143,6 +1143,9 @@ def check(home, *, since=None, now=None, health=None, root=None, validate=False,
         out["warnings"].append("the account's config holds MCP servers (%s): they load in"
                                " the pane and not in the SDK kind (P11-13)"
                                % ", ".join(account_mcp_servers(account)))
+    switch = read_switch_record(home)       # a late acceptance reads `switched` here
+    if switch is not None:
+        out["switch"] = {k: switch.get(k) for k in ("state", "from", "to", "late")}
     out["cli"] = (cli_version or runner_cli)()
     ok = rows is not None and inbox["stale"] == 0 and not unrecorded and not hook_errors \
         and not out["mismatches"]
@@ -1246,11 +1249,13 @@ SWITCH_STEPS = {"tmux": ("trust", "close", "toml", "start", "verify"),
 
 
 def read_switch_record(home):
+    """The kind switch's record, or None; a failed verify the target
+    outlived reads `switched` (_late_switch)."""
     try:
         data = json.loads((Path(home) / SWITCH_RECORD).read_text())
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    return _late_switch(home, data) if isinstance(data, dict) else None
 
 
 def _write_switch_record(home, rec):
@@ -1453,7 +1458,7 @@ def _trust_detail(home, root, account):
             " operator to accept it in %s" % (TRUST_WAIT_S, pane_hint(home, root)))
 
 
-NOTICE_RANK = 0          # ahead of every queued row (base.SOURCE_PRIORITY's lowest)
+NOTICE_RANK = -1         # ahead of every queued row, a flip or an interrupt (0) included
 
 
 def _switch_notice(home, old, new):
@@ -1473,18 +1478,53 @@ def _switch_notice(home, old, new):
 
 def _drop_notice(home, rec):
     """A rollback's: the switch's notice, if nobody took it, would tell the
-    restored kind it is the other one. Closed while still queued only."""
+    restored kind it is the other one. Closed while queued, or claimed by a
+    runner that died holding it (requeue_stale would hand it to the
+    restored kind); a notice already done is left as it is."""
     from cousin_lib.delivery import FAILED
     from cousin_lib.runner.inbox import Inbox
     notice_id = rec.get("notice_id")
     if notice_id is None:
         return False
-    inbox = Inbox(home)
-    row = inbox.get(notice_id)
-    if row is None or row["state"] != "queued":
+    return Inbox(home).done_if_open(notice_id, FAILED, "the kind switch was rolled back")
+
+
+def _clear_tmux_login_flag(home):
+    """A rollback's: data/login-required.json the tmux runner wrote (a
+    trust dialog nobody accepted) would read LOGIN REQUIRED on the
+    restored kind forever; its own kind's flag (auth.py's) is kept."""
+    path = Path(home) / "data" / "login-required.json"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
         return False
-    return inbox.done_if_queued(notice_id, FAILED, "the kind switch was rolled back",
-                                body=row["body"])
+    if not isinstance(data, dict) or data.get("kind") != "tmux":
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
+def _late_switch(home, rec):
+    """A switch whose verify failed while the target ran on (the operator
+    accepted the trust dialog after the wait): the notice the target took
+    shows the switch completed. The record then ends `switched`, written
+    back; any other record is returned as it is."""
+    from cousin_lib.delivery import DELIVERED
+    from cousin_lib.runner.inbox import Inbox
+    if rec.get("state") != "failed" or rec.get("failed") != "verify" \
+            or rec.get("notice_id") is None:
+        return rec
+    try:
+        row = Inbox(home).get(rec["notice_id"])
+    except Exception:  # noqa: BLE001 - an unreadable inbox changes nothing
+        return rec
+    if not row or row["state"] != "done" or row["outcome"] != DELIVERED:
+        return rec
+    rec.update(state="switched", switched_at=_now(), switched_late_at=_now(),
+               late=("the target took the switch's notice after verify gave up (%s)"
+                     % row.get("detail")))
+    _write_switch_record(home, rec)
+    return rec
 
 
 def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor_up,
@@ -1577,6 +1617,8 @@ def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
     step("close", "the %s runner stopped" % rec.get("to"))
     if _drop_notice(home, rec):
         step("notice", "the switch's notice, never taken, dropped")
+    if _clear_tmux_login_flag(home):
+        step("login", "the tmux pane's data/login-required.json cleared")
     _write_toml(home, base64.b64decode(rec["prior_toml_b64"]), int(rec["prior_mode"]))
     if to == "tmux":
         settings_out = harness_settings.apply_project_settings(home, root=root, kind="tmux")
@@ -1772,6 +1814,10 @@ def migrate_main(argv=None):
             print("recorder hook errors: %s" % ("; ".join(c["hook_errors"]) or "none"))
             print("chat server: %s" % c["chat"])
             print("runner CLI: %s" % c["cli"])
+            if c.get("switch"):
+                sw = c["switch"]
+                print("kind switch: %s -> %s, %s%s" % (sw["from"], sw["to"], sw["state"],
+                                                       " (%s)" % sw["late"] if sw["late"] else ""))
             if "validate" in c:
                 print("%s %s" % ("validate:" if c["validate_ok"] else "NOT VALID:", c["validate"]))
             if c["config"]:

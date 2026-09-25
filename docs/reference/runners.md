@@ -97,7 +97,13 @@ waiting for the operator to accept the dialog, with the command (`tmux -S
 it shows that session), and waits up to 10 minutes (`TRUST_WAIT_S`). It
 completes at the first turn start after the acceptance (the switch's notice).
 If nobody accepts in time, verify fails as before, naming the dialog, and the
-error says how to roll back.
+error says how to roll back. A rollback clears the tmux runner's
+`data/login-required.json`, so the restored kind does not read LOGIN
+REQUIRED. If the operator accepts after verify gave up, the target runs on
+and takes the notice: the switch did complete. Nothing watches for that,
+so `data/kind-switch.json` keeps `failed` until it is next read:
+`cousin-migrate check <slug>` (it prints `kind switch: ... switched` and
+a `late` note) or a rollback, which then rolls back a switch.
 
 A cousin with no `[agent] runner` is a legacy tmux cousin: it has no runner at
 all.

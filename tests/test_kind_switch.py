@@ -437,6 +437,79 @@ class TestTheNoticeGoesFirst(SwitchCase):
         self.assertIn("rolled back", row["detail"])
 
 
+class TestReviewFixes(SwitchCase):
+    """Proof-fix review: what a failed trust wait leaves behind, the notice
+    ahead of a flip row, a late acceptance, a claimed notice at rollback."""
+
+    def failed_trust_wait(self):
+        (self.home / "data" / "login-required.json").write_text(json.dumps(
+            {"kind": "tmux", "screen": "trust", "ts": 1.0}))
+        self.verified = (False, "no turn start under s-live within 600s; the pane showed the"
+                                " trust dialog")
+        with self.assertRaises(migrate.MigrateError):
+            migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+
+    def test_a_rollback_clears_the_tmux_kinds_login_flag(self):
+        self.failed_trust_wait()
+        rec = migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertFalse((self.home / "data" / "login-required.json").exists())
+        self.assertIn("login", [s["step"] for s in rec["rollback_steps"]])
+
+    def test_a_rollback_keeps_a_login_flag_that_is_not_the_tmux_kinds(self):
+        self.failed_trust_wait()
+        (self.home / "data" / "login-required.json").write_text(json.dumps(
+            {"kind": "claude-login", "reason": "login", "detail": "expired"}))
+        migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertTrue((self.home / "data" / "login-required.json").exists())
+
+    def test_the_notice_goes_ahead_of_an_older_flip_row(self):
+        from cousin_lib.delivery import Item
+        inbox = Inbox(self.home)
+        inbox.put(Item("system", "flip", "a rollover asked before the switch", sender="runner"))
+        seen = {}
+
+        def start(home, root):
+            rows = Inbox(home).claim(limit=1, claimant="the-target")
+            seen["first"] = rows[0]
+            Inbox(home).requeue(rows[0]["id"])
+        migrate.switch_apply(self.home, root=self.root, to="tmux", **dict(self.live(), start=start))
+        self.assertIn("sdk kind to the tmux kind", seen["first"]["body"])
+
+    def test_a_late_acceptance_ends_the_record_switched(self):
+        from cousin_lib.delivery import DELIVERED
+        self.failed_trust_wait()
+        rec = migrate.read_switch_record(self.home)
+        self.assertEqual(rec["state"], "failed")
+        # the operator accepted after the wait: the target took the notice
+        inbox = Inbox(self.home)
+        self.assertEqual(inbox.claim_id(rec["notice_id"], claimant="the-target")["id"],
+                         rec["notice_id"])
+        inbox.done(rec["notice_id"], DELIVERED, "turn ended")
+        c = migrate.check(self.home, root=self.root, cli_version=lambda: "x")
+        self.assertEqual(c["switch"]["state"], "switched")   # check is where it shows
+        rec = migrate.read_switch_record(self.home)
+        self.assertEqual(rec["state"], "switched")
+        self.assertIn("switched_late_at", rec)
+        self.assertEqual(json.loads((self.home / migrate.SWITCH_RECORD).read_text())["state"],
+                         "switched")
+        # and it still rolls back as a switch
+        rec = migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertEqual(rec["state"], "rolled_back")
+
+    def test_a_failed_switch_whose_notice_nobody_took_stays_failed(self):
+        self.failed_trust_wait()
+        self.assertEqual(migrate.read_switch_record(self.home)["state"], "failed")
+
+    def test_a_rollback_closes_a_notice_left_claimed(self):
+        self.failed_trust_wait()
+        notice_id = migrate.read_switch_record(self.home)["notice_id"]
+        Inbox(self.home).claim_id(notice_id, claimant="a-runner-that-died")
+        migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        row = Inbox(self.home).get(notice_id)
+        self.assertEqual((row["state"], row["outcome"]), ("done", "failed"))
+        self.assertEqual(Inbox(self.home).requeue_stale(older_than_s=0.0), 0)
+
+
 class TestSwitchMidTurn(SwitchCase):
     """Review C5: tmux -> sdk with a row mid-turn. The close is the
     supervisor's held stop; the target's start sweeps the claims the source

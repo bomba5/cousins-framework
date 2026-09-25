@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.24.4 - 2026-09-25
+
+### Changed
+- The overview's host and activity panels sit under the fleet table at every
+  width, side by side, instead of in a right-hand rail on wide screens.
+
+### Fixed
+- The overview's fleet sentence counts remote cousins too, so it agrees with
+  the running tile and the fleet table ("3 of 11", not "2 of 10").
+
 ## 1.24.3 - 2026-09-25
 
 ### Fixed

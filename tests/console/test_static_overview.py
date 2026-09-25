@@ -220,7 +220,7 @@ const rows = [
 const quiet = [{slug: "q", status: "running", tmuxSession: "q"}];
 process.stdout.write(JSON.stringify({busy: fleetHealth(rows, now), quiet: fleetHealth(quiet, now)}));""")
         busy = got["busy"]
-        self.assertEqual(busy["text"], "4 of 5 running · 1 needs you · next flip 04:00, in 8h 30m")
+        self.assertEqual(busy["text"], "5 of 6 running · 1 needs you · next flip 04:00, in 8h 30m")
         self.assertEqual(busy["nextFlip"]["slugs"], ["b"])
         self.assertEqual(busy["nextFlip"]["onDefault"], 1)
         self.assertEqual((busy["needs"], busy["warn"]), (1, 0))

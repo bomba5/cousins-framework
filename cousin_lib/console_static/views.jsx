@@ -1826,16 +1826,19 @@ function fleetNextFlip(cousins, now) {
 
 // One sentence of fleet health, and the counts behind it.
 function fleetHealth(cousins, now) {
-  const local = (cousins || []).filter(c => !c.remote);
-  const running = local.filter(c => c.status === "running");
+  // Counts every row, remote ones too, so the sentence agrees with the
+  // running tile and the fleet table beside it.
+  const all = cousins || [];
+  const local = all.filter(c => !c.remote);
+  const running = all.filter(c => c.status === "running");
   const needs = running.filter(c => (fleetAttention(c) || {}).level === "needs");
   const warn = running.filter(c => (fleetAttention(c) || {}).level === "warn");
-  const parts = [running.length + " of " + local.length + " running"];
+  const parts = [running.length + " of " + all.length + " running"];
   parts.push(needs.length ? needs.length + (needs.length === 1 ? " needs" : " need") + " you" : "nothing needs you");
   if (warn.length) parts.push(warn.length + (warn.length === 1 ? " warning" : " warnings"));
   const flip = fleetNextFlip(local, now);
   if (flip) parts.push("next flip " + flip.at + ", in " + fleetIn(flip.inSec));
-  return { text: parts.join(" · "), running: running.length, total: local.length,
+  return { text: parts.join(" · "), running: running.length, total: all.length,
            needs: needs.length, warn: warn.length, nextFlip: flip };
 }
 // ---- end fleet helpers ----

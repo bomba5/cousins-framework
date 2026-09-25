@@ -83,7 +83,10 @@ class Inbox:
         finally:
             conn.close()
 
-    def put(self, item):
+    def put(self, item, *, rank=None):
+        """Queue `item`; its priority is base.priority's for its source and
+        thread unless `rank` is given (a lower rank is claimed first: the
+        kind switch's notice goes ahead of every row queued before it)."""
         if not isinstance(item, Item):
             raise TypeError("put() takes a delivery.Item")
         with self._db() as conn:
@@ -93,7 +96,8 @@ class Inbox:
                 " created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (item.thread_id, item.source, item.sender, item.body,
                  json.dumps(list(item.attachments)), item.context,
-                 item.message_id, priority(item.source, item.thread_id),
+                 item.message_id,
+                 priority(item.source, item.thread_id) if rank is None else int(rank),
                  QUEUED, time.time()))
             return cur.lastrowid
 
@@ -181,6 +185,17 @@ class Inbox:
                 "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
                 " WHERE id=? AND state=? AND body=?",
                 (DONE, outcome, detail, time.time(), inbox_id, QUEUED, body))
+            return cur.rowcount == 1
+
+    def done_if_open(self, inbox_id, outcome, detail=""):
+        """Close a row that is queued or claimed (never one already done);
+        False otherwise. A claimed row closed here is out of requeue_stale's
+        reach, so no later start runs it."""
+        with self._db() as conn:
+            cur = conn.execute(
+                "UPDATE inbox SET state=?, outcome=?, detail=?, done_at=?"
+                " WHERE id=? AND state IN (?, ?)",
+                (DONE, outcome, detail, time.time(), inbox_id, QUEUED, CLAIMED))
             return cur.rowcount == 1
 
     def requeue(self, inbox_id):

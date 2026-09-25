@@ -105,6 +105,38 @@ class TestTyping(Case):
         self.assertEqual(self.panes[0].typed, [])
 
 
+class TestStoppingClaimsNothing(Case):
+    """Live proofs 09-25, finding 3: a runner asked to stop (held or not)
+    claims nothing new; it only finishes or settles what it has."""
+
+    def test_a_runner_asked_to_stop_types_no_queued_row(self):
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: r.state() == "idle" and self.panes))
+        r.begin_stop()
+        rec = r.enqueue(Item("operator:wren", "chat", "queued at the stop", sender="Wren"))
+        time.sleep(0.5)
+        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        self.assertEqual(self.panes[0].typed, [])
+
+    def test_a_claim_that_races_the_stop_goes_back_untyped(self):
+        r = self.runner()
+        real = r.inbox.claim
+
+        def claim(**kw):
+            rows = real(**kw)
+            if rows:
+                r.begin_stop()                 # the stop lands while the claim runs
+            return rows
+        r.inbox.claim = claim
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "raced", sender="Wren"))
+        self.assertTrue(_wait(lambda: r._stopping.is_set()))
+        time.sleep(0.3)
+        self.assertEqual(self.outcome(r, rec)[0], "queued")
+        self.assertEqual(self.panes[0].typed, [])
+
+
 class TestTurns(Case):
     def test_a_turn_start_nobody_typed_is_a_foreign_turn(self):
         r = self.runner()
@@ -844,9 +876,71 @@ class TestStop(Case):
         t = time.monotonic()
         r.stop(timeout=2)
         self.assertLess(time.monotonic() - t, 3.0, "bounded")
-        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by stop"))
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by a requested stop"))
         self.assertEqual(r.inbox.requeue_stale(older_than_s=0.0), 0, "nothing left claimed")
         self.assertEqual(json.loads((self.home / "data" / "tmux-claims.json").read_text())["claims"], [])
+
+
+class TestPaneLostInAStop(Case):
+    """Live proofs 09-25, finding 5: under a systemd stop the unit's cgroup
+    kill takes the tmux server while the runner stops. A pane lost once a
+    stop was asked for is the stop's cut, worded as exit criterion 2 has it
+    ("cut by restart"; "cut by a requested stop" when held), and the next
+    start is told."""
+
+    def lose_the_pane_in_a_stop(self):
+        r = self.runner(slow=True, slow_s=10.0)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.begin_stop()                                 # the SIGTERM
+        self.panes[0].die()                            # and the cgroup kill took tmux
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        r.stop(timeout=4)
+        return r, rec
+
+    def test_unheld_it_reads_cut_by_restart_and_the_next_start_is_told(self):
+        from cousin_lib.runner import restart_note
+        r, rec = self.lose_the_pane_in_a_stop()
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by restart"))
+        note = restart_note.read(self.home)
+        self.assertIsNotNone(note, "the cut is marked for the next start")
+        self.assertNotIn("held", note)
+
+    def test_held_it_reads_cut_by_a_requested_stop(self):
+        from cousin_lib.runner import restart_note
+        self.home = temp_home(self)
+        (self.home / "run").mkdir(exist_ok=True)
+        (self.home / "run" / "held").write_text("2026-09-25T01:00:00+00:00 cousin-migrate")
+        r, rec = self.lose_the_pane_in_a_stop()
+        self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by a requested stop"))
+        self.assertIn("cousin-migrate", restart_note.read(self.home)["held"])
+
+    def test_a_pane_lost_in_a_stop_is_no_loss_toward_a_give_up(self):
+        r = self.runner(slow=True, slow_s=10.0)
+        r.loss_max = 0                                  # one counted loss would give up
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.begin_stop()
+        self.panes[0].die()                             # on probation, too: no failed start
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        r.stop(timeout=4)
+        self.assertFalse(r._gave_up)
+        self.assertEqual(r._reopen_fails, 0)
+        self.assertEqual(len(r._losses), 0)
+        self.assertFalse((self.home / "data" / "run" / "tmux-giving-up.json").exists())
+        self.assertFalse(any(e["kind"] == "system" and e["payload"].get("subtype") == "pane_failing"
+                             for e in r.events()))
+
+    def test_a_pane_lost_with_no_stop_still_reads_pane_loss(self):
+        r = self.runner(slow=True, slow_s=10.0)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        self.panes[0].die()
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        self.assertEqual(self.outcome(r, rec)[2], "cut by pane loss")
 
 
 class TestRecovery(Case):
@@ -918,7 +1012,7 @@ class TestRecovery(Case):
         self.assertTrue(_wait(lambda: self.panes and any(
             "a requested stop" in b for _f, b in self.panes[0].typed), timeout=6))
         self.assertFalse(any("restarted" in b for _f, b in self.panes[0].typed))
-        self.assertEqual(self.outcome(r2, rec)[2], "cut by stop")
+        self.assertEqual(self.outcome(r2, rec)[2], "cut by a requested stop")
         from cousin_lib.runner import restart_note
         self.assertTrue(_wait(lambda: restart_note.read(self.home) is None), "taken once typed")
 
@@ -1094,6 +1188,29 @@ class TestRollover(Case):
         self.assertIn("`handoff` tool", self.panes[0].typed[0][0] + self.panes[0].typed[0][1])
         finals = [e["payload"] for e in r.events() if e["kind"] == "extract" and e["payload"].get("final")]
         self.assertEqual([e["session_id"] for e in finals], [old], "a final mine of the old session")
+
+    def test_the_session_record_names_the_rollovers_generation(self):
+        """Live proofs 09-25, finding 6: runner-session.json kept the old
+        generation (written before the bump) until the new session's first
+        turn; a kind switch or a reader in that window saw 0 against the
+        rollover's 1. It is the rollover's generation when the row closes."""
+        from cousin_lib import boot
+        self.on_prompt = _handoff_tool
+        r = self.runner(handoff_deadline_s=5, settle_s=0.5)
+        at_done = {}
+        real_append = r.stream.append
+
+        def append(kind, payload):
+            if kind == "rollover" and payload.get("phase") == "done":
+                at_done.update(json.loads((self.home / "data" / "runner-session.json").read_text()))
+            return real_append(kind, payload)
+        r.stream.append = append
+        before = boot.read_generation(self.home)
+        _old, row, detail = self.roll(r)
+        self.assertEqual(detail["generation"], before + 1)
+        self.assertEqual(at_done["generation"], detail["generation"])
+        self.assertEqual(at_done["session_id"], detail["session_id"])
+        self.assertTrue(at_done.get("fresh"), "still fresh until the CLI writes the session")
 
     def test_a_turn_without_the_handoff_writes_an_emergency_handoff(self):
         r = self.runner(handoff_deadline_s=5)

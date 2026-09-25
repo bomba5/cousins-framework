@@ -366,6 +366,7 @@ class SdkRunner:
         self.turn = Turn()
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._stopping = threading.Event()   # a stop was asked for: nothing new is claimed
         self._thread = None
         self._loop = None
         self._client = None
@@ -680,7 +681,7 @@ class SdkRunner:
             # fresh start (never zero times): safe, and accepted.
             handover.consume(self.home)
         await self._wait_rate_limit()   # a claim by id skips the loop's wait
-        if self._stop.is_set():
+        if self._stop.is_set() or self._stopping.is_set():
             return      # the row stays queued (durable): the next start runs it
         # the loop's own guard: this runs outside the loop's per-row try, and a
         # raise here would end the worker (and a restart would start fresh again)
@@ -734,9 +735,16 @@ class SdkRunner:
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
+    def begin_stop(self):
+        """A stop was asked for (cousin-runner's signal handler, before
+        stop() runs): from now on nothing new is claimed, neither a turn
+        nor a fold; what is live is finished or settled by stop()."""
+        self._stopping.set()
+
     def stop(self, *, timeout=30.0):
         if self.machine.state == "stopped":
             return
+        self.begin_stop()
         # A running turn is interrupted first, so the join below does not
         # wait on a turn nobody will end (FakeRunner does the same). The CLI
         # records that as the user's stop: leave the mark the next resume
@@ -864,9 +872,18 @@ class SdkRunner:
                 "since": self._turn_started_at if active else None}
 
     def _claim(self, limit):
-        """The rows this session may take (phase 8): its kinds only."""
-        return self.inbox.claim(limit=limit, claimant=self.session_id,
+        """The rows this session may take (phase 8): its kinds only. None
+        once a stop was asked for (live proofs 09-25, finding 3): a claim
+        the stop raced goes straight back to the queue."""
+        if self._stopping.is_set():
+            return []
+        rows = self.inbox.claim(limit=limit, claimant=self.session_id,
                                 kinds=self.claim_kinds, exclude_kinds=self.exclude_kinds)
+        if rows and self._stopping.is_set():
+            for row in rows:
+                self.inbox.requeue(row["id"])
+            return []
+        return rows
 
     def _doorbell(self):
         """The wake socket (one per home, so the primary's); a side session
@@ -2344,7 +2361,7 @@ class SdkRunner:
         self.stream.append("rollover", dict(detail, phase="done"))
         if digest_id is not None:
             await self._wait_rate_limit()   # a claim by id skips the loop's wait
-        if self._stop.is_set() or digest_id is None:
+        if self._stop.is_set() or self._stopping.is_set() or digest_id is None:
             return True     # a stored digest row stays queued (durable): the next start runs it
         # The digest is the new session's FIRST message: claimed by id and run
         # now, ahead of chat that queued up during the rollover (same priority,

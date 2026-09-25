@@ -44,9 +44,11 @@ before it ships.
 - The kind switch: `cousin-migrate plan|apply <slug> --to sdk|tmux` moves a
   runner cousin between the two Claude kinds as a step machine, keeping its
   session; `cousin-migrate rollback <slug> --to <kind> --yes` puts it back
-  byte for byte. `--to tmux` needs the account's one-time trust of the home
-  recorded first, and the plan names the command. A switch waits out a
-  tmux rollover whose new session the CLI has not written yet.
+  byte for byte. `--to tmux` needs no step first: the pane may ask for the
+  trust (or bypass) dialog once, the runner types nothing into it and says
+  so, and verify waits up to 10 minutes for the operator to accept it in the
+  pane. A switch waits out a tmux rollover whose new session the CLI has not
+  written yet.
 - The pane hook, `cousin_lib.runner.tmux_hook`: on `SessionStart` it
   records `run/tmux-session.json` (session id, transcript path, source, the
   CLI's pid), and on every event it sends the runner one datagram on its

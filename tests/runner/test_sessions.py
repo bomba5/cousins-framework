@@ -304,6 +304,31 @@ class TestStopRacesTheWatcher(SessionsCase):
                           and "gave up" in e["payload"].get("error", "")], [])
         self.assertIs(s.sides["peer"], side)
 
+    def test_a_side_rebuilt_while_stopping_begins_its_stop_before_it_starts(self):
+        """Proof-fix review M3: a rebuild that lands after the stop began
+        claims nothing for the moment it runs."""
+        home = _install(self)
+        s = self.build(home, ("peer",), [], primary_scripts=[])
+        calls = []
+
+        class Stub:
+            def begin_stop(self):
+                calls.append("begin_stop")
+
+            def start(self):
+                calls.append("start")
+
+            def stop(self, timeout=None):
+                calls.append("stop")
+
+        def build(kind):
+            s._stopping.set()                   # the stop began while the side was built
+            return Stub()
+        s._build_side = build
+        s._restart_at["peer"] = 0.0
+        s._look_after("peer")
+        self.assertEqual(calls, ["begin_stop", "start", "stop"])
+
     def test_stop_waits_for_the_watcher_at_most_its_cap(self):
         """The watcher's join is capped at 2 * watch_s + 1 s: a look that
         hangs never holds the stop for longer."""

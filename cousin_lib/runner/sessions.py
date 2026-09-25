@@ -420,6 +420,8 @@ class Sessions:
                 fresh = self._build_side(kind)
                 self.sides[kind] = fresh
                 self._started_at[kind] = now
+                if self._stopping.is_set():
+                    fresh.begin_stop()       # it claims nothing for the moment it runs
                 fresh.start()
                 if self._stopping.is_set():
                     # stop() began while this one was built: its join of the
@@ -457,6 +459,13 @@ class Sessions:
         if self._watcher is None:
             self._watcher = threading.Thread(target=self._watch, daemon=True)
             self._watcher.start()
+
+    def begin_stop(self):
+        """A stop was asked for: no session claims anything new, and nothing
+        is rebuilt; stop() does the rest."""
+        self._stopping.set()
+        for r in list(self.sessions().values()):
+            r.begin_stop()
 
     def stop(self, *, timeout=30.0):
         """The watcher first (nothing is rebuilt during a stop), then every

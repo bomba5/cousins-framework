@@ -954,6 +954,44 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(r.inbox.get(b.inbox_id)["state"], "queued")
         self.assertEqual(r.state(), "errored")
 
+    # -- a stop claims nothing new (live proofs 09-25, finding 3) ------------
+    def test_a_runner_asked_to_stop_claims_no_queued_row(self):
+        r, _ = self._runner([])
+        r.start()
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        r.begin_stop()                         # the SIGTERM arrived; stop() not yet run
+        rec = r.enqueue(self._op("queued at the stop"))
+        time.sleep(0.5)
+        self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")
+        r.stop(timeout=5)
+        self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")
+
+    def test_a_stopping_runner_folds_nothing_into_its_live_turn(self):
+        r, made = self._runner([[init_msg(), "HANG", result()]])
+        r.start()
+        r.enqueue(self._op("first"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.begin_stop()
+        rec = r.enqueue(self._op("would fold"))
+        time.sleep(0.5)
+        self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")
+        self.assertEqual(len(made["client"].queries), 1)
+        r.stop(timeout=5)
+        self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")
+
+    def test_a_claim_that_races_the_stop_goes_back(self):
+        r, _ = self._runner([])
+        rec = r.inbox.put(self._op("raced"))
+        real = r.inbox.claim
+
+        def claim(**kw):
+            rows = real(**kw)
+            r.begin_stop()                     # the stop lands while the claim runs
+            return rows
+        r.inbox.claim = claim
+        self.assertEqual(r._claim(1), [])
+        self.assertEqual(r.inbox.get(rec)["state"], "queued")
+
     def test_no_new_client_is_started_after_stop(self):
         r, made = self._runner([[init_msg(), "HANG", "HANG", "HANG"]],
                                idle_timeout_s=1.0, drain_timeout_s=1.0)

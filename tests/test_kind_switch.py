@@ -67,19 +67,24 @@ class SwitchCase(HermeticCase):
 
 
 class TestPlan(SwitchCase):
-    def test_an_sdk_born_home_is_told_the_one_time_trust_step(self):
+    def test_an_sdk_born_home_is_ready_and_told_the_pane_asks_once(self):
+        """Finding 2 (live proofs 09-25): ~/.claude.json is no gate. A live
+        CLI rewrites it and may never record the trust for the home, so the
+        plan cannot know in advance; the pane asks once and verify waits."""
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
         self.assertEqual(p["steps"], ["trust", "close", "toml", "start", "verify"])
-        self.assertFalse(p["ready"])
+        self.assertTrue(p["ready"], p["checks"])
         trust = next(c for c in p["checks"] if c["check"] == "trust")
-        self.assertFalse(trust["ok"])
-        self.assertIn(str(self.home), trust["detail"])
-        self.assertIn("CLAUDE_CONFIG_DIR=%s" % self.config_dir, trust["detail"])
+        self.assertTrue(trust["ok"])
+        self.assertIn("not known in advance: the pane asks once", trust["detail"])
+        self.assertIn("tmux-wren", trust["detail"])
 
     def test_a_trusted_home_is_ready_and_the_sdk_way_has_no_trust_step(self):
         self.trust()
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
         self.assertTrue(p["ready"], p["checks"])
+        trust = next(c for c in p["checks"] if c["check"] == "trust")
+        self.assertIn("recorded", trust["detail"])            # the fast path, said
         self.kind("tmux")
         p = migrate.switch_plan(self.home, root=self.root, to="sdk", **self.live())
         self.assertEqual(p["steps"], ["close", "toml", "start", "verify"])
@@ -144,13 +149,11 @@ class TestCheckWarns(SwitchCase):
 
 
 class TestApply(SwitchCase):
-    def test_apply_stops_at_the_trust_step_changing_nothing(self):
-        before = (self.home / "cousin.toml").read_bytes()
-        with self.assertRaises(migrate.MigrateError) as err:
-            migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
-        self.assertIn("trust", str(err.exception))
-        self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
-        self.assertEqual(self.calls, [])
+    def test_apply_needs_no_recorded_trust_and_says_the_pane_asks(self):
+        rec = migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        self.assertEqual(rec["state"], "switched")
+        trust = next(s for s in rec["steps"] if s["step"] == "trust")
+        self.assertIn("not known in advance", trust["detail"])
 
     def test_to_tmux_runs_every_step_and_keeps_what_rollback_needs(self):
         self.trust()
@@ -158,7 +161,7 @@ class TestApply(SwitchCase):
         self.assertEqual(rec["state"], "switched")
         self.assertEqual(rec["warnings"], [])
         self.assertEqual([s["step"] for s in rec["steps"]],
-                         ["trust", "close", "toml", "cursor", "start", "notice", "verify"])
+                         ["trust", "close", "toml", "cursor", "notice", "start", "verify"])
         self.assertEqual(self.agent()["runner"], "tmux")
         self.assertEqual(json.loads(settings_path(self.home).read_text())["editorMode"], "normal")
         # the cursor before the start (review minor): the target's first
@@ -191,7 +194,7 @@ class TestApply(SwitchCase):
         migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
         rec = migrate.switch_apply(self.home, root=self.root, to="sdk", **self.live())
         self.assertEqual([s["step"] for s in rec["steps"]],
-                         ["close", "toml", "cursor", "start", "notice", "verify"])
+                         ["close", "toml", "cursor", "notice", "start", "verify"])
         self.assertEqual(self.agent()["runner"], "sdk")
         self.assertNotIn("editorMode", json.loads(settings_path(self.home).read_text()))
 
@@ -202,6 +205,119 @@ class TestApply(SwitchCase):
             migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
         self.assertIn("no turn start", str(err.exception))
         self.assertEqual(migrate.read_switch_record(self.home)["state"], "failed")
+
+
+class TestVerifyWaitsForTheTrustDialog(SwitchCase):
+    """Finding 2: the pane shows the trust dialog on a home it never saw;
+    the tmux runner types nothing, writes data/login-required.json {screen:
+    trust} and emits `auth login_required`. Verify then neither fails nor
+    rolls back: it says what it waits for, and waits for the operator up to
+    TRUST_WAIT_S; the turn start after the acceptance completes it."""
+
+    def setUp(self):
+        super().setUp()
+        self.now = 1000.0
+        self.said = []
+        self.since = 5000.0                       # wall time of the switch's start
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+    def dialog(self, screen="trust", ts=None):
+        (self.home / "data" / "login-required.json").write_text(json.dumps(
+            {"kind": "tmux", "screen": screen, "ts": self.since + 1 if ts is None else ts}))
+
+    def wait(self, started):
+        return migrate.wait_for_turn(self.home, started, root=self.root, since=self.since,
+                                     what="turn start under s-live", say=self.said.append,
+                                     clock=self.clock, sleep=self.sleep)
+
+    def test_the_trust_dialog_extends_the_wait_and_the_acceptance_completes_it(self):
+        t0 = self.now
+
+        def started():
+            if self.now - t0 >= 5 and not self.said:
+                self.dialog()                      # the runner saw the dialog
+            if self.now - t0 >= 300:               # well past VERIFY_S: the operator accepts
+                (self.home / "data" / "login-required.json").unlink(missing_ok=True)
+                return self.now - t0 >= 302
+            return False
+        ok, detail = self.wait(started)
+        self.assertTrue(ok, detail)
+        self.assertGreater(self.now - t0, migrate.VERIFY_S)
+        self.assertEqual(len(self.said), 1)
+        self.assertIn("waiting for the operator to accept the trust dialog in the pane",
+                      self.said[0])
+        self.assertIn("console", self.said[0])
+        self.assertIn("tmux -S %s attach -t tmux-wren" % (self.root / "run" / "tmux.sock"),
+                      self.said[0])
+        self.assertIn("trust dialog", detail)
+
+    def test_a_dialog_nobody_accepts_fails_at_the_longer_deadline_with_the_hint(self):
+        self.dialog()
+        t0 = self.now
+        ok, detail = self.wait(lambda: False)
+        self.assertFalse(ok)
+        self.assertGreaterEqual(self.now - t0, migrate.TRUST_WAIT_S)
+        self.assertLess(self.now - t0, migrate.TRUST_WAIT_S + 5)
+        self.assertIn("no turn start under s-live", detail)
+        self.assertIn("trust dialog", detail)
+        self.assertIn("tmux-wren", detail)
+
+    def test_no_dialog_fails_at_the_usual_deadline_without_a_hint(self):
+        t0 = self.now
+        ok, detail = self.wait(lambda: False)
+        self.assertFalse(ok)
+        self.assertLess(self.now - t0, migrate.VERIFY_S + 5)
+        self.assertNotIn("dialog", detail)
+        self.assertEqual(self.said, [])
+
+    def test_a_dialog_file_older_than_the_switch_is_not_this_one(self):
+        self.dialog(ts=self.since - 60)
+        t0 = self.now
+        ok, _detail = self.wait(lambda: False)
+        self.assertFalse(ok)
+        self.assertLess(self.now - t0, migrate.VERIFY_S + 5)
+        self.assertEqual(self.said, [])
+
+    def test_a_failure_after_the_wait_keeps_the_rollback_line(self):
+        self.verified = (False, "no turn start under s-live within 600s; the pane showed the"
+                                " trust dialog")
+        with self.assertRaises(migrate.MigrateError) as err:
+            migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        self.assertIn("trust dialog", str(err.exception))
+        self.assertIn("roll back with --to sdk", str(err.exception))
+
+
+class TestTrustScreenOnTheRunner(SwitchCase):
+    def test_the_runner_types_nothing_and_records_the_trust_screen(self):
+        """What wait_for_turn reads is what the tmux runner writes (P0)."""
+        import time
+        from cousin_lib.delivery import Item
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        from tests.runner._fake_pane import FakePane
+        self.kind("tmux")
+        panes = []
+
+        def factory(path):
+            panes.append(FakePane(path, attention="trust", context_home=self.home))
+            return panes[-1]
+        r = TmuxRunner(self.home, account=None, pane_factory=factory, config_dir=self.config_dir,
+                       launch_argv=lambda sid, fresh: ["claude", sid] + (["--fresh"] if fresh else []))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        since = time.time()
+        r.start()
+        migrate._switch_notice(self.home, "sdk", "tmux")
+        t = time.monotonic()
+        while time.monotonic() - t < 5 and migrate.pane_dialog(self.home, since) is None:
+            time.sleep(0.02)
+        self.assertEqual(migrate.pane_dialog(self.home, since), "trust")
+        self.assertEqual(panes[0].typed, [])
+        self.assertTrue(any(e["kind"] == "auth" and e["payload"].get("screen") == "trust"
+                            for e in r.events()))
 
 
 if __name__ == "__main__":
@@ -253,6 +369,145 @@ class TestRollback(SwitchCase):
         with self.assertRaises(migrate.MigrateError) as err:
             migrate.switch_rollback(self.home, root=self.root, to="tmux", **self.live())
         self.assertIn("came from sdk", str(err.exception))
+
+
+class TestTheNoticeGoesFirst(SwitchCase):
+    """Live proofs 09-25, finding 4: the kind-switch notice reached the model
+    after rows queued before the switch, so one question was answered by a
+    model that still believed the old kind. The notice is put before the
+    target starts and ahead of every queued row: the first turn after the
+    switch is the notice."""
+
+    def queue_before_the_switch(self):
+        from cousin_lib.delivery import Item
+        inbox = Inbox(self.home)
+        return [inbox.put(Item("operator:wren", "chat", "asked before the switch %d" % i,
+                               sender="Wren")) for i in range(2)]
+
+    def test_the_notice_is_queued_before_the_start_and_claimed_first(self):
+        self.queue_before_the_switch()
+        seen = {}
+
+        def start(home, root):
+            rows = Inbox(home).claim(limit=1, claimant="the-target")
+            seen["first"] = rows[0] if rows else None
+            Inbox(home).requeue(rows[0]["id"])
+        migrate.switch_apply(self.home, root=self.root, to="tmux",
+                             **dict(self.live(), start=start))
+        self.assertIsNotNone(seen["first"], "no notice queued at the start")
+        self.assertIn("sdk kind to the tmux kind", seen["first"]["body"])
+        rec = migrate.read_switch_record(self.home)
+        self.assertEqual(rec["notice_id"], seen["first"]["id"])
+
+    def test_on_the_tmux_kind_the_notice_is_the_first_row_typed(self):
+        import time
+        from cousin_lib.runner.tmux_runner import TmuxRunner
+        from tests.runner._fake_pane import FakePane
+        self.queue_before_the_switch()
+        panes, runners = [], []
+
+        def factory(path):
+            panes.append(FakePane(path, context_home=self.home))
+            return panes[-1]
+
+        def start(home, root):
+            r = TmuxRunner(home, account=None, pane_factory=factory, config_dir=self.config_dir,
+                           launch_argv=lambda sid, fresh: ["claude", sid] + (["--fresh"] if fresh else []))
+            runners.append(r)
+            self.addCleanup(lambda: r.stop(timeout=5))
+            r.start()
+        migrate.switch_apply(self.home, root=self.root, to="tmux", **dict(self.live(), start=start))
+        t = time.monotonic()
+        while time.monotonic() - t < 10 and len(panes[0].typed if panes else ()) < 3:
+            time.sleep(0.02)
+        bodies = [b for _first, b in panes[0].typed]
+        self.assertEqual(len(bodies), 3, bodies)
+        self.assertIn("sdk kind to the tmux kind", bodies[0])
+        self.assertIn("asked before the switch 0", bodies[1])
+
+    def test_a_rollback_drops_a_notice_nobody_took(self):
+        self.verified = (False, "no turn start under s-live within 90s")
+        with self.assertRaises(migrate.MigrateError):
+            migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+        notice_id = migrate.read_switch_record(self.home)["notice_id"]
+        self.assertEqual(Inbox(self.home).get(notice_id)["state"], "queued")
+        migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        row = Inbox(self.home).get(notice_id)
+        self.assertEqual(row["state"], "done")
+        self.assertIn("rolled back", row["detail"])
+
+
+class TestReviewFixes(SwitchCase):
+    """Proof-fix review: what a failed trust wait leaves behind, the notice
+    ahead of a flip row, a late acceptance, a claimed notice at rollback."""
+
+    def failed_trust_wait(self):
+        (self.home / "data" / "login-required.json").write_text(json.dumps(
+            {"kind": "tmux", "screen": "trust", "ts": 1.0}))
+        self.verified = (False, "no turn start under s-live within 600s; the pane showed the"
+                                " trust dialog")
+        with self.assertRaises(migrate.MigrateError):
+            migrate.switch_apply(self.home, root=self.root, to="tmux", **self.live())
+
+    def test_a_rollback_clears_the_tmux_kinds_login_flag(self):
+        self.failed_trust_wait()
+        rec = migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertFalse((self.home / "data" / "login-required.json").exists())
+        self.assertIn("login", [s["step"] for s in rec["rollback_steps"]])
+
+    def test_a_rollback_keeps_a_login_flag_that_is_not_the_tmux_kinds(self):
+        self.failed_trust_wait()
+        (self.home / "data" / "login-required.json").write_text(json.dumps(
+            {"kind": "claude-login", "reason": "login", "detail": "expired"}))
+        migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertTrue((self.home / "data" / "login-required.json").exists())
+
+    def test_the_notice_goes_ahead_of_an_older_flip_row(self):
+        from cousin_lib.delivery import Item
+        inbox = Inbox(self.home)
+        inbox.put(Item("system", "flip", "a rollover asked before the switch", sender="runner"))
+        seen = {}
+
+        def start(home, root):
+            rows = Inbox(home).claim(limit=1, claimant="the-target")
+            seen["first"] = rows[0]
+            Inbox(home).requeue(rows[0]["id"])
+        migrate.switch_apply(self.home, root=self.root, to="tmux", **dict(self.live(), start=start))
+        self.assertIn("sdk kind to the tmux kind", seen["first"]["body"])
+
+    def test_a_late_acceptance_ends_the_record_switched(self):
+        from cousin_lib.delivery import DELIVERED
+        self.failed_trust_wait()
+        rec = migrate.read_switch_record(self.home)
+        self.assertEqual(rec["state"], "failed")
+        # the operator accepted after the wait: the target took the notice
+        inbox = Inbox(self.home)
+        self.assertEqual(inbox.claim_id(rec["notice_id"], claimant="the-target")["id"],
+                         rec["notice_id"])
+        inbox.done(rec["notice_id"], DELIVERED, "turn ended")
+        c = migrate.check(self.home, root=self.root, cli_version=lambda: "x")
+        self.assertEqual(c["switch"]["state"], "switched")   # check is where it shows
+        rec = migrate.read_switch_record(self.home)
+        self.assertEqual(rec["state"], "switched")
+        self.assertIn("switched_late_at", rec)
+        self.assertEqual(json.loads((self.home / migrate.SWITCH_RECORD).read_text())["state"],
+                         "switched")
+        # and it still rolls back as a switch
+        rec = migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        self.assertEqual(rec["state"], "rolled_back")
+
+    def test_a_failed_switch_whose_notice_nobody_took_stays_failed(self):
+        self.failed_trust_wait()
+        self.assertEqual(migrate.read_switch_record(self.home)["state"], "failed")
+
+    def test_a_rollback_closes_a_notice_left_claimed(self):
+        self.failed_trust_wait()
+        notice_id = migrate.read_switch_record(self.home)["notice_id"]
+        Inbox(self.home).claim_id(notice_id, claimant="a-runner-that-died")
+        migrate.switch_rollback(self.home, root=self.root, to="sdk", **self.live())
+        row = Inbox(self.home).get(notice_id)
+        self.assertEqual((row["state"], row["outcome"]), ("done", "failed"))
+        self.assertEqual(Inbox(self.home).requeue_stale(older_than_s=0.0), 0)
 
 
 class TestSwitchMidTurn(SwitchCase):

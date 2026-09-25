@@ -1103,17 +1103,20 @@ class TmuxRunner:
         outcome = FAILED if e.kind == "api_error" else DELIVERED
         detail = ("skipped: the turn's %s line at offset %d failed %d times (%s: %s)"
                   % (e.kind, e.offset, fails, type(exc).__name__, exc))
-        self.stream.append("result", {"inbox_ids": self._live_ids(),
-                                      "interrupted": e.kind == "interrupt",
-                                      "is_error": outcome == FAILED})   # before the rows (#87)
         try:
-            self._close_rows(outcome, detail)
-        except Exception as err:  # noqa: BLE001 - the rows stay claimed; a start's sweep settles them
-            self.stream.append("error", {"error": "closing the skipped turn's rows: %s: %s"
-                                                  % (type(err).__name__, err)})
-        self._live, self._interrupting = None, False
-        self._turn_file(None)
-        self._to("idle", "turn closed by a skipped line")
+            self.stream.append("result", {"inbox_ids": self._live_ids(),
+                                          "interrupted": e.kind == "interrupt",
+                                          "is_error": outcome == FAILED})   # before the rows (#87)
+        finally:
+            # the rows close and the runner idles even when the append raises
+            try:
+                self._close_rows(outcome, detail)
+            except Exception as err:  # noqa: BLE001 - the rows stay claimed; a start's sweep settles them
+                self.stream.append("error", {"error": "closing the skipped turn's rows: %s: %s"
+                                                      % (type(err).__name__, err)})
+            self._live, self._interrupting = None, False
+            self._turn_file(None)
+            self._to("idle", "turn closed by a skipped line")
 
     def _skipped_limit(self, e, fails, exc):
         """R6's limit end for a skipped limit line: the taken rows requeued,
@@ -1427,8 +1430,11 @@ class TmuxRunner:
             self._blocked_stretch("row")
             return
         self.stream.append("error", {"error": "typing row %d failed" % row["id"]})
-        self.stream.append("result", {"inbox_ids": [row["id"]], "interrupted": False, "is_error": True})
-        self.inbox.done(row["id"], FAILED, "the pane refused the row")     # after its result (#87)
+        try:
+            self.stream.append("result", {"inbox_ids": [row["id"]], "interrupted": False,
+                                          "is_error": True})
+        finally:                        # after its result (#87), even when the append raises
+            self.inbox.done(row["id"], FAILED, "the pane refused the row")
 
     def _check_consumed(self, pending):
         now = time.monotonic()
@@ -1441,9 +1447,11 @@ class TmuxRunner:
             self._claims.pop(row["id"], None)
             self._closed_nonces |= set(c["nonces"])
             if self._attempts.get(row["id"], 0) >= 1:
-                self.stream.append("result", {"inbox_ids": [row["id"]], "interrupted": False,
-                                              "is_error": True})        # before the row (#87)
-                self.inbox.done(row["id"], FAILED, "the CLI never took the prompt")
+                try:
+                    self.stream.append("result", {"inbox_ids": [row["id"]], "interrupted": False,
+                                                  "is_error": True})    # before the row (#87)
+                finally:
+                    self.inbox.done(row["id"], FAILED, "the CLI never took the prompt")
             else:
                 self._attempts[row["id"]] = self._attempts.get(row["id"], 0) + 1
                 self.inbox.requeue(row["id"])

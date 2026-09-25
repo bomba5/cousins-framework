@@ -1608,16 +1608,21 @@ class OpencodeRunner:
         with self._lock:
             self.machine.to("errored", message)
         self.stream.append("error", {"error": message})
-        self.stream.append("result", {"inbox_ids": [] if requeue else [row["id"]],
-                                      "requeued": [row["id"]] if requeue else [],
-                                      "interrupted": False, "is_error": True,
-                                      "session_id": self.opencode_session, "usage": None,
-                                      "total_cost_usd": None, "num_turns": 0, "error": message})
-        if requeue:                                   # after its result (#87)
-            self.inbox.requeue(row["id"])
-        else:
-            self.inbox.done(row["id"], FAILED, message)
-        self._end_turn(run)
+        try:
+            self.stream.append("result", {"inbox_ids": [] if requeue else [row["id"]],
+                                          "requeued": [row["id"]] if requeue else [],
+                                          "interrupted": False, "is_error": True,
+                                          "session_id": self.opencode_session, "usage": None,
+                                          "total_cost_usd": None, "num_turns": 0,
+                                          "error": message})
+        finally:
+            try:
+                if requeue:                           # after its result (#87), even when
+                    self.inbox.requeue(row["id"])     # the append raises
+                else:
+                    self.inbox.done(row["id"], FAILED, message)
+            finally:
+                self._end_turn(run)
 
     def _end_turn(self, run):
         self.turn.end()

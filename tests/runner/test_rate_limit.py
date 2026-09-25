@@ -32,6 +32,20 @@ def _wait(pred, timeout=10.0):
     return False
 
 
+def _result_append_fails_once(r):
+    """The runner's first `result` append raises (a full disk, say): the
+    rows it names must still close as its branch closes them (#87 review)."""
+    real, said = r.stream.append, []
+
+    def append(kind, payload):
+        if kind == "result" and not said:
+            said.append(payload)
+            raise OSError("No space left on device")
+        return real(kind, payload)
+    r.stream.append = append
+    return said
+
+
 class TestRateLimited(HermeticCase):
     def build(self, first):
         home = temp_home(self)
@@ -91,6 +105,16 @@ class TestRateLimited(HermeticCase):
         requeued = [e["payload"] for e in r.events()
                     if e["kind"] == "result" and e["payload"].get("requeued")]
         self.assertTrue(requeued[0]["repeat_in_transcript"])
+
+    def test_a_failing_result_append_still_requeues_the_limited_row(self):
+        r = self.build([init_msg(), _limit("rejected", resets_in=5.0), result(is_error=True)])
+        said = _result_append_fails_once(r)
+        r.start()
+        rec = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertTrue(_wait(lambda: said and r.inbox.get(rec.inbox_id)["state"] != "claimed"))
+        time.sleep(0.3)
+        row = r.inbox.get(rec.inbox_id)
+        self.assertEqual((row["state"], row["outcome"]), ("queued", None), "requeued, never failed")
 
     def test_rejected_with_overage_allowed_does_not_block(self):
         r = self.build([init_msg(), _limit("rejected", overage="allowed"), assistant(text="ok"),

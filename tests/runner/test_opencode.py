@@ -152,6 +152,20 @@ def _op(body, who="priya"):
     return Item("operator:%s" % who, "chat", body, sender=who.capitalize())
 
 
+def _result_append_fails_once(r):
+    """The runner's first `result` append raises (a full disk, say): the
+    rows it names must still close as its branch closes them (#87 review)."""
+    real, said = r.stream.append, []
+
+    def append(kind, payload):
+        if kind == "result" and not said:
+            said.append(payload)
+            raise OSError("No space left on device")
+        return real(kind, payload)
+    r.stream.append = append
+    return said
+
+
 class OpencodeCase(HermeticCase):
     def home(self, *, model="local/m1", extra=""):
         home = temp_home(self, runner="opencode")
@@ -986,3 +1000,19 @@ class TestSession(OpencodeCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResultBeforeRows(OpencodeCase):
+    def test_a_refused_prompt_is_failed_even_when_its_result_cannot_be_written(self):
+        """#87 review: _unsent appends the result, then closes the row; an
+        append that raises still leaves the row closed and the turn ended."""
+        r = self.runner()
+        rid = r.inbox.put(_op("refused"))
+        row = r.inbox.claim_id(rid, claimant=r.session_id)
+        r.machine.to("running", "turn")
+        _result_append_fails_once(r)
+        with self.assertRaises(OSError):
+            r._unsent(opencode._Run(), row, RuntimeError("prompt_async refused"))
+        self.assertEqual((r.inbox.get(rid)["state"], r.inbox.get(rid)["outcome"]),
+                         ("done", "failed"))
+        self.assertEqual(r.state(), "idle")

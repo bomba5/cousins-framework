@@ -24,6 +24,20 @@ def _wait(pred, timeout=5.0):
     return False
 
 
+def _result_append_fails_once(r):
+    """The runner's first `result` append raises (a full disk, say): the
+    rows it names must still close as its branch closes them (#87 review)."""
+    real, said = r.stream.append, []
+
+    def append(kind, payload):
+        if kind == "result" and not said:
+            said.append(payload)
+            raise OSError("No space left on device")
+        return real(kind, payload)
+    r.stream.append = append
+    return said
+
+
 class Case(HermeticCase):
     def runner(self, pane=None, **kw):
         self.home = getattr(self, "home", None) or temp_home(self)
@@ -1289,3 +1303,53 @@ class TestMiningCursor(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResultBeforeRows(Case):
+    """#87 review: the result is appended before the rows close, and the
+    rows close even when that append raises."""
+
+    def claimed(self, r, body="hi"):
+        rid = r.inbox.put(Item("operator:wren", "chat", body, sender="Wren"))
+        return r.inbox.claim_id(rid, claimant=r.runner_id)
+
+    def test_a_refused_row_is_failed_even_when_its_result_cannot_be_written(self):
+        class Dead(FakePane):
+            def type_row(self, first_line, body):
+                return Outcome.FAILED
+        r = self.runner(pane=lambda path: Dead(path))
+        said = _result_append_fails_once(r)
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "hi", sender="Wren"))
+        self.assertTrue(_wait(lambda: said))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done", 3.0), "left claimed")
+        self.assertEqual(self.outcome(r, rec)[1], "failed")
+
+    def test_a_prompt_never_taken_is_failed_even_when_its_result_cannot_be_written(self):
+        r = self.runner()
+        row = self.claimed(r)
+        r.pane = FakePane(self.home / "t.jsonl")          # never started: empty box, no queue
+        r.pane.queued = lambda: False
+        r.pane.box_text = lambda: ""
+        r._attempts[row["id"]] = 1                         # typed once already
+        r._claims[row["id"]] = {"row": row, "typed_at": 0.0, "nonces": ["n1"], "taken": None}
+        _result_append_fails_once(r)
+        with self.assertRaises(OSError):
+            r._check_consumed([r._claims[row["id"]]])
+        self.assertEqual((r.inbox.get(row["id"])["state"], r.inbox.get(row["id"])["outcome"]),
+                         ("done", "failed"))
+
+    def test_a_skipped_turn_end_closes_its_rows_even_when_its_result_cannot_be_written(self):
+        from types import SimpleNamespace
+        r = self.runner()
+        row = self.claimed(r)
+        r.machine.to("running", "turn")
+        r._live = {"rows": [row], "prompt_id": "p1", "who": "runner"}
+        _result_append_fails_once(r)
+        e = SimpleNamespace(kind="turn_end", offset=7)
+        with self.assertRaises(OSError):
+            r._close_skipped(e, 4, RuntimeError("scripted"))
+        self.assertEqual((r.inbox.get(row["id"])["state"], r.inbox.get(row["id"])["outcome"]),
+                         ("done", "delivered"))
+        self.assertIsNone(r._live)
+        self.assertEqual(r.state(), "idle")

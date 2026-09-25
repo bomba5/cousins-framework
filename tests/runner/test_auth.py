@@ -132,6 +132,20 @@ def _result_401():
                          api_error_status=401)
 
 
+def _result_append_fails_once(r):
+    """The runner's first `result` append raises (a full disk, say): the
+    rows it names must still close as its branch closes them (#87 review)."""
+    real, said = r.stream.append, []
+
+    def append(kind, payload):
+        if kind == "result" and not said:
+            said.append(payload)
+            raise OSError("No space left on device")
+        return real(kind, payload)
+    r.stream.append = append
+    return said
+
+
 @unittest.skipIf(AssistantMessage is None, "claude-agent-sdk not installed")
 class TestRunnerWaitsForALogin(HermeticCase):
     def build(self, *, fail_connects=0, first_turn=None, per_client=None, account=None,
@@ -248,6 +262,19 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.op(r)
         self.assertTrue(_wait(lambda: seen))
         self.assertEqual(seen[0], True, "the writer was still open during _after_turn")
+
+    def test_a_failing_result_append_still_requeues_and_waits_for_the_login(self):
+        from tests.runner.test_sdk import init_msg
+        r = self.build(first_turn=[init_msg(), _result_401()])
+        said = _result_append_fails_once(r)
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: said and r.inbox.get(rec.inbox_id)["state"] != "claimed"))
+        time.sleep(0.3)
+        row = r.inbox.get(rec.inbox_id)
+        self.assertEqual((row["state"], row["outcome"]), ("queued", None), "requeued, never failed")
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None),
+                        "the runner never waited for the login")
 
     def test_a_revoked_login_reads_logged_in_so_only_new_credentials_retry(self):
         from tests.runner.test_sdk import init_msg

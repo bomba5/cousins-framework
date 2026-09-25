@@ -2027,19 +2027,23 @@ class SdkRunner:
             # holding it is replaced (_login_retry) before anything runs again.
             rows = closing + [row for row, _ in open_rows]
             ids = [row["id"] for row in rows]
-            # the result first (#87), then the rows it names go back
-            self.stream.append("result", {"inbox_ids": [], "requeued": ids,
-                                          "interrupted": interrupted, "is_error": True,
-                                          "num_turns": msg.num_turns,
-                                          "total_cost_usd": msg.total_cost_usd,
-                                          "session_id": msg.session_id, "usage": msg.usage,
-                                          "repeat_in_transcript": True, "auth": signal["reason"]})
-            for row in rows:
-                self.inbox.requeue(row["id"])
-            closing[:], open_rows[:] = [], []
-            self._drop_writes = True        # _turn closes the writer before _after_turn
-            self._interrupt_requested = self._interrupt_sent = False
-            self._login_required(signal["detail"], reason=signal["reason"])
+            # the result first (#87), then the rows it names go back and the
+            # runner waits for the login, even when the append raises
+            try:
+                self.stream.append("result", {"inbox_ids": [], "requeued": ids,
+                                              "interrupted": interrupted, "is_error": True,
+                                              "num_turns": msg.num_turns,
+                                              "total_cost_usd": msg.total_cost_usd,
+                                              "session_id": msg.session_id, "usage": msg.usage,
+                                              "repeat_in_transcript": True,
+                                              "auth": signal["reason"]})
+            finally:
+                for row in rows:
+                    self.inbox.requeue(row["id"])
+                closing[:], open_rows[:] = [], []
+                self._drop_writes = True        # _turn closes the writer before _after_turn
+                self._interrupt_requested = self._interrupt_sent = False
+                self._login_required(signal["detail"], reason=signal["reason"])
             return True     # the failure counter must not back off on top of the wait
         if not is_error:
             self._note_good_result()        # R19: a good RESULT, never an init
@@ -2050,17 +2054,20 @@ class SdkRunner:
             ids = [row["id"] for row in closing]
             # R9: the row's text is in the transcript once already; its rerun
             # writes it a second time. Said here, so the repeat surprises nobody.
-            # The result first (#87), then the rows it names go back.
-            self.stream.append("result", {"inbox_ids": [], "requeued": ids,
-                                          "interrupted": interrupted, "is_error": True,
-                                          "num_turns": msg.num_turns,
-                                          "total_cost_usd": msg.total_cost_usd,
-                                          "session_id": msg.session_id, "usage": msg.usage,
-                                          "repeat_in_transcript": True})
-            for row in closing:
-                self.inbox.requeue(row["id"])
-            closing[:] = []
-            self._interrupt_requested = self._interrupt_sent = False
+            # The result first (#87), then the rows it names go back, even
+            # when the append raises.
+            try:
+                self.stream.append("result", {"inbox_ids": [], "requeued": ids,
+                                              "interrupted": interrupted, "is_error": True,
+                                              "num_turns": msg.num_turns,
+                                              "total_cost_usd": msg.total_cost_usd,
+                                              "session_id": msg.session_id, "usage": msg.usage,
+                                              "repeat_in_transcript": True})
+            finally:
+                for row in closing:
+                    self.inbox.requeue(row["id"])
+                closing[:] = []
+                self._interrupt_requested = self._interrupt_sent = False
             return True
         outcome = FAILED if (is_error and not interrupted) else DELIVERED
         ids = [row["id"] for row in closing]

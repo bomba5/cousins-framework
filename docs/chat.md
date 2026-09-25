@@ -217,8 +217,9 @@ cousin-reply --user ana --video run.mp4 -m "the bench run"
   (`attachment_kind`, `attachment_path`) the way `cousin-image` does, so
   the console shows it and the Telegram bridge relays it. With no text,
   the caption is `(image: <file name>)` or `(video: <file name>)`.
-- Exit codes: 0 posted, 1 the server said no or couldn't be reached, 2
-  missing config or bad arguments, 3 blocked by the outbound filter.
+- Exit codes: 0 posted, 1 the reply couldn't be stored (a local write
+  failure), 2 missing config or bad arguments, 3 blocked by the outbound
+  filter.
 
 `cousin-reply` needs `COUSIN_HOME` and writes the reply into the
 cousin's own chat store itself, the same thing the `/api/<slug>_reply`

@@ -999,15 +999,20 @@ class SdkRunner:
         waits for the login, and the client is replaced by the retry."""
         self.turn.end()
         try:
-            for row in rows:
-                self.inbox.requeue(row["id"])
-            self.stream.append("result", {"inbox_ids": [], "requeued": [r["id"] for r in rows],
-                                          "interrupted": self._interrupt_sent,
-                                          "is_error": True, "num_turns": 0,
-                                          "total_cost_usd": None, "session_id": None,
-                                          "usage": None, "repeat_in_transcript": True,
-                                          "auth": signal["reason"],
-                                          "error": "%s: %s" % (type(cause).__name__, cause)})
+            # the result first (#87), then the rows it names go back, even
+            # when the append raises
+            try:
+                self.stream.append("result", {"inbox_ids": [],
+                                              "requeued": [r["id"] for r in rows],
+                                              "interrupted": self._interrupt_sent,
+                                              "is_error": True, "num_turns": 0,
+                                              "total_cost_usd": None, "session_id": None,
+                                              "usage": None, "repeat_in_transcript": True,
+                                              "auth": signal["reason"],
+                                              "error": "%s: %s" % (type(cause).__name__, cause)})
+            finally:
+                for row in rows:
+                    self.inbox.requeue(row["id"])
         except Exception as exc:  # noqa: BLE001 - recorded; the wait still starts
             self.stream.append("error", {"error": "requeueing a turn the login failed: %s: %s"
                                          % (type(exc).__name__, exc)})
@@ -1649,16 +1654,20 @@ class SdkRunner:
         self.turn.end()
         self.stream.append("error", {"error": message})
         try:
-            for row in consumed:
-                self.inbox.done(row["id"], FAILED, message)
-            for row in requeued:
-                self.inbox.requeue(row["id"])
-            self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                          "requeued": [r["id"] for r in requeued],
-                                          "interrupted": self._interrupt_sent,
-                                          "is_error": True, "num_turns": 0,
-                                          "total_cost_usd": None, "session_id": None,
-                                          "usage": None})
+            # the result first (#87), then the rows it names, closed even
+            # when the append raises
+            try:
+                self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                              "requeued": [r["id"] for r in requeued],
+                                              "interrupted": self._interrupt_sent,
+                                              "is_error": True, "num_turns": 0,
+                                              "total_cost_usd": None, "session_id": None,
+                                              "usage": None})
+            finally:
+                for row in consumed:
+                    self.inbox.done(row["id"], FAILED, message)
+                for row in requeued:
+                    self.inbox.requeue(row["id"])
         except Exception as close_exc:  # noqa: BLE001 - recorded; the resync still runs
             self.stream.append("error", {"error": "closing a failed turn: %s: %s"
                                          % (type(close_exc).__name__, close_exc)})
@@ -1885,17 +1894,18 @@ class SdkRunner:
             # repeat). A row written but not echoed goes back too: the client
             # holding it is replaced (_login_retry) before anything runs again.
             rows = closing + [row for row, _ in open_rows]
-            for row in rows:
-                self.inbox.requeue(row["id"])
             ids = [row["id"] for row in rows]
-            closing[:], open_rows[:] = [], []
-            self._drop_writes = True        # _turn closes the writer before _after_turn
+            # the result first (#87), then the rows it names go back
             self.stream.append("result", {"inbox_ids": [], "requeued": ids,
                                           "interrupted": interrupted, "is_error": True,
                                           "num_turns": msg.num_turns,
                                           "total_cost_usd": msg.total_cost_usd,
                                           "session_id": msg.session_id, "usage": msg.usage,
                                           "repeat_in_transcript": True, "auth": signal["reason"]})
+            for row in rows:
+                self.inbox.requeue(row["id"])
+            closing[:], open_rows[:] = [], []
+            self._drop_writes = True        # _turn closes the writer before _after_turn
             self._interrupt_requested = self._interrupt_sent = False
             self._login_required(signal["detail"], reason=signal["reason"])
             return True     # the failure counter must not back off on top of the wait
@@ -1905,29 +1915,36 @@ class SdkRunner:
             # A rejected request is not the item's fault (R9): back to the queue,
             # claimed again when the window reopens. The result closing it
             # returns True: the failure counter must not back off on top.
-            for row in closing:
-                self.inbox.requeue(row["id"])
-            ids, closing[:] = [row["id"] for row in closing], []
+            ids = [row["id"] for row in closing]
             # R9: the row's text is in the transcript once already; its rerun
             # writes it a second time. Said here, so the repeat surprises nobody.
+            # The result first (#87), then the rows it names go back.
             self.stream.append("result", {"inbox_ids": [], "requeued": ids,
                                           "interrupted": interrupted, "is_error": True,
                                           "num_turns": msg.num_turns,
                                           "total_cost_usd": msg.total_cost_usd,
                                           "session_id": msg.session_id, "usage": msg.usage,
                                           "repeat_in_transcript": True})
+            for row in closing:
+                self.inbox.requeue(row["id"])
+            closing[:] = []
             self._interrupt_requested = self._interrupt_sent = False
             return True
         outcome = FAILED if (is_error and not interrupted) else DELIVERED
         ids = [row["id"] for row in closing]
-        while closing:
-            self.inbox.done(closing[0]["id"], outcome,
-                            "turn %s" % (msg.session_id or self.session_id))
-            closing.pop(0)
-        self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted,
-                                      "is_error": is_error, "num_turns": msg.num_turns,
-                                      "total_cost_usd": msg.total_cost_usd,
-                                      "session_id": msg.session_id, "usage": msg.usage})
+        # the result first (#87): whoever reads a row closed finds the result
+        # that closed it. The rows close even when the append raises; a row
+        # whose close raises stays in `closing`, and the failure path fails it.
+        try:
+            self.stream.append("result", {"inbox_ids": ids, "interrupted": interrupted,
+                                          "is_error": is_error, "num_turns": msg.num_turns,
+                                          "total_cost_usd": msg.total_cost_usd,
+                                          "session_id": msg.session_id, "usage": msg.usage})
+        finally:
+            while closing:
+                self.inbox.done(closing[0]["id"], outcome,
+                                "turn %s" % (msg.session_id or self.session_id))
+                closing.pop(0)
         self._interrupt_requested = self._interrupt_sent = False
         return not (is_error and not interrupted)
 

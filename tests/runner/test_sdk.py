@@ -386,7 +386,9 @@ class TestSdkRunner(HermeticCase):
                                   assistant(text="done"), result()]])
         r.start()
         receipt = r.enqueue(self._op("hello"))
-        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())))
+        # the result is appended, then the row closes (#87): wait for both
+        self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())
+                              and r.inbox.get(receipt.inbox_id)["state"] == "done"))
         kinds = [e["kind"] for e in r.events()]
         for k in ("session_init", "turn_start", "tool", "text", "result"):
             self.assertIn(k, kinds)
@@ -456,7 +458,9 @@ class TestSdkRunner(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         a = r.enqueue(self._op("x"))
-        self.assertTrue(_wait(lambda: len(_results(r)) == 2))
+        # the result is appended, then the row closes (#87): wait for both
+        self.assertTrue(_wait(lambda: len(_results(r)) == 2
+                              and r.inbox.get(a.inbox_id)["state"] == "done"))
         res = _results(r)
         self.assertEqual([(x["inbox_ids"], x["num_turns"]) for x in res],
                          [([], 9), ([a.inbox_id], 5)])
@@ -509,7 +513,9 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(_wait(lambda: len(_results(r)) == 2))
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         c = r.enqueue(self._op("third"))
-        self.assertTrue(_wait(lambda: len(_results(r)) == 3))
+        # the result is appended, then the row closes (#87): wait for both
+        self.assertTrue(_wait(lambda: len(_results(r)) == 3
+                              and r.inbox.get(c.inbox_id)["state"] == "done"))
         res = _results(r)
         self.assertEqual([(x["inbox_ids"], x["num_turns"]) for x in res],
                          [([a.inbox_id], 1), ([b.inbox_id], 2), ([c.inbox_id], 3)])
@@ -783,7 +789,9 @@ class TestSdkRunner(HermeticCase):
                             delay=0.3, idle_timeout_s=1.0)
         r.start()
         a = r.enqueue(self._op("x"))
-        self.assertTrue(_wait(lambda: _results(r), timeout=8))
+        # the result is appended, then the row closes (#87): wait for both
+        self.assertTrue(_wait(lambda: _results(r) and r.inbox.get(a.inbox_id)["state"] == "done",
+                              timeout=8))
         self.assertEqual(_errors(r), [])
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "delivered")
 
@@ -818,7 +826,9 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(_wait(lambda: any("no message for" in e for e in _errors(r)), timeout=5.0))
         self.assertTrue(_wait(lambda: r.state() == "idle", timeout=5.0))
         b = r.enqueue(self._op("second"))
-        self.assertTrue(_wait(lambda: len(_results(r)) == 2))
+        # the result is appended, then the row closes (#87): wait for both
+        self.assertTrue(_wait(lambda: len(_results(r)) == 2
+                              and r.inbox.get(b.inbox_id)["state"] == "done"))
         second = _results(r)[1]
         self.assertEqual(second["inbox_ids"], [b.inbox_id])
         self.assertEqual((second["is_error"], second["num_turns"], second["total_cost_usd"]),
@@ -877,7 +887,9 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(reconnect["payload"]["resumed"], "s-orig")
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
         b = r.enqueue(self._op("again"))
-        self.assertTrue(_wait(lambda: len(_results(r)) == 2))
+        # the result is appended, then the row closes (#87): wait for both
+        self.assertTrue(_wait(lambda: len(_results(r)) == 2
+                              and r.inbox.get(b.inbox_id)["state"] == "done"))
         second = _results(r)[1]
         self.assertEqual((second["inbox_ids"], second["is_error"], second["num_turns"]),
                          ([b.inbox_id], False, 3))
@@ -1204,7 +1216,9 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
         self.assertTrue(_wait(lambda: made.get("clients") and made["clients"][0].paused))
         b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
-        self.assertTrue(_wait(lambda: [x for x in _results(r) if x["is_error"]]))
+        # the result is appended, then the rows close (#87): wait for both
+        self.assertTrue(_wait(lambda: [x for x in _results(r) if x["is_error"]]
+                              and r.inbox.get(a.inbox_id)["state"] == "done"))
         self.assertTrue(any("not ready for writing" in e for e in _errors(r)))
         failed = [x for x in _results(r) if x["is_error"]][0]
         self.assertEqual((failed["inbox_ids"], failed["requeued"]), ([a.inbox_id], [b.inbox_id]))

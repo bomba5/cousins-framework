@@ -73,9 +73,10 @@ class _RaisesAfterStopRunner(FakeRunner):
 
 class _RaisesOnFirstResultRunner(FakeRunner):
     """A FakeRunner whose very first "result" stream event raises,
-    simulating a failure in the turn's success TAIL - after its rows are
-    already closed `delivered`. Proves that failure does not re-close
-    those rows as `failed` (`Inbox.done` has no re-close guard)."""
+    simulating a failure in the turn's success TAIL. The result is appended
+    before the rows close (#87), and the rows close `delivered` even so.
+    Proves that failure does not re-close those rows as `failed`
+    (`Inbox.done` has no re-close guard)."""
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
@@ -183,9 +184,10 @@ class TestFakeRunner(HermeticCase):
         self.assertEqual(row["outcome"], "failed")
 
         r.enqueue(Item("operator:priya", "chat", "ok", sender="Priya"))
+        # the result is appended, then the row closes and the machine idles (#87)
         self.assertTrue(_wait(lambda: any(
             e["kind"] == "result" and e["payload"].get("is_error") is False
-            for e in r.events())))
+            for e in r.events()) and r.state() == "idle"))
         self.assertEqual(r.state(), "idle")
 
     def test_a_turn_that_raises_after_stop_never_touches_a_stopped_machine(self):
@@ -222,9 +224,10 @@ class TestFakeRunner(HermeticCase):
         self.assertEqual(row["outcome"], "delivered")
 
         r.enqueue(Item("operator:priya", "chat", "second", sender="Priya"))
+        # the result is appended, then the row closes and the machine idles (#87)
         self.assertTrue(_wait(lambda: any(
             e["kind"] == "result" and e["payload"].get("is_error") is False
-            for e in r.events())))
+            for e in r.events()) and r.state() == "idle"))
         self.assertEqual(r.state(), "idle")
 
     def test_errored_is_in_the_stream_before_the_error_event(self):

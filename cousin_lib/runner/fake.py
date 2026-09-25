@@ -197,11 +197,15 @@ class FakeRunner:
                 self.machine.to("errored", message)
         self.turn.end()
         self.stream.append("error", {"error": message})
-        for row in consumed:
-            self.inbox.done(row["id"], FAILED, message)
-        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                      "interrupted": False,
-                                      "is_error": True})
+        # the result first (#87): whoever reads a row closed finds its result;
+        # the rows close even when the append raises
+        try:
+            self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                          "interrupted": False,
+                                          "is_error": True})
+        finally:
+            for row in consumed:
+                self.inbox.done(row["id"], FAILED, message)
         with self._lock:
             if self.machine.state == "errored":
                 self.machine.to("idle", "recovered")
@@ -245,11 +249,15 @@ class FakeRunner:
         # closed by the loop just below. It propagates to `_loop`'s outer
         # guard instead, which calls `_fail_turn([], exc)`.
         outcome = DELIVERED
-        for row in consumed:
-            self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)
-        self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                      "interrupted": interrupted,
-                                      "is_error": False})
+        # the result first (#87), then the rows it names, closed even when
+        # the append raises (the turn did its work)
+        try:
+            self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
+                                          "interrupted": interrupted,
+                                          "is_error": False})
+        finally:
+            for row in consumed:
+                self.inbox.done(row["id"], outcome, "turn %s" % self.session_id)
         self.turn.end()
         with self._lock:
             if self.machine.state == "running":

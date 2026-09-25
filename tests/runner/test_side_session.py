@@ -69,8 +69,9 @@ class SideCase(HermeticCase):
         return r
 
     def done(self, r, receipt, timeout=5.0):
-        # the runner closes a turn's rows, then appends the result and runs its post-turn
-        # work (the session file, usage, mining, the proposal), then goes idle (#102)
+        # the runner appends a turn's result, then closes its rows (#87), runs its
+        # post-turn work (the session file, usage, mining, the proposal), then goes
+        # idle (#102)
         return _wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"
                      and r.state() == "idle", timeout)
 

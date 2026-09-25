@@ -1608,15 +1608,15 @@ class OpencodeRunner:
         with self._lock:
             self.machine.to("errored", message)
         self.stream.append("error", {"error": message})
-        if requeue:
-            self.inbox.requeue(row["id"])
-        else:
-            self.inbox.done(row["id"], FAILED, message)
         self.stream.append("result", {"inbox_ids": [] if requeue else [row["id"]],
                                       "requeued": [row["id"]] if requeue else [],
                                       "interrupted": False, "is_error": True,
                                       "session_id": self.opencode_session, "usage": None,
                                       "total_cost_usd": None, "num_turns": 0, "error": message})
+        if requeue:                                   # after its result (#87)
+            self.inbox.requeue(row["id"])
+        else:
+            self.inbox.done(row["id"], FAILED, message)
         self._end_turn(run)
 
     def _end_turn(self, run):
@@ -1802,15 +1802,6 @@ class OpencodeRunner:
                     self.machine.to("errored", detail)
             self.stream.append("error", {"error": detail})
         outcome = FAILED if kind == "failed" else DELIVERED
-        for s in closing:
-            s.closed = True
-            if s.row is not None and s.row["id"] > 0:
-                self.inbox.done(s.row["id"], outcome, detail if kind == "failed"
-                                else "turn %s" % self.opencode_session)
-        for s in requeue:
-            s.closed = True
-            if s.row is not None and s.row["id"] > 0:
-                self.inbox.requeue(s.row["id"])
         for pid, (part_kind, text) in list(run.open_parts.items()):
             if text:
                 self._emit_part(run, pid, part_kind, text, partial=True)
@@ -1826,8 +1817,21 @@ class OpencodeRunner:
         if kind == "auth":
             payload.update(auth=auth.LOGIN, repeat_in_transcript=True)
         run.results += 1
-        if not run.quiet:
-            self.stream.append("result", payload)
+        try:
+            if not run.quiet:
+                # the result first (#87): whoever reads a row closed finds its
+                # result; the rows close even when the append raises
+                self.stream.append("result", payload)
+        finally:
+            for s in closing:
+                s.closed = True
+                if s.row is not None and s.row["id"] > 0:
+                    self.inbox.done(s.row["id"], outcome, detail if kind == "failed"
+                                    else "turn %s" % self.opencode_session)
+            for s in requeue:
+                s.closed = True
+                if s.row is not None and s.row["id"] > 0:
+                    self.inbox.requeue(s.row["id"])
         run.over = not run.unclosed()
         if kind == "auth":
             self._login_required(detail)

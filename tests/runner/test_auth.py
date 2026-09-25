@@ -222,7 +222,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         rec = self.op(r)
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None, 5))
         self.assertGreaterEqual(self.clients[0].interrupts, 1)     # the runner cut the retries
-        # the row goes back to the queue before its result is appended (#102)
+        # the result is appended, then the row goes back to the queue (#87, #102)
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"
                               and any(e.get("requeued") for e in self.events(r, "result"))))
         requeued = [e for e in self.events(r, "result") if e.get("requeued")]

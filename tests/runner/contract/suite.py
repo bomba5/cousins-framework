@@ -84,6 +84,19 @@ class RunnerContract:
         row = r.inbox.get(receipt.inbox_id)
         return row["outcome"] if row and row["state"] == "done" else None
 
+    def _closed_before_result(self, r):
+        """#87: the ids whose row was closed before a `result` event named
+        them. A turn's result goes on the stream first, so whoever reads the
+        row closed also finds the result that closed it."""
+        early, real = [], r.inbox.done
+
+        def done(inbox_id, *args, **kwargs):
+            if not any(inbox_id in x.get("inbox_ids", ()) for x in _results(r)):
+                early.append(inbox_id)
+            return real(inbox_id, *args, **kwargs)
+        r.inbox.done = done
+        return early
+
     # -- the items -------------------------------------------------------------
     @item("enqueue_receipt")
     def test_enqueue_returns_a_receipt(self):
@@ -126,11 +139,12 @@ class RunnerContract:
     @item("outcome_delivered")
     def test_a_finished_turn_closes_its_row_delivered(self):
         r = self._runner()
+        early = self._closed_before_result(r)
         r.start()
         a = r.enqueue(_op("one"))
-        # a runner closes the row, then appends the result naming it (#102)
-        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None
-                              and any(a.inbox_id in x["inbox_ids"] for x in _results(r))))
+        # the result naming the row is on the stream before the row closes (#87)
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        self.assertNotIn(a.inbox_id, early)
         self.assertEqual(self._row_outcome(r, a), "delivered")
         self.assertEqual(_results(r)[-1]["inbox_ids"], [a.inbox_id])
         self.assertFalse(_results(r)[-1]["is_error"])
@@ -138,11 +152,12 @@ class RunnerContract:
     @item("outcome_failed")
     def test_a_failed_turn_closes_its_row_failed(self):
         r = self._runner(fail_first=True)
+        early = self._closed_before_result(r)
         r.start()
         a = r.enqueue(_op("one"))
-        # a runner closes the row, then appends the result naming it (#102)
-        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None
-                              and any(a.inbox_id in x["inbox_ids"] for x in _results(r))))
+        # the result naming the row is on the stream before the row closes (#87)
+        self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
+        self.assertNotIn(a.inbox_id, early)
         self.assertEqual(self._row_outcome(r, a), "failed")
         failed = [x for x in _results(r) if a.inbox_id in x["inbox_ids"]]
         self.assertTrue(failed and failed[0]["is_error"])
@@ -178,15 +193,15 @@ class RunnerContract:
     @item("outcome_interrupted")
     def test_an_interrupted_turns_row_is_delivered(self):
         r = self._runner(slow=True)
+        early = self._closed_before_result(r)
         r.start()
         a = r.enqueue(_op("slow"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
         self.assertTrue(r.interrupt())
         self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None, timeout=3.0))
         self.assertEqual(self._row_outcome(r, a), "delivered", "the model received it")
-        # The runner closes the row before it appends the turn's `result`
-        # event: wait for the event too, or a loaded host lands in the gap.
-        self.assertTrue(_wait(lambda: _results(r), timeout=3.0))
+        # the turn's `result` is on the stream before its row closes (#87)
+        self.assertNotIn(a.inbox_id, early)
         self.assertTrue(_results(r)[-1]["interrupted"])
 
     @item("interrupt_idle_false")

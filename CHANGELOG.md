@@ -11,6 +11,21 @@ pane under a real login) are pending: they run on this release candidate
 before it ships.
 
 ### Added
+- The console finishes its map of the framework:
+  - **Agent settings** per cousin, lane-aware (sdk, opencode, tmux,
+    tmux-legacy): model, effort, account, auto_start, rollover threshold,
+    side sessions, the opencode keys, env_allow, commit_attribution, plus
+    name, peer visibility and the memory keys; every `[agent]` write through
+    one validated path (`spawn.persist_agent_values`), a new SDK model
+    validated by one turn in a child process on the account being written.
+    The spawn dialog picks the kind from the server's list.
+  - **Kind switch and migration**: plan, apply, check and rollback, and
+    `--to sdk|tmux`, as background operations with their stages; the pane of
+    a tmux-kind cousin opens from the dialog for the one-time trust answer
+    (keys reach it only while it shows a dialog that waits on a person, and
+    only the keys such a dialog takes). Reincarnate and transplant, with a
+    typed confirmation for the destructive modes and an audit line naming
+    the console user.
 - The `tmux` runner kind: `[agent] runner = "tmux"` runs the host's
   interactive Claude Code CLI in a tmux pane on the framework's own socket
   (`run/tmux.sock`), driven by `TmuxRunner` inside `cousin-runner` and

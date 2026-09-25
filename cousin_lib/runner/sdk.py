@@ -57,6 +57,8 @@ def _sdk():
 
 
 _END = object()
+# #66: _next's answer when a stop comes while the turn waits on a carried row
+_CARRY_STOPPED = object()
 # A turn is live while the model runs it, including while it waits on a
 # permission: every exit from either state (errored, idle, stopped) is legal.
 LIVE_STATES = ("running", "waiting_permission")
@@ -92,6 +94,13 @@ class _NotWritten(Exception):
     def __init__(self, row, cause):
         super().__init__(str(cause))
         self.row, self.cause = row, cause
+
+
+class _CarriedDropped(Exception):
+    """#66: an interrupt was taken while the turn waited on a carried row,
+    and no echo came within drain_timeout_s: the CLI never took the
+    row up. It goes back to the queue, and the turn fails so the stream is
+    brought back in step (_resync)."""
 
 
 class _Unrenderable(Exception):
@@ -373,6 +382,11 @@ class SdkRunner:
         self._interrupt_requested = False
         self._interrupt_sent = False    # an interrupt reached the client this turn (_close)
         self._live = False       # the CLI is generating for this turn (see _interrupt_turn)
+        # #66: the turn waits on a carried row (written, its echo not come when
+        # the CLI's result did); interrupts are taken, and stop and an
+        # interrupt bound the wait (_carried_wait)
+        self._carrying = False
+        self._carry_until = None
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
         self._client_id = None   # a fresh uuid per connect (usage.record's client key)
@@ -802,7 +816,10 @@ class SdkRunner:
         below and the interrupt cannot be split by a turn boundary. `_live`
         is cleared at every ResultMessage: an interrupt that arrives after
         the result, while the CLI is between turns, is dropped too, so it
-        never marks a finished turn interrupted or reaches an idle CLI."""
+        never marks a finished turn interrupted or reaches an idle CLI;
+        unless the turn still waits on a row carried past that result
+        (#66): written before the interrupt, the row starts the CLI turn
+        the interrupt then ends."""
         if not self._interrupt_may_go(seq):
             return False
         self._interrupt_requested = True
@@ -827,7 +844,8 @@ class SdkRunner:
     def _interrupt_may_go(self, seq):
         """True when turn `seq` is the live one; a stale request is said as
         `interrupt_dropped` and never reaches the client."""
-        if seq != self._turn_seq or self.machine.state not in LIVE_STATES or not self._live:
+        if seq != self._turn_seq or self.machine.state not in LIVE_STATES \
+                or not (self._live or self._carrying):
             self.stream.append("system", {"subtype": "interrupt_dropped",
                                           "turn": seq, "current": self._turn_seq})
             return False
@@ -1489,13 +1507,14 @@ class SdkRunner:
         """Interrupt rows (phase 5), taken on every poll of a live turn
         whatever the fold's gates: after the first result a folded
         follow-up can start a CLI turn of its own, and only this path can
-        stop it. Taken only while the CLI is generating (`_live`): one that
-        lands between a result and the next echo waits queued, and one no
-        live turn takes is closed NO_TURN at the turn boundary. A refused
+        stop it. Taken only while the CLI is generating (`_live`) or the
+        turn waits on a carried row (#66): one that lands between a result
+        and the next turn waits queued, and one no live turn takes is
+        closed NO_TURN at the turn boundary. A refused
         interrupt (the CLI raised) fails its own row and never the turn,
         as the in-process path records it and goes on; the turn is then
         not marked interrupted."""
-        if not self.takes_interrupts or not self._live \
+        if not self.takes_interrupts or not (self._live or self._carrying) \
                 or self.machine.state not in LIVE_STATES:
             return
         for row in self.inbox.open_rows(INTERRUPT):
@@ -1578,6 +1597,8 @@ class SdkRunner:
         try:
             while True:
                 self._raise_write_error()
+                if self._carrying and self._carried_wait():
+                    return _CARRY_STOPPED
                 if control is not None and time.monotonic() - last_control >= self.poll_s:
                     last_control = time.monotonic()
                     with self._waiting_at("control"):
@@ -1609,6 +1630,39 @@ class SdkRunner:
                     await task
                 except BaseException:  # noqa: BLE001 - the read we abandoned, not ours to raise
                     pass
+
+    def _carried_wait(self):
+        """#66: the bounds of a carried read. True when a stop came: the
+        turn stops waiting at once. An interrupt taken meanwhile gives the
+        echo drain_timeout_s to come, then `_CarriedDropped`: counted from
+        the request, not the write, so an interrupt stuck behind a blocked
+        fold write is bounded too."""
+        if self._stop.is_set():
+            return True
+        now = time.monotonic()
+        if self._interrupt_requested and self._carry_until is None:
+            self._carry_until = now + self.drain_timeout_s
+        if self._carry_until is not None and now >= self._carry_until:
+            raise _CarriedDropped("interrupted, and the CLI never took up the carried row"
+                                  " (no echo for %.1fs)" % self.drain_timeout_s)
+        return False
+
+    def _drop_carried(self, open_rows):
+        """#66: a stop came while the turn waited on carried rows the CLI
+        never took up (no echo): back to the queue, as the tmux kind's stop
+        requeues an untaken row; the result says so first (#87)."""
+        rows = [row for row, _ in open_rows]
+        open_rows[:] = []
+        try:
+            self.stream.append("result", {"inbox_ids": [], "requeued": [r["id"] for r in rows],
+                                          "interrupted": self._interrupt_sent,
+                                          "is_error": False, "num_turns": 0,
+                                          "total_cost_usd": None, "session_id": None,
+                                          "usage": None,
+                                          "carried": "stopped before the CLI took them up"})
+        finally:
+            for row in rows:
+                self.inbox.requeue(row["id"])
 
     def _raise_write_error(self):
         """A fold write that failed on the writer fails the turn here, on
@@ -1784,6 +1838,9 @@ class SdkRunner:
 
             while open_rows:
                 echoed = set()
+                if results:
+                    # rows written, their echo not come when the result did
+                    self._carrying = True
                 responses = self._client.receive_response()
                 it = responses.__aiter__()
                 try:
@@ -1793,6 +1850,9 @@ class SdkRunner:
                         if msg is _END:
                             # the CLI died: the SDK ends the stream on {"type": "end"}
                             raise RunnerError("stream ended without a result")
+                        if msg is _CARRY_STOPPED:
+                            self._drop_carried(open_rows)
+                            break
                         echo_of = None
                         if isinstance(msg, sdk.UserMessage):
                             row = self._match_echo(sdk, msg, open_rows, echoed)
@@ -1800,6 +1860,7 @@ class SdkRunner:
                                 echo_of = row["id"]
                                 echoed.add(echo_of)
                                 self._live = True   # the CLI took up a carried row
+                                self._carrying, self._carry_until = False, None
                                 if row["id"] != first["id"]:
                                     self.turn.add(row)
                         # a message means the permission was settled; a hook's
@@ -1820,7 +1881,14 @@ class SdkRunner:
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1
                             self._live = False
+                            self._carrying, self._carry_until = False, None
+                            cut = self._interrupt_sent      # _close clears it
                             ok = self._close(msg, open_rows, echoed, closing) and ok
+                            if cut and open_rows:
+                                # an interrupt ended this CLI turn with rows still
+                                # carried: the CLI may have dropped them, so the
+                                # wait for their echo is bounded (#66)
+                                self._carry_until = time.monotonic() + self.drain_timeout_s
                             if self._drop_writes:
                                 # a login's result requeued every open row: none of
                                 # them may still be written during _after_turn
@@ -1843,6 +1911,12 @@ class SdkRunner:
             if isinstance(exc, _NotWritten) and all(r["id"] != exc.row["id"] for r in requeued):
                 requeued.append(exc.row)
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
+            if isinstance(exc, _CarriedDropped):
+                # never taken up by the CLI (no echo): back to the queue, and
+                # the resync below brings the stream back in step (#66)
+                requeued += [row for row, _ in open_rows]
+                open_rows[:] = []
+                cause = RunnerError(str(exc))
             # A raise before the send (the move to `running` refused, say) leaves
             # `first` claimed and in no list: back to the queue, the client untouched.
             unsent = [] if sending else [first]
@@ -1866,6 +1940,7 @@ class SdkRunner:
                 self._recover()
             return False
         finally:
+            self._carrying, self._carry_until = False, None
             await self._close_writer()   # no writer task outlives its turn
         self.turn.end()
         with self._lock:

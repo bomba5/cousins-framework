@@ -3,12 +3,38 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.24.1 - 2026-09-25
+
+The documentation sweep (master plan 10c, task 6) and the glossary (task 7),
+against the running 1.24.0. The 2.0.0 steps of 10c (the CHANGELOG migration
+section, the major bump) wait for 10b, the legacy lane's retirement.
+
+### Added
+- `docs/glossary.md`: the words the docs use in a sense of their own, one
+  entry each. Every page links the first use of each term to its entry;
+  `tests/test_glossary_links.py` holds the pages to it.
+- `docs/migrating.md`: "Switching between runner kinds" (`cousin-migrate
+  --to sdk|tmux`), which was undocumented.
+- `docs/mcp.md`: a runner cousin's own `.mcp.json` servers, per kind.
+- `docs/reference/lifecycle.md`: the runner lane's clean stop.
+- `docs/operations.md`: `cousin-loops fire` for testing a loop by hand.
+
+### Fixed
+- Every page read against the code and a scratch install: the tmux kind and
+  the legacy tmux lane told apart everywhere; `docs/memory.md` numbers the
+  boot packet's nine layers as `boot.assemble` does; `docs/mcp.md` lists the
+  `obsolete` and `meeting` tools; `docs/cousins.md`: a runner cousin needs no
+  chat server; `docs/chat.md`: `cousin-reply` exits 1 only on a local write
+  failure; `docs/reference/console-api.md`: the `ok` and `restart_note`
+  fields and the tmux kind in the spawn options; the cousin CLAUDE.md
+  template's `cousin-runner`, `cousin-migrate` and `cousin-watch` rows.
+- `cousin-migrate --help` names the kind switch and the legacy lane.
+
 ## 1.24.0 - 2026-09-25
 
 Phase 11 of the runner plan, integrated onto 1.23.0. The live proofs the
 phase's exit criteria require (a kind switch both ways on a real cousin, the
-pane under a real login) are pending: they run on this release candidate
-before it ships.
+pane under a real login) passed on this release candidate before it shipped.
 
 ### Added
 - The console finishes its map of the framework:

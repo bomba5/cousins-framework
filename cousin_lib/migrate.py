@@ -1,4 +1,4 @@
-"""cousin-migrate: move one cousin from the tmux lane to the SDK runner
+"""cousin-migrate: move one cousin from the legacy tmux lane to the SDK runner
 (master plan phase 7 tasks 7-8; the runbook is docs/migrating.md).
 
 Nothing here runs on its own. A merge, an upgrade or a boot never
@@ -1762,7 +1762,8 @@ def migrate_main(argv=None):
     from cousin_lib.config import FrameworkConfig
     parser = argparse.ArgumentParser(
         prog="cousin-migrate",
-        description="move one cousin from the tmux lane to the SDK runner, and back")
+        description="move one cousin from the legacy tmux lane to the SDK runner, and back;"
+                    " --to switches a runner cousin between the sdk and tmux kinds")
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in ("plan", "apply"):
         p = sub.add_parser(name)

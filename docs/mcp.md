@@ -12,7 +12,7 @@ Every cousin spawned by the framework comes with five tools:
 
 | Tool | Runs | Commands |
 |---|---|---|
-| `memory` | `cousin-memory` | `search`, `decide`, `remember`, `recall`, `activity` |
+| `memory` | `cousin-memory` | `search`, `decide`, `remember`, `obsolete`, `recall`, `activity` |
 | `send` | `cousin-chat send` or `cousin-reply` | picked by the destination |
 | `job` | `cousin-job` | `start`, `run`, `done`, `fail`, `list`, `show` |
 | `schedule` | `cousin-schedule` | `add`, `list`, `cancel` |
@@ -160,6 +160,45 @@ the in-process handler only sees the arguments the model actually
 passed, so it returns the CLI's default (non-flagged) text unless the
 model asks for that behaviour itself (`{"json": true}`).
 
+### A runner cousin's own MCP servers
+
+Per kind, an operator-added `<home>/.mcp.json` server beyond `cousin` is
+handled differently:
+
+- **sdk.** `cousin_lib/runner/mcp_config.py` reads the home's
+  `.mcp.json` once, at the first turn, and keeps it for the runner's
+  life; an edit lands at the next start. Each entry maps onto the SDK's
+  server config as one of three shapes: stdio (`command`, `args`,
+  `env`), `http` or `sse` (`url`, `headers`). `cousin` is reserved: an
+  entry of that name is skipped, since the runner serves its own tools
+  in-process. `${VAR}` and `${VAR:-default}` pass through unexpanded for
+  the agent CLI to expand from its own environment; a reference with no
+  default to a variable unset in the runner's environment skips the
+  entry (the CLI would refuse such a config), and a reference to one of
+  the cousin's own credential variables skips the entry regardless, so
+  a `.mcp.json` the model can edit can never route the cousin's
+  credential to another server. A file that does not parse, or an entry
+  of an unknown shape, is skipped with the reason, never fatal: the
+  cousin still starts with `cousin`. `cousin`'s own tools load with
+  `alwaysLoad` set, so they never sit behind the CLI's tool search; a
+  user server's tools stay deferred there. The runner's event stream
+  carries an `mcp_config` event with server names, types, ignored keys
+  and skip reasons, ordered by name, never a value.
+- **tmux** (the legacy lane and the tmux runner kind). Claude Code reads
+  `<home>/.mcp.json` itself, the ordinary project-config way, including
+  the `cousin` entry spawn wrote (see "How it's wired" above). An extra
+  server an operator adds there works exactly as Claude Code has always
+  handled it; the framework does nothing special for it.
+- **opencode.** The runner renders opencode's own config with exactly
+  one MCP server, `cousin`, a remote HTTP bridge
+  (`cousin_lib/runner/mcp_http.py`) with a bearer token; it does not
+  read the home's `.mcp.json` for this kind. Before a turn it checks
+  opencode's effective config (every config source opencode itself
+  merged) and refuses to run if anything besides `cousin` shows up
+  there, so a stray opencode config file can't add a server the runner
+  never rendered.
+- **fake.** No MCP servers of any kind; it exists for tests.
+
 ## Checking it
 
 ```
@@ -175,15 +214,16 @@ to see exactly what the cousin sees:
 ```
 export COUSIN_HOME=$PWD/cousins/wren FRAMEWORK_ROOT=$PWD
 cousin-mcp --selftest
-#   -> registry: .../cousins/wren/mcp-registry.toml (4 tools, ceiling 12, timeout 120s, output cap 16000 chars)
-#        memory    cousin-memory                activity, decide, recall, remember, search
+#   -> registry: .../cousins/wren/mcp-registry.toml (5 tools, ceiling 12, timeout 120s, output cap 16000 chars)
+#        memory    cousin-memory                activity, decide, obsolete, recall, remember, search
 #        send      cousin-chat, cousin-reply    operator, peer (operators: ana)
 #        job       cousin-job                   done, fail, list, run, show, start
+#        meeting   cousin-meeting               minutes, pass, say, show
 #        schedule  cousin-schedule              add, cancel, list
 #        cousin-memory -> beside the interpreter
 #        ...
 #      mcp sdk: present, protocol versions 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25
-#      selftest ok: 4 schema(s) built
+#      selftest ok: 5 schema(s) built
 ```
 
 `--selftest` exits 1 if any command can't be found, or if any tool did

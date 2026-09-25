@@ -1239,10 +1239,16 @@ class SdkRunner:
                             self._fresh_pending = True
                         elif self.fatal is None:
                             await self._start_fresh(with_digest=True)
+                            # the digest is queued (or run): the new id may go on file
+                            await self._flush_session()
         finally:
             watchdog.cancel()
             await self._stop_review()
-            await self._flush_session()     # a stop never loses the last id
+            if not self._resume_lost:
+                # a stop never loses the last id; a lost resume's new id waits
+                # for the fresh start, which a stop before it leaves to the
+                # next start (the old id on file takes the lost-resume path)
+                await self._flush_session()
             await self._disconnect()
 
     @contextlib.contextmanager
@@ -1871,12 +1877,12 @@ class SdkRunner:
                                     self.machine.to("running", "message")
                         self._record(sdk, msg, echo_of=echo_of)
                         if self._pending_save is not None and not self._resume_lost \
-                                and not isinstance(msg, sdk.ResultMessage):
+                                and isinstance(msg, sdk.SystemMessage) and msg.subtype == "init":
                             # #119: the id an init named goes on file now, not at the
                             # result: a runner killed inside a new session's first turn
-                            # resumes it. A lost resume keeps the old id until the fresh
-                            # start after this turn (a kill before it takes that path
-                            # again); a result's id is _after_turn's.
+                            # resumes it. At the init only: a write that fails is
+                            # retried at the result, never once per message. A lost
+                            # resume keeps the old id until its fresh start has run.
                             await self._flush_session()
                         if isinstance(msg, sdk.ResultMessage):
                             results += 1
@@ -2037,8 +2043,10 @@ class SdkRunner:
         held back by the hysteresis): a rollover is requested, never run
         here; the loop claims it at the boundary. First of all, the
         session id this result (or its init) named goes to
-        runner-session.json, off the loop."""
-        await self._flush_session()
+        runner-session.json, off the loop; not a lost resume's (the fresh
+        start after this turn writes it, once the digest is queued)."""
+        if not self._resume_lost:
+            await self._flush_session()
         await self._record_usage(msg)
         await self._mine(self._resume_id)
         await self._propose(self._resume_id)

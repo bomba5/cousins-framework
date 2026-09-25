@@ -144,7 +144,7 @@ class TestResume(HermeticCase):
                   if e["kind"] == "system" and e["payload"].get("subtype") == "resume_failed"]
         self.assertEqual((failed[0]["session_id"], failed[0]["got"]), ("s-live", "s-other"))
         self.assertTrue(_wait(lambda: any("carry this too" in b for b in self.bodies(r))))
-        self.assertEqual(r.saved_session(), "s-other")
+        self.assertTrue(_wait(lambda: r.saved_session() == "s-other"))   # after the fresh start
         digest = next(i for i in range(1, 30)
                       if "carry this too" in ((r.inbox.get(i) or {}).get("body") or ""))
         self.assertTrue(_wait(lambda: r.inbox.get(digest)["outcome"] == "delivered"))
@@ -236,6 +236,46 @@ class TestResume(HermeticCase):
         time.sleep(0.5)
         self.assertEqual(r.state(), "running")
         self.assertEqual(self.session_file()["session_id"], "s-old")
+
+    def test_a_lost_resume_keeps_the_old_id_until_its_fresh_start_runs(self):
+        # review round 2, 5: between the lost-resume turn's result and the
+        # fresh start with the digest, a kill must still find the old id,
+        # or the next start resumes the new session and no digest ever comes
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-old", "lane": "login", "generation": 0, "updated": 0}))
+        (self.home / "STATUS.md").write_text("## Open loops\n- carry this\n")
+        r = self.runner(resume_as="s-other")
+        seen, real = [], r._start_fresh
+
+        async def start_fresh(**kw):
+            seen.append(self.session_file()["session_id"])   # what a kill here would find
+            return await real(**kw)
+        r._start_fresh = start_fresh
+        r.start()
+        self.one_turn(r)
+        self.assertTrue(_wait(lambda: seen))
+        self.assertEqual(seen, ["s-old"])
+        self.assertTrue(_wait(lambda: r.saved_session() == "s-other"))   # once the digest is in
+
+    def test_a_failing_session_write_is_retried_once_per_turn_not_per_message(self):
+        # review round 2, 6: a full disk is one error at the init and one at
+        # the result, not one per streamed message
+        def factory(options):
+            self.options.append(options)
+            return ScriptedClient(options, [[init_msg(session="s-new")]
+                                            + [assistant(text="t%d" % i) for i in range(6)]
+                                            + [result(session="s-new")]])
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+
+        def full(session_id):
+            raise OSError("No space left on device")
+        r._save_session = full
+        r.start()
+        self.one_turn(r)
+        errors = [e for e in r.events() if e["kind"] == "error"
+                  and "runner-session.json" in e["payload"].get("error", "")]
+        self.assertLessEqual(len(errors), 2)
 
     def test_a_brand_new_cousin_gets_no_digest(self):
         r = self.runner(); r.start(); self.one_turn(r)

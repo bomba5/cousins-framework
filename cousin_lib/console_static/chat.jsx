@@ -78,6 +78,37 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
     try { localStorage.setItem("fw_pane_side", paneOpen ? "1" : "0"); }
     catch (e) { /* ignore */ }
   }, [paneOpen]);
+  // The pane's share of the width, dragged on the divider between the two
+  // and kept per browser; a double-click puts it back to half.
+  const [paneW, setPaneW] = React.useState(() => {
+    try {
+      const v = Number(localStorage.getItem("fw_pane_w"));
+      if (v >= 20 && v <= 80) return v;
+    } catch (e) { /* storage unavailable */ }
+    return 50;
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem("fw_pane_w", String(Math.round(paneW * 10) / 10)); }
+    catch (e) { /* ignore */ }
+  }, [paneW]);
+  const splitRef = React.useRef(null);
+  const onDividerDown = (e) => {
+    const el = splitRef.current;
+    if (!el) return;
+    e.preventDefault();
+    el.classList.add("dragging");
+    const move = (m) => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0) setPaneW(Math.min(80, Math.max(20, (r.right - m.clientX) / r.width * 100)));
+    };
+    const up = () => {
+      el.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   React.useEffect(() => {
     try { localStorage.setItem("fw_chat_fullscreen", fullscreen ? "1" : "0"); }
     catch (e) { /* ignore */ }
@@ -134,7 +165,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
       {/* The chat and the pane side by side: the pane is the runner's
           reasoning stream (with the interrupt) or the tmux terminal. On a
           phone the open pane takes the whole width, as it always did. */}
-      <div className={"chat-split" + (paneShown ? " pane-open" : "")}>
+      <div ref={splitRef} className={"chat-split" + (paneShown ? " pane-open" : "")} style={{ "--pane-w": paneW + "%" }}>
         <div className="chat-col">
           <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneShown} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} />
           {fullscreen && (
@@ -149,6 +180,10 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
           <ChatBody key={c.slug + "|" + chatUser} cousin={c} search={search} setSearch={setSearch} chatUser={chatUser} showArchived={showArchived} mediaShown={mediaShown} />
           {toast && <div className="chat-toast">{toast}</div>}
         </div>
+        {paneShown && (
+          <div className="split-div" onPointerDown={onDividerDown} onDoubleClick={() => setPaneW(50)}
+               title="drag to resize, double-click to reset" role="separator" aria-orientation="vertical" />
+        )}
         <div className={`pane-col ${paneShown ? "open" : ""}`}>
           {paneShown && (c.runner
             ? <RunnerPaneView key={c.slug} cousin={c} onClose={() => setPaneOpen(false)} />
@@ -1484,6 +1519,218 @@ function runnerFleetKey(runner) {
   return JSON.stringify([r.alive, r.state, r.session, r.since]);
 }
 
+// === The folded view of the stream (operator's ask, #125) ===
+// The raw stream is one row per event; most of it is bookkeeping. rpModel
+// folds it into a status strip (what the runner is doing now, the quota,
+// the session, the totals) and a log of real things: a turn, a tool with
+// its result, a reply, the model's text, a turn's summary line. Pure: the
+// pane re-folds its kept events on every batch. The raw toggle keeps the
+// one-row-per-event view.
+
+const rpIsTick = (ev) => !!ev && ev.kind === "system" && !!ev.payload && ev.payload.subtype === "thinking_tokens";
+
+// The kept events, with a run of thinking ticks collapsed into its first
+// (n counts them, last_ts is the newest): a thinking model sends one per
+// chunk, and they would push real events out of RUNNER_PANE_KEEP.
+function rpCompact(prev, add) {
+  const out = prev.slice();
+  for (const ev of add) {
+    const last = out[out.length - 1];
+    if (rpIsTick(ev) && rpIsTick(last)) out[out.length - 1] = Object.assign({}, last, { n: (last.n || 1) + 1, last_ts: ev.ts });
+    else out.push(ev);
+  }
+  return out;
+}
+
+const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
+const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1, task_updated: 1 };
+
+function rpModel(events) {
+  const strip = { state: null, activity: null, rate: {}, session: null, tokens: 0, cost: 0, turns: 0, bg: 0 };
+  const rows = [];
+  const tools = {};
+  let turn = null, meta = {}, thinkSince = null;
+  const newMeta = () => { meta = {}; return meta; };
+  (events || []).forEach((ev, i) => {
+    const p = ev.payload || {};
+    const k = ev.kind, ts = ev.ts || null;
+    // seq restarts with a new runner session; ts keeps two sessions apart
+    const key = (ts != null ? ts : "") + ":" + (ev.seq != null ? ev.seq : "i" + i) + ":" + k;
+    if (rpIsTick(ev)) {
+      if (thinkSince == null) thinkSince = ts;
+      strip.activity = { kind: "thinking", since: thinkSince };
+      return;
+    }
+    const thought = thinkSince;
+    thinkSince = null;
+    if (k === "state") {
+      strip.state = p.to || null;
+      if (p.to === "running") strip.activity = { kind: "working", since: ts };
+      else if (p.to === "waiting_permission") strip.activity = { kind: "waiting", since: ts };
+      else strip.activity = null;
+      return;
+    }
+    if (k === "system") {
+      // background tasks are a count on the strip, not rows: the SDK
+      // reports one around many ordinary tool calls
+      if (p.subtype === "task_started") strip.bg += 1;
+      else if (p.subtype === "task_notification") strip.bg = Math.max(0, strip.bg - 1);
+      else if (p.subtype === "fresh" || p.subtype === "init") rpBoot(rows, key, ev);
+      else if (!RP_SKIP_SYSTEM[p.subtype]) rows.push({ t: "meta", key, ev });
+      return;
+    }
+    if (RP_BOOT_KINDS[k]) { rpBoot(rows, key, ev); return; }
+    switch (k) {
+      case "rate_limit": strip.rate[p.type || "limit"] = p; return;
+      case "session_init":
+        strip.session = { model: p.model || null, auth: p.apiKeySource == null ? null : (p.apiKeySource === "none" ? "your login" : "API key (" + p.apiKeySource + ")") };
+        return;
+      case "turn_start":
+        turn = { t: "turn", key, ev, thread: p.thread_id || null, bodies: p.bodies || [], user: null, recall: null, meta: newMeta() };
+        rows.push(turn);
+        return;
+      case "user":
+        if (turn && turn.user == null) { turn.user = String(p.text || ""); return; }
+        // a message folded into the running turn: its own divider
+        rows.push({ t: "turn", mid: true, key, ev, thread: null, bodies: [], user: String(p.text || ""), recall: null });
+        return;
+      case "recall": if (turn) { turn.recall = p; return; } return;
+      case "tool": {
+        const row = { t: p.name === "mcp__cousin__reply" ? "reply" : "tool", key, ev, result: null, ms: null };
+        if (p.id) tools[p.id] = row;
+        rows.push(row);
+        strip.activity = { kind: "tool", name: rpToolLabel(p.name, p.input).name, since: ts };
+        return;
+      }
+      case "tool_result": {
+        const row = tools[p.tool_use_id];
+        if (row && !row.result) { row.result = ev; strip.activity = strip.activity && { kind: "working", since: ts }; return; }
+        break;
+      }
+      case "tool_call": {
+        // the framework's own timing of one of its tools: onto the card
+        for (let j = rows.length - 1; j >= 0; j--) {
+          const r = rows[j];
+          if ((r.t === "tool" || r.t === "reply") && r.ms == null) {
+            const n = String((r.ev.payload || {}).name || "");
+            if (n === p.tool || n.endsWith("__" + p.tool)) { r.ms = p.ms; return; }
+          }
+        }
+        return;
+      }
+      case "thinking":
+        if (p.text || thought != null) rows.push({ t: "thinking", key, ev, secs: thought != null && ts ? Math.max(0, ts - thought) : null });
+        if (strip.activity) strip.activity = { kind: "working", since: ts };
+        return;
+      case "text": rows.push({ t: "text", key, ev }); return;
+      case "error": rows.push({ t: "error", key, ev }); return;
+      case "checkpoint": meta.checkpoint = p; return;
+      case "extract": meta.extract = p; return;
+      case "propose": meta.propose = p; return;
+      case "usage":
+        meta.usage = p;
+        strip.tokens += Number(p.total) || 0;
+        strip.cost += Number(p.cost_usd) || 0;
+        return;
+      case "result":
+        meta.result = p;
+        strip.turns += 1;
+        rows.push({ t: "footer", key, ev, meta });
+        return;
+    }
+    rows.push({ t: "meta", key, ev });
+  });
+  return { strip, rows };
+}
+
+function rpBoot(rows, key, ev) {
+  const last = rows[rows.length - 1];
+  if (last && last.t === "boot") last.events.push(ev);
+  else rows.push({ t: "boot", key, events: [ev] });
+}
+
+// A tool's short name and a one-line description of what it was asked.
+function rpToolLabel(name, input) {
+  let n = String(name || "tool");
+  let server = null;
+  if (n.startsWith("mcp__")) {
+    const parts = n.split("__");
+    server = parts[1] || null;
+    n = parts.slice(2).join(" ") || server || n;
+  }
+  const i = input || {};
+  let desc = "";
+  for (const f of ["description", "file_path", "pattern", "query", "command", "url", "topic", "prompt", "text"]) {
+    if (typeof i[f] === "string" && i[f].trim()) {
+      desc = f === "file_path" ? i[f].split("/").pop() : i[f];
+      if (f === "command" && typeof i.topic === "string") desc += " " + i.topic;
+      break;
+    }
+  }
+  return { name: n, server, desc: rpCut(desc.replace(/\s+/g, " ").trim(), 90) };
+}
+
+function rpElapsed(sec) {
+  if (sec == null || !isFinite(sec)) return "";
+  if (sec < 1) return Math.round(sec * 1000) + "ms";
+  if (sec < 60) return (sec < 10 ? sec.toFixed(1) : String(Math.round(sec))) + "s";
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m + "m " + String(s).padStart(2, "0") + "s";
+}
+
+function rpTok(n) {
+  n = Number(n) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return Math.round(n / 1e3) + "k";
+  return String(n);
+}
+
+const RP_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// One quota window as the strip shows it: a label, a 0-100 fill, a level
+// (ok, warn, over) and when it resets, on this browser's clock.
+function rpRate(type, p) {
+  const label = type === "seven_day" ? "7-day" : type === "five_hour" ? "5-hour" : String(type).replace(/_/g, " ");
+  const u = typeof p.utilization === "number" ? p.utilization : null;
+  const pct = u == null ? null : Math.max(0, Math.min(100, Math.round(u * 100)));
+  const level = p.status === "rejected" || p.overage ? "over" : (p.status === "allowed_warning" || (pct != null && pct >= 80)) ? "warn" : "ok";
+  let resets = null;
+  if (p.resets_at) {
+    const d = new Date(p.resets_at * 1000);
+    resets = RP_DAYS[d.getDay()] + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+  return { label, pct, level, resets };
+}
+
+// A turn's summary line from its result, usage, extract, propose and checkpoint.
+function rpFooterParts(meta) {
+  const m = meta || {}, r = m.result || {};
+  const parts = [r.interrupted ? "interrupted" : r.is_error ? "ended with an error" : "done"];
+  if (r.num_turns) parts.push(r.num_turns + (r.num_turns === 1 ? " step" : " steps"));
+  if (m.usage && m.usage.total) parts.push(rpTok(m.usage.total) + " tok");
+  const cost = m.usage && m.usage.cost_usd != null ? m.usage.cost_usd : r.total_cost_usd;
+  if (cost) parts.push("$" + Number(cost).toFixed(2) + (m.usage && m.usage.estimate ? " est" : ""));
+  if (m.extract && m.extract.written) parts.push(m.extract.written + (m.extract.written === 1 ? " memory" : " memories"));
+  if (m.propose && m.propose.proposal) parts.push("proposal");
+  if (m.checkpoint) parts.push("checkpoint");
+  return parts;
+}
+
+// A turn's divider: the envelope's first line and the start of the message.
+function rpTurnHead(turn) {
+  const src = turn.user != null ? turn.user : String((turn.bodies || [])[0] || "");
+  const lines = src.split("\n");
+  let head = turn.thread || "", rest = src;
+  let title = head;
+  if (/^\[[^\]]+\]/.test(lines[0] || "")) {
+    title = lines[0];
+    rest = lines.slice(1).join("\n");
+    // "[operator:x] chat from x at 2026-09-25 09:48 UTC" reads as "x 09:48"
+    const m = /^\[[^\]]+\]\s+\S+\s+from\s+(.+?)\s+at\s+\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2})/.exec(title);
+    head = m ? m[1] + " " + m[2] : title;
+  }
+  return { head: rpCut(head, 90), title, snippet: rpCut(rest.replace(/\s+/g, " ").trim(), 110), full: src };
+}
+
 function RunnerPaneView({ cousin, onClose }) {
   const slug = cousin && cousin.slug;
   const runner = (cousin && cousin.runner) || {};
@@ -1528,7 +1775,7 @@ function RunnerPaneView({ cousin, onClose }) {
       frame = null;
       const add = batch;
       batch = [];
-      setEvents(prev => prev.concat(add).slice(-RUNNER_PANE_KEEP));
+      setEvents(prev => rpCompact(prev, add).slice(-RUNNER_PANE_KEEP));
     };
     const push = (ev) => {
       batch.push(ev);
@@ -1554,10 +1801,43 @@ function RunnerPaneView({ cousin, onClose }) {
     return () => { es.close(); if (frame !== null) window.cancelAnimationFrame(frame); };
   }, [slug]);
 
-  React.useEffect(() => {
+  // Follow the stream only while the reader is at the bottom: scrolled up,
+  // a new event leaves the view where it is and offers a jump back.
+  const atBottomRef = React.useRef(true);
+  const [behind, setBehind] = React.useState(false);
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (atBottomRef.current) setBehind(false);
+  };
+  const toBottom = () => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events]);
+    atBottomRef.current = true;
+    setBehind(false);
+  };
+  const [raw, setRaw] = React.useState(() => {
+    try { return localStorage.getItem("fw_rp_raw") === "1"; } catch (e) { return false; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem("fw_rp_raw", raw ? "1" : "0"); } catch (e) { /* ignore */ }
+  }, [raw]);
+  const model = React.useMemo(() => rpModel(events), [events]);
+  // The strip's elapsed timer ticks only while the runner is doing something.
+  const [now, setNow] = React.useState(() => Date.now());
+  const ticking = !!model.strip.activity;
+  React.useEffect(() => {
+    if (!ticking) return undefined;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [ticking]);
+
+  React.useLayoutEffect(() => {
+    if (atBottomRef.current) toBottom();
+    else setBehind(true);
+  }, [events, raw]);
 
   const post = async (path, body) => {
     try {
@@ -1595,15 +1875,20 @@ function RunnerPaneView({ cousin, onClose }) {
         <span style={{ flex: 1 }} />
         {onClose && <button className="btn ghost pane-x" onClick={onClose} title="collapse the pane">x</button>}
       </div>
-      <div ref={listRef} className="rp-list">
-        {events.map((ev, i) => (
+      <RpStrip strip={model.strip} now={now} raw={raw} setRaw={setRaw} />
+      <div ref={listRef} className={"rp-list" + (raw ? "" : " rp-folded")} onScroll={onListScroll}>
+        {raw ? events.map((ev, i) => (
           <div key={i} className={"runner-ev runner-ev-" + ev.kind + " rp-" + runnerKindClass(ev.kind)}>
             <span className="rp-kind">{ev.kind}</span>
             <div className="rp-body">{rpRowBody(ev)}</div>
           </div>
+        )) : model.rows.map(row => (
+          <RpRow key={row.key} row={row} now={now}
+                 activeTool={!!model.strip.activity} />
         ))}
         {events.length === 0 && <div className="rp-empty">{status === "live" ? "no events yet: the stream shows the runner's turns as they happen" : "connecting to the stream..."}</div>}
       </div>
+      {behind && <button className="rp-jump" onClick={toBottom}>new events ↓</button>}
       <div className="pane-foot">
         {note && <div className="pane-note">{note}</div>}
         <div className="pane-foot-row">
@@ -1616,6 +1901,133 @@ function RunnerPaneView({ cousin, onClose }) {
         </div>
       </div>
     </React.Fragment>
+  );
+}
+
+// The folded view's rows and strip (rpModel's output as elements).
+const RP_ACT_LABEL = { thinking: "thinking", working: "working", waiting: "waiting for permission" };
+
+function RpRow({ row, now, activeTool }) {
+  const ev = row.ev || {};
+  const p = ev.payload || {};
+  switch (row.t) {
+    case "turn": {
+      const h = rpTurnHead(row);
+      const hits = row.recall && row.recall.hits;
+      return (
+        <details className={"rp-turn" + (row.mid ? " mid" : "")}>
+          <summary title={h.title || undefined}>
+            <span className="rp-turn-head">{h.head || "turn"}</span>
+            {hits > 0 && <span className="rp-chip" title="memories recalled for this message">recall {hits}</span>}
+            <span className="rp-turn-snip">{h.snippet}</span>
+          </summary>
+          <div className="rp-turn-full">{h.full}</div>
+        </details>
+      );
+    }
+    case "tool": case "reply": {
+      const lab = rpToolLabel(p.name, p.input);
+      const res = row.result && row.result.payload;
+      const err = !!(res && res.is_error);
+      const dur = row.result && row.result.ts && ev.ts ? row.result.ts - ev.ts : (row.ms != null ? row.ms / 1000 : null);
+      const pending = !row.result;
+      const mark = pending ? <span className={"rp-spin" + (activeTool ? "" : " rp-spin-idle")} /> : <span className={err ? "rp-mark rp-err" : "rp-mark rp-ok"}>{err ? "✗" : "✓"}</span>;
+      if (row.t === "reply") {
+        const said = String((p.input || {}).text || "");
+        const where = res && !err ? String(res.text || "").replace(/^replied to /, "") : (err ? rpCut(res.text, 120) : "sending...");
+        return (
+          <details className={"rp-card rp-reply" + (err ? " is-err" : "")}>
+            <summary>{mark}<span className="rp-card-name">→ reply</span><span className="rp-card-desc">{where}</span><span className="rp-card-desc rp-reply-prev">{rpCut(said.replace(/\s+/g, " "), 120)}</span></summary>
+            <div className="rp-card-body rp-sans">{renderMarkdownLite(said).map((n, j) => rpToReact(n, j))}</div>
+          </details>
+        );
+      }
+      return (
+        <details className={"rp-card" + (err ? " is-err" : "")}>
+          <summary title={lab.server ? "MCP server " + lab.server : undefined}>
+            {mark}<span className="rp-card-name">{lab.name}</span>
+            <span className="rp-card-desc">{lab.desc}</span>
+            {dur != null && <span className="rp-card-dur">{rpElapsed(dur)}</span>}
+          </summary>
+          <div className="rp-card-body">
+            <div className="rp-card-in">{rpToolInput(p.input).map((n, j) => rpToReact(n, j))}</div>
+            {res && <div className="rp-card-out">{rpToolOutput(res.text).map((n, j) => rpToReact(n, j))}</div>}
+          </div>
+        </details>
+      );
+    }
+    case "thinking": {
+      const label = "thought" + (row.secs != null ? " " + rpElapsed(row.secs) : "");
+      if (!p.text) return <div className="rp-line rp-thought">{label}</div>;
+      return (
+        <details className="rp-thought-d">
+          <summary className="rp-thought">{label}</summary>
+          <div className="rp-thought-text">{p.text}{p.truncated ? " [truncated]" : ""}</div>
+        </details>
+      );
+    }
+    case "text":
+      return <div className="rp-text-row">{rpRowBody(ev)}</div>;
+    case "error":
+      return <div className="rp-line rp-err">error: {String(p.error || "")}</div>;
+    case "footer": {
+      const parts = rpFooterParts(row.meta);
+      const bad = row.meta.result && (row.meta.result.is_error || row.meta.result.interrupted);
+      return <div className={"rp-footer" + (bad ? " is-err" : "")}>{parts.join(" · ")}</div>;
+    }
+    case "boot":
+      return (
+        <details className="rp-boot">
+          <summary>runner started · {row.events.length} setup {row.events.length === 1 ? "event" : "events"}</summary>
+          {row.events.map((e, j) => (
+            <div key={j} className="rp-boot-ev"><span className="rp-kind">{e.kind}</span> {rpRowBody(e)}</div>
+          ))}
+        </details>
+      );
+    default:
+      return (
+        <div className={"runner-ev rp-" + runnerKindClass(ev.kind)}>
+          <span className="rp-kind">{ev.kind}</span>
+          <div className="rp-body">{rpRowBody(ev)}</div>
+        </div>
+      );
+  }
+}
+
+function RpStrip({ strip, now, raw, setRaw }) {
+  const a = strip.activity;
+  const rates = Object.keys(strip.rate).map(t => rpRate(t, strip.rate[t]));
+  return (
+    <div className="rp-strip">
+      <span className={"rp-act" + (a ? " on" : "")}>
+        {a ? <span className="rp-spin" /> : <span className="rp-idle-dot" />}
+        {a ? (a.kind === "tool" ? a.name : RP_ACT_LABEL[a.kind] || a.kind) : (strip.state || "idle").replace(/_/g, " ")}
+        {a && a.since ? <span className="rp-act-t">{rpElapsed(Math.max(0, now / 1000 - a.since))}</span> : null}
+      </span>
+      {rates.map(r => (
+        <span key={r.label} className={"rp-rate is-" + r.level} title={"Claude usage limit, " + r.label + " window" + (r.resets ? ", resets " + r.resets : "")}>
+          {r.label}
+          {r.pct != null && <span className="rp-bar"><span style={{ width: r.pct + "%" }} /></span>}
+          {r.pct != null && <span>{r.pct}%</span>}
+          {r.resets && <span className="rp-dim">resets {r.resets}</span>}
+        </span>
+      ))}
+      {strip.session && strip.session.model && (
+        <span className={"rp-chip" + (strip.session.auth && strip.session.auth !== "your login" ? " is-warn" : "")} title="from the session's init: model and where its credentials come from">
+          {strip.session.model.replace(/^claude-/, "")}{strip.session.auth ? " · " + strip.session.auth : ""}
+        </span>
+      )}
+      {strip.turns > 0 && (
+        <span className="rp-dim" title="tokens and estimated cost of the turns in this view">
+          {strip.turns} {strip.turns === 1 ? "turn" : "turns"} · {rpTok(strip.tokens)} tok{strip.cost ? " · $" + strip.cost.toFixed(2) : ""}
+        </span>
+      )}
+      {strip.bg > 0 && <span className="rp-chip">{strip.bg} bg {strip.bg === 1 ? "task" : "tasks"}</span>}
+      <span style={{ flex: 1 }} />
+      <label className="rp-raw" title="one row per stream event, as it arrives">
+        <input type="checkbox" checked={raw} onChange={e => setRaw(e.target.checked)} /> raw
+      </label>
+    </div>
   );
 }
 
@@ -2021,4 +2433,4 @@ function fmtShortTime(ts) {
   } catch (e) { return ""; }
 }
 
-Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, runnerEventLine, runnerEventBody, paneLiveness, runnerFleetKey, renderMarkdown, resolveChatUser, groupReactions });
+Object.assign(window, { ChatView, ChatBubble, PaneView, RunnerPaneView, rpModel, rpCompact, runnerEventLine, runnerEventBody, paneLiveness, runnerFleetKey, renderMarkdown, resolveChatUser, groupReactions });

@@ -3,6 +3,26 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.25.0 - 2026-09-25
+
+### Added
+- The reasoning pane is folded by default (#125). A strip under the header
+  shows what the runner is doing now (a spinner while it thinks or runs a
+  tool, with the elapsed time), the Claude usage limit as a bar with its
+  reset day, the session's model and whether it runs on the host login or
+  an API key, and the turns, tokens and cost in view. The log shows one row
+  per real thing: turns, tool calls paired with their results, replies,
+  thinking, text, and one summary line per turn. "raw" shows every event,
+  as before.
+- The divider between the chat and the reasoning pane drags to resize,
+  remembered per browser; a double-click resets it to half.
+
+### Changed
+- Scrolled up, the reasoning pane stays where you are when events arrive,
+  with a "new events" button back to the bottom.
+- A run of thinking ticks is kept as one event, so they no longer push real
+  events out of the pane's 500-event window.
+
 ## 1.24.6 - 2026-09-25
 
 ### Changed

@@ -428,6 +428,123 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(got["deepText"], "[" * 100 + "]" * 100)
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class TestRunnerPaneFolded(unittest.TestCase):
+    """The folded pane (#125): the stream becomes a status strip (activity,
+    quota, session, totals) and one row per real thing (a turn, a tool with
+    its result, a reply, text, a turn's summary). Raw keeps one row per
+    event. The fold is pure, so it is tested on event lists in node."""
+
+    def setUp(self):
+        self.chat = (_STATIC / "chat.jsx").read_text()
+        self.css = (_STATIC / "styles.css").read_text()
+        self.src = self.chat[self.chat.index("function runnerEventLine("):
+                             self.chat.index("function RunnerPaneView(")]
+
+    def run_node(self, body):
+        out = subprocess.run(["node", "-e", self.src + body], capture_output=True,
+                             text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stdout)
+
+    EVENTS = """
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const evs = [
+  E(1, "runner", {kind: "sdk"}), E(2, "policy", {describe: "x"}), E(3, "system", {subtype: "fresh"}),
+  E(4, "state", {from: "idle", to: "running"}),
+  E(5, "turn_start", {bodies: ["hi"]}), E(6, "recall", {hits: 3}),
+  E(7, "session_init", {model: "claude-opus-5-5", apiKeySource: "none"}),
+  E(8, "rate_limit", {status: "allowed_warning", resets_at: 1790733600, type: "seven_day", utilization: 0.91}),
+  E(9, "user", {text: "[operator:jo] chat from jo at 2026-09-25 09:48 UTC\\n\\nretire them"}),
+  E(10, "system", {subtype: "thinking_tokens"}), E(11, "system", {subtype: "thinking_tokens"}),
+  E(14, "thinking", {length: 0, text: ""}),
+  E(15, "tool", {id: "t1", name: "Bash", input: {command: "ls", description: "List files"}}),
+  E(16, "system", {subtype: "vcs_state_changed"}),
+  E(17, "tool_result", {tool_use_id: "t1", is_error: false, text: "a b"}),
+  E(18, "tool", {id: "t2", name: "mcp__cousin__reply", input: {text: "done"}}),
+  E(19, "tool_call", {tool: "reply", command: "", is_error: false, ms: 9}),
+  E(20, "tool_result", {tool_use_id: "t2", is_error: false, text: "replied to jo (#7)"}),
+  E(21, "user", {text: "[operator:jo] chat from jo at 2026-09-25 09:50 UTC\\n\\nalso this"}),
+  E(22, "text", {text: "ok"}), E(23, "checkpoint", {kind: "session"}),
+  E(24, "result", {num_turns: 3, is_error: false, interrupted: false}),
+  E(25, "usage", {total: 254517, cost_usd: 0.44, estimate: true}),
+  E(26, "extract", {written: 2}), E(27, "propose", {proposal: null}),
+  E(28, "state", {from: "running", to: "idle"}),
+];
+"""
+
+    def test_the_stream_folds_into_rows(self):
+        got = self.run_node(self.EVENTS + """
+const m = rpModel(evs);
+process.stdout.write(JSON.stringify({
+  types: m.rows.map(r => r.t + (r.mid ? ":mid" : "")),
+  boot: m.rows[0].events.length,
+  recall: m.rows[1].recall.hits,
+  head: rpTurnHead(m.rows[1]),
+  mid: rpTurnHead(m.rows[5]).snippet,
+  thought: m.rows[2].secs,
+  tool: [m.rows[3].result.payload.text, rpToolLabel("Bash", {command: "ls", description: "List files"})],
+  reply: [m.rows[4].ms, m.rows[4].result.payload.text],
+  footer: rpFooterParts(m.rows[7].meta).join(" · "),
+}));""")
+        self.assertEqual(got["types"], ["boot", "turn", "thinking", "tool", "reply", "turn:mid", "text", "footer"])
+        self.assertEqual(got["boot"], 3)
+        self.assertEqual(got["recall"], 3)
+        self.assertEqual(got["head"]["head"], "jo 09:48")
+        self.assertEqual(got["head"]["snippet"], "retire them")
+        self.assertEqual(got["mid"], "also this")
+        self.assertEqual(got["thought"], 4)  # first thinking tick at 1010, thought at 1014
+        self.assertEqual(got["tool"], ["a b", {"name": "Bash", "server": None, "desc": "List files"}])
+        self.assertEqual(got["reply"], [9, "replied to jo (#7)"])
+        # the checkpoint before the result and the meta after it land on one line
+        self.assertEqual(got["footer"], "done · 3 steps · 255k tok · $0.44 est · 2 memories · checkpoint")
+
+    def test_the_strip_reads_the_runner_now(self):
+        got = self.run_node(self.EVENTS + """
+const done = rpModel(evs).strip;
+const mid = rpModel(evs.slice(0, 11)).strip;
+const tool = rpModel(evs.slice(0, 13)).strip;
+process.stdout.write(JSON.stringify({done, mid, tool,
+  rate: rpRate("seven_day", done.rate.seven_day),
+  over: rpRate("five_hour", {status: "rejected", utilization: 1.2}).level,
+  ok: rpRate("five_hour", {status: "allowed", utilization: 0.2})}));""")
+        self.assertIsNone(got["done"]["activity"])
+        self.assertEqual(got["done"]["state"], "idle")
+        self.assertEqual(got["done"]["session"], {"model": "claude-opus-5-5", "auth": "your login"})
+        self.assertEqual((got["done"]["tokens"], got["done"]["turns"]), (254517, 1))
+        self.assertEqual(got["mid"]["activity"], {"kind": "thinking", "since": 1010})
+        self.assertEqual(got["tool"]["activity"], {"kind": "tool", "name": "Bash", "since": 1015})
+        self.assertEqual(got["rate"]["label"], "7-day")
+        self.assertEqual((got["rate"]["pct"], got["rate"]["level"]), (91, "warn"))
+        self.assertRegex(got["rate"]["resets"], r"^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d\d:\d\d$")
+        self.assertEqual(got["over"], "over")
+        self.assertEqual((got["ok"]["pct"], got["ok"]["level"]), (20, "ok"))
+
+    def test_an_api_key_session_says_so(self):
+        got = self.run_node("""
+const s = rpModel([{kind: "session_init", payload: {model: "m", apiKeySource: "ANTHROPIC_API_KEY"}}]).strip.session;
+process.stdout.write(JSON.stringify(s));""")
+        self.assertEqual(got["auth"], "API key (ANTHROPIC_API_KEY)")
+
+    def test_thinking_ticks_are_compacted_before_the_keep_cap(self):
+        got = self.run_node("""
+const T = (ts) => ({kind: "system", ts, payload: {subtype: "thinking_tokens"}});
+const out = rpCompact([T(1)], [T(2), T(3), {kind: "text", ts: 4, payload: {}}, T(5)]);
+process.stdout.write(JSON.stringify(out.map(e => [e.kind, e.ts, e.n || 1, e.last_ts || null])));""")
+        self.assertEqual(got, [["system", 1, 3, 3], ["text", 4, 1, None], ["system", 5, 1, None]])
+
+    def test_the_pane_holds_the_scroll_and_keeps_raw(self):
+        pane = self.chat[self.chat.index("function RunnerPaneView("):]
+        pane = pane[:pane.index("\n}\n")]
+        self.assertIn("if (atBottomRef.current) toBottom();", pane)
+        self.assertIn("else setBehind(true);", pane)
+        self.assertIn('<button className="rp-jump" onClick={toBottom}>', pane)
+        self.assertIn("rpCompact(prev, add).slice(-RUNNER_PANE_KEEP)", pane)
+        self.assertIn('localStorage.setItem("fw_rp_raw"', pane)
+        self.assertIn("<RpStrip strip={model.strip}", pane)
+        self.assertIn("@keyframes rp-spin", self.css)
+
+
 class TestFleetAndTokens(unittest.TestCase):
     def test_the_card_shows_the_runners_state_and_unsupported_items(self):
         cousins = (_STATIC / "cousins.jsx").read_text()

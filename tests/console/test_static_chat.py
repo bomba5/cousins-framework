@@ -349,7 +349,20 @@ class ChatBesideThePane(unittest.TestCase):
         self.assertIn('className="chat-col"', view)
         self.assertIn('className={`pane-col ${paneShown ? "open" : ""}`}', view)
         self.assertIn(".chat-split.pane-open .chat-col { flex: 1 1 0; }", self.css)
-        self.assertIn(".chat-split.pane-open .pane-col { flex: 1 1 0;", self.css)
+        # the pane takes the dragged share (--pane-w), half by default
+        self.assertIn(".chat-split.pane-open .pane-col { flex: 0 0 var(--pane-w, 50%);", self.css)
+
+    def test_the_split_is_dragged_kept_and_reset(self):
+        view = _function_body(self.chat, "ChatView")
+        self.assertIn('className="split-div" onPointerDown={onDividerDown} onDoubleClick={() => setPaneW(50)}', view)
+        self.assertIn('style={{ "--pane-w": paneW + "%" }}', view)
+        self.assertIn('localStorage.setItem("fw_pane_w"', view)
+        self.assertIn("Math.min(80, Math.max(20,", view)
+        # while dragging the columns do not animate, and a phone has no divider
+        self.assertIn(".chat-split.dragging .chat-col, .chat-split.dragging .pane-col { transition: none; }", self.css)
+        phone = self.css[self.css.index(".split-div { flex: none;"):]
+        phone = phone[phone.index("@media (max-width: 820px)"):]
+        self.assertIn(".split-div { display: none; }", phone[:phone.index("}\n}") + 3])
 
     def test_a_phone_still_gives_the_open_pane_the_width(self):
         phone = self.css[self.css.index("/* === Chat view (chat.jsx ChatView)"):]

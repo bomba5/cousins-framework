@@ -551,8 +551,27 @@ records, live, as it records them (read from the cousin's own
 a dropped connection picks up where it left off, and a runner that
 restarted meanwhile is marked with a new-session line. When no runner is
 running, the header says "not running" beside the last state it recorded.
-A tool call and its output read as structure: the call, then its result
-hung under it; a turn opens under a rule. "interrupt", beside the say box
+By default the stream is folded. A strip under the header says what the
+runner is doing now (a spinner with "thinking", the running tool's name, or
+the idle state, with how long it has been at it), the Claude usage limit
+as a bar with its reset day (amber from 80% or on a warning, red when
+rejected), the session's model and whether it runs on the host login or an
+API key, and the turns, tokens and estimated cost of the turns in view.
+Below it the log holds one row per real thing: a turn under a rule (who
+sent it, when, and the start of the message; click for all of it, with the
+recall hits as a chip), each tool call with its result as one card (a tick
+or a cross, what it was asked, how long it took; click for the input and
+output), a reply as "-> reply" with the message, a thinking block as
+"thought 2s", the model's text, and a line that closes each turn (steps,
+tokens, cost, memories written, checkpoint). The runner's setup events sit
+in one collapsed "runner started" row; thinking ticks and bookkeeping are
+not rows. "raw" in the strip shows every event as its own row, as it
+arrives, and is remembered per browser. Scrolled up, the view stays where
+you left it and a "new events" button takes you back to the bottom.
+
+The divider between the chat and the pane drags to resize (the pane takes
+20% to 80% of the width, remembered per browser); a double-click puts it
+back to half. "interrupt", beside the say box
 at the foot of the stream, ends the running turn, past its first answer
 too; the button is live only while a turn runs, and the foot says what came
 of it (`delivered`, or `failed` when the turn had already finished or the

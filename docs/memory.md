@@ -378,22 +378,24 @@ cousin; see [operations](operations.md).
 
 ## What the boot packet reads
 
-The boot packet is the text a new session starts from. It has eight
+The boot packet is the text a new session starts from. It has nine
 layers in a fixed order, a hard ceiling of about 8000 tokens, and a
 list of required actions at the end. The memory it pulls in:
 
 1. Framework law (`config/law.md`), not memory, but first.
-2. The committed self-portrait.
-3. Operator calibration: `operator-calibration.md` (or the portrait's
+2. Shared rules and fleet memory: the shared tier's `kind: rule`
+   entries in full, then a one-line index of the rest.
+3. The committed self-portrait.
+4. Operator calibration: `operator-calibration.md` (or the portrait's
    calibration section), plus recent corrections.
-4. Active state: the open loops from `STATUS.md` and the latest
+5. Active state: the open loops from `STATUS.md` and the latest
    `data/handoff.md`.
-5. Task packet: `data/active-threads.md` and the last three capsules.
-6. Tool trace summary.
-7. Retrieved memories: the other five distilled files, the newest
+6. Task packet: `data/active-threads.md` and the last three capsules.
+7. Tool trace summary.
+8. Retrieved memories: the other five distilled files, the newest
    capsule conclusions, recent raw entries (up to the last 60 lines
    from the newest 14 raw files) and the head of `MEMORY.md`.
-8. The list of `cousin-*` commands and what each one does.
+9. Tool surface: the list of `cousin-*` commands and what each one does.
 
 When the packet is too big, the command list and then the memories
 are cut first, and law never. A

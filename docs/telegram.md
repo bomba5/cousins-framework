@@ -79,7 +79,7 @@ the console. Thread names ignore case and treat spaces as underscores
 (`normalize_chat_user` in `cousin_lib/server/storage.py`). Use the same
 name as the cousin's `[operator] name`. Then Telegram messages count as
 the operator's too, for the recall suffix and correction capture, which
-key off that name (`_is_operator` in `cousin_lib/server/app.py`). An
+key off that name (`is_operator` in `cousin_lib/server/storage.py`). An
 entry with no `name` lands in a thread called `operator`
 (`_thread_name`).
 

@@ -472,6 +472,8 @@ cousin-migrate plan sam --to sdk
 cousin-migrate apply sam --to sdk --yes
 #     ok  close      the tmux runner stopped at idle; session <id> kept
 #     ok  toml       [agent] runner = 'sdk', the kind's settings removed
+#     ok  cursor     the mining cursor at the end of the sdk kind's record
+#     ok  notice     inbox row <n>, the first turn after the switch
 #     ok  start      the sdk runner resumes <id>
 #     ok  verify     the SDK's session_init names <id>
 #   switched
@@ -526,7 +528,9 @@ noted.
 ```
 cousin-migrate rollback sam --to tmux --yes
 #     ok  close      the sdk runner stopped
+#     ok  notice     the switch's notice, never taken, dropped
 #     ok  restore    cousin.toml as it was, byte for byte; the tmux kind's settings
+#     ok  cursor     the mining cursor at the end of the tmux kind's record
 #     ok  start      the tmux runner resumes <id>
 #   rolled_back
 ```

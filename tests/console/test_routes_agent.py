@@ -147,7 +147,7 @@ class PostAgent(AgentCase):
         gate = threading.Event()
         seen = []
 
-        def turn(home_, root, model, effort):
+        def turn(home_, root, model, effort, **kw):
             gate.wait(5)
             seen.append((model, effort))
             return 0, "validate: ok"
@@ -351,3 +351,111 @@ class SpawnOptionsLanes(AgentCase):
         self.assertEqual(len(rows["box"]["models"]), 1)
         self.assertTrue(rows["box"]["models"][0].endswith("/qwen3"))
         self.assertNotIn("models", rows["fleet"])
+
+
+class Round1(AgentCase):
+    """Review round 1 of WP-A."""
+
+    def test_model_and_account_together_run_the_turn_on_the_new_account(self):
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\n')
+        self.serve()
+        seen = []
+
+        def turn(h, r, model, effort, **kw):
+            seen.append((model, kw.get("account")))
+            return 0, "ok"
+        with mock.patch("cousin_lib.spawn.validate_turn_out_of_process", turn):
+            status, body = self.post("/api/cousins/wren/agent", {"changes": {
+                "model": "m-two", "account": "fleet"}})
+            self.assertEqual(status, 202, body)
+            op = self.wait_op("wren")
+        self.assertEqual(op["status"], "done", op)
+        self.assertEqual(seen, [("m-two", "fleet")])
+        self.assertEqual(self.agent(home)["account"], "fleet")
+
+    def test_a_failed_op_names_the_row_and_an_unexpected_error_is_worded(self):
+        self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\n')
+        self.serve()
+        with mock.patch("cousin_lib.spawn.validate_turn_out_of_process",
+                        return_value=(4, "validate: nope")):
+            self.post("/api/cousins/wren/agent", {"changes": {"model": "m-bad"}})
+            op = self.wait_op("wren")
+        self.assertEqual(list(op["result"]["errors"]), ["model"])
+        from cousin_lib import spawn
+        with mock.patch("cousin_lib.spawn.validate_turn_out_of_process",
+                        return_value=(0, "ok")), \
+                mock.patch("cousin_lib.agent_settings.apply",
+                           side_effect=spawn.SpawnError("disk says no")):
+            self.post("/api/cousins/wren/agent", {"changes": {"model": "m-three"}})
+            op = self.wait_op("wren")
+        self.assertEqual(op["status"], "failed")
+        self.assertIn("disk says no", op["error"])
+        self.assertIn("disk says no", op["result"]["errors"]["changes"])
+
+    def test_describe_serves_the_model_rule_the_turn_flag_and_the_tmux_lane(self):
+        self.cousin("wren", extra='\n[agent]\nrunner = "opencode"\naccount = "oc"\n'
+                                  'model = "openai/gpt-5"\n')
+        self.cousin("sam", extra='\n[agent]\nrunner = "sdk"\n')
+        self.serve()
+        oc = self.get("/api/cousins/wren/agent")[1]
+        sdk = self.get("/api/cousins/sam/agent")[1]
+        self.assertEqual(oc["model_rule"]["placeholder"], "<provider>/<model>")
+        self.assertTrue(oc["model_rule"]["provider_model"])
+        self.assertFalse(oc["model_change_spends_turn"])
+        self.assertTrue(sdk["model_change_spends_turn"])
+        self.assertFalse(sdk["model_rule"]["provider_model"])
+        self.assertEqual(sdk["tmux_lane"], "tmux-legacy")
+
+    def test_commit_attribution_is_an_agent_key_every_lane_reads(self):
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "tmux"\n')
+        self.serve()
+        self.assertIn("commit_attribution", self.get("/api/cousins/wren/agent")[1]["settings"])
+        status, body = self.post("/api/cousins/wren/agent",
+                                 {"changes": {"commit_attribution": "false"}})
+        self.assertEqual(status, 400, body)
+        status, body = self.post("/api/cousins/wren/agent",
+                                 {"changes": {"commit_attribution": False}})
+        self.assertEqual(status, 200, body)
+        # the tmux kind reads it from its harness settings: written there too
+        settings = json.loads((home / ".claude" / "settings.json").read_text())
+        self.assertIs(settings["includeCoAuthoredBy"], False)
+
+    def test_the_operators_own_attribution_key_wins_and_the_note_says_so(self):
+        home = self.cousin("wren")
+        (home / ".claude").mkdir()
+        (home / ".claude" / "settings.json").write_text('{"includeCoAuthoredBy": true}\n')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/settings",
+                                 {"changes": {"agent.commit_attribution": False}})
+        self.assertEqual(status, 200, body)
+        self.assertIn("includeCoAuthoredBy", body["note"])
+        self.assertIn("own", body["note"])
+
+    def test_a_harness_settings_failure_reports_what_was_written(self):
+        home = self.cousin("wren")
+        self.serve()
+        with mock.patch("cousin_lib.harness_settings.apply_project_settings",
+                        side_effect=OSError("read-only file system")):
+            status, body = self.post("/api/cousins/wren/settings",
+                                     {"changes": {"agent.commit_attribution": False}})
+        self.assertEqual(status, 500, body)
+        self.assertIn("read-only file system", body["error"])
+        self.assertEqual(body["written"], {"agent.commit_attribution": False})
+        self.assertIs(tomllib.loads((home / "cousin.toml").read_text())["agent"]
+                      ["commit_attribution"], False)
+
+    def test_an_unreadable_install_value_makes_the_effective_one_unknown(self):
+        (self.root / "config" / "harness.toml").write_text('[agent]\ncommit_attribution = "x"\n')
+        self.cousin("wren")
+        self.serve()
+        f = self.get("/api/cousins/wren/settings")[1]["fields"]["agent.commit_attribution"]
+        self.assertIsNone(f["install"]["value"])
+        self.assertIsNone(f["effective"])
+
+    def test_an_int_percentage_equal_to_the_files_float_is_no_change(self):
+        self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\nrollover_at_percent = 80.0\n')
+        self.serve()
+        status, body = self.post("/api/cousins/wren/agent",
+                                 {"changes": {"rollover_at_percent": 80}})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["changed"], [])

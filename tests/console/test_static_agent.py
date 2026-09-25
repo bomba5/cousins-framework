@@ -47,6 +47,32 @@ class AgentJsx(unittest.TestCase):
                     "row.base", "row.deny_prefixes"):
             self.assertIn(key, self.src, key)
 
+    def test_no_kind_is_named_in_the_page(self):
+        """Round 1: the lanes, the model shape and the turn come from the
+        server (describe()'s tmux_lane, model_rule, model_change_spends_turn)."""
+        for kind in ("sdk", "fake", "opencode", "tmux", "tmux-legacy"):
+            self.assertNotIn('"%s"' % kind, self.src, kind)
+        for key in ("data.tmux_lane", "data.model_rule", "data.model_change_spends_turn",
+                    "rule.placeholder", "rule.provider_model"):
+            self.assertIn(key, self.src, key)
+
+    def test_the_panel_waits_for_its_own_op_and_polls_as_a_fallback(self):
+        panel = _component(self.src, "AgentSettingsPanel")
+        self.assertIn("setWaitOp(d.op.id)", panel)
+        self.assertIn("agentOpSettled(op, waitOp)", panel)
+        self.assertIn("agentOpSettled(d.op, waitOp)", panel)
+        self.assertIn("setInterval(", panel)
+        self.assertIn("setErrors(r.errors ||", panel)
+
+    def test_it_reloads_on_a_fleet_refresh_and_the_settings_stand_alone(self):
+        panel = _component(self.src, "AgentSettingsPanel")
+        self.assertIn("[c.lane, c.held, c.effort, c.model, c.account, c.autoStart]", panel)
+        self.assertNotIn("<CousinSettingsPanel", panel)
+        self.assertIn('registerSlot("inspector.lane", { id: "cousin-settings"', self.src)
+        settings = _component(self.src, "CousinSettingsPanel")
+        self.assertIn("d.written", settings)
+        self.assertIn('"unknown"', settings)
+
     def test_an_sdk_model_change_is_a_long_operation(self):
         self.assertIn("r.status === 202", self.src)
         self.assertIn('<LongOpStatus slug={c.slug} kind="agent-settings" />', self.src)
@@ -72,14 +98,16 @@ class AgentJsx(unittest.TestCase):
 class TheOtherFiles(unittest.TestCase):
     def test_the_inspector_shows_model_effort_and_auth_on_the_tmux_legacy_lane_only(self):
         inspector = _component(_read("cousins.jsx"), "Inspector")
-        self.assertIn('const tmuxLane = !c.lane || c.lane === "tmux-legacy";', inspector)
+        # the name the server gives the lane, never a literal (round 1)
+        self.assertIn("c.lane === options.tmux_lane", inspector)
+        self.assertNotIn('"tmux-legacy"', inspector)
         block = inspector[inspector.index("{tmuxLane && <>"):inspector.index("</>}")]
         for token in ('field="model"', 'field="effort"', "<AuthField"):
             self.assertIn(token, block, token)
 
     def test_the_spawn_dialog_names_the_tmux_lane_and_offers_the_accounts_models(self):
         modal = _component(_read("cousins.jsx"), "SpawnModal")
-        self.assertIn('options?.tmux_lane || "tmux-legacy"', modal)
+        self.assertIn('{options?.tmux_lane || "..."}', modal)
         self.assertIn(".models || []", modal)
         self.assertIn("laneSuggestions.map", modal)
 
@@ -127,6 +155,25 @@ console.log(JSON.stringify([
         self.assertEqual(got, [{}, {"effort": "high", "model": "m-two",
                                     "rollover_at_percent": None},
                                {"sessions": {"peer": "own"}}, {}])
+
+    def test_op_settled_is_this_op_only(self):
+        got = self.run_node("""
+console.log(JSON.stringify([
+  agentOpSettled({id: "a", status: "done"}, "a"), agentOpSettled({id: "a", status: "done"}, "b"),
+  agentOpSettled({id: "b", status: "running"}, "b"), agentOpSettled(null, "b"),
+  agentOpSettled({id: "a", status: "failed"}, null)]));
+""")
+        self.assertEqual(got, [True, False, False, False, False])
+
+    def test_model_problem_follows_the_rule(self):
+        got = self.run_node("""
+console.log(JSON.stringify([agentModelProblem({provider_model: true}, "gpt-5"),
+  agentModelProblem({provider_model: true}, "openai/gpt-5"),
+  agentModelProblem({provider_model: false}, "gpt-5"), agentModelProblem(null, "a b")]));
+""")
+        self.assertIsNotNone(got[0])
+        self.assertEqual(got[1:3], [None, None])
+        self.assertIsNotNone(got[3])
 
     def test_env_names_and_the_hard_deny(self):
         got = self.run_node("""

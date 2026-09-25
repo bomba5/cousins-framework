@@ -752,7 +752,7 @@ VALIDATE_TURN_TIMEOUT = 90.0
 VALIDATE_TURN_GRACE = 15.0
 
 
-def validate_turn_out_of_process(home, root, model, effort, *,
+def validate_turn_out_of_process(home, root, model, effort, *, account=None,
                                  timeout=VALIDATE_TURN_TIMEOUT,
                                  grace=VALIDATE_TURN_GRACE, command=None):
     """(rc, line) of one validating turn on the cousin's account, run in a
@@ -761,12 +761,16 @@ def validate_turn_out_of_process(home, root, model, effort, *,
     turn, and the console has other threads (#100 review). The child
     starts without any accounts.AUTH_VARS variable and in a session of its
     own, so a timeout kills it and the CLI it started. Only its JSON
-    verdict is read; anything else is a failed turn (4)."""
+    verdict is read; anything else is a failed turn (4). `account` names
+    the account to run on (the one a pending change writes); None is the
+    one cousin.toml names."""
     from cousin_lib import accounts
     argv = list(command or [sys.executable, "-m", VALIDATE_TURN_MODULE])
     argv += ["--home", str(home), "--root", str(root), "--model", model]
     if effort:
         argv += ["--effort", effort]
+    if account:
+        argv += ["--account", account]
     argv += ["--timeout", "%g" % timeout]
     env = {k: v for k, v in os.environ.items() if k not in accounts.AUTH_VARS}
     # the child imports the cousin_lib this process runs, wherever its cwd is
@@ -812,7 +816,12 @@ def _agent_unchanged(agent, key, value):
             return False            # validate refuses it with the parser's reason
         current = agent.get("sessions") or {}
         return all(current.get(kind, "primary") == mode for kind, mode in value.items())
-    return key in agent and agent[key] == value and type(agent[key]) is type(value)
+    if key not in agent:
+        return False
+    current = agent[key]
+    if isinstance(current, bool) or isinstance(value, bool):
+        return type(current) is type(value) and current == value
+    return current == value         # 80 and 80.0 are the same percentage
 
 
 def persist_agent_values(home, changes, *, root=None):
@@ -847,18 +856,31 @@ def persist_agent_values(home, changes, *, root=None):
         return []
     out = agent_settings.validate(home, root, changes)
     model = out.get("model")
-    if model and lane == "sdk":
+    if model and lane == agent_settings.TURN_LANE:
+        # the table as it will be: the turn runs on the account and the effort
+        # the same change writes, never the ones still in the file
+        merged = agent_settings.merged(agent, out)
         try:
-            account = accounts.for_cousin(home, root)
+            account = agent_settings.account_of(root, merged, home)
         except accounts.AccountsError as err:
             raise agent_settings.SettingsError({"account": str(err)})
-        effort = out["effort"] if "effort" in out else agent.get("effort")
-        rc, line = validate_turn_out_of_process(home, root, model, effort)
+        # a deprecated api_key_file account has no name the child can look
+        # up; the file still holds it (the key is read-only here)
+        name = None if (account.implicit and account.kind == "anthropic-key") else account.name
+        rc, line = validate_turn_out_of_process(home, root, model, merged.get("effort"),
+                                                account=name)
         if rc != 0:
             raise agent_settings.SettingsError({"model": "model %s did not pass one turn on"
                                                          " account %s: %s"
                                                          % (model, account.name, line)})
-    agent_settings.apply(home, root, out)
+    try:
+        agent_settings.apply(home, root, out)
+    except (TypeError, ValueError) as err:
+        if isinstance(err, agent_settings.SettingsError):
+            raise
+        # a file toml_edit cannot edit in place (an inline [agent.sessions]
+        # table, say): a refusal naming the keys, the file untouched
+        raise agent_settings.SettingsError({key: str(err) for key in out})
     for key, value in out.items():
         previous = agent.get(key)
         framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"

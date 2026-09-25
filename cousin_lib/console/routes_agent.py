@@ -226,6 +226,7 @@ def write_settings(home, root, changes):
     per name, and nothing written, on a refusal. A commit_attribution
     change on a tmux lane also rewrites the cousin's harness settings,
     where that lane reads it."""
+    from cousin_lib import agent_settings
     from cousin_lib import config as fwconfig
     from cousin_lib.console import toml_edit
     errors, out = {}, {}
@@ -251,10 +252,16 @@ def write_settings(home, root, changes):
                     check_field(name, value, root)
                 except ValueError as err:
                     bad[name] = str(err)
+        agent = parsed.get("agent") or {}
         try:
-            fwconfig.commit_attribution(root, parsed.get("agent") or {})
+            fwconfig.commit_attribution(root, agent)
         except fwconfig.MissingConfigError as err:
             bad.setdefault("agent.commit_attribution", str(err))
+        if agent_settings.lane_of(agent) != agent_settings.TMUX_LEGACY:
+            # a runner cousin's [agent] as the runner reads it (the SCHEMA
+            # knows commit_attribution), the same check agent_settings.apply runs
+            for key, reason in agent_settings.check_table(root, agent, home).items():
+                bad.setdefault("agent." + key, reason)
         if bad:
             raise _Refused(bad)
     try:
@@ -264,18 +271,77 @@ def write_settings(home, root, changes):
             raise
         raise _Refused({"changes": str(err)})
     note = None
-    if "agent.commit_attribution" in changed and _settings_kind(home) != "runner":
-        # the tmux lanes read it from <home>/.claude/settings.json, written
-        # by the same function cousin-spawn --repair-settings runs
-        from cousin_lib import harness_settings, spawn
-        try:
-            harness_settings.apply_project_settings(home, root=root,
-                                                    kind=spawn._settings_kind(home))
-            note = "the harness settings (.claude/settings.json) were updated too"
-        except harness_settings.SettingsError as err:
-            note = ("cousin.toml was written, the harness settings were not: %s;"
-                    " run cousin-spawn --repair-settings %s" % (err, home.name))
+    if "agent.commit_attribution" in changed:
+        note = sync_harness_settings(home, root, {n: out[n] for n in changed})
     return changed, note
+
+
+class HarnessFailed(Exception):
+    """cousin.toml was written, the harness settings file was not, for a
+    reason apply_project_settings does not word itself."""
+
+    def __init__(self, message, written):
+        super().__init__(message)
+        self.written = written
+
+
+def _attribution_overrides(home, want):
+    """The keys of <home>/.claude/settings.json that the operator set
+    himself (not harness_settings' own) and that say the opposite of
+    `want`: those win over commit_attribution."""
+    import json
+    from cousin_lib import harness_settings
+    try:
+        data = json.loads(harness_settings.settings_path(home).read_text())
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    owned = harness_settings._read_owned_attribution(home)
+    off = {"includeCoAuthoredBy": False, "attribution": dict(harness_settings.ATTRIBUTION_OFF)}
+    return [key for key, value in off.items()
+            if key in data and key not in owned and (data[key] == value) != (not want)]
+
+
+def sync_harness_settings(home, root, written):
+    """After a commit_attribution change: on a tmux lane (tmux-legacy or the
+    tmux kind), which reads it from <home>/.claude/settings.json, rewrite that
+    file with the function cousin-spawn --repair-settings runs; an SDK-family
+    runner reads cousin.toml at start and needs nothing. The note to show:
+    what was done, which of the operator's own keys win, or why the file was
+    left (a SettingsError: its own words). Anything else is HarnessFailed,
+    which carries `written`, the cousin.toml values already on disk."""
+    if _settings_kind(home) == "runner":
+        return None
+    from cousin_lib import config as fwconfig
+    from cousin_lib import harness_settings, spawn
+    try:
+        harness_settings.apply_project_settings(home, root=root, kind=spawn._settings_kind(home))
+    except harness_settings.SettingsError as err:
+        return ("cousin.toml was written, the harness settings were not: %s;"
+                " run cousin-spawn --repair-settings %s" % (err, home.name))
+    except Exception as err:  # noqa: BLE001 - worded for the operator, the toml stays
+        raise HarnessFailed("cousin.toml was written (%s); the harness settings"
+                            " (.claude/settings.json) were not: %s: %s"
+                            % (", ".join("%s = %s" % (k, json_value(v))
+                                         for k, v in written.items()),
+                               type(err).__name__, err), written)
+    note = "the harness settings (.claude/settings.json) were updated too"
+    try:
+        want = fwconfig.commit_attribution(root, _read(home).get("agent") or {})
+    except fwconfig.MissingConfigError:
+        return note
+    wins = _attribution_overrides(home, want)
+    if wins:
+        note += ("; your own %s in .claude/settings.json %s and win%s: attribution stays %s"
+                 % (" and ".join(wins), "are" if len(wins) > 1 else "is",
+                    "" if len(wins) > 1 else "s", "on" if not want else "off"))
+    return note
+
+
+def json_value(value):
+    import json
+    return json.dumps(value)
 
 
 class _Refused(ValueError):
@@ -304,8 +370,8 @@ def _needs_turn(home, changes):
     from cousin_lib import agent_settings
     agent = _read(home).get("agent") or {}
     model = changes.get("model")
-    return (agent_settings.lane_of(agent) == "sdk" and isinstance(model, str) and model
-            and agent.get("model") != model)
+    return (agent_settings.lane_of(agent) == agent_settings.TURN_LANE
+            and isinstance(model, str) and model and agent.get("model") != model)
 
 
 def _changes_of(req):
@@ -315,14 +381,81 @@ def _changes_of(req):
     return changes
 
 
-def register():
+def _refresh(server):
+    from cousin_lib.console.routes_fleet import fleet_rows
+    server.emit("cousins-refresh", fleet_rows(server))
+
+
+def _after_write(home, root, changes, changed):
+    """The harness step a written commit_attribution needs; its note."""
+    if "commit_attribution" not in changed:
+        return None
+    return sync_harness_settings(home, root, {"agent.commit_attribution":
+                                              changes.get("commit_attribution")})
+
+
+def change_agent(server, slug, home, changes, *, answer):
+    """A runner cousin's [agent] change, the one route logic behind POST
+    /api/cousins/<slug>/agent and the fleet's /model and /effort: checked
+    at once (400 with a reason per key), then spawn.persist_agent_values
+    held exclusively on the cousin (409 while anything else runs on it).
+    A new sdk model spends a validating turn, so it runs as the cousin's
+    `agent-settings` long operation (202 {"op"}); its result is {changed,
+    restart_required} or {ok: false, error, errors: {key: reason}}.
+    `answer(changed, note)` shapes the 200 body."""
     from cousin_lib import agent_settings, spawn
     from cousin_lib.console import longop
-    from cousin_lib.console._common import cousin_home
+    root = server.root
+    try:
+        # the runner's own checks, answered at once; the write path runs
+        # them again on the file as it then is
+        agent_settings.validate(home, root, changes)
+    except agent_settings.SettingsError as err:
+        raise HttpError(400, str(err), errors=err.errors)
+    if _needs_turn(home, changes):
+        def work(op):
+            op.stage("validating turn", "running",
+                     "one smallest turn with model %s on the account being written"
+                     % changes["model"])
+            try:
+                changed = spawn.persist_agent_values(home, changes, root=root)
+                note = _after_write(home, root, changes, changed)
+            except agent_settings.SettingsError as err:
+                return {"ok": False, "error": str(err), "errors": err.errors}
+            except (spawn.SpawnError, HarnessFailed, ValueError, OSError) as err:
+                return {"ok": False, "error": str(err), "errors": {"changes": str(err)}}
+            op.stage("validating turn", "done")
+            op.stage("write", "done", ", ".join(changed) or "nothing changed")
+            if changed:
+                _refresh(server)
+            out = {"ok": True, "changed": changed, "restart_required": bool(changed)}
+            if note:
+                out["note"] = note
+            return out
+        return longop.start_response(server, slug, OP_KIND, work,
+                                     params={"keys": sorted(changes)})
+    try:
+        hold = longop.exclusive(server, slug, OP_KIND)
+    except longop.Busy as err:
+        raise HttpError(409, str(err), busy=True)
+    with hold:
+        try:
+            changed = spawn.persist_agent_values(home, changes, root=root)
+            note = _after_write(home, root, changes, changed)
+        except agent_settings.SettingsError as err:
+            raise HttpError(400, str(err), errors=err.errors)
+        except spawn.SpawnError as err:
+            raise HttpError(400, str(err))
+        except HarnessFailed as err:
+            raise HttpError(500, str(err), written=err.written)
+    if changed:
+        _refresh(server)
+    return 200, answer(changed, note)
 
-    def refresh(server):
-        from cousin_lib.console.routes_fleet import fleet_rows
-        server.emit("cousins-refresh", fleet_rows(server))
+
+def register():
+    from cousin_lib.console import longop
+    from cousin_lib.console._common import cousin_home
 
     @router.route("GET", "/api/cousins/{slug}/agent")
     def get_agent(req, slug):
@@ -334,44 +467,15 @@ def register():
         server = req.server
         home = cousin_home(server, slug)
         changes = _changes_of(req)
-        try:
-            # the runner's own checks, answered at once; the write path
-            # below runs them again on the file as it then is
-            agent_settings.validate(home, server.root, changes)
-        except agent_settings.SettingsError as err:
-            raise HttpError(400, str(err), errors=err.errors)
-        if _needs_turn(home, changes):
-            def work(op):
-                op.stage("validating turn", "running",
-                         "one smallest turn with model %s on the cousin's account"
-                         % changes["model"])
-                try:
-                    changed = spawn.persist_agent_values(home, changes, root=server.root)
-                except agent_settings.SettingsError as err:
-                    raise longop.OpError(str(err))
-                op.stage("validating turn", "done")
-                op.stage("write", "done", ", ".join(changed) or "nothing changed")
-                if changed:
-                    refresh(server)
-                return {"ok": True, "changed": changed, "restart_required": bool(changed)}
-            return longop.start_response(server, slug, OP_KIND, work,
-                                         params={"keys": sorted(changes)})
-        try:
-            hold = longop.exclusive(server, slug, OP_KIND)
-        except longop.Busy as err:
-            raise HttpError(409, str(err), busy=True)
-        with hold:
-            try:
-                changed = spawn.persist_agent_values(home, changes, root=server.root)
-            except agent_settings.SettingsError as err:
-                raise HttpError(400, str(err), errors=err.errors)
-            except spawn.SpawnError as err:
-                raise HttpError(400, str(err))
-        if changed:
-            refresh(server)
-        return 200, {"ok": True, "slug": slug, "changed": changed,
-                     "restart_required": bool(changed),
-                     "agent": describe_agent(home, server.root)}
+
+        def answer(changed, note):
+            out = {"ok": True, "slug": slug, "changed": changed,
+                   "restart_required": bool(changed),
+                   "agent": describe_agent(home, server.root)}
+            if note:
+                out["note"] = note
+            return out
+        return change_agent(server, slug, home, changes, answer=answer)
 
     @router.route("GET", "/api/cousins/{slug}/settings")
     def get_settings(req, slug):
@@ -392,8 +496,11 @@ def register():
                 changed, note = write_settings(home, server.root, changes)
             except _Refused as err:
                 raise HttpError(400, str(err), errors=err.errors)
+            except HarnessFailed as err:
+                _refresh(server)
+                raise HttpError(500, str(err), written=err.written)
         if changed:
-            refresh(server)
+            _refresh(server)
         out = {"ok": True, "slug": slug, "changed": changed,
                "restart_required": any(COUSIN_FIELDS[n]["restart"] for n in changed),
                "settings": describe_settings(home, server.root)}

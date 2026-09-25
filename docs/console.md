@@ -255,8 +255,8 @@ drift from what the runner accepts.
   that always wins. A deprecated `api_key_file` shows a warning. "unset"
   removes a key so its default applies. Save checks every change the way the
   runner does and writes them in one go; a new `sdk` model is first checked
-  with one smallest model turn on the cousin's account, shown as the
-  cousin's long operation. Every change applies at the next start: the panel
+  with one smallest model turn on the account being saved with it, shown as
+  the cousin's long operation. Every change applies at the next start: the panel
   says "restart to apply" and offers a restart (click twice). A tmux-legacy
   cousin has no agent settings; "switch kind" moves it to a runner.
 - **Cousin settings.** Name, peer visible, recall lines and keyword recall,
@@ -264,7 +264,8 @@ drift from what the runner accepts.
   or blank for the install default, with the effective time shown) and commit
   attribution: the install default (with where it comes from), on or off.
   On a tmux cousin, commit attribution also rewrites its harness settings
-  file, where that lane reads it. The chat port, host and tmux session and
+  file, where that lane reads it, and says so when your own
+  `includeCoAuthoredBy` or `attribution` there says the opposite and wins. The chat port, host and tmux session and
   the `[session]` hooks are shown read-only.
 
 The chat header's effort select shows only on a kind that reads an effort.

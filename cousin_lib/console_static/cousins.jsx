@@ -304,7 +304,8 @@ function Inspector({ cousin: c, onClose, onAct }) {
   }, [c, onClose]);
   const [filesOpen, setFilesOpen] = React.useState(false);
   if (!c) return null;
-  const tmuxLane = !c.lane || c.lane === "tmux-legacy";
+  // the tmux lane by the name the server gives it (spawn options' tmux_lane)
+  const tmuxLane = !c.lane || (options ? c.lane === options.tmux_lane : !c.runner);
   return (
     <div className="inspector">
       <div className="hdr">
@@ -1546,7 +1547,7 @@ function SpawnModal({ onClose, onSpawn }) {
           <div className="grid2">
             <FormField label="lane" hint="tmux-legacy runs the agent in a tmux pane; a runner kind runs it under cousin-supervisor.">
               <select className="sel" value={runner} onChange={e => setRunner(e.target.value)} disabled={!options}>
-                <option value="">{options?.tmux_lane || "tmux-legacy"}</option>
+                <option value="">{options?.tmux_lane || "..."}</option>
                 {runners.map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </FormField>

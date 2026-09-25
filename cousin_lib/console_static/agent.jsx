@@ -19,14 +19,14 @@
 // lane that reads effort.
 
 // ---- pure helpers (the tests run this block under node) -------------------
-const AGENT_TMUX_LEGACY = "tmux-legacy";
-
-// Whether a cousin on `lane` reads [agent] `key`: the tmux-legacy lane (or none
-// known) reads model and effort from [runtime], so both count as read there;
-// a runner kind reads what lane_keys (GET /api/spawn/options) lists for it.
+// Whether a cousin on `lane` reads [agent] `key`. A runner kind reads what
+// lane_keys (GET /api/spawn/options) lists for it; a lane that is not a runner
+// kind there (the tmux-legacy lane, or none known) reads model and effort from
+// [runtime], so both count as read.
 function agentLaneReads(lane, key, laneKeys) {
-  if (!lane || lane === AGENT_TMUX_LEGACY) return key === "model" || key === "effort";
-  return ((laneKeys || {})[lane] || []).includes(key);
+  const keys = laneKeys || {};
+  if (!lane || !Object.prototype.hasOwnProperty.call(keys, lane)) return key === "model" || key === "effort";
+  return (keys[lane] || []).includes(key);
 }
 
 function agentSame(a, b) {
@@ -69,12 +69,18 @@ function agentEnvProblem(name, denyPrefixes) {
   return null;
 }
 
-// A client-side hint for a model on a lane (the server stays the authority).
-function agentModelProblem(lane, value) {
+// A client-side hint for a model under the lane's model_rule (describe()'s;
+// the server stays the authority).
+function agentModelProblem(rule, value) {
   if (!value) return null;
   if (/\s/.test(value)) return "one word, no spaces";
-  if (lane === "opencode" && !/^[^/]+\/.+/.test(value)) return "\"<provider>/<model>\"";
+  if (rule && rule.provider_model && !/^[^/]+\/.+/.test(value)) return "\"<provider>/<model>\"";
   return null;
+}
+
+// Whether a long operation is the one this panel started and has ended.
+function agentOpSettled(op, id) {
+  return !!(op && id && op.id === id && op.status !== "running");
 }
 
 // The changes a draft makes against GET .../settings fields ("table.key").
@@ -186,7 +192,7 @@ function AgentEnvList({ value, onChange, disabled, denyPrefixes }) {
 }
 
 // One [agent] key's editor, by the type describe() gives it.
-function AgentField({ name, row, lane, value, onChange, disabled }) {
+function AgentField({ name, row, rule, value, onChange, disabled }) {
   const listId = `agent-${name}-suggestions`;
   if (row.readonly) {
     return <span style={agentMono}>{row.value == null || row.value === "" ? "-" : String(row.value)}</span>;
@@ -217,11 +223,11 @@ function AgentField({ name, row, lane, value, onChange, disabled }) {
       );
     }
     case "model": {
-      const problem = agentModelProblem(lane, value || "");
+      const problem = agentModelProblem(rule, value || "");
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <input className="txt" value={value ?? ""} disabled={disabled} list={listId}
-                 placeholder={lane === "opencode" ? "<provider>/<model>" : "the runner's default"}
+                 placeholder={(rule && rule.placeholder) || ""}
                  style={{ width: "100%", fontFamily: "var(--mono)" }}
                  onChange={e => onChange(e.target.value === "" ? null : e.target.value)} />
           {(row.suggestions || []).length > 0 && (
@@ -270,7 +276,9 @@ function AgentSettingsPanel({ cousin }) {
   const [msg, setMsg] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
-  const [waitOp, setWaitOp] = React.useState(false);
+  // the id of the agent-settings op this panel started (an sdk model change),
+  // so an earlier op that already ended is never read as this one
+  const [waitOp, setWaitOp] = React.useState(null);
   const [op] = useLongOp(c.remote ? null : c.slug);
   const load = React.useCallback(async () => {
     const d = await apiGet(`/api/cousins/${c.slug}/agent`);
@@ -278,52 +286,72 @@ function AgentSettingsPanel({ cousin }) {
     setLoadErr(null); setData(d);
   }, [c.slug]);
   React.useEffect(() => {
-    setData(null); setDraft({}); setErrors({}); setMsg(null); setSaved(false); setWaitOp(false);
+    setData(null); setDraft({}); setErrors({}); setMsg(null); setSaved(false); setWaitOp(null); setBusy(false);
     if (!c.remote) load();
   }, [c.slug, load]);
-  // an sdk model change is a long operation: reload when it ends
+  // the fleet refresh (a kind switch, a stop's hold, a change from the chat
+  // header or the CLI) reloads what the panel shows; a draft is kept
   React.useEffect(() => {
-    if (!waitOp || !op || op.kind !== "agent-settings" || op.status === "running") return;
-    setWaitOp(false); setBusy(false);
-    if (op.status === "done") {
+    if (!c.remote && data) load();
+  }, [c.lane, c.held, c.effort, c.model, c.account, c.autoStart]);
+  const settle = React.useCallback((done) => {
+    setWaitOp(null); setBusy(false);
+    if (done.status === "done") {
+      const r = done.result || {};
       setDraft({});
-      setSaved(!!(op.result && op.result.restart_required));
-      setMsg(op.result && !op.result.changed.length ? { ok: true, text: "nothing changed" } : null);
+      setSaved(!!r.restart_required);
+      setMsg(r.note ? { ok: true, text: r.note } : (r.changed && !r.changed.length ? { ok: true, text: "nothing changed" } : null));
     } else {
-      setErrors({ model: op.error });
+      const r = done.result || {};
+      setErrors(r.errors || { changes: done.error });
     }
     load();
-  }, [op, waitOp, load]);
+  }, [load]);
+  React.useEffect(() => {
+    if (agentOpSettled(op, waitOp)) settle(op);
+  }, [op, waitOp, settle]);
+  // a missed cousin-op event: poll the op until it ends
+  React.useEffect(() => {
+    if (!waitOp) return;
+    const t = setInterval(async () => {
+      const d = await apiGet(`/api/cousins/${c.slug}/op`);
+      if (d && agentOpSettled(d.op, waitOp)) settle(d.op);
+    }, 3000);
+    return () => clearInterval(t);
+  }, [waitOp, c.slug, settle]);
   if (c.remote) return null;
   if (!data) return <div style={{ ...agentMono, color: "var(--fg-3)" }}>{loadErr || "loading agent settings..."}</div>;
 
   const s = data.settings || {};
-  const legacy = data.lane === AGENT_TMUX_LEGACY;
+  const legacy = data.lane === data.tmux_lane;
   const valueOf = (key) => (key in draft ? draft[key] : (s[key] || {}).value);
   const set = (key, v) => { setDraft(d => Object.assign({}, d, { [key]: v })); setSaved(false); setMsg(null); };
   const changes = agentChanges(s, draft);
   const dirty = Object.keys(changes).length > 0;
-  const turns = data.lane === "sdk" && typeof changes.model === "string" && changes.model;
+  const turns = data.model_change_spends_turn && typeof changes.model === "string" && changes.model;
 
   const save = async () => {
     if (!dirty || busy) return;
     setBusy(true); setErrors({}); setMsg(null); setSaved(false);
     try {
       const { r, d } = await apiSend("POST", `/api/cousins/${c.slug}/agent`, { changes });
-      if (r.status === 202) { setWaitOp(true); return; }
+      if (r.status === 202 && d.op) { setWaitOp(d.op.id); return; }
       if (r.status === 400 && d.errors) { setErrors(d.errors); setBusy(false); return; }
       if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setDraft({});
       if (d.agent) setData(Object.assign({ slug: c.slug }, d.agent));
       setSaved(!!d.restart_required);
-      if (!d.changed.length) setMsg({ ok: true, text: "nothing changed" });
+      if (d.note) setMsg({ ok: true, text: d.note });
+      else if (!d.changed.length) setMsg({ ok: true, text: "nothing changed" });
       setBusy(false);
     } catch (e) {
       setMsg({ ok: false, text: String(e.message || e) });
       setBusy(false);
+      load();
     }
   };
-  const order = Object.keys(s).filter(k => k !== "runner" && k !== "api_key_file");
+  // commit_attribution is edited in cousin settings, beside its install default
+  const order = Object.keys(s).filter(k => k !== "runner" && k !== "api_key_file" && k !== "commit_attribution");
   return (
     <>
       <SectionLabel style={{ marginTop: 20 }}>agent</SectionLabel>
@@ -341,7 +369,7 @@ function AgentSettingsPanel({ cousin }) {
         </div>
         {legacy && (
           <span style={agentHint}>
-            the tmux-legacy lane has no [agent] settings: its model, effort and auth mode are the
+            the {data.lane} lane has no [agent] settings: its model, effort and auth mode are the
             identity rows above ([runtime]). Switch kind to run it on a runner.
           </span>
         )}
@@ -359,7 +387,7 @@ function AgentSettingsPanel({ cousin }) {
                 <React.Fragment key={key}>
                   <dt title={row.hint}>{key.replace(/_/g, " ")}</dt>
                   <dd style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    <AgentField name={key} row={row} lane={data.lane} value={valueOf(key)}
+                    <AgentField name={key} row={row} rule={data.model_rule} value={valueOf(key)}
                                 onChange={v => set(key, v)} disabled={busy} />
                     {key === "env_allow" && row.base && (
                       <span style={agentHint}>
@@ -390,7 +418,7 @@ function AgentSettingsPanel({ cousin }) {
             </button>
             {dirty && <button className="btn ghost" style={agentSmall} disabled={busy}
                               onClick={() => { setDraft({}); setErrors({}); }}>discard</button>}
-            {turns && <span style={agentHint}>a new sdk model is checked with one smallest turn on the cousin's account before it is written</span>}
+            {turns && <span style={agentHint}>a new model on this kind is checked with one smallest turn on the account being written, before it is written</span>}
           </div>
         )}
         {errors.changes && <span style={agentErr}>{errors.changes}</span>}
@@ -398,7 +426,6 @@ function AgentSettingsPanel({ cousin }) {
         {msg && <span style={{ ...agentErr, color: msg.ok ? "var(--fg-2)" : "var(--red)" }}>{msg.text}</span>}
         {saved && <AgentRestartOffer cousin={c} />}
       </div>
-      <CousinSettingsPanel cousin={c} />
     </>
   );
 }
@@ -422,8 +449,11 @@ function CousinSettingsPanel({ cousin }) {
     const d = await apiGet(`/api/cousins/${c.slug}/settings`);
     if (d) setData(d);
   }, [c.slug]);
-  React.useEffect(() => { setData(null); setDraft({}); setErrors({}); setSaved(null); setMsg(null); load(); }, [c.slug, load]);
-  if (!data) return null;
+  React.useEffect(() => {
+    setData(null); setDraft({}); setErrors({}); setSaved(null); setMsg(null);
+    if (!c.remote) load();
+  }, [c.slug, load]);
+  if (c.remote || !data) return null;
   const f = data.fields || {};
   const valueOf = (n) => (n in draft ? draft[n] : (f[n] || {}).value);
   const set = (n, v) => { setDraft(d => Object.assign({}, d, { [n]: v })); setSaved(null); setMsg(null); };
@@ -438,6 +468,12 @@ function CousinSettingsPanel({ cousin }) {
     try {
       const { r, d } = await apiSend("POST", `/api/cousins/${c.slug}/settings`, { changes });
       if (r.status === 400 && d.errors) { setErrors(d.errors); return; }
+      if (d.written) {
+        // cousin.toml took the value, the harness settings did not: say both
+        setDraft({}); load();
+        setErrors({ changes: d.error });
+        return;
+      }
       if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setDraft({});
       if (d.settings) setData(Object.assign({ slug: c.slug }, d.settings));
@@ -501,7 +537,7 @@ function CousinSettingsPanel({ cousin }) {
                 )}
                 {n === "agent.commit_attribution" && (
                   <span style={agentHint}>
-                    effective: {attribution.effective ? "on" : "off"} · install default {String(install.value)} from {install.source}
+                    effective: {attribution.effective == null ? "unknown" : attribution.effective ? "on" : "off"} · install default {install.value == null ? "unknown" : String(install.value)} from {install.source}
                   </span>
                 )}
                 <span style={agentHint}>{f[n].hint}{f[n].restart ? "" : " · applies without a restart"}</span>
@@ -536,8 +572,11 @@ function CousinSettingsPanel({ cousin }) {
 
 registerSlot("inspector.lane", { id: "agent", order: 10,
                                  render: ({ cousin }) => <AgentSettingsPanel cousin={cousin} /> });
+// its own entry: the cousin settings do not wait on, or fail with, GET .../agent
+registerSlot("inspector.lane", { id: "cousin-settings", order: 11,
+                                 render: ({ cousin }) => <CousinSettingsPanel cousin={cousin} /> });
 
 Object.assign(window, {
   AgentSettingsPanel, CousinSettingsPanel, AgentRestartOffer, AgentField, agentLaneReads,
-  agentChanges, cousinSettingChanges, openKindSwitch,
+  agentChanges, cousinSettingChanges, agentOpSettled, openKindSwitch,
 });

@@ -35,6 +35,9 @@ from pathlib import Path
 from cousin_lib import accounts, delivery
 
 TMUX_LEGACY = "tmux-legacy"
+# The lane whose model change is checked with one smallest model turn before
+# it is written (the runner's validate_account; spawn.persist_agent_values).
+TURN_LANE = "sdk"
 ALL = "*"
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -66,6 +69,11 @@ SCHEMA = {
     "api_key_file": {"type": "str", "lanes": ("sdk", "fake"), "readonly": True,
                      "deprecated": True, "only_when_set": True,
                      "hint": "deprecated: move the key to an account"},
+    # tracker #112: every kind reads it (runner/main.commit_attribution_of);
+    # unset is config/harness.toml [agent]'s install default
+    "commit_attribution": {"type": "bool", "lanes": ALL, "default": None,
+                           "hint": "the harness's own attribution on commits and PRs;"
+                                   " unset is the install default"},
     # The tmux kind's own key (phase 11): its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},
@@ -357,15 +365,17 @@ def _suggestions(key, lane, root, agent):
 
 def model_rule(lane):
     """How `lane` takes [agent] model, for a form: {required, catalogue,
-    hint}. `catalogue`: config/harness.toml's model list are valid
+    provider_model, placeholder, hint} (provider_model: "<provider>/<model>"). `catalogue`: config/harness.toml's model list are valid
     suggestions (the sdk lane's Claude models; never on opencode, which
     refuses them). None when the lane reads no model."""
     if "model" not in lane_keys(lane):
         return None
     if lane == "opencode":
-        return {"required": True, "catalogue": False,
+        return {"required": True, "catalogue": False, "provider_model": True,
+                "placeholder": "<provider>/<model>",
                 "hint": "required: \"<provider>/<model>\" on a provider the account holds"}
-    return {"required": False, "catalogue": True,
+    return {"required": False, "catalogue": True, "provider_model": False,
+            "placeholder": "the runner's default",
             "hint": "a model name; blank is the runner's default"}
 
 
@@ -388,7 +398,8 @@ def describe(home, root):
     agent = _read_agent(home)
     lane = lane_of(agent)
     out = {"lane": lane, "kinds": kinds(), "settings": {}, "errors": {},
-           "restart_required": True}
+           "restart_required": True, "tmux_lane": TMUX_LEGACY,
+           "model_rule": model_rule(lane), "model_change_spends_turn": lane == TURN_LANE}
     if lane == TMUX_LEGACY:
         return out
     for key in lane_keys(lane):
@@ -425,6 +436,23 @@ def describe(home, root):
         out["settings"][key] = row
     out["errors"] = _cross(root, agent, home)
     return out
+
+
+def check_table(root, agent, home=None):
+    """{key: reason} for an [agent] table as a whole (what apply's hook
+    checks); {} when the runner would take it."""
+    return _cross(root, agent, home)
+
+
+def merged(agent, changes):
+    """The [agent] table `changes` (validate's output) leave behind."""
+    return _merge(agent, changes)
+
+
+def account_of(root, agent, home=None):
+    """The Account an [agent] table names, as accounts.for_cousin resolves
+    it from the file: AccountsError when it names none that exists."""
+    return _account(root, agent, home)
 
 
 def _merge(agent, changes):

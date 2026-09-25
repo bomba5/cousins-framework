@@ -677,7 +677,7 @@ class TestPersistAgentValues(CreateCase):
                                   return_value=(0, "validate: ok")) as child:
             spawn.persist_agent_value(home, "model", "m-two", root=root)
         in_process.assert_not_called()
-        child.assert_called_once_with(home, root, "m-two", "low")
+        child.assert_called_once_with(home, root, "m-two", "low", account="host")
         self.assertEqual(tomllib.loads(path.read_text())["agent"]["model"], "m-two")
         with mock.patch.object(spawn, "validate_turn_out_of_process",
                                return_value=(4, "validate: not_found_error")):
@@ -723,7 +723,7 @@ class TestPersistAgentValuesSeveral(CreateCase):
                        "rollover_at_percent": 70, "sessions": {"meeting": "own"}},
                 root=root)
         # the turn runs on the effort being written with it
-        child.assert_called_once_with(home, root, "m-two", "high")
+        child.assert_called_once_with(home, root, "m-two", "high", account="host")
         self.assertEqual(sorted(changed), ["auto_start", "effort", "model",
                                            "rollover_at_percent", "sessions"])
         agent = tomllib.loads(path.read_text())["agent"]
@@ -780,6 +780,45 @@ class TestPersistAgentValuesSeveral(CreateCase):
                 home, {"auto_start": None}, root=root), ["auto_start"])
         self.assertNotIn("auto_start", tomllib.loads(path.read_text())["agent"])
 
+    def test_the_turn_runs_on_the_account_and_effort_being_written(self):
+        """Review round 1: the child read the account from cousin.toml, which
+        still names the old one while the change is pending."""
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin()
+        (root / "config").mkdir(exist_ok=True)
+        (root / "config" / "accounts.toml").write_text('[accounts.alt]\nkind = "claude-login"\n')
+        seen = []
+
+        def turn(h, r, model, effort, **kw):
+            seen.append((model, effort, kw.get("account")))
+            return 0, "ok"
+        with mock.patch.object(spawn, "validate_turn_out_of_process", side_effect=turn):
+            spawn.persist_agent_values(home, {"model": "m-two", "account": "alt",
+                                              "effort": "max"}, root=root)
+        self.assertEqual(seen, [("m-two", "max", "alt")])
+        with mock.patch.object(spawn, "validate_turn_out_of_process",
+                               return_value=(4, "validate: nope")):
+            with self.assertRaises(Exception) as ctx:
+                spawn.persist_agent_values(home, {"model": "m-3", "account": None}, root=root)
+        self.assertIn("account host", str(ctx.exception))
+
+    def test_an_inline_sessions_table_is_a_refusal_not_a_crash(self):
+        from cousin_lib import agent_settings, spawn
+        root, home, path = self._runner_cousin('sessions = { person = "own" }\n')
+        before = path.read_bytes()
+        with self.assertRaises(agent_settings.SettingsError) as ctx:
+            spawn.persist_agent_values(home, {"sessions": {"meeting": "own"}}, root=root)
+        self.assertIn("sessions", ctx.exception.errors)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_an_int_for_a_float_in_the_file_is_no_change(self):
+        from cousin_lib import spawn
+        root, home, path = self._runner_cousin('rollover_at_percent = 80.0\n')
+        with mock.patch.object(spawn, "framework_event") as event:
+            self.assertEqual(spawn.persist_agent_values(
+                home, {"rollover_at_percent": 80}, root=root), [])
+        event.assert_not_called()
+
     def test_a_malformed_sessions_value_is_the_parsers_refusal(self):
         from cousin_lib import agent_settings, spawn
         root, home, path = self._runner_cousin()
@@ -831,6 +870,39 @@ class TestValidateTurnOutOfProcess(unittest.TestCase):
         self.assertEqual(rc, 4)
         self.assertEqual(line, "--home /nonexistent/home --root /nonexistent/root"
                                " --model m-two --effort low --timeout 90")
+
+    def test_the_account_being_written_is_named_to_the_child(self):
+        rc, line = self._run(
+            "import json, sys; print(json.dumps({'rc': 4, 'line': ' '.join(sys.argv[1:])}))",
+            account="alt")
+        self.assertIn(" --account alt ", line + " ")
+
+    def test_the_child_resolves_a_named_account_not_the_files(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stdout
+        from cousin_lib.runner import validate_turn
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config").mkdir()
+            (root / "config" / "accounts.toml").write_text('[accounts.alt]\nkind = "claude-login"\n')
+            home = root / "cousins" / "wren"
+            home.mkdir(parents=True)
+            (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n\n[agent]\nrunner = "sdk"\n')
+            seen = []
+
+            def fake(account, root_, **kw):
+                seen.append(account.name)
+                return 0, "ok"
+            with mock.patch("cousin_lib.runner.sdk.validate_account", fake), \
+                    redirect_stdout(io.StringIO()):
+                validate_turn.main(["--home", str(home), "--root", str(root),
+                                    "--model", "m", "--account", "alt"])
+                validate_turn.main(["--home", str(home), "--root", str(root), "--model", "m"])
+                rc = validate_turn.main(["--home", str(home), "--root", str(root),
+                                         "--model", "m", "--account", "nope"])
+        self.assertEqual(seen, ["alt", "host"])
+        self.assertEqual(rc, 2)
 
     def test_the_child_gets_no_auth_variable_and_the_parents_env_is_untouched(self):
         from cousin_lib import accounts

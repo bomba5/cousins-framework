@@ -867,23 +867,35 @@ def register():
         return 200, {"ok": True, "slug": slug, "bytes": len(content.encode())}
 
     def _set_runtime(req, slug, key):
-        home = cousin_home(req.server, slug)
+        server = req.server
+        home = cousin_home(server, slug)
         value = req.body.get(key)
         if not isinstance(value, str):
             raise HttpError(400, "%s must be a string" % key)
-        try:
-            if spawn.runner_lane(home):
-                # the runner reads [agent], never [runtime] (#100)
-                changed = spawn.persist_agent_value(home, key, value, root=req.server.root)
-            else:
-                changed = spawn.persist_runtime(home, key, value)
-        except spawn.SpawnError as err:
-            raise HttpError(400, str(err))
         # The running agent keeps the value it started with; the row
         # already shows the new one, so the client is told which. A save
         # of the value it already has changes nothing: no restart, no refresh.
+        if spawn.runner_lane(home):
+            # the runner reads [agent], never [runtime] (#100), through the
+            # agent settings' one path (routes_agent.change_agent): held
+            # exclusively, and an sdk model's validating turn is the
+            # cousin's `agent-settings` long operation (202)
+            from cousin_lib.console import routes_agent
+            try:
+                spawn.check_runtime_value(key, value)
+            except spawn.SpawnError as err:
+                raise HttpError(400, str(err))
+            return routes_agent.change_agent(
+                server, slug, home, {key: value},
+                answer=lambda changed, note: {"ok": True, "slug": slug, key: value,
+                                              "restart_required": bool(changed)})
+        with _exclusive(server, slug, key):
+            try:
+                changed = spawn.persist_runtime(home, key, value)
+            except spawn.SpawnError as err:
+                raise HttpError(400, str(err))
         if changed:
-            req.server.emit("cousins-refresh", fleet_rows(req.server))
+            server.emit("cousins-refresh", fleet_rows(server))
         return 200, {"ok": True, "slug": slug, key: value,
                      "restart_required": changed}
 

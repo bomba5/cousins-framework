@@ -83,7 +83,8 @@ class Describe(_Case):
 
     def test_the_fake_lane_has_no_model(self):
         d = agent_settings.describe(self.cousin('runner = "fake"\n'), self.root)
-        self.assertEqual(set(d["settings"]), {"runner", "account", "auto_start"})
+        self.assertEqual(set(d["settings"]), {"runner", "account", "auto_start",
+                                              "commit_attribution"})
 
     def test_a_tmux_cousin_is_the_legacy_lane_with_no_agent_settings(self):
         d = agent_settings.describe(self.cousin(None), self.root)
@@ -107,7 +108,8 @@ class Describe(_Case):
         self.assertEqual(d["lane"], "tmux")
         self.assertIn("tmux", d["kinds"])
         self.assertEqual(set(d["settings"]),
-                         {"runner", "account", "auto_start", "model", "effort", "env_allow"})
+                         {"runner", "account", "auto_start", "model", "effort", "env_allow",
+                          "commit_attribution"})
         self.assertEqual(d["settings"]["env_allow"]["value"], ["LANG"])
         self.assertEqual(d["settings"]["effort"]["value"], "high")
         self.assertEqual(d["settings"]["account"]["choices"], ["host", "fleet"])   # no key account
@@ -127,6 +129,27 @@ class Describe(_Case):
             {"lane": "fake", "account": "fleet", "autoStart": False})
         self.assertEqual(agent_settings.summary(self.cousin(None)),
                          {"lane": "tmux-legacy", "account": None, "autoStart": None})
+
+
+class CommitAttribution(_Case):
+    """tracker #112: every kind reads [agent] commit_attribution (runner/main
+    commit_attribution_of), so every lane lists it, a bool or unset."""
+
+    def test_every_lane_lists_it_and_refuses_a_non_bool(self):
+        for kind in delivery.RUNNER_KINDS:
+            self.assertIn("commit_attribution", agent_settings.lane_keys(kind), kind)
+        home = self.cousin('runner = "sdk"\n')
+        self.assertEqual(agent_settings.validate(home, self.root, {"commit_attribution": False}),
+                         {"commit_attribution": False})
+        with self.assertRaises(agent_settings.SettingsError) as ctx:
+            agent_settings.validate(home, self.root, {"commit_attribution": "false"})
+        self.assertIn("commit_attribution", ctx.exception.errors)
+
+    def test_describe_serves_the_model_rule_and_the_turn_flag(self):
+        d = agent_settings.describe(self.cousin('runner = "opencode"\naccount = "oc"\n'), self.root)
+        self.assertTrue(d["model_rule"]["provider_model"])
+        self.assertFalse(d["model_change_spends_turn"])
+        self.assertEqual(d["tmux_lane"], agent_settings.TMUX_LEGACY)
 
 
 class Validate(_Case):

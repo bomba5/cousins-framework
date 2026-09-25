@@ -9,8 +9,10 @@ Two things apply to almost all of them:
 - Commands that work on the whole install take `--root <checkout>` or read
   `FRAMEWORK_ROOT`. Run inside the checkout and most of them find it anyway.
 - Commands that work on one cousin read `COUSIN_HOME` (the cousin's home,
-  `cousins/<slug>/`) or take `--home`. Inside a cousin's tmux session
-  `COUSIN_HOME` is already set, so a cousin calls them bare.
+  `cousins/<slug>/`) or take `--home`. Inside a running cousin, whatever its
+  kind, `COUSIN_HOME` is already set (in its tmux session, or exported into
+  the runner's own process for an `sdk`, `opencode`, `tmux` or `fake` runner
+  cousin), so a cousin calls them bare.
 
 The examples use an invented cousin, Wren, and an operator called ana.
 
@@ -25,7 +27,7 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one (what the start-at-boot unit
-uses); `--runner sdk|fake|opencode` and `--account <name>` make it a runner cousin
+uses); `--runner sdk|fake|opencode|tmux` and `--account <name>` make it a runner cousin
 (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
 `COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]` too, where
 the runner reads them, and only on a lane that reads them), which `--start`
@@ -203,8 +205,12 @@ the same "continue where you were"
 SIGTERM or SIGINT, then stops the runner with a 30 second timeout
 (`runner.main.STOP_TIMEOUT_S`). `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or
-SIGINT, or when the runner gives up. `--runner sdk|fake|opencode` overrides the
-cousin's `[agent] runner`. One runner per cousin: it holds a lock on
+SIGINT, or when the runner gives up. `--runner sdk|fake|opencode|tmux` overrides the
+cousin's `[agent] runner`. `--reap-pane` is the `tmux` kind's cleanup: with no
+runner holding the cousin's lock, it kills that cousin's pane (exit 0 whether
+or not one was there) instead of leaving an unsupervised turn running; with a
+runner holding the lock it refuses and says to stop the runner instead, which
+kills the pane itself when it was told to hold it. One runner per cousin: it holds a lock on
 `<home>/run/runner.lock` for its life. It reads `policy.toml` at start; a
 malformed policy is rc 2, and so is an MCP registry that does not parse or
 names a command the runner has no in-process handler for. `--home` may be
@@ -253,8 +259,10 @@ runner's current stream with `--after N`. Without `--follow` it prints those
 and exits; with `--follow` (`-f`) it keeps printing as the runner appends,
 following a restarted runner to its new stream, until interrupted. `--json`
 prints each event as its JSON line; `--home` names the home instead of
-finding it by slug. A tmux cousin has no stream (its view is its
-tmux pane): exit 2, as for an unknown cousin.
+finding it by slug. This works for every runner kind, `tmux` included (see
+[cousins](cousins.md)): a legacy tmux cousin (no `[agent] runner`) has no
+stream (its view is its tmux pane instead): exit 2, as for an unknown
+cousin.
 
 ```
 cousin-watch wren -f
@@ -263,8 +271,9 @@ cousin-watch wren --json --after 120
 
 `cousin-supervisor run` keeps an install's daemons up in one process: the
 console, the loops daemon, one `cousin-runner` per runner cousin (every
-cousin whose `cousin.toml` says `[agent] runner = "sdk"` or `"fake"`, unless
-`[agent] auto_start = false`; tmux cousins are never its) and, for a runner
+cousin whose `cousin.toml` says `[agent] runner` is `sdk`, `fake`, `opencode`
+or `tmux`, unless `[agent] auto_start = false`; a legacy tmux cousin, one
+with no `[agent] runner` at all, is never its) and, for a runner
 cousin whose `[telegram]` is enabled and complete, its Telegram bridge
 (`telegram:<slug>`, started after the runner, stopped and held with it; see
 [telegram](telegram.md)). It is a container's
@@ -312,22 +321,29 @@ cousin-supervisor stop wren && cousin-supervisor start wren
 cousin-supervisor start --name loops
 ```
 
-`cousin-migrate` moves one cousin from the tmux lane to the SDK runner, and
-back. Nothing else ever does: an upgrade or a merge leaves every cousin on the
-lane its `cousin.toml` names. `plan <slug> [--account NAME]` checks, writing
-nothing, that the cousin is running on the tmux lane (a stopped one would be
-started by the move), with no migration open, that its account is logged in,
-that a `cousin-supervisor` runs, that the SDK is installed and that its
-auto-memory imports without a conflict, then lists the steps; it exits 0
-ready, 1 not. `apply <slug> [--account NAME] --yes` runs them in order and
-stops at the first that fails: `close` (the console's clean stop: the
-handoff, the transcript mined), `import` (`cousin-memory import-auto
---apply`), `toml` (`[agent] runner = "sdk"`, and the account, once the tmux
-session is still down), `start` (the review gate's cursor opens afresh, the
-supervisor starts the runner, and the cousin's chat server is started, since
-the supervisor runs none and peers reach the inbox through it; afterwards
-`cousin-chat-watchdog` keeps it up) and `verify` (the runner stays up and holds its
-lock for 10 seconds, and the chat server answers `/health`).
+`cousin-migrate` moves one cousin from the legacy tmux lane (no `[agent]
+runner`) to the SDK runner, and back. Nothing else ever does: an upgrade or a
+merge leaves every cousin on the lane its `cousin.toml` names. `plan <slug>
+[--account NAME] [--validate]` checks, writing nothing, that the cousin is
+running on the legacy tmux lane (a stopped one would be started by the
+move), with no migration open, that its account is logged in, that a
+`cousin-supervisor` runs, that the SDK is installed and that its auto-memory
+imports without a conflict, then lists the steps; it exits 0 ready, 1 not.
+`apply <slug> [--account NAME] --yes` runs them in order and stops at the
+first that fails: `close` (the console's clean stop: the handoff, the
+transcript mined), `handover` (the legacy lane's transcript path recorded in
+`data/previous-transcript.json`: the working conversation does not carry
+over, but the runner's first fresh session is handed the path; never fails,
+a transcript that cannot be found is recorded missing), `import`
+(`cousin-memory import-auto --apply`), `toml` (`[agent] runner = "sdk"`, and
+the account, once the tmux session is still down), `start` (the review
+gate's cursor opens afresh, the supervisor starts the runner, and the
+cousin's chat server is started, since the supervisor runs none and peers
+reach the inbox through it; afterwards `cousin-chat-watchdog` keeps it up)
+and `verify` (the runner stays up and holds its lock for 10 seconds, and the
+chat server answers `/health`). `--validate` (on `plan`, `apply` or `check`)
+runs one smallest model turn with the model, effort and account the runner
+will carry, so a model the CLI can't actually run is never written.
 `data/migration.json` keeps the prior `cousin.toml`, its bytes and mode,
 written before the first step, and each step's outcome. `rollback <slug>
 --yes` undoes what ran: it stops the runner and waits until it lets go of
@@ -336,16 +352,29 @@ boot packet, starts the tmux session unless it already runs, removes the
 runner lane's session record (`data/runner-session*.json`, the restart
 mark), and releases the supervisor's hold on the runner (`run/held`). It refuses a second rollback,
 inbox rows still waiting and an inbox it cannot read (`--force` rolls back
-anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]`
-is the week's measure, from the migration on by default: inbox rows not
-done after an hour, tool calls with no recorded result, recorder hooks that
-failed, an unreadable inbox, a chat server that does not answer; exit 0
-clean, 1 not. The runbook, with the fleet's order and the rollback, is in
-[migrating](migrating.md#from-the-tmux-lane-to-the-sdk-runner).
+anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]
+[--validate]` is the week's measure, from the migration on by default: inbox
+rows not done after an hour, tool calls with no recorded result, recorder
+hooks that failed, an unreadable inbox, a chat server that does not answer;
+exit 0 clean, 1 not. The runbook, with the fleet's order and the rollback, is
+in [migrating](migrating.md#from-the-tmux-lane-to-the-sdk-runner).
+
+Once a cousin is on the runner lane, `plan`, `apply` and `rollback` also take
+`--to {sdk,tmux}`: this switches a runner cousin between the `sdk` and `tmux`
+kinds (keeping its session, resumed with `claude --resume`) instead of
+migrating off the legacy lane. Switching to `tmux` may need the operator to
+accept the CLI's trust or bypass-permissions dialog once in the pane the
+first time; `plan`/`apply` say where to look
+(`tmux -S <root>/run/tmux.sock attach -t tmux-<slug>`, or the console's pane
+view) and wait up to 10 minutes for it. `data/kind-switch.json` records a
+switch; a `rollback --to <kind>` undoes it. See [runners](reference/runners.md)
+for the kinds and [migrating](migrating.md).
 
 ```
 cousin-migrate plan wren --account team
 cousin-migrate apply wren --account team --yes
+cousin-migrate plan wren --to tmux
+cousin-migrate apply wren --to tmux --yes
 cousin-migrate check wren
 cousin-migrate rollback wren --yes
 ```
@@ -400,6 +429,9 @@ cousin-callback tag "ana named the espresso machine Gustav" --category banter
 `cousin-reason` writes and lists reasoning capsules: a conclusion with its
 evidence and the alternatives you rejected. Subcommands: `capsule`, `list`.
 
+`capsule` also takes `--truth-level` (default `conclusion`, the same levels
+as `cousin-memory`'s `--level`) and `--topic`.
+
 ```
 cousin-reason capsule --conclusion "keep backups for 30 days" \
     --evidence "audits need a month" --rejected "7 days" --confidence high
@@ -426,9 +458,10 @@ EOF
 ```
 
 `cousin-chat` sends a message to another cousin (or an external peer), or
-lists who is addressable. A runner cousin is written directly (its chat
-history and inbox, no chat server needed); a tmux cousin is reached
-through its chat server. Subcommands: `send SLUG TEXT [--from NAME]`, `list`.
+lists who is addressable. A runner cousin (`[agent] runner` set, `tmux` kind
+included) is written directly (its chat history and inbox, no chat server
+needed); a legacy tmux cousin is reached through its chat server. Subcommands:
+`send SLUG TEXT [--from NAME]`, `list`.
 
 ```
 cousin-chat send kestrel "the greenhouse report is ready" --from Wren
@@ -571,9 +604,13 @@ cousin-ui --port 8600
 ```
 
 `cousin-mcp` is the MCP server a cousin's harness starts (stdio). By hand you
-use it to check the registry, call one tool, find out why the server failed,
-or record the harness's approval of a cousin's `.mcp.json` with
-`approve SLUG`. See [mcp](mcp.md).
+use it to check the registry (`--selftest`, or `--list-tools` for the raw
+schemas), call one tool (`--call TOOL JSON`), find out why the server failed
+(`--last-connection`), print the SDK's supported protocol versions
+(`--versions`), or record the harness's approval of a cousin's `.mcp.json`
+with `approve SLUG`. `--registry` points it at a registry TOML other than the
+cousin home's (else the install's `config/mcp-registry.toml[.example]`). See
+[mcp](mcp.md).
 
 ```
 cousin-mcp --call memory '{"command": "search", "query": "backup"}'
@@ -601,6 +638,9 @@ cousin-sweep compact --target both
 
 `cousin-tool-surface` writes `data/tool-surface.md`, one line per command from
 its `--help`. The boot packet quotes it so a new generation knows its tools.
+`--root` picks the install (else `FRAMEWORK_ROOT`); `--bin` is a directory of
+installed `cousin-*` wrappers to run instead of each entry point through this
+interpreter.
 
 ```
 cousin-tool-surface
@@ -608,7 +648,9 @@ cousin-tool-surface
 
 `cousin-cache-audit` reads the harness transcripts and reports the prompt
 cache hit rate and the files that probably broke it. Needs `transcripts_dir`
-in `config/harness.toml`.
+in `config/harness.toml`. `--days` is the window (default 7, 0 for all);
+`--home` picks the cousin; `--json` prints the report as JSON; `--diagnose`
+lists each suspect invalidator with its turn pair.
 
 ```
 cousin-cache-audit --days 7 --diagnose
@@ -622,8 +664,14 @@ cousin-version bump patch
 ```
 
 `cousin-gate` scans a tree you are about to publish for private addresses,
-home paths, secret shapes, binaries and denylisted terms.
+home paths, secret shapes, binaries and denylisted terms. `--git-visible`
+scans only what git would publish (tracked files, and untracked ones
+`.gitignore` doesn't exclude) instead of the whole tree; use it on a checkout
+that also hosts a live install. `--mode triage` prints a one-line manifest
+per hit instead of the gate's file:line report. Exit 0 clean, 1 a hit (gate
+mode only).
 
 ```
 cousin-gate --root /tmp/publish --denylist ~/private/denylist.txt
+cousin-gate --root . --denylist denylist.txt --git-visible
 ```

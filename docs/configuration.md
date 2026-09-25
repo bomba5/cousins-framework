@@ -85,7 +85,8 @@ files. There's no built-in vendor default.
 ## accounts.toml
 
 `config/accounts.toml` names the accounts a runner cousin (`[agent] runner =
-"sdk"`, or `"opencode"` for an `opencode` account) can run on. A cousin picks one with `[agent] account` in its
+"sdk"` or `"tmux"` on a `claude-login` account, or `"opencode"` for an
+`opencode` account) can run on. A cousin picks one with `[agent] account` in its
 `cousin.toml`. A cousin that names none runs on `host`, the host's default
 login in `~/.claude`, shared by every such cousin, exactly as before this file
 existed. A cousin never obtains credentials itself: it runs on what it is
@@ -792,7 +793,12 @@ starts from a fixed allowlist of the runner's environment (`HOME`, `PATH`,
 `DBUS_SESSION_BUS_ADDRESS`, `LANG`, `LOCALE_ARCHIVE`, `TZ`, `COLORTERM`,
 `TMPDIR`, every `LC_*`) plus the names `[agent] env_allow` lists (a list of
 variable names; a `CLAUDE*` or `ANTHROPIC*` name is refused, since those never
-reach the pane). Absent: the tmux path, unchanged
+reach the pane). The in-pane launcher also sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+`DISABLE_AUTOUPDATER=1` and `COUSIN_PANE_PID` (its own pid, which the exec
+chain makes the CLI's too, so the pane hook and a crash recovery know which
+process is this cousin's), and refuses the CLI's print-mode flags (`-p`,
+`--print`, `--output-format`, `--input-format`, `--strict-mcp-config`): the
+tmux kind's contract is an interactive pane, never a one-shot call. Absent: the tmux path, unchanged
 (and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
 cousin.toml that does not parse is also the tmux path, and `cousin-runner`
 refuses it the same way).
@@ -857,7 +863,10 @@ The resolved value composes into the SDK runner's `options()` (and
 `<home>/.claude/settings.json` (`apply_project_settings`), and rides
 the runner's head `runner` stream event.
 
-`rollover_at_percent` (number, default 80) is the context percentage at which
+`rollover_at_percent` (number, default 80) applies to the `sdk` and `opencode`
+lanes only; the `tmux` kind has no automatic context-pressure rollover (only
+an explicit flip, the daily cadence, or `flip_when_transcript_mb` moves it).
+It is the context percentage at which
 the runner rolls the cousin over at its next idle: it asks the model for its
 handoff through the `handoff` tool, runs the `[session]` end hooks, starts a
 new session on the same system prompt, then the start hooks, and sends the

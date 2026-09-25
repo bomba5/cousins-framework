@@ -3,6 +3,12 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.24.6 - 2026-09-25
+
+### Changed
+- The console sidebar shows no scrollbar at rest and a thin one while the
+  pointer is over it. It still scrolls.
+
 ## 1.24.5 - 2026-09-25
 
 ### Removed

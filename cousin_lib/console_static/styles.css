@@ -118,7 +118,14 @@ a { color: var(--accent); }
   padding: 12px 10px;
   gap: 1px;
   overflow: auto;
+  /* no scrollbar at rest, a thin one while the pointer is over the sidebar */
+  scrollbar-width: none;
+  scrollbar-color: var(--bg-3) transparent;
 }
+.sidebar:hover { scrollbar-width: thin; }
+.sidebar::-webkit-scrollbar { width: 0; }
+.sidebar:hover::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { border: 0; border-radius: 3px; }
 .sidebar .section-label {
   font-family: var(--sans);
   font-size: 10.5px;

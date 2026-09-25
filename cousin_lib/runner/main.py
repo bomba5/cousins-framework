@@ -470,6 +470,8 @@ def _serve(runner, once):
     stop = threading.Event()
 
     def _signal(signum, frame):
+        if stop.is_set():
+            return                  # the stop is under way (the finally set it)
         stop.set()
         # at once, not when _forever next polls: a runner asked to stop
         # claims nothing new (live proofs 09-25, finding 3)
@@ -516,6 +518,7 @@ def _serve(runner, once):
             runner.stream.append("policy", {"describe": policy.describe()})
         return _once(runner, stop) if once else _forever(runner, stop)
     finally:
+        stop.set()                  # a signal from here on does nothing more
         runner.stop(timeout=STOP_TIMEOUT_S)
         if previous_term is not _UNSET:
             signal.signal(signal.SIGTERM, previous_term)

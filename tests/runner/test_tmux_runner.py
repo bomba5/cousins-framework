@@ -916,6 +916,23 @@ class TestPaneLostInAStop(Case):
         self.assertEqual(self.outcome(r, rec), ("done", "delivered", "cut by a requested stop"))
         self.assertIn("cousin-migrate", restart_note.read(self.home)["held"])
 
+    def test_a_pane_lost_in_a_stop_is_no_loss_toward_a_give_up(self):
+        r = self.runner(slow=True, slow_s=10.0)
+        r.loss_max = 0                                  # one counted loss would give up
+        r.start()
+        rec = r.enqueue(Item("operator:wren", "chat", "mid-turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: r.state() == "running"))
+        r.begin_stop()
+        self.panes[0].die()                             # on probation, too: no failed start
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "done"))
+        r.stop(timeout=4)
+        self.assertFalse(r._gave_up)
+        self.assertEqual(r._reopen_fails, 0)
+        self.assertEqual(len(r._losses), 0)
+        self.assertFalse((self.home / "data" / "run" / "tmux-giving-up.json").exists())
+        self.assertFalse(any(e["kind"] == "system" and e["payload"].get("subtype") == "pane_failing"
+                             for e in r.events()))
+
     def test_a_pane_lost_with_no_stop_still_reads_pane_loss(self):
         r = self.runner(slow=True, slow_s=10.0)
         r.start()

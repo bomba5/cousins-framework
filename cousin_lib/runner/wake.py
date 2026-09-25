@@ -35,15 +35,19 @@ def send(home, payload):
     """One datagram to the runner's socket: True when it was queued,
     False when nobody listens (or the queue stayed full for SEND_S)."""
     path = socket_path(home)
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    s = None
     try:
+        # made inside the try: poke runs from a signal handler (begin_stop),
+        # where a raise (EMFILE) would land in whatever the thread was doing
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         s.settimeout(SEND_S)
         s.sendto(payload, str(path))
         return True
     except OSError:
         return False
     finally:
-        s.close()
+        if s is not None:
+            s.close()
 
 
 def poke(home):

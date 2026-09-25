@@ -420,6 +420,8 @@ class Sessions:
                 fresh = self._build_side(kind)
                 self.sides[kind] = fresh
                 self._started_at[kind] = now
+                if self._stopping.is_set():
+                    fresh.begin_stop()       # it claims nothing for the moment it runs
                 fresh.start()
                 if self._stopping.is_set():
                     # stop() began while this one was built: its join of the

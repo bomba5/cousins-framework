@@ -621,6 +621,11 @@ class TmuxRunner:
         self.stream.append("system", {"subtype": "pane_lost", "session_id": self._session_id,
                                       "cut": cut, "requeued": requeued,
                                       "on_probation": booting is not None})
+        if stopping:
+            # the stop's own end (a unit's cgroup kill): no loss, no failed
+            # start, never a give-up marker; the loop reopens nothing
+            self._lost = {"next": time.monotonic()}
+            return
         now = time.monotonic()
         self._losses.append(now)
         while self._losses and now - self._losses[0] > self.loss_window_s:

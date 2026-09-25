@@ -327,8 +327,11 @@ The inspector's "lifecycle" panel runs `cousin-reincarnate` and
   recipient carries the donor's memory), body-swap (the two trade identity
   files, name and role) or merge (the donor's memory braided into the
   recipient's). Both are snapshotted, the mode applied, both flipped. It runs
-  on the recipient while the donor is held, so nothing else starts on either.
-  A second click confirms; a body swap wants `swap <donor> <recipient>` typed.
+  on the recipient while the donor is held, so nothing else starts on either;
+  the donor's own panel says so. A merge is confirmed by a second click; a
+  soul donation wants `donate <donor> <recipient>` typed, a body swap
+  `swap <donor> <recipient>`. Each request and its outcome is written to
+  `data/lifecycle/audit.jsonl` with the console user who asked.
 
 ### Flipping from the console
 
@@ -477,9 +480,12 @@ Escape. The pane fits itself to the browser and resizes the tmux window to
 match.
 
 A tmux-kind runner cousin's pane is shown this way only from its kind switch
-and migration panel, to answer a screen that waits on a person (the trust
-dialog): its runner types into it, so keys go in only while such a screen
-shows, and it keeps its fixed size.
+and migration panel, to answer the trust, bypass or MCP approval dialog. Its
+runner types into it, so keys go in only while such a dialog shows, only
+arrows, Enter, Escape, Tab, Backspace, a digit, y or n, and nothing after an
+Enter until the next screen has settled; it keeps its fixed size. The login
+and onboarding flows take several screens: the panel says to finish them in
+a terminal attached to the pane.
 
 Scrolling works both ways:
 

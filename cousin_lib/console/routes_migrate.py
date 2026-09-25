@@ -29,14 +29,22 @@ check), `migrate.switch_live` (overrides migrate._switch_live()'s), and
 from __future__ import annotations
 
 import re
+import sys
 import threading
+import traceback
 
 from cousin_lib import accounts, migrate
 from cousin_lib.console import longop, router
 from cousin_lib.console.app import HttpError
+from cousin_lib.console.pane import ANSWERABLE
+from cousin_lib.runner.tmux_runner import LOGIN_SCREENS
 
 # the kinds of op the fleet runs one at a time
 EXCLUSIVE_KINDS = ("migrate", "kind-switch", "migrate-rollback", "kind-switch-rollback")
+OP_KINDS = EXCLUSIVE_KINDS + ("migrate-plan", "migrate-check")
+# the runner kinds whose cousin runs in a pane the console can show
+# (console/pane.py kind_pane: the tmux kind)
+PANE_KINDS = ("tmux",)
 POLL_S = 1.0
 # what a record may show: never the saved file's bytes or mode
 RECORD_KEYS = ("slug", "state", "from", "to", "account", "session_id", "started_at",
@@ -189,8 +197,9 @@ def _start_exclusive(server, slug, kind, work, params):
 
 def _need_supervisor(up, root):
     if not up(root):
-        raise HttpError(409, "no cousin-supervisor runs for %s: the migration and the kind"
-                             " switch stop and start the cousin through it" % root)
+        raise HttpError(409, "no cousin-supervisor runs for %s: the migration, the kind"
+                             " switch and their rollbacks stop and start the cousin through it"
+                             % root)
 
 
 class _Stages:
@@ -237,7 +246,8 @@ class _Stages:
 def _watch_pane(op, home, poll, stage="verify"):
     """While the verify runs: say when the pane waits on a person (a
     tmux-kind runner records the screen in data/login-required.json).
-    Returns the Event that stops it."""
+    Returns end(), which stops it and waits for it, so no stage is
+    reported after the verify returned."""
     stop = threading.Event()
 
     def watch():
@@ -245,6 +255,8 @@ def _watch_pane(op, home, poll, stage="verify"):
         while not stop.wait(poll):
             seen = login_screen(home)
             screen = seen and seen.get("screen")
+            if stop.is_set():                    # the verify returned meanwhile
+                return
             if screen and screen != said:
                 said = screen
                 op.stage(stage, "running", waiting_line(screen))
@@ -252,8 +264,13 @@ def _watch_pane(op, home, poll, stage="verify"):
                 said = None
                 op.stage(stage, "running", "the pane's screen is clear again")
 
-    threading.Thread(target=watch, daemon=True, name="console-migrate-watch").start()
-    return stop
+    thread = threading.Thread(target=watch, daemon=True, name="console-migrate-watch")
+    thread.start()
+
+    def end():
+        stop.set()
+        thread.join(poll + 5.0)
+    return end
 
 
 # ---- the work ---------------------------------------------------------------
@@ -325,11 +342,11 @@ def _switch_work(server, home, to):
 
         def verify(*a, **kw):
             st.running("verify")
-            stop = _watch_pane(op, home, poll)
+            end = _watch_pane(op, home, poll)
             try:
                 return live["verify"](*a, **kw)
             finally:
-                stop.set()
+                end()
 
         wrapped.update(close=close, cursor_end=cursor_end, start=start, verify=verify)
         try:
@@ -337,9 +354,35 @@ def _switch_work(server, home, to):
         except migrate.MigrateError as err:
             st.sync()
             raise longop.OpError(str(err))
+        except Exception as err:  # noqa: BLE001 - the library leaves the record "switching"
+            raise longop.OpError(_switch_crashed(home, st, err))
         st.sync()
         return {"ok": True, "state": rec.get("state"), "warnings": rec.get("warnings") or []}
     return work
+
+
+def _switch_crashed(home, st, err):
+    """A switch step raised something the library does not word (it only
+    catches its own MigrateError): the record, still `switching`, is
+    marked failed at the step that ran, and the reason names the step and
+    the exception's type. Its text goes to the console's stderr only (an
+    exception's text can carry a secret)."""
+    step = st.current or "the start"
+    reason = "failed at %s: %s (see the console log); roll back to the kind it came from" % (
+        step, type(err).__name__)
+    print("cousin-console: kind switch on %s failed at %s:\n%s" % (
+        home.name, step, traceback.format_exc()), file=sys.stderr, flush=True)
+    rec = migrate.read_switch_record(home)
+    if isinstance(rec, dict) and rec.get("state") == "switching":
+        rec.update(state="failed", failed=step, error=reason)
+        try:
+            migrate._write_switch_record(home, rec)
+        except OSError:
+            pass
+    st.sync()
+    if st.current:
+        st.op.stage(st.current, "failed", reason)
+    return "the kind switch " + reason
 
 
 def _rollback_work(server, home, force):
@@ -419,7 +462,9 @@ def register():
                      "migration": public_record(migrate.read_record(home)),
                      "switch": public_record(migrate.read_switch_record(home)),
                      "loginScreen": login_screen(home), "supervisor": up,
-                     "running": running_migration(server), "deferred": list(DEFERRED)}
+                     "running": running_migration(server), "deferred": list(DEFERRED),
+                     "person_screens": list(LOGIN_SCREENS), "pane_answers": list(ANSWERABLE),
+                     "pane_kinds": list(PANE_KINDS), "op_kinds": list(OP_KINDS)}
 
     @router.route("POST", "/api/cousins/{slug}/migrate/plan")
     def plan(req, slug):
@@ -507,12 +552,14 @@ def register():
                 raise HttpError(400, "to must name the kind the switch came from")
             if force:
                 raise HttpError(400, "the kind switch's rollback takes no force")
+            _need_supervisor(_switch_live(server)["supervisor_up"], server.root)
             return _start_exclusive(server, slug, "kind-switch-rollback",
                                     _switch_rollback_work(server, home, to),
                                     {"to": to, "by": req.user})
         if force and body.get("force_confirm") is not True:
             raise HttpError(400, "force rolls back with inbox rows nobody will read: it asks a"
                                  " second time (force_confirm)")
+        _need_supervisor(_live(server)["supervisor_up"], server.root)
         return _start_exclusive(server, slug, "migrate-rollback",
                                 _rollback_work(server, home, force),
                                 {"force": force, "by": req.user})

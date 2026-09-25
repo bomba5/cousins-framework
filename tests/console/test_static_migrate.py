@@ -31,6 +31,7 @@ class MigrateJsx(unittest.TestCase):
     def test_it_calls_the_package_routes(self):
         for path in ("/migrate`", "/migrate/plan", "/migrate/apply", "/migrate/check",
                      "/migrate/rollback", "/reincarnate", "/api/lifecycle/transplant",
+                     "/lifecycle`",
                      "/api/lifecycle/modes", "/api/accounts"):
             self.assertIn(path, self.src, path)
 
@@ -48,13 +49,37 @@ class MigrateJsx(unittest.TestCase):
         self.assertIn("force_confirm = true", self.src)
         self.assertIn("Click again to force", self.src)
         self.assertIn("type <code>{phrase}</code> to confirm", self.src)
+        self.assertIn("confirmPhrase(info.phrase, donor, recipient)", self.src)
         self.assertIn("confirm: typedMode ? typed : true", self.src)
         self.assertIn("click again: rewrite the role and flip", self.src)
 
-    def test_the_trust_screen_opens_the_pane(self):
+    def test_the_trust_screen_opens_the_pane_one_input_at_a_time(self):
         self.assertIn("window.PaneView", self.src)
-        self.assertIn('tmuxSession: "tmux-" + slug', self.src)
+        self.assertIn('tmuxSession: "tmux-" + slug }} onClose={onClose} serial />', self.src)
         self.assertIn("open the pane to accept the trust dialog", self.src)
+        self.assertIn("finish it in a terminal", self.src)
+        chat = _read("chat.jsx")
+        self.assertIn("function PaneView({ cousin, onClose, serial })", chat)
+        self.assertIn("if (serialRef.current && sendingRef.current) return;", chat)
+
+    def test_screens_kinds_and_op_kinds_come_from_the_server(self):
+        for key in ("state.person_screens", "state.pane_answers", "state.pane_kinds",
+                    "state.op_kinds", "meta.op_kinds", "info.phrase"):
+            self.assertIn(key, self.src, key)
+        for literal in ('"trust", "onboarding"', '"kind-switch"', '"reincarnate", "transplant"',
+                        '=== "tmux"', "swap ${"):
+            self.assertNotIn(literal, self.src, literal)
+
+    def test_errors_are_shown_and_never_leave_a_button_busy(self):
+        self.assertIn("the console did not answer: ", self.src)
+        self.assertIn("<MigLoadError error={loadError} />", self.src)
+        self.assertNotIn("apiGet(", self.src)
+        self.assertIn("[planOpId, op && op.id, op && op.status]", self.src)
+        self.assertIn("[opId, op && op.id, op && op.status]", self.src)
+
+    def test_the_donor_shows_it_is_held(self):
+        self.assertIn("/lifecycle`", self.src)
+        self.assertIn("held as the donor of a", self.src)
 
     def test_no_colour_literals_and_no_em_dashes(self):
         self.assertNotRegex(self.src, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(")
@@ -96,12 +121,16 @@ class Helpers(unittest.TestCase):
           const waiting = {stages: [{name: "verify", status: "running",
             detail: "waiting for the operator to accept the trust dialog in the pane (screen: trust)"}]};
           const done = {stages: [{name: "verify", status: "done", detail: "(screen: trust)"}]};
+          const screens = ["trust", "login", "bypass"];
           console.log(JSON.stringify([
-            paneWaitScreen(waiting, null), paneWaitScreen(done, null),
-            paneWaitScreen(null, {screen: "trust"}), paneWaitScreen(null, {screen: "limit"}),
-            paneWaitScreen(null, null)]));
+            paneWaitScreen(waiting, null, screens), paneWaitScreen(done, null, screens),
+            paneWaitScreen(null, {screen: "trust"}, screens),
+            paneWaitScreen(null, {screen: "limit"}, screens),
+            paneWaitScreen(null, null, screens), paneWaitScreen(waiting, null, []),
+            paneAction("trust", ["trust", "bypass"]), paneAction("login", ["trust"]),
+            paneAction(null, ["trust"])]));
         """)
-        self.assertEqual(got, ["trust", None, "trust", None, None])
+        self.assertEqual(got, ["trust", None, "trust", None, None, None, "pane", "terminal", None])
 
     def test_rollback_offers_follow_the_records(self):
         got = self.run_node("""
@@ -114,16 +143,17 @@ class Helpers(unittest.TestCase):
         self.assertEqual([o["which"] for o in got[1]], ["migration"])
         self.assertEqual(got[2], [])
 
-    def test_bodies_and_the_swap_phrase(self):
+    def test_bodies_and_the_confirm_phrase(self):
         got = self.run_node("""
           console.log(JSON.stringify([
             migrateBody(true, {account: "team", validate: true, to: "tmux"}),
             migrateBody(true, {account: "", validate: false}),
             migrateBody(false, {to: "tmux", account: "team", validate: true}),
-            swapPhrase("wren", "owl"), otherKind("sdk", ["sdk", "tmux"]), otherKind("x", [])]));
+            confirmPhrase("swap {donor} {recipient}", "wren", "owl"), confirmPhrase(null, "a", "b"),
+            otherKind("sdk", ["sdk", "tmux"]), otherKind("x", [])]));
         """)
         self.assertEqual(got, [{"validate": True, "account": "team"}, {"validate": False},
-                               {"to": "tmux"}, "swap wren owl", "tmux", ""])
+                               {"to": "tmux"}, "swap wren owl", "", "tmux", ""])
 
 
 if __name__ == "__main__":

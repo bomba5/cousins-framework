@@ -76,6 +76,15 @@ class TestState(MigrateCase):
     def test_unknown_cousin_is_404(self):
         self.assertEqual(self.get("/api/cousins/nope/migrate")[0], 404)
 
+    def test_the_screens_the_kinds_with_a_pane_and_the_op_kinds_are_served(self):
+        _, body = self.get("/api/cousins/wren/migrate")
+        self.assertEqual(body["pane_kinds"], ["tmux"])
+        self.assertIn("trust", body["person_screens"])
+        self.assertIn("login", body["person_screens"])
+        self.assertEqual(body["pane_answers"], ["trust", "bypass", "mcp_approval"])
+        self.assertIn("kind-switch", body["op_kinds"])
+        self.assertIn("migrate-plan", body["op_kinds"])
+
 
 class TestPlan(MigrateCase):
     def test_a_plan_without_validate_answers_at_once_and_writes_nothing(self):
@@ -252,6 +261,14 @@ class TestRollback(MigrateCase):
         op = self.wait_done()
         self.assertEqual(op["status"], "done", op)
 
+    def test_rollback_needs_the_supervisor(self):
+        self._migrate()
+        self.live.supervisor = False
+        status, body = self.post("/api/cousins/wren/migrate/rollback",
+                                 {"which": "migration", "confirm": True})
+        self.assertEqual(status, 409, body)
+        self.assertIn("supervisor", body["error"])
+
     def test_bad_which_is_400(self):
         status, _ = self.post("/api/cousins/wren/migrate/rollback",
                               {"which": "everything", "confirm": True})
@@ -368,6 +385,32 @@ class TestSwitch(SwitchCase):
         self.assertEqual((op["kind"], op["status"]), ("kind-switch-rollback", "done"), op)
         self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
         self.assertEqual([n for n, _ in self.stages(op)], ["close", "restore", "cursor", "start"])
+
+    def test_an_unexpected_error_marks_the_record_failed(self):
+        self.trust()
+
+        def broken_start(home, root):
+            raise KeyError("children")
+        self.server.state["migrate.switch_live"]["start"] = broken_start
+        self.post("/api/cousins/wren/migrate/apply", {"to": "tmux", "confirm": True})
+        op = self.wait_done()
+        self.assertEqual(op["status"], "failed")
+        self.assertIn("start", op["error"])
+        self.assertIn("KeyError", op["error"])
+        rec = json.loads((self.home / migrate.SWITCH_RECORD).read_text())
+        self.assertEqual((rec["state"], rec["failed"]), ("failed", "start"))
+        self.assertIn("KeyError", rec["error"])
+        self.assertEqual(dict(self.stages(op))["start"], "failed")
+
+    def test_the_verify_watcher_says_nothing_once_verify_returned(self):
+        self.trust()
+        self.post("/api/cousins/wren/migrate/apply", {"to": "tmux", "confirm": True})
+        op = self.wait_done()
+        (self.home / "data" / "login-required.json").write_text(
+            json.dumps({"kind": "tmux", "screen": "trust", "ts": 1.0}))
+        time.sleep(0.1)
+        after = longop.status(self.server, "wren")
+        self.assertEqual(after["stages"], op["stages"])
 
     def test_a_switch_rollback_takes_no_force(self):
         status, _ = self.post("/api/cousins/wren/migrate/rollback",

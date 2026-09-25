@@ -13,8 +13,10 @@
 //
 // The inspector gets two panels (slot inspector.panels): "kind and
 // migration" (the records, check, rollback) and "lifecycle" (reincarnate,
-// transplant). Destructive steps ask twice; a body swap and a forced
-// rollback ask for more (typed, or a third click).
+// transplant). Destructive steps ask twice; a soul donation or a body swap
+// is typed, and a forced rollback asks a third time. The screens, the kinds
+// with a pane and the op kinds come from the server (GET .../migrate,
+// GET /api/lifecycle/modes), never a copy here.
 
 const MIG_SMALL = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
 const MIG_MONO = { fontFamily: "var(--mono)", fontSize: 11 };
@@ -23,11 +25,7 @@ const MIG_ROW = { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap
 const MIG_COL = { display: "flex", flexDirection: "column", gap: 8 };
 
 // ---- pure helpers
-const MIGRATE_OP_KINDS = ["migrate", "kind-switch", "migrate-rollback", "kind-switch-rollback",
-                          "migrate-plan", "migrate-check"];
-const LIFECYCLE_OP_KINDS = ["reincarnate", "transplant"];
-// the screens a tmux-kind pane waits on a person at (tmux_runner.LOGIN_SCREENS)
-const PERSON_SCREENS = ["trust", "onboarding", "login", "bypass", "mcp_approval"];
+const inList = (list, item) => !!item && (list || []).indexOf(item) >= 0;
 
 // The op's stages in the order it planned them (params.steps), the ones
 // not reached yet as "pending" (or "not run" once the op ended), then any
@@ -49,28 +47,35 @@ function migrateStageRows(op) {
 }
 
 // The screen a detail line names ("... (screen: trust)"), when it is one
-// that waits on a person, else null.
-function screenInDetail(detail) {
+// of `screens` (the server's person_screens), else null.
+function screenInDetail(detail, screens) {
   const m = /screen: ([a-z_]+)/.exec(String(detail || ""));
-  return m && PERSON_SCREENS.indexOf(m[1]) >= 0 ? m[1] : null;
+  return m && inList(screens, m[1]) ? m[1] : null;
 }
 
 // What the pane waits on: a running stage's detail first, then the
 // cousin's login-required state ({screen}), else null.
-function paneWaitScreen(op, loginScreen) {
+function paneWaitScreen(op, loginScreen, screens) {
   const stages = (op && op.stages) || [];
   for (let i = stages.length - 1; i >= 0; i--) {
     if (stages[i].status !== "running") continue;
-    const s = screenInDetail(stages[i].detail);
+    const s = screenInDetail(stages[i].detail, screens);
     if (s) return s;
   }
   const s = loginScreen && loginScreen.screen;
-  return s && PERSON_SCREENS.indexOf(s) >= 0 ? s : null;
+  return inList(screens, s) ? s : null;
+}
+
+// "pane" when the console's pane answers that screen (the server's
+// pane_answers), "terminal" for a flow that takes several screens, else null.
+function paneAction(screen, answers) {
+  if (!screen) return null;
+  return inList(answers, screen) ? "pane" : "terminal";
 }
 
 function paneButtonLabel(screen) {
   return screen === "trust" ? "open the pane to accept the trust dialog"
-                            : `open the pane (it waits on a person: ${screen})`;
+                            : `open the pane to answer it (screen: ${screen})`;
 }
 
 // The rollbacks the records allow: the kind switch back to the kind it
@@ -88,9 +93,11 @@ function rollbackOffers(state) {
   return out;
 }
 
-// What the operator types to confirm a body swap (routes_lifecycle.swap_phrase).
-function swapPhrase(donor, recipient) {
-  return `swap ${donor} ${recipient}`;
+// What the operator types to confirm a mode, from the server's phrase
+// template (routes_lifecycle.confirm_phrase), "" when it has none.
+function confirmPhrase(template, donor, recipient) {
+  if (!template) return "";
+  return String(template).replace("{donor}", donor).replace("{recipient}", recipient);
 }
 
 // The plan/apply body for the dialog's options: the tmux-lane migration
@@ -109,19 +116,44 @@ function otherKind(lane, kinds) {
 }
 // ---- end pure helpers
 
+// A POST that always answers: a network error is { ok: false, status: 0 }
+// with its words, so no caller is left busy.
 async function migPost(path, body) {
-  const { r, d } = await apiSend("POST", path, body || {});
-  return { ok: r.ok, status: r.status, d: d || {} };
+  try {
+    const { r, d } = await apiSend("POST", path, body || {});
+    return { ok: r.ok, status: r.status, d: d || {} };
+  } catch (e) {
+    return { ok: false, status: 0, d: { error: "the console did not answer: " + String(e.message || e) } };
+  }
+}
+
+// A GET with its error: { d } or { error } (the server's words, else the
+// network's).
+async function migGet(path) {
+  try {
+    const r = await fetch(path, { cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: (d && d.error) || `HTTP ${r.status}` };
+    return { d };
+  } catch (e) {
+    return { error: "the console did not answer: " + String(e.message || e) };
+  }
+}
+
+function MigLoadError({ error }) {
+  if (!error) return null;
+  return <div data-migrate-load-error style={{ ...MIG_MONO, color: "var(--red)" }}>could not load: {error}</div>;
 }
 
 // GET /api/cousins/<slug>/migrate, reloaded when the cousin's op moves and
 // every 10 s (a pane screen answered outside an op clears on its own).
 function useMigrateState(slug) {
   const [state, setState] = React.useState(null);
+  const [error, setError] = React.useState(null);
   const load = React.useCallback(async () => {
     if (!slug) { setState(null); return; }
-    const d = await apiGet(`/api/cousins/${slug}/migrate`);
-    if (d) setState(d);
+    const res = await migGet(`/api/cousins/${slug}/migrate`);
+    if (res.d) { setState(res.d); setError(null); } else setError(res.error);
   }, [slug]);
   React.useEffect(() => {
     load();
@@ -130,7 +162,7 @@ function useMigrateState(slug) {
     const tick = slug ? setInterval(load, 10000) : null;
     return () => { window.removeEventListener("fw-cousin-op", on); if (tick) clearInterval(tick); };
   }, [slug, load]);
-  return [state, load];
+  return [state, load, error];
 }
 
 function MigMsg({ msg }) {
@@ -157,7 +189,7 @@ function MigratePaneModal({ slug, onClose }) {
           <button className="close" onClick={close} style={{ marginLeft: "auto" }}>x</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", height: "70vh", minHeight: 0 }}>
-          {PV ? <PV cousin={{ slug, tmuxSession: "tmux-" + slug }} onClose={onClose} />
+          {PV ? <PV cousin={{ slug, tmuxSession: "tmux-" + slug }} onClose={onClose} serial />
               : <div style={{ ...MIG_MONO, padding: 20 }}>the terminal view is not loaded</div>}
         </div>
       </div>
@@ -165,14 +197,51 @@ function MigratePaneModal({ slug, onClose }) {
   );
 }
 
+// Whether the cousin has a pane the console can show, now or once `op`
+// switched it (the server's pane_kinds).
+function hasPane(state, op) {
+  const kinds = state && state.pane_kinds;
+  return inList(kinds, state && state.lane) || inList(kinds, op && op.params && op.params.to);
+}
+
+// What the pane waits on, for a panel: the screen and whether the console's
+// pane answers it; null when there is no pane or nothing waits.
+function paneWait(state, op) {
+  if (!state || !hasPane(state, op)) return null;
+  // a running op's own words first; after it, what the pane still shows
+  const screen = op && op.status === "running"
+    ? paneWaitScreen(op, state.loginScreen, state.person_screens)
+    : paneWaitScreen(null, state.loginScreen, state.person_screens);
+  return screen ? { screen, action: paneAction(screen, state.pane_answers) } : null;
+}
+
+// The pane button, or for a flow of several screens (a login, onboarding)
+// where to finish it.
+function PaneWait({ wait, slug, onOpenPane }) {
+  if (!wait) return null;
+  if (wait.action === "pane") {
+    return (
+      <div style={MIG_ROW}>
+        <button className="btn primary" style={MIG_SMALL} data-open-pane onClick={onOpenPane}>{paneButtonLabel(wait.screen)}</button>
+        <span style={MIG_HINT}>nothing else types into that screen; one key at a time</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{ ...MIG_MONO, color: "var(--amber)" }} data-pane-terminal>
+      the pane waits on the {wait.screen} screen, a flow of several screens: finish it in a terminal
+      attached to the pane (the framework's tmux socket, run/tmux.sock, session tmux-{slug})
+    </div>
+  );
+}
+
 // A migrate or lifecycle op's stages, the planned ones not reached yet
-// greyed, and the pane button while the pane waits on a person.
-function MigrateOpStages({ op, loginScreen, paneOk, onOpenPane }) {
+// greyed, and what the pane waits on (`state` is GET .../migrate; a
+// lifecycle op passes none).
+function MigrateOpStages({ op, state, onOpenPane }) {
   if (!op) return null;
   const rows = migrateStageRows(op);
-  // a running op's own words first; after it, what the pane still shows
-  const screen = !paneOk ? null
-    : op.status === "running" ? paneWaitScreen(op, loginScreen) : paneWaitScreen(null, loginScreen);
+  const wait = paneWait(state, op);
   const p = op.params || {};
   const what = [p.to && `to ${p.to}`, p.account && `account ${p.account}`, p.validate && "validated",
                 p.mode, p.donor && `donor ${p.donor}`, p.new_role && `role "${p.new_role}"`,
@@ -195,12 +264,7 @@ function MigrateOpStages({ op, loginScreen, paneOk, onOpenPane }) {
           </li>
         ))}
       </ol>
-      {screen && (
-        <div style={MIG_ROW}>
-          <button className="btn primary" style={MIG_SMALL} data-open-pane onClick={onOpenPane}>{paneButtonLabel(screen)}</button>
-          <span style={MIG_HINT}>the verify waits for it; nothing else types into that screen</span>
-        </div>
-      )}
+      <PaneWait wait={wait} slug={op.slug} onOpenPane={onOpenPane} />
       {op.error && <div className="longop-error">{op.error}</div>}
     </div>
   );
@@ -253,10 +317,11 @@ function DeferredList({ items }) {
 
 // The dialog: plan (a checklist), then apply as the cousin's op.
 function KindSwitchDialog({ slug, onClose }) {
-  const [state, reloadState] = useMigrateState(slug);
+  const [state, reloadState, loadError] = useMigrateState(slug);
   const [op] = useLongOp(slug);
   const lane = state && state.lane;
   const legacy = lane === "tmux-legacy";
+  const [accountsError, setAccountsError] = React.useState(null);
   const [to, setTo] = React.useState("");
   const [account, setAccount] = React.useState("");
   const [validate, setValidate] = React.useState(false);
@@ -275,7 +340,10 @@ function KindSwitchDialog({ slug, onClose }) {
   }, [state && state.lane]);
   React.useEffect(() => {
     if (!legacy) return;
-    apiGet("/api/accounts").then(d => { if (d) setAccountNames((d.accounts || []).map(a => a.name)); });
+    migGet("/api/accounts").then(res => {
+      if (res.d) setAccountNames((res.d.accounts || []).map(a => a.name));
+      else setAccountsError(res.error);
+    });
   }, [legacy]);
 
   const opts = { to, account, validate };
@@ -291,7 +359,7 @@ function KindSwitchDialog({ slug, onClose }) {
     if (op.result && op.result.plan) { setPlan(op.result.plan); setPlanFor(planKeyRef.current); }
     else setMsg({ err: true, text: op.error || "the plan failed" });
     setPlanOpId(null);
-  }, [op && op.id, op && op.status]);
+  }, [planOpId, op && op.id, op && op.status]);
 
   const runPlan = async () => {
     setBusy(true); setMsg(null); setPlan(null);
@@ -314,8 +382,7 @@ function KindSwitchDialog({ slug, onClose }) {
 
   const opRunning = op && op.status === "running";
   const shownOp = op && (op.id === applyOpId || op.id === planOpId
-                         || (opRunning && MIGRATE_OP_KINDS.indexOf(op.kind) >= 0)) ? op : null;
-  const paneOk = lane === "tmux" || (shownOp && shownOp.params && shownOp.params.to === "tmux");
+                         || (opRunning && inList(state && state.op_kinds, op.kind))) ? op : null;
 
   return (
     <div className="modal-bg" onClick={onClose}>
@@ -326,7 +393,8 @@ function KindSwitchDialog({ slug, onClose }) {
           <button className="close" onClick={onClose} style={{ marginLeft: "auto" }}>x</button>
         </div>
         <div className="body" style={MIG_COL}>
-          {!state && <div style={MIG_HINT}>loading...</div>}
+          <MigLoadError error={loadError} />
+          {!state && !loadError && <div style={MIG_HINT}>loading...</div>}
           {state && (
             <>
               <div style={MIG_MONO}>
@@ -342,6 +410,7 @@ function KindSwitchDialog({ slug, onClose }) {
                       <option value="">(what the cousin names, else the host login)</option>
                       {accountNames.map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
+                    {accountsError && <span style={{ ...MIG_HINT, color: "var(--red)" }}>accounts not loaded: {accountsError}</span>}
                   </div>
                   <label style={{ ...MIG_MONO, display: "flex", gap: 6, alignItems: "flex-start" }}>
                     <input type="checkbox" checked={validate} onChange={e => setValidate(e.target.checked)} />
@@ -368,13 +437,8 @@ function KindSwitchDialog({ slug, onClose }) {
               {planFits && <PlanChecklist plan={plan} />}
               {plan && !planFits && <div style={MIG_HINT}>the options changed: plan again</div>}
               <DeferredList items={state.deferred} />
-              {shownOp && <MigrateOpStages op={shownOp} loginScreen={state.loginScreen} paneOk={paneOk}
-                                           onOpenPane={() => setPaneOpen(true)} />}
-              {!shownOp && lane === "tmux" && paneWaitScreen(null, state.loginScreen) && (
-                <button className="btn" style={MIG_SMALL} data-open-pane onClick={() => setPaneOpen(true)}>
-                  {paneButtonLabel(paneWaitScreen(null, state.loginScreen))}
-                </button>
-              )}
+              {shownOp && <MigrateOpStages op={shownOp} state={state} onOpenPane={() => setPaneOpen(true)} />}
+              {!shownOp && <PaneWait wait={paneWait(state, null)} slug={slug} onOpenPane={() => setPaneOpen(true)} />}
               <MigMsg msg={msg} />
             </>
           )}
@@ -424,7 +488,7 @@ function CheckReport({ slug }) {
     if (op.result && op.result.check) setReport(op.result.check);
     else setMsg({ err: true, text: op.error || "the check failed" });
     setOpId(null);
-  }, [op && op.id, op && op.status]);
+  }, [opId, op && op.id, op && op.status]);
   const run = async () => {
     setBusy(true); setMsg(null); setReport(null);
     const body = { validate };
@@ -520,19 +584,22 @@ function recordLine(name, rec) {
 function MigratePanel({ cousin }) {
   const slug = cousin.slug;
   const local = cousin.type !== "remote";
-  const [state, reloadState] = useMigrateState(local ? slug : null);
+  const [state, reloadState, loadError] = useMigrateState(local ? slug : null);
   const [op] = useLongOp(local ? slug : null);
   const [paneOpen, setPaneOpen] = React.useState(false);
   const [showCheck, setShowCheck] = React.useState(false);
   if (!local) return null;
   const running = op && op.status === "running";
-  const migOp = op && MIGRATE_OP_KINDS.indexOf(op.kind) >= 0 && op.kind !== "migrate-plan" && op.kind !== "migrate-check" ? op : null;
+  // the panel shows what changes the cousin; the dialog and the check show their own
+  const migOp = op && inList(state && state.op_kinds, op.kind)
+    && op.kind !== "migrate-plan" && op.kind !== "migrate-check" ? op : null;
   const lane = state && state.lane;
   return (
     <>
       <SectionLabel style={{ marginTop: 20 }}>kind and migration</SectionLabel>
       <div data-migrate-panel style={MIG_COL}>
-        {!state && <div style={MIG_HINT}>loading...</div>}
+        <MigLoadError error={loadError} />
+        {!state && !loadError && <div style={MIG_HINT}>loading...</div>}
         {state && (
           <>
             <div style={MIG_MONO}>lane: <b>{lane}</b></div>
@@ -545,19 +612,13 @@ function MigratePanel({ cousin }) {
               </button>
               <button className={`btn ${showCheck ? "active" : "ghost"}`} style={MIG_SMALL}
                       onClick={() => setShowCheck(!showCheck)}>check</button>
-              {!migOp && lane === "tmux" && paneWaitScreen(null, state.loginScreen) && (
-                <button className="btn" style={MIG_SMALL} data-open-pane onClick={() => setPaneOpen(true)}>
-                  {paneButtonLabel(paneWaitScreen(null, state.loginScreen))}
-                </button>
-              )}
             </div>
+            {!migOp && <PaneWait wait={paneWait(state, null)} slug={slug} onOpenPane={() => setPaneOpen(true)} />}
             {showCheck && <CheckReport slug={slug} />}
             {rollbackOffers(state).map(o => (
               <RollbackButton key={o.which} slug={slug} offer={o} disabled={running} onStarted={reloadState} />
             ))}
-            {migOp && <MigrateOpStages op={migOp} loginScreen={state.loginScreen}
-                                       paneOk={lane === "tmux" || (migOp.params || {}).to === "tmux"}
-                                       onOpenPane={() => setPaneOpen(true)} />}
+            {migOp && <MigrateOpStages op={migOp} state={state} onOpenPane={() => setPaneOpen(true)} />}
             <DeferredList items={state.deferred} />
           </>
         )}
@@ -569,15 +630,38 @@ function MigratePanel({ cousin }) {
 
 // ---- the inspector: lifecycle -------------------------------------------------
 
+// GET /api/lifecycle/modes: [meta, error].
 function useLifecycleModes() {
   const [modes, setModes] = React.useState(null);
-  React.useEffect(() => { apiGet("/api/lifecycle/modes").then(d => { if (d) setModes(d); }); }, []);
-  return modes;
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    migGet("/api/lifecycle/modes").then(res => { if (res.d) setModes(res.d); else setError(res.error); });
+  }, []);
+  return [modes, error];
+}
+
+// GET /api/cousins/<slug>/lifecycle: what holds the cousin as a
+// transplant's donor, reloaded when a transplant op moves anywhere.
+function useLifecycleHeld(slug) {
+  const [held, setHeld] = React.useState(null);
+  const [error, setError] = React.useState(null);
+  const load = React.useCallback(async () => {
+    if (!slug) return;
+    const res = await migGet(`/api/cousins/${slug}/lifecycle`);
+    if (res.d) { setHeld(res.d.held || null); setError(null); } else setError(res.error);
+  }, [slug]);
+  React.useEffect(() => {
+    load();
+    const on = (e) => { if ((e.detail || {}).kind === "transplant") load(); };
+    window.addEventListener("fw-cousin-op", on);
+    return () => window.removeEventListener("fw-cousin-op", on);
+  }, [load]);
+  return [held, error];
 }
 
 function ReincarnateDialog({ cousin, onClose }) {
   const slug = cousin.slug;
-  const meta = useLifecycleModes();
+  const [meta, metaError] = useLifecycleModes();
   const [op] = useLongOp(slug);
   const [role, setRole] = React.useState("");
   const [timeout, setTimeoutS] = React.useState("");
@@ -615,6 +699,7 @@ function ReincarnateDialog({ cousin, onClose }) {
             console waits for it (a runner cousin answers it on the flip's own handoff request), then the
             role is rewritten in CLAUDE.md and cousin.toml, then a flip.
           </div>
+          <MigLoadError error={metaError} />
           <div style={MIG_MONO}>role now: {cousin.role || "-"}</div>
           <FormField label="new role" hint={`one line, at most ${max} characters`}>
             <input className="txt" value={role} maxLength={max} autoFocus onChange={e => { setRole(e.target.value); setArmed(false); }} />
@@ -638,8 +723,9 @@ function ReincarnateDialog({ cousin, onClose }) {
 }
 
 function TransplantDialog({ cousin, onClose }) {
-  const meta = useLifecycleModes();
+  const [meta, metaError] = useLifecycleModes();
   const [cousins, setCousins] = React.useState([]);
+  const [cousinsError, setCousinsError] = React.useState(null);
   const [donor, setDonor] = React.useState("");
   const [recipient, setRecipient] = React.useState(cousin.slug);
   const [mode, setMode] = React.useState("merge");
@@ -650,16 +736,16 @@ function TransplantDialog({ cousin, onClose }) {
   const [msg, setMsg] = React.useState(null);
   const [op] = useLongOp(recipient);
   React.useEffect(() => {
-    apiGet("/api/cousins").then(d => {
-      if (!d) return;
-      setCousins((d.cousins || []).filter(c => c.type !== "remote").map(c => c.slug));
+    migGet("/api/cousins").then(res => {
+      if (!res.d) { setCousinsError(res.error); return; }
+      setCousins((res.d.cousins || []).filter(c => c.type !== "remote").map(c => c.slug));
     });
   }, []);
   React.useEffect(() => { setArmed(false); setTyped(""); }, [donor, recipient, mode]);
   const modes = (meta && meta.modes) || [];
   const info = modes.find(m => m.id === mode);
   const typedMode = info && info.confirm === "typed";
-  const phrase = swapPhrase(donor, recipient);
+  const phrase = typedMode ? confirmPhrase(info.phrase, donor, recipient) : "";
   const ready = donor && recipient && donor !== recipient && info;
   const start = async () => {
     if (!typedMode && !armed) { setArmed(true); return; }
@@ -680,6 +766,7 @@ function TransplantDialog({ cousin, onClose }) {
           <button className="close" onClick={onClose} style={{ marginLeft: "auto" }}>x</button>
         </div>
         <div className="body" style={MIG_COL}>
+          <MigLoadError error={metaError || cousinsError} />
           <div className="grid2">
             <FormField label="donor" hint="whose memory or body moves">
               <select className="sel" value={donor} onChange={e => setDonor(e.target.value)}>
@@ -704,7 +791,7 @@ function TransplantDialog({ cousin, onClose }) {
           </div>
           {typedMode && ready && (
             <div style={MIG_ROW} data-transplant-typed>
-              <span style={{ ...MIG_HINT, color: "var(--amber)" }}>a body swap trades the two identities: type <code>{phrase}</code> to confirm</span>
+              <span style={{ ...MIG_HINT, color: "var(--amber)" }}>{mode} replaces what {recipient} is: type <code>{phrase}</code> to confirm</span>
               <input className="txt" style={{ width: 200 }} value={typed} onChange={e => setTyped(e.target.value)} />
             </div>
           )}
@@ -714,7 +801,7 @@ function TransplantDialog({ cousin, onClose }) {
         <div className="foot">
           <button className="btn" onClick={onClose}>close</button>
           <button className={`btn ${armed || typedMode ? "danger" : "primary"}`}
-                  disabled={busy || !ready || (typedMode && typed !== phrase) || (op && op.status === "running")}
+                  disabled={busy || !ready || (typedMode && (!phrase || typed !== phrase)) || (op && op.status === "running")}
                   onClick={start}>
             {armed ? `click again: ${mode} ${donor} into ${recipient}, then flip both` : "transplant"}
           </button>
@@ -728,9 +815,11 @@ function LifecyclePanel({ cousin }) {
   const [open, setOpen] = React.useState(null);
   const local = cousin.type !== "remote";
   const [op] = useLongOp(local ? cousin.slug : null);
+  const [meta, metaError] = useLifecycleModes();
+  const [held, heldError] = useLifecycleHeld(local ? cousin.slug : null);
   if (!local) return null;
-  const lifeOp = op && LIFECYCLE_OP_KINDS.indexOf(op.kind) >= 0 ? op : null;
-  const running = op && op.status === "running";
+  const lifeOp = op && inList(meta && meta.op_kinds, op.kind) ? op : null;
+  const running = (op && op.status === "running") || !!held;
   return (
     <>
       <SectionLabel style={{ marginTop: 20 }}>lifecycle</SectionLabel>
@@ -740,6 +829,13 @@ function LifecyclePanel({ cousin }) {
           <button className="btn" style={MIG_SMALL} disabled={running} onClick={() => setOpen("transplant")}>transplant...</button>
           <span style={MIG_HINT}>a new role with the memory kept; or memory or body moved between two cousins</span>
         </div>
+        <MigLoadError error={metaError || heldError} />
+        {held && (
+          <div data-lifecycle-held style={{ ...MIG_MONO, color: "var(--amber)" }}>
+            held as the donor of a {held.mode} into {held.recipient}: nothing else starts on {cousin.slug}
+            until it ends (its steps are on {held.recipient}'s inspector)
+          </div>
+        )}
         {lifeOp && <MigrateOpStages op={lifeOp} />}
       </div>
       {open === "reincarnate" && <ReincarnateDialog cousin={cousin} onClose={() => setOpen(null)} />}
@@ -767,5 +863,5 @@ registerSlot("inspector.panels", { id: "lifecycle", order: 41, render: ({ cousin
 Object.assign(window, {
   KindSwitchDialog, KindSwitchHost, openKindSwitchDialog, MigratePanel, LifecyclePanel,
   ReincarnateDialog, TransplantDialog, MigrateOpStages, MigratePaneModal,
-  migrateStageRows, paneWaitScreen, rollbackOffers, swapPhrase,
+  migrateStageRows, paneWaitScreen, paneAction, rollbackOffers, confirmPhrase,
 });

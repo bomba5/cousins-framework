@@ -313,6 +313,14 @@ above. Each is stated, none is hidden, and none is a contract item except
   any tool whose name starts with `Web`. The CLI's `permissions.deny` rule
   syntax has no such prefix form; an entry like `Web*` is written there
   verbatim and denies nothing.
+- **A first line holding a dialog's phrase reads as that dialog.**
+  `tmux_pane.attention_in` looks from the input box's top rule down when a
+  box shows, so a typed first line that holds one of its needles ("Quick
+  safety check", "Select login method", ...) classifies the screen as that
+  dialog: the runner stops typing, and the console's pane gate
+  (`console/pane.py`) opens to a person's keys, still only its closed key
+  set and one Enter per request. The classifier would need to exclude the
+  prompt line itself.
 - **Attachments are not rendered into the pane.** `TmuxRunner._render`
   builds the typed envelope from a row's body and context only; it never
   reads `row["attachments"]`. The `sdk` and `opencode` lanes turn an

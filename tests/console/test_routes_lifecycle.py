@@ -2,6 +2,7 @@
 each a long operation over cousin_lib.lifecycle. The flip and the
 bequest prompt are injected through the server's test seams; nothing is
 respawned and no chat server is reached."""
+import json
 import threading
 import time
 import tomllib
@@ -108,6 +109,11 @@ class TestTransplant(LifecycleCase):
         modes = {m["id"]: m for m in body["modes"]}
         self.assertEqual(set(modes), {"soul-donation", "body-swap", "merge"})
         self.assertEqual(modes["body-swap"]["confirm"], "typed")
+        self.assertEqual(modes["body-swap"]["phrase"], "swap {donor} {recipient}")
+        self.assertEqual(modes["soul-donation"]["confirm"], "typed")
+        self.assertEqual(modes["soul-donation"]["phrase"], "donate {donor} {recipient}")
+        self.assertEqual(modes["merge"]["confirm"], "second")
+        self.assertEqual(body["op_kinds"], ["reincarnate", "transplant"])
 
     def test_refusals(self):
         base = {"donor": "wren", "recipient": "owl", "mode": "merge", "confirm": True}
@@ -130,6 +136,43 @@ class TestTransplant(LifecycleCase):
         self.assertEqual(self.stages(op), [("snapshot", "done"), ("apply", "done"),
                                            ("flip wren", "done"), ("flip owl", "done")])
         self.assertTrue((self.owl / "CLAUDE.md").read_text().startswith("# Wren"))
+
+    def test_soul_donation_needs_its_typed_confirmation(self):
+        base = {"donor": "wren", "recipient": "owl", "mode": "soul-donation"}
+        status, body = self.post(self.URL, dict(base, confirm=True))
+        self.assertEqual(status, 400, body)
+        self.assertIn("donate wren owl", body["error"])
+        status, body = self.post(self.URL, dict(base, confirm="donate wren owl"))
+        self.assertEqual(status, 202, body)
+        self.assertEqual(self.wait_done("owl")["status"], "done")
+
+    def test_the_console_writes_who_asked_into_the_lifecycle_audit(self):
+        self.post(self.URL, {"donor": "wren", "recipient": "owl", "mode": "merge", "confirm": True})
+        self.wait_done("owl")
+        self.post("/api/cousins/wren/reincarnate", {"new_role": "librarian", "confirm": True})
+        self.wait_done("wren")
+        rows = [json.loads(l) for l in
+                (self.root / "data" / "lifecycle" / "audit.jsonl").read_text().splitlines()]
+        mine = [r for r in rows if r.get("by") == "console"]
+        self.assertEqual([(r["op"], r["step"]) for r in mine],
+                         [("transplant", "console-request"), ("transplant", "console-result"),
+                          ("reincarnate", "console-request"), ("reincarnate", "console-result")])
+        self.assertTrue(all("actor" in r and r["op_id"] for r in mine))
+        self.assertTrue(mine[1]["ok"])
+
+    def test_the_donor_says_it_is_held_by_the_transplant(self):
+        self.gate = threading.Event()
+        self.addCleanup(self.gate.set)
+        _, body = self.post(self.URL, {"donor": "wren", "recipient": "owl",
+                                       "mode": "merge", "confirm": True})
+        status, held = self.get("/api/cousins/wren/lifecycle")
+        self.assertEqual(status, 200, held)
+        self.assertEqual((held["held"]["recipient"], held["held"]["mode"], held["held"]["op_id"]),
+                         ("owl", "merge", body["op"]["id"]))
+        self.assertIsNone(self.get("/api/cousins/owl/lifecycle")[1]["held"])
+        self.gate.set()
+        self.wait_done("owl")
+        self.assertIsNone(self.get("/api/cousins/wren/lifecycle")[1]["held"])
 
     def test_both_cousins_are_held_while_it_runs(self):
         self.gate = threading.Event()

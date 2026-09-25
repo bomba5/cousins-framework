@@ -22,6 +22,7 @@ Test seams on req.server.state (never set by a request):
 from __future__ import annotations
 
 import re
+import time
 
 from cousin_lib import lifecycle
 from cousin_lib.console import longop, router
@@ -30,11 +31,14 @@ from cousin_lib.console.app import HttpError
 ROLE_MAX = 200
 MIN_TIMEOUT_S, MAX_TIMEOUT_S = 10, 600
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+OP_KINDS = ("reincarnate", "transplant")
+# a mode that replaces what a cousin is (its memory, its identity) is
+# confirmed by typing its phrase; merge only adds, so a second click does
 MODES = (
-    {"id": "soul-donation", "confirm": "second",
+    {"id": "soul-donation", "confirm": "typed", "phrase": "donate {donor} {recipient}",
      "what": "the recipient carries the donor's memory in its own body; the recipient's own"
              " memory leaves its home (it stays in the snapshot)"},
-    {"id": "body-swap", "confirm": "typed",
+    {"id": "body-swap", "confirm": "typed", "phrase": "swap {donor} {recipient}",
      "what": "the two trade identity files (CLAUDE.md, self-portrait.md) and their name and"
              " role; slug, port, session and memory stay with each slot"},
     {"id": "merge", "confirm": "second",
@@ -76,9 +80,42 @@ def _timeout(body):
     return value
 
 
-def swap_phrase(donor, recipient):
-    """What the operator types to confirm a body swap."""
-    return "swap %s %s" % (donor, recipient)
+def confirm_phrase(mode, donor, recipient):
+    """What the operator types to confirm `mode`, or None when a second
+    click (confirm: true) does."""
+    entry = next((m for m in MODES if m["id"] == mode), None)
+    if entry is None or entry["confirm"] != "typed":
+        return None
+    return entry["phrase"].format(donor=donor, recipient=recipient)
+
+
+def _audit(server, record):
+    """A console row in the lifecycle audit (data/lifecycle/audit.jsonl,
+    beside the library's own rows): who asked, from the console."""
+    lifecycle._audit(server.root, dict(record, by="console"))
+
+
+def _audited(server, work, record):
+    """`work`, with a console-request row when its op starts and a
+    console-result row (ok, error) when it ends, both with the op id."""
+    def run(op):
+        out = None
+        _audit(server, dict(record, step="console-request", op_id=op.id))
+        try:
+            out = work(op)
+            return out
+        finally:
+            ok = isinstance(out, dict) and bool(out.get("ok"))
+            _audit(server, dict(record, step="console-result", op_id=op.id, ok=ok,
+                                error=None if ok else (out or {}).get("error") if
+                                isinstance(out, dict) else "the op raised"))
+    return run
+
+
+def held_by(server, slug):
+    """The transplant holding `slug` as its donor: {"op_id", "recipient",
+    "mode", "since"}, or None."""
+    return server.state.get("lifecycle.held", {}).get(slug)
 
 
 def _flip_summary(result):
@@ -184,6 +221,9 @@ def _transplant_work(server, donor, recipient, mode, hold):
                 out["error"] = result.get("error") or "the transplant failed"
             return out
         finally:
+            held = server.state.get("lifecycle.held", {})
+            if held.get(donor, {}).get("recipient") == recipient:
+                del held[donor]
             hold.release()
     return work
 
@@ -191,7 +231,7 @@ def _transplant_work(server, donor, recipient, mode, hold):
 def register():
     @router.route("GET", "/api/lifecycle/modes")
     def modes(req):
-        return 200, {"ok": True, "modes": [dict(m) for m in MODES],
+        return 200, {"ok": True, "modes": [dict(m) for m in MODES], "op_kinds": list(OP_KINDS),
                      "timeout": lifecycle.BEQUEST_TIMEOUT_SECONDS,
                      "timeout_range": [MIN_TIMEOUT_S, MAX_TIMEOUT_S], "role_max": ROLE_MAX}
 
@@ -203,10 +243,17 @@ def register():
         role, timeout = _role(body), _timeout(body)
         if body.get("confirm") is not True:
             raise HttpError(400, "reincarnate rewrites the role and flips %s: confirm it" % slug)
-        return longop.start_response(server, slug, "reincarnate",
-                                     _reincarnate_work(server, slug, role, timeout),
-                                     params={"new_role": role, "timeout": timeout,
-                                             "by": req.user})
+        record = {"op": "reincarnate", "slug": slug, "actor": req.user, "new_role": role}
+        answer = longop.start_response(
+            server, slug, "reincarnate",
+            _audited(server, _reincarnate_work(server, slug, role, timeout), record),
+            params={"new_role": role, "timeout": timeout, "by": req.user})
+        return answer
+
+    @router.route("GET", "/api/cousins/{slug}/lifecycle")
+    def lifecycle_state(req, slug):
+        _home(req.server, slug)
+        return 200, {"ok": True, "slug": slug, "held": held_by(req.server, slug)}
 
     @router.route("POST", "/api/lifecycle/transplant")
     def transplant(req):
@@ -219,24 +266,35 @@ def register():
             raise HttpError(400, "mode must be one of %s" % ", ".join(lifecycle.MODES))
         if donor == recipient:
             raise HttpError(400, "donor and recipient must differ")
-        if mode == "body-swap":
-            if body.get("confirm") != swap_phrase(donor, recipient):
-                raise HttpError(400, "a body swap is confirmed by typing %r"
-                                % swap_phrase(donor, recipient))
+        phrase = confirm_phrase(mode, donor, recipient)
+        if phrase is not None:
+            if body.get("confirm") != phrase:
+                raise HttpError(400, "a %s is confirmed by typing %r" % (mode, phrase))
         elif body.get("confirm") is not True:
             raise HttpError(400, "the transplant changes %s: confirm it" % recipient)
         try:
             hold = longop.exclusive(server, donor, "transplant (donor)")
         except longop.Busy as err:
             raise HttpError(409, str(err), busy=True)
+        record = {"op": "transplant", "donor": donor, "recipient": recipient, "mode": mode,
+                  "actor": req.user}
+        # the donor's own inspector says what holds it (a Hold is never a
+        # reported op); set before the op can end, which removes it
+        held = server.state.setdefault("lifecycle.held", {})
+        mark = {"op_id": None, "recipient": recipient, "mode": mode, "since": time.time()}
+        held[donor] = mark
         try:
-            return longop.start_response(
+            answer = longop.start_response(
                 server, recipient, "transplant",
-                _transplant_work(server, donor, recipient, mode, hold),
+                _audited(server, _transplant_work(server, donor, recipient, mode, hold), record),
                 params={"donor": donor, "recipient": recipient, "mode": mode, "by": req.user})
         except BaseException:
+            if held.get(donor) is mark:
+                del held[donor]
             hold.release()
             raise
+        mark["op_id"] = answer[1]["op"]["id"]
+        return answer
 
 
 register()

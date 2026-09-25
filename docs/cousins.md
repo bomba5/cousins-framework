@@ -37,12 +37,12 @@ cousins/wren/
   .claude/settings.json  its harness hooks
 ```
 
-Each cousin has its own chat server on its own port (8090 to 8200 by
-default). On the legacy lane, people and other cousins talk to it through
-that server, which types incoming messages into the tmux session. A runner
-cousin's chat and inbox are written directly (no chat server needed to
-receive a message), and its chat server serves the console's view of the
-same history. The agent answers with `cousin-reply`, and messages another
+A legacy-lane cousin has its own chat server on its own port (8090 to 8200
+by default). People and other cousins talk to it through that server, which
+types incoming messages into the tmux session. A runner cousin needs no chat
+server: its chat history and inbox are written directly, and the console
+reads its chat store itself (`cousin-migrate` still starts one for a cousin
+it moves off the legacy lane). The agent answers with `cousin-reply`, and messages another
 cousin with `cousin-chat send`. See [chat](chat.md) and [memory](memory.md)
 for those two halves.
 

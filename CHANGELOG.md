@@ -3,6 +3,30 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.24.2 - 2026-09-25
+
+Three runner fixes, each proven by a test that failed before it.
+
+### Fixed
+- A new session's id is on file as soon as the SDK's init names it (#119),
+  so a runner killed during a new session's first turn resumes that session
+  instead of starting fresh. A lost resume keeps the old id on file until
+  its fresh start has run. A failing write is retried once per turn, not per
+  message.
+- A turn's `result` event reaches the stream before its inbox rows close, on
+  every kind (#87): a closed row's result is always visible. The row close
+  sits in a try/finally, so a failed append never leaves a row claimed. The
+  contract suite checks the order. Known exception: the tmux kind's
+  `_pane_lost` and `_settle_on_stop`.
+- The SDK runner's carried read (a row written while the CLI finished a
+  turn, its echo not yet come) honours stop and interrupt (#66). A stop
+  gives the echo up to 2 s, then requeues the rows the CLI never took up.
+  An interrupt is taken, and sent again to the turn if the CLI was idle
+  when it first went; after `drain_timeout_s` with no echo the client is
+  replaced (a reconnect resuming the session) before the rows are
+  requeued, so a late echo can never run a row twice. Neither counts as a
+  failure: no `errored` state, no backoff.
+
 ## 1.24.1 - 2026-09-25
 
 The documentation sweep (master plan 10c, task 6) and the glossary (task 7),

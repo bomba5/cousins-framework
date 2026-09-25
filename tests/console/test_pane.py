@@ -4,8 +4,12 @@ that logs its argv; the stream's frame source is injectable."""
 import json
 import os
 import pathlib
+import shutil
 import stat
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -237,6 +241,211 @@ class TestResize(PaneCase):
                                     cols="wide", rows=10)[0], 400)
         self.assertEqual(self._post("/api/pane/resize", cousin="testa",
                                     cols=True, rows=10)[0], 400)
+
+
+class TestTmuxKind(PaneCase):
+    """A tmux-kind runner cousin (phase 11): its pane is on the framework's
+    own socket under the runner's session name, not the legacy address.
+    A person may type into it only while it waits on a person (the trust,
+    login, onboarding, bypass or MCP dialog), where the runner never
+    types; it keeps its fixed size."""
+
+    TRUST = "Quick safety check\nIs this a project you trust?\n> 1. Yes, I trust this folder\n"
+    PROMPT = "the model's words\n" + "\u2500" * 20 + "\n\u276f \n" + "\u2500" * 20 + "\n"
+
+    def setUp(self):
+        super().setUp()
+        self._write_toml('\n[agent]\nrunner = "tmux"\n')
+        self.socket = str(self.root / "run" / "tmux.sock")
+
+    def test_it_reads_the_kinds_socket_and_exact_session(self):
+        self.pane_file.write_text("hello")
+        status, body = self._get("/api/pane", cousin="testa")
+        self.assertEqual(status, 200, body)
+        calls = self._calls()
+        self.assertTrue(all(c.startswith("-S %s " % self.socket) for c in calls), calls)
+        self.assertIn("has-session -t =tmux-testa", calls[0])
+        self.assertIn("-t =tmux-testa: -S -200", [c for c in calls if "capture-pane" in c][0])
+
+    def _sends(self):
+        return [c.split(" send-keys ", 1)[1] for c in self._calls() if " send-keys " in c]
+
+    def test_keys_go_in_on_a_screen_that_waits_on_a_person(self):
+        self.pane_file.write_text(self.TRUST)
+        status, body = self._post("/api/pane/input", cousin="testa", data="\x1b[B1\r")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["tokens"], 3)
+        self.assertEqual(self._sends(), ["-t =tmux-testa: Down", "-t =tmux-testa: -l -- 1",
+                                         "-t =tmux-testa: Enter"])
+        self.assertTrue(all(c.startswith("-S %s " % self.socket) for c in self._calls()))
+
+    def test_keys_are_refused_where_the_runner_types(self):
+        self.pane_file.write_text(self.PROMPT)
+        status, body = self._post("/api/pane/input", cousin="testa", data="\r")
+        self.assertEqual(status, 409, body)
+        self.assertIn("waits on a person", body["error"])
+        self.assertEqual(self._sends(), [])
+
+    def test_only_a_closed_key_set_goes_in_and_nothing_else_is_sent(self):
+        self.pane_file.write_text(self.TRUST)
+        for data in ("hello", "yes", "\x03", "\x1b[<64;3;4M", "\x1b[H", "1" * 50 + "\r", "\x1b[Bab"):
+            self.log.write_text("")
+            status, body = self._post("/api/pane/input", cousin="testa", data=data)
+            self.assertEqual(status, 409, (data, body))
+            self.assertEqual(body["sent"], 0, data)
+            self.assertEqual(self._sends(), [], data)
+            self.assertNotIn(data, body["error"])            # a paste is never echoed
+        for data in ("y", "n", "7", "\t", "\x7f", "\x1b[A", "\x1b[C", "\x1b[D"):
+            status, body = self._post("/api/pane/input", cousin="testa", data=data)
+            self.assertEqual(status, 200, (data, body))
+
+    def test_a_request_ends_at_its_first_enter(self):
+        """The reviewer's case: one POST of "\\rhello\\r" answered the trust
+        screen, then typed and submitted `hello` into the prompt."""
+        self.pane_file.write_text(self.TRUST)
+        status, body = self._post("/api/pane/input", cousin="testa", data="\rhello\r")
+        self.assertEqual(status, 409, body)
+        self.assertEqual((body["sent"], body["refused"]), (1, 2))
+        self.assertIn("1 key went in", body["error"])
+        self.assertEqual(self._sends(), ["-t =tmux-testa: Enter"])
+        status, body = self._post("/api/pane/input", cousin="testa", data="\x1b1")
+        self.assertEqual((status, body["sent"]), (409, 0))       # Escape ends one too...
+        self.assertIn("after Enter", body["error"])              # ...and Enter was just now
+
+    def test_input_waits_out_the_screen_change_after_an_enter(self):
+        self.pane_file.write_text(self.TRUST)
+        self.assertEqual(self._post("/api/pane/input", cousin="testa", data="\r")[0], 200)
+        status, body = self._post("/api/pane/input", cousin="testa", data="\r")
+        self.assertEqual(status, 409, body)
+        self.assertIn("after Enter", body["error"])
+        with mock.patch.object(pane, "ENTER_SETTLE_S", 0.0):
+            self.assertEqual(self._post("/api/pane/input", cousin="testa", data="\r")[0], 200)
+
+    def test_the_screen_is_read_again_before_each_key(self):
+        self.pane_file.write_text(self.TRUST)
+        screens = iter(["trust", None])
+        with mock.patch.object(pane, "_answerable_screen", lambda tmux, session: next(screens)):
+            status, body = self._post("/api/pane/input", cousin="testa", data="\x1b[B\x1b[B")
+        self.assertEqual(status, 409, body)
+        self.assertEqual((body["sent"], body["refused"]), (1, 1))
+        self.assertEqual(self._sends(), ["-t =tmux-testa: Down"])
+
+    def test_check_and_send_hold_the_per_pane_lock(self):
+        self.pane_file.write_text(self.TRUST)
+        seen = []
+        original = pane._answerable_screen
+
+        def spy(tmux, session):
+            seen.append(any(lock.locked() for lock in pane._kind_locks(None).values()))
+            return original(tmux, session)
+        with mock.patch.object(pane, "_answerable_screen", spy):
+            self._post("/api/pane/input", cousin="testa", data="1")
+        self.assertEqual(seen, [True])
+
+    def test_login_and_onboarding_are_left_to_a_terminal(self):
+        self.pane_file.write_text("Select login method:\n 1. Claude account\n")
+        status, body = self._post("/api/pane/input", cousin="testa", data="1")
+        self.assertEqual(status, 409, body)
+        self.assertIn("in a terminal", body["error"])
+
+    def test_an_unreadable_screen_refuses_the_keys(self):
+        with mock.patch.dict("os.environ", {"FAKE_TMUX_RC": "1", "FAKE_TMUX_HAS_SESSION": "0"}):
+            status, body = self._post("/api/pane/input", cousin="testa", data="a")
+        self.assertEqual(status, 409, body)
+        self.assertEqual(self._sends(), [])
+
+    def test_it_keeps_its_fixed_size(self):
+        status, body = self._post("/api/pane/resize", cousin="testa", cols=100, rows=30)
+        self.assertEqual(status, 409, body)
+        self.assertIn("fixed size", body["error"])
+        self.assertFalse([c for c in self._calls() if "resize-window" in c])
+
+    def test_an_sdk_runner_keeps_the_legacy_address(self):
+        self._write_toml('\n[agent]\nrunner = "sdk"\n')
+        self.pane_file.write_text("x")
+        self._get("/api/pane", cousin="testa")
+        self.assertIn("-t testa", [c for c in self._calls() if "capture-pane" in c][0])
+
+
+
+_TRUST_PROGRAM = r"""
+import pathlib, sys
+log = pathlib.Path(sys.argv[1])
+print("Quick safety check")
+print("Is this a project you trust?")
+print("> 1. Yes, I trust this folder")
+print("  2. No, exit", flush=True)
+line = sys.stdin.readline()
+log.write_text("trust:%r\n" % line)
+print("\x1b[2J\x1b[H" + "\u2500" * 20 + "\n\u276f \n" + "\u2500" * 20, flush=True)
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    with log.open("a") as fh:
+        fh.write("prompt:%r\n" % line)
+"""
+
+
+@unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+class TestTmuxKindOnARealServer(unittest.TestCase):
+    """The reviewer's reproduction on a scratch tmux server: one POST of
+    "\\rhello\\r" must answer the trust screen and type nothing into the
+    prompt that follows it."""
+
+    def setUp(self):
+        router.clear()
+        pane.register()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        home = self.root / "cousins" / "testa"
+        home.mkdir(parents=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "testa"\nname = "Testa"\n[chat]\nport = 1\n'
+            '\n[agent]\nrunner = "tmux"\n')
+        (self.root / "run").mkdir()
+        self.sock = str(self.root / "run" / "tmux.sock")
+        self.log = self.root / "typed.log"
+        script = self.root / "trust.py"
+        script.write_text(_TRUST_PROGRAM)
+        subprocess.run(["tmux", "-f", "/dev/null", "-S", self.sock, "new-session", "-d",
+                        "-s", "tmux-testa", "-x", "200", "-y", "50",
+                        "%s %s %s" % (sys.executable, script, self.log)], check=True)
+        self.addCleanup(subprocess.run, ["tmux", "-S", self.sock, "kill-server"],
+                        capture_output=True)
+        self.wait_for(lambda: "Quick safety check" in self.screen())
+
+    def screen(self):
+        return subprocess.run(["tmux", "-S", self.sock, "capture-pane", "-p", "-t", "=tmux-testa:"],
+                              capture_output=True, text=True).stdout
+
+    def wait_for(self, cond, timeout=5.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if cond():
+                return True
+            time.sleep(0.05)
+        self.fail("timed out; the screen:\n" + self.screen())
+
+    def post(self, data):
+        req = SimpleNamespace(root=self.root, query={}, body={"cousin": "testa", "data": data},
+                              tmux_bin="tmux", tmux_socket=None)
+        return router.dispatch("POST", "/api/pane/input", req=req)
+
+    def test_enter_then_hello_answers_the_dialog_and_types_nothing_more(self):
+        status, body = self.post("\rhello\r")
+        self.assertEqual(status, 409, body)
+        self.assertEqual(body["sent"], 1)
+        self.wait_for(lambda: self.log.exists() and "trust:" in self.log.read_text())
+        self.wait_for(lambda: "\u276f" in self.screen())
+        time.sleep(0.3)
+        self.assertNotIn("hello", self.log.read_text())
+        self.assertNotIn("hello", self.screen())
+        status, body = self.post("hello\r")                     # the prompt is the runner's
+        self.assertEqual(status, 409, body)
+        time.sleep(0.2)
+        self.assertNotIn("prompt:", self.log.read_text())
 
 
 def _state(**kw):

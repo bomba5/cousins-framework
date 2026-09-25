@@ -27,11 +27,28 @@ program's mode-setting escapes, so the frame sets it.
 
 Input goes through the injection module's process-wide lock, so a chat
 delivery and a keystroke never interleave.
+
+A tmux-kind runner cousin (`[agent] runner = "tmux"`, phase 11) is
+addressed where its runner keeps it: the framework's own socket
+(`<root>/run/tmux.sock`) and the session `tmux-<slug>`, matched exactly
+(tmux_runner.pane_for). The runner types into that pane itself, from
+another process the injection lock does not reach, so a person's keys go
+in only to answer a one-screen dialog the runner never types into (the
+trust, bypass and MCP approval dialogs; the login and onboarding flows
+take several screens and text, and are done in a terminal), and only as
+a closed set of keys: arrows, Enter, Escape, Tab, Backspace, one digit,
+y or n. A request ends at its first Enter or Escape (the screen changes
+there; the rest is refused and the answer says how many went in), the
+screen is read again before every key under a per-pane lock, and for
+ENTER_SETTLE_S after an Enter nothing goes in. Anywhere else keys are
+refused (409) and the chat is the way in. It keeps the fixed size its
+screen parsers read (a resize is 409).
 """
 from __future__ import annotations
 
 import re
 import subprocess
+import threading
 import time
 from datetime import datetime
 
@@ -246,6 +263,13 @@ def send_input(tmux, session, data):
         st = tmux.state(session)
         tracked = bool(st and st.get("mouse") and st.get("sgr"))
         tokens = [t for t in tokens if t[0] != "mouse" or tracked]
+    _send_tokens(tmux, session, tokens)
+    return len(tokens)
+
+
+def _send_tokens(tmux, session, tokens):
+    """send-keys for each token, under the injection lock; RouteError(500)
+    with tmux's stderr."""
     with injection._INJECT_LOCK:
         for mode, payload in tokens:
             if mode in ("literal", "mouse"):
@@ -267,7 +291,6 @@ def send_input(tmux, session, data):
                         "error": (r.stderr or "").strip()[:200]
                                  or "tmux send-keys failed (rc=%d)"
                                     % r.returncode})
-    return len(tokens)
 
 
 def _iso():
@@ -333,9 +356,31 @@ def _tmux_for(req, cousin):
                 host=cousin.chat_host)
 
 
+def kind_pane(cousin):
+    """A tmux-kind runner cousin's pane (tmux_runner.pane_for: the
+    framework socket, the runner's session name), or None for any other
+    cousin, a remote one included."""
+    home = getattr(cousin, "home", None)
+    if home is None or getattr(cousin, "chat_host", None):
+        return None
+    from cousin_lib.delivery import _runner_kind
+    if _runner_kind(home) != "tmux":
+        return None
+    from cousin_lib.runner.tmux_runner import pane_for
+    return pane_for(home)
+
+
 def _resolve(req, slug):
-    """(cousin, session, tmux) or a RouteError per the contract."""
+    """(cousin, session, tmux, kind) or a RouteError per the contract;
+    `kind` is the tmux-kind runner's pane (kind_pane), else None."""
     cousin = find_cousin(req, slug)
+    kind = kind_pane(cousin)
+    if kind is not None:
+        tmux = Tmux(getattr(req, "tmux_bin", None) or "tmux", socket=str(kind.socket))
+        # exact matches: `=name` for the session, `=name:` for its pane
+        if not tmux.has_session("=" + kind.name):
+            raise RouteError(409, {"ok": False, "error": "session not running"})
+        return cousin, "=%s:" % kind.name, tmux, kind
     session = cousin.tmux_session
     if not session:
         raise RouteError(400, {"ok": False,
@@ -343,7 +388,115 @@ def _resolve(req, slug):
     tmux = _tmux_for(req, cousin)
     if not tmux.has_session(session):
         raise RouteError(409, {"ok": False, "error": "session not running"})
-    return cousin, session, tmux
+    return cousin, session, tmux, None
+
+
+# The dialogs a person answers in a tmux-kind pane from here: one screen
+# each, answered with arrows, a digit or y/n, and Enter. The login menu and
+# onboarding go on to a URL, a code or text: those are done in a terminal.
+ANSWERABLE = ("trust", "bypass", "mcp_approval")
+KIND_KEYS = ("Up", "Down", "Left", "Right", "Enter", "Escape", "Tab", "BSpace")
+KIND_CHARS = "0123456789yYnN"
+ENDS = ("Enter", "Escape")          # the screen changes after these
+ENTER_SETTLE_S = 0.3
+_KIND_GUARD = threading.Lock()
+_FALLBACK_STATE = {}                # a request with no server (a unit test's duck type)
+
+
+def _kind_state(req):
+    state = getattr(getattr(req, "server", None), "state", None)
+    return _FALLBACK_STATE if state is None else state
+
+
+def _kind_locks(req):
+    with _KIND_GUARD:
+        return _kind_state(req).setdefault("pane.kind_locks", {})
+
+
+def _kind_lock(req, key):
+    locks = _kind_locks(req)
+    with _KIND_GUARD:
+        return locks.setdefault(key, threading.Lock())
+
+
+def _screen_of(tmux, session):
+    """The attention screen the visible pane shows (tmux_pane.attention_in),
+    None for none or an unreadable pane. No history: an old dialog that
+    scrolled away is not one."""
+    from cousin_lib.runner.tmux_pane import attention_in
+    try:
+        r = tmux.run("capture-pane", "-p", "-t", session)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return attention_in(r.stdout or "")
+
+
+def _answerable_screen(tmux, session):
+    """The screen, when it is a dialog a person answers from here."""
+    seen = _screen_of(tmux, session)
+    return seen if seen in ANSWERABLE else None
+
+
+def _kind_refusal(token):
+    """Why a token is not in the closed set, or None when it is."""
+    mode, payload = token
+    if mode == "key":
+        return None if payload in KIND_KEYS else "a control key (%s)" % payload
+    if mode == "mouse":
+        return "a mouse report"
+    if len(payload) != 1:
+        return "a paste or a run of text"
+    return None if payload in KIND_CHARS else "a character other than a digit, y or n"
+
+
+def _refuse(sent, refused, why):
+    raise RouteError(409, {"ok": False, "sent": sent, "refused": refused, "error": "%d key%s went in; %d refused: %s" % (
+        sent, "" if sent == 1 else "s", refused, why)})
+
+
+def send_kind_input(req, tmux, session, kind, data):
+    """Type a person's keys into a tmux-kind pane (the module docstring's
+    rules); the count sent, or a RouteError 409 with `sent` and `refused`."""
+    tokens = input_tokens(data or "")
+    if not tokens:
+        return 0
+    cut = next((i + 1 for i, (mode, payload) in enumerate(tokens)
+                if mode == "key" and payload in ENDS), len(tokens))
+    head, rest = tokens[:cut], tokens[cut:]
+    for token in head:
+        why = _kind_refusal(token)
+        if why:
+            _refuse(0, len(tokens), "%s; only arrows, Enter, Escape, Tab, Backspace, one digit,"
+                                    " y or n go into this pane" % why)
+    key = "%s|%s" % (kind.socket, kind.name)
+    state = _kind_state(req)
+    with _kind_lock(req, key):
+        ended = state.setdefault("pane.kind_ended", {})
+        if time.monotonic() - ended.get(key, float("-inf")) < ENTER_SETTLE_S:
+            _refuse(0, len(tokens), "the screen is changing after Enter or Escape; type again"
+                                    " once it has settled")
+        sent = 0
+        for mode, payload in head:
+            if _answerable_screen(tmux, session) is None:
+                if sent:
+                    _refuse(sent, len(tokens) - sent, "the pane no longer shows the dialog")
+                seen = _screen_of(tmux, session)
+                raise RouteError(409, {"ok": False, "sent": 0, "refused": len(tokens), "error": (
+                    "the %s flow takes several screens: do it in a terminal (tmux -S %s attach"
+                    " -t %s)" % (seen, kind.socket, kind.name) if seen in ("login", "onboarding")
+                    else "the tmux runner types into this pane: keys go in only while it waits on"
+                    " a person at the trust, bypass or MCP approval dialog; write to the cousin"
+                    " through the chat")})
+            _send_tokens(tmux, session, [(mode, payload)])
+            sent += 1
+            if mode == "key" and payload in ENDS:
+                ended[key] = time.monotonic()
+        if rest:
+            _refuse(sent, len(rest), "a request ends at its first Enter or Escape, where the"
+                                     " screen changes")
+    return sent
 
 
 def _lines(query):
@@ -359,34 +512,39 @@ def _int(value, lo, hi):
     return max(lo, min(hi, value))
 
 
-
 def register():
     @router.route("GET", "/api/pane")
     @guarded
     def pane(req):
-        _, session, tmux = _resolve(req, req.query.get("cousin"))
+        _, session, tmux, _kind = _resolve(req, req.query.get("cousin"))
         return 200, {"text": tmux.capture(session, _lines(req.query))}
 
     @router.route("GET", "/api/pane/stream")
     @guarded
     def stream(req):
-        _, session, tmux = _resolve(req, req.query.get("cousin"))
+        _, session, tmux, _kind = _resolve(req, req.query.get("cousin"))
         return 200, sse.Stream(stream_pane(session, _lines(req.query),
                                            tmux=tmux))
 
     @router.route("POST", "/api/pane/input")
     @guarded
     def pane_input(req):
-        _, session, tmux = _resolve(req, req.body.get("cousin"))
+        _, session, tmux, kind = _resolve(req, req.body.get("cousin"))
         data = req.body.get("data")
         if data is not None and not isinstance(data, str):
             raise RouteError(400, {"ok": False, "error": "data must be a string"})
+        if kind is not None:
+            return 200, {"ok": True, "tokens": send_kind_input(req, tmux, session, kind, data)}
         return 200, {"ok": True, "tokens": send_input(tmux, session, data)}
 
     @router.route("POST", "/api/pane/resize")
     @guarded
     def resize(req):
-        _, session, tmux = _resolve(req, req.body.get("cousin"))
+        _, session, tmux, kind = _resolve(req, req.body.get("cousin"))
+        if kind is not None:
+            raise RouteError(409, {"ok": False, "error": (
+                "the tmux kind's pane keeps its fixed size (%dx%d): the runner reads its"
+                " screen at that size" % (kind.width, kind.height))})
         cols = _int(req.body.get("cols"), 20, 400)
         rows = _int(req.body.get("rows"), 5, 200)
         try:

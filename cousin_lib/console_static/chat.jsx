@@ -754,8 +754,13 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
   );
 }
 
-function PaneView({ cousin, onClose }) {
+// `serial`: one input POST at a time, each awaited before the next (a
+// tmux-kind runner's pane, whose gate reads the screen before every key).
+function PaneView({ cousin, onClose, serial }) {
   const slug = cousin && cousin.slug;
+  const serialRef = React.useRef(!!serial);
+  serialRef.current = !!serial;
+  const sendingRef = React.useRef(false);
   const tmuxSession = (cousin && cousin.tmuxSession) || "?";
   const [status, setStatus] = React.useState("connecting");
   const [lastPoll, setLastPoll] = React.useState(null);
@@ -870,10 +875,13 @@ function PaneView({ cousin, onClose }) {
     // Input: buffer keystrokes for 40ms then POST as one blob. Reduces
     // subprocess calls when the user types fast.
     const sendInput = async () => {
+      flushTimerRef.current = null;
+      // serial: the send in flight flushes what was typed meanwhile
+      if (serialRef.current && sendingRef.current) return;
       const buf = toPaneRows(inputBufRef.current);
       inputBufRef.current = "";
-      flushTimerRef.current = null;
       if (!buf) return;
+      sendingRef.current = true;
       try {
         const r = await fetch("/api/pane/input", {
           method: "POST",
@@ -885,6 +893,11 @@ function PaneView({ cousin, onClose }) {
         else setSendError(null);
       } catch (e) {
         setSendError(String(e.message || e));
+      } finally {
+        sendingRef.current = false;
+        if (serialRef.current && inputBufRef.current && !flushTimerRef.current) {
+          flushTimerRef.current = setTimeout(sendInput, 40);
+        }
       }
     };
     term.onData(data => {

@@ -695,31 +695,65 @@ class TestModelAndEffort(ConsoleCase):
         """As migrate does (NEVER_UNRUN): one smallest turn with the model on
         the cousin's own account, in a child process (#100 review: the
         turn's scrub of os.environ is process-wide); a failure is the API's
-        words, nothing written. The console never runs the turn itself."""
+        words, nothing written. The console never runs the turn itself.
+        WP-A round 1: the turn is the cousin's long operation (202), the
+        same `agent-settings` op the agent panel starts."""
+        import time
         from unittest import mock
         home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\neffort = "low"\n')
         self.serve()
         seen = []
 
-        def passes(home_, root, model, effort):
-            seen.append((home_.name, model, effort))
+        def wait_op():
+            end = time.time() + 5
+            while time.time() < end:
+                op = self.get("/api/cousins/wren/op")[1]["op"]
+                if op and op["status"] != "running":
+                    return op
+                time.sleep(0.02)
+            self.fail("the op did not finish")
+
+        def passes(home_, root, model, effort, **kw):
+            seen.append((home_.name, model, effort, kw.get("account")))
             return 0, "validate: ok"
         with mock.patch("cousin_lib.runner.sdk.validate_account") as in_process, \
                 mock.patch("cousin_lib.spawn.validate_turn_out_of_process", passes):
             status, body = self.post("/api/cousins/wren/model", {"model": "m-two"})
-        self.assertEqual(status, 200, body)
+            self.assertEqual(status, 202, body)
+            self.assertEqual(body["op"]["kind"], "agent-settings")
+            op = wait_op()
+        self.assertEqual(op["status"], "done", op)
+        self.assertTrue(op["result"]["restart_required"])
         in_process.assert_not_called()
-        self.assertEqual(seen, [("wren", "m-two", "low")])
+        self.assertEqual(seen, [("wren", "m-two", "low", "host")])
         self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
                          "m-two")
         self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]["model"], "m-two")
         with mock.patch("cousin_lib.spawn.validate_turn_out_of_process",
                         lambda *a, **k: (4, "model not_a_model: not_found_error")):
             status, body = self.post("/api/cousins/wren/model", {"model": "not_a_model"})
-        self.assertEqual(status, 400, body)
-        self.assertIn("not_found_error", body["error"])
+            self.assertEqual(status, 202, body)
+            op = wait_op()
+        self.assertEqual(op["status"], "failed", op)
+        self.assertIn("not_found_error", op["error"])
+        self.assertIn("not_found_error", op["result"]["errors"]["model"])
         self.assertEqual(tomllib.loads((home / "cousin.toml").read_text())["agent"]["model"],
                          "m-two")
+
+    def test_the_model_and_effort_routes_wait_for_a_running_operation(self):
+        from cousin_lib.console import longop
+        self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\n')
+        self.cousin("sam")
+        server = self.serve()
+        for slug in ("wren", "sam"):
+            hold = longop.exclusive(server, slug, "migrate")
+            try:
+                for key, value in (("effort", "high"), ("model", "m-two")):
+                    status, body = self.post("/api/cousins/%s/%s" % (slug, key), {key: value})
+                    self.assertEqual(status, 409, (slug, key, body))
+                    self.assertTrue(body["busy"])
+            finally:
+                hold.release()
 
     def test_an_unchanged_model_or_effort_asks_no_restart_and_refreshes_nothing(self):
         """#100 re-review minor: a save of the value the cousin already has

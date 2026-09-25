@@ -752,7 +752,7 @@ VALIDATE_TURN_TIMEOUT = 90.0
 VALIDATE_TURN_GRACE = 15.0
 
 
-def validate_turn_out_of_process(home, root, model, effort, *,
+def validate_turn_out_of_process(home, root, model, effort, *, account=None,
                                  timeout=VALIDATE_TURN_TIMEOUT,
                                  grace=VALIDATE_TURN_GRACE, command=None):
     """(rc, line) of one validating turn on the cousin's account, run in a
@@ -761,12 +761,16 @@ def validate_turn_out_of_process(home, root, model, effort, *,
     turn, and the console has other threads (#100 review). The child
     starts without any accounts.AUTH_VARS variable and in a session of its
     own, so a timeout kills it and the CLI it started. Only its JSON
-    verdict is read; anything else is a failed turn (4)."""
+    verdict is read; anything else is a failed turn (4). `account` names
+    the account to run on (the one a pending change writes); None is the
+    one cousin.toml names."""
     from cousin_lib import accounts
     argv = list(command or [sys.executable, "-m", VALIDATE_TURN_MODULE])
     argv += ["--home", str(home), "--root", str(root), "--model", model]
     if effort:
         argv += ["--effort", effort]
+    if account:
+        argv += ["--account", account]
     argv += ["--timeout", "%g" % timeout]
     env = {k: v for k, v in os.environ.items() if k not in accounts.AUTH_VARS}
     # the child imports the cousin_lib this process runs, wherever its cwd is
@@ -801,59 +805,102 @@ def validate_turn_out_of_process(home, root, model, effort, *,
         proc.returncode, said)
 
 
-def persist_agent_value(home, key, value, *, root=None):
-    """Set a runner-lane cousin's [agent] model or effort, the keys its
-    runner reads (#100; [runtime] is the tmux lane's and the runner never
-    reads it). Validated per lane, as migrate validates what it writes:
-    effort is one of the levels and only the sdk and tmux lanes use it; a
-    tmux model is written as given (the pane's CLI takes it at its next
-    start, and no turn runs here without a pane); an sdk model
-    must pass one smallest turn on the cousin's own account (the runner's
+def _agent_unchanged(agent, key, value):
+    """Whether writing `value` to [agent] `key` leaves the table as it is:
+    the same value, a removal of a key that is not there, or [agent.sessions]
+    modes it already has ("primary" is the absent default)."""
+    if value is None:
+        return key not in agent
+    if key == "sessions":
+        if not isinstance(value, dict):
+            return False            # validate refuses it with the parser's reason
+        current = agent.get("sessions") or {}
+        return all(current.get(kind, "primary") == mode for kind, mode in value.items())
+    if key not in agent:
+        return False
+    current = agent[key]
+    if isinstance(current, bool) or isinstance(value, bool):
+        return type(current) is type(value) and current == value
+    return current == value         # 80 and 80.0 are the same percentage
+
+
+def persist_agent_values(home, changes, *, root=None):
+    """Write `changes` ({key: value}, None removes the key) into a runner-lane
+    cousin's [agent], the keys its runner reads: the ONE write path for
+    them (the console's settings panel, its model and effort routes, #100).
+    A value the table already holds is dropped first: a same-value save
+    runs no turn, writes nothing and records nothing. What is left is
+    checked as the runner checks it (agent_settings.validate: every key on
+    its own, then the table as a whole: the account on this lane, an
+    opencode model against its account); an sdk model then passes one
+    smallest turn on the cousin's own account (the runner's
     validate_account: NEVER_UNRUN), run in a child process
-    (validate_turn_out_of_process), an opencode model the lane's own checks
-    (ruling P9-1, "<provider>/<model>", a provider the account holds). A
-    refusal is a SpawnError with the reason; nothing is written then. An
-    unchanged value runs no turn and writes nothing. True when the value
-    changed."""
-    from cousin_lib import accounts, delivery, migrate
+    (validate_turn_out_of_process) on the effort being written with it;
+    and agent_settings.apply writes every change in one atomic write. A
+    tmux model is written as given (no pane here to run a turn in).
+    Refusals: agent_settings.SettingsError with a reason per key; nothing
+    is written then. SpawnError when the cousin is on the tmux lane.
+    Returns the keys that changed, each recorded as an L1 event."""
+    from cousin_lib import accounts, agent_settings, delivery
     from cousin_lib.config import FrameworkConfig
     home = Path(home)
-    check_runtime_value(key, value)
     if not runner_lane(home):
-        raise SpawnError("%s is a tmux cousin: its %s is [runtime]'s" % (home.name, key))
+        raise SpawnError("%s is a tmux cousin: its model and effort are [runtime]'s"
+                         " and it has no [agent] settings" % home.name)
     lane = delivery._runner_kind(home)
-    data = tomllib.loads((home / "cousin.toml").read_text())
-    agent = data.get("agent") or {}
+    agent = tomllib.loads((home / "cousin.toml").read_text()).get("agent") or {}
     root = Path(root) if root is not None else FrameworkConfig.root_from_home(home)
-    if key == "effort" and lane not in ("sdk", "tmux"):
-        raise SpawnError("effort applies to the sdk and tmux lanes only; %s runs on %s"
-                         % (home.name, lane))
-    previous = agent.get(key)
-    if previous == value:
-        return False    # nothing changes: no validating turn, no write, no event
-    if key == "model" and lane in ("sdk", "opencode"):
+    changes = {k: v for k, v in dict(changes).items()
+               if not _agent_unchanged(agent, k, v)}
+    if not changes:
+        return []
+    out = agent_settings.validate(home, root, changes)
+    model = out.get("model")
+    if model and lane == agent_settings.TURN_LANE:
+        # the table as it will be: the turn runs on the account and the effort
+        # the same change writes, never the ones still in the file
+        merged = agent_settings.merged(agent, out)
         try:
-            account = accounts.for_cousin(home, root)
+            account = agent_settings.account_of(root, merged, home)
         except accounts.AccountsError as err:
-            raise SpawnError(str(err))
-        if lane == "opencode":
-            from cousin_lib.runner import opencode
-            from cousin_lib.runner.base import RunnerError
-            try:
-                opencode.check_model(account, value)
-            except RunnerError as err:
-                raise SpawnError(str(err))
-        else:
-            rc, line = validate_turn_out_of_process(home, root, value, agent.get("effort"))
-            if rc != 0:
-                raise SpawnError("model %s did not pass one turn on account %s: %s"
-                                 % (value, account.name, line))
-    path = home / "cousin.toml"
-    text = migrate.set_agent_keys(path.read_text(), {key: value})
-    migrate._write_toml(home, text.encode("utf-8"), path.stat().st_mode & 0o777)
-    framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"
-                    % (key, previous or "(the CLI's default)", value))
-    return True
+            raise agent_settings.SettingsError({"account": str(err)})
+        # a deprecated api_key_file account has no name the child can look
+        # up; the file still holds it (the key is read-only here)
+        name = None if (account.implicit and account.kind == "anthropic-key") else account.name
+        rc, line = validate_turn_out_of_process(home, root, model, merged.get("effort"),
+                                                account=name)
+        if rc != 0:
+            raise agent_settings.SettingsError({"model": "model %s did not pass one turn on"
+                                                         " account %s: %s"
+                                                         % (model, account.name, line)})
+    try:
+        agent_settings.apply(home, root, out)
+    except (TypeError, ValueError) as err:
+        if isinstance(err, agent_settings.SettingsError):
+            raise
+        # a file toml_edit cannot edit in place (an inline [agent.sessions]
+        # table, say): a refusal naming the keys, the file untouched
+        raise agent_settings.SettingsError({key: str(err) for key in out})
+    for key, value in out.items():
+        previous = agent.get(key)
+        framework_event(home, key, "[agent] %s %s -> %s (applies at the next start)"
+                        % (key, "(unset)" if previous is None else previous,
+                           "(unset)" if value is None else value))
+    return list(out)
+
+
+def persist_agent_value(home, key, value, *, root=None):
+    """Set a runner-lane cousin's [agent] model or effort (the console's
+    model and effort routes, #100; [runtime] is the tmux lane's and the
+    runner never reads it): check_runtime_value's one-word rule, then
+    persist_agent_values, the one write path, with its refusal as a
+    SpawnError. True when the value changed."""
+    from cousin_lib import agent_settings
+    check_runtime_value(key, value)
+    try:
+        return bool(persist_agent_values(home, {key: value}, root=root))
+    except agent_settings.SettingsError as err:
+        raise SpawnError(str(err))
 
 # The identity keys the console edits in place, by the name its routes
 # use: (table, key) in cousin.toml.

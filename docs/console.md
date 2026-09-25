@@ -182,7 +182,9 @@ Click a card to open the inspector drawer. From top to bottom:
   Each writes only that key in `cousin.toml` and keeps the rest of the file,
   comments included. When a restart is needed the field says "restart to
   apply".
-- **Auth.** A select for `claude` or `api_key`, and when the key mode is
+- **Agent** and **cousin settings.** See [Agent settings](#agent-settings).
+- **Auth** (a tmux-legacy cousin; a runner cousin's credential is its
+  account). A select for `claude` or `api_key`, and when the key mode is
   configured, "set key" / "replace key". The key goes into a password field,
   is sent once, and from then on the page shows only "key set (ends WXYZ)".
   Switching restarts a running agent on the same session; if the agent is in
@@ -230,8 +232,44 @@ Click a card to open the inspector drawer. From top to bottom:
   sidebar and the Cousins page until you turn on "show hidden" (the eye in
   the top bar, or Settings). Hiding changes nothing else.
 
-The model has no editor in the inspector yet. Set `[runtime] model` in
-`cousin.toml` (or respawn), then restart.
+On a tmux-legacy cousin, model and effort are identity rows (`[runtime]`).
+On a runner cousin they are in the agent panel, where its runner reads them.
+
+### Agent settings
+
+Two inspector panels under identity edit the rest of `cousin.toml`, each
+value, choice and default served by the console, so nothing in the page can
+drift from what the runner accepts.
+
+- **Agent.** The kind (`[agent] runner`) is shown read-only with "switch
+  kind", which opens the kind-switch dialog (a migration). A `held` badge
+  says a stop keeps the runner down until its next start. Then one row per
+  `[agent]` key the kind reads: account (only the accounts that run on this
+  kind), model (free text with suggestions; on `opencode`
+  `"<provider>/<model>"` on a provider the account holds, never a Claude
+  model), effort, auto start, rollover percentage, side sessions
+  (`[agent.sessions]`, `sdk` only; `operator` and `system` always stay on the
+  primary), the opencode keys (`small_model`, `shell_env`,
+  `opencode_models_fetch`; `opencode_bin` read-only) and the tmux kind's
+  `env_allow`, shown beside the names the pane always gets and the hard deny
+  that always wins. A deprecated `api_key_file` shows a warning. "unset"
+  removes a key so its default applies. Save checks every change the way the
+  runner does and writes them in one go; a new `sdk` model is first checked
+  with one smallest model turn on the account being saved with it, shown as
+  the cousin's long operation. Every change applies at the next start: the panel
+  says "restart to apply" and offers a restart (click twice). A tmux-legacy
+  cousin has no agent settings; "switch kind" moves it to a runner.
+- **Cousin settings.** Name, peer visible, recall lines and keyword recall,
+  the review batch and review model, the daily flip time (`HH:MM`, `never`,
+  or blank for the install default, with the effective time shown) and commit
+  attribution: the install default (with where it comes from), on or off.
+  On a tmux cousin, commit attribution also rewrites its harness settings
+  file, where that lane reads it, and says so when your own
+  `includeCoAuthoredBy` or `attribution` there says the opposite and wins. The chat port, host and tmux session and
+  the `[session]` hooks are shown read-only.
+
+The chat header's effort select shows only on a kind that reads an effort.
+The install-wide `[agent]` defaults are on the System page.
 
 ### MCP and policy
 
@@ -300,7 +338,9 @@ itself is described in [cousins](cousins.md#generations-and-the-flip).
 | voice | required; how the cousin writes |
 | chat port | blank picks the next free one (8090 to 8200) |
 | operator | the person it answers to; blank is allowed |
-| model, effort | from `config/harness.toml [agent]` (`models`, `default_model`, `default_effort`); without `models` a built-in list is offered |
+| kind | the runner kinds the console serves, or tmux-legacy (always an explicit choice); `COUSIN_DEFAULT_RUNNER` preselects one |
+| account | a runner kind only: the accounts that run on it |
+| model, effort | tmux-legacy: from `config/harness.toml [agent]` (`models`, `default_model`, `default_effort`); without `models` a built-in list is offered. A runner kind: only where it reads them, the model as free text (`"<provider>/<model>"` on opencode, with the account's providers suggested) |
 | heartbeat | seconds, default 3600 |
 | memory scope | private, shared |
 
@@ -308,12 +348,12 @@ itself is described in [cousins](cousins.md#generations-and-the-flip).
 start fails, the cousin exists and you can start it from its card once you
 fix the problem (usually `config/agent-cmd`).
 
-The dialog has no runner or account field: the environment the console runs
-in decides. `COUSIN_DEFAULT_RUNNER` (`sdk`, `fake` or `opencode`) makes the new cousin a
-runner cousin, started through `cousin-supervisor` (where no supervisor runs,
-the start answers 503), and `COUSIN_DEFAULT_ACCOUNT` names its account; unset,
-it is a tmux cousin as before. The Docker install's `compose.yml` sets the
-first.
+The kinds and accounts come from the console (`GET /api/spawn/options`),
+never from the page. A runner cousin is started through `cousin-supervisor`
+(where no supervisor runs, the start answers 503). The Docker install's
+`compose.yml` sets `COUSIN_DEFAULT_RUNNER`, which only preselects the kind.
+There is no worker option: spawn has no backend for `[cousin] type =
+"worker"` yet.
 
 ### Remote cousins
 

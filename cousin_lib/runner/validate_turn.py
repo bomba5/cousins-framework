@@ -5,7 +5,11 @@ other threads, the console above all, must never run it in place. It
 runs this module as a child instead and reads only the verdict:
 
     python3 -m cousin_lib.runner.validate_turn --home H --root R
-        --model M [--effort E] [--timeout S]
+        --model M [--effort E] [--account NAME] [--timeout S]
+
+--account names the account to run the turn on (a change that writes the
+model and the account together is validated on the account it writes);
+without it, the one cousin.toml names.
 
 The verdict is one JSON line on stdout, {"rc": n, "line": "..."}, with
 validate_account's codes: 0 the turn answered, 4 it did not, 2 a
@@ -29,11 +33,21 @@ def main(argv=None):
     parser.add_argument("--root", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--effort")
+    parser.add_argument("--account")
     parser.add_argument("--timeout", type=float, default=90.0)
     args = parser.parse_args(argv)
     home, root = Path(args.home), Path(args.root)
     try:
-        account = accounts.for_cousin(home, root)
+        if args.account is None:
+            account = accounts.for_cousin(home, root)
+        elif args.account == accounts.HOST:
+            account = accounts.Account(accounts.HOST, "claude-login", None, None, implicit=True)
+        else:
+            known = accounts.load(root)
+            if args.account not in known:
+                raise accounts.AccountsError("account %r is not in config/accounts.toml"
+                                             % args.account)
+            account = known[args.account]
     except accounts.AccountsError as err:
         return _verdict(2, "validate: %s" % err)
     try:

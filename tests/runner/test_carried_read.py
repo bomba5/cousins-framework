@@ -1,6 +1,8 @@
 """#66: the carried read (a row written into the live turn whose echo had not
 come when the CLI's result did) honours stop() and an interrupt, even when
 the CLI never takes the row up."""
+import asyncio
+import json
 import time
 import unittest
 
@@ -13,7 +15,8 @@ from cousin_lib.delivery import Item
 from cousin_lib.runner.sdk import SdkRunner
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
-from tests.runner.test_sdk import ScriptedClient, _errors, _results, init_msg, result
+from tests.runner.test_sdk import (ScriptedClient, _compile, _errors, _results, assistant, echo,
+                                   init_msg, result)
 
 
 class DroppingClient(ScriptedClient):
@@ -38,6 +41,34 @@ class DroppingClient(ScriptedClient):
             await super().query(one())
 
 
+class LateClient(DroppingClient):
+    """A CLI that holds its `drop`-th message while idle and takes it up
+    `lag` seconds after the first interrupt reaches it: the echo, then
+    `late_turn` (the interrupt itself, sent to an idle CLI, cuts nothing).
+    A client disconnected by then takes nothing."""
+
+    def __init__(self, options, scripts, drop, lag, late_turn):
+        super().__init__(options, scripts, drop)
+        self.lag, self.late_turn = lag, late_turn
+        self.armed = self.took = False
+
+    async def interrupt(self):
+        await super().interrupt()
+        if not self.armed and len(self.queries) >= self.drop:
+            self.armed = True
+            asyncio.get_running_loop().call_later(self.lag, self._take)
+
+    def _take(self):
+        if not self.connected:
+            return
+        turn = _compile(self.late_turn)
+        for el in turn:
+            if getattr(el, "kind", None) in ("SLOW", "WAIT_FOR_INTERRUPT"):
+                el.baseline = self.interrupts      # the interrupt so far did not cut it
+        self.stream.extend([echo(self.queries[self.drop - 1]), *turn])
+        self.took = True
+
+
 def _wait(pred, timeout=5.0):
     t = time.monotonic()
     while time.monotonic() - t < timeout:
@@ -53,11 +84,15 @@ class TestCarriedRead(HermeticCase):
         self.home = temp_home(self)
         self.clients = []
 
-    def runner(self, first_turn, **kw):
-        """The first client drops the second message (the fold); any client
-        after it (a reconnect) is an ordinary scripted one."""
+    def runner(self, first_turn, late=None, **kw):
+        """The first client drops the second message (the fold), or, given
+        `late` (lag, turn), takes it up that long after an interrupt; any
+        client after it (a reconnect) is an ordinary scripted one."""
         def factory(options):
-            if not self.clients:
+            if not self.clients and late is not None:
+                client = LateClient(options, [first_turn], drop=2, lag=late[0],
+                                    late_turn=late[1])
+            elif not self.clients:
                 client = DroppingClient(options, [first_turn], drop=2)
             else:
                 client = ScriptedClient(options, [])
@@ -123,6 +158,63 @@ class TestCarriedRead(HermeticCase):
         self.assertLess(time.monotonic() - t, 10.0)
         self.assertNotIn("interrupt_dropped", [e["payload"].get("subtype") for e in r.events()
                                                if e["kind"] == "system"])
+        # an interrupt the user asked for is not a failure (review round 2, 7):
+        # no errored state, no error event, no failure count, and the result
+        # that sends b back cut nothing
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
+        self.assertNotIn("errored", states)
+        self.assertEqual(_errors(r), [])
+        self.assertEqual(r._failures, 0)
+        back = [x for x in _results(r) if x.get("requeued") == [b.inbox_id]]
+        self.assertEqual([(x["is_error"], x["interrupted"]) for x in back], [(False, False)])
+
+    def test_a_late_echo_after_the_bound_never_runs_the_row_twice(self):
+        # review round 2, 1: the CLI takes b 1.5 s after the interrupt, past
+        # the 1.0 s bound. The client that holds b is gone before b goes back
+        # to the queue: b reaches the old CLI once, and runs once more, on
+        # the new client, as a turn of its own
+        r = self.runner([init_msg(), "PAUSE", result()],
+                        late=(1.5, [assistant(text="late"), result()]))
+        _, b = self.carried(r)
+        self.assertTrue(r.interrupt())
+        self.assertTrue(_wait(lambda: self.outcome_of(r, b) == "delivered", 10.0))
+        time.sleep(2.0)                                  # past the late echo
+        said = lambda c: sum("second, folded" in json.dumps(q) for q in c.queries)
+        self.assertEqual(said(self.clients[0]), 1, "b was written to the old CLI again")
+        self.assertEqual(len(self.clients), 2, "the CLI holding b was never replaced")
+        self.assertFalse(self.clients[0].took)
+        self.assertEqual(sum(b.inbox_id in x["inbox_ids"] for x in _results(r)), 1)
+
+    def test_stop_gives_the_echo_its_interrupt_brings_a_grace(self):
+        # review round 2, 2: stop()'s interrupt is what makes the CLI take b,
+        # 0.3 s later: b was consumed, so it is closed, never requeued
+        r = self.runner([init_msg(), "PAUSE", result()],
+                        late=(0.3, [assistant(text="late"), result()]))
+        _, b = self.carried(r)
+        t = time.monotonic()
+        r.stop(timeout=10)
+        self.assertLess(time.monotonic() - t, 3.0)
+        self.assertEqual(self.outcome_of(r, b), "delivered")
+        self.assertEqual(len(self.clients), 1)
+
+    def test_an_interrupt_the_idle_cli_ignored_is_sent_again_to_the_carried_turn(self):
+        # review round 2, 3: the interrupt reached the CLI while it was idle
+        # and cut nothing; the CLI then takes b and would run it in full. The
+        # echo sends the interrupt again, to the turn that is now live.
+        r = self.runner([init_msg(), "PAUSE", result()],
+                        late=(0.3, [("SLOW", 30), assistant(text="late"), result()]))
+        _, b = self.carried(r)
+        t = time.monotonic()
+        self.assertTrue(r.interrupt())
+        self.assertTrue(_wait(lambda: self.outcome_of(r, b) is not None, 5.0),
+                        "the carried turn ran on, uninterrupted")
+        self.assertLess(time.monotonic() - t, 5.0)
+        self.assertEqual(self.outcome_of(r, b), "delivered")
+        self.assertGreaterEqual(self.clients[0].interrupts, 2)
+        closing = [x for x in _results(r) if b.inbox_id in x["inbox_ids"]]
+        self.assertTrue(closing[0]["interrupted"])
+        self.assertEqual(len(self.clients), 1)
 
     def test_an_interrupt_row_during_the_carried_read_is_taken(self):
         r = self.runner([init_msg(), "PAUSE", result()])

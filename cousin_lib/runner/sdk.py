@@ -57,8 +57,13 @@ def _sdk():
 
 
 _END = object()
-# #66: _next's answer when a stop comes while the turn waits on a carried row
+# #66: _next's answers when the turn stops waiting on a carried row: a stop
+# came (after its grace), or an interrupt's bound passed with no echo
 _CARRY_STOPPED = object()
+_CARRY_DROPPED = object()
+# #66: how long a stop still waits for a carried row's echo; stop()'s own
+# interrupt can be what makes the CLI take the row (capped by drain_timeout_s)
+CARRY_STOP_GRACE_S = 2.0
 # A turn is live while the model runs it, including while it waits on a
 # permission: every exit from either state (errored, idle, stopped) is legal.
 LIVE_STATES = ("running", "waiting_permission")
@@ -94,13 +99,6 @@ class _NotWritten(Exception):
     def __init__(self, row, cause):
         super().__init__(str(cause))
         self.row, self.cause = row, cause
-
-
-class _CarriedDropped(Exception):
-    """#66: an interrupt was taken while the turn waited on a carried row,
-    and no echo came within drain_timeout_s: the CLI never took the
-    row up. It goes back to the queue, and the turn fails so the stream is
-    brought back in step (_resync)."""
 
 
 class _Unrenderable(Exception):
@@ -387,6 +385,12 @@ class SdkRunner:
         # interrupt bound the wait (_carried_wait)
         self._carrying = False
         self._carry_until = None
+        self._carry_stop_at = None    # a stop's grace for the echo (CARRY_STOP_GRACE_S)
+        # an interrupt written while the CLI was between turns (#66): it may
+        # have cut nothing, so the echo sends it again to the live turn;
+        # cleared once an interrupt reaches a live turn
+        self._interrupt_idle = False
+        self._reinterrupting = False
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
         self._client_id = None   # a fresh uuid per connect (usage.record's client key)
@@ -837,6 +841,9 @@ class SdkRunner:
         if not self._interrupt_may_go(seq):
             return False
         self._interrupt_sent = True     # what _close reads: an interrupt that reached the client
+        # written while the CLI is between turns (a carried read, #66) it may
+        # cut nothing: the echo sends it again. One to the live turn clears it.
+        self._interrupt_idle = not self._live
         with self._waiting_at("interrupt"):     # the stall probe (#104 b) sees the writer too
             await self._client.interrupt()
         return True
@@ -1603,8 +1610,16 @@ class SdkRunner:
         try:
             while True:
                 self._raise_write_error()
-                if self._carrying and self._carried_wait():
-                    return _CARRY_STOPPED
+                end = self._carried_wait() if self._carrying else None
+                if end is not None:
+                    if not task.done():
+                        return end
+                    # a read already completed is handed back first: it may
+                    # be the echo that ends the carried read
+                    try:
+                        return task.result()
+                    except StopAsyncIteration:
+                        return _END
                 if control is not None and time.monotonic() - last_control >= self.poll_s:
                     last_control = time.monotonic()
                     with self._waiting_at("control"):
@@ -1638,37 +1653,66 @@ class SdkRunner:
                     pass
 
     def _carried_wait(self):
-        """#66: the bounds of a carried read. True when a stop came: the
-        turn stops waiting at once. An interrupt taken meanwhile gives the
-        echo drain_timeout_s to come, then `_CarriedDropped`: counted from
-        the request, not the write, so an interrupt stuck behind a blocked
-        fold write is bounded too."""
-        if self._stop.is_set():
-            return True
+        """#66: the bounds of a carried read; None while it waits on. A
+        stop gives the echo min(drain_timeout_s, CARRY_STOP_GRACE_S) (its
+        own interrupt may be what makes the CLI take the row), then
+        `_CARRY_STOPPED`. An interrupt taken meanwhile gives it
+        drain_timeout_s, counted from the request (one stuck behind a
+        blocked fold write is bounded too), then `_CARRY_DROPPED`."""
         now = time.monotonic()
+        if self._stop.is_set():
+            if self._carry_stop_at is None:
+                self._carry_stop_at = now + min(self.drain_timeout_s, CARRY_STOP_GRACE_S)
+            return _CARRY_STOPPED if now >= self._carry_stop_at else None
         if self._interrupt_requested and self._carry_until is None:
             self._carry_until = now + self.drain_timeout_s
         if self._carry_until is not None and now >= self._carry_until:
-            raise _CarriedDropped("interrupted, and the CLI never took up the carried row"
-                                  " (no echo for %.1fs)" % self.drain_timeout_s)
-        return False
+            return _CARRY_DROPPED
+        return None
 
-    def _drop_carried(self, open_rows):
-        """#66: a stop came while the turn waited on carried rows the CLI
-        never took up (no echo): back to the queue, as the tmux kind's stop
-        requeues an untaken row; the result says so first (#87)."""
-        rows = [row for row, _ in open_rows]
-        open_rows[:] = []
+    async def _end_carry(self, end, rows):
+        """#66: the turn stopped waiting on carried `rows` the CLI never took
+        up (no echo): back to the queue, as the tmux kind's stop requeues an
+        untaken row. Not a failure: a stop or the user's interrupt, so no
+        `errored`, no failure count, and the result cut nothing. After an
+        interrupt the client that may still hold them is replaced first
+        (a reconnect resuming the session), so a late echo can never run
+        them a second time; a stop's teardown disconnects it anyway."""
+        why = ("stopped before the CLI took them up" if end is _CARRY_STOPPED else
+               "interrupted, and the CLI never took them up (no echo for %.1fs)"
+               % self.drain_timeout_s)
         try:
-            self.stream.append("result", {"inbox_ids": [], "requeued": [r["id"] for r in rows],
-                                          "interrupted": self._interrupt_sent,
-                                          "is_error": False, "num_turns": 0,
-                                          "total_cost_usd": None, "session_id": None,
-                                          "usage": None,
-                                          "carried": "stopped before the CLI took them up"})
+            if end is _CARRY_DROPPED and not self._stop.is_set():
+                resume = self._resume_id
+                await self._disconnect()
+                if await self._connect(resume=resume, why="carried rows never taken up"):
+                    self.stream.append("system", {"subtype": "reconnected", "why": why,
+                                                  "resumed": resume})
         finally:
-            for row in rows:
-                self.inbox.requeue(row["id"])
+            try:
+                # the result first (#87), then the rows go back
+                self.stream.append("result", {"inbox_ids": [],
+                                              "requeued": [r["id"] for r in rows],
+                                              "interrupted": False, "is_error": False,
+                                              "num_turns": 0, "total_cost_usd": None,
+                                              "session_id": None, "usage": None,
+                                              "carried": why})
+            finally:
+                for row in rows:
+                    self.inbox.requeue(row["id"])
+
+    def _reinterrupt(self):
+        """#66: the carried row's echo came after an interrupt written while
+        the CLI was between turns, which may have cut nothing: the same
+        interrupt again, to the turn that is now live, on the writer."""
+        if self._reinterrupting or self._writer is None:
+            return
+        self._reinterrupting = True
+        seq = self._turn_seq
+        try:
+            self._writer.submit(_Job(lambda: self._interrupt_write(seq)))
+        except RunnerError as exc:      # the writer has ended: the turn fails on it anyway
+            self.stream.append("error", {"error": "interrupt again: %s" % exc})
 
     def _raise_write_error(self):
         """A fold write that failed on the writer fails the turn here, on
@@ -1806,8 +1850,11 @@ class SdkRunner:
         the turn is live, and read until every written row is closed.
         Returns False when the turn failed or a result was an error."""
         self._interrupt_requested = self._interrupt_sent = False
+        self._interrupt_idle = self._reinterrupting = False
         self._auth_turn = None
         self._sent = []
+        carried = []      # rows the turn stopped waiting on (#66): _end_carry's
+        carry_end = None
         open_rows = []    # (row, envelope text): written, not yet closed
         closing = []      # rows a result is closing right now
         ok = True
@@ -1856,8 +1903,9 @@ class SdkRunner:
                         if msg is _END:
                             # the CLI died: the SDK ends the stream on {"type": "end"}
                             raise RunnerError("stream ended without a result")
-                        if msg is _CARRY_STOPPED:
-                            self._drop_carried(open_rows)
+                        if msg is _CARRY_STOPPED or msg is _CARRY_DROPPED:
+                            carry_end, carried[:] = msg, [row for row, _ in open_rows]
+                            open_rows[:] = []
                             break
                         echo_of = None
                         if isinstance(msg, sdk.UserMessage):
@@ -1867,6 +1915,8 @@ class SdkRunner:
                                 echoed.add(echo_of)
                                 self._live = True   # the CLI took up a carried row
                                 self._carrying, self._carry_until = False, None
+                                if self._interrupt_idle:
+                                    self._reinterrupt()     # it may have cut nothing
                                 if row["id"] != first["id"]:
                                     self.turn.add(row)
                         # a message means the permission was settled; a hook's
@@ -1890,6 +1940,7 @@ class SdkRunner:
                             self._carrying, self._carry_until = False, None
                             cut = self._interrupt_sent      # _close clears it
                             ok = self._close(msg, open_rows, echoed, closing) and ok
+                            self._interrupt_idle = self._reinterrupting = False
                             if cut and open_rows:
                                 # an interrupt ended this CLI turn with rows still
                                 # carried: the CLI may have dropped them, so the
@@ -1905,6 +1956,9 @@ class SdkRunner:
                 finally:
                     await _aclose(responses)
             await self._close_writer()   # nothing left in it but interrupts: dropped
+            if carried:
+                rows, carried[:] = list(carried), []
+                await self._end_carry(carry_end, rows)
             self._raise_write_error()
         except Exception as exc:  # noqa: BLE001 - a raising turn body is recorded, not lost
             # first: a fold never begun goes back to the queue, one cut off
@@ -1917,12 +1971,8 @@ class SdkRunner:
             if isinstance(exc, _NotWritten) and all(r["id"] != exc.row["id"] for r in requeued):
                 requeued.append(exc.row)
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
-            if isinstance(exc, _CarriedDropped):
-                # never taken up by the CLI (no echo): back to the queue, and
-                # the resync below brings the stream back in step (#66)
-                requeued += [row for row, _ in open_rows]
-                open_rows[:] = []
-                cause = RunnerError(str(exc))
+            # carried rows the turn stopped waiting on, not yet handed back (#66)
+            requeued += [row for row in carried if all(r["id"] != row["id"] for r in requeued)]
             # A raise before the send (the move to `running` refused, say) leaves
             # `first` claimed and in no list: back to the queue, the client untouched.
             unsent = [] if sending else [first]
@@ -1946,7 +1996,7 @@ class SdkRunner:
                 self._recover()
             return False
         finally:
-            self._carrying, self._carry_until = False, None
+            self._carrying, self._carry_until, self._carry_stop_at = False, None, None
             await self._close_writer()   # no writer task outlives its turn
         self.turn.end()
         with self._lock:
@@ -1958,8 +2008,9 @@ class SdkRunner:
         """Close every row echoed since the last result with this one;
         rows written but not echoed stay open for the next CLI turn."""
         # sent, not asked: one still queued behind a fold when the result
-        # came never reached the CLI, and this turn was not interrupted
-        interrupted = self._interrupt_sent
+        # came never reached the CLI, and this turn was not interrupted; nor
+        # was it when the only one reached the CLI between turns (#66)
+        interrupted = self._interrupt_sent and not self._interrupt_idle
         is_error = bool(msg.is_error)
         closing[:] = [row for row, _ in open_rows if row["id"] in echoed]
         open_rows[:] = [(row, text) for row, text in open_rows if row["id"] not in echoed]

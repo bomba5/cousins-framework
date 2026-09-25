@@ -3,6 +3,12 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.24.3 - 2026-09-25
+
+### Fixed
+- The console's reasoning pane footer lines up with the chat composer beside
+  it: same padding and a 36px input and button row.
+
 ## 1.24.2 - 2026-09-25
 
 Three runner fixes, each proven by a test that failed before it.

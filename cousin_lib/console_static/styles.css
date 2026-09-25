@@ -1882,8 +1882,10 @@ table.data th.num { font-family: var(--sans); font-size: 10.5px; }
 .pane-title { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--fg-0); }
 .pane-chip { font-family: var(--mono); font-size: 10.5px; color: var(--fg-2); background: var(--bg-2); border-radius: 5px; padding: 2px 7px; }
 .pane-x { padding: 0 8px; min-height: 24px; }
-.pane-foot { border-top: 1px solid var(--hair); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--bg-0); }
+.pane-foot { border-top: 1px solid var(--hair); padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; background: var(--bg-0); }
 .pane-foot-row { display: flex; gap: 8px; align-items: center; }
+/* same 36px row and padding as .chat-composer, so the two bottom bars line up */
+.pane-foot-row > input.txt, .pane-foot-row > .btn { height: 36px; box-sizing: border-box; }
 .pane-note { font-family: var(--mono); font-size: 10.5px; color: var(--fg-2); }
 .btn.rp-interrupt:not(:disabled) { color: var(--accent-bright); border-color: oklch(from var(--accent) l c h / 0.55); background: oklch(from var(--accent) l c h / 0.10); }
 .btn.rp-interrupt:not(:disabled):hover { background: oklch(from var(--accent) l c h / 0.2); }

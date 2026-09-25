@@ -70,8 +70,37 @@ before it ships.
 - The pane's stdio `cousin` server serves `reply` and `handoff` for a
   tmux-kind home, through the runner's own tool code.
 
-### Deferred to 1.23.x
-- Context-pressure detection for the tmux kind's rollover (1.23.0 keeps the
+### Fixed
+- A runner asked to stop claims nothing new (live proofs, finding 3: during
+  a held close for a kind switch the SDK runner answered a queued row before
+  it stopped). `cousin-runner`'s signal handler calls the runner's
+  `begin_stop()` at once (`SdkRunner`, `TmuxRunner`, the side sessions'
+  `Sessions`, and a side session rebuilt during the stop), and `stop()` calls
+  it first; from then on no turn, fold or digest is claimed, and a claim the
+  stop raced goes back to the queue. What is live is still finished or
+  settled. A signal during the stop's own teardown does nothing more, and
+  the wake poke it sends never raises.
+- The kind switch's notice is the first turn after the switch (finding 4:
+  rows queued before the switch were answered by a model that still
+  believed the old kind). It is queued before the target starts, ranked
+  ahead of every row (a flip or an interrupt included). A rollback closes
+  it if it is still queued or claimed, and clears the tmux runner's
+  `data/login-required.json`, so the restored kind never reads LOGIN
+  REQUIRED from a trust dialog nobody accepted. A switch whose verify gave
+  up but whose target took the notice later (the trust dialog accepted
+  late) reads `switched`, with a `late` note, at the next read of its
+  record; `cousin-migrate check` prints it.
+- A pane lost while the runner stops is the stop's cut (finding 5: under a
+  systemd stop the unit's cgroup kill takes the tmux server first). The cut
+  row reads "cut by restart", or "cut by a requested stop" when held (the
+  held stop's own settle uses the same words), the restart mark tells the
+  next start, and the loss counts toward no give-up.
+- A tmux rollover's `data/runner-session.json` names the rollover's
+  generation as soon as it moves (finding 6: it kept the old one until the
+  new session's first turn).
+
+### Deferred to 1.24.x
+- Context-pressure detection for the tmux kind's rollover (1.24.0 keeps the
   minimal rollover), `cousin-migrate --all`, `cousin-migrate adopt` (a legacy
   cousin onto the tmux kind with its session) and the docker `tmux` profile.
 

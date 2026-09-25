@@ -3,6 +3,12 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.24.5 - 2026-09-25
+
+### Removed
+- The sidebar's NEXT FLIP card. The next flip stays in the overview's fleet
+  sentence and in the fleet table's column.
+
 ## 1.24.4 - 2026-09-25
 
 ### Changed

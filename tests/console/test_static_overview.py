@@ -78,11 +78,12 @@ class OverviewMarkup(unittest.TestCase):
         self.assertIn("fleetLoginWaits(", self.view)
         self.assertIn("loginRequired.action", self.view)
 
-    def test_the_sidebar_carries_the_count_and_the_next_flip(self):
+    def test_the_sidebar_carries_the_count_not_a_flip_card(self):
         app = _read("app.jsx")
         self.assertIn("fleetHealth(", app)
         self.assertIn('className="nav-count"', app)
-        self.assertIn("data-next-flip", app)
+        # the next flip is in the fleet sentence and the table, not a sidebar card
+        self.assertNotIn("data-next-flip", app)
         self.assertIn("<HostView onOpen=", app)
 
 

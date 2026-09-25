@@ -110,6 +110,13 @@ SITES = (
     ('cousin_lib/supervisor.py', '"""`[agent] runner` is one of RUNNER_KINDS (delivery._runner_kind\'s test)."""', 'transport'),
     ('cousin_lib/supervisor.py', '(`[agent] runner` one of RUNNER_KINDS) whose `[agent] auto_start` is not', 'transport'),
     ('cousin_lib/supervisor.py', 'delivery.RUNNER_KINDS gets a runner child, unless `[agent] auto_start = false`', 'transport'),
+    # Merged from 1.23.0/1.24.0 (the console's pane view, MCP panel, kind switch):
+    # the tmux kind is a harness lane there (HARNESS_LANES), its pane a view.
+    ('cousin_lib/console/pane.py', 'if _runner_kind(home) != "tmux":', 'pane'),
+    ('cousin_lib/console/routes_mcp.py', 'def _is_runner(lane):', 'kinds'),
+    ('cousin_lib/console/routes_mcp.py', 'if _is_runner(lane):', 'kinds'),
+    ('cousin_lib/console/routes_mcp.py', '_write_registry(req, own, runner_lane=_is_runner(_lane(home)))', 'kinds'),
+    ('cousin_lib/console/routes_migrate.py', 'return _runner_kind(home) or "tmux-legacy"', 'kinds'),
 )
 
 

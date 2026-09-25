@@ -320,9 +320,11 @@ class TestSwitch(SwitchCase):
     def test_the_plan_says_the_one_time_trust_step(self):
         status, body = self.post("/api/cousins/wren/migrate/plan", {"to": "tmux"})
         self.assertEqual(status, 200, body)
-        self.assertFalse(body["plan"]["ready"])
+        # never a gate: the pane asks and verify waits for the operator
+        self.assertTrue(body["plan"]["ready"], body)
         trust = next(c for c in body["plan"]["checks"] if c["check"] == "trust")
-        self.assertIn("accept the trust dialog", trust["detail"])
+        self.assertTrue(trust["ok"])
+        self.assertIn("the pane asks once", trust["detail"])
 
     def test_the_switch_reports_its_cursor_and_notice_stages(self):
         self.trust()
@@ -332,7 +334,7 @@ class TestSwitch(SwitchCase):
         op = self.wait_done()
         self.assertEqual(op["status"], "done", op)
         self.assertEqual([n for n, _ in self.stages(op)],
-                         ["trust", "close", "toml", "cursor", "start", "notice", "verify"])
+                         ["trust", "close", "toml", "cursor", "notice", "start", "verify"])
         self.assertTrue(all(st == "done" for _, st in self.stages(op)))
         self.assertEqual(self.agent()["runner"], "tmux")
 
@@ -384,7 +386,7 @@ class TestSwitch(SwitchCase):
         op = self.wait_done()
         self.assertEqual((op["kind"], op["status"]), ("kind-switch-rollback", "done"), op)
         self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
-        self.assertEqual([n for n, _ in self.stages(op)], ["close", "restore", "cursor", "start"])
+        self.assertEqual([n for n, _ in self.stages(op)], ["close", "notice", "restore", "cursor", "start"])
 
     def test_an_unexpected_error_marks_the_record_failed(self):
         self.trust()

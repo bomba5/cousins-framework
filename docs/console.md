@@ -408,6 +408,8 @@ The kinds and accounts come from the console (`GET /api/spawn/options`),
 never from the page. A runner cousin is started through `cousin-supervisor`
 (where no supervisor runs, the start answers 503). The Docker install's
 `compose.yml` sets `COUSIN_DEFAULT_RUNNER`, which only preselects the kind.
+`COUSIN_DEFAULT_ACCOUNT` only preselects too: a runner kind created with the
+account left blank gets it (unset, `host`); tmux-legacy never reads it.
 There is no worker option: spawn has no backend for `[cousin] type =
 "worker"` yet.
 

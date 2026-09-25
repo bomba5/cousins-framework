@@ -602,9 +602,11 @@ class TestDeliveryDocs(unittest.TestCase):
         self.has("at-least-once", section, "operations.md, Backups")
         self.has("`inbox.db` first", section, "operations.md, Backups")
 
-    def test_the_console_spawn_dialog_says_the_environment_decides_the_lane(self):
+    def test_the_console_spawn_dialog_says_the_environment_only_preselects(self):
+        # 1.24.0 (WP-A): the dialog has kind and account fields; the
+        # environment preselects them and never decides
         section = _section(self.read("docs/console.md"), "### Spawning a cousin")
-        for needle in ("COUSIN_DEFAULT_RUNNER", "COUSIN_DEFAULT_ACCOUNT", "no runner or account"):
+        for needle in ("COUSIN_DEFAULT_RUNNER", "COUSIN_DEFAULT_ACCOUNT", "only preselects"):
             self.has(needle, section, "console.md, Spawning a cousin")
 
     def test_the_console_restart_route_exits_75(self):

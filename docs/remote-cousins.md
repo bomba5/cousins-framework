@@ -1,6 +1,6 @@
 # Remote cousins
 
-A remote cousin runs on another machine: a Pi on a desk, a VM, a box
+A remote [cousin](glossary.md#cousin) runs on another machine: a Pi on a desk, a VM, a box
 behind NAT. It keeps its memory on the console machine, talks to the
 other cousins through it, and shows up in the console as a card you can
 chat with. Read this when one machine is not enough.
@@ -13,7 +13,7 @@ machine, carry it over, and run `./install.sh`.
 ## How it fits together
 
 The console machine runs the **queen**: a small HTTP API under `/hive/`
-that holds an inbox per cousin and a memory store. Each remote cousin is
+that holds an [inbox](glossary.md#inbox) per cousin and a memory store. Each remote cousin is
 a **node**. A node calls the queen; the queen never calls the node. That
 is why a node behind NAT, or on a network the console can't see, works
 fine.
@@ -214,7 +214,7 @@ Either way the unit runs `python3 cousin_node.py` from the directory,
 reads `node.env` as its environment, and restarts on failure after 5
 seconds. The script then waits up to 20 seconds for `/health` to answer
 and prints where the logs are. If the machine has no `systemctl`, it
-tells you to use `--foreground` under your own supervisor.
+tells you to use `--foreground` under your own [supervisor](glossary.md#supervisor).
 
 Check it on the node:
 
@@ -276,7 +276,7 @@ said, and mentions a memory if it recalled one. It's there so a fresh
 node answers from minute one and you can test the plumbing before
 wiring in a real model. `/health` says `"brain": "placeholder"`.
 
-**Agent command.** One command line, run on the node for every turn. The
+**Agent command.** One command line, run on the node for every [turn](glossary.md#turn). The
 runtime splits it like a shell would (no actual shell), runs it in the
 node directory with `COUSIN_SLUG`, `NODE_NAME` and `NODE_DIR` in its
 environment, writes the prompt to stdin and takes stdout as the reply.
@@ -319,7 +319,7 @@ Each message becomes one turn, whether it arrived on the node's own
 4. **Remember.** The whole exchange is stored on the queen under the
    node's own scope, every turn. Only that node can recall its own
    memories. If the node's disk dies, its memory doesn't.
-5. **Reply.** The reply is stored in the sender's chat thread. If the
+5. **Reply.** The reply is stored in the sender's chat [thread](glossary.md#thread). If the
    turn came over the hive, the answer goes back over the hive too.
 
 The node polls its inbox every `NODE_POLL_SECONDS` (default 5; 0 turns
@@ -339,7 +339,7 @@ home chat: `[tell-home: ...]` then reaches it through the queen, which
 checks the node's token and refuses a replayed message. It needs no chat
 server, so it works in the container too, where `cousin-supervisor`
 starts none. The legacy `home_chat_url` posts to a cousin's chat server
-instead (a runner cousin's starts without a tmux binary), and has
+instead (a [runner](glossary.md#runner) cousin's starts without a tmux binary), and has
 nothing to post to in the container.
 
 ```sh

@@ -1,6 +1,6 @@
 # MCP tools
 
-A cousin can use the framework's CLIs as MCP tools instead of typing
+A [cousin](glossary.md#cousin) can use the framework's CLIs as MCP tools instead of typing
 them into a shell. Same commands, same effect, but the arguments travel
 as JSON, so nothing in a decision or a message gets mangled by shell
 quoting on the way. This page covers what a cousin gets, the registry
@@ -39,7 +39,7 @@ exactly as written.
   or `--video` if given.
 - Anything else is an error that lists who the cousin can reach. There's
   no default, so a typo in a slug fails instead of posting into the
-  wrong thread.
+  wrong [thread](glossary.md#thread).
 
 That removes the classic mistake of answering a peer cousin with
 `cousin-reply` ([chat](chat.md#cousin-to-cousin)). The peer list is read
@@ -69,7 +69,7 @@ anything runs. The row records
 the command line as given, so a secret in `argv` ends up in the jobs
 store: pass secrets some other way.
 
-What's deliberately not there: spawn, flip, reincarnate, transplant,
+What's deliberately not there: spawn, [flip](glossary.md#flip), reincarnate, transplant,
 loop control and shared-tier review. Those are yours, not the cousin's.
 
 MCP only covers what the cousin does. Messages still reach the cousin
@@ -122,7 +122,7 @@ cousin-mcp approve wren --root "$PWD"
 
 ### The in-process transport
 
-On the SDK lane, the runner does not spawn `cousin-mcp` over stdio: the
+On the SDK [lane](glossary.md#lane), the [runner](glossary.md#runner) does not spawn `cousin-mcp` over stdio: the
 same registry builds the tools inside the runner's own process
 (`cousin_lib/runner/tools.py`). Schemas come from `mcp_server.build_schema`
 either way, so a tool cannot exist on one transport and not the other.
@@ -136,7 +136,7 @@ start shell` launcher in a fresh interpreter (the same code the runner
 imported), from the cousin's home, because forking the multi-threaded
 runner itself could hang the child.
 
-`handoff` ends the generation: the runner asks for it at a rollover (see
+`handoff` ends the generation: the runner asks for it at a [rollover](glossary.md#rollover) (see
 [agent-loop-runner](design/agent-loop-runner.md#continuous-extraction-and-rollover)),
 and it is called exactly once, with five fields: `position` (a paragraph,
 where the work stands), `next_action` (the first thing the next generation
@@ -166,7 +166,7 @@ Per kind, an operator-added `<home>/.mcp.json` server beyond `cousin` is
 handled differently:
 
 - **sdk.** `cousin_lib/runner/mcp_config.py` reads the home's
-  `.mcp.json` once, at the first turn, and keeps it for the runner's
+  `.mcp.json` once, at the first [turn](glossary.md#turn), and keeps it for the runner's
   life; an edit lands at the next start. Each entry maps onto the SDK's
   server config as one of three shapes: stdio (`command`, `args`,
   `env`), `http` or `sse` (`url`, `headers`). `cousin` is reserved: an
@@ -181,7 +181,7 @@ handled differently:
   of an unknown shape, is skipped with the reason, never fatal: the
   cousin still starts with `cousin`. `cousin`'s own tools load with
   `alwaysLoad` set, so they never sit behind the CLI's tool search; a
-  user server's tools stay deferred there. The runner's event stream
+  user server's tools stay deferred there. The runner's event [stream](glossary.md#stream)
   carries an `mcp_config` event with server names, types, ignored keys
   and skip reasons, ordered by name, never a value.
 - **tmux** (the legacy lane and the tmux runner kind). Claude Code reads

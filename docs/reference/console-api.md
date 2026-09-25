@@ -2,7 +2,7 @@
 
 Every HTTP route the web console serves, for when you want to script against it or debug what the browser is doing. For what the pages do and how to use them, read [the console guide](../console.md).
 
-The console is one Python process (`cousin-console`, default `127.0.0.1:8600`). The browser page is static files plus these routes. The console keeps almost nothing of its own: it reads cousin homes, the jobs database, the loops state and the tracker on every call, and it proxies chat to each cousin's own chat server.
+The console is one Python process (`cousin-console`, default `127.0.0.1:8600`). The browser page is static files plus these routes. The console keeps almost nothing of its own: it reads [cousin](../glossary.md#cousin) homes, the jobs database, the loops state and the tracker on every call, and it proxies chat to each cousin's own chat server.
 
 ## Getting in
 
@@ -65,7 +65,7 @@ Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"o
 
 ## Telegram
 
-Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. A runner cousin's bridge is a `cousin-supervisor` child (`telegram:<slug>`): these routes write `cousin.toml` and ask the supervisor to rescan, and never start a bridge themselves.
+Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. A [runner](../glossary.md#runner) cousin's bridge is a `cousin-supervisor` child (`telegram:<slug>`): these routes write `cousin.toml` and ask the [supervisor](../glossary.md#supervisor) to rescan, and never start a bridge themselves.
 
 A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last five people who wrote to the bot and were refused, so they can be added without looking up a numeric id. Anyone who messages the bot can appear there.
 
@@ -115,7 +115,7 @@ Add an entry. Body `{"name", "entry": {"kind", ...}}`, the entry's keys as in ac
 
 ### `POST /api/accounts/<name>`
 
-Replace an entry whole. Body `{"entry"}`. Refused (`400`, naming the cousin) when a cousin on the account could not run with the new entry on its lane. `200 {"ok": true, "account": row}`, `404` no such entry, `400` for `host`.
+Replace an entry whole. Body `{"entry"}`. Refused (`400`, naming the cousin) when a cousin on the account could not run with the new entry on its [lane](../glossary.md#lane). `200 {"ok": true, "account": row}`, `404` no such entry, `400` for `host`.
 
 ### `POST /api/accounts/<name>/remove`
 
@@ -193,7 +193,7 @@ Copies `config/mcp-registry.toml.example` (else the checkout's) to `config/mcp-r
 
 ### `GET /api/cousins/<slug>/mcp/servers`
 
-`{"ok": true, "file": ".mcp.json", "exists", "etag", "lane", "restart_note", "parse_error", "reserved": "cousin", "servers": [...], "kept": [{"name", "reason"}], "last_event"}`. A server: `{"name", "type": "stdio" | "http" | "sse", "command", "command_masked", "args": [{"value", "masked"}], "env": [{"name", "value", "masked"}]}` or `{"name", "type", "url", "url_masked", "headers": [{"name", "value", "masked"}]}`, plus `ignored_keys` (keys the runner drops, kept on save), `account_vars`, `unset_vars` (a `${VAR}` with no default that the console's environment does not set: a hint, the runner's environment decides) and `masked`. `kept` lists the entries this editor does not model (the reserved `cousin`, an entry of no known shape): a save keeps them as they are. `last_event` is the newest `mcp_config` event of the runner's primary stream (`{"ts", "seq", "payload": {"file", "servers", "skipped"}, "stream"}`), or null.
+`{"ok": true, "file": ".mcp.json", "exists", "etag", "lane", "restart_note", "parse_error", "reserved": "cousin", "servers": [...], "kept": [{"name", "reason"}], "last_event"}`. A server: `{"name", "type": "stdio" | "http" | "sse", "command", "command_masked", "args": [{"value", "masked"}], "env": [{"name", "value", "masked"}]}` or `{"name", "type", "url", "url_masked", "headers": [{"name", "value", "masked"}]}`, plus `ignored_keys` (keys the runner drops, kept on save), `account_vars`, `unset_vars` (a `${VAR}` with no default that the console's environment does not set: a hint, the runner's environment decides) and `masked`. `kept` lists the entries this editor does not model (the reserved `cousin`, an entry of no known shape): a save keeps them as they are. `last_event` is the newest `mcp_config` event of the runner's primary [stream](../glossary.md#stream) (`{"ts", "seq", "payload": {"file", "servers", "skipped"}, "stream"}`), or null.
 
 ### `POST /api/cousins/<slug>/mcp/servers`
 
@@ -227,10 +227,10 @@ Body `{"etag", "deny_tools", "deny_bash_patterns", "ask", "outbound_filter", "co
 
 A cousin's `[agent]` table, per runner lane, and the rest of its `cousin.toml` the inspector edits (`cousin_lib/console/routes_agent.py`). Each kind of key has one write path:
 
-- **`[agent]`** (the keys the cousin's runner reads): `spawn.persist_agent_values`, the same path `POST /api/cousins/<slug>/model` and `/effort` take on a runner cousin. Every change is checked by `agent_settings.validate`, with the runner's own checks (`runner/main.effort_of`, `accounts.check_lane` and the tmux kind's refusal of a key or token account, `refuse_claude_name` and the opencode model checks, the `[agent.sessions]` parser, `opencode.shell_env`, the pane's hard deny for `env_allow`), key by key and then for the table as a whole; an `sdk` model then passes one smallest turn, in a child process, on the account and effort the same change writes (never the ones still in the file); `agent_settings.apply` writes every change in one atomic write whose hook re-checks the parsed table. A value the file already holds is not a change.
+- **`[agent]`** (the keys the cousin's runner reads): `spawn.persist_agent_values`, the same path `POST /api/cousins/<slug>/model` and `/effort` take on a runner cousin. Every change is checked by `agent_settings.validate`, with the runner's own checks (`runner/main.effort_of`, `accounts.check_lane` and the tmux kind's refusal of a key or token account, `refuse_claude_name` and the opencode model checks, the `[agent.sessions]` parser, `opencode.shell_env`, the pane's hard deny for `env_allow`), key by key and then for the table as a whole; an `sdk` model then passes one smallest [turn](../glossary.md#turn), in a child process, on the account and effort the same change writes (never the ones still in the file); `agent_settings.apply` writes every change in one atomic write whose hook re-checks the parsed table. A value the file already holds is not a change.
 - **The other keys** (`cousin.name`, `cousin.peer_visible`, `memory.proactive_recall`, `memory.recall_keyword_only`, `memory.review_batch`, `memory.review_model`, `lifecycle.flip_at`, `agent.commit_attribution`): `toml_edit.write_keys`, with a hook that runs the same check on the parsed result (and `config.commit_attribution` on the `[agent]` table).
 - **Read-only**: `[chat]` port, host and tmux_session (a changed port breaks every peer), `[session]` start and end hooks (shell commands). The kind (`[agent] runner`) is switched by a migration, never here.
-- A write is refused with `409 {"busy": true}` while a long operation, a flip or a clean stop runs on the cousin. A change that needs a restart answers `restart_required: true`; the inspector offers `POST /api/cousins/<slug>/restart`.
+- A write is refused with `409 {"busy": true}` while a long operation, a [flip](../glossary.md#flip) or a clean stop runs on the cousin. A change that needs a restart answers `restart_required: true`; the inspector offers `POST /api/cousins/<slug>/restart`.
 
 ### `GET /api/cousins/<slug>/agent`
 
@@ -270,7 +270,7 @@ Body `{"since"?: "<ISO time>", "validate"?: bool}`. The exit criterion, `200 {"o
 
 ### `POST /api/cousins/<slug>/migrate/rollback`
 
-Body `{"which": "migration" | "switch", "confirm": true, ...}`. `"switch"` takes `to`, the kind the switch came from (the library refuses another: the op fails saying which), and no force. `"migration"` takes `force` (inbox rows still waiting, or an inbox that cannot be read), which asks a second time: `"force_confirm": true` too, else `400`. `202 {"ok": true, "op"}`, kind `migrate-rollback` or `kind-switch-rollback`, its stages the library's rollback steps. A refusal from the library (already rolled back, rows waiting, a runner that will not let go) fails the op with its words. `409` when no cousin-supervisor runs for the root.
+Body `{"which": "migration" | "switch", "confirm": true, ...}`. `"switch"` takes `to`, the kind the switch came from (the library refuses another: the op fails saying which), and no force. `"migration"` takes `force` ([inbox](../glossary.md#inbox) rows still waiting, or an inbox that cannot be read), which asks a second time: `"force_confirm": true` too, else `400`. `202 {"ok": true, "op"}`, kind `migrate-rollback` or `kind-switch-rollback`, its stages the library's rollback steps. A refusal from the library (already rolled back, rows waiting, a runner that will not let go) fails the op with its words. `409` when no cousin-supervisor runs for the root.
 
 ## Lifecycle
 
@@ -358,13 +358,13 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `model`, `effort` | what the next start will use: the cousin's `[runtime]` value, else `config/harness.toml [agent]` default, else null |
 | `hidden` | `[cousin] hidden` |
 | `auth` | `claude` or `api_key`; null if cousin.toml holds a mode the framework doesn't know |
-| `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. Worker: always `running`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). |
+| `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. [Worker](../glossary.md#worker): always `running`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). |
 | `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
 | `chat` | `ok`, `down` or `none` (no port) from the chat server's `/health`; `console` for a runner cousin, whose chat the console serves itself |
 | `active` | the last 20 pane lines changed in the last 60 seconds; for a runner cousin, a live turn (`running` or `waiting_permission`) |
 | `pid`, `uptime_seconds` | the agent process in the tmux pane and its age (a runner cousin: the `cousin-runner` process); null when unknown, never 0 |
 | `activity` | first 200 characters of `data/last-activity.txt` |
-| `lastMsgTs` | unix time of the cousin's newest reply in your thread (the `[operator] name`, last 20 rows), 0 if none |
+| `lastMsgTs` | unix time of the cousin's newest reply in your [thread](../glossary.md#thread) (the `[operator] name`, last 20 rows), 0 if none |
 | `tokensSpent` | today's token total, 0 when token counting isn't set up |
 | `runner` | null for a tmux cousin. A runner cousin: `{"alive", "state", "since", "session", "kind", "pid", "unsupported"}` from its own stores: `alive` whether a runner holds its lock, `state` the last state its primary event stream recorded (with `since`, that event's time; it stays the last one recorded after the runner is gone, so read it with `alive`), `kind` (`sdk`, `fake` or `opencode`), `pid` and `unsupported` (the contract items the runner declares it does not support) from the `runner` event `cousin-runner` writes at start |
 | `supervisor` | `{"state": ...}` for a runner cousin the running `cousin-supervisor` holds as a child (`running`, `backoff`, `failing`, `stopped`), read from its `run/supervisor.json`; null when no supervisor runs (or the file is stale) or it holds no child for this cousin. Null is unknown, never stopped |
@@ -765,7 +765,7 @@ The batch lands in `<home>/memory/.trash/<id>/` with one audit line per item in 
 
 ### `POST /api/memory/<slug>/obsolete`
 
-Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the distilled views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. An operator-level claim is the operator's to retire: `403` for anyone but the operator account (see [Memory operator actions](#memory-operator-actions)) when `entry` names an L0 claim, or, without `entry`, when the topic has a live L0 claim. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
+Body `{"topic": "...", "why": "...", "force": false, "entry": "<id>"}` (`entry` optional). Appends an L5 entry for the topic, recorded as by the logged-in user with source `console`, then rebuilds the [distilled](../glossary.md#distilled) views, which leave the topic out until a later entry brings it back. With `entry`, a claim's id from the tensions list, the mark retires that one claim and the topic stays; an id that is not one of the topic's claims is a `400`. An operator-level claim is the operator's to retire: `403` for anyone but the operator account (see [Memory operator actions](#memory-operator-actions)) when `entry` names an L0 claim, or, without `entry`, when the topic has a live L0 claim. Nothing is removed from raw. `200` with the entry and `effects` (`distilled`, `obsolete_topics`, or `distill_error` if the rebuild failed; the mark is written either way) and a `memory-change` event with action `obsolete`. `400` when topic or why is missing, the reason is empty, or the topic has no raw entries and `force` is off.
 
 ### `POST /api/memory/<slug>/restore`
 
@@ -849,7 +849,7 @@ Query `path`. Streams the bytes. Raster images inline with their type, everythin
 
 ## Shared memory review
 
-Proposals to the shared tier wait in `shared/proposed/` as `<slug>__<file>.md`. See [memory](../memory.md).
+Proposals to the [shared tier](../glossary.md#shared-tier) wait in `shared/proposed/` as `<slug>__<file>.md`. See [memory](../memory.md).
 
 ### `GET /api/shared/list`
 

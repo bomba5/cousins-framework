@@ -1,8 +1,8 @@
 # Hive API
 
-The routes the queen serves to remote cousins, the tokens that guard them, and the small HTTP server each remote node runs. Read this when you're debugging a node or writing your own. For setting up remote cousins, read [remote cousins](../remote-cousins.md).
+The routes the queen serves to remote [cousins](../glossary.md#cousin), the tokens that guard them, and the small HTTP server each remote node runs. Read this when you're debugging a node or writing your own. For setting up remote cousins, read [remote cousins](../remote-cousins.md).
 
-The hive is off until you turn it on. Then there's one queen, and nodes on other machines talk to it outbound only: a node needs no open port for the bus to work, so one behind NAT is fine. The queen keeps everything durable in `shared/hive/hive.db`: tokens, one inbox per slug, a memory corpus, and the nodes that have checked in.
+The hive is off until you turn it on. Then there's one queen, and nodes on other machines talk to it outbound only: a node needs no open port for the bus to work, so one behind NAT is fine. The queen keeps everything durable in `shared/hive/hive.db`: tokens, one [inbox](../glossary.md#inbox) per slug, a memory corpus, and the nodes that have checked in.
 
 There are two ways to run a queen. Both run the same route code over the same database.
 
@@ -159,7 +159,7 @@ What a node does with the queen, for reference if you're writing your own:
 
 - checks in on start and then every `checkin_seconds` (60 until the queen says otherwise); a failed checkin is logged and retried, never fatal
 - polls `GET /hive/inbox?since=<cursor>` every `NODE_POLL_SECONDS` (5; 0 turns it off), keeps the cursor in `data/inbox-cursor`, and answers each message back over `/hive/msg`
-- on each turn recalls from `/hive/recall` word by word (the first six distinct words of 4+ characters, up to 3 memories), and after it remembers the exchange with scope `own`
+- on each [turn](../glossary.md#turn) recalls from `/hive/recall` word by word (the first six distinct words of 4+ characters, up to 3 memories), and after it remembers the exchange with scope `own`
 - acts on three markers in the brain's reply: `[remember: fact]` (written with scope `shared`), `[tell <slug>: text]` (a `/hive/msg`), `[tell-home: text]` (with `TELL_HOME=1`, which the console's build sets for home chat when `config/hive.toml` names a `home_cousin`, a `POST /hive/tell-home` with its token; otherwise the legacy POST to `HOME_CHAT_URL/api/send`)
 
 The brain is `AGENT_CMD` if set (the prompt on stdin, the reply on stdout, `AGENT_TIMEOUT_SECONDS` default 120), otherwise a placeholder that echoes. With no reachable queen the node keeps serving its chat and remembers nothing until the queen is back.

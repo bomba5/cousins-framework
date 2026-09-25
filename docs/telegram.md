@@ -1,6 +1,6 @@
 # Telegram bridge
 
-The bridge relays one cousin's chat to Telegram and back, so you can talk
+The bridge relays one [cousin](glossary.md#cousin)'s chat to Telegram and back, so you can talk
 to the cousin from your phone. It is the only feature in the framework
 that sends your content to a third party. It stays off until it is fully
 configured, and refuses to start otherwise.
@@ -22,12 +22,12 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
   It never types into the cousin's terminal and keeps no chat history of
   its own. The chat server owns all of that: recall, typing the line into
   the terminal, the presence marker, correction capture and chat hooks.
-  For a runner cousin (`[agent] runner` in cousin.toml) there is no
+  For a [runner](glossary.md#runner) cousin (`[agent] runner` in cousin.toml) there is no
   terminal: the bridge stores an inbound message in the cousin's
-  `data/chat.db` and delivers it to the runner's inbox itself, then
+  `data/chat.db` and delivers it to the runner's [inbox](glossary.md#inbox) itself, then
   touches the presence marker, captures a correction and fires chat
   hooks, the steps `/api/send` takes. Replies are read back from the
-  cousin's `data/chat.db` on both lanes (what `GET /api/history` returns,
+  cousin's `data/chat.db` on both [lanes](glossary.md#lane) (what `GET /api/history` returns,
   read in the bridge's own process), so a runner cousin needs no chat
   server and no `[chat] port` for the bridge.
 - **Its only state:** where it is, in `data/telegram-bridge.json`
@@ -43,7 +43,7 @@ bots and run two bridges.
 ## Interface
 
 A Telegram message from an allowed operator lands in the cousin's chat
-exactly as if it had been typed in the console, in the thread named for
+exactly as if it had been typed in the console, in the [thread](glossary.md#thread) named for
 that operator. The cousin's replies in that thread go back to Telegram,
 whether the message came from Telegram or from the console.
 
@@ -193,12 +193,12 @@ There is no separate service unit: two bridges polling the same bot make
 Telegram answer 409 Conflict. Who starts it depends on the cousin's lane:
 
 - **A tmux cousin**: `cousin-spawn` starts it right after the chat server (a
-  console start, `cousin-start@`, a flip) and stops it with the cousin. The
+  console start, `cousin-start@`, a [flip](glossary.md#flip)) and stops it with the cousin. The
   console's switch starts or stops it while the cousin runs.
 - **A runner cousin** (`[agent] runner`): `cousin-supervisor` runs it as a
   child, `telegram:<slug>`, beside `runner:<slug>`, started after the runner.
   It is restarted when it crashes, with the same backoff as every other child,
-  and it comes back after a reboot or a supervisor restart. A stop of the
+  and it comes back after a reboot or a [supervisor](glossary.md#supervisor) restart. A stop of the
   cousin (`cousin-supervisor stop <slug>`, the console's stop button) stops
   the bridge and holds it with the runner; `start` brings both back. A config
   that does not pass the bridge's own check (not enabled, no token, no

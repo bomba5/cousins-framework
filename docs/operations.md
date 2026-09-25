@@ -10,11 +10,11 @@ units.
 
 **What runs.** One container, `framework`, whose main process is
 `cousin-supervisor` (the entrypoint prepares the volume, then hands over to
-it). The supervisor starts the console, the loops daemon, one
-`cousin-runner` per runner cousin and, for a cousin with `[telegram]` enabled,
+it). The [supervisor](glossary.md#supervisor) starts the console, the loops daemon, one
+`cousin-runner` per [runner](glossary.md#runner) [cousin](glossary.md#cousin) and, for a cousin with `[telegram]` enabled,
 its Telegram bridge (`telegram:<slug>`), restarts a child that exits (backing
 off up to 60 seconds), and stops them in order when the container stops: the
-bridges, then the runners, each given 35 seconds to finish its turn, then the
+bridges, then the runners, each given 35 seconds to finish its [turn](glossary.md#turn), then the
 loops daemon, then the console. compose waits 45 seconds before it kills anything
 (`stop_grace_period`). Every cousin in the container is a runner cousin; tmux
 cousins need a bare host. See each child:
@@ -111,7 +111,7 @@ docker compose up -d
 `up` recreates the container on the new image; the volume is untouched.
 Each runner resumes its session from the volume (`data/runner-session.json`
 and `data/sessions.db`), so a cousin picks up its conversation where it left
-off; a message that arrived while it was down is waiting in its inbox. A
+off; a message that arrived while it was down is waiting in its [inbox](glossary.md#inbox). A
 cousin you stopped stays stopped until you start it. The
 console's top bar shows the version it runs, as does
 `docker compose exec framework cousin-version`.
@@ -181,7 +181,7 @@ while the cousin is stopped (the login takes no lock against a running
 stays in the account's data dir on the volume. On a bare host the same
 cousin needs only the `opencode` binary on `PATH` (or `[agent] opencode_bin`).
 
-This lane never carries a Claude subscription: a Claude account on it, an
+This [lane](glossary.md#lane) never carries a Claude subscription: a Claude account on it, an
 Anthropic OAuth login in its `auth.json`, or any config or environment that
 names the Claude-subscription bridge refuses the start (exit 2), and a live
 install that still carries the bridge removes it with the runbook in
@@ -217,7 +217,7 @@ Five things run under your systemd user manager. The templates and how to
 install them are in [the units](../systemd/README.md).
 
 - **`cousin-loops.service`** is the scheduler. Every 30 seconds it ticks:
-  heartbeats, each cousin's `[[loops]]`, one-shot schedules, timed flip
+  heartbeats, each cousin's `[[loops]]`, one-shot schedules, timed [flip](glossary.md#flip)
   requests, the daily `flip_at` flips and the transcript-size guard. It's the
   only thing that fires recurring work, so don't add a cron job that also
   fires a loop or a flip.
@@ -310,7 +310,7 @@ opts a cousin out, and `cousin-loops flips` prints each cousin's time and
 where it came from. The daemon flips at most one cousin per tick, so a shared
 time queues rather than collides. If the daemon was
 down at flip time, the flip happens once on the next tick after it comes
-back, not once per missed day. Worker cousins are skipped.
+back, not once per missed day. [Worker](glossary.md#worker) cousins are skipped.
 
 ```
 cousin-loops requests          # pending timed flips
@@ -331,7 +331,7 @@ That writes `<dest>/wren/<YYYY-MM-DD>/`. Every SQLite database under the
 cousin's `data/` is copied with `VACUUM INTO` (a plain file copy of a
 database another process has open can come out torn), the runner's
 `inbox.db`, `sessions.db` and `usage.db` included, plus `memory/`,
-`MEMORY.md`, `STATUS.md` and `CLAUDE.md`. The runner's event stream,
+`MEMORY.md`, `STATUS.md` and `CLAUDE.md`. The runner's event [stream](glossary.md#stream),
 `data/stream/*.jsonl`, is copied too, each file cut in the copy to its last
 complete line (the runner may be mid-line when the snapshot runs), and so
 are the runner's small state files, as plain copies: the sessions it resumes

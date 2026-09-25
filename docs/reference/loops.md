@@ -2,7 +2,7 @@
 
 The loop data model and exactly how the loops daemon decides what to deliver and when. Read it when a loop didn't fire (or fired twice) and you want to know why. For setting loops up, read [jobs and loops](../jobs-and-loops.md).
 
-One process, `cousin-loops run`, owns all scheduling: loops, context heartbeats, trigger files, one-shots and scheduled flips. Nothing else fires anything. The console, the CLIs and scripts only read its state or leave requests for it to pick up on its next tick.
+One process, `cousin-loops run`, owns all scheduling: loops, context heartbeats, trigger files, one-shots and scheduled [flips](../glossary.md#flip). Nothing else fires anything. The console, the CLIs and scripts only read its state or leave requests for it to pick up on its next tick.
 
 ```sh
 cousin-loops run                # the daemon: a tick every 30 s, forever
@@ -16,7 +16,7 @@ The systemd unit `cousin-loops.service` runs `cousin-loops run --interval 30`.
 
 ## A loop
 
-Loops live in the cousin's own `cousin.toml`, one `[[loops]]` table each:
+Loops live in the [cousin](../glossary.md#cousin)'s own `cousin.toml`, one `[[loops]]` table each:
 
 ```toml
 [[loops]]
@@ -72,8 +72,8 @@ Every tick does this, in this order:
 
 1. **Flips.** Walk the pending timed flips: send the warnings that are due, run the ones whose time has come. Then, if no timed flip ran this tick, at most one daily `flip_at` flip. See [Flips](#flips).
 2. **Cousins.** For each cousin, one at a time:
-   - a worker cousin runs its due loops as jobs (see [Workers](#worker-cousins)) and that's all;
-   - a cousin that isn't alive is skipped. A legacy tmux cousin (no `[agent] runner`) is alive when its chat server accepts a connection on `127.0.0.1:<port>`, so a tmux pane whose chat server is dead gets nothing. A runner cousin (`[agent] runner` set, whatever the kind - `sdk`, `tmux`, `opencode` or `fake`) is alive when its runner holds `run/runner.lock`;
+   - a [worker](../glossary.md#worker) cousin runs its due loops as jobs (see [Workers](#worker-cousins)) and that's all;
+   - a cousin that isn't alive is skipped. A legacy tmux cousin (no `[agent] runner`) is alive when its chat server accepts a connection on `127.0.0.1:<port>`, so a tmux pane whose chat server is dead gets nothing. A [runner](../glossary.md#runner) cousin (`[agent] runner` set, whatever the kind - `sdk`, `tmux`, `opencode` or `fake`) is alive when its runner holds `run/runner.lock`;
    - its trigger files are delivered, one delivery each;
    - the context heartbeat (if due) and every due loop are collected and delivered together, as one message.
 3. **Requests.** Consume pending manual fires.
@@ -87,7 +87,7 @@ A failure inside one cousin (an exception, a bad file) is reported and the walk 
 
 A legacy tmux cousin (no `[agent] runner`) gets everything typed into its tmux session through the same injector the chat server uses (paste, wait, Enter, check, one retry; see [the chat API](chat-api.md#what-the-cousin-sees)). That includes its guard: if the pane shows one of `attention_patterns` from `config/harness.toml`, nothing is typed and the delivery counts as failed.
 
-A runner cousin, including one on the `tmux` runner kind (its own tmux pane, driven by `TmuxRunner`, not the legacy lane's send-keys), gets each delivery as one row in its inbox (`data/inbox.db`), on thread `loop:daemon` with source `loop`. The row is kept before the daemon moves on, so the put is the delivery: the daemon never waits for the turn.
+A runner cousin, including one on the `tmux` runner kind (its own tmux pane, driven by `TmuxRunner`, not the legacy [lane](../glossary.md#lane)'s send-keys), gets each delivery as one row in its [inbox](../glossary.md#inbox) (`data/inbox.db`), on [thread](../glossary.md#thread) `loop:daemon` with source `loop`. The row is kept before the daemon moves on, so the put is the delivery: the daemon never waits for the [turn](../glossary.md#turn).
 
 What the cousin gets:
 

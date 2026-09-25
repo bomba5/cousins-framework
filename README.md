@@ -4,7 +4,7 @@
 
 # cousins-framework
 
-I run a small family of Claude Code agents at home. I call them cousins. Each
+I run a small family of Claude Code agents at home. I call them [cousins](docs/glossary.md#cousin). Each
 one has its own name, voice and job, its own memory, and its own chat, and
 they keep all of that when a session ends and a new one starts. This repo is
 the framework that makes that work.
@@ -32,8 +32,8 @@ them, watch their terminal, and browse their memory.
 Read this before the quick start, because it starts as soon as you finish it.
 
 A cousin is a live Claude Code session. It is woken on a schedule, not only
-when you talk to it: a heartbeat every hour by default, and a flip once a day
-that ends its session and starts a new one. Every wake is a turn against your
+when you talk to it: a heartbeat every hour by default, and a [flip](docs/glossary.md#flip) once a day
+that ends its session and starts a new one. Every wake is a [turn](docs/glossary.md#turn) against your
 Claude account, and it keeps happening while you sleep. The console's tokens
 page shows what your cousins are actually using; `cousin-loops flips` shows
 when each one flips. Both are adjustable, and a cousin can be told never to

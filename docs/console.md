@@ -1,6 +1,6 @@
 # The console
 
-The console is the web page I run the whole install from: every cousin's
+The console is the web page I run the whole install from: every [cousin](glossary.md#cousin)'s
 card, their chat and live terminal, jobs, memory, loops, tokens and the
 tracker. This page walks through it page by page. The HTTP routes behind it
 are in [reference/console-api.md](reference/console-api.md).
@@ -81,7 +81,7 @@ user, and a clock.
 
 The sidebar lists the pages (Ctrl/Cmd + 1 to 7, 0 for Settings) and below
 them your cousins. The Overview entry carries a count when cousins are
-waiting on a person, and the foot of the sidebar shows the next daily flip:
+waiting on a person, and the foot of the sidebar shows the next daily [flip](glossary.md#flip):
 the earliest `flip_at` among the running cousins, how far away it is, and
 who flips then. Click a cousin to open its chat. A stopped cousin is
 greyed out and can't be clicked; start it from Cousins first. A dot next to
@@ -116,13 +116,13 @@ The fleet table has one row per cousin, what needs you first, then
 warnings, then the running ones, then the stopped ones. The columns:
 
 - **state**, in words beside its dot: `working`, `idle`, `needs you`,
-  `rate limited`, `errored`, `enrolled` (a worker) or `stopped`. A cousin
+  `rate limited`, `errored`, `enrolled` (a [worker](glossary.md#worker)) or `stopped`. A cousin
   "needs you" when its pane shows one of the `attention_patterns` or its
-  runner waits for a permission; the reason replaces the role line in the
+  [runner](glossary.md#runner) waits for a permission; the reason replaces the role line in the
   cousin column. A running cousin whose chat server is down is a warning.
   A stopped cousin is never flagged: stopping it was your decision.
 - **cousin**: name, slug and role.
-- **runner**: the lane, read from the row: the runner's own kind (`sdk`,
+- **runner**: the [lane](glossary.md#lane), read from the row: the runner's own kind (`sdk`,
   `opencode`, ...), `tmux`, `worker` or `remote`, with the chat server's
   state under a tmux cousin.
 - **model** and effort, what the next start renders.
@@ -175,7 +175,7 @@ Click a card to open the inspector drawer. From top to bottom:
   button:
   - operator: one line, up to 64 characters, no leading or trailing spaces.
     Needs a restart (the chat server reads it at start).
-  - scope: `private` or `shared` (may propose to the shared tier). Applies at once.
+  - scope: `private` or `shared` (may propose to the [shared tier](glossary.md#shared-tier)). Applies at once.
   - heartbeat: whole seconds from 60 to 2592000 (30 days). Applies at the
     loops daemon's next tick.
 
@@ -188,7 +188,7 @@ Click a card to open the inspector drawer. From top to bottom:
   configured, "set key" / "replace key". The key goes into a password field,
   is sent once, and from then on the page shows only "key set (ends WXYZ)".
   Switching restarts a running agent on the same session; if the agent is in
-  the middle of a turn you get "restart anyway" instead. See
+  the middle of a [turn](glossary.md#turn) you get "restart anyway" instead. See
   [cousins](cousins.md#auth-login-or-api-key).
 - **Telegram.** The cousin's Telegram bridge: status (enabled, token set,
   bridge running, what is missing), the bot's @name after a check, an enable
@@ -247,7 +247,7 @@ drift from what the runner accepts.
   `[agent]` key the kind reads: account (only the accounts that run on this
   kind), model (free text with suggestions; on `opencode`
   `"<provider>/<model>"` on a provider the account holds, never a Claude
-  model), effort, auto start, rollover percentage, side sessions
+  model), effort, auto start, [rollover](glossary.md#rollover) percentage, side sessions
   (`[agent.sessions]`, `sdk` only; `operator` and `system` always stay on the
   primary), the opencode keys (`small_model`, `shell_env`,
   `opencode_models_fetch`; `opencode_bin` read-only) and the tmux kind's
@@ -332,7 +332,7 @@ button opens the same dialog. The routes are in
   cousin's account and its session: the source stops at idle and the
   target resumes it.
 - **apply**: only after a ready plan for the same options, with the
-  supervisor up, and a second click. It runs in the background with its
+  [supervisor](glossary.md#supervisor) up, and a second click. It runs in the background with its
   steps as they happen (close, handover, import, toml, start, verify for
   the migration; trust, close, toml, cursor, start, notice, verify for the
   switch), one migration or switch at a time across the fleet. When the
@@ -340,7 +340,7 @@ button opens the same dialog. The routes are in
   says so and a button opens the pane: accept the dialog there (arrows and
   Enter). Keys go into a tmux-kind pane only while it waits on a person;
   everywhere else the runner types, and the chat is the way in.
-- **check**: the exit criterion as a report (inbox rows, tool calls with no
+- **check**: the exit criterion as a report ([inbox](glossary.md#inbox) rows, tool calls with no
   result, recorder hook errors, the runner's config against the cousin's,
   the chat server), optionally since a time and with one validating turn.
 - **roll back**: offered while a record allows it, the kind switch back to
@@ -452,7 +452,7 @@ The archive holds the node's token, so treat it as a secret. The card shows
 The chat page talks to the cousin's own chat server through the console. The
 console stores no messages; what you read is that server's history.
 
-The thread you see is picked like this: `?user=` in the URL, else the
+The [thread](glossary.md#thread) you see is picked like this: `?user=` in the URL, else the
 cousin's operator from `cousin.toml`, else the user you're logged in as. With
 none of those the message box is disabled and says why.
 
@@ -505,7 +505,7 @@ Generating media is a separate, optional thing: see [media](media.md).
 ### Beside the chat: the pane
 
 The pane sits beside the chat rather than in place of it, so you watch the
-cousin work while you talk to it: a runner cousin's reasoning stream, or a
+cousin work while you talk to it: a runner cousin's reasoning [stream](glossary.md#stream), or a
 tmux cousin's terminal. Where the window is wide enough for both it opens by
 default; its "x" closes it and the header's button brings it back, and the
 choice is kept in your browser. On a phone the open pane takes the whole
@@ -603,7 +603,7 @@ open, and count the live entries otherwise. Under them the layers, grouped:
 |---|---|
 | now | active state (STATUS.md, handoff, checkpoints), the MEMORY.md index |
 | candidates | raw entries (daily), monthly digests, raw archive (gzip) |
-| durable | distilled views, decisions log, memory files, notes, harness auto-memory |
+| durable | [distilled](glossary.md#distilled) views, decisions log, memory files, notes, harness auto-memory |
 | machinery | search indexes, recall log, trash, legacy archive |
 
 Each shows a count and when it last changed. "insights" at the top is a

@@ -1,6 +1,6 @@
 # Cousins
 
-What a cousin is, how to make one, and how to run, change and retire it.
+What a [cousin](glossary.md#cousin) is, how to make one, and how to run, change and retire it.
 Read this after the quick start, when you want to know what `cousin-spawn`
 actually built and what you can do with it.
 
@@ -12,10 +12,10 @@ directory that holds everything it is, and a **kind**, `[agent] runner` in
 under `cousin-runner`, with no tmux session at all; `tmux` also runs under
 `cousin-runner`, but drives the host's interactive Claude Code in a tmux pane
 on the framework's own socket; a cousin with no `[agent] runner` at all is on
-the **legacy tmux lane**, its agent running in its own tmux session, typed
+the **legacy tmux [lane](glossary.md#lane)**, its agent running in its own tmux session, typed
 into by its chat server (the console calls this lane `tmux-legacy`). This
 page mostly describes the legacy lane, which
-most of `cousin-spawn`'s output still assumes; where a runner cousin (any of
+most of `cousin-spawn`'s output still assumes; where a [runner](glossary.md#runner) cousin (any of
 `sdk`, `opencode` or `tmux`) works differently, it says so. See
 [runners](reference/runners.md) for the kinds themselves and
 [agent-loop-runner](design/agent-loop-runner.md) for the design.
@@ -40,7 +40,7 @@ cousins/wren/
 A legacy-lane cousin has its own chat server on its own port (8090 to 8200
 by default). People and other cousins talk to it through that server, which
 types incoming messages into the tmux session. A runner cousin needs no chat
-server: its chat history and inbox are written directly, and the console
+server: its chat history and [inbox](glossary.md#inbox) are written directly, and the console
 reads its chat store itself (`cousin-migrate` still starts one for a cousin
 it moves off the legacy lane). The agent answers with `cousin-reply`, and messages another
 cousin with `cousin-chat send`. See [chat](chat.md) and [memory](memory.md)
@@ -98,10 +98,10 @@ Every option:
 | `--model` | `[runtime] model` |
 | `--effort` | `[runtime] effort`: `low`, `medium`, `high`, `xhigh`, `max` |
 | `--heartbeat` | `[heartbeat] context_beat_seconds` (default 3600) |
-| `--memory-scope` | `[memory] scope`: `private` (default) or `shared` (may propose memories to the shared tier; the retired `both` is read as `shared`) |
+| `--memory-scope` | `[memory] scope`: `private` (default) or `shared` (may propose memories to the [shared tier](glossary.md#shared-tier); the retired `both` is read as `shared`) |
 | `--runner` | `[agent] runner`: `sdk`, `fake`, `opencode` or `tmux` puts the cousin on `cousin-runner`, started by `cousin-supervisor` instead of `cousin-spawn --start`'s own tmux session (the `tmux` kind still uses tmux, but a pane on the framework's own socket, driven by the runner, not the legacy lane's session); absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means the legacy tmux lane |
 | `--account` | `[agent] account`, one of `config/accounts.toml`'s (or `host`); a runner cousin only; absent, `COUSIN_DEFAULT_ACCOUNT` applies to a runner cousin |
-| `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. A runner cousin is started by asking the running `cousin-supervisor` (no `config/agent-cmd`, no tmux); with no supervisor the start fails, exit 1 |
+| `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. A runner cousin is started by asking the running `cousin-supervisor` (no `config/agent-cmd`, no tmux); with no [supervisor](glossary.md#supervisor) the start fails, exit 1 |
 | `--resume` | with `--start` on an existing cousin: resume its last session (`config/harness.toml [agent.resume]`) instead of a new one; falls back to a new session when that isn't possible. What the start-at-boot unit uses |
 | `--sync-template` | create nothing; show how an existing cousin's CLAUDE.md framework part differs from the current template (see [the CLAUDE.md template](#the-claudemd-template)) |
 | `--apply` | with `--sync-template`: write the sync |
@@ -164,7 +164,7 @@ The last line is a marker; put anything specific to this cousin below it.
 Below the marker, `CLAUDE.md` is yours: edit it in any editor or in the
 console's inspector (which backs up the old version to
 `data/claude-md-backups/`). A running session doesn't reread it: the change
-lands at the next start or flip. `examples/wren/` is a complete rendered
+lands at the next start or [flip](glossary.md#flip). `examples/wren/` is a complete rendered
 cousin you can read.
 
 Above the marker is the framework part, and it follows the template. Every
@@ -367,10 +367,10 @@ Ways to trigger one:
 If a flip crashes halfway it leaves a marker. Nothing recovers it on its own;
 the console shows "stale marker" and you look at it.
 
-A runner cousin's flip is a rollover instead: `cousin-flip` puts (or joins)
+A runner cousin's flip is a [rollover](glossary.md#rollover) instead: `cousin-flip` puts (or joins)
 the pending `flip` row on the running `cousin-runner` and waits for the
 handoff. None of the tmux steps above run (no marker, no pane, no pending
-boot, no transcript mining: the runner already mined every turn as it went),
+boot, no transcript mining: the runner already mined every [turn](glossary.md#turn) as it went),
 and it refuses a stopped runner cousin, since a rollover needs a runner to
 carry it out. See [`[agent] runner`](configuration.md#agent-runner) and
 [commands](commands.md#running-cousins).
@@ -492,7 +492,7 @@ No `[session]` table means nothing runs, which is fine.
 
 `[operator] name` in `cousin.toml` is the person the cousin answers to. It
 decides where `cousin-reply` goes when you don't pass `--user`, which chat
-thread the console opens, and who `send` in the MCP tools can reach by name.
+[thread](glossary.md#thread) the console opens, and who `send` in the MCP tools can reach by name.
 Set it at spawn with `--operator` or later in the inspector (the chat server
 needs a restart to pick it up).
 

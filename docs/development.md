@@ -27,7 +27,7 @@ edit a `.jsx` file and reload.
 | `cousin_lib/console/` | the web console's server: `app.py` (the HTTP server, login, network guard), `router.py`, one `routes_*.py` per area, `hive.py` (the queen routes), `proxy.py` (chat), `pane.py` (the tmux pane), `sse.py` (the live event stream) |
 | `cousin_lib/console_static/` | the console's frontend: `index.html`, one `.jsx` per view, `styles.css` |
 | `cousin_lib/server/` | the per-cousin chat server (`cousin-chat-server`): `app.py`, `storage.py` (the SQLite chat store), `injection.py` (typing into tmux), `netguard.py` (who may connect) |
-| `cousin_lib/delivery.py` | the one way anything reaches a cousin: a typed, thread-keyed `Item` handed to `deliver()`, which picks the backend. Producers never build an injector themselves |
+| `cousin_lib/delivery.py` | the one way anything reaches a [cousin](glossary.md#cousin): a typed, thread-keyed `Item` handed to `deliver()`, which picks the backend. Producers never build an injector themselves |
 | `cousin_lib/gate/` | the contamination gate (`cousin-gate`) |
 | `cousin_lib/ui.py`, `ui_static/` | the older single-page UI behind `cousin-ui` |
 | `templates/` | `cousin-CLAUDE.template.md` (every cousin's identity file) and `hive-node/` (the remote node runtime, installer and identity) |
@@ -49,7 +49,8 @@ python3 -m unittest tests.test_hive              # one module
 python3 -m unittest tests.console.test_hive_console -k revoke
 ```
 
-The full run is about 1700 tests and takes around five minutes. That's the
+The full run is about 4800 tests and takes around twenty minutes on a
+small host. That's the
 same command CI runs.
 
 Every test runs hermetic: `tests/_hermetic.py` strips `FRAMEWORK_ROOT`,
@@ -250,7 +251,7 @@ input properties, and how each subcommand maps to argv. The registry's
 1. Make the thing a CLI first (above).
 2. Add a `[tools.<name>]` entry to `config/mcp-registry.toml.example`.
    Never register a CLI that runs a shell on its input, and keep
-   operator-only verbs (spawn, flip, lifecycle, loop control, shared
+   operator-only verbs (spawn, [flip](glossary.md#flip), lifecycle, loop control, shared
    memory review) out.
 3. Document it in [MCP](mcp.md).
 

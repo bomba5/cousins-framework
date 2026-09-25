@@ -1,7 +1,7 @@
 # Configuration
 
 Every file the framework reads from `config/`, every key in it, and the keys
-of a cousin's own `cousin.toml`. Read the first part when you set up an
+of a [cousin](glossary.md#cousin)'s own `cousin.toml`. Read the first part when you set up an
 install, and come back to the rest when you want to turn something on.
 
 Only one file is required: `config/agent-cmd`. Everything else is optional.
@@ -32,12 +32,12 @@ Then add these when you want what they do:
 | `external-peers.toml` | messaging cousins on another install |
 | `hive.toml` | the console as queen for cousins on other machines |
 | `media.toml` | image, voice and video generation |
-| `shared-reviewers.json` | promoting memory into the shared tier |
+| `shared-reviewers.json` | promoting memory into the [shared tier](glossary.md#shared-tier) |
 | `outbound-filter.json` | blocking words from leaving in chat and media captions |
 | `law.md` | a block of rules every cousin boots with |
-| `worker-cmd` | loops for worker cousins |
+| `worker-cmd` | loops for [worker](glossary.md#worker) cousins |
 | `mcp-registry.toml` | your own default MCP tool list for new cousins |
-| `accounts.toml` | runner cousins on their own login, token or API key |
+| `accounts.toml` | [runner](glossary.md#runner) cousins on their own login, token or API key |
 
 ## The framework root
 
@@ -154,9 +154,9 @@ that names the key, never a secret:
   a quarter of the context capped at 32000 (opencode's own largest). The
   runner renders them as the model's `limit`: without it opencode reports no
   context limit for a local model, so neither the runner's context-pressure
-  rollover nor opencode's own compaction happens (only the daily cadence
+  [rollover](glossary.md#rollover) nor opencode's own compaction happens (only the daily cadence
   applies). opencode compacts at the context minus the output, so an output
-  near the context would compact every turn.
+  near the context would compact every [turn](glossary.md#turn).
 - An `endpoint` that names the Claude-subscription bridge (its package or
   proxy names, or port 3456, the bridge proxy's port) is refused: move a
   legitimate local proxy on 3456 to another port.
@@ -221,7 +221,7 @@ names the `anthropic` provider, or an `endpoint_model`, `[agent] model` or
 start (exit 2). `cousin-account status <name>`
 reads presence only, with no process run: a `providers` account is logged
 in when `auth.json` holds every provider it names, an `endpoint` account
-by its configuration. The lanes do not mix: an opencode cousin (`[agent]
+by its configuration. The [lanes](glossary.md#lane) do not mix: an opencode cousin (`[agent]
 runner = "opencode"`) runs on an `opencode` account only, never on `host`,
 a `claude-login`, `claude-token` or `anthropic-key` account or an `[agent]
 api_key_file`, and an `sdk` or `fake` cousin never runs on an `opencode`
@@ -318,7 +318,7 @@ behaves. For Claude Code copy `harness.toml.claude-code.example`, which has
 every value filled in. `harness.toml.example` is the same keys, commented,
 for another harness.
 
-Without the file, all of this is off: transcript mining at flip, the harness
+Without the file, all of this is off: transcript mining at [flip](glossary.md#flip), the harness
 memory collection in search, the console's token counts, the transcript-size
 guard, `cousin-mcp approve`, the "needs attention" flag, the
 `{model}`/`{effort}` defaults, and the `api_key` auth mode. A file that
@@ -352,7 +352,7 @@ path out.
 | `default_model` | none | what `{model}` renders to for a cousin without its own |
 | `default_effort` | none | what `{effort}` renders to; one of `low`, `medium`, `high`, `xhigh`, `max` |
 | `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list, which follows code updates. |
-| `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux lane (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` stream event, so it is observable without reading either toml file. |
+| `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux lane (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` [stream](glossary.md#stream) event, so it is observable without reading either toml file. |
 
 `[agent.resume]`: how `agent-cmd` resumes a session instead of starting a new
 one. Switching a running cousin's auth mode restarts it on the same session
@@ -638,7 +638,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_SLUG` | set by the framework for session hooks, chat hooks and the MCP server |
 | `COUSIN_TMUX_SOCKET` | a non-default tmux socket, read by the chat server and the watchdog. The console takes `--tmux-socket` instead. |
 | `COUSIN_FILTER_OVERRIDE` | `1` switches the outbound filter off for one command |
-| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the supervisor, not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
+| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the [supervisor](glossary.md#supervisor), not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
 | `COUSIN_DEFAULT_RUNNER` | `sdk`, `fake` or `opencode`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 | `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The image's `opencode` target sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the default image, a bare host): `opencode` on `PATH` |
@@ -770,7 +770,7 @@ The bridge refuses to start when any of these is missing. See [telegram](telegra
 (docs/design/agent-loop-runner.md) instead of a tmux session. Chat, schedules,
 loops and meetings all reach it the same way now: each producer hands its item
 to the delivery facade and reads back `delivery.accepted(outcome, home)` (a
-durable inbox put is acceptance, `delivered` or a runner's `queued` row, never
+durable [inbox](glossary.md#inbox) put is acceptance, `delivered` or a runner's `queued` row, never
 a bare `failed`; a producer hands a runner cousin its item without waiting,
 since the put is the acceptance, and waits on a tmux cousin's typed line as
 before) and, where it needs to know whether the cousin is up,
@@ -909,7 +909,7 @@ server reacts to, see [chat](chat.md)), `policy.toml` (below) and
 
 ### [agent.sessions]
 
-Side sessions: a thread kind that gets a session of its own, beside the
+Side sessions: a [thread](glossary.md#thread) kind that gets a session of its own, beside the
 primary. Every kind not named stays in the primary session, which is also
 the default with no table at all.
 

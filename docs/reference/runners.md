@@ -1,20 +1,20 @@
 # Runners reference
 
-What a runner is, the kinds the framework ships, how to pick one, and what
+What a [runner](../glossary.md#runner) is, the kinds the framework ships, how to pick one, and what
 each kind does with every item of the runner contract. For the keys, read
 [configuration](../configuration.md); for `cousin-runner` and its exit codes,
 [commands](../commands.md).
 
 ## What a runner is
 
-A runner is the process that drives a cousin's agent loop in place of a tmux
+A runner is the process that drives a [cousin](../glossary.md#cousin)'s agent loop in place of a tmux
 pane. `cousin-runner --home <home>` (started for you by `cousin-supervisor`)
 builds the runner `[agent] runner` in `cousin.toml` names, takes one lock per
-cousin, and serves the cousin's inbox (`data/inbox.db`): every chat message,
-peer message, loop, schedule, flip and interrupt is a row there, and the
-runner claims rows in priority order, runs a turn for them, and closes each
+cousin, and serves the cousin's [inbox](../glossary.md#inbox) (`data/inbox.db`): every chat message,
+peer message, loop, schedule, [flip](../glossary.md#flip) and interrupt is a row there, and the
+runner claims rows in priority order, runs a [turn](../glossary.md#turn) for them, and closes each
 row `delivered` or `failed`. What happens in a turn goes to the cousin's event
-stream (`data/stream/`), which the console's pane and `cousin-watch` read. The
+[stream](../glossary.md#stream) (`data/stream/`), which the console's pane and `cousin-watch` read. The
 framework's tools (`reply`, `handoff`, memory, jobs, ...) run inside the
 runner's process against the live turn, whatever the kind.
 
@@ -22,7 +22,7 @@ runner's process against the live turn, whatever the kind.
 
 A row that arrives while a turn runs is either folded into that turn (written
 into it at once and closed by the same result) or kept for a turn of its own.
-The rule is `base.FOLDED_KINDS`, the same on every runner that folds (`sdk`,
+The rule is `base.FOLDED_KINDS`, the same on every runner that [folds](../glossary.md#fold) (`sdk`,
 `opencode`, `fake`). The `tmux` kind folds nothing (`midturn_fold` is
 DECLARED): the pane's CLI queues typed input to the turn's end or interrupts,
 never folds, so every row, an operator's or a peer's included, is claimed at
@@ -32,7 +32,7 @@ meant to stop.
 
 | row | while a turn runs |
 |---|---|
-| chat on an `operator:`, `person:` or `peer:` thread | folded into the running turn |
+| chat on an `operator:`, `person:` or `peer:` [thread](../glossary.md#thread) | folded into the running turn |
 | a meeting line | its own turn: it is the cousin's turn in a round, answered once |
 | a loop or a schedule | its own turn: the cousin's own timers, nobody waits on them |
 | a flip, an interrupt, a reaction, a hook or a boot row | never folded: a flip is the handoff turn, an interrupt has its own path |
@@ -50,7 +50,7 @@ meeting, then a peer. A peer row already queued when a meeting, loop or
 memory-proposal turn starts folds into that turn, as operator and person rows
 do.
 
-On the `sdk` lane a fold is never written by the reader of the turn: each
+On the `sdk` [lane](../glossary.md#lane) a fold is never written by the reader of the turn: each
 turn has one writer task, and the fold's write (and an interrupt row's
 control write) is handed to it in order while the reader goes on reading the
 CLI's output. A reader that waited on the write could deadlock the turn: a
@@ -70,7 +70,7 @@ the cousin's card and its chat header. Nothing is skipped silently.
 | kind | agent loop | account kinds | what it is for |
 |---|---|---|---|
 | `sdk` | the Claude Agent SDK (its bundled Claude Code CLI), in-process tools and hooks | `claude-login` (and `host`), `claude-token`, `anthropic-key` | the default lane: Claude models, on a login or an API key. Side sessions (`[agent.sessions]`) are this kind only |
-| `fake` | none: a scripted turn that answers at once | none needed | tests, demos and the Docker exit checks: the whole lane (inbox, stream, supervisor) with no model |
+| `fake` | none: a scripted turn that answers at once | none needed | tests, demos and the Docker exit checks: the whole lane (inbox, stream, [supervisor](../glossary.md#supervisor)) with no model |
 | `opencode` | `opencode serve`, driven over HTTP and its event stream (`OpencodeRunner`) | `opencode` only | another provider's models on its own API key, or a local OpenAI-compatible model. Never a Claude subscription |
 | `tmux` | the host's interactive Claude Code CLI in a tmux pane on the framework's own socket (`run/tmux.sock`), driven by `TmuxRunner`; the CLI's transcript is the source of truth, its hooks only wake the runner | `claude-login` (and `host`) only | the fallback if Agent SDK usage moves off subscription limits. It cannot fold a message into a running turn (`midturn_fold`) |
 
@@ -239,7 +239,7 @@ none is a contract item:
   itself; its retry shows as a `system` event.
 - **A local endpoint model has no context limit** unless its account sets
   `endpoint_context`: without it neither the runner's context-pressure
-  rollover nor opencode's own compaction happens, only the daily cadence.
+  [rollover](../glossary.md#rollover) nor opencode's own compaction happens, only the daily cadence.
 - **`cousin-spawn --runner opencode` writes no `[agent] model`** and does not
   check the account's lane when the cousin is created; the runner refuses the
   start (exit 2) until both are right.

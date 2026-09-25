@@ -2,12 +2,12 @@
 
 There are two ways to install, and this page covers both, and how to take
 each back out. [Install with Docker](#install-with-docker) runs the whole
-framework in one container: the console, the scheduler and every cousin, with
+framework in one container: the console, the scheduler and every [cousin](glossary.md#cousin), with
 all state on one volume. It needs git and Docker and nothing else, and its
 cousins run on the Agent SDK (`cousin-runner`), not in tmux.
 [Install on a bare host](#install-on-a-bare-host) is a checkout with a venv
 and systemd user units, where cousins run as Claude Code sessions in tmux (or
-on the runner beside them). The example cousin is `wren` and the console user
+on the [runner](glossary.md#runner) beside them). The example cousin is `wren` and the console user
 is `ana`.
 
 ## Install with Docker
@@ -91,7 +91,7 @@ Its credentials stay on the volume, under `data/accounts/mine`.
 the console. The spawn dialog sets no runner and no account: the
 container's environment decides. `compose.yml` sets
 `COUSIN_DEFAULT_RUNNER=sdk`, so a cousin made in the container is a runner
-cousin and the console starts it through the supervisor, and
+cousin and the console starts it through the [supervisor](glossary.md#supervisor), and
 `COUSIN_DEFAULT_ACCOUNT` (the key override, or the line above) names its
 account. Send it a message.
 
@@ -235,7 +235,7 @@ Log in once (interactively, or with `claude auth login`) before any cousin
 starts. A cousin started before that sits on Claude Code's first-run screens
 (the theme picker, then the login menu) in its tmux session. With the preset below, the console marks it "needs attention" and
 the framework types nothing into that pane: chat messages, heartbeats,
-scheduled prompts and a flip's boot text are all skipped with a
+scheduled prompts and a [flip](glossary.md#flip)'s boot text are all skipped with a
 `tmux delivery SKIPPED` line in the log. The chat message is stored, but the
 cousin never sees it. Without the preset there's nothing to recognise the
 menu by, and all of that gets typed into it, where it can pick options.
@@ -256,7 +256,7 @@ kind, always started from a shell on the host:
 
 `cousin-runner --home cousins/<slug> --check-auth` says whether a cousin's
 account is logged in (exit 0, or 4 when it is not), with no model call; an
-install script can gate on it. Add `--validate` for one smallest model turn.
+install script can gate on it. Add `--validate` for one smallest model [turn](glossary.md#turn).
 
 Re-login: when a login expires or is revoked, a key or token stops working, or
 an account's billing stops it, the runner says so in the console,
@@ -418,7 +418,7 @@ ssh -L 8600:127.0.0.1:8600 ana@192.0.2.10     # then open http://127.0.0.1:8600/
 ```
 
 Log in, open Wren and send a message. The card should say running with no
-"needs attention" line, and the reply shows up in the thread.
+"needs attention" line, and the reply shows up in the [thread](glossary.md#thread).
 
 ### Reaching the console from the LAN
 

@@ -1,6 +1,6 @@
 # Memory
 
-How a cousin remembers: where each kind of memory lives, what writes
+How a [cousin](glossary.md#cousin) remembers: where each kind of memory lives, what writes
 it, what a fresh session reads back, and how to search, share and
 remove it. Read this when you want a cousin to keep something, or when
 you're trying to work out why it forgot.
@@ -25,10 +25,10 @@ Every `cousin-memory` command needs `COUSIN_HOME` (or `--home`). Without
 it the command refuses instead of guessing, because a guessed home means
 reading and writing some other cousin's memory.
 
-When a new session starts (a spawn, a flip, a restart), the framework
+When a new session starts (a spawn, a [flip](glossary.md#flip), a restart), the framework
 hands the cousin a boot packet built from the layers below. So what a
 cousin "knows" at the start of a session is: its identity files, its
-open loops and handoff, the distilled views of its raw memory, its last
+open loops and handoff, the [distilled](glossary.md#distilled) views of its raw memory, its last
 few reasoning capsules and recent raw entries, and the head of its
 `MEMORY.md`. Anything else it has to search for.
 
@@ -49,7 +49,7 @@ Everything below is relative to the cousin home.
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
 | Corrections | `data/corrections.jsonl` | the chat server, from your messages | boot packet (calibration layer) |
 | Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
-| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off on the SDK lane) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
+| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off on the SDK [lane](glossary.md#lane)) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
 | Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
@@ -162,7 +162,7 @@ the extraction and proposal cursors, `data/last-activity.txt`, the raw fold
 files) and the trash's check-and-replace of a raw or decisions file) hold an
 flock on `data/.memory-write.lock` while they read and write. Two sessions
 of one cousin (see `[agent.sessions]` in [configuration](configuration.md)),
-the cousin's own `cousin-memory` commands and the runner's per-turn miner can
+the cousin's own `cousin-memory` commands and the [runner](glossary.md#runner)'s per-turn miner can
 all write at once, and none of them loses the other's entry. The raw fold
 needs it although it folds only days older than the hot window: the
 decisions backfill writes a decision into the raw file of its own day, which
@@ -256,7 +256,7 @@ console has the same list at `GET /api/memory/{slug}/tensions`.
 
 When more than `[memory] review_batch` new entries on authored topics
 (default 3) have been written since the review gate last looked, the gate
-holds all of them. On the runner lane it looks after every turn; the
+holds all of them. On the runner lane it looks after every [turn](glossary.md#turn); the
 count is per cousin, so entries from a turn that crashed or ended in an
 error are caught at the next look. A held entry stays in raw and search
 still finds it, but it stays out of the distilled views and out of the
@@ -383,7 +383,7 @@ layers in a fixed order, a hard ceiling of about 8000 tokens, and a
 list of required actions at the end. The memory it pulls in:
 
 1. Framework law (`config/law.md`), not memory, but first.
-2. Shared rules and fleet memory: the shared tier's `kind: rule`
+2. Shared rules and fleet memory: the [shared tier](glossary.md#shared-tier)'s `kind: rule`
    entries in full, then a one-line index of the rest.
 3. The committed self-portrait.
 4. Operator calibration: `operator-calibration.md` (or the portrait's
@@ -518,7 +518,7 @@ beat a better match. Delete the two files to reset it.
 
 On the SDK lane the runner switches the agent CLI's own auto-memory off
 (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`), so framework memory is the only
-one. What the CLI kept before that folds in once:
+one. What the CLI kept before that [folds](glossary.md#fold) in once:
 
 ```
 cousin-memory import-auto                      # a dry run: what would be copied, nothing written
@@ -587,7 +587,7 @@ tools and keeps no session, and runs on
 the cousin's own account, on `[memory] review_model` or else the
 cousin's own model (`SdkRunner._model_review`). The next message does
 not wait for it. Its usage is recorded like a turn's. The outcome is a
-`review_gate` event in the runner's stream: how many were held, kept,
+`review_gate` event in the runner's [stream](glossary.md#stream): how many were held, kept,
 dropped and still pending, and the error if the review failed (`cancelled`
 when the runner stopped first). The reviewing model may keep an entry recorded at
 operator level but never drop one: a drop cannot be undone, so that

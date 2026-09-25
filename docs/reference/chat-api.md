@@ -1,6 +1,6 @@
 # Chat server API
 
-The HTTP API of the per-cousin chat server, for when you're writing a client, a bridge or a script that talks to one cousin directly. For how chat works day to day, read [the chat guide](../chat.md).
+The HTTP API of the per-cousin chat server, for when you're writing a client, a bridge or a script that talks to one [cousin](../glossary.md#cousin) directly. For how chat works day to day, read [the chat guide](../chat.md).
 
 Every cousin with a `[chat] port` runs its own chat server:
 
@@ -9,7 +9,7 @@ cousin-chat-server --home cousins/wren
 cousin-chat-server --home cousins/wren --no-terminal-delivery   # store only, never type into tmux
 ```
 
-It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat` and the Telegram bridge are plain HTTP clients of this server (`cousin-reply` and the media `chat` commands write the reply route's row themselves, `chat_api.reply`); for a runner cousin (`[agent] runner`) the bridge stores and delivers an inbound message itself instead of calling `/api/send`, and still reads replies through `/api/history`.
+It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat` and the Telegram bridge are plain HTTP clients of this server (`cousin-reply` and the media `chat` commands write the reply route's row themselves, `chat_api.reply`); for a [runner](../glossary.md#runner) cousin (`[agent] runner`) the bridge stores and delivers an inbound message itself instead of calling `/api/send`, and still reads replies through `/api/history`.
 
 ## Who can call it
 
@@ -38,7 +38,7 @@ Messages live in `<home>/data/chat.db` (SQLite, WAL). Every route that returns m
 | field | meaning |
 |---|---|
 | `id` | increasing integer, the paging cursor |
-| `chat_user` | the thread key: the other party's name, lowercased, spaces turned into `_`. `Ana Lima` and `ana lima` are one thread |
+| `chat_user` | the [thread](../glossary.md#thread) key: the other party's name, lowercased, spaces turned into `_`. `Ana Lima` and `ana lima` are one thread |
 | `user` | who wrote it (display name) |
 | `type` | `user` for inbound messages, the cousin's slug for its own replies |
 | `timestamp` | UTC ISO 8601 |
@@ -221,7 +221,7 @@ A missing or broken file, a bad regex or a failing script never affects the send
 | `data/.last-user-msg` | touched on every inbound message |
 | `data/corrections.jsonl` | corrections spotted in operator messages |
 | `data/chat-hooks.log` | output of shell hooks |
-| `chat/inbound/<id>.<ext>` | inbound images. Nothing cleans this up; it's the cousin's inbox |
+| `chat/inbound/<id>.<ext>` | inbound images. Nothing cleans this up; it's the cousin's [inbox](../glossary.md#inbox) |
 
 ## Remote cousins
 

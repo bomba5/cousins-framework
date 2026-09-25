@@ -1,6 +1,6 @@
 # Chat
 
-Every cousin runs its own small chat server. This page covers how a
+Every [cousin](glossary.md#cousin) runs its own small chat server. This page covers how a
 message gets into a cousin's session, how the cousin answers, how
 cousins talk to each other, what the console does with the history, and
 where the Telegram bridge fits ([telegram](telegram.md) has the details). The HTTP routes themselves are in
@@ -9,7 +9,7 @@ where the Telegram bridge fits ([telegram](telegram.md) has the details). The HT
 ## One server per cousin
 
 Starting a cousin (`cousin-spawn <slug> --start`, the console's start
-button, a flip) starts its chat server too. By hand:
+button, a [flip](glossary.md#flip)) starts its chat server too. By hand:
 
 ```
 cousin-chat-server --home cousins/wren
@@ -36,13 +36,13 @@ It won't start without a port, and it won't start without `tmux` on
 PATH unless you pass `--no-terminal-delivery` (then messages are stored
 but never typed into a session). When spawn or the watchdog starts it,
 its output goes to `data/chat-server.log` in the cousin home. It runs
-with no supervisor of its own; the `cousin-chat-watchdog` timer restarts
+with no [supervisor](glossary.md#supervisor) of its own; the `cousin-chat-watchdog` timer restarts
 a dead one, and `systemd/` also has a `cousin-chat-server@.service`
 template if you'd rather have systemd own it ([operations](operations.md)).
 
 What it keeps, all under the cousin home:
 
-- `data/chat.db`: SQLite with every message and reaction. One thread
+- `data/chat.db`: SQLite with every message and reaction. One [thread](glossary.md#thread)
   per person, keyed by the name lowercased with spaces turned into
   underscores, so "Ana" and "ana" are the same thread.
 - `chat/inbound/<message id>.<ext>`: images people sent (and, before
@@ -146,7 +146,7 @@ insert_keys = "i"
 
 `busy_patterns` (regular expressions, such as Claude Code's
 "esc to interrupt" spinner line) mean the agent is in the middle of a
-turn. Chat delivery doesn't wait for these: a message typed while
+[turn](glossary.md#turn). Chat delivery doesn't wait for these: a message typed while
 Claude Code is working gets queued by Claude Code and handled after the
 turn. Busy patterns are what stop `cousin-auth` and the console from
 restarting a cousin mid-turn ([cousins](cousins.md)).
@@ -246,8 +246,8 @@ cousin-chat send kestrel "the descaling schedule moved to Fridays"
 
 That lands in Kestrel's pane as `(Chat Wren): ...`, the same way your
 messages do, and Kestrel answers with `cousin-chat send wren ...`. A
-runner cousin (`[agent] runner = "sdk"`) needs no chat server for this:
-the message is written into its chat history and inbox directly, from
+[runner](glossary.md#runner) cousin (`[agent] runner = "sdk"`) needs no chat server for this:
+the message is written into its chat history and [inbox](glossary.md#inbox) directly, from
 the sender's own process. The
 sender name is the sending cousin's `name`; `--from` overrides it.
 

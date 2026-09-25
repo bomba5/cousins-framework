@@ -1,6 +1,6 @@
 # Lifecycle reference
 
-What goes into a boot packet, what a flip does step by step, and how reincarnate and transplant work underneath. Read it when a flip went wrong or a cousin woke up confused. For the everyday version, read [cousins](../cousins.md).
+What goes into a boot packet, what a [flip](../glossary.md#flip) does step by step, and how reincarnate and transplant work underneath. Read it when a flip went wrong or a [cousin](../glossary.md#cousin) woke up confused. For the everyday version, read [cousins](../cousins.md).
 
 A cousin's session only lasts so long before its context is full. The flip ends the session (a "generation") and starts a fresh one, and the boot packet is the text the fresh session gets typed in first so it knows who it is and what it was doing. The files in the home are what carry over; the packet is built from them.
 
@@ -34,13 +34,13 @@ DEGRADED layers: calibration, tool_surface
 | # | layer | built from | when it's empty |
 |---|---|---|---|
 | 1 | Framework Law | `<root>/config/law.md`, the same for every cousin | empty section. Not marked degraded: it's an install problem, not the cousin's |
-| 2 | Shared Rules and Fleet Memory | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule` in full, every other entry as one line (file and description). Never pending proposals | empty, fine: a fresh install has no shared tier |
+| 2 | Shared Rules and Fleet Memory | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule` in full, every other entry as one line (file and description). Never pending proposals | empty, fine: a fresh install has no [shared tier](../glossary.md#shared-tier) |
 | 3 | Cousin Self-Portrait | `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | `(no committed self-portrait yet - ...)`, **degraded** |
 | 4 | Operator Calibration | `memory/distilled/operator-calibration.md`; else the "Operator Calibration" section of the self-portrait (unless it still says TODO). Then the last 15 corrections from `data/corrections.jsonl`, newest first | `(no operator calibration distilled yet - degraded)`, **degraded** (also when there are corrections but no calibration) |
 | 5 | Active State | the `## Open loops` section of STATUS.md (or the first 1500 characters when there's no such section), then the first 1500 characters of `data/handoff.md`. A stale warning goes on top when decisions were logged after STATUS.md was last changed | `(no active state - degraded boot)`, **degraded** |
 | 6 | Current Task Packet | `data/active-threads.md` (first 1500 characters) and the last three reasoning capsules from `memory/distilled/reasoning-capsules.md` | `(no in-flight tasks - check STATUS.md)`. Only **degraded** if Active State is empty too |
 | 7 | Recent Tool Trace Summary | the cousin's traced CLI calls from the last 24 hours, newest first, up to 30 | `(no substantive tool traces in last 24h)`, fine |
-| 8 | Retrieved Memories | the distilled files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration is in layer 4), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/`, and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
+| 8 | Retrieved Memories | the [distilled](../glossary.md#distilled) files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration is in layer 4), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/`, and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
 | 9 | Tool Surface | `<root>/data/tool-surface.md`, written by `cousin-tool-surface` (or its timer) | `(no tool-surface manifest ... - degraded; run cousin-tool-surface ...)`, **degraded** |
 | 10 | Required Boot Actions | fixed text | never empty |
 
@@ -141,7 +141,7 @@ The console's stop button ends a running cousin the same way, minus the respawn:
 
 The console runs a clean stop in the background (HTTP 202, the row turns `stopped` when it is done; the handoff wait is up to 300 seconds). A cousin that isn't running stops at once. `{"clean": false}` on `POST /api/cousins/<slug>/stop` stops at once without the handoff, and restart stays immediate: it applies a setting and comes straight back. In code the clean stop is `cousin_lib.flip.close_session`.
 
-That is the legacy lane's clean stop. On the runner lane (any `[agent] runner` kind) a clean stop is not `close_session` at all: it is the runner's own SIGTERM path. The console asks the supervisor to stop the cousin's `runner:<slug>` child without waiting for it; the runner gives the turn it is on up to 30 s (`STOP_TIMEOUT_S`), then stops on its own (the supervisor kills it 5 s after that) (no marker, no pane capture, no separate handoff prompt - the runner's own rollover and turn-end mining cover that). The route answers 202 `stopping` while the supervisor works it, or 200 `stopped` when there was nothing running to stop; anything the supervisor itself refuses comes back as a 502 naming the reason.
+That is the legacy [lane](../glossary.md#lane)'s clean stop. On the [runner](../glossary.md#runner) lane (any `[agent] runner` kind) a clean stop is not `close_session` at all: it is the runner's own SIGTERM path. The console asks the [supervisor](../glossary.md#supervisor) to stop the cousin's `runner:<slug>` child without waiting for it; the runner gives the turn it is on up to 30 s (`STOP_TIMEOUT_S`), then stops on its own (the supervisor kills it 5 s after that) (no marker, no pane capture, no separate handoff prompt - the runner's own [rollover](../glossary.md#rollover) and turn-end mining cover that). The route answers 202 `stopping` while the supervisor works it, or 200 `stopped` when there was nothing running to stop; anything the supervisor itself refuses comes back as a 502 naming the reason.
 
 ### When a flip dies halfway
 
@@ -149,7 +149,7 @@ Nothing recovers a crashed flip automatically. A flip that fails after step 3 (s
 
 ### Runner lane
 
-A cousin with `[agent] runner` set (`sdk`, `tmux`, `fake` or `opencode`) is not flipped through the legacy tmux lane's steps: its flip is a rollover, whatever the runner kind - including the `tmux` runner kind, which drives its own tmux pane through `TmuxRunner` rather than the legacy lane's send-keys. `cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's inbox (the same row `Runner.rollover` puts; a pending one is joined, not doubled) and wait for its answer, up to the handoff deadline plus a minute. None of the steps above run: no marker, no pane capture of the legacy kind, no pending boot, no transcript mining of the legacy kind (the SDK and tmux runners mine every turn; the opencode runner does not mine yet, see [runners](runners.md#known-gaps)).
+A cousin with `[agent] runner` set (`sdk`, `tmux`, `fake` or `opencode`) is not flipped through the legacy tmux lane's steps: its flip is a rollover, whatever the runner kind - including the `tmux` runner kind, which drives its own tmux pane through `TmuxRunner` rather than the legacy lane's send-keys. `cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's [inbox](../glossary.md#inbox) (the same row `Runner.rollover` puts; a pending one is joined, not doubled) and wait for its answer, up to the handoff deadline plus a minute. None of the steps above run: no marker, no pane capture of the legacy kind, no pending boot, no transcript mining of the legacy kind (the SDK and tmux runners mine every [turn](../glossary.md#turn); the opencode runner does not mine yet, see [runners](runners.md#known-gaps)).
 
 The row's body is the reason, and the model reads it in its handoff request: `cousin-flip` by hand, `max_age` from the daily `flip_at` cadence, `timed flip` from a timed flip, the bequest text from reincarnate. The result has `"lane": "runner"` and one `rollover` stage carrying the runner's answer.
 

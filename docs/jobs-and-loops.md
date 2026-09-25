@@ -11,7 +11,7 @@ daemon restarts.
 
 A job is a row saying "this is running, this is who started it, here's
 the log". The store is `data/jobs.db` under the framework root, shared
-by every cousin, and the console's Jobs view reads it.
+by every [cousin](glossary.md#cousin), and the console's Jobs view reads it.
 
 Register work you're doing yourself, then close it:
 
@@ -184,7 +184,7 @@ console's Loops view, which writes the same `[[loops]]` tables back.
 ### The loops daemon
 
 One process fires everything: loops, heartbeats, one-shot schedules,
-timed flips, meeting turns, and the memory index refresh that keeps every
+timed [flips](glossary.md#flip), meeting [turns](glossary.md#turn), and the memory index refresh that keeps every
 cousin's search index level with its files (checked every 5 minutes per
 cousin, one home at a time, only changed files embedded; each pass that
 did work is logged as `cousin-loops: index <slug>: ...`).
@@ -301,7 +301,7 @@ in `config/worker-cmd` as a tracked job instead, with `{prompt}` and
 my-agent --print --cwd {home} {prompt}
 ```
 
-The exit code ends up on the job row, so a worker that keeps failing
+The exit code ends up on the job row, so a [worker](glossary.md#worker) that keeps failing
 shows as failed in the Jobs view. Without `config/worker-cmd` the loop
 stays due and the daemon logs what to write.
 

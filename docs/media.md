@@ -1,6 +1,6 @@
 # Media generation
 
-Cousins can generate images, voice clips and short videos through a
+[Cousins](glossary.md#cousin) can generate images, voice clips and short videos through a
 service you point them at. It's off until you configure it, and the
 framework doesn't ship or pick a provider. This page covers the config,
 the three commands, and exactly what goes over the network.
@@ -80,7 +80,7 @@ it answers with the file.
 ## Using it
 
 Each command has two subcommands: `gen` makes a file, `chat` makes a
-file and posts it to someone's chat thread.
+file and posts it to someone's chat [thread](glossary.md#thread).
 
 ```
 cousin-image gen "a violet sunrise over a ridge"

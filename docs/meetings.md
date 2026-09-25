@@ -1,6 +1,6 @@
 # Meetings
 
-A meeting is a chat shared by you and several running cousins: for
+A meeting is a chat shared by you and several running [cousins](glossary.md#cousin): for
 brainstorming, coordinating, or cross-reviewing a change. It runs in rounds,
 so it stays a discussion instead of turning into five cousins answering at
 once. Every cousin already knows what a meeting is and how to take part (see
@@ -24,7 +24,7 @@ sequenceDiagram
 ```
 
 - **Everyone is told.** When the meeting opens, each participant gets one
-  line saying it is in the meeting, with whom, and to wait for its turn;
+  line saying it is in the meeting, with whom, and to wait for its [turn](glossary.md#turn);
   when it closes, one line saying it is over. Neither needs an answer.
 - **Participants** are running local cousins, in the order you pick them. A
   stopped cousin can't join: start it first. A remote cousin (on another
@@ -43,7 +43,7 @@ sequenceDiagram
 - **Speaking order.** Every turn line says which turn is yours ("2 of 3")
   and the whole order, with the current speaker marked; the opening line
   says where you speak in every round. The console shows the same
-  numbered order above the thread.
+  numbered order above the [thread](glossary.md#thread).
 - **Closing.** Without a facilitator the meeting closes at once. With one,
   the facilitator gets the whole transcript, writes the minutes (decisions,
   open questions, actions with an owner), adds each action to the tracker
@@ -106,7 +106,7 @@ turn says `closing, you facilitate` and carries the whole transcript.
 
 - New cousins get the **Meetings** section of
   `templates/cousin-CLAUDE.template.md` in their CLAUDE.md at spawn.
-- Existing cousins get it from the template sync every start and flip runs
+- Existing cousins get it from the template sync every start and [flip](glossary.md#flip) runs
   ([cousins](cousins.md#the-claudemd-template)), the `meeting` MCP tool
   included; the CLI works at once.
 - Every turn message carries the how-to line itself.

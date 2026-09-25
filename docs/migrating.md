@@ -1,12 +1,12 @@
 # Migrating a cousin
 
-How to move a cousin you already have into an install: its home, its memory,
+How to move a [cousin](glossary.md#cousin) you already have into an install: its home, its memory,
 its chat history, and, if you ran cousins on other machines under an older
 framework, the hive's tokens and memory. It assumes the target install is
 done and working ([install](install.md)).
 
 There are two cases, and they go differently (moving a cousin already
-here from the tmux lane to the SDK runner is its own section,
+here from the tmux [lane](glossary.md#lane) to the SDK [runner](glossary.md#runner) is its own section,
 [below](#from-the-tmux-lane-to-the-sdk-runner)):
 
 - **The cousin already runs on this framework**, on another machine or in
@@ -19,7 +19,7 @@ the old home around until you're happy with the new one.
 
 ## Before you start
 
-Stop the cousin on the source, after it has written its handoff (a flip or
+Stop the cousin on the source, after it has written its handoff (a [flip](glossary.md#flip) or
 its session-end routine does that). Both halves: the tmux session and the
 chat server.
 
@@ -315,7 +315,7 @@ plan say `NO carry`: it never falls back to the host login.
 
 A model the runner's CLI can't run is never written. The runner runs the
 CLI bundled with `claude-agent-sdk` (the `cli` line names its version), and
-a model newer than that CLI fails every turn with an API 400. So when a
+a model newer than that CLI fails every [turn](glossary.md#turn) with an API 400. So when a
 model is carried, `plan` and `apply` say `NO validate` unless you pass
 `--validate`: one smallest model turn, on a throwaway client, with the
 model, effort and account the runner will run, and the API's own words when
@@ -354,7 +354,7 @@ It saves the current `cousin.toml` (its exact bytes and mode) in
 | `handover` | the path of the last tmux session's transcript, and of the newest other transcript in the same directory, is written to `data/previous-transcript.json` with the time the session ended. A transcript it cannot find is recorded as missing, with why; it never fails the migration |
 | `import` | Claude Code's own memory for the cousin is folded into `memory/imported/auto/` (`cousin-memory import-auto --apply`), with a recall baseline first |
 | `toml` | `[agent] runner = "sdk"`, `account` when you named one, and what the plan's `carry` lines listed (the key account is made first); nothing else in the file changes. Refused if the tmux session came back meanwhile (a scheduled flip, a console start) |
-| `start` | the migration day's boot packet is set aside (the runner starts on its own digest), the supervisor starts the cousin's runner, and the cousin's chat server is started: the supervisor runs none, and other cousins' messages reach the inbox through it |
+| `start` | the migration day's boot packet is set aside (the runner starts on its own digest), the [supervisor](glossary.md#supervisor) starts the cousin's runner, and the cousin's chat server is started: the supervisor runs none, and other cousins' messages reach the [inbox](glossary.md#inbox) through it |
 | `verify` | the runner stays up and holds its lock for 10 seconds, and the chat server answers `/health` for the cousin |
 
 It stops at the first step that fails and says so. At the end it prints
@@ -364,7 +364,7 @@ cousin's state, with a closing paragraph that names those paths: the
 conversation from before the move, read-only, to be read from the end by a
 subagent that extracts only the user and assistant text, never read whole
 into the session. That start renames the record to
-`data/previous-transcript.json.consumed`, so a later rollover does not
+`data/previous-transcript.json.consumed`, so a later [rollover](glossary.md#rollover) does not
 repeat it.
 
 Then check it, the same day and each day after:

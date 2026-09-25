@@ -8,10 +8,10 @@ Two things apply to almost all of them:
 
 - Commands that work on the whole install take `--root <checkout>` or read
   `FRAMEWORK_ROOT`. Run inside the checkout and most of them find it anyway.
-- Commands that work on one cousin read `COUSIN_HOME` (the cousin's home,
+- Commands that work on one [cousin](glossary.md#cousin) read `COUSIN_HOME` (the cousin's home,
   `cousins/<slug>/`) or take `--home`. Inside a running cousin, whatever its
   kind, `COUSIN_HOME` is already set (in its tmux session, or exported into
-  the runner's own process for an `sdk`, `opencode`, `tmux` or `fake` runner
+  the [runner](glossary.md#runner)'s own process for an `sdk`, `opencode`, `tmux` or `fake` runner
   cousin), so a cousin calls them bare.
 
 The examples use an invented cousin, Wren, and an operator called ana.
@@ -30,12 +30,12 @@ last session instead of opening a new one (what the start-at-boot unit
 uses); `--runner sdk|fake|opencode|tmux` and `--account <name>` make it a runner cousin
 (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
 `COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]` too, where
-the runner reads them, and only on a lane that reads them), which `--start`
+the runner reads them, and only on a [lane](glossary.md#lane) that reads them), which `--start`
 starts through `cousin-supervisor`;
 `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
-(every start and flip does that by itself). See [cousins](cousins.md).
+(every start and [flip](glossary.md#flip) does that by itself). See [cousins](cousins.md).
 
 ```
 cousin-spawn wren --name Wren --role "keeps the house notes" \
@@ -141,7 +141,7 @@ cousin-account login keyed --provider openai --method "ChatGPT Pro/Plus (headles
 `cousin-flip` ends the cousin's current generation and starts the next one on
 a fresh session with a boot packet. `--dry-run` runs the checks only;
 `--confirm` asks the new generation to post one line when it is oriented. On
-a runner cousin (`[agent] runner`), `cousin-flip` is a rollover: it puts (or
+a runner cousin (`[agent] runner`), `cousin-flip` is a [rollover](glossary.md#rollover): it puts (or
 joins) the pending `flip` row on the running `cousin-runner` and waits for
 the handoff, the same path context pressure or the daily cadence uses. It
 refuses a stopped runner cousin (start it first): a rollover needs a runner
@@ -189,11 +189,11 @@ cousin-cycle inc --action "shipped the weekly report"
 ```
 
 `cousin-runner` runs a cousin on the runner instead of a tmux session: the
-inbox is the bus and the wake socket is the doorbell, no port. At start it
+[inbox](glossary.md#inbox) is the bus and the wake socket is the doorbell, no port. At start it
 resumes the session saved in `data/runner-session.json`, falling back to a
 fresh session carrying the state digest as its first message when it cannot
 (no saved session, or the CLI does not recognise the saved one: a
-`resume_failed` event either way, never a crash). A stop cuts the turn in
+`resume_failed` event either way, never a crash). A stop cuts the [turn](glossary.md#turn) in
 flight, and the agent CLI records that as the user's stop ("stop what you
 are doing and wait for the user"), so when the last runner stopped (or died)
 mid-turn, a resumed session's first line is the runner's own: the runner
@@ -239,7 +239,7 @@ it. An install script can gate on `cousin-runner --home H --check-auth`.
 | 0 | stopped by SIGTERM or SIGINT, or `--once` drained the inbox, or `--check-auth` found the account logged in (and `--validate`'s turn answered) |
 | 2 | configuration: no or an unknown `[agent] runner`, an unreadable cousin.toml, a key file open to others or malformed, a malformed `policy.toml`, an MCP registry that does not parse or names a command with no in-process handler, an account on the other lane (an `opencode` runner on a Claude account, an `sdk` runner on an `opencode` one), an `opencode` cousin with no `[agent] model` or whose config or environment names the Claude-subscription bridge; or a `tmux` runner that gave up on its pane (5 failed starts in a row, or more than 5 pane losses in 10 minutes; the reason in `data/run/tmux-giving-up.json`, which holds the next start down for an hour or until `cousin-supervisor start`) |
 | 3 | the runner gave up: its worker ended (it could not connect, or a reconnect failed; on opencode: the server did not start, or it does not report the runner's MCP server connected), or under `--once` it stayed `errored` for more than 10 seconds, or under `--once` a side session (`[agent.sessions]`) gave up and the batch had not drained more than 10 seconds later (the clock runs on across rebuilds that fail to connect; a rebuild that connects ends it); the long-running mode keeps rebuilding a side session and never exits for one |
-| 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner, or any of its side sessions, waiting for a login. A supervisor must not restart on it |
+| 4 | a person must log in: `--check-auth` found the account not logged in (or `--validate`'s turn did not answer), or `--once` found the runner, or any of its side sessions, waiting for a login. A [supervisor](glossary.md#supervisor) must not restart on it |
 | 5 | busy: another runner holds `<home>/run/runner.lock` (tried for about a second first, so a status probe of the lock never refuses a runner). Not a configuration problem: a supervisor retries after its backoff and never counts it |
 
 ```
@@ -249,7 +249,7 @@ cousin-runner --home cousins/wren --check-auth
 cousin-runner --home cousins/wren --check-auth --validate
 ```
 
-`cousin-watch <slug>` prints a runner cousin's reasoning stream in any
+`cousin-watch <slug>` prints a runner cousin's reasoning [stream](glossary.md#stream) in any
 terminal: the same events the console's pane shows (its state changes, the
 turns, its text, thinking and tool calls, their results), one line each, read
 from the runner's primary stream under the cousin's own `data/stream/`, with
@@ -388,7 +388,7 @@ cousin-migrate rollback wren --yes
 | `search QUERY [--top N] [--collection memory\|notes\|harness] [--json]` | keyword search, plus semantic when embeddings are configured |
 | `remember TOPIC FACT [--level L] [--cite SRC]` | one fact into raw memory with its truth level |
 | `decide TOPIC DECISION REASONING [--level L] [--cite SRC] [--stdin]` | log a decision (and a raw copy of it) |
-| `obsolete TOPIC --why REASON [--force] [--entry ID]` | retire a topic (L5): out of the distilled views, history kept; with `--entry`, retire one of its claims by its id and keep the topic |
+| `obsolete TOPIC --why REASON [--force] [--entry ID]` | retire a topic (L5): out of the [distilled](glossary.md#distilled) views, history kept; with `--entry`, retire one of its claims by its id and keep the topic |
 | `tensions [--json]` | topics whose live claims disagree: an authored topic with two or more live claims of different content, each claim's id, and how to settle it (retire one with `obsolete --entry`) |
 | `history TOPIC` | a topic's claims, oldest first: each one's id, when it became valid, and `live` or when an obsolete mark retired it (valid time is derived from raw, never written back) |
 | `review [--keep ID... \| --drop ID... [--why REASON]]` | the entries the review gate holds (more than `[memory] review_batch` written on authored topics since it last looked), or the operator's verdict on some: keep releases them into the memory views, drop retires them; a verdict is refused inside a cousin's own process tree |
@@ -399,7 +399,7 @@ cousin-migrate rollback wren --yes
 | `import-auto [--apply [--sample N]] [--json] [--verify]` | fold the agent CLI's own auto-memory into `memory/imported/auto/` with provenance: a dry run unless `--apply`, idempotent, an edited copy never overwritten, a removed copy never imported again; `--apply` first replays your logged queries that reached that memory as a baseline, and `--verify` replays them again: exit 1 if any lost a memory, 2 if nothing was compared |
 | `compact [--target index\|raw] [--budget B] [--hot-days D] [--dry-run]` | trim the MEMORY.md index, or fold old raw days into monthly archives |
 | `reindex` | rebuild the search indexes from scratch |
-| `propose-shared [--commit]` | nominate shareable memories for the shared tier |
+| `propose-shared [--commit]` | nominate shareable memories for the [shared tier](glossary.md#shared-tier) |
 | `trash [list]`, `trash restore ID` | list and restore memories removed in the console |
 
 Truth levels for `--level` are `operator`, `framework`, `tool`,

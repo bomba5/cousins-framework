@@ -562,7 +562,7 @@ Below it the log holds one row per real thing: a turn under a rule (who
 sent it, when, and the start of the message; click for all of it, with the
 recall hits as a chip), each tool call with its result as one card (a tick
 or a cross, what it was asked, how long it took; click for the input and
-output), a reply as "-> reply" with the message, a thinking block as
+output), a reply as "reply" with the message, a thinking block as
 "thought 2s", the model's text, and a line that closes each turn (steps,
 tokens, cost, memories written, checkpoint). A message folded into a
 running turn gets its own rule and recall chip. Login and credential

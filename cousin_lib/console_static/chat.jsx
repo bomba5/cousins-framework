@@ -1979,7 +1979,7 @@ function RpRow({ row, now, activeTool }) {
         const where = res && !err ? String(res.text || "").replace(/^replied to /, "") : (err ? rpCut(res.text, 120) : "sending...");
         return (
           <details className={"rp-card rp-reply" + (err ? " is-err" : "")}>
-            <summary>{mark}<span className="rp-card-name">→ reply</span><span className="rp-card-desc">{where}</span><span className="rp-card-desc rp-reply-prev">{rpCut(said.replace(/\s+/g, " "), 120)}</span></summary>
+            <summary>{mark}<span className="rp-card-name">reply</span><span className="rp-card-desc">{where}</span><span className="rp-card-desc rp-reply-prev">{rpCut(said.replace(/\s+/g, " "), 120)}</span></summary>
             <div className="rp-card-body rp-sans">{renderMarkdownLite(said).map((n, j) => rpToReact(n, j))}</div>
           </details>
         );

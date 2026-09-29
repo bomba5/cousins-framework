@@ -3,6 +3,11 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.25.2 - 2026-09-29
+
+### Changed
+- Reasoning pane: a reply card reads "reply", without the arrow.
+
 ## 1.25.1 - 2026-09-29
 
 ### Fixed

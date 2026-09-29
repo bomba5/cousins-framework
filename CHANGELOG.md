@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.25.1 - 2026-09-29
+
+### Fixed
+- Reasoning pane: a message folded into a running turn shows its own
+  recall count; it used to overwrite the first message's, because the
+  runner sends a recall before its message.
+- Reasoning pane: a login that needs renewing, a credential mismatch and a
+  401 retry now show as red lines, and a "login required" chip sits on the
+  strip until the login is restored. They used to be grey JSON.
+- Reasoning pane: a resumed session joins the runner-start group like a
+  fresh one; a session rollover shows as a divider line and a memory review
+  as one line (kept, dropped, pending); a failed tool call with no card (one
+  outside a turn) shows as an error line instead of being dropped.
+
 ## 1.25.0 - 2026-09-25
 
 ### Added

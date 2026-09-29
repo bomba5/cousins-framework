@@ -1259,7 +1259,7 @@ function runnerKindClass(kind) {
     case "text": case "user": case "result": return "text";
     case "thinking": return "thinking";
     case "tool": case "tool_call": case "tool_result": case "output": return "tool";
-    case "error": return "error";
+    case "error": case "auth": return "error";
     default: return "meta";
   }
 }
@@ -1546,9 +1546,12 @@ const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
 const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1, task_updated: 1 };
 
 function rpModel(events) {
-  const strip = { state: null, activity: null, rate: {}, session: null, tokens: 0, cost: 0, turns: 0, bg: 0 };
+  const strip = { state: null, activity: null, rate: {}, session: null, tokens: 0, cost: 0, turns: 0, bg: 0, auth: null };
   const rows = [];
   const tools = {};
+  // the runner emits a message's recall BEFORE its user event: a folded
+  // message's recall waits here for its own divider
+  let recalls = [];
   let turn = null, meta = {}, thinkSince = null;
   const newMeta = () => { meta = {}; return meta; };
   (events || []).forEach((ev, i) => {
@@ -1575,7 +1578,12 @@ function rpModel(events) {
       // reports one around many ordinary tool calls
       if (p.subtype === "task_started") strip.bg += 1;
       else if (p.subtype === "task_notification") strip.bg = Math.max(0, strip.bg - 1);
-      else if (p.subtype === "fresh" || p.subtype === "init") rpBoot(rows, key, ev);
+      else if (p.subtype === "fresh" || p.subtype === "init" || p.subtype === "resumed") rpBoot(rows, key, ev);
+      else if (p.subtype === "api_retry") {
+        const auth = p.error_status === 401 || p.error_status === 403;
+        rows.push({ t: "line", key, ev, cls: auth ? "rp-err" : "rp-warn",
+                    text: "API retry " + (p.attempt || 1) + ": " + [p.error_status, p.error].filter(x => x != null && x !== "").join(" ") });
+      }
       else if (!RP_SKIP_SYSTEM[p.subtype]) rows.push({ t: "meta", key, ev });
       return;
     }
@@ -1587,14 +1595,35 @@ function rpModel(events) {
         return;
       case "turn_start":
         turn = { t: "turn", key, ev, thread: p.thread_id || null, bodies: p.bodies || [], user: null, recall: null, meta: newMeta() };
+        recalls = [];
         rows.push(turn);
         return;
       case "user":
         if (turn && turn.user == null) { turn.user = String(p.text || ""); return; }
         // a message folded into the running turn: its own divider
-        rows.push({ t: "turn", mid: true, key, ev, thread: null, bodies: [], user: String(p.text || ""), recall: null });
+        rows.push({ t: "turn", mid: true, key, ev, thread: null, bodies: [], user: String(p.text || ""), recall: recalls.shift() || null });
         return;
-      case "recall": if (turn) { turn.recall = p; return; } return;
+      case "recall":
+        if (!turn) return;
+        if (turn.user == null && turn.recall == null) turn.recall = p;
+        else recalls.push(p);
+        return;
+      case "auth": {
+        const line = rpAuthLine(p);
+        if (line.blocking) strip.auth = p;
+        else if (p.restored) strip.auth = null;
+        rows.push({ t: "line", key, ev, cls: line.cls, text: line.text });
+        return;
+      }
+      case "rollover":
+        rows.push({ t: "line", key, ev, cls: "rp-roll" + (p.phase === "failed" ? " rp-err" : ""),
+                    text: "session rollover · " + (p.phase || "") + (p.reason ? " · " + String(p.reason).replace(/_/g, " ") : "") });
+        return;
+      case "review_gate":
+        rows.push({ t: "line", key, ev, cls: p.error ? "rp-warn" : "rp-dim",
+                    text: "memory review · " + (p.kept || 0) + " kept, " + (p.dropped || 0) + " dropped"
+                          + (p.pending ? ", " + p.pending + " pending" : "") + (p.error ? " · " + p.error : "") });
+        return;
       case "tool": {
         const row = { t: p.name === "mcp__cousin__reply" ? "reply" : "tool", key, ev, result: null, ms: null };
         if (p.id) tools[p.id] = row;
@@ -1616,6 +1645,8 @@ function rpModel(events) {
             if (n === p.tool || n.endsWith("__" + p.tool)) { r.ms = p.ms; return; }
           }
         }
+        // no card to time (e.g. a call outside a turn): a failure still shows
+        if (p.is_error) rows.push({ t: "line", key, ev, cls: "rp-err", text: "tool " + (p.tool || "?") + " failed" + (p.command ? " · " + rpCut(p.command, 90) : "") });
         return;
       }
       case "thinking":
@@ -1647,6 +1678,17 @@ function rpBoot(rows, key, ev) {
   const last = rows[rows.length - 1];
   if (last && last.t === "boot") last.events.push(ev);
   else rows.push({ t: "boot", key, events: [ev] });
+}
+
+// An `auth` event as one line (runner/sdk.py, opencode.py, tmux_runner.py):
+// a login required or a credential mismatch blocks the cousin, a retry is
+// a warning, a restore clears it.
+function rpAuthLine(p) {
+  if (p.restored) return { cls: "rp-ok", text: "login restored" + (p.account ? " · " + p.account : ""), blocking: false };
+  if (p.retry) return { cls: "rp-warn", text: "login retry · " + p.retry, blocking: false };
+  if (p.mismatch) return { cls: "rp-err", text: "credentials mismatch · expected " + p.expected + ", got " + p.got, blocking: true };
+  const why = [p.detail || p.reason || (p.login_required ? "login required" : "auth"), p.action].filter(Boolean).join(" · ");
+  return { cls: "rp-err", text: "login required · " + why, blocking: true };
 }
 
 // A tool's short name and a one-line description of what it was asked.
@@ -1970,6 +2012,8 @@ function RpRow({ row, now, activeTool }) {
       return <div className="rp-text-row">{rpRowBody(ev)}</div>;
     case "error":
       return <div className="rp-line rp-err">error: {String(p.error || "")}</div>;
+    case "line":
+      return <div className={"rp-line " + row.cls}>{row.text}</div>;
     case "footer": {
       const parts = rpFooterParts(row.meta);
       const bad = row.meta.result && (row.meta.result.is_error || row.meta.result.interrupted);
@@ -2016,6 +2060,9 @@ function RpStrip({ strip, now, raw, setRaw }) {
         <span className={"rp-chip" + (strip.session.auth && strip.session.auth !== "your login" ? " is-warn" : "")} title="from the session's init: model and where its credentials come from">
           {strip.session.model.replace(/^claude-/, "")}{strip.session.auth ? " · " + strip.session.auth : ""}
         </span>
+      )}
+      {strip.auth && (
+        <span className="rp-chip is-err" title={rpAuthLine(strip.auth).text}>login required</span>
       )}
       {strip.turns > 0 && (
         <span className="rp-dim" title="tokens and estimated cost of the turns in this view">

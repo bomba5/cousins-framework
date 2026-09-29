@@ -556,16 +556,21 @@ runner is doing now (a spinner with "thinking", the running tool's name, or
 the idle state, with how long it has been at it), the Claude usage limit
 as a bar with its reset day (amber from 80% or on a warning, red when
 rejected), the session's model and whether it runs on the host login or an
-API key, and the turns, tokens and estimated cost of the turns in view.
+API key, a red "login required" chip while the login needs renewing, and
+the turns, tokens and estimated cost of the turns in view.
 Below it the log holds one row per real thing: a turn under a rule (who
 sent it, when, and the start of the message; click for all of it, with the
 recall hits as a chip), each tool call with its result as one card (a tick
 or a cross, what it was asked, how long it took; click for the input and
 output), a reply as "-> reply" with the message, a thinking block as
 "thought 2s", the model's text, and a line that closes each turn (steps,
-tokens, cost, memories written, checkpoint). The runner's setup events sit
-in one collapsed "runner started" row; thinking ticks and bookkeeping are
-not rows. "raw" in the strip shows every event as its own row, as it
+tokens, cost, memories written, checkpoint). A message folded into a
+running turn gets its own rule and recall chip. Login and credential
+problems, API retries and failed tool calls with no card are one red (or
+amber) line each; a session rollover is a divider line and a memory review
+one line (kept, dropped, pending). The runner's setup events, fresh or
+resumed, sit in one collapsed "runner started" row; thinking ticks and
+bookkeeping are not rows. "raw" in the strip shows every event as its own row, as it
 arrives, and is remembered per browser. Scrolled up, the view stays where
 you left it and a "new events" button takes you back to the bottom.
 

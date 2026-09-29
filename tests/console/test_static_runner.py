@@ -204,14 +204,15 @@ class TestRunnerPaneHighlighting(unittest.TestCase):
     def test_each_kind_takes_its_color_group(self):
         kinds = ["text", "user", "result", "thinking", "tool", "tool_call", "tool_result",
                  "output", "error", "state", "turn_start", "session", "usage", "extract",
-                 "propose", "rate_limit"]
+                 "propose", "rate_limit", "auth"]
         got = self.run_node("process.stdout.write(JSON.stringify(%s.map(runnerKindClass)));"
                             % json.dumps(kinds))
         self.assertEqual(dict(zip(kinds, got)), {
             "text": "text", "user": "text", "result": "text", "thinking": "thinking",
             "tool": "tool", "tool_call": "tool", "tool_result": "tool", "output": "tool",
             "error": "error", "state": "meta", "turn_start": "meta", "session": "meta",
-            "usage": "meta", "extract": "meta", "propose": "meta", "rate_limit": "meta"})
+            "usage": "meta", "extract": "meta", "propose": "meta", "rate_limit": "meta",
+            "auth": "error"})
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_a_real_diff_is_detected_and_a_dashed_list_is_not(self):
@@ -525,6 +526,58 @@ process.stdout.write(JSON.stringify({done, mid, tool,
 const s = rpModel([{kind: "session_init", payload: {model: "m", apiKeySource: "ANTHROPIC_API_KEY"}}]).strip.session;
 process.stdout.write(JSON.stringify(s));""")
         self.assertEqual(got["auth"], "API key (ANTHROPIC_API_KEY)")
+
+    def test_a_folded_messages_recall_lands_on_its_own_divider(self):
+        """The runner emits a message's recall before its user event, so
+        a folded message's recall must not overwrite the turn's."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const m = rpModel([
+  E(1, "turn_start", {bodies: ["a"]}), E(2, "recall", {hits: 3}), E(3, "user", {text: "a"}),
+  E(4, "recall", {hits: 5}), E(5, "recall", {hits: 0}), E(6, "user", {text: "b"}), E(7, "user", {text: "c"}),
+  E(8, "turn_start", {bodies: ["d"]}), E(9, "user", {text: "d"}), E(10, "recall", {hits: 2}), E(11, "user", {text: "e"}),
+]);
+process.stdout.write(JSON.stringify(m.rows.map(r => [r.t + (r.mid ? ":mid" : ""), r.recall && r.recall.hits])));""")
+        self.assertEqual(got, [["turn", 3], ["turn:mid", 5], ["turn:mid", 0],
+                               ["turn", None], ["turn:mid", 2]])
+
+    def test_every_runner_kind_has_a_row_or_a_home(self):
+        """The kinds the runners emit that are not turn content (auth,
+        api_retry, resumed, rollover, review_gate, a tool_call with no
+        card) each get a readable line, never raw JSON or silence."""
+        got = self.run_node("""
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const evs = [
+  E(1, "runner", {kind: "sdk"}), E(2, "system", {subtype: "resumed", session_id: "s"}),
+  E(3, "system", {subtype: "api_retry", error_status: 401, error: "authentication_failed", attempt: 1}),
+  E(4, "auth", {account: "host", kind: "claude-login", reason: "login_required", detail: "OAuth session expired", action: "run claude auth login"}),
+  E(5, "rollover", {phase: "start", reason: "max_age", session_id: "s"}),
+  E(6, "review_gate", {turn: 3, held: 5, kept: 4, dropped: 1, pending: 0, error: null}),
+  E(7, "tool_call", {tool: "reply", command: "", is_error: true, ms: 4}),
+  E(8, "tool_call", {tool: "memory", command: "search", is_error: false, ms: 4}),
+];
+const blocked = rpModel(evs).strip.auth;
+const m = rpModel(evs.concat([E(9, "auth", {account: "host", restored: true})]));
+process.stdout.write(JSON.stringify({
+  rows: m.rows.map(r => r.t === "boot" ? ["boot", r.events.length] : [r.t, r.cls, r.text]),
+  blocked: !!blocked, cleared: m.strip.auth,
+  retry: rpAuthLine({retry: "401"}).cls,
+  mismatch: rpAuthLine({mismatch: true, expected: "none", got: "ANTHROPIC_API_KEY"}),
+}));""")
+        self.assertEqual(got["rows"], [
+            ["boot", 2],
+            ["line", "rp-err", "API retry 1: 401 authentication_failed"],
+            ["line", "rp-err", "login required · OAuth session expired · run claude auth login"],
+            ["line", "rp-roll", "session rollover · start · max age"],
+            ["line", "rp-dim", "memory review · 4 kept, 1 dropped"],
+            ["line", "rp-err", "tool reply failed"],
+            ["line", "rp-ok", "login restored · host"],
+        ])
+        self.assertTrue(got["blocked"])
+        self.assertIsNone(got["cleared"])
+        self.assertEqual(got["retry"], "rp-warn")
+        self.assertEqual(got["mismatch"], {"cls": "rp-err", "blocking": True,
+                                           "text": "credentials mismatch · expected none, got ANTHROPIC_API_KEY"})
 
     def test_thinking_ticks_are_compacted_before_the_keep_cap(self):
         got = self.run_node("""

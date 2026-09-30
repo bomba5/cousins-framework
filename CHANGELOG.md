@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.26.0 - 2026-09-30
+
+### Added
+- An opencode account may name `opencode` in its `providers`: the runner
+  then leaves opencode's own hosted service (OpenCode Zen, whose free models
+  are `opencode/<model>`) enabled, and `cousin-account login <name>
+  --provider opencode` stores its key. Every other account keeps it disabled,
+  as before. Zen needs its own API key, and most free models let the vendor
+  train on the prompts (docs/configuration.md).
+
 ## 1.25.3 - 2026-09-30
 
 ### Fixed

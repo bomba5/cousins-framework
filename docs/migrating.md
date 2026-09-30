@@ -6,8 +6,8 @@ framework, the hive's tokens and memory. It assumes the target install is
 done and working ([install](install.md)).
 
 There are two cases, and they go differently (moving a cousin already
-here from the tmux [lane](glossary.md#lane) to the SDK [runner](glossary.md#runner) is its own section,
-[below](#from-the-tmux-lane-to-the-sdk-runner)):
+here with no [runner](glossary.md#runner) kind onto one is its own section,
+[below](#a-cousin-with-no-runner)):
 
 - **The cousin already runs on this framework**, on another machine or in
   another root. The home has the right shape. You copy it across.
@@ -232,196 +232,41 @@ it.
 
 See [configuration](configuration.md) for the accounts file.
 
-## From the tmux lane to the SDK runner
+## A cousin with no runner
 
-A cousin on this framework runs on the tmux lane until you move it: an
-upgrade, a merge or a restart never changes the lane its `cousin.toml` names.
-`cousin-migrate` moves one cousin at a time, and every step it takes is
-recorded and can be undone. This always lands on the `sdk` kind; a cousin
-already on the runner lane (`sdk` or `tmux`) is not on the tmux lane any
-more, and moves between those two kinds instead with `cousin-migrate
---to sdk|tmux` ([below](#switching-between-runner-kinds)). The fleet goes
-in this order:
-
-1. **A test cousin.** Spawn a throwaway one on the tmux lane
-   (`cousin-spawn testa --role "migration test"`), talk to it, then migrate
-   it. Nothing is at stake, so this is where a surprise should happen.
-2. **One low-stakes cousin.** One whose work can wait a day.
-3. **Observe two days.** Leave it on the runner, use it as usual, and run
-   `cousin-migrate check` on it each day. Move on only when both days are
-   clean.
-4. **The rest, one at a time.** One migration, one `check` the next day,
-   then the next cousin. Never two in flight.
-5. **The engineer cousin last.** The one that works on the framework itself
-   goes after the rest have run a week, so the cousin you would call to fix
-   a migration is still on the lane you know.
-
-### One cousin
-
-Before you start: after the upgrade that brings `cousin-migrate`, reinstall
-the framework into the install's venv (`pip install -e '.[sdk]'` from the
-checkout) so the new command is on PATH and the SDK is installed. A
-`cousin-supervisor` runs for the install (it starts the runner), the
-cousin's account is logged in (`cousin-account status <account>`), and the
-cousin is running on the tmux lane: migrating a stopped cousin would start
-it, so start it first or leave it for later. The plan checks all of that:
+2.0.0 has no legacy tmux [lane](glossary.md#lane): every cousin names a runner kind in
+`cousin.toml [agent] runner` (`sdk`, `tmux`, `opencode` or `fake`). A cousin
+without one is refused by name everywhere it would run, start, receive a
+message or flip, with one line:
 
 ```
-cousin-migrate plan wren --account team --validate
-#   ok  lane       on the tmux lane
-#   ok  running    its tmux session is up
-#   ok  record     no migration in progress
-#   ok  carry
-#         carry   [runtime] model 'claude-opus-5' -> [agent] model
-#         carry   [runtime] effort 'high' -> [agent] effort
-#         none    [runtime] auth 'claude': --account team
-#   ok  account    account=team kind=claude-login loggedIn=True method=claude.ai
-#   ok  cli        the runner's CLI: Claude Code 2.1.277 (bundled with claude-agent-sdk 0.2.157)
-#   ok  validate   validate: ok (one model turn answered) (model claude-opus-5, effort high, account team); a model the runner's CLI can't run is never written
-#   ok  supervisor a cousin-supervisor answers for /srv/fw
-#   ok  sdk        claude-agent-sdk is installed
-#   ok  import     3 auto-memory file(s) to fold in
-#   ok  mcp        the runner loads from .mcp.json: ha; skips cousin (reserved: the runner serves its own `cousin` tools in-process)
-#   note The working conversation does not carry: the new session starts from the state digest, the handoff and memory, and is handed the previous transcript path
-#   note data/handoff.md is 3.2h old now; the close asks for a new one and waits for it
-# steps: close -> handover -> import -> toml -> start -> verify
-# wren: ready (run: cousin-migrate apply wren --validate --yes)
+wren has no [agent] runner: 2.0.0 has no legacy tmux lane. Move it on the
+last 1.x release with cousin-migrate apply wren, or convert it by hand
+(docs/migrating.md, "A cousin with no runner")
 ```
 
-`plan` writes nothing. Leave out `--account` and the cousin runs on the
-host's own login, unless its `[runtime] auth` is `"api_key"`.
+A [worker](glossary.md#worker) (`[cousin] type = "worker"`) is not refused this way: it has no
+session to deliver to, and its line says so.
 
-**The working conversation does not carry.** The runner starts a new
-session: it knows what the state digest, the handoff and memory tell it,
-and nothing else of the conversation it was having on the tmux lane. That
-conversation stays on disk as Claude Code's transcript of the last tmux
-session (`<transcripts_dir>/<session id>.jsonl`, the directory
-`config/harness.toml` names), and the new session is told where: its first
-message ends with the path, and asks it to have a subagent read the file
-from the end and rebuild its active work into STATUS.md, the handoff and
-memory. Tell the cousin what matters before you migrate it, and expect to
-remind it of the rest.
+**The easy way** is to move every cousin before the upgrade, on the last 1.x
+release: `cousin-migrate apply <slug> --validate --yes`, one at a time, then
+upgrade. That path closes the session cleanly, carries `[runtime] model` and
+`effort` into `[agent]`, [folds](glossary.md#fold) the auto-memory in and hands the new session
+the old transcript's path.
 
-The runner reads only `[agent]`, so the `carry` lines say what of the tmux
-lane's `[runtime]` moves there: `model` and `effort` (or, when `[runtime]`
-sets none and `config/agent-cmd` renders the placeholder, the
-`config/harness.toml [agent]` default the tmux lane ran on), and for
-`auth = "api_key"` an `anthropic-key` account named `<slug>-key`, made at
-`apply` from the cousin's own `.secrets/api-key.env` (the key copied to
-`.secrets/accounts/<slug>-key`, mode 0600; `config/accounts.toml` gains its
-table). A key already in `[agent]`, or `--account`, wins and is listed as
-`kept`. An api_key cousin whose key file is missing or malformed makes the
-plan say `NO carry`: it never falls back to the host login.
+**By hand**, on 2.0.0:
 
-A model the runner's CLI can't run is never written. The runner runs the
-CLI bundled with `claude-agent-sdk` (the `cli` line names its version), and
-a model newer than that CLI fails every [turn](glossary.md#turn) with an API 400. So when a
-model is carried, `plan` and `apply` say `NO validate` unless you pass
-`--validate`: one smallest model turn, on a throwaway client, with the
-model, effort and account the runner will run, and the API's own words when
-it fails. `apply --validate` runs it again itself, before anything changes.
-`cousin-migrate check wren --validate` does the same for a cousin already
-on the runner. An effort carried alone is validated the same way, on the
-CLI's default model. The turn never uses a key, token or config dir from
-your shell: the account is its only credential. For a key account,
-`--validate` makes `data/accounts/<slug>-key`, the account's own config
-dir with no login in it (no secret is written there; the runner uses the
-same dir).
-
-The cousin's `.mcp.json` stays where it is. The runner reads it at its
-start and loads every server in it beside its own tools, except the
-`cousin` entry spawn wrote for the tmux lane's `cousin-mcp`, which the
-runner serves in-process instead. The `mcp` line lists the servers it will
-load, by name only, and what it will skip and why (see
-[configuration](configuration.md#mcpjson-the-runners-mcp-servers)). It is
-never a blocker.
-
-A key file already at `.secrets/accounts/<slug>-key` is used as it is when
-it holds the cousin's key, and never removed by a rollback; with another
-key there, the plan says `NO carry`. When the plan says ready, and at a moment the cousin is
-between tasks:
-
-```
-cousin-migrate apply wren --account team --validate --yes
-```
-
-It saves the current `cousin.toml` (its exact bytes and mode) in
-`data/migration.json`, then:
-
-| step | what happens |
-|---|---|
-| `close` | a clean stop of the tmux session: the cousin writes its handoff, the transcript is mined, the generation moves on. The close waits (up to 5 minutes) for a handoff written during it, else writes an emergency one; `apply` warns, with the file's age, when the handoff it leaves was not written during the close, and when it is the emergency one |
-| `handover` | the path of the last tmux session's transcript, and of the newest other transcript in the same directory, is written to `data/previous-transcript.json` with the time the session ended. A transcript it cannot find is recorded as missing, with why; it never fails the migration |
-| `import` | Claude Code's own memory for the cousin is folded into `memory/imported/auto/` (`cousin-memory import-auto --apply`), with a recall baseline first |
-| `toml` | `[agent] runner = "sdk"`, `account` when you named one, and what the plan's `carry` lines listed (the key account is made first); nothing else in the file changes. Refused if the tmux session came back meanwhile (a scheduled flip, a console start) |
-| `start` | the migration day's boot packet is set aside (the runner starts on its own digest), the [supervisor](glossary.md#supervisor) starts the cousin's runner, and the cousin's chat server is started: the supervisor runs none, and other cousins' messages reach the [inbox](glossary.md#inbox) through it |
-| `verify` | the runner stays up and holds its lock for 10 seconds, and the chat server answers `/health` for the cousin |
-
-It stops at the first step that fails and says so. At the end it prints
-the recorded transcript path(s) (`previous transcript (last): ...`), or why
-there are none. The runner's first session starts fresh, on a digest of the
-cousin's state, with a closing paragraph that names those paths: the
-conversation from before the move, read-only, to be read from the end by a
-subagent that extracts only the user and assistant text, never read whole
-into the session. That start renames the record to
-`data/previous-transcript.json.consumed`, so a later [rollover](glossary.md#rollover) does not
-repeat it.
-
-Then check it, the same day and each day after:
-
-1. It answers a chat message, and `cousin-watch wren` shows the turn.
-2. Another cousin's message reaches it: `cousin-chat send wren "ping"`
-   from a peer (or your shell) lands in its inbox and gets an answer.
-3. `cousin-memory import-auto --verify` (with `COUSIN_HOME` set) finds no
-   recall that got worse.
-4. `cousin-migrate check wren` says `ok`: since the migration, no inbox
-   row open for more than an hour, every tool call has a recorded result,
-   no recorder hook failed, the runner's model, effort and account agree
-   with the cousin's `[runtime]` (a `MISMATCH` line says where not: a
-   console model or effort change still writes `[runtime]`), and the chat
-   server answers. The supervisor
-   runs no chat server: `cousin-chat-watchdog` (its timer) brings a runner
-   cousin's back after a reboot or a crash, so keep that timer on.
-
-### Rolling back
-
-```
-cousin-migrate rollback wren --yes
-```
-
-It undoes the steps `apply` got through, and only those. It stops the
-runner and waits until it has let go of its lock, puts the saved
-`cousin.toml` back byte for byte, removes what it made of the key account,
-even when `apply` stopped half-way through making it: exactly the bytes it
-appended to `config/accounts.toml` (the rest of the file comes back byte
-for byte), and the secret copy unless another account there still points
-at it. When another cousin names the account, all of it is kept and the
-step says who. It removes `data/previous-transcript.json` (and the
-`.consumed` one) and what the runner kept of its session
-(`data/runner-session.json`, a side session's `runner-session-<kind>.json`,
-the restart mark `data/runner-restart.json`), so a later migration starts a
-fresh session with the handover rather than resuming the old one, has the
-supervisor rescan, writes a fresh
-boot packet from the cousin's state now, starts the tmux session (unless it
-is already up) and releases the supervisor's hold on the runner. If
-`apply` failed before `toml`, it changes nothing but the record. A step
-that fails is written into `data/migration.json` and reported; fix what it
-names and run `rollback` again. It
-refuses a second rollback, inbox rows that still wait (nothing on the tmux
-lane reads the inbox: let them finish, or pass `--force`, and they stay in
-`data/inbox.db`) and an inbox it cannot read. What the migration imported
-stays in `memory/imported/auto/`; it does no harm on the tmux lane.
-Entries the review gate still holds have no reviewer on the tmux lane:
-settle them with `cousin-memory review`. After a rollback, `plan` and
-`apply` work again.
-
-By hand, if `cousin-migrate` itself is the problem: `cousin-supervisor stop
-wren` and wait until `cousin-supervisor status` shows it `stopped`, put the
-old file back (its bytes are `prior_toml_b64` in `data/migration.json`, or
-delete the `runner` line from the `[agent]` table: no `runner` is the tmux
-lane), delete
-`data/pending-boot.json` if one is there (the tmux session would boot on an
-old packet otherwise), then `cousin-spawn wren --start`.
+1. Stop the old pane if it still runs: `tmux kill-session -t <slug>` on the
+   socket it used.
+2. Fold its auto-memory in: `cousin-memory import-auto <slug>`.
+3. In `cousin.toml`, add an `[agent]` table with `runner = "sdk"` (or another
+   kind) and `account = "<name>"` from `config/accounts.toml`, and move
+   `model` and `effort` from `[runtime]` into it.
+4. `cousin-supervisor reload`: the [supervisor](glossary.md#supervisor) starts it. The new session
+   starts from the state digest, the handoff and memory; the old
+   conversation does not carry.
+5. `cousin-migrate tidy <slug> --yes` removes the keys 2.0.0 no longer reads
+   (below).
 
 ## Checking it
 
@@ -431,21 +276,16 @@ Start it, then go down this list:
 cousin-spawn wren --start
 ```
 
-1. The chat server is this cousin's:
-   `curl -s http://127.0.0.1:<port>/health` answers with `"slug": "wren"`.
+1. `cousin-supervisor status` lists `runner:wren` as `running`, and neither
+   its `refused` nor its `config` block names wren.
 2. Memory is found: `COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren cousin-memory
    search "<something from its notes>"` finds it. With embeddings on, the
    first search rebuilds the index and takes a while.
 3. The chat history is there: open the cousin in the console and scroll up.
    Old pictures show.
-4. A message from the console reaches the pane, and nothing in
-   `data/chat-server.log` says `tmux delivery SKIPPED` or `FAILED`.
-5. `cousin-flip wren --dry-run` runs every stage and reports no degraded
-   sections you didn't expect.
-6. One real flip, `cousin-flip wren --confirm`. With `--confirm` the new
-   session posts a line in chat once it's oriented; it should know who it is
-   and what it was doing.
-7. Its loops show in the console's loops view with sensible next-fire times.
+4. A message from the console gets an answer, and the reasoning pane shows
+   the [turn](glossary.md#turn).
+5. Its loops show in the console's loops view with sensible next-fire times.
 
 Only then retire the old one. I keep the old home and the archives for a week
 or two before deleting anything.

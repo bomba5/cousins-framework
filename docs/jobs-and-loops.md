@@ -216,8 +216,8 @@ They write a request that the daemon picks up on its next tick, and
 A request nobody picks up within 10 minutes is marked expired, which
 means the daemon is down or stuck.
 
-What happens on each tick, for every cousin whose chat server answers
-on its port (a cousin that's down gets nothing and catches up later):
+What happens on each tick, for every cousin whose [runner](glossary.md#runner) is up (it holds
+`run/runner.lock`; a cousin that's down gets nothing and catches up later):
 
 1. Trigger files in the cousin home are delivered (see below).
 2. The heartbeat, if it's due, and every due loop are sent together as

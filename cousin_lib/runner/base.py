@@ -1,8 +1,9 @@
 """The runner contract every runner is written against.
 
 docs/design/agent-loop-runner.md, "The runner". The Protocol below is
-the locked interface from the master plan; `FakeRunner` and
-`SdkRunner` implement it and one contract suite tests both.
+the locked interface from the master plan; every runner kind implements
+it (`FakeRunner`, `SdkRunner`, `OpencodeRunner`, `TmuxRunner`) and one
+contract suite tests them.
 """
 from dataclasses import dataclass
 from typing import Iterator, Protocol

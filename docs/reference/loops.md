@@ -73,7 +73,7 @@ Every tick does this, in this order:
 1. **Flips.** Walk the pending timed flips: send the warnings that are due, run the ones whose time has come. Then, if no timed flip ran this tick, at most one daily `flip_at` flip. See [Flips](#flips).
 2. **Cousins.** For each cousin, one at a time:
    - a [worker](../glossary.md#worker) cousin runs its due loops as jobs (see [Workers](#worker-cousins)) and that's all;
-   - a cousin that isn't alive is skipped. A legacy tmux cousin (no `[agent] runner`) is alive when its chat server accepts a connection on `127.0.0.1:<port>`, so a tmux pane whose chat server is dead gets nothing. A [runner](../glossary.md#runner) cousin (`[agent] runner` set, whatever the kind - `sdk`, `tmux`, `opencode` or `fake`) is alive when its runner holds `run/runner.lock`;
+   - a cousin that isn't alive is skipped. A cousin with no `[agent] runner` is refused by 2.0.0 and gets nothing. A [runner](../glossary.md#runner) cousin (`[agent] runner` set, whatever the kind - `sdk`, `tmux`, `opencode` or `fake`) is alive when its runner holds `run/runner.lock`;
    - its trigger files are delivered, one delivery each;
    - the context heartbeat (if due) and every due loop are collected and delivered together, as one message.
 3. **Requests.** Consume pending manual fires.
@@ -85,7 +85,7 @@ A failure inside one cousin (an exception, a bad file) is reported and the walk 
 
 ## Delivery
 
-A legacy tmux cousin (no `[agent] runner`) gets everything typed into its tmux session through the same injector the chat server uses (paste, wait, Enter, check, one retry; see [the chat API](chat-api.md#what-the-cousin-sees)). That includes its guard: if the pane shows one of `attention_patterns` from `config/harness.toml`, nothing is typed and the delivery counts as failed.
+A cousin with no `[agent] runner` gets nothing: 2.0.0 refuses it by name ([migrating](../migrating.md#a-cousin-with-no-runner)).
 
 A runner cousin, including one on the `tmux` runner kind (its own tmux pane, driven by `TmuxRunner`, not the legacy [lane](../glossary.md#lane)'s send-keys), gets each delivery as one row in its [inbox](../glossary.md#inbox) (`data/inbox.db`), on [thread](../glossary.md#thread) `loop:daemon` with source `loop`. The row is kept before the daemon moves on, so the put is the delivery: the daemon never waits for the [turn](../glossary.md#turn).
 
@@ -221,7 +221,7 @@ At `fire_at` it flips and marks the request `done`, or `failed` with the error. 
 
 **Transcript guard.** With `flip_when_transcript_mb` and `transcripts_dir` set in `config/harness.toml`, every tick measures each live non-worker cousin's session transcript (`<transcripts_dir>/<session_id>.jsonl`, session id from `[runtime]`). For the biggest one over the limit it queues a timed flip five minutes out with a reason like `transcript over 40 MB (41.3 MB)`. One cousin per tick, never a second while one is pending for that cousin. Cousins without a session id or a transcript are skipped. Setting the limit without `transcripts_dir` gets reported every tick.
 
-Timed and daily flips run whether or not the cousin's chat server is up.
+Timed and daily flips run whether or not the cousin's runner is up.
 
 ## Files
 

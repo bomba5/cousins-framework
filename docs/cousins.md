@@ -8,15 +8,13 @@ actually built and what you can do with it.
 
 A cousin is an agent session (Claude Code, in the setup I use) with a home
 directory that holds everything it is, and a **kind**, `[agent] runner` in
-`cousin.toml`, that says how its agent loop runs: `sdk` and `opencode` run
-under `cousin-runner`, with no tmux session at all; `tmux` also runs under
-`cousin-runner`, but drives the host's interactive Claude Code in a tmux pane
-on the framework's own socket; a cousin with no `[agent] runner` at all is on
-the **legacy tmux [lane](glossary.md#lane)**, its agent running in its own tmux session, typed
-into by its chat server (the console calls this lane `tmux-legacy`). This
-page mostly describes the legacy lane, which
-most of `cousin-spawn`'s output still assumes; where a [runner](glossary.md#runner) cousin (any of
-`sdk`, `opencode` or `tmux`) works differently, it says so. See
+`cousin.toml`, that says how its agent loop runs. Every kind is a
+[runner](glossary.md#runner), `cousin-runner`, started and kept up by `cousin-supervisor`: `sdk` (the
+default) and `opencode` with no tmux at all; `tmux` drives the host's
+interactive Claude Code in a tmux pane on the framework's own socket; `fake`
+exercises the [lane](glossary.md#lane) itself. A cousin with no `[agent] runner` was on the
+legacy tmux lane, which 2.0.0 retired: it is refused by name
+([migrating](migrating.md#a-cousin-with-no-runner)). See
 [runners](reference/runners.md) for the kinds themselves and
 [agent-loop-runner](design/agent-loop-runner.md) for the design.
 
@@ -24,13 +22,13 @@ Every cousin's home directory:
 
 ```
 cousins/wren/
-  cousin.toml          slug, name, role, chat port, operator, runtime, loops...
+  cousin.toml          slug, name, role, operator, [agent] (kind, account, model), loops...
   CLAUDE.md            its identity, rendered from the template once, then yours to edit
   STATUS.md            open loops, the thing a new session anchors on
   MEMORY.md            the memory index
   memory/              raw entries, distilled views, memory files
   notes/               notes it writes
-  data/                decisions log, handoffs, checkpoints, boot packets, pid files
+  data/                decisions log, handoffs, checkpoints, inbox, event stream
   scripts/             its own scripts
   mcp-registry.toml    the tools it gets over MCP
   .mcp.json            tells the harness to start cousin-mcp
@@ -49,25 +47,11 @@ registry: the filesystem is the fleet.
 
 ## Spawning one
 
-Before a cousin can start you need `config/agent-cmd`: one line, the command
-that runs your agent. It can carry three placeholders the framework fills in
-at every start:
-
-```
-printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" \
-    > config/agent-cmd
-```
-
-`--dangerously-skip-permissions` is what lets a cousin work unattended, and it
-means the cousin can do anything your account can; see
-[install](install.md#4-claude-code).
-
-`{session_id}` gets a fresh id per session (and is saved to `cousin.toml`),
-`{model}` and `{effort}` come from the cousin's `[runtime]` or the install
-defaults (see [models and effort](#models-and-effort)). What the agent is
-allowed to do is your choice, expressed in that line; the framework doesn't
-pick a binary or a permission mode for you. [install](install.md) has the
-full setup.
+A cousin needs a running `cousin-supervisor` to start (the units in
+[install](install.md) run one) and an account to run on: the host's own
+Claude login (`host`, the default) or one from `config/accounts.toml`
+([accounts](configuration.md#accountstoml)). Its runner works unattended:
+what it may do is its `policy.toml` ([configuration](configuration.md#policytoml)).
 
 Then:
 
@@ -77,30 +61,29 @@ cousin-spawn wren --name Wren \
     --voice "Short and plain. Answers first, explains after. Says when it does not know." \
     --operator ana \
     --start
-#   -> created wren at <checkout>/cousins/wren (chat port 8090)
-#      started wren
+#   -> created wren at <checkout>/cousins/wren
+#      started wren (cousin-supervisor)
 ```
 
 Every option:
 
 | option | what it does |
 |---|---|
-| `slug` | lowercase, `^[a-z][a-z0-9_-]{1,31}$`; the directory, the tmux session name, the chat route |
+| `slug` | lowercase, `^[a-z][a-z0-9_-]{1,31}$`; the directory and the chat route |
 | `--root` | the framework root (the checkout); else `FRAMEWORK_ROOT`, else the current directory if it is one |
 | `--name` | display name; default is the slug capitalised |
 | `--role` | one line; required to create |
 | `--role-paragraph` | a paragraph for the Identity section of CLAUDE.md; default is the role |
 | `--voice` | how the cousin writes; required to create |
-| `--port` | chat port; default is the first free one in 8090-8200 not claimed by any cousin |
 | `--operator` | the person it answers to; written to `[operator] name` and into its MCP registry |
-| `--model` | `[runtime] model` |
-| `--effort` | `[runtime] effort`: `low`, `medium`, `high`, `xhigh`, `max` |
+| `--model` | `[agent] model` |
+| `--effort` | `[agent] effort`: `low`, `medium`, `high`, `xhigh`, `max` (the `sdk` and `tmux` kinds) |
 | `--heartbeat` | `[heartbeat] context_beat_seconds` (default 3600) |
 | `--memory-scope` | `[memory] scope`: `private` (default) or `shared` (may propose memories to the [shared tier](glossary.md#shared-tier); the retired `both` is read as `shared`) |
-| `--runner` | `[agent] runner`: `sdk`, `fake`, `opencode` or `tmux` puts the cousin on `cousin-runner`, started by `cousin-supervisor` instead of `cousin-spawn --start`'s own tmux session (the `tmux` kind still uses tmux, but a pane on the framework's own socket, driven by the runner, not the legacy lane's session); absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means the legacy tmux lane |
-| `--account` | `[agent] account`, one of `config/accounts.toml`'s (or `host`); a runner cousin only; absent, `COUSIN_DEFAULT_ACCOUNT` applies to a runner cousin |
-| `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. A runner cousin is started by asking the running `cousin-supervisor` (no `config/agent-cmd`, no tmux); with no [supervisor](glossary.md#supervisor) the start fails, exit 1 |
-| `--resume` | with `--start` on an existing cousin: resume its last session (`config/harness.toml [agent.resume]`) instead of a new one; falls back to a new session when that isn't possible. What the start-at-boot unit uses |
+| `--runner` | `[agent] runner`: `sdk`, `tmux`, `opencode` or `fake`; absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means `sdk` |
+| `--account` | `[agent] account`, one of `config/accounts.toml`'s (or `host`); absent, `COUSIN_DEFAULT_ACCOUNT` applies, else `host` |
+| `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. The start asks the running [supervisor](glossary.md#supervisor); with none the start fails, exit 1. A cousin with no `[agent] runner` is refused, exit 2 |
+| `--resume` | kept for 1.x scripts and ignored: a runner resumes its own session (`data/runner-session.json`) |
 | `--sync-template` | create nothing; show how an existing cousin's CLAUDE.md framework part differs from the current template (see [the CLAUDE.md template](#the-claudemd-template)) |
 | `--apply` | with `--sync-template`: write the sync |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
@@ -110,7 +93,7 @@ later without touching the cousin.
 
 Exit codes: 0 created (and started), 1 created but the start failed (the home
 is kept; fix the cause and run `cousin-spawn wren --start`), 2 nothing was
-done (bad input, slug taken, no `config/agent-cmd`, tmux or the agent missing).
+done (bad input, slug taken, a cousin with no runner).
 A failed create removes whatever it made, so it never leaves a half-made home
 squatting the slug. A directory under `cousins/` with no `cousin.toml` is
 reported as an orphan; remove or finish it by hand.
@@ -198,40 +181,22 @@ cousin-spawn wren --sync-template --apply
 
 ```
 cousin-spawn wren --start          # start an existing cousin (no-op if running)
+cousin-supervisor stop wren        # stop it and hold it down
+cousin-supervisor start wren       # start it again (clears the hold)
 ```
 
-This is the legacy lane's start. It creates the tmux session named in
-`[chat] tmux_session`, with the home as working directory and `COUSIN_HOME`
-set, runs `config/agent-cmd` in it behind a small launcher that applies the
-auth mode. In 2.0.0 it is refused before any of that: a cousin with no
-`[agent] runner` is not started (`cousin-spawn --start` exits 2 with the
-reason).
+`--start` (or the console) asks the running `cousin-supervisor` to start the
+cousin's `runner:<slug>` child; with no supervisor up the start fails. A stop
+holds the cousin down (`<home>/run/held`) across a supervisor restart until
+the next start. A restart resumes the same session
+(`data/runner-session.json`), so the conversation carries over; a flip
+(below) is how a cousin starts fresh. The console's card and inspector have
+the same buttons. See [commands](commands.md#running-cousins) and
+[runners](reference/runners.md).
 
-A runner cousin (`[agent] runner` is `sdk`, `fake`, `opencode` or `tmux`)
-starts and stops a different way: `--start` (or the console) asks the running
-`cousin-supervisor` to start its `runner:<slug>` child instead, and it needs
-`cousin-supervisor run` up first (`NoSupervisor` otherwise). None of
-`config/agent-cmd` or the tmux commands above apply
-to it. Stop and restart for it are `cousin-supervisor stop|start <slug>`, or
-the console; a stop holds it down (`<home>/run/held`) across a supervisor
-restart until the next start. See [commands](commands.md#running-cousins)
-and [runners](reference/runners.md).
-
-Stop and restart for the legacy lane are in the console (card and inspector
-buttons). Stop is a clean stop: the cousin writes its handoff and saves what
-it learned, the transcript is mined, and the next start boots a fresh
-session on a packet built from all that
-([lifecycle](reference/lifecycle.md#a-clean-stop)). There's no stop command
-yet; an immediate stop by hand is:
-
-```
-tmux kill-session -t wren
-```
-
-Restart is an immediate stop, a short pause, start. The conversation in the
-session is gone; the next session starts fresh from CLAUDE.md and whatever
-the cousin wrote to disk. To keep the thread across a restart, flip instead
-(below), or switch auth modes, which resumes the same session.
+A cousin with no `[agent] runner` is not started: `cousin-spawn --start`
+exits 2 with the reason, and the console answers 409
+([migrating](migrating.md#a-cousin-with-no-runner)).
 
 To get rid of a cousin, use "dismiss" in the console: it stops it, archives
 the home (without `.secrets/`) to `data/dismissed/<slug>-<timestamp>.tar.gz`
@@ -239,15 +204,21 @@ and removes it.
 
 ## Models and effort
 
-`{model}` and `{effort}` in `config/agent-cmd` render from the cousin's own
-`cousin.toml`, else the install default:
+A cousin's model and effort are `[agent] model` and `[agent] effort` in its
+`cousin.toml`, read once when its runner starts:
 
 ```toml
 # cousins/wren/cousin.toml
-[runtime]
+[agent]
+runner = "sdk"
 model = "claude-sonnet-5"
 effort = "medium"
 ```
+
+Effort is one of `low`, `medium`, `high`, `xhigh`, `max` (the `sdk` and `tmux`
+kinds; an `opencode` model names its provider, `"<provider>/<model>"`).
+Without a model the kind's own default applies. The install's defaults in
+`config/harness.toml` are what the console's spawn dialog preselects:
 
 ```toml
 # config/harness.toml
@@ -257,95 +228,42 @@ default_effort = "high"
 models = ["claude-opus-5", "claude-sonnet-5"]   # what the spawn dialog offers
 ```
 
-If the command has a placeholder that neither file fills, the start fails and
-names both files; nothing guesses a model for you. Effort is one of `low`,
-`medium`, `high`, `xhigh`, `max`. Without `models` the spawn dialog offers a
-short built-in list.
+A change needs a restart. The console's agent settings (the inspector, and the
+chat header's effort select) write these keys; an `sdk` model is checked with
+one smallest [turn](glossary.md#turn) before it is written. See
+[`[agent] runner`](configuration.md#agent-runner). `[runtime] model` and
+`effort` are the retired legacy lane's and are not read
+([removed keys](configuration.md#removed-in-200)).
 
-Both are read at start, so a change needs a restart or a flip. The chat
-header's effort select and the spawn dialog write these keys; for the model
-after spawn, edit `cousin.toml`.
+## Auth: accounts
 
-A runner cousin has no `config/agent-cmd` and no `{model}`/`{effort}`
-placeholders: it reads `[agent] model` and `[agent] effort` in `cousin.toml`
-directly (its `[runtime]` is the legacy lane's and is not read by
-`cousin-runner`). `cousin-spawn --model`/`--effort` write there instead, for
-a cousin created with `--runner`. See [`[agent] runner`](configuration.md#agent-runner).
-
-## Auth: login or API key
-
-This is the legacy lane's auth switch: a runner cousin (`sdk`, `opencode` or
-`tmux`) instead names an account in `config/accounts.toml` (see
-[accounts.toml](configuration.md#accountstoml)); `[runtime] auth` is not read
-for it.
-
-Each cousin's agent logs in one of two ways, set in `cousin.toml [runtime]
-auth` and applied at every start (so flips and restarts keep it):
-
-- `claude` (the default): the harness's own login. The key variable and the
-  config-dir variable are removed from the agent's environment, so an
-  `ANTHROPIC_API_KEY` exported somewhere upstream can't quietly move the
-  cousin onto metered billing.
-- `api_key`: a key from the cousin's own `<home>/.secrets/api-key.env` (one
-  line, `ANTHROPIC_API_KEY=<key>`; the file must be mode 600 and the
-  directory 700, or the start is refused). The launcher reads it at exec
-  time and hands it over in the environment only, so it never appears in an
-  argv, tmux's included, or in a log.
-
-```
-cousin-auth wren                          # current mode and key state
-#   -> wren: auth claude (modes: claude, api_key)
-#      key: not set (.../cousins/wren/.secrets/api-key.env)
-cousin-auth wren --key-stdin < wren.key   # write the key file (a tty prompts without echo)
-cousin-auth wren api_key                  # switch; a running agent restarts on the same session
-cousin-auth wren claude --no-restart      # switch back, apply at the next start
-```
-
-Why the key mode needs more than the key: Claude Code with its own login
-present and `ANTHROPIC_API_KEY` set bills the login. So `api_key` mode also
-points the agent at an isolated config directory,
-`data/harness-api-key-config/` under the root, via `CLAUDE_CONFIG_DIR`. It
-links everything in `~/.claude` except the login and account files, plus a
-copy of `~/.claude.json` with the account keys removed. A start refuses if
-that directory holds a login. Transcripts are linked through, so both modes
-share the same sessions. The names involved (variables, files, account keys)
-are in `config/harness.toml [auth.api_key]`; copy
-`config/harness.toml.claude-code.example` and they're filled in. Without that
-table, `api_key` mode is refused.
-
-A switch checks everything first (key file, isolated directory, whether a
-resume is possible) and changes nothing if one fails. It restarts a running
-agent with the resume rule in `config/harness.toml [agent.resume]` (for Claude
-Code, `--session-id {session_id}` becomes `--resume {session_id}`), so the
-conversation carries over. If the pane shows the agent mid-turn
-(`busy_patterns`), it refuses unless you pass `--force`.
-
-The first `api_key` start may stop at "Do you want to use this API key?".
-Answer it once in the pane; the console flags the card as needing attention.
-The inspector has the same controls as `cousin-auth`: a mode select and a key
-field that shows only "key set" and the last four characters afterwards.
+A cousin runs on an account: `[agent] account` in `cousin.toml`, one of
+`config/accounts.toml`'s, or `host` (the host's own Claude login, the
+default). An account is a Claude login, a Claude token, an Anthropic API key,
+or an opencode data dir with its providers' keys; which kinds run on which
+is in [accounts.toml](configuration.md#accountstoml), and `cousin-account`
+manages them ([commands](commands.md)). `[runtime] auth` and the
+`cousin-auth` mode switch belonged to the retired legacy lane and do nothing
+for a runner cousin.
 
 ## Generations and the flip
 
-A session doesn't last forever: the transcript grows and the context fills.
-A flip ends one generation and starts the next on a fresh session, handing it
-a boot packet so it picks up where the last one stopped.
+A session doesn't last forever: the context fills. A flip ends one
+generation and starts the next on a fresh session, which starts from a state
+digest (STATUS.md's open loops, the handoff, memory) so it picks up where the
+last one stopped. On a runner this is a [rollover](glossary.md#rollover).
 
 ```
 cousin-flip wren --dry-run      # the checks only, nothing touched
 cousin-flip wren                # flip now
-cousin-flip wren --confirm      # the new generation posts one line when it's oriented
 ```
 
-What happens, in short: the cousin is asked to update STATUS.md and write
-`data/handoff.md`, with up to five minutes to do it (if it doesn't, the
-framework writes an emergency handoff from the pane). The old generation is
-archived under `data/generations/gen-NNNN/`, the counter goes up, a new boot
-packet is assembled into `data/boot-packet-gen-NNNN.md`, the tmux session is
-killed and started again on a new session id, and the packet is typed in.
-By default the cousin is told not to announce the flip. The full step list
-and what goes in the packet are in
-[reference/lifecycle.md](reference/lifecycle.md).
+`cousin-flip` puts (or joins) the pending `flip` row on the running
+`cousin-runner` and waits for the handoff: the cousin is asked to write it,
+the generation counter goes up, and the new session gets the digest. The
+runner already mined every turn as it went. A stopped
+cousin is refused, since a rollover needs a runner to carry it out. The full
+step list is in [reference/lifecycle.md](reference/lifecycle.md).
 
 Ways to trigger one:
 
@@ -353,22 +271,11 @@ Ways to trigger one:
   15 minutes; a timed flip warns the cousin at T-5m, T-1m and T-30s).
 - A daily flip: every cousin gets one, at the install's `default_flip_at` (04:00 unless `config/harness.toml` says otherwise). Set `[lifecycle] flip_at = "HH:MM"` in `cousin.toml` to move this one, or `"never"` to opt it out; `cousin-loops flips` shows each cousin's time and where it comes from. The loops
   daemon runs it once a day after that time, one cousin per tick.
-- The transcript-size guard: with `flip_when_transcript_mb` in
-  `config/harness.toml`, the loops daemon schedules a flip when a cousin's
-  transcript grows past it.
+- Context pressure: the runner rolls over on its own at
+  `[agent] rollover_at_percent` of the model's context (the `sdk` and
+  `opencode` kinds; [configuration](configuration.md#agent-runner)).
 
-If a flip crashes halfway it leaves a marker. Nothing recovers it on its own;
-the console shows "stale marker" and you look at it.
-
-A runner cousin's flip is a [rollover](glossary.md#rollover) instead: `cousin-flip` puts (or joins)
-the pending `flip` row on the running `cousin-runner` and waits for the
-handoff. None of the tmux steps above run (no marker, no pane, no pending
-boot, no transcript mining: the runner already mined every [turn](glossary.md#turn) as it went),
-and it refuses a stopped runner cousin, since a rollover needs a runner to
-carry it out. See [`[agent] runner`](configuration.md#agent-runner) and
-[commands](commands.md#running-cousins).
-
-The boot packet includes the committed self-portrait: a description of the
+The runner's system prompt includes the committed self-portrait: a description of the
 cousin drafted from its real sources and reviewed by a person before it
 counts.
 
@@ -391,13 +298,10 @@ cousin-reincarnate wren --new-role "keeps the house notes and the budget"
 
 Reincarnate snapshots the continuity files (MEMORY.md, STATUS.md, CLAUDE.md,
 `cousin.toml`, the self-portrait, `memory/`) to
-`data/lifecycle/wren/<timestamp>/`, asks the cousin through its chat server
-for a bequest and waits up to `--timeout` seconds (default 300) for
-`data/handoff.md` to change (a runner cousin skips this separate ask: its
-bequest rides the flip's own rollover handoff request instead), rewrites the
-role in the CLAUDE.md title line (and a `## Role` section if there is one)
-and in `cousin.toml`, then flips. A cousin that doesn't answer is recorded,
-not fatal: the flip asks again and writes an emergency handoff if needed.
+`data/lifecycle/wren/<timestamp>/`, rewrites the role in the CLAUDE.md title
+line (and a `## Role` section if there is one) and in `cousin.toml`, then
+flips: the cousin's bequest rides the rollover's own handoff request. A cousin
+with no `[agent] runner` is refused.
 
 ```
 cousin-transplant --donor wren --recipient kestrel --mode merge
@@ -412,7 +316,7 @@ both (donor first):
 | `body-swap` | its memory | the donor's CLAUDE.md, self-portrait, name and role (the donor gets the recipient's) |
 | `merge` | everything | the donor's MEMORY.md appended under `## Memories inherited from <Donor> (<date>)`, and the donor's `memory/raw` merged in |
 
-Slug, port and tmux session always stay where they are. The donor is never
+The slug always stays where it is. The donor is never
 deleted. Merge is the messy one: two timelines in one MEMORY.md, which the
 distiller has to weigh.
 
@@ -498,7 +402,7 @@ needs a person asks for one instead of inventing it:
   the message box is disabled and says why.
 - `--level operator` in `cousin-memory` is only ever written by hand with a
   `--cite`, so with no operator that level stays empty.
-- The boot packet notes the missing operator calibration in its header.
+- The state digest notes the missing operator calibration.
 - An uncommitted self-portrait stays a candidate; nothing commits it for
   you. Shared-tier promotions need a reviewer in
   `config/shared-reviewers.json` and refuse without one.

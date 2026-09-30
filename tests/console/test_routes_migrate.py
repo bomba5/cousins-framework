@@ -115,7 +115,8 @@ class TestPlan(MigrateCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body["plan"]["to"], "sdk")
         kind = next(c for c in body["plan"]["checks"] if c["check"] == "kind")
-        self.assertIn("legacy tmux lane", kind["detail"])
+        from cousin_lib.delivery import lane_refusal
+        self.assertEqual(kind["detail"], lane_refusal(self.home))
 
     def test_bad_bodies_are_400(self):
         for body in ({"to": "opencode"}, {"account": "Bad Name"}, {"validate": "yes"},

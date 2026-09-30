@@ -11,6 +11,7 @@ import unittest
 from unittest import mock
 
 from cousin_lib import migrate
+from cousin_lib.delivery import lane_refusal
 from cousin_lib.harness_settings import settings_path
 from cousin_lib.runner.inbox import Inbox
 from tests._hermetic import HermeticCase
@@ -125,10 +126,11 @@ class TestPlan(SwitchCase):
         self.kind("sdk")
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login"}))
-        # the legacy lane is migrate's own path, not a kind switch
+        # a cousin with no runner is refused by name (row 75): no kind to switch from
         (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
-        self.assertFalse(p["ready"]); self.assertIn("legacy", " ".join(c["detail"] for c in p["checks"]))
+        self.assertFalse(p["ready"])
+        self.assertIn(lane_refusal(self.home), [c["detail"] for c in p["checks"]])
         # a token or key account never reaches the tmux kind (P11-6)
         (self.root / "config" / "accounts.toml").write_text('[accounts.fleet]\nkind = "claude-token"\n')
         self.kind("sdk", account="fleet")

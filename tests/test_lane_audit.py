@@ -99,6 +99,7 @@ SITES = (
     ('cousin_lib/migrate.py', 'if agent.get("runner") != "sdk":', 'sdk-only'),
     ('cousin_lib/migrate.py', 'tmux_kind = _agent(home).get("runner") == "tmux"', 'kinds'),
     ('cousin_lib/migrate.py', 'if current not in RUNNER_KINDS:', 'kinds'),
+    ('cousin_lib/migrate.py', 'checks.append(_check("kind", False, lane_refusal(home)))', 'refusal'),
     ('cousin_lib/migrate.py', 'if data is None or (kind not in RUNNER_KINDS and not worker):', 'transport'),
     ('cousin_lib/migrate.py', 'target["refused"] = lane_refusal(home)       # tidy is not a conversion (R2)', 'refusal'),
     ('cousin_lib/migrate.py', 'kind = _runner_kind(home)', 'kinds'),

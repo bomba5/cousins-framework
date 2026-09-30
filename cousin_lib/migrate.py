@@ -1408,9 +1408,8 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
         return {"slug": home.name, "from": current, "to": to, "steps": [], "checks": checks,
                 "warnings": warnings, "ready": False}
     if current not in RUNNER_KINDS:
-        checks.append(_check("kind", False, "%s is on the legacy tmux lane: the kind switch is"
-                             " between runner kinds; migrate it first (cousin-migrate apply)"
-                             % home.name))
+        # row 75: 2.0.0 has no migration to point at, only the refusal
+        checks.append(_check("kind", False, lane_refusal(home)))
     elif current == to:
         checks.append(_check("kind", False, "%s is already the %s kind" % (home.name, to)))
     elif current not in SWITCH_KINDS:

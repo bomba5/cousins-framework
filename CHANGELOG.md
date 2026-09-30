@@ -58,7 +58,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     `tool_result` not yet) the bound is `tool_idle_timeout_s` (an hour).
   - A live turn's interrupt poll (5 times a second) read the inbox on the
     event loop thread, where a busy inbox (sqlite waits up to 30 s) froze
-    the reader and the hooks; the read runs off the loop.
+    the reader and the hooks; the read runs off the loop. That shifted
+    when a fold is written, and one test that read the turn's threads
+    right after the fold's write, before its echo (where the row joins
+    the turn), failed about 4 runs in 6; it waits for the echo now.
   - A row with an image and a file attachment is echoed and closed as
     any other: now pinned by a test.
 - **The runner pane marks where markdown stops** (#99): past the first

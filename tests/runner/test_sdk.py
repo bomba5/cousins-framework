@@ -601,8 +601,13 @@ class TestSdkRunner(HermeticCase):
         r.start()
         r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: made.get("client") and made["client"].paused))
-        r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
+        peer = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
         self.assertTrue(_wait(lambda: len(made["client"].queries) == 2, timeout=5))
+        # the folded row joins the turn when its echo is read (the CLI took it
+        # up), not when it is written: wait for that echo, not for the write
+        self.assertTrue(_wait(lambda: any(e["kind"] == "user"
+                                          and e["payload"].get("echo_of") == peer.inbox_id
+                                          for e in r.events()), timeout=5))
         self.assertEqual(r.turn.snapshot(), (True, ("operator:priya", "peer:testa")))
         ctx = r.tool_context
         text, err = tools.call(ctx, "reply", {"text": "stopping", "thread": "peer:testa"})

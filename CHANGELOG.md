@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+
+- `cousin-runner`: a status probe of a runner's lock no longer takes it
+  (#79). `hold_lock` now also holds an open-file-description lock on
+  `run/runner.lock` beside its flock, and `is_running` reads it with
+  `F_OFD_GETLK`, which takes nothing, so a runner starting while the
+  fleet poll, the loops tick or the console probes it is never refused.
+  The flock still keeps a second runner out, one of an older version
+  included; a runner started before the upgrade reads as stopped to the
+  new probe until it restarts.
+
 ## 2.1.0 - 2026-09-30
 
 ### Added

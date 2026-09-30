@@ -42,6 +42,7 @@ import contextlib
 import fcntl
 import os
 import signal
+import struct
 import sys
 import threading
 import time
@@ -71,7 +72,12 @@ ERRORED_GIVE_UP_S = 10.0
 STOP_TIMEOUT_S = 30.0
 
 LOCK_HELD_EXIT = 5    # another runner holds <home>/run/runner.lock
-LOCK_TAKE_S = 1.0     # hold_lock retries this long: an is_running() probe holds the lock for microseconds
+LOCK_TAKE_S = 1.0     # hold_lock retries this long: a pre-#79 probe (flock) holds the lock for microseconds
+
+# struct flock (fcntl(2)) for the open-file-description lock on
+# runner.lock: l_type, l_whence, l_start, l_len, l_pid, native layout
+# (64-bit Linux: 32 bytes). l_start = l_len = 0 is the whole file.
+_FLOCK = "hhqqi4x"
 
 _UNSET = object()
 
@@ -245,16 +251,28 @@ def runner_for(home, *, kind=None):
         return OpencodeRunner(home, account=account, policy=policy)
 
 
+def _ofd_lock(kind):
+    """A struct flock over the whole file for F_OFD_SETLK / F_OFD_GETLK."""
+    return struct.pack(_FLOCK, kind, os.SEEK_SET, 0, 0, 0)
+
+
 @contextlib.contextmanager
 def hold_lock(home):
-    """One runner per cousin: an exclusive flock on <home>/run/runner.lock,
-    held for the life of this context (the kernel drops it when the
-    process dies, even on SIGKILL). Taken before anything else, because a
-    second runner's `requeue_stale` would steal the first one's live
-    claims. A held lock is retried for LOCK_TAKE_S before LockHeld:
-    is_running() probes by taking the same lock for microseconds (the
-    loops tick, the fleet poll, the console's stream), and a runner
-    starting inside that probe must not be refused (#79)."""
+    """One runner per cousin: <home>/run/runner.lock, held for the life of
+    this context (the kernel drops it when the process dies, even on
+    SIGKILL). Taken before anything else, because a second runner's
+    `requeue_stale` would steal the first one's live claims.
+
+    Two locks on one descriptor (#79). An exclusive flock excludes a
+    second runner, a runner of an older framework version included; an
+    open-file-description write lock (F_OFD_SETLK) is what is_running()
+    reads with F_OFD_GETLK, a query that takes nothing, so a probe never
+    holds the lock a starting runner needs. The two live in separate
+    kernel namespaces (flock cannot see an OFD lock nor the reverse),
+    which is why the holder takes both. A held flock is still retried
+    for LOCK_TAKE_S before LockHeld: an is_running() of an older
+    version, still running in a long-lived process, probes by taking
+    the flock for microseconds."""
     path = Path(home) / "run" / "runner.lock"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,31 +294,40 @@ def hold_lock(home):
             os.close(fd)
             raise LockHeld("another cousin-runner holds %s" % path)
     try:
+        # the flock is ours, so no other runner of this version holds the
+        # OFD lock (it takes the flock first): a refusal here is a holder
+        # outside the framework's own code, and still busy, not config
+        fcntl.fcntl(fd, fcntl.F_OFD_SETLK, _ofd_lock(fcntl.F_WRLCK))
+    except OSError:
+        os.close(fd)
+        raise LockHeld("another cousin-runner holds %s" % path)
+    try:
         yield
     finally:
         os.close(fd)
 
 
 def is_running(home):
-    """True when a runner holds `<home>/run/runner.lock`. A fresh, non-
-    blocking flock on its own descriptor: `BlockingIOError` means a
-    runner holds it; taking the lock cleanly means nobody does, so the
-    probe releases it and answers False; a missing lock file is False,
-    nothing to hold."""
+    """True when a runner holds `<home>/run/runner.lock`. An F_OFD_GETLK
+    query on a fresh descriptor (#79): it asks whether a write lock
+    could be placed and takes nothing, so a runner starting during the
+    probe is never refused. The holder's OFD lock is visible from any
+    process, this one included. A missing lock file is False, nothing
+    to hold. A runner of an older version holds only a flock, which this
+    query cannot see: such a runner reads as stopped until it restarts
+    (hold_lock still refuses a second runner beside it)."""
     path = Path(home) / "run" / "runner.lock"
     try:
-        fd = os.open(path, os.O_RDWR)
+        fd = os.open(path, os.O_RDONLY)
     except OSError:
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return True
-    else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        answer = fcntl.fcntl(fd, fcntl.F_OFD_GETLK, _ofd_lock(fcntl.F_WRLCK))
+    except OSError:
         return False
     finally:
         os.close(fd)
+    return struct.unpack(_FLOCK, answer)[0] != fcntl.F_UNLCK
 
 
 def _gone(runner):

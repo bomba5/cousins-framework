@@ -384,8 +384,8 @@ def fleet_rows(server):
 
 def spawn_lane_options(root):
     """What the spawn dialog offers for the lane: `runners` (the kinds,
-    from delivery.RUNNER_KINDS; none chosen is the tmux lane),
-    `default_runner` (COUSIN_DEFAULT_RUNNER, else null), `accounts` (host,
+    from delivery.RUNNER_KINDS), `default_runner` (COUSIN_DEFAULT_RUNNER,
+    else spawn.DEFAULT_RUNNER, the one the dialog preselects), `accounts` (host,
     then config/accounts.toml's by name, each with its kind, the kinds it
     runs on (agent_settings.check_lane, the runner's rule, the tmux kind's
     refusal of a key or token account included) and, for an opencode
@@ -394,7 +394,8 @@ def spawn_lane_options(root):
     with `accounts_error` when the file cannot be read, `lane_keys`, the
     [agent] keys each kind reads, and `lane_models`, how each kind that
     reads a model takes it (agent_settings.model_rule). `tmux_lane` is the
-    runner value that names the tmux lane explicitly."""
+    lane value a fleet row gives a cousin with no runner kind (the spawn
+    route refuses it: 2.0.0 has no legacy tmux lane)."""
     from cousin_lib import accounts, agent_settings
     kinds = agent_settings.kinds()
     error = None

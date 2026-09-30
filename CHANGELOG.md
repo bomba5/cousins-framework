@@ -3,6 +3,14 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.25.3 - 2026-09-30
+
+### Fixed
+- A runner restarted after a login was fixed no longer shows "login
+  required" forever: a data/login-required.json already on disk at start
+  now clears on the first good result (SDK and opencode runners). It used
+  to wait for a new login failure that never came.
+
 ## 1.25.2 - 2026-09-29
 
 ### Changed

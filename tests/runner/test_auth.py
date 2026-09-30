@@ -149,12 +149,13 @@ def _result_append_fails_once(r):
 @unittest.skipIf(AssistantMessage is None, "claude-agent-sdk not installed")
 class TestRunnerWaitsForALogin(HermeticCase):
     def build(self, *, fail_connects=0, first_turn=None, per_client=None, account=None,
-              watch_mark=True):
+              watch_mark=True, before=None):
         """`per_client[n]`: the scripts client n runs before the defaults;
         `first_turn` is per_client {0: [first_turn]}. `account` may be a
         callable of the root. `self.logged_in` and `self.mark` are what
         `claude auth status` and the credential mark read, flipped by the
-        test to play the operator."""
+        test to play the operator. `before(home)` runs before the runner
+        is made (a file an earlier runner left)."""
         from cousin_lib.runner.sdk import SdkRunner
         from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
         self.home = temp_home(self)
@@ -192,6 +193,8 @@ class TestRunnerWaitsForALogin(HermeticCase):
             return client
         if callable(account):
             account = account(self.root)
+        if before:
+            before(self.home)
         r = SdkRunner(self.home, client_factory=factory, account=account)
         self.addCleanup(lambda: r.stop(timeout=5))
         return r
@@ -226,6 +229,19 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertIsNone(r.fatal)                        # never exits for a login
         self.assertTrue(any(e.get("restored") for e in self.events(r, "auth")))
         self.assertIsNone(auth.read_login_required(self.home))   # cleared by a good result
+
+    def test_a_login_file_left_by_an_earlier_runner_clears_on_the_first_good_result(self):
+        """A restart after the login was fixed: the file on disk is armed at
+        start, so the first good result clears it (it stayed forever)."""
+        r = self.build(before=lambda home: auth.write_login_required(
+            home, host="h", account="host", kind="claude-login", reason=auth.LOGIN,
+            detail="old", action="claude auth login"))
+        self.logged_in = True
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is None))
+        self.assertTrue(any(e.get("restored") for e in self.events(r, "auth")))
 
     def test_a_bad_key_fails_at_the_first_401_retry_not_after_the_retries(self):
         from tests.runner.test_sdk import init_msg

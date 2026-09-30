@@ -878,6 +878,16 @@ class TestTurns(OpencodeCase):
                          ["manual retry", None])
         self.assertTrue(self.payloads(r, "auth")[-1]["restored"])
 
+    def test_a_login_file_left_by_an_earlier_runner_clears_on_the_first_good_result(self):
+        home = self.home()
+        (home / "data").mkdir(parents=True, exist_ok=True)
+        (home / "data" / "login-required.json").write_text(json.dumps({"reason": "login_required"}))
+        r = self.started(self.runner([[("text", "ok")]], home=home))
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 8))
+        self.assertTrue(_wait(lambda: not (home / "data" / "login-required.json").exists(), 8))
+        self.assertTrue(self.payloads(r, "auth")[-1]["restored"])
+
     def test_a_credential_change_is_checked_before_the_login_block_lifts(self):
         """Review Important 7: opencode reads auth.json live, so the retry that
         a credential change starts must not run on a file the start would

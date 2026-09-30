@@ -420,7 +420,10 @@ class SdkRunner:
         self._login_file_seen = False # the file was written (a manual retry is its deletion)
         self._retry_failures = 0      # login retries that failed for another reason, in a row
         self._last_connect_error = None
-        self._restore_pending = False # R19: the file clears on the next GOOD result
+        # R19: the file clears on the next GOOD result. A file left by an
+        # earlier runner (a restart after the fix) is armed too, or the
+        # console would say "login required" until the next failure.
+        self._restore_pending = auth.read_login_required(self.home) is not None
         self._auth_turn = None        # the signal seen inside the running turn
         self._fresh_pending = None    # a start the login held: _start_fresh's with_digest
         self._opened = False          # a client connected at least once

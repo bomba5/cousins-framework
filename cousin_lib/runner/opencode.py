@@ -558,7 +558,8 @@ class OpencodeRunner:
         self._login_attempt = 0
         self._login_mark = None
         self._login_file_seen = False
-        self._restore_pending = False
+        # a file left by an earlier runner clears on the first good result too
+        self._restore_pending = auth.read_login_required(self.home) is not None
         self._account_fd = None
         self._server_env = None
 

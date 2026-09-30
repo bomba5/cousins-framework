@@ -292,14 +292,10 @@ or two before deleting anything.
 
 ## Switching between runner kinds
 
-This is a different move from the section above: `cousin-migrate apply`
-(no `--to`) takes a cousin off the legacy tmux lane and onto the runner
-lane, always onto the `sdk` kind, once. `cousin-migrate --to sdk|tmux`
-switches a cousin that is already on the runner lane between the `sdk`
-kind and the `tmux` kind, live and reversibly, keeping the same session
-where both kinds can resume it. A cousin still on the legacy tmux lane
-has to go through `apply` first (`plan`/`apply` say so and point at
-this section).
+`cousin-migrate --to sdk|tmux` switches a cousin between the `sdk` kind and
+the `tmux` kind, live and reversibly, keeping the same session where both
+kinds can resume it. `plan`, `apply` and `rollback` need `--to` in 2.0.0; a
+cousin with no runner is refused ([above](#a-cousin-with-no-runner)).
 
 ```
 cousin-migrate plan sam --to sdk

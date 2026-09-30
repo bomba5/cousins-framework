@@ -170,8 +170,8 @@ class TestModeNames(AuthCase):
         # agent_auth.py only (the console page reads them from the API).
         pkg = pathlib.Path(agent_auth.__file__).parent
         for path in list(pkg.rglob("*.py")) + list(pkg.rglob("*.jsx")):
-            if path.name == "agent_auth.py":
-                continue
+            if path.name in ("agent_auth.py", "removed_keys.py"):
+                continue   # removed_keys names the retired [auth.api_key] table, not a mode
             text = path.read_text(encoding="utf-8")
             self.assertNotIn('"api_key"', text, path)
             self.assertNotIn("'api_key'", text, path)

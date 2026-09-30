@@ -164,7 +164,7 @@ gets a new one.
 | `--queen-url URL` | required. The queen as the node will reach it, not as you reach it from here |
 | `--name N`, `--role R` | required. Rendered into the node's `CLAUDE.md` |
 | `--token T` | use a token already minted on another queen instead of minting one here |
-| `--home-chat URL` | sets `HOME_CHAT_URL` in `node.env` (see [node.env](#nodeenv)); off when absent |
+| `--tell-home` | sets `TELL_HOME=1` in `node.env`: `[tell-home: ...]` reaches the queen's `home_cousin` (see [node.env](#nodeenv)); off when absent |
 | `--agent-cmd CMD` | the brain command to put in `node.env`; empty means the placeholder |
 | `--port N` | the node's chat port, default 8210 |
 | `--listen-all` | bind the node's chat on `0.0.0.0` so the console can proxy chat to it. Default is loopback only |
@@ -312,8 +312,7 @@ Each message becomes one turn, whether it arrived on the node's own
      queen.
    - `[tell-home: text]` reaches the home cousin through the queen
      (`POST /hive/tell-home`, with the node's token), if the node was
-     built with home chat. Otherwise it's dropped, unless `HOME_CHAT_URL`
-     is set (see [node.env](#nodeenv)).
+     built with home chat (`TELL_HOME=1`). Otherwise it's dropped.
 4. **Remember.** The whole exchange is stored on the queen under the
    node's own scope, every turn. Only that node can recall its own
    memories. If the node's disk dies, its memory doesn't.
@@ -463,7 +462,7 @@ http://<this machine>:8101`.
 | `QUEEN_URL` | | the queen, reached outbound |
 | `HIVE_TOKEN` | | the node's bearer token. Secret |
 | `TELL_HOME` | empty | `1`: `[tell-home: ...]` goes to the queen's `POST /hive/tell-home` with `HIVE_TOKEN` |
-| `HOME_CHAT_URL` | empty | where `[tell-home: ...]` posts, unauthenticated, when `TELL_HOME` is not `1`; empty means it's dropped. The console always leaves it empty, and nothing in this install serves a chat server for it: set it (by hand or with `--home-chat`) only to reach another install's |
+| `HOME_CHAT_URL` | empty | ignored since 2.0.0 (no home chat server); a node with it set and `TELL_HOME` not `1` says so at start |
 | `AGENT_CMD` | empty | the brain command; empty means the placeholder |
 | `NODE_POLL_SECONDS` | `5` | inbox poll interval; 0 turns it off |
 | `AGENT_TIMEOUT_SECONDS` | `120` | how long one brain call may take |

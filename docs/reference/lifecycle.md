@@ -2,6 +2,8 @@
 
 What goes into a boot packet, what a [flip](../glossary.md#flip) does step by step, and how reincarnate and transplant work underneath. Read it when a flip went wrong or a [cousin](../glossary.md#cousin) woke up confused. For the everyday version, read [cousins](../cousins.md).
 
+**2.0.0:** every cousin is a [runner](../glossary.md#runner) kind, and its flip is a [rollover](../glossary.md#rollover): see [Runner lane](#runner-lane). The boot packet and the flip steps below are the retired legacy tmux [lane](../glossary.md#lane)'s; 2.0.0 refuses a cousin with no `[agent] runner` before any of them run. They stay here as the record, and the packet's layers are the ones the runner's state digest shares.
+
 A cousin's session only lasts so long before its context is full. The flip ends the session (a "generation") and starts a fresh one, and the boot packet is the text the fresh session gets typed in first so it knows who it is and what it was doing. The files in the home are what carry over; the packet is built from them.
 
 ## The boot packet
@@ -137,7 +139,7 @@ On failure there's an `error` string and the stages up to the one that failed.
 
 ### A clean stop
 
-The console's stop button ends a running cousin the same way, minus the respawn: steps 3 to 10 above (marker, capture, the handoff prompt headed `[cousin-stop in progress]`, the audit, transcript mining, archive, generation, packet), then the agent and the chat server stop. The packet waits in `data/pending-boot.json`. The next start of any kind (the console, `cousin-spawn --start`, the `cousin-start@` unit with `--resume`) starts a fresh session instead of resuming the closed one, and types the packet in after 8 seconds, preceded by `[cousin-start] the last session closed cleanly; boot packet follows.` A flip in between supersedes the pending packet with its own.
+The console's stop button on a runner cousin stops its runner and holds it down (`<home>/run/held`); a restart resumes the session. A cousin with no `[agent] runner` is refused (409).
 
 The console runs a clean stop in the background (HTTP 202, the row turns `stopped` when it is done; the handoff wait is up to 300 seconds). A cousin that isn't running stops at once. `{"clean": false}` on `POST /api/cousins/<slug>/stop` stops at once without the handoff, and restart stays immediate: it applies a setting and comes straight back. In code the clean stop is `cousin_lib.flip.close_session`.
 

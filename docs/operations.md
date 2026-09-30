@@ -399,17 +399,11 @@ console's top bar shows the one the console process is running.
 
 ## After a reboot
 
-The units come back by themselves (with linger on). A cousin comes back only
-if you enabled its start unit:
-
-```
-systemctl --user enable cousin-start@wren.service
-```
-
-That runs `cousin-spawn wren --start --resume` once at boot, which picks up
-the cousin's last session where it can and opens a new one where it can't.
-Cousins without the unit stay stopped until you start them from the console
-or with `cousin-spawn <slug> --start`. See
+The units come back by themselves (with linger on). `cousin-supervisor`
+starts every cousin with it, each resuming its session, except a cousin with
+`[agent] auto_start = false` or one held down by a stop (`<home>/run/held`):
+those stay stopped until you start them from the console or with
+`cousin-supervisor start <slug>`. See
 [systemd/README.md](../systemd/README.md).
 
 ## Troubleshooting

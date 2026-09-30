@@ -159,11 +159,11 @@ What a node does with the queen, for reference if you're writing your own:
 - checks in on start and then every `checkin_seconds` (60 until the queen says otherwise); a failed checkin is logged and retried, never fatal
 - polls `GET /hive/inbox?since=<cursor>` every `NODE_POLL_SECONDS` (5; 0 turns it off), keeps the cursor in `data/inbox-cursor`, and answers each message back over `/hive/msg`
 - on each [turn](../glossary.md#turn) recalls from `/hive/recall` word by word (the first six distinct words of 4+ characters, up to 3 memories), and after it remembers the exchange with scope `own`
-- acts on three markers in the brain's reply: `[remember: fact]` (written with scope `shared`), `[tell <slug>: text]` (a `/hive/msg`), `[tell-home: text]` (with `TELL_HOME=1`, which the console's build sets for home chat, a `POST /hive/tell-home` with its token; without it, a POST to `HOME_CHAT_URL/api/send` if one is set (by hand, or with `cousin-spawn-node --home-chat`), which nothing in this install serves; with neither, it's dropped)
+- acts on three markers in the brain's reply: `[remember: fact]` (written with scope `shared`), `[tell <slug>: text]` (a `/hive/msg`), `[tell-home: text]` (with `TELL_HOME=1`, which the console's build sets for home chat, a `POST /hive/tell-home` with its token; without it, dropped)
 
 The brain is `AGENT_CMD` if set (the prompt on stdin, the reply on stdout, `AGENT_TIMEOUT_SECONDS` default 120), otherwise a placeholder that echoes. With no reachable queen the node keeps serving its chat and remembers nothing until the queen is back.
 
-Node settings come from `node.env`: `COUSIN_SLUG`, `NODE_NAME`, `NODE_ROLE`, `NODE_PORT` (8210), `NODE_HOST`, `QUEEN_URL`, `HIVE_TOKEN`, `TELL_HOME`, `HOME_CHAT_URL`, `AGENT_CMD`, `NODE_DIR`, `NODE_POLL_SECONDS`, `AGENT_TIMEOUT_SECONDS`.
+Node settings come from `node.env`: `COUSIN_SLUG`, `NODE_NAME`, `NODE_ROLE`, `NODE_PORT` (8210), `NODE_HOST`, `QUEEN_URL`, `HIVE_TOKEN`, `TELL_HOME`, `AGENT_CMD`, `NODE_DIR`, `NODE_POLL_SECONDS`, `AGENT_TIMEOUT_SECONDS`.
 
 ## Limits
 

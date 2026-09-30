@@ -182,7 +182,8 @@ Click a card to open the inspector drawer. From top to bottom:
   comments included. When a restart is needed the field says "restart to
   apply".
 - **Agent** and **cousin settings.** See [Agent settings](#agent-settings).
-- **Auth** (a tmux-legacy cousin; a runner cousin's credential is its
+- **Auth** (a tmux-legacy cousin only, which 2.0.0 refuses: the switch
+  answers with the refusal line; a runner cousin's credential is its
   account). A select for `claude` or `api_key`, and when the key mode is
   configured, "set key" / "replace key". The key goes into a password field,
   is sent once, and from then on the page shows only "key set (ends WXYZ)".
@@ -256,8 +257,9 @@ drift from what the runner accepts.
   runner does and writes them in one go; a new `sdk` model is first checked
   with one smallest model turn on the account being saved with it, shown as
   the cousin's long operation. Every change applies at the next start: the panel
-  says "restart to apply" and offers a restart (click twice). A tmux-legacy
-  cousin has no agent settings; "switch kind" moves it to a runner.
+  says "restart to apply" and offers a restart (click twice). A cousin with
+  no `[agent] runner` has no agent settings and is refused by 2.0.0
+  ([migrating](migrating.md#a-cousin-with-no-runner)).
 - **Cousin settings.** Name, peer visible, recall lines and keyword recall,
   the review batch and review model, the daily flip time (`HH:MM`, `never`,
   or blank for the install default, with the effective time shown) and commit
@@ -317,24 +319,21 @@ Replacing a registry with the default, or a broken `.mcp.json` or
 ### Kind and migration
 
 The inspector's "kind and migration" panel shows the cousin's lane and its
-migration and kind switch records, and opens the switch dialog: "migrate to
-the runner" on a tmux-lane cousin (`cousin-migrate`), "switch kind" on a
-runner cousin (`cousin-migrate --to sdk|tmux`). The agent panel's switch
+migration and kind switch records, and opens the switch dialog, "switch kind"
+(`cousin-migrate --to sdk|tmux`). A cousin with no `[agent] runner` shows the
+2.0.0 refusal line instead: the tmux-lane migration is 1.x only
+([migrating](migrating.md#a-cousin-with-no-runner)). The agent panel's switch
 button opens the same dialog. The routes are in
 [the API reference](reference/console-api.md#kind-switch-and-migration).
 
 - **plan**: a checklist of every check with its detail, the steps, and
-  ready or not. It writes nothing. For the migration you pick the account
-  and whether to validate; validate spends one model turn (the smallest
-  one, on the model, effort and account the runner will run), and a
-  carried model is never written without it. The kind switch keeps the
+  ready or not. It writes nothing. The kind switch keeps the
   cousin's account and its session: the source stops at idle and the
   target resumes it.
 - **apply**: only after a ready plan for the same options, with the
   [supervisor](glossary.md#supervisor) up, and a second click. It runs in the background with its
-  steps as they happen (close, handover, import, toml, start, verify for
-  the migration; trust, close, toml, cursor, start, notice, verify for the
-  switch), one migration or switch at a time across the fleet. When the
+  steps as they happen (trust, close, toml, cursor, start, notice, verify),
+  one switch at a time across the fleet. When the
   switch's verify finds the tmux pane waiting on the trust dialog, the step
   says so and a button opens the pane: accept the dialog there (arrows and
   Enter). Keys go into a tmux-kind pane only while it waits on a person;
@@ -343,9 +342,7 @@ button opens the same dialog. The routes are in
   result, recorder hook errors, the runner's config against the cousin's),
   optionally since a time and with one validating turn.
 - **roll back**: offered while a record allows it, the kind switch back to
-  the kind it came from, the migration back to the tmux lane. A second click
-  confirms; forcing the migration's rollback past waiting inbox rows asks a
-  third time.
+  the kind it came from. A second click confirms.
 
 Not there yet, because phase 11 defers them, and the panel says so: adopting
 a live pane, and switching the whole fleet (`--all --keep-going`).
@@ -392,22 +389,22 @@ itself is described in [cousins](cousins.md#generations-and-the-flip).
 | role paragraph | optional; goes into the Identity section of CLAUDE.md |
 | voice | required; how the cousin writes |
 | operator | the person it answers to; blank is allowed |
-| kind | the runner kinds the console serves, or tmux-legacy (always an explicit choice); `COUSIN_DEFAULT_RUNNER` preselects one |
-| account | a runner kind only: the accounts that run on it |
-| model, effort | tmux-legacy: from `config/harness.toml [agent]` (`models`, `default_model`, `default_effort`); without `models` a built-in list is offered. A runner kind: only where it reads them, the model as free text (`"<provider>/<model>"` on opencode, with the account's providers suggested) |
+| kind | the runner kinds the console serves; `COUSIN_DEFAULT_RUNNER` preselects one, else `sdk` |
+| account | the accounts that run on the chosen kind |
+| model, effort | only where the kind reads them; `config/harness.toml [agent]` `models`, `default_model` and `default_effort` are the suggestions (a built-in list without `models`); the model is free text, `"<provider>/<model>"` on opencode, with the account's providers suggested |
 | heartbeat | seconds, default 3600 |
 | memory scope | private, shared |
 
 "create cousin" creates it and then starts it. If the create works and the
 start fails, the cousin exists and you can start it from its card once you
-fix the problem (usually `config/agent-cmd`).
+fix the problem (usually the supervisor, or the account's login).
 
 The kinds and accounts come from the console (`GET /api/spawn/options`),
-never from the page. A runner cousin is started through `cousin-supervisor`
+never from the page. A cousin is started through `cousin-supervisor`
 (where no supervisor runs, the start answers 503). The Docker install's
 `compose.yml` sets `COUSIN_DEFAULT_RUNNER`, which only preselects the kind.
 `COUSIN_DEFAULT_ACCOUNT` only preselects too: a runner kind created with the
-account left blank gets it (unset, `host`); tmux-legacy never reads it.
+account left blank gets it (unset, `host`).
 There is no worker option: spawn has no backend for `[cousin] type =
 "worker"` yet.
 

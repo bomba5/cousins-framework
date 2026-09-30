@@ -3,6 +3,82 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 2.0.0 - 2026-09-30
+
+The legacy tmux lane is retired: every cousin is a runner kind (`sdk`,
+`tmux`, `opencode` or `fake`), and no cousin runs a chat server of its own.
+The tmux **kind** (Claude Code in a pane, driven by `cousin-runner`) stays.
+
+### Upgrading from 1.x
+
+Do these in order.
+
+1. **Move every cousin to a runner kind first, on 1.x.** `cousin-migrate plan
+   <slug>` says `on the tmux lane` for a legacy one; move each with
+   `cousin-migrate apply <slug> --validate --yes`, one at a time. 2.0.0 keeps
+   no conversion: a cousin with no `[agent] runner` is refused by name
+   everywhere. Missed one? docs/migrating.md, "A cousin with no runner", has
+   the steps by hand.
+2. **Hive nodes:** a node with `HOME_CHAT_URL` set moves to `TELL_HOME=1`, with
+   `home_cousin` named in the queen's `config/hive.toml`.
+3. **Units:** disable what only the legacy lane used:
+   `systemctl --user disable --now cousin-chat-watchdog.timer
+   cousin-chat-server@<slug>.service cousin-start@<slug>.service`.
+4. **Upgrade:** pull, `pip install -e '.[sdk]'`, restart `cousin-supervisor`,
+   `cousin-console` and `cousin-loops`. No store changes schema; runners
+   resume their sessions.
+5. **Stop the old chat servers** still running from 1.x, and remove the keys
+   2.0.0 no longer reads: `cousin-migrate tidy --all` lists them,
+   `cousin-migrate tidy --all --yes` removes them (each file's prior bytes are
+   kept as `.pre-2.0.0`) and stops a 1.x chat server still running for a cousin.
+
+**Rolling back:** check out the last 1.x tag, `pip install -e '.[sdk]'`,
+restart the supervisor, console and loops. Runner cousins resume their
+sessions. A cousin.toml `tidy` edited has its prior bytes in
+`data/cousin.toml.pre-2.0.0`; the chat-server units can be re-enabled by hand.
+
+### Removed (breaking)
+
+- The legacy tmux lane. A cousin with no `[agent] runner` is refused with one
+  line naming the way out, by `cousin-spawn --start` (exit 2), the console's
+  start/stop/restart (409), `cousin-runner` (exit 2), delivery (`failed`),
+  `cousin-flip`, `cousin-reincarnate`, the supervisor and `cousin-migrate
+  plan|apply|rollback` without `--to` (exit 2). A worker says it has no
+  session to deliver to.
+- The per-cousin chat server: `cousin-chat-server`, `cousin-chat-watchdog`,
+  their units, port allocation and `cousin-spawn --port`. The console, the
+  inbox and the hive carry chat. A peer install still on 1.x is still reached
+  at its chat server's `/api/send`.
+- `systemd/cousin-start@.service`: the supervisor starts cousins at boot.
+- The hive node's `HOME_CHAT_URL` (ignored, with a line at start): tell-home
+  goes through the queen (`TELL_HOME=1`). `cousin-spawn-node --home-chat` is
+  now `--tell-home`.
+- `cousin-migrate plan|apply|rollback` need `--to` (the kind switch); the
+  1.x tmux-lane migration is refused. The console's migrate routes answer
+  `409` (no runner) or `400` (a runner cousin) without `to`.
+- The auth mode switch (`cousin-auth`, the console's auth route) refuses a
+  cousin with no runner (`409`) before anything is stopped; a dismiss of one
+  archives it without the refused stop.
+- A new cousin with no `--runner` and no `COUSIN_DEFAULT_RUNNER` is `sdk`
+  (it was the legacy lane); `tmux-legacy` is not a lane any more.
+- The console's rows lose `port` and `host`; the spawn dialog offers runner
+  kinds only.
+
+### Added
+
+- Removed keys are named, never silently ignored: `cousin-runner` at start
+  (a stderr line and a `system` `config` event), `cousin-supervisor status`
+  (`config` and `refused` blocks), the console's card (`removedKeys`) and
+  `cousin-migrate plan --to` / `check`. `cousin-migrate tidy <slug>|--all
+  [--yes]` removes them. The list is in docs/configuration.md, "Removed in 2.0.0".
+
+### Changed
+
+- Docs describe runner kinds only (cousins.md, configuration.md, chat.md,
+  chat-api.md, migrating.md, operations.md, remote-cousins.md, telegram.md,
+  console.md, the glossary, the loops pages), plus eight doc and comment
+  fixes found by the framework map.
+
 ## 1.27.0 - 2026-09-30
 
 ### Added

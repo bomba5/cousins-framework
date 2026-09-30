@@ -361,7 +361,7 @@ class _Handler(BaseHTTPRequestHandler):
             console_hive.serve(self, method, parsed.path, parsed.query, body)
             return
         # The external peers' door (cousin_lib/console/peer_routes.py):
-        # another install's cousin, with its per-peer bearer token and no
+        # another install's cousin, signing with its per-peer secret (HMAC) and no
         # session, behind the network guard; the body is bounded before
         # it is read. A session is worth nothing there, a peer token
         # nothing under /api/.

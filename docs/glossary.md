@@ -75,10 +75,10 @@ with `cousin-migrate`. See [reference/runners.md](reference/runners.md).
 
 ### lane
 
-how a cousin is driven. A **runner kind** is a lane; the
-**legacy tmux lane** is a cousin with no runner kind, whose chat server types
-into its own tmux session. The console calls it `tmux-legacy`. It is still
-supported until it is retired. See [cousins.md](cousins.md).
+how a cousin is driven: a **runner kind** (`sdk`, `tmux`, `opencode` or
+`fake`). The **legacy tmux lane** (a cousin with no runner kind, typed into
+by its chat server) was retired in 2.0.0; a cousin without a runner kind is
+refused by name. See [cousins.md](cousins.md).
 
 ### loop
 

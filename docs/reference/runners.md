@@ -123,8 +123,8 @@ all.
 
 The lanes do not mix: an `opencode` cousin on a Claude account, or an `sdk`
 or `fake` cousin on an `opencode` account, is refused at start (exit 2), and
-so is an `opencode` or `fake` cousin with `[agent.sessions]` mapping a kind
-to `"own"`.
+so is an `opencode`, `fake` or `tmux` cousin with `[agent.sessions]` mapping a
+kind to `"own"` (side sessions are the `sdk` kind's).
 
 **The opencode lane never carries Claude subscription traffic.** No
 `claude-login` or `claude-token` account runs on it, an Anthropic OAuth login

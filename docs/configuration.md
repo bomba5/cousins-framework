@@ -51,7 +51,7 @@ Every command finds it the same way, first match wins:
    exists
 4. the working directory, if it looks like a checkout (it has
    `templates/cousin-CLAUDE.template.md` and `config/`). This one only
-   applies to commands you type, never to the chat server or the daemons.
+   applies to commands you type, never to the runners or the daemons.
 
 Otherwise the command stops and tells you how to name the root.
 
@@ -78,6 +78,7 @@ different case: it is refused ([migrating](migrating.md)).
 | `busy_patterns` | `config/harness.toml` | delete: the auth-mode switch that read it is gone |
 | `[input_mode]` | `config/harness.toml` | delete: nothing types chat into a pane |
 | `flip_when_transcript_mb` | `config/harness.toml` | delete: the transcript-size guard read the legacy lane's session |
+| `COUSIN_TMUX_SOCKET` | the environment | unset it: it named the legacy sessions' tmux socket; the tmux kind uses `<root>/run/tmux.sock` |
 | `[agent.resume]` | `config/harness.toml` | delete: a runner resumes its own session |
 | `[auth.api_key]` | `config/harness.toml` | delete: an `anthropic-key` account in `accounts.toml` replaces the `api_key` mode |
 | `home_chat_url` | `config/hive.toml` | delete: set `home_cousin`, reached through the queen |
@@ -342,11 +343,9 @@ Top-level keys:
 | `host_label` | the hostname | a non-empty string: the host a login message names ("log in on <host>"), in `data/login-required.json`, `cousin-chat list` and the Telegram notice. Anything else is an error. |
 
 Path templates take `{home}` (the cousin home as is) and `{home_encoded}`
-(Claude Code's project directory name for it: every `/` becomes `-`, so
-`/a/b` is `-a-b`). A leading `~` is your home directory. If your checkout
-path has characters other than letters, digits, `-` and `/`, compare with the
-directory Claude Code actually made under `~/.claude/projects/` and write the
-path out.
+(Claude Code's project directory name for it: every character that is not an
+ASCII letter or digit becomes `-`, so `/a/b` is `-a-b` and `/tmp/x_/w.v2` is
+`-tmp-x--w-v2`). A leading `~` is your home directory.
 
 `[agent]`:
 
@@ -383,7 +382,7 @@ Every user can do everything. There are no roles.
 
 ## net-allowlist.json
 
-Who may connect to the console and the chat servers. By default: loopback
+Who may connect to the console. By default: loopback
 and the private ranges `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`. This
 file only adds to that list:
 
@@ -414,8 +413,8 @@ timeout_s = 120
 | `chunk_chars` | 2000 | long files are embedded in chunks this long |
 | `chunk_overlap` | 200 | each chunk overlaps the previous one by this much |
 
-`[recall]`, for proactive recall (the chat server searching memory for your
-messages and adding a "possibly relevant" line):
+`[recall]`, for proactive recall (the runner searching memory for each
+message a cousin receives and adding a "possibly relevant" line):
 
 | key | default | meaning |
 |---|---|---|
@@ -441,7 +440,7 @@ send_path = "/api/send"
 
 | key | default | meaning |
 |---|---|---|
-| `url` | required | the peer's chat server, or its console, `http` or `https`, no credentials, query or fragment |
+| `url` | required | the peer's console (or, for a peer install still on 1.x, its chat server), `http` or `https`, no credentials, query or fragment |
 | `send_path` | `/api/send`, or `/peer/send` with a `token_file` | the route that takes the message; must start with `/` |
 | `token_file` | none | outbound: the secret this install shares with that peer, in a file under the root (mode 0600). Each message to its console's `POST /peer/send` is signed with it; the secret itself is never sent |
 | `sender` | none, required with `token_file` | outbound: the name that peer knows this install by (its own entry for us) |
@@ -600,12 +599,11 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | variable | meaning |
 |---|---|
 | `FRAMEWORK_ROOT` | the root, see above. The units set it. |
-| `COUSIN_HOME` | the cousin a command acts for. Set in every cousin's tmux session; set it yourself to use `cousin-memory`, `cousin-job` and friends from a plain shell. |
+| `COUSIN_HOME` | the cousin a command acts for. Set in every runner's environment; set it yourself to use `cousin-memory`, `cousin-job` and friends from a plain shell. |
 | `COUSIN_SLUG` | set by the framework for session hooks, chat hooks and the MCP server |
-| `COUSIN_TMUX_SOCKET` | a non-default tmux socket, read by the chat server and the watchdog. The console takes `--tmux-socket` instead. |
 | `COUSIN_FILTER_OVERRIDE` | `1` switches the outbound filter off for one command |
-| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the [supervisor](glossary.md#supervisor), not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the chat servers and tmux sessions the supervised console starts, so a tmux cousin started from that console sees it too. Only the console's restart route reads it (to report `supervised`) |
-| `COUSIN_DEFAULT_RUNNER` | `sdk`, `fake` or `opencode`: the lane a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: the tmux lane, and nothing is written. Any other value is refused before anything is created |
+| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the [supervisor](glossary.md#supervisor), not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the runners and the tmux kind's panes. Only the console's restart route reads it (to report `supervised`) |
+| `COUSIN_DEFAULT_RUNNER` | `sdk`, `tmux`, `opencode` or `fake`: the runner kind a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: `sdk`. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 | `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The image's `opencode` target sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the default image, a bare host): `opencode` on `PATH` |
 | `COUSIN_POLICY_FILE` | set by an opencode cousin's runner for its `opencode serve`, not by you: the rendered policy file the plugin pack reads (`<data_dir>/cousin-policy.json`) |
@@ -665,7 +663,7 @@ account = "metered"
 | key | default | meaning |
 |---|---|---|
 | `scope` | `"private"` | `private` or `shared`: whether the cousin may propose memories to the shared tier. Every cousin reads the shared tier and keeps its private memory either way. The retired `both` is read as `shared` |
-| `proactive_recall` | `true` | `false` stops the chat server adding recall lines to your messages |
+| `proactive_recall` | `true` | `false` stops the runner adding recall lines to the messages the cousin receives |
 | `recall_keyword_only` | `false` | `true` lets keyword-only hits into recall lines when there's no embedding service |
 | `review_batch` | `3` | when more than this many entries on authored topics were written since the review gate last looked (on the runner lane, after every turn), they are held for review, out of the memory views until kept (`cousin-memory review`) |
 | `review_model` | the cousin's own model | the model the runner's review gate asks to keep or drop held entries (SDK lane) |
@@ -738,7 +736,8 @@ starts from a fixed allowlist of the runner's environment (`HOME`, `PATH`,
 `DBUS_SESSION_BUS_ADDRESS`, `LANG`, `LOCALE_ARCHIVE`, `TZ`, `COLORTERM`,
 `TMPDIR`, every `LC_*`) plus the names `[agent] env_allow` lists (a list of
 variable names; a `CLAUDE*` or `ANTHROPIC*` name is refused, since those never
-reach the pane). The in-pane launcher also sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+reach the pane, and so is a credential-shaped name, one `accounts.credential_name`
+recognises). The in-pane launcher also sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
 `DISABLE_AUTOUPDATER=1` and `COUSIN_PANE_PID` (its own pid, which the exec
 chain makes the CLI's too, so the pane hook and a crash recovery know which
 process is this cousin's), and refuses the CLI's print-mode flags (`-p`,

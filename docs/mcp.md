@@ -72,8 +72,8 @@ store: pass secrets some other way.
 What's deliberately not there: spawn, [flip](glossary.md#flip), reincarnate, transplant,
 loop control and shared-tier review. Those are yours, not the cousin's.
 
-MCP only covers what the cousin does. Messages still reach the cousin
-as lines typed into its pane by the chat server; MCP adds no way in.
+MCP only covers what the cousin does. Messages reach the cousin through
+its [inbox](glossary.md#inbox), which its [runner](glossary.md#runner) reads; MCP adds no way in.
 
 ## How it's wired
 

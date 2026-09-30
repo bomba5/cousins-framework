@@ -695,12 +695,24 @@ function MainHeader({ view, cousins, activeCousin }) {
     overview: "/console/host",
   };
   const extra = window.registeredView ? registeredView(view) : null;
+  // On a phone the chat's status is one line: dot, state, model (cut with
+  // an ellipsis). The slug is the title above it; the heartbeat is in the
+  // inspector.
+  const mobile = window.useMobileLayout ? useMobileLayout() : false;
   return (
     <div className="main-header">
       <h1>{titles[view] || (extra && extra.label) || view}</h1>
       <span className="path">{paths[view] || (extra ? "/console/" + view : "")}</span>
       <span className="spacer" />
-      {view === "chat" && c && (
+      {view === "chat" && c && mobile && (
+        <span className="hdr-meta hdr-meta-m">
+          <span className={"led " + (st ? st.tone : "gray") + (st && st.pulse ? " pulse" : "")} />
+          <span className={"fleet-state tone-" + (st ? st.tone : "gray")}>{st ? st.word : c.status}</span>
+          {c.model && <span className="hdr-model">&middot; {c.model}</span>}
+          {c.chat === "down" && <span className="hdr-down">&middot; chat server down</span>}
+        </span>
+      )}
+      {view === "chat" && c && !mobile && (
         <span className="hdr-meta">
           <span className={"led " + (st ? st.tone : "gray") + (st && st.pulse ? " pulse" : "")} />
           <span className={"fleet-state tone-" + (st ? st.tone : "gray")}>{st ? st.word : c.status}</span> · {c.slug}{c.model ? ` · ${c.model}` : ""} · heartbeat {c.heartbeat}s{c.chat === "down" ? " · chat server down" : ""}

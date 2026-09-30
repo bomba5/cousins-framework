@@ -20,8 +20,9 @@ The manifest may declare three parts, each optional:
 - [service]: one long-running process for the install, run by the
   supervisor as `plugin:<name>` while at least one cousin enables it
   (command, args, env, port, health);
-- [console]: a page on that service, shown as a tab on the cousin's view
-  (title, page); it needs [service].
+- [console]: a page on that service, shown on the cousin's chat view
+  (title, page, placement: "pane", a tab over the pane, the default, or
+  "chat", a strip over the chat); it needs [service].
 
 Values may carry placeholders the framework renders: `{plugin_dir}`,
 `{root}`, `{service_url}` (`http://127.0.0.1:<port>`), and in [mcp] and
@@ -49,7 +50,10 @@ _TOP_KEYS = {"name", "description", "version", "mcp", "service", "console"}
 _ENTRY_KEYS = {"path", "enabled"}
 _PART_KEYS = {"mcp": {"command", "args", "env"},
               "service": {"command", "args", "env", "port", "health"},
-              "console": {"title", "page"}}
+              "console": {"title", "page", "placement"}}
+# Where a [console] page shows: a tab over the pane (the default), or a
+# strip over the chat's messages.
+PLACEMENTS = ("pane", "chat")
 _INSTALL_VARS = ("plugin_dir", "root", "service_url")
 _COUSIN_VARS = _INSTALL_VARS + ("slug", "home")
 _PART_VARS = {"mcp": _COUSIN_VARS, "service": _INSTALL_VARS, "console": _COUSIN_VARS}
@@ -72,6 +76,11 @@ class Plugin:
         self.mcp = manifest.get("mcp")
         self.service = manifest.get("service")
         self.console = manifest.get("console")
+
+    @property
+    def placement(self):
+        """"pane" or "chat" with a [console] page, else None."""
+        return self.console.get("placement", PLACEMENTS[0]) if self.console else None
 
     def __repr__(self):
         return "Plugin(%r)" % self.name
@@ -122,8 +131,9 @@ class Plugin:
         return argv, env
 
     def console_tab(self, root, *, slug, home):
-        """{name, title, url} of the cousin's tab: the rendered page under
-        the console's proxy (/plugins/<name><page>); None without [console].
+        """{name, title, url, placement} of the cousin's page: the rendered
+        page under the console's proxy (/plugins/<name><page>), and where it
+        shows ("pane" or "chat"); None without [console].
         A rendered value is URL-quoted where it lands in the page."""
         if not self.console:
             return None
@@ -131,14 +141,15 @@ class Plugin:
                   for k, v in self.values(root, slug=slug, home=home).items()}
         page = render(self.console["page"], values)
         return {"name": self.name, "title": self.console["title"],
-                "url": "%s%s%s" % (PROXY_PREFIX, self.name, page)}
+                "url": "%s%s%s" % (PROXY_PREFIX, self.name, page),
+                "placement": self.placement}
 
     def row(self):
         """The install's view of it (GET /api/plugins), nothing rendered."""
         return {"name": self.name, "description": self.description, "version": self.version,
                 "dir": str(self.dir), "mcp": bool(self.mcp), "service": bool(self.service),
                 "console": bool(self.console), "port": self.port,
-                "title": (self.console or {}).get("title")}
+                "title": (self.console or {}).get("title"), "placement": self.placement}
 
 
 def render(text, values):
@@ -204,6 +215,9 @@ def _check_part(part, table, has_service):
         page = table.get("page")
         if not isinstance(page, str) or not page.startswith("/"):
             raise PluginError("[console] needs `page`, a path starting with /")
+        if "placement" in table and table["placement"] not in PLACEMENTS:
+            raise PluginError("[console] `placement` must be %s, not %r"
+                              % (" or ".join('"%s"' % v for v in PLACEMENTS), table["placement"]))
     allowed = _PART_VARS[part]
     for key, value in _strings_of(part, table):
         for name in placeholders(value):
@@ -382,7 +396,7 @@ def mcp_servers(home, root, *, slug=None, loaded=None):
 
 
 def console_tabs(home, root, *, slug=None, loaded=None):
-    """[{name, title, url}] for the plugins this cousin enables that have a
+    """[{name, title, url, placement}] for the plugins this cousin enables that have a
     [console] page, in name order."""
     home = Path(home)
     return [tab for tab in (p.console_tab(root, slug=slug or home.name, home=home)

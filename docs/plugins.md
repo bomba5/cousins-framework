@@ -15,7 +15,7 @@ beside it (its code, its assets). Three parts, each optional:
 |---|---|
 | `[mcp]` | a stdio MCP server the [runner](glossary.md#runner) starts beside the cousin's own tools, for each cousin that enables the plugin |
 | `[service]` | one process for the whole install, kept up by the [supervisor](glossary.md#supervisor) while at least one cousin enables the plugin |
-| `[console]` | a page on that service, shown as a tab beside the chat of each cousin that enables the plugin |
+| `[console]` | a page on that service, shown on the chat view of each cousin that enables the plugin: a tab over the pane, or a strip over the chat |
 
 ## The manifest
 
@@ -36,14 +36,16 @@ env = { CLOCK_BIND = "127.0.0.1" }
 port = 8190                     # required with [service]: the loopback port it listens on
 health = "/healthz"             # optional: a GET path, 2xx is healthy
 
-[console]                       # optional, needs [service]: the tab
+[console]                       # optional, needs [service]: the page
 title = "Clock"
 page = "/page/{slug}"           # a path on the service
+placement = "pane"              # optional: "pane" (a tab over the pane) or "chat" (a strip over the chat)
 ```
 
 `name` matches `^[a-z][a-z0-9-]{0,31}$`; `cousin` is reserved. `description`
 and `version` are free strings. `command` and `args` are an argv (no shell);
-`env` maps names to strings.
+`env` maps names to strings. `placement` is `"pane"` (the default) or
+`"chat"`; see [the page](#what-happens) below.
 
 Placeholders, rendered by the framework in `command`, `args`, `env` values and
 `page`:
@@ -61,7 +63,8 @@ On top of its own `env`, the MCP server gets `COUSIN_SLUG`, `COUSIN_HOME`,
 `PLUGIN_DIR` and `FRAMEWORK_ROOT`, on top of the supervisor's environment.
 
 Parsing is strict. An unknown key, a value of the wrong type, a placeholder
-that is not in the table (or `{slug}` in a `[service]`), `[console]` without
+that is not in the table (or `{slug}` in a `[service]`), a `placement` other
+than `"pane"` or `"chat"`, `[console]` without
 `[service]`, or two services on one port: the plugin is skipped and the reason
 is named, in `cousin-supervisor status`, in `GET /api/plugins`, and in the
 cousin's `mcp_config` event. One bad plugin never stops the install or a
@@ -116,10 +119,26 @@ them, restarted with the same backoff as every child, its output also in
 newly enabled plugin, drops one no cousin enables any more, and restarts one
 whose command or env changed. `cousin-supervisor status` lists it.
 
-**The tab.** A cousin's chat view gets a strip over its pane, one tab per
-enabled plugin with a `[console]` page, beside the reasoning (or terminal) tab.
-The tab is an iframe of `/plugins/<name><page>`, the page rendered for that
-cousin. Without such a plugin there is no strip.
+**The page.** A plugin's `[console]` page is an iframe of
+`/plugins/<name><page>`, the page rendered for that cousin. Where it shows is
+its `placement`:
+
+- `"pane"` (the default): a tab. The cousin's chat view gets a row of tabs over
+  its pane, one per such plugin, beside the reasoning (or terminal) tab.
+- `"chat"`: a strip on top of the chat, inside the chat column, like a video
+  call: you see the page while you chat. The strip has a thin bar with the
+  plugin's title, a "pop out" button that opens the page in its own window,
+  and a collapse button that shrinks it to that bar; drag its bottom edge to
+  set its height (at least 120 px, at most 70% of the column; a double-click
+  resets it to 240 px). Height and collapsed state are kept in your browser, per
+  cousin and plugin. The messages and the composer stay visible below it at
+  every size, and a chat that was at its latest message stays there as the
+  strip moves. Two such plugins on one cousin stack two strips. The strip is
+  on the normal chat view; fullscreen hides it (the page stays loaded) and an
+  embedded chat (`?embed=1`) has none.
+
+Without a plugin page there is neither row nor strip: the chat view is the one
+an install without plugins has.
 
 **The proxy.** `/plugins/<name>/<path>` on the console forwards GET, POST and
 HEAD to `http://127.0.0.1:<port>/<path>`, the query kept, behind the console's

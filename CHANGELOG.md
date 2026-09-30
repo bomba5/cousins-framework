@@ -39,6 +39,35 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   existing indexes pick it up at their next rebuild or refresh, which
   re-embeds only the affected files' last chunk.
 
+## 2.2.1 - 2026-09-30
+
+### Fixed
+
+- **The chat header on a phone** ([docs/console.md](docs/console.md#chat)):
+  below the console's 820 px breakpoint the chat toolbar took three rows and
+  the status line under the name wrapped mid-line, so a third of the screen
+  went before the first message. The toolbar is now one row of 36 px
+  targets: the effort select, a search button that opens the search field
+  (with a close x), a "⋯" menu holding archive, archived / live and
+  media on / off (and the "@slug as user" line), then the pane and
+  fullscreen toggles as icons. The status line is one line: dot, state and
+  model (cut with an ellipsis); the slug (the title above) and the heartbeat
+  are left out there. The desktop header and the embed are unchanged.
+
+## 2.2.0 - 2026-09-30
+
+### Added
+
+- **A plugin page over the chat** ([docs/plugins.md](docs/plugins.md#what-happens)):
+  `[console] placement` in `plugin.toml`, `"pane"` (the default: the 2.1.0 tab
+  over the pane, unchanged) or `"chat"`: a strip on top of the chat's messages,
+  like a video call, with a bar (title, pop out, collapse) and a bottom edge to
+  drag its height (120 px to 70% of the column), both kept per cousin and
+  plugin in the browser. The messages and composer stay below it and the chat
+  keeps following its latest message. Any other value skips the plugin with
+  the reason. `GET /api/plugins` rows and the fleet row's `plugins[].tab` carry
+  `placement`. Without a `"chat"` plugin the chat view is as before.
+
 ## 2.1.0 - 2026-09-30
 
 ### Added

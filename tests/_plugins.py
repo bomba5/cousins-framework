@@ -108,7 +108,8 @@ def free_port():
         return probe.getsockname()[1]
 
 
-def manifest(name="clock", *, port=None, mcp=True, service=True, console=True, extra=""):
+def manifest(name="clock", *, port=None, mcp=True, service=True, console=True, placement=None,
+             extra=""):
     text = 'name = "%s"\ndescription = "a fake %s"\nversion = "0.1.0"\n' % (name, name)
     if mcp:
         text += ('\n[mcp]\ncommand = %s\nargs = ["{plugin_dir}/mcp_server.py"]\n'
@@ -121,6 +122,8 @@ def manifest(name="clock", *, port=None, mcp=True, service=True, console=True, e
                  % (json.dumps(sys.executable), port or free_port()))
     if console and service:
         text += '\n[console]\ntitle = "Clock"\npage = "/page/{slug}"\n'
+        if placement is not None:
+            text += 'placement = %s\n' % json.dumps(placement)
     return text + extra
 
 

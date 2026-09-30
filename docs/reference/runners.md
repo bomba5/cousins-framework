@@ -332,6 +332,13 @@ What the tmux kind does not do yet, separate from the opencode lane's list
 above. Each is stated, none is hidden, and none is a contract item except
 `midturn_fold`, which is declared (see the contract table):
 
+- **No plugin tools (2.1.0).** A [plugin](../plugins.md)'s `[mcp]` server
+  reaches the `sdk` kind (in the SDK's options) and the `opencode` kind (a
+  `local` entry in the rendered config), not the pane: Claude Code in the pane
+  reads the home's `.mcp.json` itself, and nothing merges the plugin's server
+  into it. The plugin's service and its console tab work as on any kind; the
+  console's plugin settings say so on a tmux cousin.
+
 - **`deny_bash_patterns` and `ask` do not reach the pane.** Both need a
   live PreToolUse veto to enforce, and under `--dangerously-skip-permissions`
   the CLI never consults one, so only `deny_tools`, rendered into

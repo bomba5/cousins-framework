@@ -268,6 +268,11 @@ drift from what the runner accepts.
   file, where that lane reads it, and says so when your own
   `includeCoAuthoredBy` or `attribution` there says the opposite and wins. The tmux session and
   the `[session]` hooks are shown read-only.
+- **Plugins.** Only on an install with [plugins](plugins.md): a checkbox per
+  plugin `config/plugins.toml` declares, writing the cousin's `[plugins]
+  enabled`. It applies at the next start (restart offered); a tmux cousin is
+  told its pane does not get a plugin's tools. Without plugins the section is
+  not there at all.
 
 The chat header's effort select shows only on a kind that reads an effort.
 The install-wide `[agent]` defaults are on the System page.
@@ -509,6 +514,12 @@ tmux cousin's terminal. Where the window is wide enough for both it opens by
 default; its "x" closes it and the header's button brings it back, and the
 choice is kept in your browser. On a phone the open pane takes the whole
 width, as it always did.
+
+With a [plugin](plugins.md) that has a console page enabled on the cousin, a
+strip of tabs sits over the pane: the reasoning (or terminal) tab, and one tab
+per such plugin, showing the plugin's page (an iframe of
+`/plugins/<name>/...`, served through the console's proxy behind your login).
+Without one there is no strip.
 
 ### The terminal pane
 

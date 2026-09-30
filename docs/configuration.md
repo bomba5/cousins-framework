@@ -38,6 +38,7 @@ Then add these when you want what they do:
 | `worker-cmd` | loops for [worker](glossary.md#worker) cousins |
 | `mcp-registry.toml` | your own default MCP tool list for new cousins |
 | `accounts.toml` | [runner](glossary.md#runner) cousins on their own login, token or API key |
+| `plugins.toml` | [plugins](plugins.md): tools, a service and a console tab the framework does not ship |
 
 ## The framework root
 
@@ -526,6 +527,30 @@ One table per kind, `[image]`, `[voice]`, `[video]`:
 
 A request goes to the configured provider or fails; it's never rerouted. See
 [media](media.md).
+
+## plugins.toml
+
+The install's [plugins](plugins.md), read by the runner (at start), the
+[supervisor](glossary.md#supervisor) (at start and on `reload`) and the console. Missing: no plugins,
+and no plugin UI anywhere.
+
+```toml
+[plugins.clock]
+path = "plugins-local/clock"    # the plugin's directory, holding plugin.toml
+enabled = true                  # optional
+```
+
+| key | default | meaning |
+|---|---|---|
+| `[plugins.<name>]` | | one table per plugin; `<name>` matches `^[a-z][a-z0-9-]{0,31}$` and equals `name` in its `plugin.toml` (`cousin` is reserved) |
+| `path` | required | the plugin's directory: absolute, or relative to the framework root |
+| `enabled` | `true` | `false` hides the plugin everywhere: no tools, no service, no tab, not listed |
+
+A bad entry (an unknown key, a missing directory, a manifest that does not
+check) is skipped and named, never fatal: `cousin-supervisor status` lists it
+under `plugin`, `GET /api/plugins` under `problems`. The manifest's own keys
+are in [plugins](plugins.md#the-manifest). A cousin turns a plugin on in its
+`cousin.toml` ([below](#plugins-a-cousins-plugins)).
 
 ## shared-reviewers.json
 
@@ -1096,6 +1121,20 @@ the same tool list at every start.
 - **When a change lands.** The file is read once per runner; a reconnect or
   a rollover offers the same set. Restart the runner (or wait for its next
   start) to pick up a change.
+
+### [plugins] (a cousin's plugins)
+
+```toml
+[plugins]
+enabled = ["clock"]
+```
+
+The [plugins](plugins.md) this cousin uses, by name, from the install's
+[`config/plugins.toml`](#pluginstoml). The only key; a name the install does
+not have (or disables) is skipped and named in the cousin's `mcp_config`
+event. Read by the runner at start: a change needs a restart. The console's
+inspector writes it (`POST /api/cousins/<slug>/plugins`). A plugin's own
+per-cousin settings live in its own file; the framework never reads them.
 
 ### policy.toml
 

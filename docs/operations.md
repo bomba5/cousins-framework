@@ -12,10 +12,11 @@ units.
 `cousin-supervisor` (the entrypoint prepares the volume, then hands over to
 it). The [supervisor](glossary.md#supervisor) starts the console, the loops daemon, one
 `cousin-runner` per [runner](glossary.md#runner) [cousin](glossary.md#cousin) and, for a cousin with `[telegram]` enabled,
-its Telegram bridge (`telegram:<slug>`), restarts a child that exits (backing
+its Telegram bridge (`telegram:<slug>`) and each enabled [plugin](plugins.md)'s
+service (`plugin:<name>`), restarts a child that exits (backing
 off up to 60 seconds), and stops them in order when the container stops: the
 bridges, then the runners, each given 35 seconds to finish its [turn](glossary.md#turn), then the
-loops daemon, then the console. compose waits 45 seconds before it kills anything
+plugin services, then the loops daemon, then the console. compose waits 45 seconds before it kills anything
 (`stop_grace_period`). Every cousin in the container is a runner cousin; tmux
 cousins need a bare host. See each child:
 

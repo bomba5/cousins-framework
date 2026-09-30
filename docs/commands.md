@@ -282,7 +282,10 @@ or `tmux`, unless `[agent] auto_start = false`; a legacy tmux cousin, one
 with no `[agent] runner` at all, is never its) and, for a runner
 cousin whose `[telegram]` is enabled and complete, its Telegram bridge
 (`telegram:<slug>`, started after the runner, stopped and held with it; see
-[telegram](telegram.md)). It is a container's
+[telegram](telegram.md)), and each [plugin](plugins.md) service some cousin
+enables (`plugin:<name>`, started before the runners and stopped after them;
+`reload` adds, removes or restarts it, and `status` names a plugin that does
+not load under `plugin`). It is a container's
 init and a bare host's single unit. Each child's output goes to its stdout,
 every line prefixed with the child's name (`console | ...`, `runner:wren |
 ...`). A child that exits is restarted after 1, 2, 4 ... up to 60 seconds; five
@@ -297,7 +300,8 @@ it stayed. The console's own restart (exit 75) comes back at
 once. On SIGTERM or SIGINT it stops the bridges first (together, 10 seconds
 each), then the runners (together, 35 seconds
 each: the runner's own 30 second stop, `runner.main.STOP_TIMEOUT_S`, plus 5),
-then the loops daemon, then the console, and exits 0. On
+then the plugin services (10 seconds each), then the loops daemon, then the
+console, and exits 0. On
 SIGHUP (or `reload`) it rescans `cousins/`: a new runner cousin is started, one
 that is gone or left the runner lane is stopped, a bridge is added or removed
 as `[telegram] enabled` changed and restarted when its token or operators did,

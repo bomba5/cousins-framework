@@ -3,6 +3,30 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 2.1.0 - 2026-09-30
+
+### Added
+
+- **Plugins** ([docs/plugins.md](docs/plugins.md)): the framework learns to run
+  install-level extensions it does not ship. A plugin is a directory with a
+  `plugin.toml` declaring any of an `[mcp]` server, a `[service]` and a
+  `[console]` page; the install declares it in the new, optional
+  `config/plugins.toml`, and a cousin turns it on with `[plugins] enabled` in
+  its `cousin.toml` (or the inspector's new "plugins" list). Parsing is strict
+  and a bad plugin is named and skipped, never fatal (`cousin_lib/plugins.py`).
+- The runner adds each enabled plugin's MCP server beside the home's
+  `.mcp.json` servers on the `sdk` and `opencode` kinds (a `.mcp.json` server
+  of the same name wins); the `mcp_config` event marks them
+  `"source": "plugin"`. The `tmux` kind does not get them yet (a documented gap).
+- `cousin-supervisor` runs each plugin service some cousin enables as a child
+  `plugin:<name>` (restart with backoff, `data/plugins/<name>/service.log`,
+  picked up or dropped by `reload`); `status` names a plugin that does not load.
+- Console: `GET /api/plugins`, `GET`/`POST /api/cousins/<slug>/plugins`, the
+  fleet row's `plugins`, and the `/plugins/<name>/...` proxy to a service's
+  loopback port behind the console login, streaming (an event stream stays
+  open). A cousin with a plugin page gets a tab beside its chat pane. An
+  install without plugins shows no plugin UI at all.
+
 ## 2.0.0 - 2026-09-30
 
 The legacy tmux lane is retired: every cousin is a runner kind (`sdk`,

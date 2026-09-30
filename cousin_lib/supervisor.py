@@ -44,7 +44,7 @@ Stop (SIGTERM or SIGINT): the reverse of the start order. Every bridge
 is signalled together and waited for (10 s each), then every runner
 is signalled together and waited for together (up to
 runner.main.STOP_TIMEOUT_S + 5 s each: the runner gives its turn
-STOP_TIMEOUT_S), then the loops daemon, then the console
+STOP_TIMEOUT_S), then the plugin services, then the loops daemon, then the console
 (10 s each); a child still alive at its timeout is SIGKILLed with its
 process group. Then the supervisor exits 0.
 

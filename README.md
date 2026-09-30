@@ -88,6 +88,7 @@ and how to remove it all again, is in [install](docs/install.md).
 - [Meetings](docs/meetings.md) - a chat with several cousins at once, in rounds
 - [Jobs and loops](docs/jobs-and-loops.md) - background work and schedules
 - [MCP tools](docs/mcp.md) - the tools a cousin gets
+- [Plugins](docs/plugins.md) - tools, a service and a console tab the framework runs but does not ship
 - [Media](docs/media.md) - images, video and voice, if you want them
 - [Remote cousins](docs/remote-cousins.md) - a cousin on another machine,
   like a Pi on your desk

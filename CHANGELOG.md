@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 1.27.0 - 2026-09-30
+
+### Added
+- Reasoning pane: the "N bg tasks" chip opens the list of background tasks
+  (subagents, background shells): the running ones with their description,
+  kind, elapsed time and last tool, then the last few ended ones with their
+  status (#129). The SDK runner now keeps each task event's id, description,
+  kind, status, last tool and a short summary on the stream (no prompt, no
+  output).
+
+### Fixed
+- Reasoning pane: a background task that ends with only a `task_updated`
+  status no longer keeps the bg-task count above zero; a runner restart
+  marks tasks left running by the old process as lost.
+
 ## 1.26.0 - 2026-09-30
 
 ### Added

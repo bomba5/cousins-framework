@@ -61,7 +61,8 @@ prints every account's name, kind and where its credentials live, never a
 secret; `status <name>` asks the agent CLI whether that account is logged in,
 with no model call, and exits 0 when it is, 4 when it is not (the line names
 what to run). For an `opencode` account it runs nothing: it reads whether
-the account's `auth.json` holds every provider it names (an `endpoint`
+the account's `auth.json` holds every provider it names, except `opencode`,
+whose free models need no key (an `endpoint`
 account is logged in by its configuration). `host` is the host's default login. `--root R` picks the
 install; without it the root comes from `FRAMEWORK_ROOT`, then the checkout
 you are in.
@@ -131,8 +132,8 @@ method redirects to `localhost` on the host, so it only completes from a
 browser on the host; a device-code method completes from any device.
 Refused (exit 2): the provider `anthropic`, by key or by OAuth, and any
 method named Claude or Anthropic (Claude cousins run on the Agent SDK and
-nowhere else, ruling P9-1), the provider
-`opencode` (the hosted service the runner disables), a provider or method
+nowhere else, ruling P9-1), a provider the account does not name
+(`opencode`, the hosted service the runner disables, included), a provider or method
 that names the Claude-subscription bridge, an `endpoint` account, and these
 flags on any other kind of account. The binary is `COUSIN_OPENCODE_BIN`
 (an absolute path), else `opencode` on `PATH`. `--timeout` bounds the wait

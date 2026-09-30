@@ -802,7 +802,8 @@ token file reads "set (ends WXYZ)" at most.
   own login asks you to tick that you mean it). A claude-token account:
   "mint a token", or paste one. An anthropic-key account: paste the key. An
   opencode account: per provider, paste its API key, or name an OAuth
-  method by its opencode label and "sign in". Anthropic and Claude are
+  method by its opencode label and "sign in" (`opencode`'s free models need
+  no key). Anthropic and Claude are
   refused on opencode.
 
 A login runs in the background with its steps shown. The sign-in URL appears

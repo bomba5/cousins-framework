@@ -151,9 +151,15 @@ that names the key, never a secret:
   `providers` is a non-empty list of distinct opencode provider ids (`openai`,
   `mistral`, ...). `opencode` names opencode's own hosted service (OpenCode
   Zen, its free models among them, as `opencode/<model>`); the runner keeps it
-  disabled for every account that does not name it. Zen needs its own API
-  key, and most of its free models let the vendor use the prompts for
-  training: check the model's terms before a cousin runs on one. `endpoint` is an http(s) base URL with a
+  disabled for every account that does not name it. Its free models need no
+  key: an account whose `providers` is `["opencode"]` counts as logged in
+  with no `auth.json` at all (a key stored for it with `cousin-account login
+  <name> --provider opencode` is still used, for the paid models). Most free
+  models let the vendor use the prompts and completions to improve or train
+  models; Zen's documentation (opencode.ai/docs/zen, its privacy section)
+  names the ones whose provider keeps nothing (on 2026-10-01: Space Bunny
+  Free and LongCat 2.5 Preview Free). Check the model's terms before a
+  cousin runs on one. `endpoint` is an http(s) base URL with a
   host and no `user:password@`, and needs `endpoint_model`, the model id the
   endpoint serves; `endpoint_model` without `endpoint` is refused.
 - `endpoint_context` (optional, with `endpoint` only) is the endpoint model's

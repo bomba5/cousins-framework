@@ -71,6 +71,12 @@ _MODEL = re.compile(r"^\S{1,200}$")
 XDG_DIRS = (("XDG_CONFIG_HOME", "config"), ("XDG_DATA_HOME", "data"),
             ("XDG_CACHE_HOME", "cache"), ("XDG_STATE_HOME", "state"))
 AUTH_JSON = ("data", "opencode", "auth.json")
+# Providers opencode serves with no stored credential: its own hosted
+# provider runs its free models keyless (measured on 1.18.31: `opencode run
+# -m opencode/<free model>` answered with no auth.json at all). Named in an
+# account's providers, it counts as logged in without a key; a key stored
+# for it is still used (its paid models).
+KEYLESS_PROVIDERS = ("opencode",)
 EXPECTED_SOURCE = {"claude-login": "none", "claude-token": "none",
                    "anthropic-key": "ANTHROPIC_API_KEY"}
 # What `claude auth status --json` reads for each kind (R16: a fake key read
@@ -694,17 +700,18 @@ def status(account, root, *, run=subprocess.run):
 
 def _opencode_status(account):
     """An endpoint account is logged in by its configuration; a providers
-    account when auth.json holds every provider it names. Nothing is run,
-    nothing is created, no key is returned."""
+    account when auth.json holds every provider it names that needs a key
+    (a KEYLESS_PROVIDERS one never does). Nothing is run, nothing is
+    created, no key is returned."""
     if account.endpoint:
         return {"loggedIn": True, "authMethod": "opencode", "endpoint": account.endpoint}
     try:
         entries = _auth_entries(account)
     except AccountsError as err:
         return {"error": str(err)}
-    missing = [p for p in account.providers if p not in entries]
+    missing = [p for p in account.providers if p not in entries and p not in KEYLESS_PROVIDERS]
     return {"loggedIn": not missing, "authMethod": "opencode",
-            "providers": [p for p in account.providers if p in entries], "missing": missing}
+            "providers": [p for p in account.providers if p not in missing], "missing": missing}
 
 
 def _missing_hint(account):

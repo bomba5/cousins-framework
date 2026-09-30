@@ -107,7 +107,7 @@ A login is the account's long operation: `console/longop.py` under the key `acco
 
 ### `GET /api/accounts/<name>/status`
 
-Is it logged in, with no model call: `claude auth status --json` under the account, or for opencode the account's auth.json read (no process). One check per account at a time: `409` while one runs. `{"ok", "name", "kind", "loggedIn", "method", "error", "action"}`: `ok` is logged in with the method the kind wants; `action` (null when ok) is the line that fixes it. opencode adds `providers`, `missing` or `endpoint`. Never the email or organisation the CLI reports. `404` unknown account.
+Is it logged in, with no model call: `claude auth status --json` under the account, or for opencode the account's auth.json read (no process). One check per account at a time: `409` while one runs. `{"ok", "name", "kind", "loggedIn", "method", "error", "action"}`: `ok` is logged in with the method the kind wants; `action` (null when ok) is the line that fixes it. opencode adds `providers` (the ones it can run on), `missing` (the ones whose key auth.json lacks; `opencode`, keyless for its free models, never) or `endpoint`. Never the email or organisation the CLI reports. `404` unknown account.
 
 ### `POST /api/accounts`
 
@@ -123,7 +123,7 @@ Body `{"confirm": "<name>"}`, the name typed again. `200 {"ok": true, "removed"}
 
 ### `POST /api/accounts/<name>/key`
 
-A write-only key. Body `{"key"}` for claude-token (a token you minted elsewhere) and anthropic-key: written through `console/secrets.py` to the account's secret file (0600, its directory 0700, read back as the runner reads it), which must be under `.secrets/` (otherwise `400`: write it by hand); `.secrets/` is made, or tightened to, 0700. A list row shows a secret file's last four only when it is under `.secrets/`. `200 {"ok": true, "name", "secret": {set, last4, error}}`. For opencode, body `{"provider", "key"}`: merged into the account's auth.json as an API key (`accounts.store_api_key`); a provider the account does not name, `opencode`, or one naming Claude or Anthropic is `400`. `200 {"ok": true, "name", "provider", "status"}` (the status above). `400` for a claude-login account (log it in), a key that is not one line of printable characters, or a local-endpoint account.
+A write-only key. Body `{"key"}` for claude-token (a token you minted elsewhere) and anthropic-key: written through `console/secrets.py` to the account's secret file (0600, its directory 0700, read back as the runner reads it), which must be under `.secrets/` (otherwise `400`: write it by hand); `.secrets/` is made, or tightened to, 0700. A list row shows a secret file's last four only when it is under `.secrets/`. `200 {"ok": true, "name", "secret": {set, last4, error}}`. For opencode, body `{"provider", "key"}`: merged into the account's auth.json as an API key (`accounts.store_api_key`); a provider the account does not name (`opencode` included), or one naming Claude or Anthropic, is `400`. `200 {"ok": true, "name", "provider", "status"}` (the status above). `400` for a claude-login account (log it in), a key that is not one line of printable characters, or a local-endpoint account.
 
 ### `POST /api/accounts/<name>/login`
 

@@ -299,6 +299,62 @@ class TestStatusAndCheck(OpencodeCase):
         self.assertIn(str(self.root / ".secrets" / "accounts" / "keyed.opencode"), line)
 
 
+ZEN_TOML = """
+[accounts.zen]
+kind = "opencode"
+providers = ["opencode"]
+
+[accounts.mixed]
+kind = "opencode"
+providers = ["opencode", "openai"]
+"""
+
+
+class TestKeylessHostedProvider(OpencodeCase):
+    """opencode's own hosted provider serves its free models with no key
+    (measured on 1.18.31: `opencode run -m opencode/<free model>` answers
+    with no auth.json at all): an account naming `opencode` is logged in
+    for it without one. A key, when stored, stays in use (the paid models)."""
+
+    def test_an_account_naming_only_opencode_is_logged_in_with_no_auth_json(self):
+        self.write(ZEN_TOML)
+        acc = accounts.load(self.root)["zen"]
+        accounts.preflight(acc, self.root)
+        st = accounts.status(acc, self.root, run=_never_run)
+        self.assertTrue(st["loggedIn"], st)
+        self.assertEqual((st["providers"], st["missing"]), (["opencode"], []))
+        self.cousin('account = "zen"\n')
+        rc, line = accounts.check(self.home, self.root, run=_never_run)
+        self.assertEqual(rc, 0, line)
+        self.assertIn("loggedIn=True", line)
+
+    def test_a_stored_zen_key_still_counts_and_never_shows(self):
+        self.write(ZEN_TOML)
+        self.auth_json("zen", {"opencode": {"type": "api", "key": "fake-zen-key"}})
+        st = accounts.status(accounts.load(self.root)["zen"], self.root, run=_never_run)
+        self.assertTrue(st["loggedIn"]); self.assertEqual(st["providers"], ["opencode"])
+        self.assertNotIn("fake-zen-key", json.dumps(st))
+
+    def test_the_other_providers_still_need_their_keys(self):
+        self.write(ZEN_TOML)
+        acc = accounts.load(self.root)["mixed"]
+        st = accounts.status(acc, self.root, run=_never_run)
+        self.assertFalse(st["loggedIn"])
+        self.assertEqual((st["providers"], st["missing"]), (["opencode"], ["openai"]))
+        self.cousin('account = "mixed"\n')
+        rc, line = accounts.check(self.home, self.root, run=_never_run)
+        self.assertEqual(rc, 4)
+        self.assertIn("--provider openai", line)
+        self.auth_json("mixed", {"openai": {"type": "api", "key": "sk-fake-openai"}})
+        self.assertEqual(accounts.check(self.home, self.root, run=_never_run)[0], 0)
+
+    def test_a_bad_auth_json_is_still_an_error(self):
+        self.write(ZEN_TOML)
+        self.auth_json("zen", {"opencode": {"type": "api", "key": "fake-zen-key"}}, mode=0o640)
+        st = accounts.status(accounts.load(self.root)["zen"], self.root, run=_never_run)
+        self.assertIn("chmod 600", st["error"]); self.assertFalse(st.get("loggedIn"))
+
+
 class TestLane(OpencodeCase):
     def test_an_opencode_runner_takes_only_an_opencode_account(self):
         self.write(TOML)

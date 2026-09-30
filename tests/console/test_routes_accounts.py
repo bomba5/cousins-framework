@@ -211,6 +211,14 @@ class Status(AccountsCase):
         self.assertEqual(status, 200)
         self.assertEqual((body["ok"], body["missing"]), (False, ["openai", "mistral"]))
 
+    def test_opencodes_own_hosted_provider_needs_no_key(self):
+        with open(self.root / "config" / "accounts.toml", "a") as fh:
+            fh.write('\n[accounts.zen]\nkind = "opencode"\nproviders = ["opencode"]\n')
+        status, body = self.get("/api/accounts/zen/status")
+        self.assertEqual(status, 200, body)
+        self.assertEqual((body["ok"], body["missing"], body["providers"], body["action"]),
+                         (True, [], ["opencode"], None))
+
     def test_unknown_and_bad_names(self):
         self.assertEqual(self.get("/api/accounts/ghost/status")[0], 404)
         self.assertEqual(self.get("/api/accounts/Bad..Name/status")[0], 400)

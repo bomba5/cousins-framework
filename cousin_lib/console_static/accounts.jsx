@@ -24,7 +24,7 @@ const ACCOUNT_FIELD_HINTS = {
   config_dir: "the CLI's config dir, under the root (default data/accounts/<name>)",
   secret_file: "the token or key file, under .secrets/ (default .secrets/accounts/<name>)",
   data_dir: "opencode's HOME, under the root (default .secrets/accounts/<name>.opencode)",
-  providers: "the provider ids whose keys the account holds, comma separated (never anthropic)",
+  providers: "the provider ids the account runs on, comma separated (never anthropic); each needs its key, except opencode (its hosted free models need none)",
   endpoint: "a local OpenAI-compatible base URL, e.g. http://127.0.0.1:11434/v1 (no credentials in it)",
   endpoint_model: "the model id the endpoint serves",
   endpoint_context: "the model's context window, in tokens (optional)",

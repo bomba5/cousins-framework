@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- An opencode account whose `providers` names `opencode` (opencode's own
+  hosted service, OpenCode Zen) no longer reads as logged out without a
+  key. 1.26.0 said Zen needs its own API key; its free models need none
+  (measured on opencode 1.18.31: `opencode run -m opencode/big-pickle`
+  answered with no `auth.json` at all). `cousin-account status`,
+  `cousin-runner --check-auth`, the console's accounts page and check-auth,
+  and `cousin-migrate`'s auth check now count `opencode` as logged in with no
+  key, and list it under `providers`, never under `missing`; a key stored
+  for it is still used (the paid models). Every other provider still needs
+  its key. Most free models let the vendor use the prompts to improve or
+  train models (docs/configuration.md names where Zen lists the ones that
+  keep nothing).
+
 ## 2.3.2 - 2026-10-01
 
 ### Fixed

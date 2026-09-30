@@ -29,6 +29,10 @@ providers = ["openai", "mistral"]
 kind = "opencode"
 providers = ["anthropic"]
 
+[accounts.zen]
+kind = "opencode"
+providers = ["opencode"]
+
 [accounts.local]
 kind = "opencode"
 endpoint = "http://127.0.0.1:11434/v1"
@@ -243,10 +247,14 @@ class TestRefusals(OcLoginCase):
                      needle="Claude subscription")
         self.refused("--provider", "openai", "--method", "Claude Pro/Max", needle="Claude")
 
-    def test_opencodes_own_hosted_service(self):
-        self.refused("--provider", "opencode", needle="hosted")
-        self.refused("--provider", "opencode", "--method", "OpenCode Console account",
-                     needle="hosted")
+    def test_opencodes_own_hosted_service_only_on_an_account_that_names_it(self):
+        self.refused("--provider", "opencode", needle="does not name provider 'opencode'")
+
+    def test_a_zen_key_is_written_for_an_account_that_names_opencode(self):
+        rc, out, err = self.cli("login", "zen", "--provider", "opencode",
+                                stdin=io.StringIO(KEY + "\n"))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.auth("zen"), {"opencode": {"type": "api", "key": KEY}})
 
     def test_every_bridge_marker(self):
         self.refused("--provider", "claude-max-proxy", needle="bridge")

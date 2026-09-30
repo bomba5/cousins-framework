@@ -5,7 +5,8 @@ The runner owns one `opencode serve` child (opencode_http.OpencodeServer)
 on loopback with a per-run password, its HOME and XDG directories in the
 account's data dir, working in the cousin's home (R4), started with an
 ALLOWLISTED environment and a config the runner renders at every start
-(R5): opencode's own hosted provider disabled, the model named (R6), the
+(R5): opencode's own hosted provider disabled unless the account names it,
+the model named (R6), the
 plugin pack, and one MCP server, the runner's own (mcp_http.McpHttpServer),
 so every framework tool runs in this process against the live Turn (R7).
 Before the first prompt it checks that opencode reports that MCP server
@@ -238,12 +239,14 @@ def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLU
     over it (its global config dir, `$HOME/.opencode`, a managed config):
     `foreign_config_sources` refuses those the runner can see, and the
     effective config is checked after the server starts
-    (`check_effective_config`)."""
+    (`check_effective_config`). opencode's own hosted service (Zen, its
+    free models among them) stays disabled unless the account names
+    `opencode` in its providers: nothing reaches it by default."""
     config = {
         "$schema": SCHEMA,
         "model": model,
         "small_model": small_model,
-        "disabled_providers": ["opencode"],
+        "disabled_providers": [] if "opencode" in account.providers else ["opencode"],
         "autoupdate": False,
         "share": "disabled",
         "permission": {"*": "allow"},           # never an interactive ask (R9)

@@ -82,7 +82,6 @@ class TestLoad(OpencodeCase):
             'providers = "openai"\n': "providers",
             'providers = ["Open AI"]\n': "providers",
             'providers = ["openai", "openai"]\n': "providers",
-            'providers = ["opencode"]\n': "providers",
             ep: "endpoint_model",
             'providers = ["openai"]\nendpoint_model = "m"\n': "endpoint_model",
             ep + 'endpoint_model = ""\n': "endpoint_model",

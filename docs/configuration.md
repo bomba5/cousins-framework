@@ -144,8 +144,11 @@ that names the key, never a secret:
   that leaves the root, is refused.
 - An `opencode` account takes exactly one of `providers` or `endpoint`.
   `providers` is a non-empty list of distinct opencode provider ids (`openai`,
-  `mistral`, ...), never `opencode` itself (opencode's own hosted service,
-  which the runner always disables). `endpoint` is an http(s) base URL with a
+  `mistral`, ...). `opencode` names opencode's own hosted service (OpenCode
+  Zen, its free models among them, as `opencode/<model>`); the runner keeps it
+  disabled for every account that does not name it. Zen needs its own API
+  key, and most of its free models let the vendor use the prompts for
+  training: check the model's terms before a cousin runs on one. `endpoint` is an http(s) base URL with a
   host and no `user:password@`, and needs `endpoint_model`, the model id the
   endpoint serves; `endpoint_model` without `endpoint` is refused.
 - `endpoint_context` (optional, with `endpoint` only) is the endpoint model's
@@ -981,7 +984,7 @@ file), and the runner's own switches; nothing
 else (no `OPENCODE_*` of the shell, no `*_API_KEY`) reaches it. The config
 it reads is rendered at every start into `<data_dir>/opencode.runner.json`
 (mode 0600): opencode's own hosted provider
-disabled, the model and small model above, `permission` allow-all (the
+disabled (unless the account names `opencode`), the model and small model above, `permission` allow-all (the
 cousin's `policy.toml` is the policy), the plugin pack, and one MCP server,
 the runner's own on loopback behind a per-start token, through which the
 model reaches the framework's tools as `cousin_<tool>`.

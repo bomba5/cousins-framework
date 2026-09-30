@@ -210,10 +210,6 @@ def _load_opencode(root, name, table, where):
                                 " %s" % (where, _PROVIDER.pattern))
         if len(set(provs)) != len(provs):
             raise AccountsError("%s providers names a provider twice" % where)
-        if "opencode" in provs:
-            raise AccountsError("%s providers: 'opencode' is opencode's own hosted service,"
-                                " which the runner always disables; name the providers whose"
-                                " keys you hold" % where)
         for key in ("endpoint_model", "endpoint_context", "endpoint_output"):
             if key in table:
                 raise AccountsError("%s %s goes with endpoint, not providers" % (where, key))
@@ -985,9 +981,9 @@ def opencode_bin():
 def check_opencode_login(account, provider, method=None):
     """R12' refusals, before any key is read or any process runs: a Claude
     subscription (Anthropic, or any method named Claude, by OAuth),
-    opencode's own hosted service, a bridge marker, a provider the account
-    does not name, and every account that is not an opencode providers
-    account."""
+    a bridge marker, a provider the account does not name (opencode's own
+    hosted service, Zen, only when the account names `opencode`), and every
+    account that is not an opencode providers account."""
     from cousin_lib.runner import opencode_guard
     if account.kind != "opencode":
         raise AccountsError("--provider, --method and --key-file are for kind opencode"
@@ -999,9 +995,6 @@ def check_opencode_login(account, provider, method=None):
         raise AccountsError("name the provider to log in with --provider <id>, one of %s"
                             " (a provider id matches %s)"
                             % (", ".join(account.providers), _PROVIDER.pattern))
-    if provider == "opencode":
-        raise AccountsError("'opencode' is opencode's own hosted service, which the runner"
-                            " always disables: log in the providers whose keys you hold")
     for what, text in (("provider", provider), ("method", method or "")):
         marker = opencode_guard.bridge_marker(text)
         if marker:

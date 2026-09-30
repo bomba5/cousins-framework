@@ -262,6 +262,17 @@ class TestConfig(OpencodeCase):
         self.assertEqual(config["disabled_providers"], ["opencode"])
         self.assertNotIn("provider", config)
 
+    def test_an_account_that_names_opencode_keeps_its_hosted_service_on(self):
+        """#127: the free models are opencode/<model> on opencode's own
+        service, which is on only when the account names it."""
+        self.home()
+        config = opencode.render_config(
+            self.account(endpoint=None, endpoint_model=None, providers=("opencode",)),
+            model="opencode/big-pickle", small_model="opencode/big-pickle",
+            mcp_url="http://127.0.0.1:9/mcp", mcp_token="t")
+        self.assertEqual(config["enabled_providers"], ["opencode"])
+        self.assertEqual(config["disabled_providers"], [])
+
     def test_the_model_is_required(self):
         with self.assertRaises(RunnerError) as err:
             self.runner(home=self.home(model=None))

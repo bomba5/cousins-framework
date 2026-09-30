@@ -95,7 +95,7 @@ the person a cousin answers to, from `[operator]` in its
 
 an install-level extension the framework runs but does not ship: a
 directory with a `plugin.toml` declaring tools (an MCP server), a service
-and a console tab, each optional, declared in `config/plugins.toml` and
+and a console page (a tab over the pane, or a strip over the chat), each optional, declared in `config/plugins.toml` and
 turned on per cousin. See [plugins.md](plugins.md).
 
 ### raw memory

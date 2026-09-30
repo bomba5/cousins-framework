@@ -58,6 +58,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   React.useEffect(() => { writeMediaShown(mediaShown); }, [mediaShown]);
   // The pane column's tab: "pane" (the reasoning stream or the terminal) or a
   // plugin's name (plugins.jsx). Without a plugin tab there is no strip at all.
+  // A plugin page placed "chat" is not a tab: it is a strip over the messages.
   const [paneTab, setPaneTab] = React.useState("pane");
 
   // Per-tab last-viewed marker: stamp localStorage whenever the operator
@@ -162,7 +163,10 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   // A remote cousin (a hive node on another machine) has no pane here:
   // the console does not run it, it only proxies its chat.
   const paneShown = paneOpen && !c.remote;
-  const pluginTabList = window.pluginTabs ? window.pluginTabs(c) : [];
+  const pluginTabAll = window.pluginTabs ? window.pluginTabs(c) : [];
+  const pluginTabList = pluginTabAll.filter(t => t.placement !== "chat");
+  // The "chat" pages, over the messages; not in an embed (no pane there either).
+  const chatStrips = embed || c.remote ? [] : pluginTabAll.filter(t => t.placement === "chat");
   const activeTab = pluginTabList.find(t => t.name === paneTab) || null;
 
   return (
@@ -177,6 +181,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
             <button className="chat-fullscreen-exit"
                     onClick={() => setFullscreen(false)}
                     title="exit fullscreen">x exit</button>
+          )}
+          {chatStrips.length > 0 && window.PluginChatStrips && (
+            <PluginChatStrips slug={c.slug} tabs={chatStrips} />
           )}
           {/* key by slug: remount ChatBody on cousin switch so its messages +
               draft state reset to empty. Without this React reuses the instance
@@ -504,6 +511,17 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
     };
     window.addEventListener("chat-stream-tick", onTick);
     return () => window.removeEventListener("chat-stream-tick", onTick);
+  }, []);
+  // Keep the tail in view when the list's box changes height while at the
+  // bottom (a plugin strip over the chat dragged or collapsed, the window).
+  React.useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || !window.ResizeObserver) return;
+    const ro = new window.ResizeObserver(() => {
+      if (atBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
   const jumpToBottom = () => {
     const el = scrollerRef.current;

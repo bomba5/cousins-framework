@@ -519,7 +519,10 @@ With a [plugin](plugins.md) that has a console page enabled on the cousin, a
 strip of tabs sits over the pane: the reasoning (or terminal) tab, and one tab
 per such plugin, showing the plugin's page (an iframe of
 `/plugins/<name>/...`, served through the console's proxy behind your login).
-Without one there is no strip.
+A plugin whose page is placed `"chat"` shows it instead as a strip on top of
+the chat's messages, which you can collapse, resize by its bottom edge, or pop
+out into its own window ([plugins](plugins.md#what-happens)). Without such a
+plugin there is neither.
 
 ### The terminal pane
 

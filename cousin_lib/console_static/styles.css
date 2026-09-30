@@ -1833,6 +1833,24 @@ table.data th.num { font-family: var(--sans); font-size: 10.5px; }
 .pane-tabs { flex: none; display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--hair); overflow-x: auto; }
 .pane-tabs > .btn { font-size: 11px; padding: 2px 10px; min-height: 22px; }
 .plugin-frame { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: var(--bg-0); }
+/* Chat strips (plugins.jsx PluginChatStrips): a [console] placement = "chat" page
+   over the chat's messages, like a video call, only when such a plugin is on. The
+   box is capped at 70% of the column so the messages and composer stay below. */
+.plugin-strips { flex: none; max-height: 70%; overflow-y: auto; display: flex; flex-direction: column; border-bottom: 1px solid var(--hair); }
+.plugin-strip { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-0); }
+.plugin-strip + .plugin-strip { border-top: 1px solid var(--hair); }
+.plugin-strip-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 16px 4px 24px; background: var(--bg-1); border-bottom: 1px solid var(--hair); }
+.plugin-strip.collapsed .plugin-strip-bar { border-bottom-color: transparent; }
+.plugin-strip-title { font-family: var(--mono); font-size: 11px; color: var(--fg-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-strip-bar > .btn { font-size: 11px; padding: 2px 10px; min-height: 22px; }
+.plugin-strip.collapsed .plugin-frame { display: none; }
+.plugin-strip-grip { flex: none; height: 7px; cursor: row-resize; touch-action: none; position: relative; z-index: 3; }
+.plugin-strip-grip::after { content: ""; position: absolute; left: 0; right: 0; top: 3px; height: 1px; background: transparent; transition: background 0.12s; }
+.plugin-strip-grip:hover::after, .plugin-strip.dragging .plugin-strip-grip::after { background: var(--accent); }
+.plugin-strip.dragging { user-select: none; }
+.plugin-strip.dragging .plugin-frame { pointer-events: none; }
+/* fullscreen is the chat alone: the strips hide (their pages stay loaded) */
+body.chat-fullscreen .plugin-strips { display: none; }
 /* The divider between chat and pane: a wide grab area over a hairline. */
 .split-div { flex: none; width: 7px; margin: 0 -4px 0 -3px; z-index: 3; cursor: col-resize; touch-action: none; position: relative; }
 .split-div::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background 0.12s; }

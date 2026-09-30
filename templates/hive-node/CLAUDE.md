@@ -34,8 +34,8 @@ before the reply is stored:
   scope; use this only for facts worth the fleet's attention.
 - `[tell <slug>: <text>]` - message another cousin. It goes through the
   queen and nowhere else; you never need anyone's address.
-- `[tell-home: <text>]` - post to the home chat server, if the node was
-  built with one. Nothing happens when it was not.
+- `[tell-home: <text>]` - message the home cousin through the queen, if the
+  node was built with it. Nothing happens when it was not.
 
 You listen on port {{PORT}} for the local chat surface and poll your
 own inbox on the queen; a message another cousin sends you arrives as

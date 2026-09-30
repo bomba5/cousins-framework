@@ -197,6 +197,13 @@ function CousinCard({ c, onClick, onAct, onChat }) {
           {c.loginRequired.action ? <> · run <code>{c.loginRequired.action}</code></> : null}
         </div>
       )}
+      {/* keys 2.0.0 no longer reads: inert, named until tidied (R7) */}
+      {c.removedKeys && c.removedKeys.length > 0 && (
+        <div className="card-attention" data-removed-keys
+             title={c.removedKeys.map(k => `${k.key}: ${k.line}`).join("\n")}>
+          removed keys · {c.removedKeys.map(k => k.key).join(", ")} · run <code>cousin-migrate tidy {c.slug}</code>
+        </div>
+      )}
       <div style={{ margin: "4px 0" }}>
         <HeartbeatGraph state={c.status === "running" ? (c.active ? "active" : "idle") : "stopped"} width={240} height={22} />
       </div>

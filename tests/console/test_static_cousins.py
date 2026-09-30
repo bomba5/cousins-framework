@@ -411,3 +411,17 @@ class TelegramPanel(unittest.TestCase):
     def test_no_em_dash(self):
         self.assertNotIn("—", self.src)
         self.assertNotIn("–", self.src)
+
+
+class CardRemovedKeys(unittest.TestCase):
+    """R7: the card says when the cousin's cousin.toml still carries keys
+    2.0.0 removed, names them, and points at `cousin-migrate tidy`."""
+
+    def setUp(self):
+        self.src = _component(_read("cousins.jsx"), "CousinCard")
+
+    def test_a_card_shows_removed_keys(self):
+        self.assertIn("c.removedKeys", self.src)
+        self.assertIn("data-removed-keys", self.src)
+        self.assertIn("cousin-migrate tidy", self.src)
+        self.assertRegex(self.src, r"c\.removedKeys && c\.removedKeys\.length > 0")

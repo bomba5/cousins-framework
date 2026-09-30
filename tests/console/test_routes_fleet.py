@@ -1003,3 +1003,21 @@ class TestPidAndUptime(ConsoleCase):
         self.assertIsInstance(age, int)
         self.assertIsNone(uptime_seconds(4194303))
         self.assertIsNone(uptime_seconds(None))
+
+
+class TestRemovedKeysRow(ConsoleCase):
+    """R7: a row names the keys 2.0.0 removed that its cousin.toml still
+    carries (the install's own are the supervisor's status); the cousin is
+    served as usual."""
+
+    def test_a_row_names_its_removed_keys(self):
+        self.cousin("wren", port=8091, extra='tmux_session = "wren"\n'
+                                              '\n[agent]\nrunner = "fake"\n')
+        self.cousin("sam", port=None, extra='\n[agent]\nrunner = "fake"\n')
+        (self.root / "config" / "agent-cmd").write_text("claude\n")
+        self.serve()
+        rows = {r["slug"]: r for r in self.get("/api/cousins")[1]["cousins"]}
+        self.assertEqual([(k["where"], k["key"]) for k in rows["wren"]["removedKeys"]],
+                         [("cousin.toml", "[chat] port"), ("cousin.toml", "[chat] tmux_session")])
+        self.assertTrue(all(k["line"] for k in rows["wren"]["removedKeys"]))
+        self.assertEqual(rows["sam"]["removedKeys"], [])

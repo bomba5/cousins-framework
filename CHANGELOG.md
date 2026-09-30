@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 2.2.2 - 2026-09-30
 
 ### Fixed
 - Plugins: a plugin's event stream through the console's `/plugins/<name>/`

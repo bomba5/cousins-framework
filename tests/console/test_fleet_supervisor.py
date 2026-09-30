@@ -141,6 +141,80 @@ class TestRunnerLaneStartStop(_Case):
                                 "runner": "unknown", "supervisor": "running"})
         self.assertNotIn("status", body)
 
+    def _events(self, server):
+        seen = []
+        real = server.emit
+
+        def emit(kind, payload):
+            seen.append((kind, payload))
+            return real(kind, payload)
+        server.emit = emit
+        return seen
+
+    def test_a_stop_of_a_hand_started_runner_with_no_supervisor_says_so(self):
+        # #92: the stop found no supervisor and a runner holding the lock
+        # (started by hand): 502 "cousin-supervisor refused the stop: no
+        # reason given" named a refusal nobody made
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        server = self.serve()
+        seen = self._events(server)
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True):
+            status, body = self.post("/api/cousins/wren/stop")
+        self.assertEqual(status, 503, body)
+        self.assertNotIn("refused", body["error"])
+        self.assertNotIn("no reason given", body["error"])
+        self.assertIn("no cousin-supervisor is running", body["error"])
+        self.assertIn("started outside one", body["error"])
+        self.assertIn("held", body["error"])
+        self.assertEqual((body["runner"], body["supervisor"], body["held"]),
+                         ("running", "not running", True))
+        self.assertTrue(supervisor.is_held(home))
+        self.assertIn(("cousin-status", {"slug": "wren", "status": "stop failed"}), seen)
+
+    def test_a_still_stopping_start_is_409(self):
+        # #92: transient, the caller's to retry; it was a 500
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        self.stub(start={"ok": False, "name": "runner:wren",
+                         "error": "runner:wren is still stopping; start it once it is down"})
+        server = self.serve()
+        seen = self._events(server)
+        supervisor.hold(home, "console")
+        status, body = self.post("/api/cousins/wren/start")
+        self.assertEqual(status, 409, body)
+        self.assertIn("still stopping", body["error"])
+        statuses = [p for k, p in seen if k == "cousin-status"]
+        self.assertEqual([p["status"] for p in statuses], ["starting", "start failed"])
+        self.assertIn("still stopping", statuses[-1]["error"])
+
+    def test_a_start_beside_a_hand_started_runner_is_409_and_starts_nothing(self):
+        # #92: held, a runner started by hand alive, a supervisor with no
+        # child of its own running: "started" was answered for a second
+        # runner that sat in backoff behind the first one's lock
+        from cousin_lib import supervisor
+        home = self.cousin("wren", extra=RUNNER)
+        stub = self.stub()
+        stub.write_snapshot({})
+        self.serve()
+        supervisor.hold(home, "console")
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True):
+            status, body = self.post("/api/cousins/wren/start")
+        self.assertEqual(status, 409, body)
+        self.assertIn("did not start", body["error"])
+        self.assertNotIn(("start", "wren"), stub.ops())
+
+    def test_any_refused_start_is_a_start_failed_event(self):
+        # #92: `starting` went out and nothing after it on a refusal
+        self.cousin("wren", extra=RUNNER)
+        server = self.serve()
+        seen = self._events(server)
+        status, body = self.post("/api/cousins/wren/start")      # no supervisor: 503
+        self.assertEqual(status, 503, body)
+        statuses = [p for k, p in seen if k == "cousin-status"]
+        self.assertEqual([p["status"] for p in statuses], ["starting", "start failed"])
+        self.assertEqual(statuses[-1]["error"], body["error"])
+
     def test_a_refused_stop_fails_a_restart_before_its_start(self):
         self.cousin("wren", extra=RUNNER)
         stub = self.stub(stop={"ok": False, "error": "the supervisor is stopping"})

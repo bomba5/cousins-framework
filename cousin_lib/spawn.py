@@ -386,6 +386,32 @@ class NoSupervisor(SpawnError):
     """A runner-lane start found no cousin-supervisor for the root."""
 
 
+class StillStopping(SpawnError):
+    """The supervisor refused a start because the cousin's runner is still
+    on its way down: transient, a start once it is down goes through."""
+
+
+class ForeignRunner(SpawnError):
+    """A runner the supervisor did not start (one started by hand) holds
+    the cousin's lock: a start would add a second runner that only waits
+    for that lock, in the supervisor's backoff."""
+
+
+def _foreign_runner(home, root):
+    """True when a runner holds the home's lock and the live supervisor's
+    snapshot shows no running child of its own for the cousin. No snapshot
+    (no supervisor, or one that has not published yet) is not evidence:
+    False, and the supervisor is asked as before."""
+    from cousin_lib import delivery, supervisor
+    if not delivery.is_alive(home):
+        return False
+    snap = supervisor.snapshot(root)
+    if not isinstance(snap, dict) or not isinstance(snap.get("children"), dict):
+        return False
+    row = snap["children"].get("runner:%s" % Path(home).name)
+    return not (isinstance(row, dict) and row.get("pid"))
+
+
 def runner_lane(home):
     """The cousin runs on cousin-runner (`[agent] runner` is one of RUNNER_KINDS),
     the test every runner-lane caller uses; its start and stop are the
@@ -406,16 +432,29 @@ def _supervisor_root(home, root):
 
 
 def _start_runner(home, root):
+    """Ask the supervisor to start the cousin's runner. NoSupervisor with
+    none; ForeignRunner, before asking, when a runner it did not start
+    holds the lock (#92: its start answered "running" for a second runner
+    that sat in backoff); StillStopping for its transient "still stopping"
+    refusal; SpawnError with the reason for any other refusal."""
     from cousin_lib import supervisor
     root = _supervisor_root(home, root)
+    slug = Path(home).name
+    if _foreign_runner(home, root):
+        raise ForeignRunner(
+            "%s's lock is held by a runner the cousin-supervisor did not start"
+            " (one started by hand): stop that runner first; a start now would only"
+            " add a second one waiting for the lock" % slug)
     try:
-        answer = supervisor.request(root, "start", slug=Path(home).name)
+        answer = supervisor.request(root, "start", slug=slug)
     except supervisor.SupervisorUnavailable:
         raise NoSupervisor("no cousin-supervisor is running for %s: start it"
                            " with `cousin-supervisor run`" % root)
     if not answer.get("ok"):
-        raise SpawnError("cousin-supervisor refused the start: %s"
-                         % (answer.get("error") or "no reason given"))
+        error = answer.get("error") or "no reason given"
+        # the supervisor's own words for a child on its way down (start_child)
+        refused = StillStopping if "still stopping" in error else SpawnError
+        raise refused("cousin-supervisor refused the start: %s" % error)
 
 
 def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):

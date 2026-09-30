@@ -92,6 +92,47 @@ class TestRunnerLaneStart(_Case):
             spawn.start_cousin(home, agent_cmd=None, root=self.root)
         self.assertIn("runner:wren is still stopping", str(caught.exception))
 
+    def test_still_stopping_is_its_own_refusal(self):
+        # #92: transient, so the console answers 409, not 500
+        home = runner_home(self.root, "wren")
+        self.stub(start={"ok": False, "name": "runner:wren",
+                         "error": "runner:wren is still stopping; start it once it is down"})
+        with self.assertRaises(spawn.StillStopping):
+            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+
+    def test_another_refusal_is_a_plain_spawn_error(self):
+        home = runner_home(self.root, "wren")
+        self.stub(start={"ok": False, "error": "runner:wren is not a cousin"})
+        with self.assertRaises(spawn.SpawnError) as caught:
+            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+        self.assertNotIsInstance(caught.exception, (spawn.StillStopping, spawn.ForeignRunner))
+
+    def test_a_runner_the_supervisor_did_not_start_is_not_joined_by_a_second(self):
+        # #92: held (a stop with no supervisor), a runner started by hand
+        # still holds the lock, and the supervisor that came up since has
+        # no child of its own running: its start answered "running" for a
+        # second runner that only waited for the lock, in backoff
+        home = runner_home(self.root, "wren")
+        stub = self.stub()
+        stub.write_snapshot({"runner:wren": {"state": "stopped", "pid": None}})
+        supervisor.hold(home, "Testa")
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True), \
+                self.assertRaises(spawn.ForeignRunner) as caught:
+            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+        self.assertIn("did not start", str(caught.exception))
+        self.assertEqual(stub.ops(), [])
+
+    def test_the_supervisors_own_runner_on_its_way_down_is_still_asked(self):
+        home = runner_home(self.root, "wren")
+        stub = self.stub(start={"ok": False, "name": "runner:wren",
+                                "error": "runner:wren is still stopping; start it once it is down"})
+        stub.write_snapshot({"runner:wren": {"state": "running", "pid": 4242}})
+        supervisor.hold(home, "Testa")
+        with mock.patch("cousin_lib.delivery.is_alive", lambda home, **kw: True), \
+                self.assertRaises(spawn.StillStopping):
+            spawn.start_cousin(home, agent_cmd=None, root=self.root)
+        self.assertEqual(stub.ops(), [("start", "wren")])
+
 
 class TestRunnerLaneStop(_Case):
     def test_stop_asks_the_supervisor_with_the_runner_timeout(self):

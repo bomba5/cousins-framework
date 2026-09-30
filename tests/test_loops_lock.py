@@ -81,6 +81,49 @@ class TestLoopsLock(HermeticCase):
         self.assertEqual(oct(os.stat(self.lock.parent).st_mode & 0o777), "0o700")
 
 
+class TestTheForkHandlerClosesOnlyItsOwnLock(HermeticCase):
+    """A handler outlives its lock (one per call, never unregistered).
+    Once the lock file is gone its inode can be recycled for a new file
+    that a reused fd number then names: device and inode match, and the
+    stale handler closed a descriptor that was not its own (#92)."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = pathlib.Path(tmp.name)
+        (self.dir / "root").mkdir()
+
+    def _handler(self):
+        from unittest import mock
+        handlers = []
+        with mock.patch.object(os, "register_at_fork",
+                               lambda **kw: handlers.append(kw["after_in_child"])):
+            fd = hold_loops_lock(self.dir / "root")
+        return fd, handlers[0]
+
+    def test_a_recycled_inode_under_another_path_is_left_open(self):
+        from unittest import mock
+        fd, handler = self._handler()
+        stale = os.fstat(fd)
+        other = os.open(self.dir / "unrelated", os.O_RDWR | os.O_CREAT, 0o600)
+        os.dup2(other, fd)                        # the lock closed, its fd number reused
+        os.close(other)
+        self.addCleanup(lambda: os.close(fd))
+        real_fstat = os.fstat
+        # the recycled inode: fstat of the reused fd reads the old identity
+        with mock.patch.object(os, "fstat",
+                               lambda n: stale if n == fd else real_fstat(n)):
+            handler()
+        os.fstat(fd)                              # still open: not closed by the handler
+
+    def test_its_own_lock_is_closed(self):
+        fd, handler = self._handler()
+        handler()
+        with self.assertRaises(OSError):
+            os.fstat(fd)
+
+
 class TestLoopsLockSurvivesFork(HermeticCase):
     """jobs._spawn_tracked forks (twice, no exec) from inside the loops
     daemon's own process to run a worker loop's command; flock locks are

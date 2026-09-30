@@ -1106,6 +1106,16 @@ class LoopsLockHeld(Exception):
     busy, not 2 (configuration), so a supervisor waits for the holder."""
 
 
+def _fd_path(fd):
+    """The path an open fd names (/proc/self/fd), or None where there is
+    no /proc to ask."""
+    import os
+    try:
+        return os.readlink("/proc/self/fd/%d" % fd)
+    except OSError:
+        return None
+
+
 def hold_loops_lock(root):
     """One clock per root: an exclusive, non-blocking flock on
     <root>/run/loops.lock, held until the returned descriptor is closed
@@ -1126,8 +1136,10 @@ def hold_loops_lock(root):
     for something unrelated by the time a later, unrelated fork runs it,
     and closing that would be a bug of its own, not a fix. Each handler
     therefore checks the fd is still open on the same file (device and
-    inode) it locked before closing it - the only tolerance a stale or
-    already-closed fd needs."""
+    inode) it locked before closing it, and, where /proc/self/fd says,
+    at the same path: a deleted lock file's inode can be recycled for a
+    new file (a later temporary root, in a test run) that a reused fd
+    number then names, and device and inode alone would close it (#92)."""
     import fcntl
     import os
     path = Path(root) / "run" / "loops.lock"
@@ -1140,6 +1152,7 @@ def hold_loops_lock(root):
         raise LoopsLockHeld("another loops daemon holds %s" % path)
     identity = os.fstat(fd)
     ident_key = (identity.st_dev, identity.st_ino)
+    ident_path = _fd_path(fd)
 
     def _close_in_child():
         try:
@@ -1148,6 +1161,8 @@ def hold_loops_lock(root):
             return    # already closed: nothing to do
         if (st.st_dev, st.st_ino) != ident_key:
             return    # the fd number was reused for something else; not ours
+        if ident_path is not None and _fd_path(fd) != ident_path:
+            return    # a recycled inode under another path: not ours either
         try:
             os.close(fd)
         except OSError:

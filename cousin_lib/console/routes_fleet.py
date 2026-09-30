@@ -457,16 +457,21 @@ def _start_runner(server, slug, config):
     and never ask it to start. Held skips that short-circuit and asks
     the supervisor instead: "still stopping" while the old runner is on
     its way out, or a fresh start once it is down. 503 when no
-    supervisor runs for the root."""
+    supervisor runs for the root; 409 for "still stopping" (transient)
+    and for a runner the supervisor did not start holding the lock (a
+    start would add a second one in backoff, spawn.ForeignRunner); 500
+    for any other refusal. Every refusal is a `start failed` event with
+    its error, after the `starting` one (#92)."""
     if delivery.is_alive(config.home) and not supervisor.is_held(config.home):
         return {"ok": True, "slug": slug, "status": "already running"}
     server.emit("cousin-status", {"slug": slug, "status": "starting"})
     try:
         spawn.start_cousin(config.home, agent_cmd=None, root=server.root)
-    except spawn.NoSupervisor as err:
-        raise HttpError(503, str(err))
     except spawn.SpawnError as err:
-        raise HttpError(500, str(err))
+        status = 503 if isinstance(err, spawn.NoSupervisor) \
+            else 409 if isinstance(err, (spawn.StillStopping, spawn.ForeignRunner)) else 500
+        server.emit("cousin-status", {"slug": slug, "status": "start failed", "error": str(err)})
+        raise HttpError(status, str(err))
     return {"ok": True, "slug": slug, "status": "started"}
 
 
@@ -488,7 +493,9 @@ def _stop(server, slug, by="console"):
     when it is down; a turn in hand can take up to 35 s. Only `stopping`
     and stopped or not running are outcomes: anything else (the
     supervisor refused, `runner: "unknown"`) is a 502 with its error,
-    never `status: "stopped"` (N7)."""
+    never `status: "stopped"` (N7). With no supervisor and a runner
+    started by hand still holding the lock, nothing here can signal it:
+    503 saying so, with the hold the stop wrote (#92)."""
     home = cousin_home(server, slug)
     server.emit("cousin-status", {"slug": slug, "status": "stopping"})
     if spawn.runner_lane(home):
@@ -498,6 +505,14 @@ def _stop(server, slug, by="console"):
             status = "stopping"
         elif runner in ("stopped", "not running"):
             status = "stopped"
+        elif runner == "running" and result.get("supervisor") == "not running":
+            server.emit("cousin-status", {"slug": slug, "status": "stop failed"})
+            held = ("it is held, so a cousin-supervisor started later leaves it down"
+                    if result.get("held") else result.get("error") or "it could not be held")
+            raise HttpError(503, "no cousin-supervisor is running, and %s's runner was started"
+                            " outside one: nothing here can stop it (stop it where it was"
+                            " started); %s" % (slug, held), slug=slug,
+                            **{k: v for k, v in result.items() if k != "error"})
         else:
             server.emit("cousin-status", {"slug": slug, "status": "stop failed"})
             extra = {k: v for k, v in result.items() if k != "error"}

@@ -18,6 +18,26 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
+- **Console start and stop around the supervisor** (#92):
+  - A stop with no supervisor running and a runner started by hand still
+    holding the lock answered `502 cousin-supervisor refused the stop: no
+    reason given`; nothing had refused. It is `503` saying that no
+    supervisor runs, the runner was started outside one and cannot be
+    stopped from here, and that the hold is written.
+  - A start the supervisor refused as "still stopping" (transient) was a
+    `500`; it is a `409` (`spawn.StillStopping`).
+  - A start while the cousin is held and a runner the supervisor did not
+    start holds its lock answered `started` for a second runner that only
+    waited for the lock in the supervisor's backoff. The live supervisor's
+    snapshot is read first: with no running child of its own for the
+    cousin the start is refused (`spawn.ForeignRunner`, `409` in the
+    console, exit 1 from `cousin-spawn --start`) and nothing is started.
+  - A refused start emitted `starting` and nothing after it; it now
+    emits `start failed` with the error.
+  - The loops lock's at-fork handler checked device and inode only; a
+    recycled inode under another path (a later temporary root in a test
+    run) could have it close a descriptor that was not its own. It checks
+    the path too, where `/proc/self/fd` says.
 - **Runner review leftovers** (#68):
   - `cousin-runner --once` gave up after 10 s on a runner `errored` inside
     its resync, whose drain may take its `drain_timeout_s` (30 s), and

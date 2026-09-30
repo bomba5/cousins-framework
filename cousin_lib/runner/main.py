@@ -464,6 +464,29 @@ def _check_auth(home, *, validate=False):
     return rc
 
 
+def _name_removed_keys(runner):
+    """R7: the keys 2.0.0 removed that this cousin or its install still
+    carries, named and never fatal: one `system` `config` event per
+    finding (after the head event) and one stderr line. A scan that
+    cannot run says nothing: it never stops a start."""
+    from cousin_lib import removed_keys
+    home = Path(runner.home)
+    try:
+        found = removed_keys.scan(getattr(runner, "root", None) or root_for(home), home)
+    except Exception:  # noqa: BLE001 - a warning must never fail a start
+        return
+    if not found:
+        return
+    for finding in found:
+        runner.stream.append("system", dict(finding, subtype="config"))
+    install = any(f["where"] != "cousin.toml" for f in found)
+    print("cousin-runner: 2.0.0 no longer reads %s (inert); `cousin-migrate tidy %s` removes"
+          " the cousin's%s (docs/configuration.md, \"Removed in 2.0.0\")"
+          % (removed_keys.summary(found), home.name,
+             ", `cousin-migrate tidy --all` the install's" if install else ""),
+          file=sys.stderr)
+
+
 def _serve(runner, once):
     stop = threading.Event()
 
@@ -510,6 +533,7 @@ def _serve(runner, once):
                                         "unsupported": list(runner.unsupported()),
                                         "commit_attribution": commit_attribution_of(
                                             _agent_table(runner.home), runner.root)})
+        _name_removed_keys(runner)
         runner.start()
         policy = getattr(runner, "policy", None)
         if policy is not None:

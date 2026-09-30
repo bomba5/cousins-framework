@@ -3,10 +3,14 @@
 # Claude Code, copy config/harness.toml.claude-code.example instead:
 # the same keys, filled in.
 #
-# Absent file: transcript mining at flip, the harness auto-memory
-# search collection and the loops daemon's transcript-size guard are
-# all off (mining says so once at flip). Present but unparsable: a
-# loud error, because the file promised something.
+# Absent file: transcript mining at flip and the harness auto-memory
+# search collection are off (mining says so once at flip). Present but
+# unparsable: a loud error, because the file promised something.
+#
+# The keys 2.0.0 removed with the legacy tmux lane (attention_patterns,
+# busy_patterns, [input_mode], flip_when_transcript_mb, [agent.resume],
+# [auth.api_key]) are not here: docs/configuration.md, "Removed in
+# 2.0.0"; `cousin-migrate tidy --all --yes` takes them out of a file.
 #
 # The two path values are templates expanded per cousin:
 #   {home}          the cousin home, verbatim
@@ -22,14 +26,6 @@
 # The harness's own auto-memory directory for this cousin. When set it
 # becomes a search collection for cousin-memory search.
 #auto_memory_dir = "/var/lib/harness/projects/{home_encoded}/memory"
-#
-# Transcript-size guard (needs transcripts_dir). When a live cousin's
-# <transcripts_dir>/<session_id>.jsonl grows past this many megabytes
-# the loops daemon submits one timed-flip request for it, five
-# minutes out, visible in `cousin-loops requests` with the usual
-# warning ladder. At most one cousin per tick; never a second request
-# while one is pending. Absent: no guard. Must be a positive number.
-#flip_when_transcript_mb = 100
 #
 # The daily flip time for every cousin that does not set its own
 # `[lifecycle] flip_at`. A cousin spawned or migrated after you
@@ -55,11 +51,9 @@
 # edit instead of guessing where the harness keeps its settings.
 #settings_file = "~/.harness-settings.json"
 #
-# Install-wide agent defaults. config/agent-cmd may carry {model} and
-# {effort} placeholders; each renders from the cousin's own
-# cousin.toml [runtime] model / effort, else from these. A placeholder
-# with no value in either place is a spawn error that names both
-# files. `models` is the catalogue the console's spawn dialog offers;
+# Install-wide agent defaults: the model and effort the console's
+# spawn dialog preselects for a new cousin (it writes them to the
+# cousin's [agent]). `models` is the catalogue the dialog offers;
 # absent, a built-in list of three names is offered. `default_effort`
 # is one of low, medium, high, xhigh, max.
 #[agent]
@@ -76,42 +70,3 @@
 # policy on every install. Set it false to have the SDK runner and the
 # tmux lane's <home>/.claude/settings.json both turn it off.
 #commit_attribution = true
-#
-# Pane text (regular expressions, searched in the agent's visible
-# pane) that means the agent is mid-turn. `cousin-auth` and the
-# console refuse to restart a busy cousin unless forced. Absent: no
-# busy detection. A top-level key: it goes above the first [table].
-#busy_patterns = ["press esc to stop"]
-#
-# How config/agent-cmd resumes an existing session: session_arg is
-# the words of agent-cmd that start a session under a given id,
-# resume_arg the words that resume one. An auth-mode switch restarts
-# a running agent on the SAME session through this; absent, the
-# switch refuses to restart and says so.
-#[agent.resume]
-#session_arg = "--session {session_id}"
-#resume_arg = "--resume {session_id}"
-#
-# The api_key auth mode (`cousin-auth <slug> api_key`): the agent runs
-# on a key from <home>/.secrets/api-key.env instead of the harness's
-# own login. key_env is the variable the key is handed over in;
-# config_dir_env the variable that points the harness at another
-# config directory. The isolated directory (relative: under the root)
-# symlinks every entry of source_dir except `exclude`, plus a copy of
-# settings_file (as settings_name) without strip_settings_keys, keeping
-# preserve_settings_keys from the previous copy. A launch refuses when
-# the isolated directory holds one of login_files, or its settings copy
-# one of login_settings_keys. In the default mode both variables are
-# removed from the agent's environment. Absent: api_key mode refused.
-#[auth.api_key]
-#key_env = "HARNESS_API_KEY"
-#config_dir_env = "HARNESS_CONFIG_DIR"
-#source_dir = "~/.harness"
-#settings_file = "~/.harness.json"
-#settings_name = ".harness.json"
-#isolated_dir = "data/harness-api-key-config"
-#exclude = ["credentials.json"]
-#strip_settings_keys = ["account"]
-#preserve_settings_keys = []
-#login_files = ["credentials.json"]
-#login_settings_keys = ["account"]

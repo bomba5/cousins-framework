@@ -4,7 +4,8 @@ Every file the framework reads from `config/`, every key in it, and the keys
 of a [cousin](glossary.md#cousin)'s own `cousin.toml`. Read the first part when you set up an
 install, and come back to the rest when you want to turn something on.
 
-Only one file is required: `config/agent-cmd`. Everything else is optional.
+No file is required: a cousin on a [runner](glossary.md#runner) kind runs on
+the host's own login with none. Everything here is optional.
 When a file is missing, the thing it configures is off, and the code says so
 where it matters instead of guessing a value. When a file is there but
 broken, you get an error that names it. A typo never reads as "off".
@@ -18,7 +19,6 @@ tokens) never get committed. Copy an example to its real name and edit it.
 For a normal install with Claude Code:
 
 ```
-printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
 cp config/harness.toml.claude-code.example config/harness.toml
 cousin-console adduser ana                     # writes config/console-users.json
 ```
@@ -55,32 +55,35 @@ Every command finds it the same way, first match wins:
 
 Otherwise the command stops and tells you how to name the root.
 
-## agent-cmd
+## Removed in 2.0.0
 
-One line: the command that runs your agent inside a cousin's tmux session.
-Read by `cousin-spawn --start`, `cousin-flip` and the console's start button.
-Without it no cousin can start, and those commands say so with the path.
+2.0.0 retired the legacy tmux [lane](glossary.md#lane) and the per-cousin chat server, and with
+them these keys and one file. Nothing reads them any more. A key still in a
+file is inert and never a refusal: `cousin-runner` names it at start (one
+stderr line, and a `system` `config` event on the [stream](glossary.md#stream)), `cousin-supervisor
+status` lists it under `config`, the console's card shows it, and
+`cousin-migrate plan --to` and `check` print a `warn 2.0.0` line. `cousin-migrate
+tidy <slug>|--all --yes` removes them, keeping each file's prior bytes beside
+it ([commands](commands.md)). A cousin with no `[agent] runner` at all is a
+different case: it is refused ([migrating](migrating.md)).
 
-```
-<your home>/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}
-```
+| key | where | what to do |
+|---|---|---|
+| `[chat] port`, `[chat] host` | `cousin.toml` | delete: the console serves chat and peers reach the [inbox](glossary.md#inbox) directly |
+| `[chat] tmux_session` | `cousin.toml` | delete: the tmux kind names its own session, `tmux-<slug>` |
+| `[runtime] model`, `[runtime] effort` | `cousin.toml` | delete: a runner reads `[agent] model` and `effort` only |
+| `[runtime] session_id` | `cousin.toml` | delete: a runner keeps its session in `data/runner-session.json` |
+| `[runtime] auth` | `cousin.toml` | delete: a runner authenticates through its `[agent] account` ([accounts.toml](#accountstoml)) |
+| `attention_patterns` | `config/harness.toml` | delete: the tmux kind reads its own screen |
+| `busy_patterns` | `config/harness.toml` | delete: the auth-mode switch that read it is gone |
+| `[input_mode]` | `config/harness.toml` | delete: nothing types chat into a pane |
+| `flip_when_transcript_mb` | `config/harness.toml` | delete: the transcript-size guard read the legacy lane's session |
+| `[agent.resume]` | `config/harness.toml` | delete: a runner resumes its own session |
+| `[auth.api_key]` | `config/harness.toml` | delete: an `anthropic-key` account in `accounts.toml` replaces the `api_key` mode |
+| `home_chat_url` | `config/hive.toml` | delete: set `home_cousin`, reached through the queen |
+| `config/agent-cmd` (the file) | `config/` | delete: every runner kind starts its own agent; `tidy` moves it to `config/agent-cmd.pre-2.0.0` |
 
-`--dangerously-skip-permissions` is what lets a cousin work unattended, and it
-means the cousin can do anything your account can; see
-[install](install.md#4-claude-code). Use an absolute path for the binary. systemd units and the tmux server don't
-see your login shell's PATH. Before starting anything, the framework checks
-that tmux and the first word of this line resolve.
-
-Three placeholders are filled per start:
-
-- `{session_id}`: a fresh id minted on every start, written back to the
-  cousin's `cousin.toml` as `[runtime] session_id`.
-- `{model}`: the cousin's `[runtime] model`, else `[agent] default_model` in
-  `harness.toml`.
-- `{effort}`: the cousin's `[runtime] effort`, else `[agent] default_effort`.
-
-A placeholder with no value in either place is a start error naming both
-files. There's no built-in vendor default.
+A `[chat]` or `[runtime]` table left empty goes with its last key.
 
 ## accounts.toml
 
@@ -322,24 +325,21 @@ every value filled in. `harness.toml.example` is the same keys, commented,
 for another harness.
 
 Without the file, all of this is off: transcript mining at [flip](glossary.md#flip), the harness
-memory collection in search, the console's token counts, the transcript-size
-guard, `cousin-mcp approve`, the "needs attention" flag, the
-`{model}`/`{effort}` defaults, and the `api_key` auth mode. A file that
-doesn't parse is an error, not "off".
+memory collection in search, the console's token counts, `cousin-mcp
+approve`, and the spawn dialog's model and effort preselection. A file that
+doesn't parse is an error, not "off". The keys 2.0.0 removed from it are
+listed under [Removed in 2.0.0](#removed-in-200).
 
 Top-level keys:
 
 | key | default | meaning |
 |---|---|---|
-| `transcripts_dir` | none | where the harness writes session transcripts for a cousin. A path template, see below. Used by transcript mining at flip, the console's token counts and the size guard. |
+| `transcripts_dir` | none | where the harness writes session transcripts for a cousin. A path template, see below. Used by transcript mining at flip and the console's token counts. |
 | `auto_memory_dir` | none | the harness's own memory directory for a cousin. When set, it becomes the `harness` collection in `cousin-memory search`. |
 | `mcp_logs_dir` | Claude Code's `~/.cache/claude-cli-nodejs/{home_encoded}/mcp-logs-{server}` | where the harness writes a log per session per MCP server. The boot packet and `cousin-mcp --last-connection` read it for the reason a cousin's MCP server failed, which the harness itself does not report. |
 | `default_flip_at` | `04:00` | `"HH:MM"`, the daily flip time for every cousin that does not set its own. `"never"` makes no flip the default. One time for the whole fleet is fine: the daemon fires at most one flip per tick. |
-| `flip_when_transcript_mb` | none (no guard) | a positive number of megabytes. When a live cousin's `<transcripts_dir>/<session_id>.jsonl` grows past it, the loops daemon asks for one flip, five minutes out. Needs `transcripts_dir`. |
 | `settings_file` | none | the harness's settings JSON, the file that records project trust and approved MCP servers. `cousin-mcp approve` edits exactly this file. Without it, `approve` refuses and prints the edit to make by hand. |
-| `attention_patterns` | `[]` | plain strings. When a running cousin's visible pane contains one, the pane is waiting on a person (a login or trust menu). The console shows "needs attention" and every delivery into that pane is skipped with a `tmux delivery SKIPPED` log line. |
 | `host_label` | the hostname | a non-empty string: the host a login message names ("log in on <host>"), in `data/login-required.json`, `cousin-chat list` and the Telegram notice. Anything else is an error. |
-| `busy_patterns` | `[]` | regular expressions. A match on the visible pane means the agent is mid-turn; `cousin-auth` and the console refuse to restart it unless forced. |
 
 Path templates take `{home}` (the cousin home as is) and `{home_encoded}`
 (Claude Code's project directory name for it: every `/` becomes `-`, so
@@ -352,46 +352,10 @@ path out.
 
 | key | default | meaning |
 |---|---|---|
-| `default_model` | none | what `{model}` renders to for a cousin without its own |
-| `default_effort` | none | what `{effort}` renders to; one of `low`, `medium`, `high`, `xhigh`, `max` |
+| `default_model` | none | the model the console's spawn dialog preselects for a new cousin |
+| `default_effort` | none | the effort it preselects; one of `low`, `medium`, `high`, `xhigh`, `max` |
 | `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list, which follows code updates. |
 | `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux lane (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` [stream](glossary.md#stream) event, so it is observable without reading either toml file. |
-
-`[agent.resume]`: how `agent-cmd` resumes a session instead of starting a new
-one. Switching a running cousin's auth mode restarts it on the same session
-through this. Without it, the switch refuses to restart.
-
-| key | meaning |
-|---|---|
-| `session_arg` | the words in `agent-cmd` that start a session, e.g. `"--session-id {session_id}"`. Must appear in `agent-cmd` exactly. |
-| `resume_arg` | what replaces them to resume, e.g. `"--resume {session_id}"` |
-
-`[input_mode]`: for an agent with a vim-style input box. When the pane shows
-`normal_marker`, the framework types `insert_keys` first so a chat line is
-typed, not read as commands. Both keys are needed; without the table nothing
-extra is typed.
-
-`[auth.api_key]`: the `api_key` auth mode, where a cousin runs on an API key
-from `<home>/.secrets/api-key.env` instead of the harness login (see
-[cousins](cousins.md)). Without the table, `api_key` mode is refused.
-
-| key | default | meaning |
-|---|---|---|
-| `key_env` | required | the environment variable the key is passed in (`ANTHROPIC_API_KEY` for Claude Code) |
-| `config_dir_env` | required | the variable that points the harness at another config directory (`CLAUDE_CONFIG_DIR`) |
-| `source_dir` | required | the harness's normal config directory (`~/.claude`) |
-| `settings_file` | none | the harness's settings JSON (`~/.claude.json`) |
-| `settings_name` | the file name of `settings_file` | the name of the copy inside the isolated directory |
-| `isolated_dir` | `data/harness-api-key-config` | the isolated config directory; relative paths are under the root |
-| `exclude` | `[]` | entries of `source_dir` not linked into the isolated directory |
-| `strip_settings_keys` | `[]` | keys removed from the settings copy |
-| `preserve_settings_keys` | `[]` | keys kept from the previous copy when it's rebuilt |
-| `login_files` | `[]` | files that mean a login is present; the launch refuses |
-| `login_file_keys` | `[]` | when set, a login file only counts as a login if its JSON has one of these keys |
-| `login_settings_keys` | `[]` | keys in the settings copy that mean a login; the launch refuses |
-
-In the default `claude` mode, both variables are removed from the agent's
-environment.
 
 ## console-users.json
 
@@ -520,8 +484,7 @@ the problem.
 | `enabled` | `false` | `true` or `false`, nothing else |
 | `public_url` | required when enabled | the console as the nodes reach it, e.g. `http://192.0.2.10:8600`. Baked into every node archive the console builds. |
 | `checkin_seconds` | 60 | how often a node checks in, at least 5. A node counts as online within 2.5 periods of its last checkin. |
-| `home_cousin` | none | the local cousin a console-built node's `[tell-home: ...]` reaches, through the queen's authenticated `POST /hive/tell-home`. The build dialog's "home chat" switch needs it (or the legacy key below). |
-| `home_chat_url` | none | legacy: a chat server that a node's `[tell-home: ...]` posts to directly, unauthenticated; used only when `home_cousin` is unset. |
+| `home_cousin` | none | the local cousin a console-built node's `[tell-home: ...]` reaches, through the queen's authenticated `POST /hive/tell-home`. The build dialog's "home chat" switch needs it. |
 
 The hive's database lives in `<root>/shared/hive/`. See
 [remote cousins](remote-cousins.md).
@@ -661,10 +624,6 @@ slug = "wren"
 name = "Wren"
 role = "helps me around the house"
 
-[chat]
-port = 8090
-tmux_session = "wren"
-
 [operator]
 name = "ana"
 ```
@@ -689,28 +648,11 @@ account = "metered"
 | `peer_visible` | `true` | `false` takes it out of other cousins' peer list, and it sees no peers either |
 | `hidden` | `false` | hides the card in the console unless "show hidden" is on |
 
-`[chat]`:
-
-| key | default | meaning |
-|---|---|---|
-| `port` | picked by spawn, from 8090 up | the chat server's port. Required for chat. |
-| `host` | `127.0.0.1` | the address the chat server binds and others reach it on |
-| `tmux_session` | the slug | the tmux session the agent runs in and chat is typed into |
-
 `[operator]`:
 
 | key | default | meaning |
 |---|---|---|
 | `name` | none | the person this cousin works for. None is a valid answer: no operator. |
-
-`[runtime]`:
-
-| key | default | meaning |
-|---|---|---|
-| `model` | `[agent] default_model` | what `{model}` renders to |
-| `effort` | `[agent] default_effort` | `low`, `medium`, `high`, `xhigh` or `max` |
-| `session_id` | written on each start | the current session, from `{session_id}` |
-| `auth` | `"claude"` | `"claude"` (the harness login) or `"api_key"`. Change it with `cousin-auth`. |
 
 `[heartbeat]`:
 
@@ -815,8 +757,8 @@ item, not that it answered it: the rows of an interrupted turn are delivered.
 
 `model` names the model the runner asks for, and `effort` its effort (`low`,
 `medium`, `high`, `xhigh` or `max`; anything else is exit 2 at start). A runner
-reads only `[agent]`: `[runtime]` (model, effort, auth) is the legacy tmux lane's, and
-`cousin-migrate` carries it over, validated (see [migrating](migrating.md)).
+reads only `[agent]`: `[runtime]` (model, effort, auth) was the legacy tmux lane's
+and is gone in 2.0.0 ([Removed in 2.0.0](#removed-in-200)).
 `account` names the account the
 cousin runs on, one of `config/accounts.toml`'s (see
 [accounts.toml](#accountstoml)); with none, the cousin runs on `host`, the
@@ -868,7 +810,7 @@ the runner's head `runner` stream event.
 
 `rollover_at_percent` (number, default 80) applies to the `sdk` and `opencode`
 lanes only; the `tmux` kind has no automatic context-pressure rollover (only
-an explicit flip, the daily cadence, or `flip_when_transcript_mb` moves it).
+an explicit flip or the daily cadence moves it).
 It is the context percentage at which
 the runner rolls the cousin over at its next idle: it asks the model for its
 handoff through the `handoff` tool, runs the `[session]` end hooks, starts a

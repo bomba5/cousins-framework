@@ -105,7 +105,6 @@ class HarnessSeam(unittest.TestCase):
             self.assertTrue(cfg["transcripts_dir"])
             self.assertTrue(cfg["auto_memory_dir"])
             self.assertTrue(cfg["settings_file"])
-            self.assertTrue(cfg["attention_patterns"])
 
     def test_unparsable_file_is_loud(self):
         with tempfile.TemporaryDirectory() as root:
@@ -268,13 +267,21 @@ class TestClaudeCodePreset(unittest.TestCase):
         return tomllib.loads(
             (here / "config" / "harness.toml.claude-code.example").read_text())
 
-    def test_every_blocking_first_run_screen_needs_attention(self):
-        patterns = self._preset()["attention_patterns"]
-        for screen in ("Select login method", "Paste code here if prompted",
-                       "OAuth error", "Press Enter to retry",
-                       "Choose the text style", "Yes, I trust this folder",
-                       "Do you want to use this API key"):
-            self.assertIn(screen, patterns)
+    def test_the_presets_carry_no_key_2_0_0_removed(self):
+        # R7: the legacy pane's attention and busy patterns, [input_mode],
+        # the size guard, [agent.resume] and [auth.api_key] are gone; the
+        # tmux kind reads its own screen (tmux_pane.attention_in)
+        import tomllib
+        from cousin_lib import removed_keys
+        here = Path(__file__).resolve().parent.parent / "config"
+        self.assertEqual(removed_keys.findings(self._preset(), removed_keys.HARNESS_KEYS,
+                                               "config/harness.toml"), [])
+        commented = tomllib.loads("\n".join(
+            line[1:] for line in (here / "harness.toml.example").read_text().splitlines()
+            if len(line) > 1 and line.startswith("#") and not line.startswith("# ")))
+        self.assertTrue(commented.get("transcripts_dir"))      # the uncommenting worked
+        self.assertEqual(removed_keys.findings(commented, removed_keys.HARNESS_KEYS,
+                                               "config/harness.toml"), [])
 
     def test_the_preset_does_not_pin_a_model_catalogue(self):
         self.assertNotIn("models", self._preset().get("agent", {}))

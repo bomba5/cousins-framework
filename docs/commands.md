@@ -303,7 +303,11 @@ else the checkout you are in. One supervisor per install: it holds
 
 The running supervisor answers on `run/supervisor.sock` (the `run/` directory
 is private to its user). `status [--json]` lists every child with its state
-(`running`, `backoff`, `failing`, `stopped`), pid, restarts and the reason;
+(`running`, `backoff`, `failing`, `stopped`), pid, restarts and the reason,
+then under `refused` every cousin it will not run because it has no `[agent]
+runner` (with the line that says why and the way out; a [worker](glossary.md#worker) is not listed),
+and under `config` every key 2.0.0 no longer reads that a cousin or the install
+still carries (named, never fatal; `cousin-migrate tidy` removes them);
 `start <slug>` starts a runner cousin's child (also one with `auto_start =
 false`) or clears a `failing` one; `stop <slug>` stops it once its turn is done
 (`--no-wait` answers once it is signalled) and holds it down until `start`,
@@ -312,7 +316,8 @@ across supervisor restarts too (`<home>/run/held`, see
 console and the loops daemon are `--name console` and `--name loops`, held
 until `start` or the next supervisor start. `reload` is SIGHUP. These exit 0
 done, 1 when no supervisor is running, 2 when it refused (the line says why).
-`run/supervisor.json` holds the same status for readers that want a file.
+`run/supervisor.json` holds the same status, without `refused` and `config`,
+for readers that want a file.
 
 ```
 cousin-supervisor run --console-host 0.0.0.0
@@ -370,6 +375,24 @@ view) and wait up to 10 minutes for it. `data/kind-switch.json` records a
 switch; a `rollback --to <kind>` undoes it. See [runners](reference/runners.md)
 for the kinds and [migrating](migrating.md).
 
+`tidy <slug>|--all [--yes]` removes the keys 2.0.0 no longer reads (the list
+and what each did is in [configuration](configuration.md#removed-in-200)):
+`<slug>` from that cousin's `cousin.toml`, `--all` from every cousin's and
+from the install's `config/harness.toml` and `config/hive.toml`, plus
+`config/agent-cmd`. Without `--yes` it lists each key with its line and
+writes nothing; with `--yes` it copies each file's prior bytes beside it
+(`<home>/data/cousin.toml.pre-2.0.0`, `config/harness.toml.pre-2.0.0`,
+never over an earlier copy), removes only those lines (comments, order and
+line endings stay; a table left empty goes; a file it cannot edit line by
+line is left whole and named), and moves `config/agent-cmd` aside. It also
+stops a 1.x chat server still running for the cousin (found by
+`data/chat-server.pid` or its `[chat] port`, and signalled only when its
+command line is a chat server for that home), and removes the pid file. A
+cousin with no `[agent] runner` is refused: `tidy` is not a conversion. `plan
+--to` and `check` name the same keys (`warn 2.0.0` lines). Exit 0 done or nothing
+to do, 1 when `--all` met a refused cousin or a file it left whole, 2 when
+`<slug>` is refused.
+
 ```
 cousin-migrate plan wren --account team
 cousin-migrate apply wren --account team --yes
@@ -377,6 +400,8 @@ cousin-migrate plan wren --to tmux
 cousin-migrate apply wren --to tmux --yes
 cousin-migrate check wren
 cousin-migrate rollback wren --yes
+cousin-migrate tidy --all
+cousin-migrate tidy --all --yes
 ```
 
 ## Memory

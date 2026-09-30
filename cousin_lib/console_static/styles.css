@@ -2123,6 +2123,16 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .rp-md-quote { color: var(--fg-2); border-left: 2px solid var(--line); padding-left: 6px; }
 .rp-md-hr { border-top: 1px solid var(--line); margin: 5px 0; }
 .rp-md-gap { height: 0.6em; }
+/* Past RP_MD_MAX (chat.jsx) the text is not parsed: a thin rule and a muted
+   note say where the markdown stops, so a raw `**` below it is not a bug. */
+.rp-md-rest {
+  margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--line);
+  white-space: pre-wrap; word-break: break-word;
+}
+.rp-md-rest::before {
+  content: "raw text from here"; display: block; margin-bottom: 2px;
+  font-family: var(--mono); font-size: 10.5px; color: var(--fg-3);
+}
 
 /* ---- package seams (ui.jsx): slots, write-only secrets, long operations ---- */
 .slot-error {

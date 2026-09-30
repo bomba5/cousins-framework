@@ -346,6 +346,20 @@ process.stdout.write(JSON.stringify({tags: [...tags].sort(), texts, made}));
             self.assertNotIn("dangerouslySetInnerHTML", el["props"])
             self.assertIsNone(el["href"])
 
+    def test_where_the_markdown_stops_is_marked(self):
+        """#99: past the cap the text is plain, and nothing said so: a raw
+        `**` after 20k characters looked like a rendering bug. The rest
+        gets a thin rule and a muted note, from the theme's variables."""
+        self.assertIn('cls: "rp-md-rest"', self.chat)
+        rest = re.search(r"\.rp-md-rest \{([^}]*)\}", self.css)
+        self.assertIsNotNone(rest)
+        self.assertRegex(rest.group(1), r"border-top: 1px \w+ var\(--line\)")
+        self.assertIn("white-space: pre-wrap", rest.group(1))
+        note = re.search(r"\.rp-md-rest::before \{([^}]*)\}", self.css)
+        self.assertIsNotNone(note)
+        self.assertIn('content: "raw text from here"', note.group(1))
+        self.assertIn("color: var(--fg-3)", note.group(1))
+
 
 class TestRunnerPaneHighlightingCost(unittest.TestCase):
     """Review round 1: the text is untrusted and the pane's thread renders

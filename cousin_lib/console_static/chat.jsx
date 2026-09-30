@@ -1385,7 +1385,8 @@ function mdInline(text) {
 // Block markdown, one node per line: fenced code (```diff and a detected
 // diff get diff colors, ```json the JSON colors), headings, list items,
 // quotes, rules, paragraphs. Only the first RP_MD_MAX characters are
-// parsed; the rest follows as plain text.
+// parsed; the rest follows as plain text, under a marker (.rp-md-rest in
+// styles.css: a thin rule and "raw text from here").
 const RP_MD_MAX = 20000;
 function renderMarkdownLite(text) {
   const all = String(text == null ? "" : text);

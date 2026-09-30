@@ -18,6 +18,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
+- **The runner pane marks where markdown stops** (#99): past the first
+  20 000 characters a text is not parsed, and the rest (`.rp-md-rest`) had
+  no style, so a raw `**` there looked like a rendering bug. It now sits
+  under a thin dashed rule with a muted "raw text from here" note.
 - **The runner contract names only the tools it serves** (#97): the
   doctrine prose ("How you answer", "Memory", "Tools, not the terminal
   CLIs") named `send`, `memory`, `job`, `schedule` and `meeting` from a

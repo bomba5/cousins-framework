@@ -73,6 +73,11 @@ class AgentBusy(AuthError):
     """The agent is mid-turn; a restart would cut the turn off."""
 
 
+class LaneRefused(AuthError):
+    """The cousin has no runner kind: 2.0.0 refuses it by name
+    (delivery.lane_refusal), before anything runs."""
+
+
 # ---- the mode ---------------------------------------------------------
 
 def check_mode(mode):
@@ -531,8 +536,12 @@ def switch(root, slug, mode, *, restart=True, force=False, tmux_bin="tmux",
     on, restart its agent on the SAME session (the harness's resume, see
     config/harness.toml [agent.resume]). All or nothing: every check
     (mode usable, agent idle unless force, resume possible) runs before
-    cousin.toml changes or anything is killed."""
-    from cousin_lib import spawn
+    cousin.toml changes or anything is killed.
+
+    A cousin with no runner kind is refused with delivery.lane_refusal
+    before anything runs, tmux included: the restart would kill its
+    legacy session and then be refused by start_cousin (R2)."""
+    from cousin_lib import delivery, spawn
     check_mode(mode)
     root = Path(root)
     home = root / "cousins" / slug
@@ -540,6 +549,8 @@ def switch(root, slug, mode, *, restart=True, force=False, tmux_bin="tmux",
         config = CousinConfig.load(home)
     except MissingConfigError as err:
         raise AuthError(str(err))
+    if not spawn.runner_lane(home):
+        raise LaneRefused(delivery.lane_refusal(home))
     previous = read_mode(home)
     result = {"slug": slug, "mode": mode, "previous": previous,
               "running": False, "restarted": False}

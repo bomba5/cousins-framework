@@ -788,6 +788,8 @@ def register():
                     tmux_socket=req.server.tmux_socket)
             except agent_auth.AgentBusy as err:
                 raise HttpError(409, str(err), busy=True)
+            except agent_auth.LaneRefused as err:
+                raise HttpError(409, str(err))
             except agent_auth.AuthError as err:
                 raise HttpError(400, str(err))
         req.server.emit("cousins-refresh", fleet_rows(req.server))

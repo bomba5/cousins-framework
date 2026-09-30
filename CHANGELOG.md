@@ -25,6 +25,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   variables (`accounts.AUTH_VARS`) and every credential-shaped name
   (`*SECRET*`, `*_KEY`, `*_TOKEN`, `*_PASSWORD`), the rule the runner
   already applies to the cousin's own tools.
+- The sdk runner has a test that a turn the CLI ends with an `is_error`
+  result (no exception, no login or rate-limit signal) closes its rows
+  `failed` and the next row still runs (#67).
 
 ## 2.1.0 - 2026-09-30
 

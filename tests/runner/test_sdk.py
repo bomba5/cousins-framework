@@ -754,6 +754,26 @@ class TestSdkRunner(HermeticCase):
         self.assertIn("usage", _results(r)[0])
         self.assertIsNone(_results(r)[0]["usage"])
 
+    def test_an_is_error_result_closes_its_rows_failed_and_the_next_row_runs(self):
+        # #67: the CLI answers the turn with an error result (no exception,
+        # no auth or rate-limit signal): _close fails the rows that result
+        # closes, the result event names them, and the runner goes on
+        r, _ = self._runner([[init_msg(), assistant(text="boom"), result(is_error=True)],
+                             [init_msg(), assistant(text="ok"), result()]])
+        r.start()
+        a = r.enqueue(self._op("fails"))
+        self.assertTrue(_wait(lambda: r.inbox.get(a.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
+        first = _results(r)[0]
+        self.assertEqual(first["inbox_ids"], [a.inbox_id])
+        self.assertIs(first["is_error"], True)
+        self.assertIs(first["interrupted"], False)
+        self.assertNotIn("requeued", first)
+        b = r.enqueue(self._op("works"))
+        self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
+        self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
+
     def test_query_is_sent_as_an_async_iterable_not_a_dict(self):
         seen = []
 

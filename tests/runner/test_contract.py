@@ -132,5 +132,51 @@ class TestRunnerLaneDoctrine(HermeticCase):
         self.assertIn("error", self.flat)
 
 
+class TestDoctrineFollowsServedTools(HermeticCase):
+    """#97: the doctrine prose named `send`, `memory`, `job`, `schedule` and
+    `meeting` from a fixed text, so a cousin whose registry disables one was
+    told to use a tool it does not have. The prose names only the tools the
+    runner serves (tool_definitions)."""
+
+    def _without(self, name, **kw):
+        reg = _registry()
+        reg["tools"][name]["enabled"] = False
+        return reg, contract.render(reg, "1.12.0", **kw)
+
+    def test_a_disabled_tool_is_named_nowhere(self):
+        for name in ("send", "memory", "job", "schedule", "meeting"):
+            reg, text = self._without(name)
+            self.assertNotIn("`%s`" % name, text, name)
+            self.assertNotIn("mcp__cousin__%s" % name, text, name)
+            served = {d["name"] for d in tools.tool_definitions(reg)}
+            for other in served:
+                self.assertIn("`mcp__cousin__%s`" % other, text, (name, other))
+
+    def test_a_disabled_tools_commands_are_not_instructed(self):
+        _reg, text = self._without("memory")
+        flat = " ".join(text.split())
+        for needle in ("`remember`", "`decide`", "`search` or `recall`", "level=operator"):
+            self.assertNotIn(needle, flat)
+        _reg, text = self._without("job")
+        self.assertNotIn("`run`", text)
+
+    def test_the_others_keep_their_doctrine(self):
+        _reg, text = self._without("job")
+        flat = " ".join(text.split())
+        self.assertIn("with the `reply` tool", flat)
+        self.assertIn("with the `send` tool", flat)
+        self.assertIn("Schedules and meetings go through the `schedule` and `meeting` tools", flat)
+        _reg, text = self._without("send")
+        flat = " ".join(text.split())
+        self.assertIn("through the `memory` tool", flat)
+        self.assertIn("A long shell command is the `job` tool's `run`", flat)
+
+    def test_the_opencode_names_follow_too(self):
+        _reg, text = self._without("send", tool_name=lambda n: "cousin_" + n,
+                                   runner="opencode", other_servers=None)
+        self.assertNotIn("cousin_send", text)
+        self.assertIn("cousin_memory", text)
+
+
 if __name__ == "__main__":
     unittest.main()

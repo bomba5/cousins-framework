@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+
+- **The runner contract names only the tools it serves** (#97): the
+  doctrine prose ("How you answer", "Memory", "Tools, not the terminal
+  CLIs") named `send`, `memory`, `job`, `schedule` and `meeting` from a
+  fixed text, so a cousin whose registry disables one was told to use a
+  tool it does not have. Each mention now follows `tool_definitions`: a
+  disabled tool's sentences, bullets and section go, and the paragraph
+  that held them is re-wrapped. With every tool served the contract is
+  byte for byte what it was (the prompt cache keys on it).
+
 ## 2.2.0 - 2026-09-30
 
 ### Added

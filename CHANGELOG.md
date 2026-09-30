@@ -18,6 +18,23 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
+- **Runner review leftovers** (#68):
+  - `cousin-runner --once` gave up after 10 s on a runner `errored` inside
+    its resync, whose drain may take its `drain_timeout_s` (30 s), and
+    exited 3 on a runner about to recover. The drain now comes on top of
+    the 10 s; a login or a stalled side session keeps the plain 10 s.
+  - `--once` read the inbox unguarded: one busy or broken read ended it
+    with a traceback. A read that raises is retried, and one that keeps
+    raising for 10 s is exit 3 naming the error.
+  - A silent tool call longer than the idle timeout (600 s: a build, a
+    10-minute Bash) failed its turn as a stalled stream, and the resync
+    interrupted it. While a tool call is open (its `tool_use` seen, its
+    `tool_result` not yet) the bound is `tool_idle_timeout_s` (an hour).
+  - A live turn's interrupt poll (5 times a second) read the inbox on the
+    event loop thread, where a busy inbox (sqlite waits up to 30 s) froze
+    the reader and the hooks; the read runs off the loop.
+  - A row with an image and a file attachment is echoed and closed as
+    any other: now pinned by a test.
 - **The runner pane marks where markdown stops** (#99): past the first
   20 000 characters a text is not parsed, and the rest (`.rp-md-rest`) had
   no style, so a raw `**` there looked like a rendering bug. It now sits

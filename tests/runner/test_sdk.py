@@ -821,6 +821,7 @@ class TestSdkRunner(HermeticCase):
         r, made = self._runner([
             [init_msg(), assistant(tool="Bash"), "HANG", result(num_turns=1, cost=0.01)],
             [assistant(text="second"), result(num_turns=7, cost=0.07)]], idle_timeout_s=1.0)
+        r.tool_idle_timeout_s = 1.0     # the Bash call stays open: its bound times out (#68)
         r.start()
         a = r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: any("no message for" in e for e in _errors(r)), timeout=5.0))

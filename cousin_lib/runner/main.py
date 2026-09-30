@@ -20,7 +20,8 @@ in a row or too many pane losses; its reason in
 data/run/tmux-giving-up.json): the supervisor leaves 2 down, never
 restarted; 3 when the runner gave up
 (its worker ended, e.g. it could not connect, or `--once` found it
-`errored` for longer than ERRORED_GIVE_UP_S), so a supervisor restarts
+`errored` for longer than ERRORED_GIVE_UP_S past its drain, or could
+not read its inbox that long), so a supervisor restarts
 it; 4 when `--check-auth`
 found the account not logged in (or `--validate`'s one turn did not
 answer), or `--once` found the runner waiting for a login (R15): a
@@ -62,7 +63,8 @@ KINDS = RUNNER_KINDS      # the runners runner_for builds, one list (delivery)
 # source of credentials: the key, the token and the config dir.
 AUTH_ENV = accounts.AUTH_VARS
 
-# `--once` gives up on a runner that stays `errored` this long.
+# `--once` gives up on a runner that stays `errored` this long, past the
+# runner's own drain_timeout_s when it has one (_errored_budget, #68).
 ERRORED_GIVE_UP_S = 10.0
 
 # How long a stopping runner gives its current turn (runner.stop's
@@ -312,18 +314,44 @@ def _gone(runner):
         getattr(runner, "fatal", None) or "its worker ended")
 
 
+def _errored_budget(runner):
+    """How long `--once` lets a runner stay `errored` (#68): a failed SDK
+    turn is `errored` through its resync, which drains for up to the
+    runner's drain_timeout_s before it recovers, so the drain comes on top
+    of ERRORED_GIVE_UP_S. A runner with no drain (the fake, opencode, a
+    side-session set reads its primary's) gets ERRORED_GIVE_UP_S."""
+    for obj in (runner, getattr(runner, "primary", None)):
+        drain = getattr(obj, "drain_timeout_s", None)
+        if isinstance(drain, (int, float)) and not isinstance(drain, bool):
+            return ERRORED_GIVE_UP_S + float(drain)
+    return ERRORED_GIVE_UP_S
+
+
 def _once(runner, stop):
     """Until the inbox is drained (0), a signal (0), or the runner gives
-    up (3): its worker ended, or it stayed `errored` too long; 4 when it
-    stayed `errored` waiting for a login (R15: a restart cannot log in)."""
+    up (3): its worker ended, or it stayed `errored` too long, or its
+    inbox could not be read for ERRORED_GIVE_UP_S; 4 when it stayed
+    `errored` waiting for a login (R15: a restart cannot log in)."""
     errored_since = None
+    unreadable_since = None
     while not stop.is_set():
         why = _gone(runner)
         if why:
             print(why, file=sys.stderr)
             return getattr(runner, "exit_code", None) or 3
         state = runner.state()
-        if runner.inbox.unfinished() == 0 and state != "running":
+        try:
+            unfinished = runner.inbox.unfinished()
+        except Exception as err:  # noqa: BLE001 - a busy or broken read is retried, then named
+            unreadable_since = unreadable_since or time.monotonic()
+            if time.monotonic() - unreadable_since > ERRORED_GIVE_UP_S:
+                print("cousin-runner: the inbox could not be read for %.0fs: %s: %s"
+                      % (ERRORED_GIVE_UP_S, type(err).__name__, err), file=sys.stderr)
+                return 3
+            time.sleep(0.05)
+            continue
+        unreadable_since = None
+        if unfinished == 0 and state != "running":
             return 0
         # a login is looked at on its own: with side sessions (phase 8) the
         # session waiting for one may not be the one state() reports
@@ -333,7 +361,9 @@ def _once(runner, stop):
         stalled = getattr(runner, "side_stalled", lambda: False)()
         if state == "errored" or login or stalled:
             errored_since = errored_since or time.monotonic()
-            if time.monotonic() - errored_since > ERRORED_GIVE_UP_S:
+            # a login or a stalled side session drains nothing: the plain budget
+            budget = ERRORED_GIVE_UP_S if (login or stalled) else _errored_budget(runner)
+            if time.monotonic() - errored_since > budget:
                 if login:
                     print("cousin-runner: the account needs a login (see"
                           " data/login-required.json)", file=sys.stderr)
@@ -343,7 +373,7 @@ def _once(runner, stop):
                           % ERRORED_GIVE_UP_S, file=sys.stderr)
                     return 3
                 print("cousin-runner: the runner stayed errored for %.0fs"
-                      % ERRORED_GIVE_UP_S, file=sys.stderr)
+                      % budget, file=sys.stderr)
                 return 3
         else:
             errored_since = None

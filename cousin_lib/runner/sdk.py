@@ -365,6 +365,10 @@ class SdkRunner:
     # How often a live turn looks for operator/person/peer rows to fold in, and
     # how long an idle loop sleeps when the doorbell is a Poller.
     poll_s = 0.2
+    # The idle bound while a tool call is open (its tool_use seen, its
+    # tool_result not yet): a tool is silent while it runs, and a long one
+    # is no stalled stream (#68). The idle_timeout_s bounds every other wait.
+    tool_idle_timeout_s = 3600.0
 
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
                  effort=None, cwd=None, idle_timeout_s=600.0, turn_timeout_s=None,
@@ -435,6 +439,7 @@ class SdkRunner:
         self._failures = 0       # consecutive failed turns
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
+        self._open_tools = set()  # the live turn's tool_use ids with no tool_result yet
         self._waits = []         # the turn's long waits in progress (#104 b)
         # The live turn's writer (_Writer): every mid-turn write goes through
         # it, never awaited by the reader. None between turns.
@@ -1571,7 +1576,14 @@ class SdkRunner:
         if not self.takes_interrupts or not (self._live or self._carrying) \
                 or self.machine.state not in LIVE_STATES:
             return
-        for row in self.inbox.open_rows(INTERRUPT):
+        # read off the loop (#68): at poll_s for the whole turn, and a busy
+        # inbox waits up to sqlite's lock timeout, which must not freeze the
+        # reader, the hooks and the stall watch with it
+        rows = await asyncio.to_thread(self.inbox.open_rows, INTERRUPT)
+        if not rows or not (self._live or self._carrying) \
+                or self.machine.state not in LIVE_STATES:
+            return
+        for row in rows:
             if row["state"] != "queued" or \
                     self.inbox.claim_id(row["id"], claimant=self.session_id) is None:
                 continue
@@ -1632,7 +1644,8 @@ class SdkRunner:
 
     async def _next(self, it, started, fold, control=None):
         """The next message, or `_END` when the stream stops. The idle
-        timeout bounds the wait for THIS message (a stream gone silent);
+        timeout bounds the wait for THIS message (a stream gone silent),
+        tool_idle_timeout_s while a tool call is open (#68);
         the optional turn timeout bounds the whole turn. `control` (the
         interrupt rows) runs once immediately on every call, i.e. on every
         message received (its throttle, `last_control`, is local to this
@@ -1646,7 +1659,9 @@ class SdkRunner:
         generation is acted on when it lands, not when the next message
         happens to arrive."""
         task = asyncio.ensure_future(it.__anext__())
-        idle_deadline = time.monotonic() + self.idle_timeout_s
+        # a tool call open is silent while it runs: its own bound (#68)
+        idle_s = self.tool_idle_timeout_s if self._open_tools else self.idle_timeout_s
+        idle_deadline = time.monotonic() + idle_s
         last_control = 0.0
         try:
             while True:
@@ -1670,7 +1685,8 @@ class SdkRunner:
                     with self._waiting_at("fold"):
                         await fold()
                 now = time.monotonic()
-                wait, overrun = idle_deadline - now, "no message for %.1fs" % self.idle_timeout_s
+                wait, overrun = idle_deadline - now, "no message for %.1fs%s" % (
+                    idle_s, " with a tool call open" if self._open_tools else "")
                 if self.turn_timeout_s is not None:
                     left = started + self.turn_timeout_s - now
                     if left < wait:
@@ -1771,6 +1787,22 @@ class SdkRunner:
         writer, self._writer = self._writer, None
         if writer is not None:
             await writer.close()
+
+    def _note_tools(self, sdk, msg):
+        """The turn's open tool calls (#68): a tool_use opens one, its
+        tool_result closes it, a result closes them all (the CLI's turn is
+        over)."""
+        if isinstance(msg, sdk.ResultMessage):
+            self._open_tools.clear()
+            return
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
+            return
+        for block in content:
+            if isinstance(block, sdk.ToolUseBlock):
+                self._open_tools.add(block.id)
+            elif isinstance(block, sdk.ToolResultBlock):
+                self._open_tools.discard(block.tool_use_id)
 
     def _match_echo(self, sdk, msg, open_rows, echoed):
         """The open row this UserMessage echoes, or None."""
@@ -1894,6 +1926,7 @@ class SdkRunner:
         self._interrupt_idle = self._reinterrupting = False
         self._auth_turn = None
         self._sent = []
+        self._open_tools = set()
         carried = []      # rows the turn stopped waiting on (#66): _end_carry's
         carry_end = None
         open_rows = []    # (row, envelope text): written, not yet closed
@@ -1948,6 +1981,7 @@ class SdkRunner:
                             carry_end, carried[:] = msg, [row for row, _ in open_rows]
                             open_rows[:] = []
                             break
+                        self._note_tools(sdk, msg)
                         echo_of = None
                         if isinstance(msg, sdk.UserMessage):
                             row = self._match_echo(sdk, msg, open_rows, echoed)

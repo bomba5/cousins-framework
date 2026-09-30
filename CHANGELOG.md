@@ -15,6 +15,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   The flock still keeps a second runner out, one of an older version
   included; a runner started before the upgrade reads as stopped to the
   new probe until it restarts.
+- The runner's event stream reader (`EventStream.tail()`) no longer
+  raises `UnicodeDecodeError` when the stream file ends inside a
+  multi-byte character (a writer that died mid-write): it reads bytes
+  and decodes each complete line, and the partial last line is skipped
+  as before (#86).
 
 ## 2.1.0 - 2026-09-30
 

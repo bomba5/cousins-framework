@@ -34,6 +34,25 @@ class TestEventStream(HermeticCase):
         self.assertEqual([e["kind"] for e in EventStream(self.home, "sess-1").tail()], ["a", "b", "d"])
         self.assertEqual([e["seq"] for e in EventStream(self.home, "sess-1").tail()], [1, 2, 3])
 
+    def test_a_last_line_cut_mid_character_is_skipped_not_fatal(self):
+        # #86: a writer that died inside a multi-byte UTF-8 character left
+        # bytes that do not decode; the partial line is skipped as any
+        # partial line is, and the next writer's line is read after it
+        s = EventStream(self.home, "sess-1")
+        s.append("a", {"t": "caf\u00e9"}); s.append("b", {})
+        cut = ('{"seq": 3, "kind": "c", "payload": {"t": "\u00e9t\u00e9"}}'
+               .encode("utf-8"))
+        cut = cut[:cut.index("\u00e9".encode("utf-8")) + 1]   # one byte of a two-byte character
+        with open(s.path, "ab") as f:
+            f.write(cut)
+        self.assertEqual([e["kind"] for e in s.tail()], ["a", "b"])
+        again = EventStream(self.home, "sess-1")        # the constructor tails too
+        self.assertEqual(again.append("d", {"t": "\u00e9"}), 3)
+        events = list(EventStream(self.home, "sess-1").tail())
+        self.assertEqual([e["kind"] for e in events], ["a", "b", "d"])
+        self.assertEqual(events[0]["payload"], {"t": "caf\u00e9"})
+        self.assertEqual(events[2]["payload"], {"t": "\u00e9"})
+
     def test_two_readers_do_not_disturb_the_writer(self):
         s = EventStream(self.home, "sess-1")
         s.append("a", {})

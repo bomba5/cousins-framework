@@ -60,6 +60,36 @@ class TestChunkText(unittest.TestCase):
         self.assertEqual("".join(c[:1800] for c in chunks[:-1])
                          + chunks[-1], body)
 
+    def test_a_tail_that_would_be_mostly_overlap_joins_the_previous_chunk(self):
+        # #82: 150 new chars after the first window would make a 350-char
+        # tail that is mostly the previous chunk's end; it merges instead
+        body = "".join(chr(65 + i % 26) for i in range(2150))
+        self.assertEqual(memory_search._chunk_text(body, size=2000, overlap=200), [body])
+
+    def test_a_tail_wholly_inside_the_previous_chunk_is_not_emitted(self):
+        body = "".join(chr(65 + i % 26) for i in range(3700))
+        chunks = memory_search._chunk_text(body, size=2000, overlap=200)
+        self.assertEqual(chunks, [body[:2000], body[1800:]])
+
+    def test_a_tail_with_as_much_new_text_as_the_overlap_stays_its_own_chunk(self):
+        body = "".join(chr(65 + i % 26) for i in range(2200))
+        chunks = memory_search._chunk_text(body, size=2000, overlap=200)
+        self.assertEqual(chunks, [body[:2000], body[1800:]])
+
+    def test_no_chunk_is_mostly_overlap_at_any_length(self):
+        size, overlap = 500, 50
+        for length in range(1, 2400, 7):
+            body = "".join(chr(65 + i % 26) for i in range(length))
+            chunks = memory_search._chunk_text(body, size=size, overlap=overlap)
+            self.assertEqual("".join(c[:size - overlap] for c in chunks[:-1]) + chunks[-1],
+                             body, length)
+            for c in chunks[:-1]:
+                self.assertEqual(len(c), size, length)
+            self.assertLess(len(chunks[-1]), size + overlap, length)
+            if len(chunks) > 1:
+                # the tail carries at least `overlap` chars the chunk before lacks
+                self.assertGreaterEqual(len(chunks[-1]) - overlap, overlap, length)
+
     def test_exact_multiple_leaves_no_empty_chunk(self):
         body = "x" * 4000
         chunks = memory_search._chunk_text(body, size=2000, overlap=0)

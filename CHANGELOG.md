@@ -28,6 +28,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 - The sdk runner has a test that a turn the CLI ends with an `is_error`
   result (no exception, no login or rate-limit signal) closes its rows
   `failed` and the next row still runs (#67).
+- Semantic memory search: a file's last chunk that would add fewer new
+  characters than `chunk_overlap` now joins the chunk before it instead
+  of standing alone as a fragment that is mostly overlap (#82); such
+  fragments ranked erratically. Nothing is re-embedded at upgrade:
+  existing indexes pick it up at their next rebuild or refresh, which
+  re-embeds only the affected files' last chunk.
 
 ## 2.1.0 - 2026-09-30
 

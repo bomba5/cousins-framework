@@ -507,21 +507,30 @@ def _cosine(a, b):
 
 
 def _chunk_text(body, *, size=2000, overlap=200):
-    """Split a body into overlapping chunks of at most `size` chars.
-    Overlap keeps a sentence that straddles a boundary findable in one
-    piece. A short body is one chunk; an empty body is none; the step
-    is always positive so a careless overlap cannot stall."""
+    """Split a body into overlapping chunks of `size` chars. Overlap keeps
+    a sentence that straddles a boundary findable in one piece. A short
+    body is one chunk; an empty body is none; the step is always
+    positive so a careless overlap cannot stall.
+
+    A tail that would be mostly overlap (fewer new chars than the
+    overlap) joins the chunk before it instead (#82), so the last chunk
+    runs up to size + overlap - 1 chars: such fragments carried little
+    text of their own and ranked erratically."""
     if not body:
         return []
     if len(body) <= size:
         return [body]
     step = max(1, size - overlap)
+    shared = size - step            # what two neighbours actually share
     chunks = []
     start = 0
-    while start < len(body):
-        chunks.append(body[start:start + size])
+    while True:
+        end = start + size
+        if end >= len(body) or len(body) - end < shared:
+            chunks.append(body[start:])
+            return chunks
+        chunks.append(body[start:end])
         start += step
-    return chunks
 
 
 def _text_hash(text):

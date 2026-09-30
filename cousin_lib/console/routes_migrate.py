@@ -114,6 +114,16 @@ def _lane(home):
     return _runner_kind(home) or "tmux-legacy"
 
 
+def _no_kind(home):
+    """Row 72/79: a plan, apply or rollback of the migration (no `to`) is
+    refused before anything runs: 2.0.0 keeps no conversion from the legacy
+    lane (O3). 409 with delivery.lane_refusal for a cousin with no runner;
+    400 telling a runner cousin to name a kind."""
+    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind
+    raise HttpError(400 if _runner_kind(home) in RUNNER_KINDS else 409,
+                    migrate.no_kind_line(home))
+
+
 def _bool(body, key):
     value = body.get(key, False)
     if value is None:
@@ -456,7 +466,9 @@ def register():
             up = bool(_live(server)["supervisor_up"](server.root))
         except Exception:  # noqa: BLE001 - unknown reads as not up
             up = False
-        return 200, {"ok": True, "slug": slug, "lane": _lane(home),
+        from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal
+        refusal = None if _runner_kind(home) in RUNNER_KINDS else lane_refusal(home)
+        return 200, {"ok": True, "slug": slug, "lane": _lane(home), "refusal": refusal,
                      "kinds": list(migrate.SWITCH_KINDS), "steps": list(migrate.STEPS),
                      "switch_steps": {k: list(v) for k, v in migrate.SWITCH_STEPS.items()},
                      "migration": public_record(migrate.read_record(home)),
@@ -474,6 +486,7 @@ def register():
         if to:
             p = migrate.switch_plan(home, root=server.root, to=to, **_switch_live(server))
             return 200, {"ok": True, "plan": p}
+        _no_kind(home)
         live = _live(server)
         if not validate:
             try:
@@ -500,6 +513,8 @@ def register():
         server = req.server
         home = _home(server, slug)
         to, account, validate = _options(req.body)
+        if not to:
+            _no_kind(home)
         _confirmed(req.body, "the kind switch" if to else "the migration")
         busy = running_migration(server)
         if busy:
@@ -544,6 +559,8 @@ def register():
         which = body.get("which")
         if which not in ("migration", "switch"):
             raise HttpError(400, "which must be migration or switch")
+        if which == "migration":
+            _no_kind(home)
         force = _bool(body, "force")
         _confirmed(body, "the rollback")
         if which == "switch":

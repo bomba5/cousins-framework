@@ -79,16 +79,12 @@ function paneButtonLabel(screen) {
 }
 
 // The rollbacks the records allow: the kind switch back to the kind it
-// came from, and the migration back to the tmux lane.
+// came from. (2.0.0 has no legacy lane, so no migration rolls back to it.)
 function rollbackOffers(state) {
   const out = [];
   const sw = state && state.switch;
   if (sw && ["switching", "switched", "failed"].indexOf(sw.state) >= 0 && sw.from) {
     out.push({ which: "switch", to: sw.from, label: `roll the kind switch back to ${sw.from}` });
-  }
-  const mg = state && state.migration;
-  if (mg && ["applying", "failed", "migrated"].indexOf(mg.state) >= 0) {
-    out.push({ which: "migration", to: null, label: "roll the migration back to the tmux lane" });
   }
   return out;
 }
@@ -606,10 +602,12 @@ function MigratePanel({ cousin }) {
             <div style={MIG_HINT}>{recordLine("migration", state.migration)}</div>
             <div style={MIG_HINT}>{recordLine("kind switch", state.switch)}</div>
             <div style={MIG_ROW}>
-              <button className="btn" style={MIG_SMALL} disabled={running} data-open-kind-switch
-                      onClick={() => openKindSwitchDialog(slug)}>
-                {lane === "tmux-legacy" ? "migrate to the runner..." : "switch kind..."}
-              </button>
+              {state.refusal ? (
+                <div data-migrate-refusal style={MIG_HINT}>{state.refusal}</div>
+              ) : (
+                <button className="btn" style={MIG_SMALL} disabled={running} data-open-kind-switch
+                        onClick={() => openKindSwitchDialog(slug)}>switch kind...</button>
+              )}
               <button className={`btn ${showCheck ? "active" : "ghost"}`} style={MIG_SMALL}
                       onClick={() => setShowCheck(!showCheck)}>check</button>
             </div>

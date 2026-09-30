@@ -56,6 +56,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   // Media on/off: a browser preference (media.jsx), default on.
   const [mediaShown, setMediaShown] = React.useState(() => readMediaShown());
   React.useEffect(() => { writeMediaShown(mediaShown); }, [mediaShown]);
+  // The pane column's tab: "pane" (the reasoning stream or the terminal) or a
+  // plugin's name (plugins.jsx). Without a plugin tab there is no strip at all.
+  const [paneTab, setPaneTab] = React.useState("pane");
 
   // Per-tab last-viewed marker: stamp localStorage whenever the operator
   // is on this cousin's chat tab + the document is visible. This is what
@@ -159,6 +162,8 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   // A remote cousin (a hive node on another machine) has no pane here:
   // the console does not run it, it only proxies its chat.
   const paneShown = paneOpen && !c.remote;
+  const pluginTabList = window.pluginTabs ? window.pluginTabs(c) : [];
+  const activeTab = pluginTabList.find(t => t.name === paneTab) || null;
 
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0 }}>
@@ -185,7 +190,14 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
                title="drag to resize, double-click to reset" role="separator" aria-orientation="vertical" />
         )}
         <div className={`pane-col ${paneShown ? "open" : ""}`}>
-          {paneShown && (c.runner
+          {paneShown && pluginTabList.length > 0 && window.PluginPaneTabs && (
+            <PluginPaneTabs tabs={pluginTabList} active={activeTab ? activeTab.name : "pane"}
+                            onPick={setPaneTab} paneLabel={c.runner ? "reasoning" : "terminal"} />
+          )}
+          {paneShown && activeTab && window.PluginFrame && (
+            <PluginFrame key={c.slug + "|" + activeTab.name} tab={activeTab} />
+          )}
+          {paneShown && !activeTab && (c.runner
             ? <RunnerPaneView key={c.slug} cousin={c} onClose={() => setPaneOpen(false)} />
             : <PaneView cousin={c} onClose={() => setPaneOpen(false)} />)}
         </div>

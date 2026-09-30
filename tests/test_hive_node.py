@@ -340,7 +340,8 @@ class TestBrainLoop(NodeCase):
         self.assertEqual(inbox[0]["from"], "testa")
         self.assertEqual(inbox[0]["body"], "the deploy is green")
 
-    def test_tell_home_posts_to_the_configured_home_chat(self):
+    def test_a_home_chat_url_is_ignored_and_nothing_is_posted(self):
+        """2.0.0: no home chat server; only TELL_HOME=1 reaches home."""
         _HomeChat.received = []
         home = http.server.HTTPServer(("127.0.0.1", 0), _HomeChat)
         threading.Thread(target=home.serve_forever, daemon=True).start()
@@ -353,12 +354,8 @@ class TestBrainLoop(NodeCase):
                    {"user": "Sam", "message": "say hi home"})
         reply = self._wait_for_reply(node, "Sam")[1]["message"]
         self.assertEqual(reply, "Sure.")
-        deadline = time.time() + 5
-        while time.time() < deadline and not _HomeChat.received:
-            time.sleep(0.05)
-        self.assertEqual(_HomeChat.received[0]["path"], "/api/send")
-        self.assertEqual(_HomeChat.received[0]["payload"],
-                         {"user": "Testa", "message": "node is up"})
+        time.sleep(0.5)
+        self.assertEqual(_HomeChat.received, [])
 
     def test_tell_home_with_no_home_configured_is_a_no_op(self):
         node = self._node()

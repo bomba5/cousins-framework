@@ -39,7 +39,7 @@ and /health need nothing.
 Configuration is the environment (install.sh loads node.env):
   COUSIN_SLUG, NODE_NAME, NODE_ROLE, NODE_PORT, NODE_HOST (127.0.0.1)
   QUEEN_URL, HIVE_TOKEN
-  HOME_CHAT_URL (optional gateway), AGENT_CMD (optional backend)
+  TELL_HOME (1: [tell-home: ...] through the queen), AGENT_CMD (optional backend)
   NODE_DIR (this directory), NODE_POLL_SECONDS (5; 0 disables)
   AGENT_TIMEOUT_SECONDS (120)
 """
@@ -132,7 +132,9 @@ class NodeConfig:
         self.token = (get("HIVE_TOKEN") or "").strip()
         if not self.token:
             raise ConfigError("HIVE_TOKEN is missing from the environment")
-        self.home_chat_url = (get("HOME_CHAT_URL") or "").strip().rstrip("/")
+        # HOME_CHAT_URL (1.x: a POST to a home chat server) is gone with
+        # the per-cousin chat server; kept only to say so at start
+        self.home_chat_url = (get("HOME_CHAT_URL") or "").strip()
         # TELL_HOME=1: [tell-home: ...] goes through the queen, with this
         # node's token (POST /hive/tell-home), not to a chat server
         self.tell_home = (get("TELL_HOME") or "").strip() == "1"
@@ -466,29 +468,16 @@ class Brain:
 
     def _tell_home(self, text):
         """Sent once, never retried (docs/reference/hive-api.md): a
-        message the queen or the home chat does not take is dropped, and
-        the log says so."""
+        message the queen does not take, or any message without
+        TELL_HOME=1, is dropped, and the log says so."""
         if self.config.tell_home:
             sent = self.hive.tell_home(text, msg_id="%s-%s" % (
                 self.config.slug, uuid.uuid4().hex))
             if not sent:
                 self.log("tell-home dropped: the queen did not take it")
             return sent
-        url = self.config.home_chat_url
-        if not url:
-            self.log("tell-home dropped: no TELL_HOME or HOME_CHAT_URL")
-            return False
-        request = urllib.request.Request(
-            url + "/api/send",
-            data=json.dumps({"user": self.config.name,
-                             "message": text}).encode(),
-            method="POST", headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=8):
-                return True
-        except Exception as err:
-            self.log("tell-home dropped: %s" % err)
-            return False
+        self.log("tell-home dropped: TELL_HOME is not 1")
+        return False
 
 
 # ---- the inbox poller ---------------------------------------------------
@@ -738,6 +727,10 @@ def main(argv=None):
     print("%s (%s) listening on %s:%d [brain=%s]" % (
         node.config.name, node.config.slug, node.config.host, node.port,
         node.config.brain), flush=True)
+    if node.config.home_chat_url and not node.config.tell_home:
+        print("cousin_node: HOME_CHAT_URL is ignored since 2.0.0 (no home chat"
+              " server); set TELL_HOME=1 to reach the home cousin through the"
+              " queen", file=sys.stderr, flush=True)
     node.checkin.start()
     try:
         node.httpd.serve_forever()

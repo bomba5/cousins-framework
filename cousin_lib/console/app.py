@@ -30,6 +30,9 @@ Extension points for the other console tasks:
 - A handler returns `(status, json_body)` or `(status, json_body,
   headers)`; a `static.RawResponse` body is written verbatim and an
   `sse.Stream` body is streamed chunk by chunk and closed.
+- `/plugins/<name>/...` is not a route: routes_plugins.serve_proxy
+  answers it on the handler (GET, POST, HEAD), behind the same guard and
+  login (`_Handler.auth_refusal`), streaming the plugin service's answer.
 """
 from __future__ import annotations
 
@@ -68,6 +71,7 @@ ROUTE_MODULES = [
     "cousin_lib.console.stream",
     "cousin_lib.console.sse",
     "cousin_lib.console.longop",
+    "cousin_lib.console.routes_plugins",
 ]
 
 # The seam for the UI parity packages (docs: notes of the console audit,
@@ -330,6 +334,34 @@ class _Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self._handle("PUT")
 
+    def do_HEAD(self):
+        # only the plugin proxy answers HEAD; anything else is what
+        # http.server says for a method it has no handler for
+        if self.path.startswith("/plugins/"):
+            self._handle("HEAD")
+        else:
+            self.send_error(501, "Unsupported method ('HEAD')")
+
+    def auth_refusal(self):
+        """(status, body) when this request may not pass the login, else
+        None: the rule every /api route but AUTH_EXEMPT follows (a broken
+        users file refuses everything, a configured one needs a session)."""
+        server = self.console
+        from cousin_lib.console import auth
+        state, error = server.users.state()
+        if state == "broken":
+            server.report_users_error(error)
+            return 503, {"ok": False, "error": error}
+        if state != "ok":
+            return None
+        token = self._cookie(auth.COOKIE)
+        user = server.sessions.lookup(
+            token, stamp_of=lambda name: auth.user_stamp(server.users, name)) \
+            if token else None
+        if user is None:
+            return 401, {"ok": False, "error": "login required"}
+        return None
+
     def _cookie(self, name):
         raw = self.headers.get("Cookie") or ""
         for part in raw.split(";"):
@@ -376,6 +408,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             body = self.rfile.read(length) if length else b""
             peer_routes.serve(self, method, parsed.path, body)
+            return
+        # A plugin's pages and streams (routes_plugins): the guard, the
+        # login and a bounded body, then the service's answer streamed.
+        from cousin_lib.console import routes_plugins
+        if routes_plugins.is_proxy_path(parsed.path):
+            routes_plugins.serve_proxy(self, method, parsed.path, parsed.query, length)
             return
         length = max(0, length)
         body = self.rfile.read(length) if length else b""

@@ -270,7 +270,17 @@ def lane_fields(home):
     return out
 
 
-def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
+def _plugins(server, config, loaded):
+    """The row's `plugins` (routes_plugins.cousin_plugins): [] when the
+    install has none or the cousin enables none; never an error."""
+    from cousin_lib.console import routes_plugins
+    try:
+        return routes_plugins.cousin_plugins(server.root, config.home, loaded)
+    except Exception:  # noqa: BLE001 - a plugin never takes the fleet listing down
+        return []
+
+
+def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD, plugins=None):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
     chat = None if _is_runner(config) else chat_health(config)
@@ -342,6 +352,8 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
         # R7: keys 2.0.0 no longer reads, named on the card (the install's
         # own are in `cousin-supervisor status`)
         "removedKeys": removed_keys.scan_home(config.home),
+        # the plugins it enables, each with its console tab or null
+        "plugins": _plugins(server, config, plugins),
         **lane_fields(config.home),
     }
 
@@ -376,7 +388,12 @@ def fleet_rows(server):
     defaults = agent_defaults(server.root)
     patterns = attention_patterns(server.root)
     snap = supervisor.snapshot(server.root)
-    rows = [fleet_row(server, config, defaults, patterns, snap)
+    from cousin_lib import plugins as fw_plugins
+    try:
+        loaded = fw_plugins.load(server.root)
+    except Exception:  # noqa: BLE001 - _plugins answers [] per row then
+        loaded = None
+    rows = [fleet_row(server, config, defaults, patterns, snap, loaded)
             for config in FrameworkConfig(server.root).list_cousins()]
     return rows + console_hive.remote_rows(
         server, {row["slug"] for row in rows})

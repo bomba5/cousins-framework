@@ -29,6 +29,14 @@ it holds: the CLI's environment carries the cousin's own credential
 there, and a .mcp.json the model can edit must not route it to a
 server.
 
+Plugins (cousin_lib/plugins.py): each plugin the cousin enables in its
+cousin.toml `[plugins] enabled` that declares [mcp] adds one stdio server
+named after the plugin (`load(..., root=...)`, `add_plugins`), rendered
+from its manifest, with COUSIN_SLUG, COUSIN_HOME, FRAMEWORK_ROOT and
+PLUGIN_DIR in its env. A .mcp.json entry of the same name wins; the
+plugin's is skipped with the reason. Plugin rows carry
+`"source": "plugin"` in the event.
+
 The event (`Loaded.event`) carries server names, types, ignored key
 names and reasons, never a value. The set is ordered by name, so the
 same file gives the same bytes at every start."""
@@ -56,6 +64,7 @@ class Loaded:
         self.servers = servers or {}      # name -> SDK config, by name
         self.listed = listed or []        # [{"name", "type"[, "ignored_keys"]}]
         self.skipped = skipped or []      # [{"name" (None: the file), "reason"}]
+        self.plugins = False              # a plugin was added or skipped (add_plugins)
 
     def event(self):
         """The stream event's payload: names, types and reasons only."""
@@ -186,10 +195,11 @@ def _refusal(kind, entry, environ):
     return None
 
 
-def load(home, environ=None):
+def load(home, environ=None, *, root=None):
     """The servers to merge beside `cousin`, `${VAR}` left for the CLI;
     `environ` (default: this process's environment, which the SDK hands
-    the CLI) is read only for whether a variable is set."""
+    the CLI) is read only for whether a variable is set. With `root`,
+    the cousin's plugins are added after the file's (add_plugins)."""
     environ = os.environ if environ is None else environ
     present, entries, skipped = read(home)
     loaded = Loaded(present, skipped=list(skipped))
@@ -206,6 +216,41 @@ def load(home, environ=None):
         loaded.listed.append(row)
     # one order for the whole set of skips: the file's problems, then by name
     loaded.skipped.sort(key=lambda s: (s["name"] is not None, s["name"] or ""))
+    if root is not None:
+        add_plugins(loaded, home, root, entries=entries, environ=environ)
+    return loaded
+
+
+def add_plugins(loaded, home, root, *, entries=(), environ=None):
+    """The cousin's plugin MCP servers (plugins.mcp_servers) added to
+    `loaded` as stdio servers, after the file's, each row and skip marked
+    `"source": "plugin"`. A name the file declares (loaded or skipped) or
+    `cousin` keeps the file's; the plugin's is skipped with why. Never
+    raises: a broken plugin set is one skip."""
+    from cousin_lib import plugins
+    environ = os.environ if environ is None else environ
+    try:
+        servers, skipped = plugins.mcp_servers(home, root)
+    except Exception as err:  # noqa: BLE001 - never fatal: the cousin keeps its tools
+        servers, skipped = {}, [{"name": None, "reason": "plugins not read: %s"
+                                 % type(err).__name__}]
+    declared = {name for name, _k, _e in entries} | {
+        s["name"] for s in loaded.skipped if s["name"] and s.get("source") != "plugin"}
+    for skip in skipped:
+        loaded.skipped.append(dict(skip, source="plugin"))
+    for name, server in servers.items():
+        if name == RESERVED:
+            why = "reserved: the runner serves its own `%s` tools in-process" % RESERVED
+        elif name in declared or name in loaded.servers:
+            why = "%s declares a server named %s; that one is kept" % (FILE, name)
+        else:
+            why = _refusal("stdio", server, environ)
+        if why:
+            loaded.skipped.append({"name": name, "reason": why, "source": "plugin"})
+            continue
+        loaded.servers[name] = _config("stdio", server)
+        loaded.listed.append({"name": name, "type": "stdio", "source": "plugin"})
+    loaded.plugins = bool(servers or skipped)
     return loaded
 
 

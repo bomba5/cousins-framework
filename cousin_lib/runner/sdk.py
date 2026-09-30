@@ -598,7 +598,8 @@ class SdkRunner:
                                       extra_args=extra)
 
     def _mcp_servers(self, server):
-        """`cousin` first, then the home's .mcp.json servers by name.
+        """`cousin` first, then the home's .mcp.json servers by name, then
+        the servers of the plugins the cousin enables (mcp_config.add_plugins).
         alwaysLoad is the cousin's alone: the CLI would defer its tools
         behind its tool search, so a cousin's first memory, send or reply
         call would need a search first (#94). A user server's tools stay
@@ -608,12 +609,12 @@ class SdkRunner:
         if self._user_mcp is None:
             from cousin_lib.runner import mcp_config
             try:
-                self._user_mcp = mcp_config.load(self.home)
+                self._user_mcp = mcp_config.load(self.home, root=self.root)
             except Exception as err:  # noqa: BLE001 - never fatal: the cousin keeps `cousin`
                 self._user_mcp = mcp_config.Loaded(True, skipped=[{
                     "name": None, "reason": "%s not read: %s" % (mcp_config.FILE,
                                                                  type(err).__name__)}])
-            if self._user_mcp.present:
+            if self._user_mcp.present or self._user_mcp.plugins:
                 self.stream.append("mcp_config", self._user_mcp.event())
         return dict({"cousin": {**server, "alwaysLoad": True}}, **self._user_mcp.servers)
 

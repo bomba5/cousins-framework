@@ -8,7 +8,10 @@ ALLOWLISTED environment and a config the runner renders at every start
 (R5): opencode's own hosted provider disabled unless the account names it,
 the model named (R6), the
 plugin pack, and one MCP server, the runner's own (mcp_http.McpHttpServer),
-so every framework tool runs in this process against the live Turn (R7).
+so every framework tool runs in this process against the live Turn (R7),
+plus one `local` MCP server per framework plugin the cousin enables that
+declares [mcp] (cousin_lib/plugins.py; the home's .mcp.json is not read
+on this kind).
 Before the first prompt it checks that opencode reports that MCP server
 `connected`; a runner whose model would have no framework tools refuses
 to run turns.
@@ -234,14 +237,23 @@ def plugin_entry(plugin=PLUGIN):
     return Path(plugin).as_uri()
 
 
-def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLUGIN):
+def local_mcp(server):
+    """A stdio server ({command, args, env}) as an opencode `local` MCP entry."""
+    return {"type": "local", "command": [server["command"]] + list(server.get("args") or []),
+            "environment": dict(server.get("env") or {}), "enabled": True}
+
+
+def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLUGIN,
+                  servers=None):
     """The config the runner renders (R5). opencode merges other sources
     over it (its global config dir, `$HOME/.opencode`, a managed config):
     `foreign_config_sources` refuses those the runner can see, and the
     effective config is checked after the server starts
     (`check_effective_config`). opencode's own hosted service (Zen, its
     free models among them) stays disabled unless the account names
-    `opencode` in its providers: nothing reaches it by default."""
+    `opencode` in its providers: nothing reaches it by default. `servers`
+    ({name: {command, args, env}}: the cousin's plugin MCP servers) are
+    added beside `cousin` as `local` entries."""
     config = {
         "$schema": SCHEMA,
         "model": model,
@@ -254,6 +266,8 @@ def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLU
         "mcp": {"cousin": {"type": "remote", "url": mcp_url,
                            "headers": {"Authorization": "Bearer %s" % mcp_token}}},
     }
+    for name, server in (servers or {}).items():
+        config["mcp"][name] = local_mcp(server)
     if account.providers:
         config["enabled_providers"] = list(account.providers)
     if account.endpoint:
@@ -340,10 +354,12 @@ def _lock_names_others(path):
     return ", ".join(others)
 
 
-def check_effective_config(config, env, *, account, model, small_model, plugin=PLUGIN):
+def check_effective_config(config, env, *, account, model, small_model, plugin=PLUGIN,
+                           servers=()):
     """opencode's effective config (GET /config, every source merged) holds
     what the runner rendered and nothing more: the bridge guard over all of
-    it, exactly the policy plugin, exactly the cousin MCP server, providers
+    it, exactly the policy plugin, exactly the cousin MCP server and the
+    plugin servers the runner rendered (`servers`, their names), providers
     within the account's, the named models. RunnerError naming what, never
     a value (a value may be a key)."""
     def refuse(what):
@@ -358,8 +374,9 @@ def check_effective_config(config, env, *, account, model, small_model, plugin=P
     if names != [plugin_entry(plugin)]:
         refuse("lists plugins %s, not only the policy plugin" % names)
     mcp = sorted(config.get("mcp") or {})
-    if mcp != ["cousin"]:
-        refuse("lists MCP servers %s, not only the cousin's" % mcp)
+    if mcp != sorted({"cousin", *servers}):
+        refuse("lists MCP servers %s, not only the cousin's%s"
+               % (mcp, " and its plugins' %s" % sorted(servers) if servers else ""))
     allowed = set(account.providers or ()) | ({ENDPOINT_PROVIDER} if account.endpoint else set())
     extra = sorted(set(config.get("provider") or {}) - allowed)
     if extra:
@@ -507,6 +524,12 @@ class OpencodeRunner:
         self.server_factory = server_factory or _default_server_factory
         self.idle_timeout_s = float(idle_timeout_s)
         self.health_timeout_s = float(health_timeout_s)
+        # The plugin MCP servers (cousin_lib/plugins.py), read once: an
+        # edit lands at the next start, as on the sdk kind.
+        from cousin_lib.runner import mcp_config
+        self._plugin_mcp = mcp_config.add_plugins(mcp_config.Loaded(False), self.home,
+                                                  self.root, environ=environ)
+        self._plugin_mcp_said = False
         # the bridge guard at construction (runner_for, exit 2: R13), on the
         # config as it will be rendered and the environment it will get
         self._render(mcp_url="http://127.0.0.1:0/mcp", mcp_token="-")
@@ -578,7 +601,8 @@ class OpencodeRunner:
     def _render(self, *, mcp_url, mcp_token):
         """(config, env), refused when either names the bridge (R13)."""
         config = render_config(self.account, model=self.model, small_model=self.small_model,
-                               mcp_url=mcp_url, mcp_token=mcp_token)
+                               mcp_url=mcp_url, mcp_token=mcp_token,
+                               servers=self._plugin_servers())
         env = server_env(self.account, self.root, home=self.home, environ=self._environ,
                          models_fetch=self.models_fetch)
         try:
@@ -586,6 +610,20 @@ class OpencodeRunner:
         except opencode_guard.BridgeRefused as err:
             raise RunnerError(err.reason)
         return config, env
+
+    def _plugin_servers(self):
+        """{name: {command, args, env}} of the plugin servers to render."""
+        return {row["name"]: {"command": cfg["command"], "args": cfg.get("args", []),
+                              "env": cfg.get("env", {})}
+                for row in self._plugin_mcp.listed
+                for cfg in [self._plugin_mcp.servers[row["name"]]]}
+
+    def _say_plugin_mcp(self):
+        """The `mcp_config` event, once per runner, when a plugin was added
+        or skipped (the sdk kind's event, `.mcp.json` never read here)."""
+        if self._plugin_mcp.plugins and not self._plugin_mcp_said:
+            self._plugin_mcp_said = True
+            self.stream.append("mcp_config", dict(self._plugin_mcp.event(), file=None))
 
     def _refuse_foreign_config(self):
         """Review Critical 1: a config source opencode would merge over the
@@ -801,7 +839,7 @@ class OpencodeRunner:
                               " policy.toml would not apply, so no turn runs"
                               % (entry, names or "none"))
         check_effective_config(effective, env, account=self.account, model=self.model,
-                               small_model=self.small_model)
+                               small_model=self.small_model, servers=self._plugin_servers())
 
     def _await_plugin_ack(self):
         """The veto's second half: the plugin acknowledged THIS start's
@@ -847,6 +885,7 @@ class OpencodeRunner:
         from cousin_lib.runner import prompt
         try:
             self._start_mcp()
+            self._say_plugin_mcp()
             config, env = self._render(mcp_url=self._mcp.url, mcp_token=self._mcp.token)
             self._server_env = env
             self._refuse_foreign_config()
@@ -916,7 +955,8 @@ class OpencodeRunner:
                 effective = self._client.request("GET", "/config",
                                                  timeout=self.plugin_timeout_s) or {}
                 check_effective_config(effective, self._server_env, account=self.account,
-                                       model=self.model, small_model=self.small_model)
+                                       model=self.model, small_model=self.small_model,
+                                       servers=self._plugin_servers())
                 return True
             except Exception as exc:  # noqa: BLE001 - a failed check is a refusal, never a crash
                 err = exc

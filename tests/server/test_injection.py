@@ -23,26 +23,7 @@ from cousin_lib.server.injection import (
     default_settle,
     make_deliver,
 )
-
-_FAKE_TMUX = """#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
-n=$(wc -l < "$FAKE_TMUX_LOG")
-if [ "$1" = load-buffer ]; then cat > "${FAKE_TMUX_STDIN:-/dev/null}"; fi
-# FAKE_TMUX_FAIL_CALL: fail every call of this subcommand;
-# FAKE_TMUX_FAIL_NTH: fail these 1-based call indexes (space separated)
-if [ -n "${FAKE_TMUX_FAIL_CALL:-}" ] && [ "$1" = "$FAKE_TMUX_FAIL_CALL" ]; then exit 1; fi
-case " ${FAKE_TMUX_FAIL_NTH:-} " in *" $n "*) exit 1;; esac
-# FAKE_TMUX_HANG_NTH: these call indexes hang until the caller times out
-case " ${FAKE_TMUX_HANG_NTH:-} " in *" $n "*) exec sleep 10;; esac
-# FAKE_TMUX_PANE2 replaces the pane from call FAKE_TMUX_PANE_AFTER + 1 on
-pane="$FAKE_TMUX_PANE"
-if [ -n "${FAKE_TMUX_PANE_AFTER:-}" ] && [ "$n" -gt "$FAKE_TMUX_PANE_AFTER" ]; then pane="$FAKE_TMUX_PANE2"; fi
-for a in "$@"; do
-  if [ "$a" = capture-pane ]; then cat "$pane" 2>/dev/null; fi
-  if [ "$a" = -l ]; then sleep "${FAKE_TMUX_PASTE_DELAY:-0}"; fi
-done
-exit "${FAKE_TMUX_RC:-0}"
-"""
+from tests._fakes import _FAKE_TMUX
 
 
 class ComposeCase(unittest.TestCase):
@@ -318,33 +299,6 @@ class TestAttentionGuard(InjectorCase):
             typed = self._injector().inject("hello")
         self.assertFalse(typed)
         self.assertFalse(any(" -l " in c for c in self._calls()))
-
-    def test_loops_heartbeat_does_not_type_into_a_login_menu(self):
-        # The path the re-test caught: the loops daemon's first context
-        # beat for a fresh cousin, delivered by its default deliver.
-        from cousin_lib import loops
-
-        root = self.tmux.parent / "root"
-        home = root / "cousins" / "wren"
-        (root / "config").mkdir(parents=True)
-        home.mkdir(parents=True)
-        (root / "config" / "harness.toml").write_text(
-            'attention_patterns = ["Select login method"]\n')
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\n[chat]\nport = 18123\n')
-        (home / "CLAUDE.md").write_text("# Wren\n")
-        self.pane.write_text(self.MENU)
-        bindir = self.tmux.parent
-        with mock.patch.dict(os.environ, {
-                "FRAMEWORK_ROOT": str(root),
-                "PATH": str(bindir) + os.pathsep + os.environ["PATH"]}), \
-                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
-            loops.tick(deliver=loops._default_deliver,
-                       is_alive=lambda slug: True)
-        self.assertIn("SKIPPED", err.getvalue())
-        self.assertTrue(self._calls(), "the beat never reached tmux")
-        self.assertFalse(any("send-keys" in c for c in self._calls()),
-                         self._calls())
 
 
 class TestSettle(unittest.TestCase):

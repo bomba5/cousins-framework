@@ -99,25 +99,6 @@ class TestSend(ServerCase):
         self.assertEqual(calls[0]["user"], "Sam")
         self.assertEqual(calls[0]["message"], "hi")
 
-    def test_send_touches_the_presence_marker_after_delivery(self):
-        # The marker's mtime feeds the NEXT delivery's time prefix, so the
-        # touch must happen after this delivery composed its text: at
-        # deliver() time the marker still carries the previous mtime.
-        marker_mtime_at_delivery = []
-
-        def deliver(**kw):
-            marker = self.home / "data" / ".last-user-msg"
-            marker_mtime_at_delivery.append(
-                marker.stat().st_mtime if marker.exists() else None
-            )
-
-        server = self._boot(deliver=deliver)
-        self._request(server, "/api/send", {"user": "Sam", "message": "a"})
-        marker = self.home / "data" / ".last-user-msg"
-        self.assertTrue(marker.exists())
-        self.assertIsNone(marker_mtime_at_delivery[0])
-
-
 class TestReply(ServerCase):
     def test_reply_stores_under_recipient_thread_as_own_type(self):
         server = self._boot()

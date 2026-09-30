@@ -22,7 +22,7 @@ from cousin_lib import spawn, supervisor
 from cousin_lib.runner.main import is_running
 from tests._hermetic import HermeticCase
 from tests._stub_supervisor import StubSupervisor, runner_home
-from tests.server.test_injection import _FAKE_TMUX
+from tests._fakes import _FAKE_TMUX
 
 
 def _wait_for(predicate, timeout=15.0):

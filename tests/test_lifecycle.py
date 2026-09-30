@@ -28,7 +28,7 @@ from cousin_lib import lifecycle
 from cousin_lib.lifecycle import (braid_memory, reincarnate,
                                   reincarnate_main, rewrite_role,
                                   transplant, transplant_main)
-from tests.server.test_injection import _FAKE_TMUX
+from tests._fakes import _FAKE_TMUX
 
 
 class _Capture(http.server.BaseHTTPRequestHandler):

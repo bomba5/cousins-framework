@@ -49,7 +49,7 @@ import tomllib
 from pathlib import Path
 
 from cousin_lib import accounts
-from cousin_lib.delivery import RUNNER_KINDS
+from cousin_lib.delivery import RUNNER_KINDS, lane_refusal
 from cousin_lib.runner import restart_note
 from cousin_lib.runner.base import RunnerError
 
@@ -163,8 +163,8 @@ def export_environment(home, *, overwrite=True):
 
 def runner_for(home, *, kind=None):
     """The runner cousin.toml names. A cousin with no `[agent] runner` is
-    a tmux cousin: it gets no runner (its inbox has no producer), unless
-    `kind` says otherwise. The home's policy.toml is loaded here, once,
+    refused with `delivery.lane_refusal` (2.0.0 has no legacy tmux lane),
+    unless `kind` says otherwise. The home's policy.toml is loaded here, once,
     and handed to the runner: a malformed one is a PolicyError, a
     RunnerError, so the process exits 2 naming the key. An sdk or
     opencode runner's MCP registry is checked here too
@@ -176,9 +176,7 @@ def runner_for(home, *, kind=None):
     agent = _agent_table(home)
     kind = kind or agent.get("runner")
     if not kind:
-        raise RunnerError("%s/cousin.toml has no [agent] runner: this is a tmux"
-                          " cousin (pass --runner %s to run it here anyway)"
-                          % (home, "|".join(KINDS)))
+        raise RunnerError(lane_refusal(home))
     if kind not in KINDS:
         raise RunnerError("cousin.toml [agent] runner must be one of %s, got %r"
                           % (", ".join(KINDS), kind))

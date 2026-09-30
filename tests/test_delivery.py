@@ -1,18 +1,14 @@
 """The one way anything reaches a cousin (docs/design/agent-loop-runner.md)."""
-import unittest
-
-from cousin_lib import delivery
-from cousin_lib.delivery import DeliveryError, Item
 import os
 import pathlib
 import tempfile
-from datetime import datetime, timezone
-from cousin_lib.server.injection import compose_delivery
-import stat
-from unittest import mock
-from tests.server.test_injection import _FAKE_TMUX
-from tests._hermetic import HermeticCase
+import unittest
 from types import SimpleNamespace
+from unittest import mock
+
+from cousin_lib import delivery
+from cousin_lib.delivery import DeliveryError, Item
+from tests._hermetic import HermeticCase
 
 
 class TestThreadIds(unittest.TestCase):
@@ -57,147 +53,6 @@ class TestItem(unittest.TestCase):
         self.assertEqual((delivery.DELIVERED, delivery.QUEUED,
                           delivery.FAILED),
                          ("delivered", "queued", "failed"))
-
-
-class TestTmuxRender(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.home = pathlib.Path(tmp.name)
-        (self.home / "data").mkdir()
-        self.marker = self.home / "data" / ".last-user-msg"
-        self.now = datetime(2026, 8, 6, 5, 30, tzinfo=timezone.utc)
-        self.backend = delivery.TmuxBackend()
-
-    def test_chat_is_byte_identical_to_compose_delivery(self):
-        self.marker.touch()
-        ago = self.now.timestamp() - 12 * 60
-        os.utime(self.marker, (ago, ago))
-        item = Item(thread_id="operator:Sam", source="chat", sender="Sam",
-                    body="two\nlines  here", attachments=("/tmp/a.png",))
-        expected = compose_delivery("Sam", "two\nlines  here",
-                                    marker_path=self.marker,
-                                    attachments=("/tmp/a.png",), now=self.now)
-        self.assertEqual(self.backend.render(self.home, item, now=self.now),
-                         expected)
-
-    def test_chat_context_rides_as_the_old_recall_suffix_did(self):
-        item = Item(thread_id="operator:Sam", source="chat", sender="Sam",
-                    body="where is the plan", context="[fw-recall] plan.md")
-        expected = compose_delivery(
-            "Sam", "where is the plan" + " " + "[fw-recall] plan.md",
-            marker_path=self.marker, now=self.now)
-        self.assertEqual(self.backend.render(self.home, item, now=self.now),
-                         expected)
-
-    def test_a_chat_hook_line_is_composed_like_chat(self):
-        item = Item(thread_id="system", source="hook", sender="fw-hook",
-                    body="rotated")
-        expected = compose_delivery("fw-hook", "rotated",
-                                    marker_path=self.marker, now=self.now)
-        self.assertEqual(self.backend.render(self.home, item, now=self.now),
-                         expected)
-
-    def test_a_schedule_gets_its_prefix(self):
-        item = Item(thread_id="schedule", source="schedule", body="check CI")
-        self.assertEqual(self.backend.render(self.home, item),
-                         "[cousin-schedule] check CI")
-
-    def test_every_other_source_is_typed_exactly_as_given(self):
-        for source, thread in (("reaction", "operator:Sam"),
-                               ("loop", "loop:digest"),
-                               ("meeting", "meeting:7"),
-                               ("flip", "system"), ("boot", "system")):
-            body = "[x] line one\nline two"
-            item = Item(thread_id=thread, source=source, body=body)
-            self.assertEqual(self.backend.render(self.home, item), body)
-
-
-class TestDeliver(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        root = pathlib.Path(tmp.name)
-        self.home = root / "cousins" / "wren"
-        (self.home / "data").mkdir(parents=True)
-        (self.home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\nname = "Wren"\n[chat]\nport = 8099\n')
-        self.tmux = root / "tmux"
-        self.tmux.write_text(_FAKE_TMUX)
-        self.tmux.chmod(self.tmux.stat().st_mode | stat.S_IEXEC)
-        self.log = root / "calls.log"
-        patcher = mock.patch.dict(os.environ, {
-            "FAKE_TMUX_LOG": str(self.log),
-            "FAKE_TMUX_PANE": str(root / "pane.txt")})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.opts = dict(tmux_bin=str(self.tmux), settle=lambda n: 0,
-                         verify_delay=0)
-
-    def _calls(self):
-        return self.log.read_text().splitlines() if self.log.exists() else []
-
-    def test_a_typed_line_is_delivered(self):
-        item = Item(thread_id="schedule", source="schedule", body="check CI")
-        self.assertEqual(delivery.deliver(self.home, item, **self.opts),
-                         delivery.DELIVERED)
-        self.assertTrue(any("[cousin-schedule] check CI" in c
-                            for c in self._calls()))
-
-    def test_a_long_chat_item_is_headed_with_its_sender(self):
-        # #111: the header names the item's sender, typed before the line.
-        (self.log.parent / "pane.txt").write_text("> _\n")
-        item = Item(thread_id="operator:Sam", source="chat", sender="Sam",
-                    body="(Chat Eve): " + "b" * 1500)
-        self.assertEqual(delivery.deliver(self.home, item, header_settle=0,
-                                          **self.opts), delivery.DELIVERED)
-        calls = self._calls()
-        self.assertEqual(calls[0], "send-keys -t wren -l (Chat Sam): Sam's"
-                         " message follows in full below; answer the"
-                         " message, not this line. ")
-        self.assertIn("(Chat Sam): (Chat Eve): bbb", calls[1])
-
-    def test_a_long_loop_item_gets_no_chat_header(self):
-        item = Item(thread_id="loop:digest", source="loop", body="b" * 1500)
-        delivery.deliver(self.home, item, **self.opts)
-        self.assertEqual(self._calls()[0], "send-keys -t wren -l " + "b" * 1500)
-
-    def test_a_failed_paste_is_failed_not_delivered(self):
-        item = Item(thread_id="loop:digest", source="loop", body="beat")
-        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC": "1"}):
-            self.assertEqual(delivery.deliver(self.home, item, **self.opts),
-                             delivery.FAILED)
-
-    def test_not_waiting_is_queued_and_still_types(self):
-        item = Item(thread_id="meeting:7", source="meeting", body="your turn")
-        outcome = delivery.deliver(self.home, item, wait=False, **self.opts)
-        self.assertEqual(outcome, delivery.QUEUED)
-        for thread in list(__import__("threading").enumerate()):
-            if thread.daemon and thread is not __import__(
-                    "threading").current_thread():
-                thread.join(2)
-        self.assertTrue(any("your turn" in c for c in self._calls()))
-
-    def test_an_explicit_backend_is_used_instead(self):
-        seen = []
-
-        class Recorder:
-            def send(self, home, item, *, wait=True, **opts):
-                seen.append((item.thread_id, wait))
-                return delivery.QUEUED
-
-        item = Item(thread_id="peer:testa", source="chat", sender="Testa",
-                    body="hi")
-        self.assertEqual(
-            delivery.deliver(self.home, item, backend=Recorder()),
-            delivery.QUEUED)
-        self.assertEqual(seen, [("peer:testa", True)])
-
-    def test_a_missing_home_is_failed_not_an_exception(self):
-        item = Item(thread_id="system", source="boot", body="x")
-        self.assertEqual(
-            delivery.deliver(self.home / "nope", item, **self.opts),
-            delivery.FAILED)
 
 
 class TestThreadForChat(unittest.TestCase):
@@ -307,15 +162,11 @@ class TestChatServerUsesTheFacade(unittest.TestCase):
         (self.root / "config").mkdir()
         (self.home / "cousin.toml").write_text(
             '[cousin]\nslug = "wren"\nname = "Wren"\n[chat]\nport = 0\n'
-            '[operator]\nname = "Sam"\n')
-        self.tmux = self.root / "tmux"
-        self.tmux.write_text(_FAKE_TMUX)
-        self.tmux.chmod(self.tmux.stat().st_mode | stat.S_IEXEC)
+            '[operator]\nname = "Sam"\n[agent]\nrunner = "fake"\n')
 
     def _server(self):
         from cousin_lib.server import app
-        return app.build_server(self.home, framework_root=str(self.root),
-                                tmux_bin=str(self.tmux))
+        return app.build_server(self.home, framework_root=str(self.root))
 
     def test_a_send_becomes_a_chat_item_on_the_senders_thread(self):
         seen = []
@@ -351,49 +202,6 @@ class TestChatServerUsesTheFacade(unittest.TestCase):
                          ("reaction", "system"))
 
 
-class TestFlipAndBootUseTheFacade(unittest.TestCase):
-    def test_no_module_but_delivery_builds_an_injector(self):
-        """The exit criterion of the phase, as a test: the pane is
-        typed into from exactly one place."""
-        root = pathlib.Path(delivery.__file__).parent
-        allowed = {"delivery.py", "server/injection.py", "console/pane.py"}
-        offenders = []
-        for path in sorted(root.rglob("*.py")):
-            rel = str(path.relative_to(root))
-            if rel in allowed:
-                continue
-            if "TmuxInjector(" in path.read_text():
-                offenders.append(rel)
-        self.assertEqual(offenders, [])
-
-    def test_a_pending_boot_is_a_boot_item(self):
-        from cousin_lib import spawn
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        home = pathlib.Path(tmp.name)
-        (home / "data").mkdir()
-        packet = home / "data" / "boot-packet-gen-0002.md"
-        packet.write_text("BOOT PACKET FOR COUSIN: wren")
-        spawn.pending_boot_path(home).write_text(
-            '{"generation": 2, "packet": "%s", "written_at": "x"}' % packet)
-        seen = []
-        with mock.patch("cousin_lib.delivery.deliver",
-                        lambda h, item, **kw: seen.append((item, kw))
-                        or delivery.DELIVERED):
-            ok = spawn._inject_pending_boot(
-                home, SimpleNamespace(tmux_session="wren"), tmux_bin="t",
-                tmux_socket=None, settle=0)
-        self.assertTrue(ok)
-        item, kw = seen[0]
-        self.assertEqual((item.source, item.thread_id), ("boot", "system"))
-        self.assertEqual(
-            item.body,
-            "[cousin-start] the last session closed cleanly; boot packet"
-            " follows. Do not announce the restart.\n"
-            "BOOT PACKET FOR COUSIN: wren")
-        self.assertEqual((kw["tmux_bin"], kw["socket"]), ("t", None))
-
-
 class TestInboxBackend(HermeticCase):
     def setUp(self):
         super().setUp()
@@ -402,10 +210,6 @@ class TestInboxBackend(HermeticCase):
 
     def test_backend_for_picks_the_inbox_for_a_runner_cousin(self):
         self.assertEqual(type(delivery.backend_for(self.home)).__name__, "InboxBackend")
-
-    def test_backend_for_keeps_tmux_when_no_runner_is_set(self):
-        (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
-        self.assertEqual(type(delivery.backend_for(self.home)).__name__, "TmuxBackend")
 
     def test_send_without_wait_puts_pokes_and_says_queued(self):
         from cousin_lib.runner.inbox import Inbox
@@ -462,14 +266,16 @@ class TestInboxBackendNeverRaises(HermeticCase):
 
 
 class TestMalformedCousinToml(HermeticCase):
-    def test_a_malformed_cousin_toml_means_tmux_and_cousin_runner_refuses(self):
+    def test_a_malformed_cousin_toml_is_refused_and_cousin_runner_refuses(self):
         import contextlib
         import io
         from tests.runner._home import temp_home
         from cousin_lib.runner import main as runner_main
         home = temp_home(self, runner="sdk")
         (home / "cousin.toml").write_text('[agent\nrunner = "sdk"\n')
-        self.assertEqual(type(delivery.backend_for(home)).__name__, "TmuxBackend")
+        self.assertIsInstance(delivery.backend_for(home),
+                              delivery.RefusedBackend)
+        self.assertIn("cousin.toml", delivery.lane_refusal(home))
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             rc = runner_main.runner_main(["--home", str(home), "--once"])
@@ -485,7 +291,7 @@ class TestProducerContracts(HermeticCase):
         self.assertTrue(delivery.accepted(delivery.DELIVERED, home))
         self.assertFalse(delivery.accepted(delivery.FAILED, home))
         (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
-        self.assertFalse(delivery.accepted(delivery.QUEUED, home))   # tmux: queued is a menu, retry
+        self.assertFalse(delivery.accepted(delivery.QUEUED, home))   # refused: nothing was kept
 
     def test_is_alive_reads_the_runner_lock_for_a_runner_cousin(self):
         from tests.runner._home import temp_home
@@ -495,7 +301,77 @@ class TestProducerContracts(HermeticCase):
         with runner_main.hold_lock(home):           # a context manager main.py exposes for tests
             self.assertTrue(delivery.is_alive(home, fallback=lambda: False))
         (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
-        self.assertTrue(delivery.is_alive(home, fallback=lambda: True))
+        self.assertFalse(delivery.is_alive(home, fallback=lambda: True))
+
+
+class TestRefusedLane(HermeticCase):
+    """R2, R3, R14: a cousin with no runner kind is refused by name, and a
+    delivery to it is `failed`, never typed anywhere."""
+
+    def _home(self, text, slug="wren"):
+        from tests.runner._home import temp_home
+        home = temp_home(self, slug=slug)
+        (home / "cousin.toml").write_text(text)
+        return home
+
+    def _no_runner(self, slug="wren"):
+        return self._home('[cousin]\nslug = "%s"\nname = "%s"\n'
+                          % (slug, slug.capitalize()), slug=slug)
+
+    def test_a_cousin_with_no_runner_gets_the_refused_backend(self):
+        self.assertIsInstance(delivery.backend_for(self._no_runner()),
+                              delivery.RefusedBackend)
+
+    def test_an_unknown_runner_value_is_refused(self):
+        home = self._home('[cousin]\nslug = "wren"\nname = "Wren"\n'
+                          '[agent]\nrunner = "docker"\n')
+        self.assertIsInstance(delivery.backend_for(home),
+                              delivery.RefusedBackend)
+
+    def test_an_unparsable_cousin_toml_is_refused(self):
+        home = self._home('[agent\nrunner = "sdk"\n')
+        self.assertIsInstance(delivery.backend_for(home),
+                              delivery.RefusedBackend)
+
+    def test_a_refused_send_is_failed_and_never_raises(self):
+        home = self._no_runner()
+        threads = {"interrupt": "operator:Sam", "schedule": "schedule",
+                   "flip": "system", "boot": "system", "hook": "system"}
+        with mock.patch("subprocess.run", side_effect=AssertionError), \
+                mock.patch("subprocess.Popen", side_effect=AssertionError), \
+                mock.patch("socket.create_connection",
+                           side_effect=AssertionError):
+            for source in delivery.SOURCES:
+                item = Item(thread_id=threads.get(source, "operator:Sam"),
+                            source=source, sender="Sam", body="hello")
+                for wait in (True, False):
+                    self.assertEqual(delivery.deliver(home, item, wait=wait),
+                                     delivery.FAILED, (source, wait))
+
+    def test_the_refusal_names_the_slug_and_cousin_migrate(self):
+        line = delivery.lane_refusal(self._no_runner(slug="testa"))
+        for part in ("testa", "[agent] runner", "cousin-migrate apply testa",
+                     "docs/migrating.md"):
+            self.assertIn(part, line)
+        self.assertNotIn("\n", line)
+
+    def test_a_worker_is_refused_with_the_worker_line(self):
+        home = self._home('[cousin]\nslug = "toki"\nname = "Toki"\n'
+                          'type = "worker"\n', slug="toki")
+        self.assertIsInstance(delivery.backend_for(home),
+                              delivery.RefusedBackend)
+        line = delivery.lane_refusal(home)
+        self.assertIn("toki", line)
+        self.assertIn("worker", line)
+        self.assertIn("no session", line)
+        self.assertNotIn("cousin-migrate", line)
+
+    def test_is_alive_is_false_for_a_refused_cousin(self):
+        self.assertFalse(delivery.is_alive(self._no_runner(),
+                                           fallback=lambda: True))
+
+    def test_tmux_backend_is_gone(self):
+        self.assertFalse(hasattr(delivery, "TmuxBackend"))
 
 
 if __name__ == "__main__":

@@ -7,9 +7,12 @@ reply can be routed back to where the turn came from, and its source,
 so a backend can decide how to present it and what to do with it when
 it arrives mid-turn.
 
-This phase has one backend, tmux, which renders an item to exactly the
-line that producer typed before this module existed. The runner's
-inbox is the second backend, selected by `[agent] runner`.
+A cousin whose `[agent] runner` names a runner kind (`RUNNER_KINDS`)
+is delivered to through its runner's inbox. Any other cousin (no
+runner, an unknown value, a cousin.toml that does not parse, a worker)
+is refused: 2.0.0 has no legacy tmux lane, so a delivery to it is
+`failed`, and `lane_refusal(home)` is the one line every entry point
+says why with.
 
 Outcomes are three and only three. When the framework cannot tell
 whether a cousin received something it says `queued` or `failed`,
@@ -80,50 +83,6 @@ class Item:
         object.__setattr__(self, "attachments", tuple(self.attachments))
 
 
-class TmuxBackend:
-    """Types an item into the cousin's tmux session as the line that
-    producer typed before this module existed. Rendering is pure;
-    `send` owns the injector."""
-
-    def render(self, home, item, *, now=None):
-        if item.source in ("chat", "hook"):
-            from cousin_lib.server.injection import compose_delivery
-            message = item.body
-            if item.context:
-                message = message + " " + item.context
-            return compose_delivery(
-                item.sender, message,
-                marker_path=Path(home) / "data" / ".last-user-msg",
-                attachments=item.attachments, now=now)
-        if item.source == "schedule":
-            return "[cousin-schedule] %s" % item.body
-        return item.body
-
-    def send(self, home, item, *, wait=True, **opts):
-        """Render and type. `opts` are TmuxInjector's keyword arguments
-        (tmux_bin, socket, settle, verify_delay, log, root, ...)."""
-        if item.source == "interrupt":
-            # an interrupt is a runner's inbox row; typed into a pane it
-            # would be a message. A tmux cousin is stopped in its pane.
-            return FAILED
-        from cousin_lib.config import CousinConfig, MissingConfigError
-        from cousin_lib.server.injection import TmuxInjector
-        try:
-            session = CousinConfig.load(home).tmux_session
-        except (MissingConfigError, OSError):
-            return FAILED
-        text = self.render(home, item)
-        # a chat or hook line names its sender, so a long one is headed
-        # (injection.paste_header); every other source is typed as given
-        kw = ({"sender": item.sender}
-              if item.source in ("chat", "hook") and item.sender else {})
-        injector = TmuxInjector(session, **opts)
-        if not wait:
-            injector.inject_async(text, **kw)
-            return QUEUED
-        return DELIVERED if injector.inject(text, **kw) else FAILED
-
-
 class InboxBackend:
     """The runner's inbox: put a row, poke the socket, report `queued`.
     `delivered` is claimed only when `wait=True` and the runner marks
@@ -161,24 +120,68 @@ class InboxBackend:
         return QUEUED
 
 
-def _runner_kind(home):
-    """`[agent] runner`, or None. A cousin.toml that is missing or does
-    not parse is None, so delivery stays on tmux: the conservative
-    reading, and not a silent one, because cousin-runner refuses the
-    same file with rc 2 and says why."""
+def _cousin_toml(home):
+    """The home's cousin.toml as a dict, or None when it is missing or
+    does not parse."""
     import tomllib
     try:
-        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
+        return tomllib.loads((Path(home) / "cousin.toml").read_text())
     except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+
+def _runner_kind(home):
+    """`[agent] runner`, or None. A cousin.toml that is missing or does
+    not parse is None, so the cousin is refused (`lane_refusal` says
+    why): never a guess at a lane."""
+    data = _cousin_toml(home)
+    if data is None:
         return None
     return (data.get("agent") or {}).get("runner")
 
 
+def lane_refusal(home):
+    """The one line that says why a cousin gets no delivery, no start and
+    no flip: it has no runner kind. A worker has its own line (it runs
+    as loops jobs and has no session); a legacy cousin is pointed at the
+    last 1.x release and the manual conversion."""
+    slug = Path(home).name
+    data = _cousin_toml(home)
+    if data is None:
+        return ("%s: %s/cousin.toml is missing or does not parse, so it"
+                " names no [agent] runner" % (slug, home))
+    if (data.get("cousin") or {}).get("type") == "worker":
+        return ("%s is a worker ([cousin] type = \"worker\"): it runs as"
+                " loops jobs and has no session to deliver to" % slug)
+    kind = (data.get("agent") or {}).get("runner")
+    if kind:
+        return ("%s: [agent] runner = %r is not a runner kind (one of %s)"
+                % (slug, kind, ", ".join(RUNNER_KINDS)))
+    return ("%s has no [agent] runner: 2.0.0 has no legacy tmux lane. Move"
+            " it on the last 1.x release with cousin-migrate apply %s, or"
+            " convert it by hand (docs/migrating.md, \"A cousin with no"
+            " runner\")" % (slug, slug))
+
+
+class RefusedBackend:
+    """A cousin with no runner kind: every send is `failed`, nothing is
+    typed, opened or raised, and nothing is printed (the caller reports,
+    with `lane_refusal(home)`)."""
+
+    def reason(self, home):
+        return lane_refusal(home)
+
+    def send(self, home, item, *, wait=True, **opts):
+        return FAILED
+
+
 def backend_for(home):
-    """tmux unless cousin.toml [agent] runner names a runner."""
+    """The runner's inbox when cousin.toml [agent] runner names a runner
+    kind; `RefusedBackend` for anything else (missing, unknown value,
+    unparsable file, a worker)."""
     if _runner_kind(home) in RUNNER_KINDS:
         return InboxBackend()
-    return TmuxBackend()
+    return RefusedBackend()
 
 
 def deliver(home, item, *, wait=True, backend=None, **backend_opts):
@@ -201,13 +204,13 @@ def accepted(outcome, home):
 
 
 def is_alive(home, *, fallback=None):
-    """Liveness for producers. A runner cousin is alive when a runner
-    holds its lock; a tmux cousin answers through the caller's own
-    check (`fallback`), because this module never touches tmux."""
+    """Liveness for producers: a runner cousin is alive when a runner
+    holds its lock. A refused cousin is never alive; `fallback` is not
+    called (it goes in a later release)."""
     if isinstance(backend_for(home), InboxBackend):
         from cousin_lib.runner.main import is_running
         return is_running(home)
-    return bool(fallback()) if fallback is not None else False
+    return False
 
 
 def thread_for_chat(config, user, *, cousins=None):

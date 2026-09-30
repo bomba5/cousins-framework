@@ -490,6 +490,12 @@ The header has:
   the pane beside the chat, when it is closed.
 - **fullscreen**: hides the rest of the console.
 
+On a phone the header is one row: the effort select, a search button that
+opens the search field (its x closes and clears it), a **⋯** menu with
+archive, archived / live and media on / off (and whose thread you are in),
+then the pane and fullscreen buttons as icons. The status line under the
+name is one line there too: the state and the model.
+
 A remote cousin's chat has only send, history and the media toggle; its node
 has no search, archive, effort or pane.
 

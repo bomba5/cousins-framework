@@ -333,36 +333,6 @@ class TestLaunchThroughTmux(AuthCase):
     runs the session command and a fake agent that reports its argv and
     environment."""
 
-    def test_api_key_reaches_the_env_and_never_an_argv(self):
-        self.write_key()
-        agent_auth.build_isolated_dir(self.cfg())
-        agent_auth.persist_mode(self.home, MODE_API_KEY)
-        report = self.start()
-        self.assertEqual(report["env"]["KESTREL_KEY"], KEY)
-        self.assertEqual(report["env"]["KESTREL_CONFIG_DIR"],
-                         str(self.cfg()["isolated_dir"]))
-        self.assertNotIn(KEY, " ".join(report["argv"]))
-        self.assertIn("--model", report["argv"])
-        log = self.log.read_text()
-        self.assertIn("new-session", log)
-        self.assertIn("agent_launch.py", log)
-        self.assertNotIn(KEY, log)
-
-    def test_claude_mode_strips_an_inherited_key(self):
-        with mock.patch.dict(os.environ, {"KESTREL_KEY": KEY,
-                                          "KESTREL_CONFIG_DIR": "/tmp/x"}):
-            report = self.start()
-        self.assertNotIn("KESTREL_KEY", report["env"])
-        self.assertNotIn("KESTREL_CONFIG_DIR", report["env"])
-
-    def test_a_bad_key_file_refuses_the_start_before_tmux(self):
-        from cousin_lib.spawn import SpawnError
-        agent_auth.build_isolated_dir(self.cfg())
-        agent_auth.persist_mode(self.home, MODE_API_KEY)
-        with self.assertRaisesRegex(SpawnError, "auth: no key file"):
-            self.start()
-        self.assertFalse(self.log.exists())
-
     def test_the_launcher_refuses_on_its_own_too(self):
         # The check binds at exec time, not only in the preflight: a
         # key file removed between the two still stops the agent.
@@ -424,32 +394,6 @@ class TestSwitch(AuthCase):
         self.assertEqual((self.home / "cousin.toml").read_text(), before)
         self.assertNotIn("kill-session", self.log.read_text())
 
-    def test_force_restarts_a_busy_agent(self):
-        self.write_key()
-        self.running("* Cogitating... (12s . esc to interrupt)\n")
-        out = self.switch(MODE_API_KEY, force=True)
-        self.assertTrue(out["restarted"])
-
-    def test_an_idle_agent_restarts_on_the_same_session(self):
-        self.write_key()
-        self.running("* Worked for 7m 28s\n> \n")
-        out = self.switch(MODE_API_KEY)
-        self.assertTrue(out["restarted"])
-        self.assertEqual(out["session_id"], "11111111-2222")
-        log = self.log.read_text()
-        self.assertIn("kill-session", log)
-        report = json.loads(self.out.read_text())
-        self.assertIn("--resume", report["argv"])
-        self.assertIn("11111111-2222", report["argv"])
-        self.assertNotIn("--session-id", report["argv"])
-        self.assertEqual(report["env"]["KESTREL_KEY"], KEY)
-        self.assertNotIn(KEY, log)
-        # And back: claude mode, same session, the key gone.
-        self.switch(MODE_LOGIN)
-        report = json.loads(self.out.read_text())
-        self.assertNotIn("KESTREL_KEY", report["env"])
-        self.assertIn("11111111-2222", report["argv"])
-
     def test_no_resume_rule_refuses_before_anything_changes(self):
         self.write_key()
         self.running("idle\n")
@@ -462,49 +406,6 @@ class TestSwitch(AuthCase):
         out = self.switch(MODE_API_KEY, restart=False)
         self.assertFalse(out["restarted"])
         self.assertEqual(agent_auth.read_mode(self.home), MODE_API_KEY)
-
-
-class TestModeSurvivesStartAndFlip(AuthCase):
-    def test_a_plain_start_reads_the_persisted_mode(self):
-        self.write_key()
-        self.assertFalse(agent_auth.switch(
-            self.root, "wren", MODE_API_KEY, tmux_bin=str(self.tmux))
-            ["restarted"])
-        report = self.start()
-        self.assertEqual(report["env"]["KESTREL_KEY"], KEY)
-
-    def test_a_flip_respawns_in_the_same_mode(self):
-        from cousin_lib.flip import flip
-        self.write_key()
-        agent_auth.switch(self.root, "wren", MODE_API_KEY,
-                          tmux_bin=str(self.tmux))
-        from cousin_lib import spawn
-        real = spawn.start_cousin
-
-        def no_chat_server(home, **kw):
-            kw["start_chat_server"] = lambda h: None
-            return real(home, **kw)
-        with mock.patch("cousin_lib.flip.start_cousin", no_chat_server):
-            out = flip("wren", tmux_bin=str(self.tmux), handoff_deadline=1,
-                       halfway=0.4, settle=0,
-                       which=lambda name: "/bin/" + name)
-        self.assertTrue(out["ok"], out)
-        report = json.loads(self.out.read_text())
-        self.assertEqual(report["env"]["KESTREL_KEY"], KEY)
-        self.assertEqual(agent_auth.read_mode(self.home), MODE_API_KEY)
-
-    def test_a_flip_refuses_before_the_kill_when_the_key_is_gone(self):
-        from cousin_lib.flip import flip
-        self.write_key()
-        agent_auth.switch(self.root, "wren", MODE_API_KEY,
-                          tmux_bin=str(self.tmux))
-        agent_auth.key_file(self.home).unlink()
-        out = flip("wren", tmux_bin=str(self.tmux), handoff_deadline=1,
-                   halfway=0.4, settle=0, which=lambda name: "/bin/" + name)
-        self.assertFalse(out["ok"])
-        self.assertIn("auth:", out["error"])
-        self.assertFalse(self.log.exists()
-                         and "kill-session" in self.log.read_text())
 
 
 class TestSecretsStayHome(AuthCase):

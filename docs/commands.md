@@ -37,6 +37,13 @@ existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
 (every start and [flip](glossary.md#flip) does that by itself). See [cousins](cousins.md).
 
+2.0.0 has no legacy tmux lane: a cousin with no `[agent] runner` is refused by
+name, with one line and before anything runs, by `cousin-spawn --start` (exit
+2; creating a cousin with `--start` needs a runner kind), by a stop (the
+console's answers 409), by `cousin-flip` and by `cousin-reincarnate`. A
+[worker](glossary.md#worker) (`[cousin] type = "worker"`) has no session: its stop is a no-op that
+says so.
+
 ```
 cousin-spawn wren --name Wren --role "keeps the house notes" \
     --voice "Short and plain. Says when it does not know." --operator ana --start

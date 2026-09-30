@@ -534,9 +534,19 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
     root locates the supervisor (else derived from the home). wait
     (default) answers once the runner is down; wait=False once it is
     signalled, `"runner": "stopping"`. by is who asked, for the hold
-    marker."""
+    marker.
+
+    A worker has no session: its stop is a no-op that says so,
+    {"worker": "no session", "note": <lane_refusal>} (R14). Any other
+    cousin with no runner kind is refused with delivery.lane_refusal
+    before any tmux call (R2)."""
     if runner_lane(home):
         return _stop_runner(home, root, wait=wait, by=by)
+    from cousin_lib import delivery
+    data = delivery._cousin_toml(home) or {}
+    if (data.get("cousin") or {}).get("type") == "worker":
+        return {"worker": "no session", "note": delivery.lane_refusal(home)}
+    raise SpawnError(delivery.lane_refusal(home))
     home = Path(home)
     config = CousinConfig.load(home)
     base = _tmux_base(tmux_bin, tmux_socket)
@@ -1123,9 +1133,14 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
     cousin-supervisor is asked to start the cousin's runner, the one
     launcher of a runner process (R10), and agent_cmd, the tmux
     arguments and start_chat_server are not used. No supervisor is
-    NoSupervisor; a refused start is a SpawnError with its reason."""
+    NoSupervisor; a refused start is a SpawnError with its reason.
+
+    A cousin with no runner kind is refused with delivery.lane_refusal
+    before anything runs: 2.0.0 has no legacy tmux lane (R2)."""
     if runner_lane(home):
         return _start_runner(home, root)
+    from cousin_lib import delivery
+    raise SpawnError(delivery.lane_refusal(home))
     config = CousinConfig.load(home)
     agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
     # The auth mode's checks (key file, isolated harness config) run
@@ -1552,6 +1567,18 @@ def spawn_main(argv=None):
             return 2
     if start_existing and on_runner:
         return _start_existing_runner(root, args.slug)
+    if args.start and not on_runner:
+        # R2: 2.0.0 has no legacy tmux lane: nothing is created or started
+        # for a cousin with no runner kind.
+        from cousin_lib import delivery
+        if start_existing:
+            why = delivery.lane_refusal(root / "cousins" / args.slug)
+        else:
+            why = ("--start needs a runner kind (--runner %s, or"
+                   " COUSIN_DEFAULT_RUNNER): 2.0.0 has no legacy tmux lane;"
+                   " nothing created" % "|".join(RUNNER_KINDS))
+        print("cousin-spawn: %s" % why, file=sys.stderr)
+        return 2
     agent_cmd = None
     if args.start and not on_runner:
         # Everything a start needs is checked before anything is

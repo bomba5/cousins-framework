@@ -300,6 +300,11 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
         result["error"] = str(err)
         return result
     home = config.home
+    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal
+    if _runner_kind(home) not in RUNNER_KINDS:
+        # R2: 2.0.0 has no legacy tmux lane; refused by name, nothing touched.
+        result["error"] = lane_refusal(home)
+        return result
     base = {"op": "reincarnate", "slug": slug}
     do_flip = do_flip or _default_do_flip(root)
 

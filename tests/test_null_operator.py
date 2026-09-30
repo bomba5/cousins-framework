@@ -110,18 +110,6 @@ class TestMemoryAndLifecycle(NullOperatorCase):
                 memory_main(["activity", "running the null suite"]), 0)
             self.assertEqual(memory_main(["search", "anything"]), 0)
 
-    @unittest.skipUnless(shutil.which("tmux"),
-                         "tmux is a documented prerequisite; not installed")
-    def test_flip_dry_run_needs_no_operator(self):
-        from cousin_lib.flip import flip
-        from tests._fakes import agent_on_path
-        agent_on_path(self, self.root)
-        (self.root / "config").mkdir(exist_ok=True)
-        (self.root / "config" / "agent-cmd").write_text("my-agent\n")
-        self._spawn()
-        result = flip("wren", dry_run=True)
-        self.assertTrue(result["ok"], result)
-
     def test_shared_promotion_refuses_rather_than_defaulting(self):
         # With no operator there is nobody to default promotion to;
         # the tier refuses with remediation instead of inventing an

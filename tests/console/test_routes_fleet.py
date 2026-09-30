@@ -171,7 +171,7 @@ class TestSpawn(ConsoleCase):
 
 class TestDismiss(ConsoleCase):
     def test_archives_then_removes_and_reports(self):
-        home = self.cousin("wren")
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
         (home / "notes").mkdir()
         (home / "notes" / "only.md").write_text("x")
         self.serve()
@@ -185,7 +185,7 @@ class TestDismiss(ConsoleCase):
         self.assertEqual(self.delete("/api/cousins/wren")[0], 404)
 
     def test_a_failed_archive_refuses_with_500_and_keeps_the_home(self):
-        home = self.cousin("wren")
+        home = self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
         (self.root / "data").mkdir()
         (self.root / "data" / "dismissed").write_text("file")
         self.serve()
@@ -196,93 +196,31 @@ class TestDismiss(ConsoleCase):
 
 
 class TestStartStopRestart(ConsoleCase):
-    def test_start_uses_the_configured_agent_cmd(self):
-        self.cousin("wren")
-        self.serve()
-        status, body = self.post("/api/cousins/wren/start")
-        self.assertEqual(status, 500)
-        self.assertIn("agent-cmd", body["error"])
-        (self.root / "config" / "agent-cmd").write_text("my-agent --x\n")
-        with mock.patch("cousin_lib.spawn._default_chat_server",
-                        lambda home: None):
-            status, body = self.post("/api/cousins/wren/start")
-        self.assertEqual(status, 200, body)
-        self.assertEqual(body, {"ok": True, "slug": "wren",
-                                "status": "started", "chat_server": "started"})
-        self.assertIn("new-session", self.tmux_log.read_text())
-        self.assertIn("my-agent --x", self.tmux_log.read_text())
+    """R2: a cousin with no runner kind is refused by name (409) by the
+    start, the stop and the restart, before any tmux call and with no
+    chat server; a worker's stop is a no-op that says so (R14)."""
 
-    def test_start_when_already_running_and_chat_reused(self):
-        fake = self.fake_chat("wren")
-        self.cousin("wren", port=fake.port)
+    def test_start_stop_and_restart_of_a_cousin_with_no_runner_are_409(self):
+        from cousin_lib.delivery import lane_refusal
+        home = self.cousin("wren")
         self.tmux_running(True)
-        (self.root / "config" / "agent-cmd").write_text("my-agent\n")
         self.serve()
-        status, body = self.post("/api/cousins/wren/start")
-        self.assertEqual(body["status"], "already running")
-        self.assertEqual(body["chat_server"], "reused")
-        self.assertNotIn("new-session", self.tmux_log.read_text())
-
-    def test_stop_is_idempotent_and_names_the_halves(self):
-        self.cousin("wren")
-        self.serve()
-        status, body = self.post("/api/cousins/wren/stop")
-        self.assertEqual(body, {"ok": True, "slug": "wren", "status": "stopped",
-                                "tmux": "already stopped",
-                                "chat_server": "not running"})
-        self.tmux_running(True)
-        status, body = self.post("/api/cousins/wren/stop", {"clean": False})
-        self.assertEqual(body["tmux"], "stopped")
+        for verb in ("start", "stop", "restart"):
+            status, body = self.post("/api/cousins/wren/%s" % verb)
+            self.assertEqual(status, 409, (verb, body))
+            self.assertEqual(body["error"], lane_refusal(home))
+        self.assertFalse(self.tmux_log.exists() and self.tmux_log.read_text())
+        self.assertFalse((home / "data" / "chat-server.pid").exists())
         self.assertEqual(self.post("/api/cousins/nobody/stop")[0], 404)
-        self.assertEqual(self.post("/api/cousins/wren/stop",
-                                   {"clean": "yes"})[0], 400)
 
-    def test_a_running_cousin_stops_cleanly_in_the_background(self):
-        self.cousin("wren")
-        self.tmux_running(True)
-        server = self.serve()
-        seen, calls = [], []
-        server.listeners.append(lambda k, d: seen.append((k, d)))
-        done = __import__("threading").Event()
-
-        def fake_close(slug, **kw):
-            calls.append(slug)
-            done.set()
-            return {"slug": slug, "ok": True, "stages": [],
-                    "new_generation": 3}
-        server.close_fn = fake_close
+    def test_a_workers_stop_is_a_no_op_that_says_so(self):
+        self.cousin("wren", ctype="worker")
+        self.serve()
         status, body = self.post("/api/cousins/wren/stop")
-        self.assertEqual(status, 202, body)
-        self.assertEqual(body["status"], "closing")
-        self.assertTrue(done.wait(5))
-        deadline = time.time() + 5
-        while time.time() < deadline and not any(
-                d.get("status") == "stopped" for k, d in seen
-                if k == "cousin-status"):
-            time.sleep(0.02)
-        self.assertEqual(calls, ["wren"])
-        self.assertIn(("cousin-status", {"slug": "wren",
-                                         "status": "closing"}), seen)
-        self.assertIn(("cousin-status", {"slug": "wren",
-                                         "status": "stopped"}), seen)
-
-    def test_restart_is_stop_then_start_with_the_starts_code(self):
-        self.cousin("wren")
-        (self.root / "config" / "agent-cmd").write_text("my-agent\n")
-        server = self.serve()
-        server.settle_seconds = 0
-        seen = []
-        server.listeners.append(lambda k, d: seen.append((k, d)))
-        with mock.patch("cousin_lib.spawn._default_chat_server",
-                        lambda home: None):
-            status, body = self.post("/api/cousins/wren/restart")
         self.assertEqual(status, 200, body)
-        self.assertTrue(body["ok"])
-        self.assertEqual(body["target"], "cousin/wren")
-        self.assertEqual(body["stop"]["tmux"], "already stopped")
-        self.assertEqual(body["start"]["status"], "started")
-        self.assertIn(("cousin-status", {"slug": "wren",
-                                         "status": "stopping"}), seen)
+        self.assertEqual(body["worker"], "no session")
+        self.assertIn("worker", body["note"])
+        self.assertFalse(self.tmux_log.exists() and self.tmux_log.read_text())
 
 
 class TestExclusiveMark(ConsoleCase):
@@ -304,7 +242,7 @@ class TestExclusiveMark(ConsoleCase):
         # used to mark the cousin busy, so a migrate could start beside
         # it (and, in the real finding, beside a dismiss archiving and
         # deleting the home).
-        self.cousin("wren")
+        self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
         (self.root / "config" / "agent-cmd").write_text("my-agent\n")
         server = self.serve()
         gate, released = threading.Event(), threading.Event()
@@ -330,20 +268,20 @@ class TestExclusiveMark(ConsoleCase):
         self.assertIsNone(longop.op_running(server, "wren"))
 
     def test_the_mark_releases_on_the_routes_own_error_path(self):
-        # no config/agent-cmd: _start fails with a 500 before it ever
+        # a cousin with no runner: _start refuses it (409) before it ever
         # reaches spawn.start_cousin - the mark must not survive it
         self.cousin("wren")
         server = self.serve()
         status, body = self.post("/api/cousins/wren/start")
-        self.assertEqual(status, 500, body)
+        self.assertEqual(status, 409, body)
         self.assertIsNone(longop.op_running(server, "wren"))
         # a second attempt fails the same way, not "already busy"
         status, body = self.post("/api/cousins/wren/start")
-        self.assertEqual(status, 500, body)
+        self.assertEqual(status, 409, body)
         self.assertNotIn("running on", body["error"])
 
     def test_two_concurrent_routes_on_one_slug_one_gets_409(self):
-        self.cousin("wren")
+        self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
         (self.root / "config" / "agent-cmd").write_text("my-agent\n")
         self.serve()
         gate, released = threading.Event(), threading.Event()

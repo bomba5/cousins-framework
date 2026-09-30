@@ -14,8 +14,9 @@ from tests.console._harness import ConsoleCase
 class LifecycleCase(ConsoleCase):
     def setUp(self):
         super().setUp()
-        self.wren = self.cousin("wren", role="archivist")
-        self.owl = self.cousin("owl", role="scout")
+        runner = '\n[agent]\nrunner = "fake"\n'
+        self.wren = self.cousin("wren", role="archivist", extra=runner)
+        self.owl = self.cousin("owl", role="scout", extra=runner)
         (self.wren / "CLAUDE.md").write_text("# Wren - archivist\n\nbody\n")
         (self.owl / "CLAUDE.md").write_text("# Owl - scout\n\nbody\n")
         (self.wren / "MEMORY.md").write_text("wren remembers\n")
@@ -72,8 +73,8 @@ class TestReincarnate(LifecycleCase):
         self.assertEqual(op["status"], "done", op)
         self.assertEqual(self.stages(op), [("snapshot", "done"), ("bequest", "done"),
                                            ("rewrite", "done"), ("flip", "done")])
-        self.assertEqual(self.flips, [("wren", None)])
-        self.assertEqual([s for s, _ in self.prompts], ["wren"])
+        self.assertEqual([slug for slug, _ in self.flips], ["wren"])
+        self.assertEqual(self.prompts, [])      # a runner's bequest rides the rollover
         self.assertTrue((self.wren / "CLAUDE.md").read_text().startswith("# Wren - librarian"))
         role = tomllib.loads((self.wren / "cousin.toml").read_text())["cousin"]["role"]
         self.assertEqual(role, "librarian")

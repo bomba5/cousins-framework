@@ -454,29 +454,9 @@ def _start(server, slug):
     config = load_cousin(server, slug)
     if spawn.runner_lane(config.home):
         return _start_runner(server, slug, config)
-    chat_ok = chat_health(config) == "ok"
-    if session_alive(server, config):
-        if not chat_ok and not config.chat_host:
-            spawn._default_chat_server(config.home)
-            return {"ok": True, "slug": slug, "status": "already running",
-                    "chat_server": "started"}
-        return {"ok": True, "slug": slug, "status": "already running",
-                "chat_server": "reused" if chat_ok else "not running"}
-    try:
-        agent_cmd = spawn._read_agent_cmd(server.root)
-    except spawn.SpawnError as err:
-        raise HttpError(500, str(err))
-    server.emit("cousin-status", {"slug": slug, "status": "starting"})
-    try:
-        spawn.start_cousin(
-            config.home, agent_cmd=agent_cmd, tmux_bin=server.tmux_bin,
-            tmux_socket=server.tmux_socket, root=server.root,
-            start_chat_server=((lambda home: None) if chat_ok
-                               else spawn._default_chat_server))
-    except spawn.SpawnError as err:
-        raise HttpError(500, str(err))
-    return {"ok": True, "slug": slug, "status": "started",
-            "chat_server": "reused" if chat_ok else "started"}
+    # R2: 2.0.0 has no legacy tmux lane: a cousin with no runner kind is
+    # refused by name, before any tmux call and with no chat server
+    raise HttpError(409, delivery.lane_refusal(config.home))
 
 
 def _stop(server, slug, by="console"):
@@ -505,8 +485,13 @@ def _stop(server, slug, by="console"):
                             % (result.get("error") or "no reason given"),
                             slug=slug, **extra)
         return {"ok": True, "slug": slug, "status": status, **result}
-    result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
-                               tmux_socket=server.tmux_socket)
+    try:
+        result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
+                                   tmux_socket=server.tmux_socket)
+    except spawn.SpawnError as err:
+        # R2: a cousin with no runner kind is refused by name (a worker's
+        # stop is a no-op that says so)
+        raise HttpError(409, str(err))
     return {"ok": True, "slug": slug, "status": "stopped", **result}
 
 
@@ -674,6 +659,9 @@ def register():
             if spawn.runner_lane(config.home):
                 out = _stop(server, slug)
                 return (202 if out["status"] == "stopping" else 200), out
+            # R2: no legacy tmux lane: _stop refuses a cousin with no runner
+            # kind (409) before any tmux call; a worker's stop is a no-op
+            return 200, _stop(server, slug)
             if not clean or not session_alive(server, config):
                 return 200, _stop(server, slug)
             # A clean stop runs in the background and marks itself busy in

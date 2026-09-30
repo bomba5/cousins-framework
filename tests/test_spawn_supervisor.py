@@ -165,25 +165,6 @@ class TestRunnerLaneStop(_Case):
                                "error": "the supervisor is stopping"})
 
 
-class TestTmuxLaneUnchanged(_Case):
-    """guard: a tmux cousin never reaches the supervisor, even with one up."""
-
-    def test_start_and_stop_stay_on_tmux(self):
-        home = self.root / "cousins" / "sam"
-        (home / "data").mkdir(parents=True)
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "sam"\nname = "Sam"\n\n[chat]\ntmux_session = "sam"\n')
-        stub = self.stub()
-        started = []
-        spawn.start_cousin(home, agent_cmd="my-agent", tmux_bin=str(self.tmux),
-                           root=self.root, start_chat_server=started.append)
-        self.assertIn("new-session", self.tmux_calls())
-        self.assertEqual(started, [home])
-        out = spawn.stop_cousin(home, tmux_bin=str(self.tmux), port_pid=lambda p: None)
-        self.assertEqual(set(out), {"tmux", "chat_server"})
-        self.assertEqual(stub.requests, [])
-
-
 class TestRealSupervisor(_Case):
     """start_cousin and stop_cousin against a real `cousin-supervisor run`
     over a `fake` runner cousin that does not auto-start."""

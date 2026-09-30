@@ -558,6 +558,15 @@ as a bar with its reset day (amber from 80% or on a warning, red when
 rejected), the session's model and whether it runs on the host login or an
 API key, a red "login required" chip while the login needs renewing, and
 the turns, tokens and estimated cost of the turns in view.
+While the agent has background tasks running (a subagent or a shell it
+started in the background), the strip has an "N bg tasks" chip; click it for
+the list under the strip: each running task first (what it is doing, agent
+or shell, how long it has run, the last tool it used), then the last five
+that ended (completed, failed, stopped or killed, and how long ago; hover
+for the summary). A click outside, Escape or the chip again closes it. A
+task ends on its notification or on a final status update, whichever comes
+first; a runner restart marks the tasks still running as lost. A stream
+recorded before 1.27 has no task details, so its tasks are only counted.
 Below it the log holds one row per real thing: a turn under a rule (who
 sent it, when, and the start of the message; click for all of it, with the
 recall hits as a chip), each tool call with its result as one card (a tick

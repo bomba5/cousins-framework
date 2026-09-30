@@ -284,6 +284,43 @@ def _default_factory(options):
     return _sdk().ClaudeSDKClient(options=options)
 
 
+# #129: a background task's lifecycle (the SDK's TaskStarted/Progress/
+# Updated/NotificationMessage) on the stream, kept to what the pane's task
+# list shows: never its prompt, output file or output.
+TASK_SUBTYPES = ("task_started", "task_progress", "task_updated", "task_notification")
+TASK_SUMMARY_CHARS = 300
+
+
+def _task_str(value, cap=TASK_SUMMARY_CHARS):
+    return (value.strip()[:cap] or None) if isinstance(value, str) else None
+
+
+def _task_payload(subtype, data):
+    """A task message's `system` payload from its raw data: the id and, per
+    subtype, the description and type (started), the last tool and usage
+    totals (progress), the status when the patch carries one (updated), the
+    status and a bounded summary (notification)."""
+    d = data or {}
+    out = {"subtype": subtype, "task_id": _task_str(d.get("task_id"))}
+    if subtype == "task_started":
+        out.update(description=_task_str(d.get("description")),
+                   task_type=_task_str(d.get("task_type")),
+                   tool_use_id=_task_str(d.get("tool_use_id")))
+    elif subtype == "task_progress":
+        u = d.get("usage") if isinstance(d.get("usage"), dict) else {}
+        out.update(last_tool_name=_task_str(d.get("last_tool_name")),
+                   usage={k: u[k] for k in ("total_tokens", "tool_uses", "duration_ms")
+                          if isinstance(u.get(k), (int, float)) and not isinstance(u.get(k), bool)})
+    elif subtype == "task_updated":
+        patch = d.get("patch") if isinstance(d.get("patch"), dict) else {}
+        status = _task_str(patch.get("status"))
+        if status:
+            out["status"] = status
+    else:
+        out.update(status=_task_str(d.get("status")), summary=_task_str(d.get("summary")))
+    return out
+
+
 # A thinking block in the reasoning stream: its text, bounded as a tool
 # result's is (the whole block stays in the session store's transcript).
 # the block helpers are shared with the tmux kind (phase 11, R7)
@@ -2598,6 +2635,8 @@ class SdkRunner:
                 self.stream.append("error", {"error": "session store append failed: %s"
                                              % (getattr(msg, "error", "") or msg.data),
                                              "mirror_error": True})
+            elif msg.subtype in TASK_SUBTYPES:
+                self.stream.append("system", _task_payload(msg.subtype, msg.data))
             else:
                 d = msg.data or {}
                 payload = {"subtype": msg.subtype}

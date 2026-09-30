@@ -6,6 +6,7 @@ runs as a process, as the supervisor would run it. Invented cast only."""
 import http.client
 import socket
 import time
+from unittest import mock
 
 from cousin_lib.console import auth
 from tests import _plugins as fake
@@ -194,6 +195,31 @@ class TestProxy(PluginConsoleCase):
             rest += chunk
         self.assertEqual(rest, b"data: first\n\ndata: second\n\n")
 
+
+    def test_a_stream_quiet_longer_than_the_connect_timeout_stays_open(self):
+        """An event stream may be quiet for as long as it likes: the proxy
+        asks the service for `Connection: close`, so http.client lets go of
+        the socket at the headers and the connect timeout used to end the
+        relay after that many quiet seconds."""
+        from cousin_lib.console import routes_plugins
+        patch = mock.patch.object(routes_plugins, "CONNECT_TIMEOUT_S", 0.3)
+        patch.start(); self.addCleanup(patch.stop)
+        fake.start_service(self, self.dir, self.root)
+        sock = socket.create_connection(("127.0.0.1", self.server.port), timeout=10)
+        self.addCleanup(sock.close)
+        sock.sendall(b"GET /plugins/clock/events HTTP/1.1\r\nHost: x\r\n\r\n")
+        got = b""
+        deadline = time.monotonic() + 10
+        while b"data: first\n\n" not in got and time.monotonic() < deadline:
+            got += sock.recv(4096)
+        time.sleep(1.0)                      # quiet for more than three connect timeouts
+        (self.dir / "release").write_text("go")
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            got += chunk
+        self.assertTrue(got.endswith(b"data: first\n\ndata: second\n\n"), got[-80:])
 
 class TestProxyLogin(PluginConsoleCase):
     def test_a_session_is_required_like_every_page(self):

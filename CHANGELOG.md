@@ -6,6 +6,10 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 ## Unreleased
 
 ### Fixed
+- Plugins: a plugin's event stream through the console's `/plugins/<name>/`
+  proxy no longer ends after 5 quiet seconds. The proxy asks the service for
+  `Connection: close`, so the connect timeout stayed on the socket the relay
+  reads; a page reconnected every few seconds and missed events sent in the gaps.
 
 - `cousin-runner`: a status probe of a runner's lock no longer takes it
   (#79). `hold_lock` now also holds an open-file-description lock on

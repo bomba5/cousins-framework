@@ -241,16 +241,19 @@ def serve_proxy(handler, method, path, query, length):
         try:
             conn.request(method, target, body=body if method == "POST" or body else None,
                          headers=headers)
+            # held here: with `Connection: close` http.client lets go of
+            # conn.sock at the headers, and the relay must still reach it
+            sock = conn.sock
             resp = conn.getresponse()
         except (OSError, http.client.HTTPException) as err:
             return _refuse(handler, 502, "plugin %s: its service on %s:%d does not answer (%s)"
                            % (name, plugins.HOST, plugin.port, type(err).__name__))
-        _relay(handler, method, resp, conn)
+        _relay(handler, method, resp, sock)
     finally:
         conn.close()
 
 
-def _relay(handler, method, resp, conn):
+def _relay(handler, method, resp, sock):
     """The upstream response, streamed: status and headers as they came
     (hop-by-hop dropped), then every chunk as it arrives, flushed."""
     ctype = resp.getheader("Content-Type") or ""
@@ -269,9 +272,9 @@ def _relay(handler, method, resp, conn):
     if method == "HEAD":
         return
     try:
-        if conn.sock is not None:
+        if sock is not None:
             # an event stream may be quiet for as long as it likes
-            conn.sock.settimeout(None if streaming else READ_TIMEOUT_S)
+            sock.settimeout(None if streaming else READ_TIMEOUT_S)
         while True:
             chunk = resp.read1(CHUNK)
             if not chunk:

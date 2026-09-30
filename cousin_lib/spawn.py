@@ -552,7 +552,12 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
     <slug>-<YYYYmmdd-HHMMSS>.tar.gz, then remove the tree. A failed
     archive REFUSES the delete: untracked notes exist only on disk and
     the archive is their one copy. Harness-side directories named by
-    config/harness.toml are left in place and reported."""
+    config/harness.toml are left in place and reported.
+
+    A cousin with no runner kind (not a worker) is dismissed without the
+    stop, which 2.0.0 refuses for it (R2): nothing 2.0.0 started can be
+    running for it. The result then carries "stop": "skipped" and a
+    "note" with delivery.lane_refusal."""
     root = FrameworkConfig(root).root
     home = root / "cousins" / slug
     if not (home / "cousin.toml").is_file():
@@ -562,8 +567,16 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
         raise DismissRefused(
             "refusing to delete: archive dir %s is inside the tree being"
             " deleted; home kept" % archive_dir)
-    stop_fn = stop or stop_cousin
-    stop_fn(home, tmux_bin=tmux_bin, tmux_socket=tmux_socket)
+    from cousin_lib import delivery
+    skipped = None
+    if not runner_lane(home) and \
+            ((delivery._cousin_toml(home) or {}).get("cousin") or {}).get("type") != "worker":
+        skipped = {"stop": "skipped",
+                   "note": "%s; the stop is skipped: nothing 2.0.0 started runs for it"
+                           % delivery.lane_refusal(home)}
+    else:
+        stop_fn = stop or stop_cousin
+        stop_fn(home, tmux_bin=tmux_bin, tmux_socket=tmux_socket)
     archive = archive_dir / ("%s-%s.tar.gz"
                              % (slug, time.strftime("%Y%m%d-%H%M%S")))
     try:
@@ -587,7 +600,7 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
         if cfg and cfg.get(key):
             left.append(str(expand_harness_path(cfg[key], home)))
     return {"slug": slug, "status": "deleted", "archive": str(archive),
-            "left_in_place": left}
+            "left_in_place": left, **(skipped or {})}
 
 
 def _mint_session_id():

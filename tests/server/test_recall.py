@@ -1,12 +1,11 @@
-"""Proactive recall on /api/send: a colleague remembers without being
-asked.
+"""Proactive recall: a colleague remembers without being asked.
 
 An operator message long enough to carry meaning is searched against
-the cousin's own memory, and the best hits ride along on the DELIVERED
-line as one `[fw-recall] ...` suffix. The stored message never changes:
-the history is what the operator said, not what the cousin was
-reminded of. Best-effort by contract: a dead search costs nothing but
-the suffix.
+the cousin's own memory, and the best hits ride along as one
+`[fw-recall] ...` line (memory_search.recall_context: the gates and the
+line the runner's prompt hook adds as context, runner/hooks.py). The
+stored message never changes: the history is what the operator said,
+not what the cousin was reminded of.
 
 Threshold rule: with the embedding seam configured a hit needs its
 semantic similarity at or above `[recall] min_score`; keyword-only
@@ -15,18 +14,14 @@ term matched. Thresholds come from `config/embedding.toml [recall]`,
 defaults when absent; the per-cousin switch is `cousin.toml [memory]
 proactive_recall`.
 """
-import json
 import os
 import pathlib
 import tempfile
 import unittest
-import urllib.request
 from unittest import mock
 
 from cousin_lib import memory_search
 from cousin_lib.config import CousinConfig
-from cousin_lib.server import app
-from cousin_lib.server.app import ChatServer
 from tests._fakes import fake_embedder
 
 VECTOR_A = [1.0, 0.0, 0.0]
@@ -54,8 +49,7 @@ class RecallCase(unittest.TestCase):
         os.environ["PATH"] = "/usr/bin:/bin"
 
     def _boot(self, *, operator="Sam", recall=None, keyword_only=False):
-        toml = ('[cousin]\nslug = "wren"\nname = "Wren"\n'
-                "[chat]\nport = 0\n")
+        toml = '[cousin]\nslug = "wren"\nname = "Wren"\n'
         if operator:
             toml += '[operator]\nname = "%s"\n' % operator
         if recall is not None or keyword_only:
@@ -66,31 +60,18 @@ class RecallCase(unittest.TestCase):
             toml += "recall_keyword_only = true\n"
         (self.home / "cousin.toml").write_text(toml)
         self.calls = []
-        server = ChatServer(CousinConfig.load(self.home),
-                            deliver=lambda **kw: self.calls.append(kw))
-        server.start()
-        self.addCleanup(server.stop)
-        return server
+        return CousinConfig.load(self.home)
 
-    def _send(self, server, message, user="Sam"):
-        req = urllib.request.Request(
-            "http://127.0.0.1:%d/api/send" % server.port,
-            data=json.dumps({"user": user, "message": message}).encode())
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, json.loads(resp.read())
-
-    def _history(self, server, user="Sam"):
-        url = "http://127.0.0.1:%d/api/history?user=%s" % (server.port,
-                                                           user)
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            return json.loads(resp.read())["messages"]
+    def _send(self, config, message):
+        """What the cousin is handed for an operator message: the message,
+        and the recall line as its context."""
+        line = memory_search.recall_context(self.home, message, config=config)
+        self.calls.append({"message": message, "context": line or ""})
+        return 200, {}
 
     def _delivered(self):
-        """The text the cousin reads. The recall line rides the delivered
-        item as `context` (cousin_lib.delivery) and the tmux backend
-        renders it as `message + " " + context`, byte-identical to the
-        old suffix (tests.test_delivery proves that). Rebuilding it here
-        keeps every assertion below about what the cousin actually sees."""
+        """The message and its recall line, `message + " " + context`:
+        every assertion below reads what the cousin is handed."""
         self.assertEqual(len(self.calls), 1)
         return self._text(self.calls[0])
 
@@ -128,9 +109,9 @@ class TestEndToEnd(RecallCase):
         (self.home / "memory" / "ports.md").write_text(
             "# Ports\n\nThe claimed set excludes every port.\n")
         self._configure_embedding(self._serve_fake())
-        server = self._boot()
+        config = self._boot()
         message = "tell me again about the sunrise over the ridge"
-        status, _ = self._send(server, message)
+        status, _ = self._send(config, message)
         self.assertEqual(status, 200)
         delivered = self._delivered()
         self.assertEqual(
@@ -140,17 +121,15 @@ class TestEndToEnd(RecallCase):
             " details; ignore if not.")
         self.assertNotIn("\n", delivered)
         self.assertNotIn("Ports", delivered)  # similarity 0 < min_score
-        self.assertEqual([m["message"] for m in self._history(server)],
-                         [message])
 
     def test_keyword_only_install_is_silent_unless_opted_in(self):
         # No embedding seam and no opt-in: an OR-joined keyword match is
         # too loose to interrupt with, so nothing is appended.
         (self.home / "memory" / "upkeep.md").write_text(
             "# Grinder upkeep\n\nThe burr grinder needs descaling.\n")
-        server = self._boot()
+        config = self._boot()
         message = "when did the burr grinder last get descaling done?"
-        self._send(server, message)
+        self._send(config, message)
         self.assertEqual(self._delivered(), message)
 
     def test_keyword_only_install_keeps_every_fts_hit_when_opted_in(self):
@@ -161,9 +140,9 @@ class TestEndToEnd(RecallCase):
         (self.home / "notes").mkdir()
         (self.home / "notes" / "2026-01-01-ports.md").write_text(
             "The claimed set excludes every port.\n")
-        server = self._boot(keyword_only=True)
+        config = self._boot(keyword_only=True)
         message = "when did the burr grinder last get descaling done?"
-        self._send(server, message)
+        self._send(config, message)
         delivered = self._delivered()
         self.assertTrue(delivered.startswith(message + " [fw-recall] "))
         self.assertIn("Grinder upkeep (memory:upkeep.md)", delivered)
@@ -175,8 +154,8 @@ class TestEndToEnd(RecallCase):
         (self.home / "notes").mkdir()
         (self.home / "notes" / "2026-01-01-grinder.md").write_text(
             "The burr grinder needs descaling every 200 shots.\n")
-        server = self._boot(keyword_only=True)
-        self._send(server, "when did the burr grinder last get descaling?")
+        config = self._boot(keyword_only=True)
+        self._send(config, "when did the burr grinder last get descaling?")
         self.assertIn("2026-01-01-grinder (notes:2026-01-01-grinder.md)",
                       self._delivered())
 
@@ -186,69 +165,26 @@ class TestTriggers(RecallCase):
         raise AssertionError("search must not run")
 
     def test_short_message_is_not_searched(self):
-        server = self._boot()
+        config = self._boot()
         short = "x" * 23
-        with mock.patch.object(app.memory_search, "search", self._never):
-            self._send(server, short)
+        with mock.patch.object(memory_search, "search", self._never):
+            self._send(config, short)
         self.assertEqual(self._delivered(), short)
 
     def test_opt_out_in_cousin_toml_is_honored(self):
-        server = self._boot(recall=False)
-        with mock.patch.object(app.memory_search, "search", self._never):
-            self._send(server, LONG)
-        self.assertEqual(self._delivered(), LONG)
-
-    def test_non_operator_sender_is_not_searched(self):
-        server = self._boot()
-        with mock.patch.object(app.memory_search, "search", self._never):
-            self._send(server, LONG, user="Peer")
-        self.assertEqual(self._delivered(), LONG)
-
-    def test_no_configured_operator_means_no_recall(self):
-        server = self._boot(operator=None)
-        with mock.patch.object(app.memory_search, "search", self._never):
-            self._send(server, LONG)
-        self.assertEqual(self._delivered(), LONG)
-
-    def test_search_failure_is_swallowed_and_delivery_proceeds(self):
-        server = self._boot()
-        with mock.patch.object(app.memory_search, "search",
-                               side_effect=RuntimeError("index on fire")):
-            status, _ = self._send(server, LONG)
-        self.assertEqual(status, 200)
-        self.assertEqual(self._delivered(), LONG)
-
-    def test_a_slow_search_is_cut_off_and_delivery_proceeds(self):
-        # Canary (2026-09-18): the search re-embedded a big change inside
-        # the send, the console's 15 s wait ran out, and the operator saw
-        # a failed send for a message that was stored and delivered late.
-        import threading
-        import time
-        release = threading.Event()
-
-        def slow(*a, **k):
-            release.wait(5)
-            return [], None
-        server = self._boot()
-        self._configure_embedding("http://127.0.0.1:9/unused")
-        with mock.patch.object(app, "RECALL_BUDGET_SECONDS", 0.2), \
-                mock.patch.object(app.memory_search, "search", slow):
-            started = time.monotonic()
-            status, _ = self._send(server, LONG)
-            took = time.monotonic() - started
-        release.set()
-        self.assertEqual(status, 200)
-        self.assertLess(took, 3)
+        config = self._boot(recall=False)
+        with mock.patch.object(memory_search, "search", self._never):
+            self._send(config, LONG)
         self.assertEqual(self._delivered(), LONG)
 
     def test_nothing_above_threshold_appends_nothing(self):
         self._configure_embedding("http://127.0.0.1:9/unused")
         (self.home / "memory" / "a.md").write_text("# A\n\nbody\n")
-        server = self._boot()
+        config = self._boot()
         hits = [self._hit("a.md", similarity=0.1)]
-        with mock.patch.object(app.memory_search, "search",
+        with mock.patch.object(memory_search, "search",
                                return_value=(hits, None)):
-            self._send(server, LONG)
+            self._send(config, LONG)
         self.assertEqual(self._delivered(), LONG)
 
     def test_configured_seam_ignores_hits_without_similarity(self):
@@ -256,11 +192,11 @@ class TestTriggers(RecallCase):
         # (service down) has nothing to say about meaning.
         self._configure_embedding("http://127.0.0.1:9/unused")
         (self.home / "memory" / "a.md").write_text("# A\n\nbody\n")
-        server = self._boot()
+        config = self._boot()
         hits = [self._hit("a.md")]
-        with mock.patch.object(app.memory_search, "search",
+        with mock.patch.object(memory_search, "search",
                                return_value=(hits, "service unreachable")):
-            self._send(server, LONG)
+            self._send(config, LONG)
         self.assertEqual(self._delivered(), LONG)
 
 
@@ -276,11 +212,11 @@ class TestThresholds(RecallCase):
     def test_defaults_when_no_embedding_config(self):
         for name in ("a.md", "b.md", "c.md"):
             (self.home / "memory" / name).write_text("# %s\n" % name[0])
-        server = self._boot(keyword_only=True)
+        config = self._boot(keyword_only=True)
         seen, search = self._capture([self._hit("a.md"), self._hit("b.md")])
-        with mock.patch.object(app.memory_search, "search", search):
-            self._send(server, "x" * 23)
-            self._send(server, "y" * 24)
+        with mock.patch.object(memory_search, "search", search):
+            self._send(config, "x" * 23)
+            self._send(config, "y" * 24)
         self.assertEqual(len(seen), 1)
         query, kw = seen[0]
         self.assertEqual(query, "y" * 24)
@@ -298,12 +234,12 @@ class TestThresholds(RecallCase):
             "[recall]\nmin_chars = 40\nmin_score = 0.9\ntop = 1\n")
         for name in ("a.md", "b.md"):
             (self.home / "memory" / name).write_text("# %s\n" % name[0])
-        server = self._boot()
+        config = self._boot()
         seen, search = self._capture([self._hit("a.md", similarity=0.95),
                                       self._hit("b.md", similarity=0.5)])
-        with mock.patch.object(app.memory_search, "search", search):
-            self._send(server, "z" * 39)
-            self._send(server, "z" * 40)
+        with mock.patch.object(memory_search, "search", search):
+            self._send(config, "z" * 39)
+            self._send(config, "z" * 40)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0][1]["top"], 1)
         delivered = self._text(self.calls[1])

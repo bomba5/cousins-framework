@@ -318,8 +318,6 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
         "name": config.name,
         "role": str(cousin.get("role", "")),
         "type": config.type,
-        "port": config.chat_port,
-        "host": config.chat_host,
         "home": str(config.home),
         "tmuxSession": config.tmux_session,
         "operator": config.operator_name,
@@ -458,29 +456,9 @@ def _start(server, slug):
     config = load_cousin(server, slug)
     if spawn.runner_lane(config.home):
         return _start_runner(server, slug, config)
-    chat_ok = chat_health(config) == "ok"
-    if session_alive(server, config):
-        if not chat_ok and not config.chat_host:
-            spawn._default_chat_server(config.home)
-            return {"ok": True, "slug": slug, "status": "already running",
-                    "chat_server": "started"}
-        return {"ok": True, "slug": slug, "status": "already running",
-                "chat_server": "reused" if chat_ok else "not running"}
-    try:
-        agent_cmd = spawn._read_agent_cmd(server.root)
-    except spawn.SpawnError as err:
-        raise HttpError(500, str(err))
-    server.emit("cousin-status", {"slug": slug, "status": "starting"})
-    try:
-        spawn.start_cousin(
-            config.home, agent_cmd=agent_cmd, tmux_bin=server.tmux_bin,
-            tmux_socket=server.tmux_socket, root=server.root,
-            start_chat_server=((lambda home: None) if chat_ok
-                               else spawn._default_chat_server))
-    except spawn.SpawnError as err:
-        raise HttpError(500, str(err))
-    return {"ok": True, "slug": slug, "status": "started",
-            "chat_server": "reused" if chat_ok else "started"}
+    # R2: 2.0.0 has no legacy tmux lane: a cousin with no runner kind is
+    # refused by name, before any tmux call and with no chat server
+    raise HttpError(409, delivery.lane_refusal(config.home))
 
 
 def _stop(server, slug, by="console"):
@@ -509,8 +487,13 @@ def _stop(server, slug, by="console"):
                             % (result.get("error") or "no reason given"),
                             slug=slug, **extra)
         return {"ok": True, "slug": slug, "status": status, **result}
-    result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
-                               tmux_socket=server.tmux_socket)
+    try:
+        result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
+                                   tmux_socket=server.tmux_socket)
+    except spawn.SpawnError as err:
+        # R2: a cousin with no runner kind is refused by name (a worker's
+        # stop is a no-op that says so)
+        raise HttpError(409, str(err))
     return {"ok": True, "slug": slug, "status": "stopped", **result}
 
 
@@ -596,10 +579,10 @@ def register():
         if not isinstance(voice, str) or not voice.strip():
             raise HttpError(400, "voice is required: the template refuses"
                                  " to render without one")
-        port = body.get("port")
-        if port is not None and (isinstance(port, bool)
-                                 or not isinstance(port, int)):
-            raise HttpError(400, "port must be an integer")
+        if body.get("port") is not None:
+            # R10: no per-cousin chat server, so a cousin has no port
+            raise HttpError(400, "port: 2.0.0 runs no per-cousin chat server,"
+                                 " so a cousin has no chat port")
         # The four runtime fields the dialog sends; each is validated
         # by create_cousin before anything is written (400 below).
         runtime = {}
@@ -623,7 +606,7 @@ def register():
                 req.server.root, slug=slug, role=role,
                 name=body.get("name") or None,
                 role_paragraph=body.get("role_paragraph") or None,
-                voice=voice, port=port, operator=body.get("operator") or None,
+                voice=voice, operator=body.get("operator") or None,
                 **runtime)
         except spawn.SpawnError as err:
             text = str(err)
@@ -631,8 +614,7 @@ def register():
                 else 400
             raise HttpError(status, text)
         req.server.emit("cousins-refresh", fleet_rows(req.server))
-        return 201, {"ok": True, "slug": out["slug"], "home": str(out["home"]),
-                     "port": out["port"]}
+        return 201, {"ok": True, "slug": out["slug"], "home": str(out["home"])}
 
     @router.route("DELETE", "/api/cousins/{slug}")
     def dismiss(req, slug):
@@ -678,6 +660,9 @@ def register():
             if spawn.runner_lane(config.home):
                 out = _stop(server, slug)
                 return (202 if out["status"] == "stopping" else 200), out
+            # R2: no legacy tmux lane: _stop refuses a cousin with no runner
+            # kind (409) before any tmux call; a worker's stop is a no-op
+            return 200, _stop(server, slug)
             if not clean or not session_alive(server, config):
                 return 200, _stop(server, slug)
             # A clean stop runs in the background and marks itself busy in
@@ -912,9 +897,8 @@ def register():
         return _set_runtime(req, slug, "model")
 
     # Whether a saved identity value needs a restart to take effect.
-    # The chat server loads cousin.toml once at its start and uses the
-    # operator to tell operator messages from peers; a console restart
-    # stops and starts it. The memory scope is read from cousin.toml on
+    # The runner loads cousin.toml once at its start and uses the
+    # operator to tell operator messages from peers; a restart reloads it. The memory scope is read from cousin.toml on
     # each shared-tier call, and the loops daemon loads every
     # cousin.toml on each tick, so both apply without one.
     identity_restart = {"operator": True, "memory_scope": False,

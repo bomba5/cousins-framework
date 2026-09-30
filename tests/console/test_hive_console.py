@@ -152,7 +152,7 @@ class TestQueenOnTheConsole(HiveConsoleCase):
                          (200, {"status": "ok"}))
         _, body = self.get("/api/hive")
         self.assertEqual(body, {"enabled": True, "public_url": PUBLIC,
-                                "checkin_seconds": 30, "home_chat_url": None,
+                                "checkin_seconds": 30, "home_cousin": None,
                                 "default_port": 8210})
 
     def test_the_standalone_queens_routes_answer_here(self):
@@ -475,7 +475,9 @@ class TestBuild(HiveConsoleCase):
         self.assertTrue(entry["dir"].exists())
 
     def test_brain_home_chat_and_loopback_options(self):
-        self.enable(home_chat_url="http://home.example.invalid:8090")
+        # the legacy home_chat_url is not read (2.0.0 runs no per-cousin
+        # chat server): home chat is the queen's tell-home to home_cousin
+        self.enable(home_chat_url="http://home.example.invalid:8090", home_cousin="wren")
         self.serve()
         _, body = self._build(brain="agent", agent_cmd="/opt/agent --plain",
                               home_chat=True, reachable=False, port=8300)
@@ -483,8 +485,9 @@ class TestBuild(HiveConsoleCase):
         with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
             env_text = tar.extractfile("kestrel-node/node.env").read().decode()
         self.assertIn("AGENT_CMD='/opt/agent --plain'", env_text)
-        self.assertIn("HOME_CHAT_URL=http://home.example.invalid:8090",
-                      env_text)
+        self.assertIn("TELL_HOME=1\n", env_text)
+        self.assertIn("HOME_CHAT_URL=\n", env_text)
+        self.assertNotIn("home.example.invalid", env_text)
         self.assertIn("NODE_HOST=127.0.0.1", env_text)
         self.assertIn("NODE_PORT=8300", env_text)
 

@@ -1,15 +1,15 @@
-"""Chat routes: a proxy over each cousin's chat server
-(docs/reference/console-api.md, "Chat: a proxy over each cousin's chat server").
+"""Chat routes (docs/reference/console-api.md, "Chat").
 
-Every route names the cousin, resolves its `host`/`port` from the
-filesystem registry on that call, and forwards to the routes in
-docs/reference/chat-api.md. A runner cousin (cousin.toml `[agent]
-runner`, its home on this machine) runs no chat server: for it the
-console answers the same routes itself, over the cousin's `chat.db`,
-through the library the chat server answers with (server/chat_api.py),
-so the body is the same on both lanes. A send then delivers through
-`delivery.deliver` (the cousin's inbox) and a reaction tells the cousin
-the same way; the console still keeps no store of its own. The console stores no message: the only files
+Every route names the cousin. A runner cousin (cousin.toml `[agent]
+runner`, its home on this machine) is answered by the console itself,
+over the cousin's `chat.db`, through server/chat_api.py: a send
+delivers through `delivery.deliver` (the cousin's inbox) and a reaction
+tells the cousin the same way. Any other cousin is forwarded upstream,
+by the `host`/`port` resolved from the registry on that call, to the
+routes in docs/reference/chat-api.md: that is a hive node's own chat
+server. No cousin on this machine runs a chat server of its own
+(2.0.0), so a local cousin with no runner kind has no upstream to
+answer. The console stores no message: the only files
 it touches under a cousin home are the inbox and the generated-media
 folders (`chat/images`, `chat/audio`, `chat/video`), served read-only,
 and the attachment annotation on history rows is one directory listing

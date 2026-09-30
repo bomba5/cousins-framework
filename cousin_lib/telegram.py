@@ -6,17 +6,18 @@ fully configured: a missing token, a disabled flag, or an empty
 operator allowlist is an error naming the cause, never a silent
 no-send that looks like a working bot dropping messages.
 
-The bridge is a pure relay: an inbound Telegram message becomes
-`POST /api/send` to a tmux cousin's own chat server, or, for a runner
-cousin, a stored chat row delivered to its inbox (the steps /api/send
+The bridge is a pure relay: an inbound Telegram message becomes a stored
+chat row delivered to the runner cousin's inbox (the steps chat_api.send
 takes, done here); the cousin's replies are relayed back to the
-operator's Telegram chat. It never types into a terminal and holds no
-chat state of its own; chat.db owns it.
+operator's Telegram chat. A cousin with no runner kind is refused by
+name (delivery.lane_refusal): 2.0.0 runs no chat server to post to. It
+never types into a terminal and holds no chat state of its own; chat.db
+owns it.
 The only thing it keeps is where it is: the Telegram update offset and
 one reply cursor per operator thread, in data/telegram-bridge.json. A
 cursor moves only past what was delivered, so a failed relay is retried
 and a restart resumes instead of re-sending the thread.
-The Telegram API and the chat server are injected here so the relay is
+The Telegram API and the chat send are injected here so the relay is
 testable without a real network.
 """
 import base64
@@ -39,8 +40,8 @@ from cousin_lib.server.storage import (ChatStore, normalize_chat_user,
 
 _API = "https://api.telegram.org/bot%s/%s"
 _FILE_API = "https://api.telegram.org/file/bot%s/%s"
-# getFile serves up to 20 MB; the chat server keeps a photo inline in
-# one JSON body, so the bridge takes less than that.
+# getFile serves up to 20 MB; a photo travels as a data: URI inside
+# one relayed message, so the bridge takes less than that.
 _MAX_INBOUND_BYTES = 10 * 1024 * 1024
 # The Bot API's upload limits: 10 MB for a photo, 50 MB for other files.
 _MB = 1024 * 1024
@@ -178,36 +179,25 @@ def load_bridge_config(home, root=None):
         operator_name=names, port=(data.get("chat") or {}).get("port"), home=home)
 
 
+def _refuse_unless_runner(cfg):
+    """A cousin with no runner kind has no transport in 2.0.0: refused by
+    name (TelegramConfigError with delivery.lane_refusal's line)."""
+    if not isinstance(delivery.backend_for(cfg.home), delivery.InboxBackend):
+        raise TelegramConfigError(delivery.lane_refusal(cfg.home))
+
+
 def _default_chat_send(cfg, *, user, message, attachment=None):
-    """One inbound message into the cousin's chat, by the cousin's lane.
-    A runner cousin (cousin.toml `[agent] runner`): the bridge stores the
-    row and delivers it itself (_store_and_deliver). A tmux cousin: the
-    chat server's own `POST /api/send` (_post_to_chat_server), because
-    that is where recall, the tmux socket options and the inject lock
-    live; the bridge never types into the terminal itself."""
-    if isinstance(delivery.backend_for(cfg.home), delivery.InboxBackend):
-        return _store_and_deliver(cfg, user=user, message=message,
-                                  attachment=attachment)
-    return _post_to_chat_server(cfg, user=user, message=message,
-                                attachment=attachment)
-
-
-def _post_to_chat_server(cfg, *, user, message, attachment=None):
-    if not cfg.port:
-        raise TelegramConfigError("a tmux cousin's bridge needs its [chat] port")
-    body = {"user": user, "message": message}
-    if attachment:
-        body["image"] = attachment  # a data: URI, decoded by the server
-    request = urllib.request.Request(
-        "http://127.0.0.1:%d/api/send" % cfg.port,
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(request, timeout=10)
+    """One inbound message into the runner cousin's chat: the bridge
+    stores the row and delivers it itself (_store_and_deliver). A cousin
+    with no runner kind is refused before anything is stored."""
+    _refuse_unless_runner(cfg)
+    return _store_and_deliver(cfg, user=user, message=message,
+                              attachment=attachment)
 
 
 def _store_and_deliver(cfg, *, user, message, attachment=None):
-    """The runner lane: store the row and ride `deliver()`, the steps the
-    chat server's /api/send takes, without the chat server. `attachment`
+    """Store the row and ride `deliver()`, the steps chat_api.send takes,
+    with the bridge's own image folder. `attachment`
     is a data: URI (as relay_inbound built it); it is decoded to
     <home>/chat/images/ and the row carries its path, the one
     convention the console and the outbound relay both read."""
@@ -248,7 +238,7 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
     # is not read here.
     deliver(user=user, message=message, message_id=row["id"],
            attachments=(str(path),) if path else ())
-    # After delivery, same order /api/send has: the marker's mtime is
+    # After delivery, same order chat_api.send has: the marker's mtime is
     # the gap baseline for the NEXT message, and the correction capture
     # rides along on the same call.
     after_inbound_stored(config, user, message)
@@ -373,7 +363,7 @@ def pump_inbound(cfg, state, updates, *, relay=None, log=None):
         except Exception as err:
             if not _permanent(err):
                 raise
-            log("update %s rejected by the chat server, skipped: %s"
+            log("update %s rejected by the chat, skipped: %s"
                 % (update.get("update_id"), _describe(err)))
         state["tg_offset"] = update["update_id"] + 1
         save_cursors(cfg.home, state)
@@ -458,9 +448,8 @@ def _history(cfg, thread, since=None):
     """One operator thread's rows from the cousin's own chat store, oldest
     first: those after `since`, or with since None the newest row only
     (to start a fresh cursor at the end of the thread). It reads the
-    store in this process (chat_api.history, what the chat server's
-    /api/history runs), so no chat server has to run (phase 10a). A
-    store that cannot be read raises, and the caller retries."""
+    store in this process (chat_api.history). A store that cannot be
+    read raises, and the caller retries."""
     from cousin_lib.server import chat_api
     query = {"user": thread}
     query.update({"limit": "1"} if since is None else {"since": str(since)})
@@ -494,6 +483,7 @@ def run_bridge(home, *, poll_interval=5):
     import time
 
     cfg = load_bridge_config(home)
+    _refuse_unless_runner(cfg)
     state = load_cursors(cfg.home)
 
     def tg_send_text(**kw):

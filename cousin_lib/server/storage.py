@@ -1,4 +1,5 @@
-"""Chat message storage for a cousin's chat server.
+"""Chat message storage for a cousin (what server/chat_api.py reads and
+writes in-process).
 
 One SQLite database per cousin at <home>/data/chat.db. The full schema is
 declared at creation - there is no migration dance and no dual id space.

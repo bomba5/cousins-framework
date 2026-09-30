@@ -531,8 +531,7 @@ TOML_FILES = {
     "hive": {
         "file": "hive.toml",
         "fields": {(r"^$", "enabled"): "bool", (r"^$", "public_url"): "url",
-                   (r"^$", "checkin_seconds"): "int", (r"^$", "home_cousin"): "str",
-                   (r"^$", "home_chat_url"): "url"},
+                   (r"^$", "checkin_seconds"): "int", (r"^$", "home_cousin"): "str"},
         "removable": None,
         "check": _check_hive,
         "applies": "read at every hive request: no restart",
@@ -1122,11 +1121,10 @@ def register():
             "allow": allow, "sha": _sha(raw), "client": req.client,
             "builtin": ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12",
                         "192.168.0.0/16"],
-            "applies": "read when the console and each chat server start",
-            "restart": {"services": ["console", "chat servers"],
+            "applies": "read when the console starts",
+            "restart": {"services": ["console"],
                         "route": CONSOLE_RESTART_ROUTE,
-                        "note": "restart the console here; a cousin's chat server"
-                                " restarts with the cousin"}}
+                        "note": "restart the console here"}}
         commands = {}
         for name in COMMAND_FILES:
             raw = _read_bytes(_config_path(server, name))
@@ -1230,7 +1228,7 @@ def register():
         backup, sha = _write_text(server, path, json.dumps(data, indent=2) + "\n",
                                   req.body.get("base_sha"))
         return 200, {"ok": True, "allow": allow, "backup": backup, "sha": sha,
-                     "restart": {"services": ["console", "chat servers"],
+                     "restart": {"services": ["console"],
                                  "route": CONSOLE_RESTART_ROUTE}}
 
     # -- harness.toml [agent] defaults --

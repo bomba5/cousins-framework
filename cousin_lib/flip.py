@@ -253,7 +253,9 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
          settle=RESPAWN_SETTLE_SECONDS, which=shutil.which,
          reason="cousin-flip", queue_if_stopped=False):
     """Run the flip for one cousin. Returns a structured result whose
-    ok reflects the verified identity write."""
+    ok reflects the verified identity write. On a runner cousin it is the
+    rollover (_flip_runner); a cousin with no runner kind is refused with
+    delivery.lane_refusal before any tmux call (R2)."""
     result = {"slug": slug, "ok": False, "stages": []}
     root = FrameworkConfig.from_env().root
     home = root / "cousins" / slug
@@ -270,6 +272,10 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
             return result
         return _flip_runner(slug, home, reason=reason, deadline=handoff_deadline,
                             queue_if_stopped=queue_if_stopped)
+    # R2: 2.0.0 has no legacy tmux lane; refused by name, before any tmux call.
+    from cousin_lib.delivery import lane_refusal
+    result["error"] = lane_refusal(home)
+    return result
     session = config.tmux_session
 
     # Concurrency guard: a FRESH marker means another flip is mid-run;

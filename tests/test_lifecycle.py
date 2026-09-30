@@ -87,14 +87,15 @@ class LifecycleCase(unittest.TestCase):
         from tests._fakes import agent_on_path
         agent_on_path(self, self.root)
 
-    def _cousin(self, slug, name, role):
+    def _cousin(self, slug, name, role, runner="fake"):
         home = self.root / "cousins" / slug
         (home / "data").mkdir(parents=True)
         (home / "memory" / "raw").mkdir(parents=True)
         (home / "cousin.toml").write_text(
             '[cousin]\nslug = "%s"\nname = "%s"\nrole = "%s"\n\n'
             '[chat]\nport = %d\ntmux_session = "%s"\n'
-            % (slug, name, role, self.port, slug))
+            % (slug, name, role, self.port, slug)
+            + ('\n[agent]\nrunner = "%s"\n' % runner if runner else ""))
         (home / "CLAUDE.md").write_text(
             "# %s - %s\n\n## Identity\n\nYou are %s.\n\n## Voice\n\n"
             "Plain.\n" % (name, role, name))
@@ -113,7 +114,7 @@ class LifecycleCase(unittest.TestCase):
             json.dumps({"who": slug, "text": "%s private" % slug}) + "\n")
         return home
 
-    def _fake_flip(self, slug):
+    def _fake_flip(self, slug, reason=None):
         self.flips.append(slug)
         return {"slug": slug, "ok": True, "stages": []}
 
@@ -180,6 +181,26 @@ class TestBraidMemory(unittest.TestCase):
         self.assertTrue(out.endswith("\n"))
 
 
+class TestLegacyReincarnateRefused(LifecycleCase):
+    """R2: reincarnate refuses a cousin with no [agent] runner by name
+    and touches nothing: no snapshot, no rewrite, no flip, no tmux."""
+
+    def test_reincarnate_on_a_cousin_with_no_runner_is_refused(self):
+        from cousin_lib.delivery import lane_refusal
+        home = self._cousin("testc", "Testc", "keeper of the gate", runner=None)
+        claude = (home / "CLAUDE.md").read_text()
+        toml = (home / "cousin.toml").read_text()
+        out = self._reincarnate("testc")
+        self.assertFalse(out["ok"], out)
+        self.assertEqual(out["error"], lane_refusal(home))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(_Capture.received, [])
+        self.assertFalse((self.root / "data" / "lifecycle").exists())
+        self.assertEqual((home / "CLAUDE.md").read_text(), claude)
+        self.assertEqual((home / "cousin.toml").read_text(), toml)
+        self.assertFalse(self.log.exists() and self.log.read_text())
+
+
 class TestReincarnate(LifecycleCase):
     def test_refuses_an_unknown_slug_before_touching_anything(self):
         out = self._reincarnate("nobody")
@@ -188,12 +209,18 @@ class TestReincarnate(LifecycleCase):
         self.assertEqual(self.flips, [])
         self.assertFalse((self.root / "data" / "lifecycle").exists())
 
+    def test_every_step_lands_in_the_audit_log(self):
+        self._reincarnate(timeout=0.2)
+        rows = self._audit()
+        self.assertEqual([r["step"] for r in rows],
+                         ["snapshot", "bequest", "rewrite", "flip", "done"])
+        for row in rows:
+            self.assertEqual(row["op"], "reincarnate")
+            self.assertEqual(row["slug"], "testa")
+            self.assertIn("ts", row)
+
     def test_snapshot_bequest_rewrite_flip_in_that_order(self):
-        def cousin_writes():
-            time.sleep(0.15)
-            (self.a / "data" / "handoff.md").write_text("# bequest\n")
-        threading.Thread(target=cousin_writes, daemon=True).start()
-        out = self._reincarnate(timeout=3)
+        out = self._reincarnate()
         self.assertTrue(out["ok"], out)
         steps = [s["step"] for s in out["steps"]]
         self.assertEqual(steps, ["snapshot", "bequest", "rewrite", "flip"])
@@ -206,82 +233,30 @@ class TestReincarnate(LifecycleCase):
             self.assertTrue((snap / name).is_file(), name)
         self.assertTrue((snap / "memory" / "testa-fact.md").is_file())
         self.assertIn("keeper of the ledger", (snap / "CLAUDE.md").read_text())
-        # Bequest prompt reached the chat server's /api/send and the
-        # cousin's handoff write was observed.
-        self.assertEqual(len(_Capture.received), 1)
-        self.assertEqual(_Capture.received[0]["path"], "/api/send")
-        self.assertIn("handoff.md", _Capture.received[0]["payload"]["message"])
+        # A runner cousin's bequest rides the rollover: nothing is posted.
         bequest = next(s for s in out["steps"] if s["step"] == "bequest")
-        self.assertTrue(bequest["sent"])
-        self.assertTrue(bequest["wrote"])
+        self.assertTrue(bequest["carried"])
+        self.assertEqual(_Capture.received, [])
         # Role rewritten in both identity files.
         claude = (self.a / "CLAUDE.md").read_text()
         self.assertTrue(claude.startswith("# Testa - mender of the fence\n"))
         cfg = tomllib.loads((self.a / "cousin.toml").read_text())
         self.assertEqual(cfg["cousin"]["role"], "mender of the fence")
         self.assertEqual(cfg["cousin"]["slug"], "testa")
-        self.assertEqual(cfg["chat"]["port"], self.port)
         # Flipped through the injected seam, memory untouched.
         self.assertEqual(self.flips, ["testa"])
         self.assertEqual((self.a / "MEMORY.md").read_text(),
                          "# Testa - memory index\n- Testa remembers the first day\n")
 
-    def test_silent_cousin_is_recorded_and_the_flip_still_runs(self):
-        out = self._reincarnate(timeout=0.3)
-        self.assertTrue(out["ok"], out)
-        bequest = next(s for s in out["steps"] if s["step"] == "bequest")
-        self.assertTrue(bequest["sent"])
-        self.assertFalse(bequest["wrote"])
-        self.assertEqual(self.flips, ["testa"])
-
-    def test_unreachable_chat_server_is_a_recorded_step_not_a_crash(self):
-        (self.a / "cousin.toml").write_text(
-            '[cousin]\nslug = "testa"\nname = "Testa"\nrole = "r"\n\n'
-            '[chat]\nport = 1\ntmux_session = "testa"\n')
-        out = self._reincarnate(timeout=0.3)
-        self.assertTrue(out["ok"], out)
-        bequest = next(s for s in out["steps"] if s["step"] == "bequest")
-        self.assertFalse(bequest["sent"])
-        self.assertIn("reason", bequest)
-        self.assertEqual(self.flips, ["testa"])
-
-    def test_every_step_lands_in_the_audit_log(self):
-        self._reincarnate(timeout=0.2)
-        rows = self._audit()
-        self.assertEqual([r["step"] for r in rows],
-                         ["snapshot", "bequest", "rewrite", "flip", "done"])
-        for row in rows:
-            self.assertEqual(row["op"], "reincarnate")
-            self.assertEqual(row["slug"], "testa")
-            self.assertIn("ts", row)
-
     def test_a_failed_flip_makes_the_result_not_ok(self):
         out = self._reincarnate(
             timeout=0.2,
-            do_flip=lambda slug: {"slug": slug, "ok": False,
+            do_flip=lambda slug, reason=None: {"slug": slug, "ok": False,
                                   "error": "preflight failed"})
         self.assertFalse(out["ok"])
         self.assertIn("preflight", out["error"])
         rows = self._audit()
         self.assertFalse(next(r for r in rows if r["step"] == "flip")["ok"])
-
-    def test_the_real_flip_runs_through_the_fake_tmux(self):
-        from cousin_lib.flip import flip
-
-        def real(slug):
-            return flip(slug, tmux_bin=str(self.tmux), handoff_deadline=1,
-                        halfway=0.4, settle=0)
-        out = self._reincarnate(timeout=0.2, do_flip=real)
-        self.assertTrue(out["ok"], out)
-        calls = self.log.read_text()
-        self.assertIn("new-session", calls)
-        self.assertIn("BOOT PACKET FOR COUSIN: testa", calls)
-        # The new packet was assembled from the rewritten identity.
-        packet = self.a / "data" / "boot-packet-gen-0001.md"
-        self.assertTrue(packet.is_file())
-        cfg = tomllib.loads((self.a / "cousin.toml").read_text())
-        self.assertEqual(cfg["cousin"]["role"], "mender of the fence")
-        self.assertIn("session_id", cfg["runtime"])
 
     def test_cli_refuses_unknown_slug_with_exit_2(self):
         err = io.StringIO()
@@ -399,46 +374,6 @@ class TestBodySwap(LifecycleCase):
         self.assertTrue((self.a / "memory" / "testa-fact.md").is_file())
         self.assertTrue((self.b / "memory" / "testb-fact.md").is_file())
         self.assertEqual(sorted(self.flips), ["testa", "testb"])
-
-    def test_each_slot_keeps_its_own_port_and_reply_route(self):
-        # The template renders the slot's port and reply route into
-        # CLAUDE.md; a swap that moves the file whole hands each cousin
-        # the other's address. Canary: after a swap testa's CLAUDE.md
-        # named testb's port and /api/testb_reply.
-        from cousin_lib.template import render_template
-        template = (pathlib.Path(lifecycle.__file__).resolve().parents[1]
-                    / "templates" / "cousin-CLAUDE.template.md").read_text()
-        ports = {"testa": 8211, "testb": 8222}
-        for home, slug, name, role in (
-                (self.a, "testa", "Testa", "keeper of the ledger"),
-                (self.b, "testb", "Testb", "reader of the weather")):
-            toml = (home / "cousin.toml").read_text()
-            (home / "cousin.toml").write_text(
-                toml.replace("port = %d" % self.port,
-                             "port = %d" % ports[slug]))
-            text = render_template(template, {
-                "NAME": name, "SLUG": slug, "PORT": ports[slug],
-                "ROLE_ONE_LINE": role, "ROLE_PARAGRAPH": role,
-                "VOICE_GUIDE": "Plain."})
-            # A cousin-specific section that names its own route again.
-            text += "\n## Local notes\n\nPOST to `/api/%s_reply`.\n" % slug
-            (home / "CLAUDE.md").write_text(text)
-        out = self._transplant("body-swap")
-        self.assertTrue(out["ok"], out)
-        a_md = (self.a / "CLAUDE.md").read_text()
-        b_md = (self.b / "CLAUDE.md").read_text()
-        # The identity moved ...
-        self.assertTrue(a_md.startswith("# Testb - reader of the weather"))
-        self.assertIn("--from Testb", a_md)
-        self.assertTrue(b_md.startswith("# Testa - keeper of the ledger"))
-        # ... the address did not.
-        self.assertIn("runs on port 8211 and binds `/api/testa_reply`", a_md)
-        self.assertIn("runs on port 8222 and binds `/api/testb_reply`", b_md)
-        self.assertNotIn("8222", a_md)
-        self.assertNotIn("testb_reply", a_md)
-        self.assertNotIn("8211", b_md)
-        self.assertNotIn("testa_reply", b_md)
-        self.assertIn("POST to `/api/testa_reply`", a_md)
 
     def test_missing_self_portrait_on_one_side_moves_not_crashes(self):
         (self.b / "self-portrait.md").unlink()

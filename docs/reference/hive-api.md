@@ -11,7 +11,6 @@ There are two ways to run a queen. Both run the same route code over the same da
 enabled = true
 public_url = "http://192.0.2.10:8600"   # the console as nodes reach it
 checkin_seconds = 60                     # at least 5
-home_chat_url = ""                       # optional, legacy, for [tell-home: ...]
 home_cousin = ""                         # optional: [tell-home: ...] through POST /hive/tell-home
 ```
 
@@ -143,13 +142,13 @@ On the console, behind the normal login: `GET /api/hive`, `GET /api/hive/nodes`,
 
 ## The node's own endpoints
 
-A node (`cousin_node.py`, shipped in the archive) is one Python file with no dependencies. It runs a small chat server in the same shapes as a local cousin's, so the console's chat view works on it unchanged:
+A node (`cousin_node.py`, shipped in the archive) is one Python file with no dependencies. It runs a small chat server in the shapes of [the chat API](chat-api.md), so the console's chat view works on it unchanged:
 
 | route | what it does |
 |---|---|
 | `GET /health` | `{"status": "ok", "slug", "port", "brain": "agent" \| "placeholder"}`. Always open |
 | `POST /api/send` | `{"user", "message"}`, both required. Stores the message and answers `{"ok": true, "id", "timestamp"}` straight away; the node thinks on a background thread and its reply shows up in the history |
-| `GET /api/history` | `user` required, plus `since`, `before`, `limit` (default 200). Same answer and paging as the [chat server](chat-api.md#get-apihistory); no `archived`, no reactions |
+| `GET /api/history` | `user` required, plus `since`, `before`, `limit` (default 200). Same answer and paging as [history](chat-api.md#history) on this machine; no `archived`, no reactions |
 
 No search, archive, reactions or pane. Messages are kept in `data/chat.jsonl` next to the node.
 
@@ -160,7 +159,7 @@ What a node does with the queen, for reference if you're writing your own:
 - checks in on start and then every `checkin_seconds` (60 until the queen says otherwise); a failed checkin is logged and retried, never fatal
 - polls `GET /hive/inbox?since=<cursor>` every `NODE_POLL_SECONDS` (5; 0 turns it off), keeps the cursor in `data/inbox-cursor`, and answers each message back over `/hive/msg`
 - on each [turn](../glossary.md#turn) recalls from `/hive/recall` word by word (the first six distinct words of 4+ characters, up to 3 memories), and after it remembers the exchange with scope `own`
-- acts on three markers in the brain's reply: `[remember: fact]` (written with scope `shared`), `[tell <slug>: text]` (a `/hive/msg`), `[tell-home: text]` (with `TELL_HOME=1`, which the console's build sets for home chat when `config/hive.toml` names a `home_cousin`, a `POST /hive/tell-home` with its token; otherwise the legacy POST to `HOME_CHAT_URL/api/send`)
+- acts on three markers in the brain's reply: `[remember: fact]` (written with scope `shared`), `[tell <slug>: text]` (a `/hive/msg`), `[tell-home: text]` (with `TELL_HOME=1`, which the console's build sets for home chat, a `POST /hive/tell-home` with its token; without it, a POST to `HOME_CHAT_URL/api/send` if one is set (by hand, or with `cousin-spawn-node --home-chat`), which nothing in this install serves; with neither, it's dropped)
 
 The brain is `AGENT_CMD` if set (the prompt on stdin, the reply on stdout, `AGENT_TIMEOUT_SECONDS` default 120), otherwise a placeholder that echoes. With no reachable queen the node keeps serving its chat and remembers nothing until the queen is back.
 

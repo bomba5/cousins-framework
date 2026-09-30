@@ -2030,7 +2030,7 @@ function HostView({ onOpen }) {
                       </td>
                       <td data-label="runner">
                         <div className="mono">{kind}</div>
-                        <div className="fleet-sub">{c.runner ? (c.runner.alive ? "" : "(not running)") : c.chat === "ok" ? `chat :${c.port}` : c.chat === "down" ? "chat down" : c.chat === "none" ? "no chat server" : (c.chat || "")}</div>
+                        <div className="fleet-sub">{c.runner ? (c.runner.alive ? "" : "(not running)") : c.chat === "ok" ? "chat ok" : c.chat === "down" ? "chat down" : c.chat === "none" ? "no chat server" : (c.chat || "")}</div>
                       </td>
                       <td data-label="model">
                         <div className="mono">{c.model || "-"}</div>

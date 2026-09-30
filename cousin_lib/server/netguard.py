@@ -1,7 +1,8 @@
 """Network guard: the address allowlist every request passes first.
 
 Identity above the network layer is client-asserted, so the address
-allowlist is the chat server's only boundary. Defaults are loopback plus
+allowlist is the console's (and an external peer address's) first
+boundary. Defaults are loopback plus
 the RFC1918 private ranges; an install EXTENDS the list, and no
 configuration can remove loopback - local CLIs must always work.
 """

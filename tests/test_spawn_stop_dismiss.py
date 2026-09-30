@@ -1,8 +1,9 @@
 """spawn.stop_cousin and spawn.dismiss_cousin: the console's stop and
 delete paths, usable with no console running.
 
-Stop is idempotent and names what it did to each half (tmux session,
-chat server). Dismiss archives the whole home before removing it and
+Stop refuses a cousin with no runner kind by name (R2) and is a no-op
+that says so for a worker (R14); a runner cousin's stop is the
+supervisor's. Dismiss archives the whole home before removing it and
 REFUSES the delete when the archive cannot be written: the archive is
 the only copy of never-tracked notes, so a delete without it is a
 silent loss.
@@ -11,11 +12,8 @@ import os
 import pathlib
 import re
 import stat
-import subprocess
-import sys
 import tarfile
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -52,90 +50,45 @@ class StopCase(unittest.TestCase):
         kw.start()
         self.addCleanup(kw.stop)
 
+    runner = None
+
     def _cousin(self, slug="wren", port=8100):
         home = self.root / "cousins" / slug
         (home / "data").mkdir(parents=True)
         (home / "cousin.toml").write_text(
             '[cousin]\nslug = "%s"\nname = "Wren"\n[chat]\nport = %d\n'
-            % (slug, port))
+            % (slug, port)
+            + ('[agent]\nrunner = "%s"\n' % self.runner if self.runner else ""))
         (home / "notes").mkdir()
         (home / "notes" / "untracked.md").write_text("only copy\n")
         return home
 
-    def _fake_chat_server(self, home):
-        # A process whose cmdline carries the chat-server marker, as the
-        # real one does; stop_cousin refuses to kill a pid without it.
-        proc = subprocess.Popen(
-            [sys.executable, "-c",
-             "import time  # cousin_lib.server.app\ntime.sleep(30)"])
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        (home / "data" / "chat-server.pid").write_text(str(proc.pid))
-        return proc
+class TestLegacyStopRefused(StopCase):
+    """R2, R14: stop_cousin refuses a cousin with no [agent] runner by
+    name before any tmux call; a worker has no session, so its stop is a
+    no-op that says so."""
 
-
-class TestStopCousin(StopCase):
-    def test_kills_the_session_and_the_chat_server_it_spawned(self):
+    def test_stopping_a_cousin_with_no_runner_is_refused_and_runs_no_tmux(self):
+        from cousin_lib.delivery import lane_refusal
         home = self._cousin()
-        proc = self._fake_chat_server(home)
+        with self.assertRaises(SpawnError) as ctx:
+            stop_cousin(home, tmux_bin=str(self.tmux))
+        self.assertEqual(str(ctx.exception), lane_refusal(home))
+        self.assertFalse(self.log.exists() and self.log.read_text())
+
+    def test_stopping_a_worker_is_a_no_op_that_says_so(self):
+        from cousin_lib.delivery import lane_refusal
+        home = self._cousin()
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\ntype = "worker"\n')
         out = stop_cousin(home, tmux_bin=str(self.tmux))
-        self.assertEqual(out, {"tmux": "stopped", "chat_server": "stopped"})
-        self.assertIn("kill-session -t wren", self.log.read_text())
-        proc.wait(timeout=5)
-        self.assertIsNotNone(proc.returncode)
-        self.assertFalse((home / "data" / "chat-server.pid").exists())
-
-    def test_is_idempotent_and_names_what_was_already_down(self):
-        home = self._cousin()
-        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC_HAS_SESSION": "1"}):
-            out = stop_cousin(home, tmux_bin=str(self.tmux))
-        self.assertEqual(out, {"tmux": "already stopped",
-                               "chat_server": "not running"})
-        self.assertNotIn("kill-session", self.log.read_text())
-
-    def test_a_chat_server_elsewhere_on_this_host_is_never_touched(self):
-        # Canary for the fixture guard in setUp: a process that looks
-        # like a chat server and holds the cousin's port, with no pid
-        # file, must survive a stop from this suite.
-        proc = subprocess.Popen(
-            [sys.executable, "-c",
-             "import socket, sys, time  # cousin_lib.server.app\n"
-             "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()\n"
-             "print(s.getsockname()[1], flush=True); time.sleep(30)"],
-            stdout=subprocess.PIPE, text=True)
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        port = int(proc.stdout.readline())
-        home = self._cousin(port=port)
-        with mock.patch.dict(os.environ, {"FAKE_TMUX_RC_HAS_SESSION": "1"}):
-            out = stop_cousin(home, tmux_bin=str(self.tmux))
-        self.assertEqual(out["chat_server"], "not running")
-        time.sleep(0.1)
-        self.assertIsNone(proc.poll())
-
-    def test_a_stale_pid_pointing_at_another_program_is_not_killed(self):
-        home = self._cousin()
-        proc = subprocess.Popen([sys.executable, "-c",
-                                 "import time; time.sleep(30)"])
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        (home / "data" / "chat-server.pid").write_text(str(proc.pid))
-        out = stop_cousin(home, tmux_bin=str(self.tmux),
-                          port_pid=lambda port: None)
-        self.assertEqual(out["chat_server"], "not running")
-        self.assertIsNone(proc.poll())
-
-    def test_falls_back_to_the_process_bound_to_the_port(self):
-        home = self._cousin()
-        proc = subprocess.Popen(
-            [sys.executable, "-c",
-             "import time  # cousin-chat-server\ntime.sleep(30)"])
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        out = stop_cousin(home, tmux_bin=str(self.tmux),
-                          port_pid=lambda port: proc.pid if port == 8100
-                          else None)
-        self.assertEqual(out["chat_server"], "stopped")
-        proc.wait(timeout=5)
+        self.assertEqual(out, {"worker": "no session", "note": lane_refusal(home)})
+        self.assertIn("worker", out["note"])
+        self.assertFalse(self.log.exists() and self.log.read_text())
 
 
 class TestDismissCousin(StopCase):
+    runner = "fake"   # a runner cousin: its stop is the supervisor's (R2)
     def test_archives_the_whole_home_then_removes_it(self):
         home = self._cousin()
         out = dismiss_cousin(self.root, slug="wren", tmux_bin=str(self.tmux))
@@ -150,8 +103,6 @@ class TestDismissCousin(StopCase):
         self.assertIn("wren/notes/untracked.md", names)
         self.assertIn("wren/cousin.toml", names)
         self.assertEqual(out["left_in_place"], [])
-        # Stopped first: the session was killed through the fake tmux.
-        self.assertIn("kill-session -t wren", self.log.read_text())
 
     def test_refuses_when_the_archive_cannot_be_written(self):
         home = self._cousin()

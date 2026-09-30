@@ -1,4 +1,5 @@
-"""Chat-pattern hooks fired by the server on /api/send.
+"""Chat-pattern hooks fired by a chat send (server/chat_api.send, what the
+console, cousin-chat and the Telegram bridge call in-process).
 
 Hooks run AFTER the message is stored and delivered, so the cousin sees
 the chat line first and any inject line second, as its own delivery.
@@ -12,12 +13,12 @@ import pathlib
 import tempfile
 import time
 import unittest
-import urllib.request
+from types import SimpleNamespace
 from unittest import mock
 
 from cousin_lib import chat_hooks
 from cousin_lib.config import CousinConfig
-from cousin_lib.server.app import ChatServer
+from cousin_lib.server import chat_api
 
 
 def _wait_for(path, seconds=5.0):
@@ -37,8 +38,7 @@ class HooksServerCase(unittest.TestCase):
         self.home = self.root / "cousins" / "wren"
         self.home.mkdir(parents=True)
         (self.home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\nname = "Wren"\n'
-            "[chat]\nport = 0\n")
+            '[cousin]\nslug = "wren"\nname = "Wren"\n')
         patcher = mock.patch.dict(os.environ, {}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -51,25 +51,16 @@ class HooksServerCase(unittest.TestCase):
 
     def _boot(self, deliver=None):
         self.calls = []
-        server = ChatServer(CousinConfig.load(self.home),
-                            deliver=deliver or (
-                                lambda **kw: self.calls.append(kw)))
-        server.start()
-        self.addCleanup(server.stop)
-        return server
+        return SimpleNamespace(config=CousinConfig.load(self.home),
+                               deliver=deliver or (lambda **kw: self.calls.append(kw)))
 
     def _send(self, server, message, user="Sam"):
-        req = urllib.request.Request(
-            "http://127.0.0.1:%d/api/send" % server.port,
-            data=json.dumps({"user": user, "message": message}).encode())
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, json.loads(resp.read())
+        body = chat_api.send(server.config, {"user": user, "message": message},
+                             deliver=server.deliver)
+        return (200 if body.get("ok") else 500), body
 
     def _history(self, server, user="Sam"):
-        url = "http://127.0.0.1:%d/api/history?user=%s" % (server.port,
-                                                           user)
-        with urllib.request.urlopen(url, timeout=5) as resp:
-            return json.loads(resp.read())["messages"]
+        return chat_api.history(self.home, {"user": user})["messages"]
 
 
 class TestInjectHook(HooksServerCase):
@@ -92,7 +83,7 @@ class TestInjectHook(HooksServerCase):
         self.assertEqual([m["message"] for m in self._history(server)],
                          ["please debug health now"])
 
-    def test_user_filter_applies_on_the_server_path(self):
+    def test_user_filter_applies_on_the_send_path(self):
         self._hooks([{"pattern": "hi", "user": "Pat",
                       "handler": "inject:x"}])
         server = self._boot()
@@ -103,9 +94,7 @@ class TestInjectHook(HooksServerCase):
 
     def test_no_delivery_seam_means_inject_is_a_noop(self):
         self._hooks([{"pattern": "hi", "handler": "inject:x"}])
-        server = ChatServer(CousinConfig.load(self.home))
-        server.start()
-        self.addCleanup(server.stop)
+        server = SimpleNamespace(config=CousinConfig.load(self.home), deliver=None)
         status, _ = self._send(server, "hi")
         self.assertEqual(status, 200)
 

@@ -42,7 +42,7 @@ from cousin_lib.runner.envelope import CONTEXT_MARK
 
 RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop")
 PRE_MATCHER = "Agent|Task|Bash"
-# The chat server's RECALL_BUDGET_SECONDS: past it the prompt goes on
+# The recall budget: past it the prompt goes on
 # without recall and the search finishes on its thread, index warm.
 RECALL_BUDGET_S = 4.0
 # The recorder writes <root>/data/jobs.db, which every cousin on the host
@@ -73,8 +73,8 @@ def gate(policy, payload):
 
 
 def default_recall(home, root=None):
-    """`recall(body) -> (context text or None, hit count)`: the chat
-    server's gates and line (memory_search.recall_context's parts),
+    """`recall(body) -> (context text or None, hit count)`: the recall
+    gates and line (memory_search.recall_context's parts),
     reading the runner's `root`, never the environment's."""
     def recall(body):
         from cousin_lib import memory_search
@@ -210,7 +210,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     async def on_prompt(payload):
         prompt = payload.get("prompt") or ""
         if CONTEXT_MARK in prompt:
-            # the chat server already recalled for this item
+            # the item already carries its recall context
             stream.append("recall", {"hits": 0, "skipped": "context present"})
             return {}
         body = body_for_prompt(prompt) or ""

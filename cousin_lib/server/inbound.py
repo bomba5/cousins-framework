@@ -1,6 +1,6 @@
 """Follow-up to storing one inbound chat message, shared by every send
-path that stores a chat row: the chat server's own `/api/send` and the
-Telegram bridge alike. When the sender is the configured operator, their
+path that stores a chat row: chat_api.send (the console, cousin-chat)
+and the Telegram bridge alike. When the sender is the configured operator, their
 message is checked for a correction and recorded on a hit: best-effort,
 because the message is already stored and this may never turn into a
 failed send.

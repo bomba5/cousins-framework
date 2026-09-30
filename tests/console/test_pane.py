@@ -1,5 +1,5 @@
-"""The pane routes: capture, the SSE stream, input through the injection
-lock, resize (docs/reference/console-api.md, "The pane"). tmux is a fake binary
+"""The pane routes: capture, the SSE stream, input, resize
+(docs/reference/console-api.md, "The pane"). tmux is a fake binary
 that logs its argv; the stream's frame source is injectable."""
 import json
 import os
@@ -164,19 +164,6 @@ class TestInput(PaneCase):
         sends = [c for c in self._calls() if "send-keys" in c]
         self.assertEqual(sends, ["send-keys -t testa -l -- -x",
                                  "send-keys -t testa Enter"])
-
-    def test_input_takes_the_injection_lock(self):
-        from cousin_lib.server import injection
-        seen = []
-
-        def spy(*args, **kw):
-            seen.append(injection._INJECT_LOCK.locked())
-            return original(*args, **kw)
-
-        original = pane.Tmux.run
-        with mock.patch.object(pane.Tmux, "run", spy):
-            self._post("/api/pane/input", cousin="testa", data="a")
-        self.assertTrue(seen and all(seen[-1:]), seen)
 
     def test_input_errors(self):
         self.assertEqual(self._post("/api/pane/input", data="a")[0], 400)

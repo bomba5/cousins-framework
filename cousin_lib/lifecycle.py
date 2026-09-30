@@ -300,6 +300,11 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
         result["error"] = str(err)
         return result
     home = config.home
+    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal
+    if _runner_kind(home) not in RUNNER_KINDS:
+        # R2: 2.0.0 has no legacy tmux lane; refused by name, nothing touched.
+        result["error"] = lane_refusal(home)
+        return result
     base = {"op": "reincarnate", "slug": slug}
     do_flip = do_flip or _default_do_flip(root)
 
@@ -385,44 +390,12 @@ def _swap_file(a, b):
         os.replace(tmp, b)
 
 
-# The one line of templates/cousin-CLAUDE.template.md that renders the
-# slot's address ({{PORT}}, {{SLUG}}) into CLAUDE.md.
-_ADDRESS_LINE = re.compile(
-    r"Your chat-server runs on port \d+ and binds `/api/[A-Za-z0-9_-]+_reply`\.")
-
-
-def _readdress_body(slot, previous):
-    """After a body swap, CLAUDE.md in `slot`'s home came from
-    `previous`'s slot and names that slot's port and reply route.
-    Re-render the address for the slot it now lives in: the template's
-    address line takes the slot's own port and slug, and any other
-    `/api/<previous slug>_reply` route (a cousin-specific section may
-    repeat it) becomes the slot's own. Identity text is left alone."""
-    path = Path(slot.home) / "CLAUDE.md"
-    if not path.is_file():
-        return
-    text = path.read_text()
-    new = text.replace("/api/%s_reply" % previous.slug,
-                       "/api/%s_reply" % slot.slug)
-    if slot.chat_port is not None:
-        line = ("Your chat-server runs on port %d and binds"
-                " `/api/%s_reply`." % (slot.chat_port, slot.slug))
-        new = _ADDRESS_LINE.sub(lambda m: line, new)
-    if new != text:
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(new)
-        os.replace(tmp, path)
-
-
 def _swap_bodies(donor, recipient):
     """body-swap: identity files and the [cousin] name/role trade
-    places; slug, port and session stay with each slot, memory stays
-    where it is. CLAUDE.md carries the slot's rendered port and reply
-    route, so each swapped file is re-addressed to its new slot."""
+    places; the slug and the session stay with each slot, memory stays
+    where it is."""
     for name in IDENTITY_FILES:
         _swap_file(donor.home / name, recipient.home / name)
-    _readdress_body(donor, recipient)
-    _readdress_body(recipient, donor)
     donor_cfg = tomllib.loads((donor.home / "cousin.toml").read_text())
     recip_cfg = tomllib.loads((recipient.home / "cousin.toml").read_text())
     d_role = donor_cfg.get("cousin", {}).get("role", "")

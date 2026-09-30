@@ -1,4 +1,4 @@
-"""cousin-spawn: port allocation, creation sequence, cleanup contract.
+"""cousin-spawn: creation sequence, cleanup contract.
 
 Tested against real temporary framework roots; nothing is mocked below
 the CLI's own seams.
@@ -6,7 +6,6 @@ the CLI's own seams.
 import json
 import pathlib
 import shutil
-import socket
 import tempfile
 import tomllib
 import unittest
@@ -15,7 +14,6 @@ from unittest import mock
 
 from cousin_lib.spawn import (
     SpawnError,
-    allocate_port,
     create_cousin,
     spawn_main,
     start_cousin,
@@ -31,61 +29,6 @@ class SpawnCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         return pathlib.Path(tmp.name)
 
-    def _claim(self, root, slug, port):
-        home = root / "cousins" / slug
-        home.mkdir(parents=True)
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "%s"\n[chat]\nport = %d\n' % (slug, port)
-        )
-
-
-class TestAllocatePort(SpawnCase):
-    # The claimed-set tests inject a never-live predicate: the host
-    # running this suite has its own services, and which ports THEY
-    # occupy must not decide whether these tests pass.
-    def test_first_free_port_in_range_skipping_claimed(self):
-        root = self._root()
-        self._claim(root, "a", 8090)
-        self._claim(root, "b", 8091)
-        got = allocate_port(root, start=8090, end=8200,
-                            is_live=lambda p: False)
-        self.assertEqual(got, 8092)
-
-    def test_claimed_ports_outside_the_scan_range_stay_excluded(self):
-        # The scan range decides where to look; the claimed set decides
-        # what to skip. A port hand-configured outside today's range
-        # must not become allocatable when someone widens the range.
-        root = self._root()
-        self._claim(root, "a", 9999)
-        never = lambda p: False
-        self.assertEqual(
-            allocate_port(root, start=9998, end=10000, is_live=never), 9998
-        )
-        self._claim(root, "b", 9998)
-        self.assertEqual(
-            allocate_port(root, start=9998, end=10000, is_live=never), 10000
-        )
-
-    def test_live_bound_port_is_skipped(self):
-        root = self._root()
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        sock.listen(1)
-        self.addCleanup(sock.close)
-        live = sock.getsockname()[1]
-        self.assertEqual(
-            allocate_port(root, start=live, end=live + 1), live + 1
-        )
-
-    def test_exhaustion_is_an_error_never_a_sentinel(self):
-        root = self._root()
-        self._claim(root, "a", 9998)
-        self._claim(root, "b", 9999)
-        with self.assertRaises(SpawnError):
-            allocate_port(root, start=9998, end=9999,
-                          is_live=lambda p: False)
-
-
 class CreateCase(SpawnCase):
     def _framework_root(self):
         root = self._root()
@@ -98,7 +41,7 @@ class CreateCase(SpawnCase):
 
     def _create(self, root, **kw):
         args = dict(slug="wren", name="Wren", role="example cousin",
-                    voice="Plain and helpful.", port=8100)
+                    voice="Plain and helpful.")
         args.update(kw)
         return create_cousin(root, **args)
 
@@ -113,8 +56,7 @@ class TestCreateCousin(CreateCase):
             self.assertTrue((home / sub).is_dir(), sub)
         cfg = tomllib.loads((home / "cousin.toml").read_text())
         self.assertEqual(cfg["cousin"]["slug"], "wren")
-        self.assertEqual(cfg["chat"]["port"], 8100)
-        self.assertEqual(cfg["chat"]["tmux_session"], "wren")
+        self.assertNotIn("chat", cfg)
         claude_md = (home / "CLAUDE.md").read_text()
         self.assertIn("# Wren", claude_md)
         self.assertIn("## Voice", claude_md)
@@ -137,7 +79,7 @@ class TestCreateCousin(CreateCase):
         root = self._framework_root()
         self._create(root)
         with self.assertRaises(SpawnError):
-            self._create(root, port=8101)
+            self._create(root)
 
     def test_orphan_directory_is_reported_with_its_path(self):
         # A directory without cousin.toml is not a cousin; naming its
@@ -169,88 +111,75 @@ class TestCreateCousin(CreateCase):
                 self._create(root)
         self.assertFalse((root / "cousins" / "wren").exists())
 
-    def test_port_is_allocated_when_not_given(self):
+class TestLegacyStartRefused(CreateCase):
+    """R2: start_cousin refuses a cousin with no [agent] runner by name,
+    before any tmux call."""
+
+    def test_starting_a_cousin_with_no_runner_is_refused_and_runs_no_tmux(self):
+        import os
+        import stat
+        from cousin_lib.delivery import lane_refusal
         root = self._framework_root()
-        self._claim(root, "a", 8090)
-        out = self._create(root, port=None,
-                           _is_live=lambda p: False)
-        self.assertEqual(out["port"], 8091)
-
-
-class TestStartCousin(CreateCase):
-    def setUp(self):
-        super().setUp()
-        self.calls = []
-
-    def _fake_tmux(self, root):
-        import os as _os
-        import stat as _stat
+        out = self._create(root)
         tmux = root / "tmux"
         tmux.write_text(_FAKE_TMUX)
-        tmux.chmod(tmux.stat().st_mode | _stat.S_IEXEC)
+        tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
         log = root / "tmux-calls.log"
-        patcher = mock.patch.dict(
-            "os.environ",
-            {"FAKE_TMUX_LOG": str(log), "FAKE_TMUX_PANE": str(root / "p")},
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        return tmux, log
+        with mock.patch.dict(os.environ, {"FAKE_TMUX_LOG": str(log),
+                                          "FAKE_TMUX_PANE": str(root / "p")}):
+            with self.assertRaises(SpawnError) as ctx:
+                start_cousin(out["home"], agent_cmd="x", tmux_bin=str(tmux))
+        self.assertEqual(str(ctx.exception), lane_refusal(out["home"]))
+        self.assertFalse(log.exists() and log.read_text())
 
-    def test_creates_the_session_and_starts_the_chat_server(self):
+
+    def test_cousin_spawn_start_refuses_with_exit_2_and_creates_nothing(self):
+        import contextlib
+        import io
+        import os
+        from cousin_lib.delivery import lane_refusal
         root = self._framework_root()
         out = self._create(root)
-        tmux, log = self._fake_tmux(root)
-        start_cousin(
-            out["home"], agent_cmd="my-agent --flag",
-            tmux_bin=str(tmux),
-            start_chat_server=lambda home: self.calls.append(home),
-        )
-        text = log.read_text()
-        self.assertIn("new-session", text)
-        self.assertIn("-s wren", text)
-        self.assertIn("my-agent --flag", text)
-        self.assertEqual(self.calls, [out["home"]])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("COUSIN_DEFAULT_RUNNER", None)
+            rc = spawn_main(["wren", "--root", str(root), "--start"])
+            self.assertEqual(rc, 2)
+            self.assertIn(lane_refusal(out["home"]), err.getvalue())
+            rc = spawn_main(["sam", "--root", str(root), "--role", "r",
+                             "--voice", "v", "--start"])
+        self.assertEqual(rc, 2)
+        self.assertIn("needs a runner kind", err.getvalue())
+        self.assertFalse((root / "cousins" / "sam").exists())
 
-    def test_start_distills_raw_memory_first(self):
-        # Only a flip assembled a boot packet, so a cousin that was only
-        # ever started or resumed never had its distilled views built.
-        from cousin_lib import memory
-        root = self._framework_root()
-        out = self._create(root)
-        tmux, _ = self._fake_tmux(root)
-        memory._append_raw(out["home"], {
-            "topic": "retention window",
-            "content": "keep thirty days of flows",
-            "truth_level": "cousin-conclusion", "source": "decision"})
-        start_cousin(out["home"], agent_cmd="my-agent",
-                     tmux_bin=str(tmux), start_chat_server=lambda h: None)
-        text = (out["home"] / "memory" / "distilled"
-                / "decisions.md").read_text()
-        self.assertIn("keep thirty days of flows", text)
 
-    def test_a_failing_distill_never_stops_a_start(self):
-        root = self._framework_root()
-        out = self._create(root)
-        tmux, log = self._fake_tmux(root)
-        with mock.patch("cousin_lib.distill.distill",
-                        side_effect=RuntimeError("boom")):
-            start_cousin(out["home"], agent_cmd="my-agent",
-                         tmux_bin=str(tmux),
-                         start_chat_server=lambda h: None)
-        self.assertIn("new-session", log.read_text())
+class TestNoChatPort(CreateCase):
+    """R10: no per-cousin chat server, so no port is allocated, written,
+    rendered or accepted."""
 
-    def test_tmux_failure_is_a_spawn_error(self):
+    def test_a_new_cousin_toml_has_no_chat_table(self):
         root = self._framework_root()
-        out = self._create(root)
-        tmux, _ = self._fake_tmux(root)
-        with mock.patch.dict("os.environ", {"FAKE_TMUX_RC": "1"}):
-            with self.assertRaises(SpawnError):
-                start_cousin(out["home"], agent_cmd="my-agent",
-                             tmux_bin=str(tmux),
-                             start_chat_server=lambda home: None)
-        # A start failure keeps the home: restartable, not an orphan.
-        self.assertTrue((out["home"] / "cousin.toml").is_file())
+        out = create_cousin(root, slug="wren", name="Wren", role="example cousin",
+                            voice="Plain and helpful.", runner="fake")
+        data = tomllib.loads((out["home"] / "cousin.toml").read_text())
+        self.assertNotIn("chat", data)
+        self.assertNotIn("port", out)
+        self.assertNotIn("{{PORT}}", (out["home"] / "CLAUDE.md").read_text())
+        with self.assertRaises(SpawnError) as ctx:
+            create_cousin(root, slug="sam", role="r", voice="v", port=8100)
+        self.assertIn("port", str(ctx.exception))
+        self.assertFalse((root / "cousins" / "sam").exists())
+
+    def test_spawn_main_rejects_port(self):
+        import contextlib
+        import io
+        root = self._framework_root()
+        with contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as ctx:
+            spawn_main(["wren", "--root", str(root), "--role", "r",
+                        "--voice", "v", "--port", "8100"])
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertFalse((root / "cousins" / "wren").exists())
 
 
 class TestSpawnMain(CreateCase):
@@ -266,10 +195,10 @@ class TestSpawnMain(CreateCase):
         root = self._framework_root()
         rc, out, _ = self._main([
             "wren", "--root", str(root), "--role", "example cousin",
-            "--voice", "Plain and helpful.", "--port", "8100",
+            "--voice", "Plain and helpful.",
         ])
         self.assertEqual(rc, 0)
-        self.assertIn("chat port 8100", out)
+        self.assertIn("created wren at", out)
         self.assertTrue(
             (root / "cousins" / "wren" / "cousin.toml").is_file()
         )
@@ -294,258 +223,8 @@ exit 0
 """
 
 
-class TestStartPreflightAndExisting(CreateCase):
-    """`cousin-spawn --start` checks what a start needs (tmux, the
-    agent command's executable) BEFORE creating anything, and
-    `cousin-spawn <slug> --start` starts a cousin that already exists:
-    the recovery its own "start failed" message promises."""
-
-    def setUp(self):
-        super().setUp()
-        import os as _os
-        import stat as _stat
-        self.root = self._framework_root()
-        (self.root / "config").mkdir()
-        self.bin = self.root / "bin"
-        self.bin.mkdir()
-        self.log = self.root / "tmux.log"
-        self.started = []
-        for name, text in (("tmux", _STUB_TMUX),
-                           ("my-agent", "#!/bin/sh\nexit 0\n")):
-            f = self.bin / name
-            f.write_text(text)
-            f.chmod(f.stat().st_mode | _stat.S_IEXEC)
-        (self.root / "config" / "agent-cmd").write_text("my-agent --x\n")
-        patcher = mock.patch.dict(_os.environ, {
-            "PATH": str(self.bin), "STUB_TMUX_LOG": str(self.log)})
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        chat = mock.patch("cousin_lib.spawn._default_chat_server",
-                          side_effect=lambda home: self.started.append(home))
-        chat.start()
-        self.addCleanup(chat.stop)
-
-    def _main(self, argv):
-        import contextlib
-        import io
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = spawn_main(argv)
-        return rc, out.getvalue(), err.getvalue()
-
-    def _create_argv(self):
-        return ["wren", "--root", str(self.root), "--role", "x",
-                "--voice", "v", "--port", "8100", "--start"]
-
-    def test_no_tmux_refuses_before_creating_anything(self):
-        (self.bin / "tmux").unlink()
-        rc, _out, err = self._main(self._create_argv())
-        self.assertEqual(rc, 2)
-        self.assertIn("tmux", err)
-        self.assertNotIn("Traceback", err)
-        self.assertFalse((self.root / "cousins").exists())
-
-    def test_unresolvable_agent_refuses_before_creating_anything(self):
-        (self.bin / "my-agent").unlink()
-        rc, _out, err = self._main(self._create_argv())
-        self.assertEqual(rc, 2)
-        self.assertIn("my-agent", err)
-        self.assertIn("agent-cmd", err)
-        self.assertFalse((self.root / "cousins").exists())
-
-    def test_no_agent_cmd_refuses_before_creating_anything(self):
-        (self.root / "config" / "agent-cmd").unlink()
-        rc, _out, err = self._main(self._create_argv())
-        self.assertEqual(rc, 2)
-        self.assertIn("agent-cmd", err)
-        self.assertFalse((self.root / "cousins").exists())
-
-    def test_create_and_start_passes_preflight(self):
-        rc, out, err = self._main(self._create_argv())
-        self.assertEqual(rc, 0, err)
-        self.assertIn("started wren", out)
-        self.assertIn("new-session", self.log.read_text())
-
-    def test_an_existing_cousin_starts_with_start_alone(self):
-        # A port nothing listens on, so the chat server is started.
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        free = sock.getsockname()[1]
-        sock.close()
-        self._create(self.root, port=free)
-        rc, out, err = self._main(["wren", "--root", str(self.root),
-                                   "--start"])
-        self.assertEqual(rc, 0, err)
-        self.assertIn("started wren", out)
-        self.assertIn("new-session", self.log.read_text())
-        self.assertEqual(self.started, [self.root / "cousins" / "wren"])
-
-    def test_a_chat_server_already_on_the_port_is_not_doubled(self):
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        sock.listen(1)
-        self.addCleanup(sock.close)
-        self._create(self.root, port=sock.getsockname()[1])
-        rc, _out, err = self._main(["wren", "--root", str(self.root),
-                                    "--start"])
-        self.assertEqual(rc, 0, err)
-        self.assertIn("new-session", self.log.read_text())
-        self.assertEqual(self.started, [])
-
-    def test_an_existing_live_cousin_is_left_alone(self):
-        self._create(self.root)
-        with mock.patch.dict("os.environ", {"STUB_TMUX_ALIVE_RC": "0"}):
-            rc, out, err = self._main(["wren", "--root", str(self.root),
-                                       "--start"])
-        self.assertEqual(rc, 0, err)
-        self.assertIn("already running", out)
-        self.assertNotIn("new-session", self.log.read_text())
-        self.assertEqual(self.started, [])
-
-    def test_an_existing_cousin_start_checks_tmux_too(self):
-        self._create(self.root)
-        (self.bin / "tmux").unlink()
-        rc, _out, err = self._main(["wren", "--root", str(self.root),
-                                    "--start"])
-        self.assertEqual(rc, 2)
-        self.assertIn("tmux", err)
-
-    def test_create_over_an_existing_cousin_names_the_start_path(self):
-        self._create(self.root)
-        rc, _out, err = self._main(self._create_argv())
-        self.assertEqual(rc, 2)
-        self.assertIn("already exists", err)
-        self.assertIn("cousin-spawn wren --start", err)
-
-    def test_start_alone_on_an_unknown_slug_still_needs_role_and_voice(self):
-        import contextlib
-        import io
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit):
-                spawn_main(["ghost", "--root", str(self.root), "--start"])
-        self.assertFalse((self.root / "cousins").exists())
-
-
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestStartSubstitutesSessionId(TestStartCousin):
-    """A plain start (console, cousin-spawn --start) must render the
-    {session_id} placeholder exactly as a flip does: a fresh uuid in the
-    argv, persisted to cousin.toml [runtime]. Before this, only flip.py
-    substituted and a plain start handed the literal braces to the
-    agent."""
-
-    def test_placeholder_is_rendered_and_persisted(self):
-        import re as _re
-        import tomllib as _tomllib
-        root = self._framework_root()
-        out = self._create(root)
-        tmux, log = self._fake_tmux(root)
-        start_cousin(
-            out["home"], agent_cmd="my-agent --session-id {session_id}",
-            tmux_bin=str(tmux), start_chat_server=lambda home: None,
-        )
-        text = log.read_text()
-        self.assertNotIn("{session_id}", text)
-        m = _re.search(r"--session-id ([0-9a-f-]{36})", text)
-        self.assertIsNotNone(m, text)
-        conf = _tomllib.loads((out["home"] / "cousin.toml").read_text())
-        self.assertEqual(conf["runtime"]["session_id"], m.group(1))
-
-    def test_without_placeholder_nothing_is_persisted(self):
-        import tomllib as _tomllib
-        root = self._framework_root()
-        out = self._create(root)
-        tmux, log = self._fake_tmux(root)
-        start_cousin(
-            out["home"], agent_cmd="my-agent --flag",
-            tmux_bin=str(tmux), start_chat_server=lambda home: None,
-        )
-        conf = _tomllib.loads((out["home"] / "cousin.toml").read_text())
-        self.assertNotIn("session_id", conf.get("runtime", {}))
-
-
-class TestModelAndEffortPlaceholders(TestStartCousin):
-    """{model} and {effort} in the agent-cmd render at the single spawn
-    site from cousin.toml [runtime], else config/harness.toml [agent]
-    defaults; a placeholder with no value anywhere is a SpawnError that
-    names both files, never a guessed vendor default."""
-
-    def _harness(self, root, text):
-        (root / "config").mkdir(exist_ok=True)
-        (root / "config" / "harness.toml").write_text(text)
-
-    def test_cousin_values_win_over_harness_defaults(self):
-        root = self._framework_root()
-        out = self._create(root, model="own-model", effort="low")
-        self._harness(root, '[agent]\ndefault_model = "dm"\n'
-                            'default_effort = "high"\n')
-        tmux, log = self._fake_tmux(root)
-        start_cousin(out["home"], agent_cmd="my-agent --model {model}"
-                     " --effort {effort}", tmux_bin=str(tmux), root=root,
-                     start_chat_server=lambda home: None)
-        text = log.read_text()
-        self.assertIn("--model own-model --effort low", text)
-        self.assertNotIn("{model}", text)
-        self.assertNotIn("{effort}", text)
-
-    def test_harness_defaults_fill_what_the_cousin_leaves_unset(self):
-        root = self._framework_root()
-        out = self._create(root)
-        self._harness(root, '[agent]\ndefault_model = "dm"\n'
-                            'default_effort = "medium"\n')
-        tmux, log = self._fake_tmux(root)
-        start_cousin(out["home"], agent_cmd="my-agent --model {model}"
-                     " --effort {effort}", tmux_bin=str(tmux), root=root,
-                     start_chat_server=lambda home: None)
-        self.assertIn("--model dm --effort medium", log.read_text())
-
-    def test_root_falls_back_to_the_environment(self):
-        root = self._framework_root()
-        out = self._create(root)
-        self._harness(root, '[agent]\ndefault_model = "dm"\n')
-        tmux, log = self._fake_tmux(root)
-        with mock.patch.dict("os.environ", {"FRAMEWORK_ROOT": str(root)}):
-            start_cousin(out["home"], agent_cmd="my-agent --model {model}",
-                         tmux_bin=str(tmux),
-                         start_chat_server=lambda home: None)
-        self.assertIn("--model dm", log.read_text())
-
-    def test_missing_value_is_a_spawn_error_naming_both_files(self):
-        root = self._framework_root()
-        out = self._create(root)
-        tmux, log = self._fake_tmux(root)
-        with self.assertRaises(SpawnError) as ctx:
-            start_cousin(out["home"], agent_cmd="my-agent --effort {effort}",
-                         tmux_bin=str(tmux), root=root,
-                         start_chat_server=lambda home: None)
-        msg = str(ctx.exception)
-        self.assertIn("{effort}", msg)
-        self.assertIn(str(out["home"] / "cousin.toml"), msg)
-        self.assertIn(str(root / "config" / "harness.toml"), msg)
-        self.assertIn("default_effort", msg)
-        # Nothing was started: the error came before tmux.
-        self.assertFalse(log.exists())
-
-    def test_without_placeholders_no_value_is_needed(self):
-        root = self._framework_root()
-        out = self._create(root)
-        tmux, log = self._fake_tmux(root)
-        start_cousin(out["home"], agent_cmd="my-agent", tmux_bin=str(tmux),
-                     root=root, start_chat_server=lambda home: None)
-        self.assertIn("my-agent", log.read_text())
-
-    def test_render_is_exposed_for_preflight_and_keeps_session_id(self):
-        from cousin_lib.spawn import render_agent_cmd
-        root = self._framework_root()
-        out = self._create(root, model="own-model", effort="max")
-        cmd = render_agent_cmd(
-            "a --m {model} --e {effort} --s {session_id}", out["home"],
-            root=root)
-        self.assertEqual(cmd, "a --m own-model --e max --s {session_id}")
-
 
 
 class TestPersistIdentityValues(CreateCase):
@@ -998,7 +677,7 @@ class TestSpawnMainRuntimeFlags(CreateCase):
         root = self._framework_root()
         rc, _, err = self._main([
             "wren", "--root", str(root), "--role", "x", "--voice", "v",
-            "--port", "8100", "--model", "m-one", "--effort", "max",
+            "--model", "m-one", "--effort", "max",
             "--heartbeat", "900", "--memory-scope", "shared",
         ])
         self.assertEqual(rc, 0, err)
@@ -1109,29 +788,6 @@ class PendingBootPacket(unittest.TestCase):
         self.assertIsNotNone(pending_boot(self.home))
         self.packet.unlink()
         self.assertIsNone(pending_boot(self.home))
-
-    def test_the_start_injects_the_packet_and_clears_it(self):
-        from cousin_lib import spawn
-        injected = []
-
-        class FakeInjector:
-            def __init__(self, session, **kw):
-                self.session = session
-
-            def inject(self, text):
-                injected.append((self.session, text))
-
-        config = spawn.CousinConfig.load(self.home)
-        with mock.patch("cousin_lib.server.injection.TmuxInjector",
-                        FakeInjector):
-            ok = spawn._inject_pending_boot(self.home, config, tmux_bin="t",
-                                            tmux_socket=None, settle=0)
-        self.assertTrue(ok)
-        self.assertFalse(self.pending.exists())
-        self.assertEqual(injected[0][0], "wren")
-        self.assertIn("closed cleanly", injected[0][1])
-        self.assertIn("BOOT PACKET FOR COUSIN: wren", injected[0][1])
-
 
 class TestTemplateSync(unittest.TestCase):
     """The framework part of CLAUDE.md follows the template; Identity,

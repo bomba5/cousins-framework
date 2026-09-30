@@ -2,7 +2,3 @@
 slug = "wren"
 name = "Wren"
 role = "example cousin for this framework"
-
-[chat]
-port = 8100
-tmux_session = "wren"

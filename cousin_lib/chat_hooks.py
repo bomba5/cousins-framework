@@ -133,8 +133,8 @@ def fire(matched, *, user, message, slug, home, inject=None):
 def on_message(home, *, user, message, message_id, slug, deliver):
     """Evaluate the home's hooks against one stored message and fire
     them. `deliver(user=, message=, message_id=, attachments=)` is the
-    send path's own delivery seam (the chat server today, the console in
-    phase 5): an inject: handler rides it and lands as a `hook` row.
+    send path's own delivery seam (chat_api.send's, the Telegram
+    bridge's): an inject: handler rides it and lands as a `hook` row.
     Never raises: a failure is reported and nothing else fires."""
     try:
         hooks = load_hooks(home)

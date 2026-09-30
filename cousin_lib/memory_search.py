@@ -1011,8 +1011,8 @@ def print_results(hits):
 
 
 # ------------------------------------------------------- proactive recall
-# One implementation for both lanes: the chat server's delivered line
-# (server/app.py) and the SDK runner's UserPromptSubmit hook.
+# The gates and the line the runner's UserPromptSubmit hook adds
+# (runner/hooks.py default_recall).
 
 RECALL_PREFIX = "[fw-recall] possibly relevant from your memory: "
 RECALL_SUFFIX = " - cousin-memory search for details; ignore if not."

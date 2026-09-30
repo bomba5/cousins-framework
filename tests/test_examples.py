@@ -19,7 +19,6 @@ _WREN = _REPO_ROOT / "examples" / "wren"
 WREN_VALUES = {
     "NAME": "Wren",
     "SLUG": "wren",
-    "PORT": 8100,
     "ROLE_ONE_LINE": "example cousin for this framework",
     "ROLE_PARAGRAPH": (
         "You are Wren, the example cousin that ships with this "
@@ -57,7 +56,7 @@ class TestWren(unittest.TestCase):
     def test_cousin_toml_parses_with_matching_identity(self):
         cfg = tomllib.loads((_WREN / "cousin.toml").read_text())
         self.assertEqual(cfg["cousin"]["slug"], "wren")
-        self.assertEqual(cfg["chat"]["port"], 8100)
+        self.assertNotIn("chat", cfg)   # no per-cousin chat server (R10)
 
 
 if __name__ == "__main__":

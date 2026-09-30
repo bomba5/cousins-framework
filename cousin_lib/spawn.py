@@ -12,7 +12,6 @@ import re
 import shlex
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tarfile
@@ -98,62 +97,25 @@ class DismissRefused(SpawnError):
     not be written, or would land inside the tree being removed."""
 
 
-def _claimed_ports(root):
-    """Every port in any cousin.toml under the root, whether or not it
-    falls inside today's scan range - a hand-configured port outside
-    the range must never become allocatable by a wider range later."""
-    claimed = set()
-    for cfg in FrameworkConfig(root).list_cousins():
-        if cfg.chat_port:
-            claimed.add(cfg.chat_port)
-    return claimed
-
-
-def _is_live(port):
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-            return True
-    except OSError:
-        return False
-
-
-def allocate_port(root, *, start=8090, end=8200, is_live=_is_live):
-    """First port in [start, end] that is neither claimed nor live.
-    Exhaustion is an error: a cousin without a working chat port is a
-    spawn failure, not a degraded success."""
-    claimed = _claimed_ports(root)
-    for port in range(start, end + 1):
-        if port in claimed or is_live(port):
-            continue
-        return port
-    raise SpawnError(
-        "no free chat port in %d-%d; widen the range or free a port"
-        % (start, end)
-    )
-
-
 def _toml_quote(value):
     return '"%s"' % value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _write_cousin_toml(home, *, slug, name, role, port, operator=None,
+def _write_cousin_toml(home, *, slug, name, role, operator=None,
                        model=None, effort=None, heartbeat=None,
                        memory_scope=None, runner=None, account=None):
     """Write via a temporary file, re-parse, then rename into place: a
     config that cannot be read back is never persisted. The [operator],
     [runtime], [heartbeat], [memory] and [agent] tables exist only when
     a value was given for them: an absent key is the documented default,
-    never a copied-out one."""
+    never a copied-out one. There is no [chat] table: no cousin runs a
+    chat server of its own (R10)."""
     text = (
         "[cousin]\n"
         "slug = %s\n"
         "name = %s\n"
-        "role = %s\n\n"
-        "[chat]\n"
-        "port = %d\n"
-        "tmux_session = %s\n"
-        % (_toml_quote(slug), _toml_quote(name), _toml_quote(role),
-           port, _toml_quote(slug))
+        "role = %s\n"
+        % (_toml_quote(slug), _toml_quote(name), _toml_quote(role))
     )
     if operator:
         text += "\n[operator]\nname = %s\n" % _toml_quote(operator)
@@ -250,10 +212,11 @@ def spawn_lane(root, runner=None, account=None):
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
                   voice=None, port=None, template_path=None, operator=None,
                   model=None, effort=None, heartbeat=None, memory_scope=None,
-                  runner=None, account=None, _is_live=_is_live):
-    """The creation sequence from the spec: validate, allocate, create,
-    write atomically, render, provision the MCP adapter - and on any
-    failure after the home exists, remove everything this run created.
+                  runner=None, account=None):
+    """The creation sequence from the spec: validate, create, write
+    atomically, render, provision the MCP adapter - and on any failure
+    after the home exists, remove everything this run created. port is
+    refused: no cousin runs a chat server of its own (R10).
     model, effort, heartbeat and memory_scope are optional and land in
     cousin.toml ([runtime], [heartbeat] context_beat_seconds, [memory]
     scope); runner and account land in [agent] (spawn_lane: the
@@ -262,8 +225,11 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
     and effort, the keys its runner reads, checked by its lane
     (agent_settings.check_new); each is validated before anything is
     written.
-    Returns {slug, home, port}."""
+    Returns {slug, home}."""
     root = FrameworkConfig(root).root
+    if port is not None:
+        raise SpawnError("port %r: 2.0.0 runs no per-cousin chat server, so a"
+                         " cousin has no chat port" % (port,))
     if not slug or not _SLUG_RE.match(slug):
         raise SpawnError(
             "invalid slug %r: use ^[a-z][a-z0-9_-]{1,31}$" % (slug,)
@@ -299,14 +265,11 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
     except OSError as err:
         raise SpawnError("cannot read template %s: %s" % (template, err))
     name = name or slug.capitalize()
-    if port is None:
-        port = allocate_port(root, is_live=_is_live)
     # Render BEFORE anything is written: an incomplete identity must
     # fail while the filesystem is still untouched.
     values = {
         "NAME": name,
         "SLUG": slug,
-        "PORT": port,
         "ROLE_ONE_LINE": role,
         "ROLE_PARAGRAPH": role_paragraph or role,
     }
@@ -320,7 +283,7 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         for sub in ("memory", "data", "notes", "scripts"):
             (home / sub).mkdir(parents=True)
         _write_cousin_toml(home, slug=slug, name=name, role=role,
-                           port=port, operator=operator, model=model,
+                           operator=operator, model=model,
                            effort=effort, heartbeat=heartbeat,
                            memory_scope=memory_scope, runner=runner,
                            account=account)
@@ -340,31 +303,11 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
         # create leaves nothing.
         shutil.rmtree(home, ignore_errors=True)
         raise SpawnError("create failed, home removed: %s" % err)
-    return {"slug": slug, "home": home, "port": port}
+    return {"slug": slug, "home": home}
 
 
 def _pid_file(home):
     return Path(home) / "data" / "chat-server.pid"
-
-
-def _default_chat_server(home):
-    """Launch the cousin's chat server detached, logging to its data
-    dir, and record its pid so stop_cousin can find it. The daemon owns
-    its own lifetime; spawn only starts it."""
-    log = open(home / "data" / "chat-server.log", "ab")
-    try:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "cousin_lib.server.app",
-             "--home", str(home)],
-            stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    finally:
-        log.close()
-    try:
-        _pid_file(home).write_text("%d\n" % proc.pid)
-    except OSError:
-        pass
 
 
 _CHAT_SERVER_MARKERS = ("cousin_lib.server.app", "cousin-chat-server")
@@ -534,9 +477,19 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
     root locates the supervisor (else derived from the home). wait
     (default) answers once the runner is down; wait=False once it is
     signalled, `"runner": "stopping"`. by is who asked, for the hold
-    marker."""
+    marker.
+
+    A worker has no session: its stop is a no-op that says so,
+    {"worker": "no session", "note": <lane_refusal>} (R14). Any other
+    cousin with no runner kind is refused with delivery.lane_refusal
+    before any tmux call (R2)."""
     if runner_lane(home):
         return _stop_runner(home, root, wait=wait, by=by)
+    from cousin_lib import delivery
+    data = delivery._cousin_toml(home) or {}
+    if (data.get("cousin") or {}).get("type") == "worker":
+        return {"worker": "no session", "note": delivery.lane_refusal(home)}
+    raise SpawnError(delivery.lane_refusal(home))
     home = Path(home)
     config = CousinConfig.load(home)
     base = _tmux_base(tmux_bin, tmux_socket)
@@ -580,14 +533,8 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
                 pass
             time.sleep(0.05)
     pid_file.unlink(missing_ok=True)
-    try:
-        from cousin_lib import telegram_admin
-        bridge_state = telegram_admin.stop_bridge(home)
-    except Exception:
-        bridge_state = "not running"
     stopped = [what for what, state in (("agent", tmux_state),
-                                        ("chat server", chat_state),
-                                        ("telegram bridge", bridge_state))
+                                        ("chat server", chat_state))
                if state == "stopped"]
     if stopped:
         framework_event(home, "session", "%s stopped" % " and ".join(stopped))
@@ -1098,7 +1045,7 @@ def _inject_pending_boot(home, config, *, tmux_bin, tmux_socket, settle):
 
 
 def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
-                 start_chat_server=_default_chat_server, root=None,
+                 start_chat_server=None, root=None,
                  record=True, note=None, boot_settle=BOOT_SETTLE_SECONDS):
     """THE tmux-session-creation site - the only one in this codebase,
     by spec. Any future respawn machinery calls this function.
@@ -1123,9 +1070,14 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
     cousin-supervisor is asked to start the cousin's runner, the one
     launcher of a runner process (R10), and agent_cmd, the tmux
     arguments and start_chat_server are not used. No supervisor is
-    NoSupervisor; a refused start is a SpawnError with its reason."""
+    NoSupervisor; a refused start is a SpawnError with its reason.
+
+    A cousin with no runner kind is refused with delivery.lane_refusal
+    before anything runs: 2.0.0 has no legacy tmux lane (R2)."""
     if runner_lane(home):
         return _start_runner(home, root)
+    from cousin_lib import delivery
+    raise SpawnError(delivery.lane_refusal(home))
     config = CousinConfig.load(home)
     agent_cmd = render_agent_cmd(agent_cmd, home, root=root)
     # The auth mode's checks (key file, isolated harness config) run
@@ -1193,15 +1145,6 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
         if pending_boot(home) is not None:
             text += "; boot packet from the clean stop injected"
         framework_event(home, "session", text)
-    start_chat_server(home)
-    # The Telegram bridge belongs to its cousin like the chat server:
-    # up with it when [telegram] is enabled and complete. Best-effort;
-    # a bridge that cannot start never costs the cousin its start.
-    try:
-        from cousin_lib import telegram_admin
-        telegram_admin.start_bridge(home, launch_root)
-    except Exception:
-        pass
     if pending_boot_path(home).exists():
         _inject_pending_boot(home, config, tmux_bin=tmux_bin,
                              tmux_socket=tmux_socket, settle=boot_settle)
@@ -1263,19 +1206,6 @@ def _session_alive(session, tmux_bin="tmux"):
     return r.returncode == 0
 
 
-def _chat_server_unless_live(home):
-    """Start the chat server only when nothing answers on the cousin's
-    port: a watchdog or unit may already own it, and a second server
-    would only fail to bind."""
-    try:
-        port = CousinConfig.load(home).chat_port
-    except MissingConfigError:
-        port = None
-    if port and _is_live(port):
-        return
-    _default_chat_server(home)
-
-
 def resume_plan(home, root, agent_cmd):
     """(agent command, note) that resumes the cousin's last session, or
     (None, why not). Resuming needs [agent.resume] in harness.toml, a
@@ -1319,8 +1249,7 @@ def _start_existing(root, slug, agent_cmd, resume=False):
         else:
             cmd, note = resumed, why
     try:
-        start_cousin(home, agent_cmd=cmd, root=root, note=note,
-                     start_chat_server=_chat_server_unless_live)
+        start_cousin(home, agent_cmd=cmd, root=root, note=note)
     except SpawnError as err:
         print("cousin-spawn: start failed: %s" % err, file=sys.stderr)
         return 1
@@ -1450,7 +1379,6 @@ def spawn_main(argv=None):
                         help="the authored voice guide; a cousin is "
                              "never shipped without one (required to"
                              " create)")
-    parser.add_argument("--port", type=int)
     parser.add_argument("--operator",
                         help="the operator's name: written to cousin.toml"
                              " [operator] and named in the cousin's MCP"
@@ -1484,8 +1412,7 @@ def spawn_main(argv=None):
                              " config/accounts.toml's (a runner cousin only;"
                              " absent: COUSIN_DEFAULT_ACCOUNT, else host)")
     parser.add_argument("--start", action="store_true",
-                        help="start the cousin (tmux session + chat"
-                             " server; a runner cousin through"
+                        help="start the cousin (a runner cousin, through"
                              " cousin-supervisor) after creating it; on an EXISTING"
                              " cousin, given without --role/--voice, just"
                              " start it (a no-op when already running)")
@@ -1552,6 +1479,18 @@ def spawn_main(argv=None):
             return 2
     if start_existing and on_runner:
         return _start_existing_runner(root, args.slug)
+    if args.start and not on_runner:
+        # R2: 2.0.0 has no legacy tmux lane: nothing is created or started
+        # for a cousin with no runner kind.
+        from cousin_lib import delivery
+        if start_existing:
+            why = delivery.lane_refusal(root / "cousins" / args.slug)
+        else:
+            why = ("--start needs a runner kind (--runner %s, or"
+                   " COUSIN_DEFAULT_RUNNER): 2.0.0 has no legacy tmux lane;"
+                   " nothing created" % "|".join(RUNNER_KINDS))
+        print("cousin-spawn: %s" % why, file=sys.stderr)
+        return 2
     agent_cmd = None
     if args.start and not on_runner:
         # Everything a start needs is checked before anything is
@@ -1578,7 +1517,7 @@ def spawn_main(argv=None):
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,
             role_paragraph=args.role_paragraph, voice=args.voice,
-            port=args.port, operator=args.operator, model=args.model,
+            operator=args.operator, model=args.model,
             effort=args.effort, heartbeat=args.heartbeat,
             memory_scope=args.memory_scope, runner=args.runner,
             account=args.account,
@@ -1586,12 +1525,10 @@ def spawn_main(argv=None):
     except SpawnError as err:
         print("cousin-spawn: %s" % err, file=sys.stderr)
         return 2
-    print("created %s at %s (chat port %d)"
-          % (out["slug"], out["home"], out["port"]))
+    print("created %s at %s" % (out["slug"], out["home"]))
     if args.start:
         try:
-            start_cousin(out["home"], agent_cmd=agent_cmd, root=root,
-                         start_chat_server=_chat_server_unless_live)
+            start_cousin(out["home"], agent_cmd=agent_cmd, root=root)
         except SpawnError as err:
             print("cousin-spawn: created but start failed: %s\n"
                   "the home is kept; fix the cause and start it with:"

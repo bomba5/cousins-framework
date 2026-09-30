@@ -19,9 +19,12 @@ REQUIRED_UNITS = {
     "cousin-loops.service",
     "cousin-sweep.service", "cousin-sweep.timer",
     "cousin-tool-surface.service", "cousin-tool-surface.timer",
+    "cousin-console.service",
+}
+# R10: no per-cousin chat server, so neither its unit nor its watchdog's
+RETIRED_UNITS = {
     "cousin-chat-server@.service",
     "cousin-chat-watchdog.service", "cousin-chat-watchdog.timer",
-    "cousin-console.service",
 }
 PLACEHOLDERS = {"ROOT", "USER_BIN", "SYSTEM_PATH"}
 _ABS_PATH = re.compile(r'(?:^|[=:\s"\'])/[A-Za-z0-9_]')
@@ -45,6 +48,16 @@ class TestInventory(unittest.TestCase):
         names = {p.name for p in _units()}
         self.assertTrue(REQUIRED_UNITS <= names,
                         "missing: %s" % sorted(REQUIRED_UNITS - names))
+
+    def test_no_chat_server_or_watchdog_unit_ships(self):
+        names = {p.name for p in _units()}
+        self.assertEqual(RETIRED_UNITS & names, set())
+        # the README names them only to disable them on an upgrade
+        readme = (_UNITS / "README.md").read_text()
+        for line in readme.splitlines():
+            if "cousin-chat-server" in line or "cousin-chat-watchdog" in line:
+                self.assertNotIn("enable --now", line.replace("disable --now", ""))
+                self.assertFalse(line.startswith("|"), line)
 
     def test_every_timer_has_its_service(self):
         names = {p.name for p in _units()}
@@ -139,14 +152,6 @@ class TestEachUnit(unittest.TestCase):
                         sweep)
         self.assertTrue(daily.startswith(("daily", "*-*-*")), daily)
 
-    def test_chat_watchdog_runs_every_ten_minutes(self):
-        timer = _parse(_UNITS / "cousin-chat-watchdog.timer")["Timer"]
-        self.assertEqual(timer["OnCalendar"], "*:0/10")
-        service = _parse(_UNITS / "cousin-chat-watchdog.service")["Service"]
-        self.assertEqual(service["Type"], "oneshot")
-        self.assertEqual(service["ExecStart"],
-                         "{{USER_BIN}}/cousin-chat-watchdog")
-
     def test_console_unit_is_a_restarting_service_on_a_stated_port(self):
         # The console owns nothing durable but sessions and the users
         # file, so a restart costs a login and nothing else: systemd may
@@ -159,11 +164,6 @@ class TestEachUnit(unittest.TestCase):
         self.assertEqual(service["Restart"], "on-failure")
         unit = _parse(_UNITS / "cousin-console.service")
         self.assertEqual(unit["Install"]["WantedBy"], "default.target")
-
-    def test_chat_server_template_takes_the_slug_as_instance(self):
-        text = (_UNITS / "cousin-chat-server@.service").read_text()
-        self.assertIn("--home {{ROOT}}/cousins/%i", text)
-
 
 if __name__ == "__main__":
     unittest.main()

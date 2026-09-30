@@ -2,18 +2,17 @@
 "Telegram"): status, the write-only token, the operators, the refused
 senders waiting to be added, the enable switch and a token check. The
 token never leaves the server: every answer says only whether one is
-set. Enabling starts the bridge when the cousin runs; disabling stops
-it. A runner cousin's bridge is the supervisor's child (R10, #101): a
-change there is written to cousin.toml and the supervisor is asked to
-rescan (`reload`), which adds, removes or restarts `telegram:<slug>`;
-the console never starts a runner cousin's bridge itself."""
+set. A bridge is the supervisor's child (R10, #101): a change is written
+to cousin.toml and the supervisor is asked to rescan (`reload`), which
+adds, removes or restarts `telegram:<slug>`; the console never starts a
+bridge itself. A cousin with no runner kind has no bridge in 2.0.0: the
+config is written and `bridge` says why (delivery.lane_refusal)."""
 from __future__ import annotations
 
-from cousin_lib import supervisor, telegram_admin
+from cousin_lib import delivery, supervisor, telegram_admin
 from cousin_lib.console import router
 from cousin_lib.console.app import HttpError
-from cousin_lib.config import CousinConfig
-from cousin_lib.console._common import cousin_home, session_alive
+from cousin_lib.console._common import cousin_home
 
 
 def _status(req, slug, home):
@@ -27,10 +26,6 @@ def _guard(fn, *args, **kw):
         return fn(*args, **kw)
     except telegram_admin.TelegramAdminError as err:
         raise HttpError(400, str(err))
-
-
-def _cousin_running(req, home):
-    return session_alive(req.server, CousinConfig.load(home))
 
 
 def _runner_lane(home):
@@ -62,14 +57,10 @@ def _supervisor_rescan(req, home):
 
 def _restart_bridge(req, home):
     """Apply a config change: the bridge reads its config once, at
-    start. It runs only while its cousin runs, like the chat server.
-    What to report as `bridge`."""
+    start, so the supervisor restarts it. What to report as `bridge`."""
     if _runner_lane(home):
         return _supervisor_rescan(req, home)
-    state = telegram_admin.stop_bridge(home)
-    if _cousin_running(req, home):
-        state, _pid = telegram_admin.start_bridge(home, req.server.root)
-    return state
+    return delivery.lane_refusal(home)
 
 
 def register():
@@ -116,14 +107,7 @@ def register():
         if not isinstance(enabled, bool):
             raise HttpError(400, "enabled must be true or false")
         telegram_admin.set_enabled(home, enabled)
-        if _runner_lane(home):
-            state = _supervisor_rescan(req, home)
-        elif enabled and _cousin_running(req, home):
-            state, _pid = telegram_admin.start_bridge(home, req.server.root)
-        elif enabled:
-            state = "starts with the cousin"
-        else:
-            state = telegram_admin.stop_bridge(home)
+        state = _restart_bridge(req, home)
         out = _status(req, slug, home)
         out["bridge"] = state
         return 200, out

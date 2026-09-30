@@ -44,12 +44,11 @@ class _CliCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = pathlib.Path(tmp.name)
-        for slug in ("wren", "toki"):
+        for slug, agent in (("wren", ""), ("toki", '[agent]\nrunner = "fake"\n')):
             d = self.root / "cousins" / slug
             d.mkdir(parents=True)
             (d / "cousin.toml").write_text(
-                '[cousin]\nslug = "%s"\n[chat]\nport = %d\n'
-                '[operator]\nname = "Sam"\n' % (slug, self.port)
+                '[cousin]\nslug = "%s"\n[operator]\nname = "Sam"\n%s' % (slug, agent)
             )
         self.env = {
             "COUSIN_HOME": str(self.root / "cousins" / "wren"),
@@ -93,13 +92,16 @@ class TestReplyCli(_CliCase):
 
 
 class TestChatCli(_CliCase):
-    def test_send_posts_to_peer_and_exits_zero(self):
+    def test_send_delivers_to_a_runner_peer_and_exits_zero(self):
+        # a local runner peer is written in-process (its store and inbox);
+        # nothing reaches a server
         out = io.StringIO()
         with mock.patch.dict("os.environ", self.env):
             with contextlib.redirect_stdout(out):
                 code = chat_main(["send", "toki", "hello"])
         self.assertEqual(code, 0)
-        self.assertEqual(_Ok.received["payload"], {"user": "Wren", "message": "hello"})
+        self.assertIsNone(_Ok.received)
+        self.assertEqual(_reply_rows(self.root / "cousins" / "toki"), [("hello", None)])
 
     def test_blocked_send_exits_three(self):
         (self.root / "config").mkdir()

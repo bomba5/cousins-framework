@@ -37,14 +37,12 @@ class TestRunnerLaneStartStop(_Case):
         self.cousin("wren", extra=RUNNER)
         stub = self.stub()
         self.serve()
-        chat_servers = []
-        with mock.patch("cousin_lib.spawn._default_chat_server", chat_servers.append):
-            status, body = self.post("/api/cousins/wren/start")
+        status, body = self.post("/api/cousins/wren/start")
         self.assertEqual(status, 200, body)
         self.assertEqual(body, {"ok": True, "slug": "wren", "status": "started"})
         self.assertEqual(stub.ops(), [("start", "wren")])
         self.assertEqual(self.tmux_calls(), "")
-        self.assertEqual(chat_servers, [])
+        self.assertFalse((self.root / "cousins" / "wren" / "data" / "chat-server.pid").exists())
         self.assertFalse((self.root / "config" / "agent-cmd").exists())
 
     def test_a_live_runner_is_already_running(self):
@@ -338,7 +336,7 @@ class TestCreateRunnerCousin(_Case):
         super().setUp()
         (self.root / "templates").mkdir()
         (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
-            "# {{NAME}} ({{SLUG}}:{{PORT}})\n{{ROLE_ONE_LINE}}\n"
+            "# {{NAME}} ({{SLUG}})\n{{ROLE_ONE_LINE}}\n"
             "{{ROLE_PARAGRAPH}}\n## Voice\n{{VOICE_GUIDE}}\n")
         (self.root / "config" / "accounts.toml").write_text(
             '[accounts.metered]\nkind = "anthropic-key"\n')
@@ -347,7 +345,7 @@ class TestCreateRunnerCousin(_Case):
         from cousin_lib import supervisor
         self.serve()
         status, body = self.post("/api/cousins", {
-            "slug": "toki", "role": "r", "voice": "v", "port": 8123,
+            "slug": "toki", "role": "r", "voice": "v",
             "runner": "fake", "account": "metered"})
         self.assertEqual(status, 201, body)
         data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
@@ -357,7 +355,7 @@ class TestCreateRunnerCousin(_Case):
     def test_empty_runner_and_account_are_the_default(self):
         self.serve()
         status, body = self.post("/api/cousins", {
-            "slug": "toki", "role": "r", "voice": "v", "port": 8123,
+            "slug": "toki", "role": "r", "voice": "v",
             "runner": "", "account": None})
         self.assertEqual(status, 201, body)
         data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())

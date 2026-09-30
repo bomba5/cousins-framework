@@ -109,6 +109,32 @@ class ImportCase(unittest.TestCase):
         return chat_import.import_history(self.old_home, self.new_home, **kw)
 
 
+class TestRefusesWhileTheRunnerRuns(ImportCase):
+    def test_import_refuses_while_the_runner_runs(self):
+        # no chat server to probe (R10): the cousin's runner holding its
+        # lock is what "running" means, and the import waits for a stop
+        import contextlib
+        import io
+        from unittest import mock
+        from cousin_lib.runner.main import hold_lock
+        root = self.new_home.parent / "root"
+        home = root / "cousins" / "wren"
+        home.mkdir(parents=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n[agent]\nrunner = "fake"\n')
+        argv = ["wren", "--old-home", str(self.old_home), "--root", str(root)]
+        err = io.StringIO()
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            with hold_lock(home):
+                self.assertEqual(chat_import.main(argv), 2)
+            self.assertIn("runner", err.getvalue())
+            self.assertFalse((home / "data" / chat_import.MARKER).exists())
+            (home / "data").mkdir(exist_ok=True)
+            self.assertEqual(chat_import.main(argv), 0)
+        self.assertTrue((home / "data" / chat_import.MARKER).exists())
+
+
 class TestImport(ImportCase):
     def test_old_rows_keep_their_ids_and_new_rows_follow(self):
         report = self._run()

@@ -2,7 +2,7 @@
 
 Every HTTP route the web console serves, for when you want to script against it or debug what the browser is doing. For what the pages do and how to use them, read [the console guide](../console.md).
 
-The console is one Python process (`cousin-console`, default `127.0.0.1:8600`). The browser page is static files plus these routes. The console keeps almost nothing of its own: it reads [cousin](../glossary.md#cousin) homes, the jobs database, the loops state and the tracker on every call, and it proxies chat to each cousin's own chat server.
+The console is one Python process (`cousin-console`, default `127.0.0.1:8600`). The browser page is static files plus these routes. The console keeps almost nothing of its own: it reads [cousin](../glossary.md#cousin) homes, the jobs database, the loops state and the tracker on every call, it serves a local cousin's chat from the cousin's own `chat.db`, and it proxies a remote hive node's chat to the node's chat server.
 
 ## Getting in
 
@@ -40,7 +40,7 @@ There are no per-user permissions. Anyone who can log in can do everything.
 
 - JSON in, JSON out. Responses carry `Content-Type: application/json` and `Cache-Control: no-store`. A body that isn't a JSON object is `400 {"ok": false, "error": "malformed JSON"}`.
 - Commands answer `{"ok": true, ...}`. Failures answer `{"ok": false, "error": "..."}`. Read routes return their data keys, usually without `ok`.
-- Status codes: `200` done, `201` created, `202` accepted and still running in the background, `400` bad input, `401` no session, `403` refused, `404` unknown thing (or an unknown path), `405` known path with the wrong method, `409` state conflict, `500` local failure with the reason in `error`, `502` a cousin's chat server is unreachable or answered something that isn't JSON, `503` broken users file.
+- Status codes: `200` done, `201` created, `202` accepted and still running in the background, `400` bad input, `401` no session, `403` refused, `404` unknown thing (or an unknown path), `405` known path with the wrong method, `409` state conflict, `500` local failure with the reason in `error`, `502` an upstream chat server (a hive node's) is unreachable or answered something that isn't JSON, `503` broken users file.
 - A `<slug>` has to match `^[a-z][a-z0-9_-]{1,31}$`, otherwise `400 {"error": "bad slug"}` before anything is looked up. A loop `<name>` matches `^[a-z][a-z0-9_-]{0,31}$`.
 - A trailing slash on a path is accepted.
 - Anything not under `/api/` or `/hive/` is a static file (GET only).
@@ -242,7 +242,7 @@ Body `{"changes": {"<key>": value | null}}` (null removes the key; `sessions` is
 
 ### `GET /api/cousins/<slug>/settings`
 
-`{"fields": {"<table.key>": {"value", "set", "default", "type", "restart", "hint"}}, "readonly": {"chat.port", "chat.host", "chat.tmux_session", "session.start_hooks", "session.end_hooks"}, "readonly_why", "errors"}`. `lifecycle.flip_at` also has `install` (`config/harness.toml default_flip_at`, else `04:00`; null for never) and `effective` (`config.flip_time`). `agent.commit_attribution` also has `install: {"value", "source"}` (`config/harness.toml [agent]`, or the built-in default, true) and `effective`, the value the cousin runs with.
+`{"fields": {"<table.key>": {"value", "set", "default", "type", "restart", "hint"}}, "readonly": {"chat.tmux_session", "session.start_hooks", "session.end_hooks"}, "readonly_why", "errors"}`. `lifecycle.flip_at` also has `install` (`config/harness.toml default_flip_at`, else `04:00`; null for never) and `effective` (`config.flip_time`). `agent.commit_attribution` also has `install: {"value", "source"}` (`config/harness.toml [agent]`, or the built-in default, true) and `effective`, the value the cousin runs with.
 
 ### `POST /api/cousins/<slug>/settings`
 
@@ -348,7 +348,6 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 |---|---|
 | `slug`, `name`, `role` | from `[cousin]` |
 | `type` | `cousin`, `worker`, or `remote` (a hive node) |
-| `port`, `host` | chat port and `[chat] host` (host is null for a local cousin) |
 | `home` | the cousin's home directory |
 | `tmuxSession` | `[chat] tmux_session`, default the slug |
 | `operator` | `[operator] name`, or null |
@@ -360,7 +359,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `auth` | `claude` or `api_key`; null if cousin.toml holds a mode the framework doesn't know |
 | `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. [Worker](../glossary.md#worker): always `running`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). |
 | `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
-| `chat` | `ok`, `down` or `none` (no port) from the chat server's `/health`; `console` for a runner cousin, whose chat the console serves itself |
+| `chat` | `console` for a runner cousin, whose chat the console serves itself; for any other cousin `ok`, `down` or `none` (no port) from an upstream chat server's `/health` |
 | `active` | the last 20 pane lines changed in the last 60 seconds; for a runner cousin, a live turn (`running` or `waiting_permission`) |
 | `pid`, `uptime_seconds` | the agent process in the tmux pane and its age (a runner cousin: the `cousin-runner` process); null when unknown, never 0 |
 | `activity` | first 200 characters of `data/last-activity.txt` |
@@ -383,12 +382,12 @@ Spawn a cousin. Body:
 
 ```json
 {"slug": "wren", "role": "research helper", "voice": "dry, short answers",
- "name": "Wren", "role_paragraph": "...", "port": 8611, "operator": "ana",
+ "name": "Wren", "role_paragraph": "...", "operator": "ana",
  "model": "claude-opus-5", "effort": "high", "heartbeat": 3600,
  "memory_scope": "private", "runner": "sdk", "account": "metered"}
 ```
 
-`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk`, `fake` or `opencode`, or `tmux-legacy` to name the tmux lane so the install's default runner does not apply) and `account` go to `[agent]`, and so do a runner cousin's `model` and `effort` (a tmux cousin's go to `[runtime]`), checked by the lane first: the account must run on it and a key it does not read (an effort off the `sdk` lane, a model on `fake`) is a `400`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home", "port"}` and a `cousins-refresh` event. `400` bad input (the message says which), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
+`slug`, `role` and `voice` are required (the CLAUDE.md template won't render without a voice). The rest are optional; empty means the default applies and no key is written. `runner` (`sdk`, `fake` or `opencode`, or `tmux-legacy` to name the tmux lane so the install's default runner does not apply) and `account` go to `[agent]`, and so do a runner cousin's `model` and `effort` (a tmux cousin's go to `[runtime]`), checked by the lane first: the account must run on it and a key it does not read (an effort off the `sdk` lane, a model on `fake`) is a `400`; left out, the install's `COUSIN_DEFAULT_RUNNER` and `COUSIN_DEFAULT_ACCOUNT` apply (unset: a tmux cousin). An account needs a runner and must be in `config/accounts.toml`. `201 {"ok": true, "slug", "home"}` and a `cousins-refresh` event. `400` bad input (the message says which; a `port` is refused: no cousin has a chat port in 2.0.0), `409` the slug exists or a leftover directory squats it. This only creates the cousin; the page follows it with `/start`.
 
 ### `GET /api/spawn/options`
 
@@ -414,15 +413,13 @@ Dismiss. Stops the cousin, tars the whole home (minus `.secrets/`) to `data/dism
 
 ### `POST /api/cousins/<slug>/start`
 
-Starts the tmux session with the agent from `config/agent-cmd`, and the chat server if it isn't answering. `200 {"ok": true, "slug", "status": "started" | "already running", "chat_server": "started" | "reused" | "not running"}`. If the session is already up but the chat server is down, the chat server is started. `500` when `config/agent-cmd` is missing or tmux fails. Emits `cousin-status` `starting`.
-
-A runner cousin (`[agent] runner = "sdk"` or `"fake"`) is started by the running `cousin-supervisor` instead ([commands](../commands.md)): no `config/agent-cmd`, no tmux, no chat server. `200 {"ok": true, "slug", "status": "started" | "already running"}`; already running means a runner holds the cousin's lock. `503` when no supervisor runs for the install (the message says to run `cousin-supervisor run`), `500` with its reason when the supervisor refuses.
+A runner cousin (`[agent] runner`: `sdk`, `tmux`, `opencode` or `fake`) is started by the running `cousin-supervisor` ([commands](../commands.md)): no `config/agent-cmd`, no chat server. `200 {"ok": true, "slug", "status": "started" | "already running"}`; already running means a runner holds the cousin's lock. `503` when no supervisor runs for the install (the message says to run `cousin-supervisor run`), `500` with its reason when the supervisor refuses. A cousin with no runner kind is `409 {"ok": false, "error": "<the lane refusal: 2.0.0 has no legacy tmux lane>"}`, before any tmux call.
 
 ### `POST /api/cousins/<slug>/stop`
 
-Body (optional): `{"clean": true}` (the default). A running cousin stops cleanly in the background ([lifecycle](lifecycle.md#a-clean-stop)): `202 {"ok": true, "slug", "status": "closing", "started_at"}`, `cousin-status` `closing`, then `stopped` (or `stop failed`) and a `cousins-refresh` when it is done; `409` while a flip or another clean stop of that cousin is running. The run's stages show on `GET /api/cousins/<slug>/flip`.
+Body (optional): `{"clean": true}` (the default).
 
-With `{"clean": false}`, or when the cousin isn't running: kills the tmux session and stops the chat server at once. Idempotent. `200 {"ok": true, "slug", "status": "stopped", "tmux": "stopped" | "already stopped", "chat_server": "stopped" | "not running"}`. Emits `cousin-status` `stopping`. `400` when `clean` is not a boolean.
+A cousin with no runner kind is `409` with the lane refusal, before any tmux call; a [worker](../glossary.md#worker)'s stop is `200 {"ok": true, "slug", "status": "stopped", "worker": "no session", "note"}`. Emits `cousin-status` `stopping`. `400` when `clean` is not a boolean.
 
 A runner cousin always stops through the supervisor, clean or not: a clean stop is the runner's own SIGTERM path (it finishes the turn in hand, then exits, which can take up to about 35 seconds). The route does not wait for that: `202 {"ok": true, "slug", "status": "stopping", "runner": "stopping", "supervisor": "running"}` once the runner is signalled, and the row's `supervisor.state` turns `stopped` when it is down. When there was nothing to stop the answer is `200` with `"status": "stopped"` and `"runner": "stopped" | "not running"`, `"supervisor": "running" | "not running"`. When the supervisor refused the stop the answer is `502 {"ok": false, "slug", "error": "cousin-supervisor refused the stop: <reason>", "runner": "unknown", "supervisor": "running"}`, never `stopped`. The stop holds the runner down until the next start, across a supervisor or container restart too (`<home>/run/held`), and also with no supervisor running: the route writes the hold itself and adds `"held": true`. A restart whose start is refused because no supervisor runs removes that hold again.
 
@@ -472,7 +469,7 @@ Body `{"effort": "high"}`, one of `low`, `medium`, `high`, `xhigh`, `max`. A tmu
 
 ### `POST /api/cousins/<slug>/operator`
 
-Body `{"operator": "ana"}`. Written to `[operator] name`. One line, 1 to 64 characters, no leading or trailing spaces, no control characters. `200 {"ok": true, "slug", "operator", "restart_required": true}`: the chat server reads it once at start to tell your messages from other cousins', so restart the cousin. `400` leaves the file untouched.
+Body `{"operator": "ana"}`. Written to `[operator] name`. One line, 1 to 64 characters, no leading or trailing spaces, no control characters. `200 {"ok": true, "slug", "operator", "restart_required": true}`: the runner reads it at start to tell your messages from other cousins', so restart the cousin. `400` leaves the file untouched.
 
 ### `POST /api/cousins/<slug>/memory-scope`
 
@@ -490,7 +487,7 @@ Body `{"hidden": true}`. Sets or removes `[cousin] hidden`. `200 {"ok": true, "s
 
 ### `POST /api/cousins/<slug>/peer`
 
-Send a message from one cousin to another. Body `{"to": "kestrel", "text": "..."}`. It's posted to Kestrel's chat server `/api/send` with `user` set to Wren's display name, so it lands as `(Chat Wren): ...` like `cousin-chat send`. `200 {"ok": true, "to", "id"}`. `400` empty text or `to` is the same cousin, `404` either cousin unknown, `502` Kestrel's chat server is down.
+Send a message from one cousin to another. Body `{"to": "kestrel", "text": "..."}`. It's written to Kestrel's chat store and inbox in-process, with `user` set to Wren's display name, so it lands as `(Chat Wren): ...` like `cousin-chat send`. `200 {"ok": true, "to", "id"}`. `400` empty text or `to` is the same cousin, `404` either cousin unknown, `502` when Kestrel has no runner kind (no transport to it).
 
 ### `GET /api/cousins/<slug>/flip`
 
@@ -535,15 +532,15 @@ Each cousin also carries `cache`: the prompt-cache hit rate, `cache_read / (cach
 
 It needs `transcripts_dir` in `config/harness.toml`. Every transcript in the cousin's transcripts directory touched in the window is read, its sessions (a cousin that flips daily has one per day) and their subagents, and each message counts once (the harness writes one line per content block, each repeating the usage). The total adds input, output, cache read and cache creation tokens. Without the config: `{"available": false, "reason": "...", "cousins": []}`. The transcripts are read incrementally, so the first call after a console start is the slow one.
 
-## Chat (proxied to each cousin)
+## Chat
 
-These forward to the cousin's own chat server ([chat API](chat-api.md)). A runner cousin (`[agent] runner`, its home on this machine) runs no chat server: for it the console answers the same routes itself over the cousin's `data/chat.db`, through the library the chat server answers with, so the body and the `400` texts are the same on both lanes. Its send stores the row and delivers it to the cousin's inbox (a `chat` item on the sender's thread, an image handed on as its file), then fires the cousin's chat hooks; a reaction tells the cousin with a `reaction` item. The console stores no messages. The cousin comes from `cousin` in the query or body. `400` bad slug, `404` unknown cousin, `502 {"ok": false, "error": ...}` if the chat server is unreachable, has no port, or answers non-JSON. Any JSON answer from the chat server comes back with its own status.
+No cousin on this machine runs a chat server of its own. For a runner cousin (`[agent] runner`, its home on this machine) the console answers these routes itself over the cousin's `data/chat.db`, through `server/chat_api.py`, with the bodies and `400` texts of the [chat API](chat-api.md). Its send stores the row and delivers it to the cousin's inbox (a `chat` item on the sender's thread, an image handed on as its file), then fires the cousin's chat hooks; a reaction tells the cousin with a `reaction` item. The console stores no messages. The cousin comes from `cousin` in the query or body. `400` bad slug, `404` unknown cousin. Any other cousin is forwarded upstream by its host and port: `502 {"ok": false, "error": ...}` if that server is unreachable, there is no port, or it answers non-JSON (a local cousin with no runner kind has none to answer); any JSON answer comes back with its own status.
 
 For a slug that isn't local but is a hive node, the console proxies to where the node last checked in from and sends the node's token as a bearer. A revoked node is `404`, one that never checked in is `502`. Remote cousins have no pane, no inbox files and no media folders on this machine.
 
 ### `GET /api/messages`
 
-Query: `cousin`, `user` (both required), `limit` (default 200), `before`, `since`, `archived` (`0`, `1`, `all`; default `0`). Forwards to `/api/history`. Answers the chat server's `{"messages", "total", "has_more"}` plus `"cousin"`. Each message gets an `attachment: {"url", "kind"}` when there is a file for it: an inbound image under `chat/inbound/<id>.<ext>` (kind `image`), or the row's `attachment_path` when it sits in `chat/images/`, `chat/audio/` or `chat/video/`. `kind` is `image`, `audio` or `video` (a stored `voice` shows as `audio`).
+Query: `cousin`, `user` (both required), `limit` (default 200), `before`, `since`, `archived` (`0`, `1`, `all`; default `0`). Answers the chat API's `/api/history` body, `{"messages", "total", "has_more"}`, plus `"cousin"`. Each message gets an `attachment: {"url", "kind"}` when there is a file for it: an inbound image under `chat/inbound/<id>.<ext>` (kind `image`), or the row's `attachment_path` when it sits in `chat/images/`, `chat/audio/` or `chat/video/`. `kind` is `image`, `audio` or `video` (a stored `voice` shows as `audio`).
 
 ### `GET /api/search`
 
@@ -997,7 +994,7 @@ The install config files, each `{"path", "exists", "error", "applies", "restart"
 - `embedding`, `hive`: `values` by key (`recall.min_score` for a subtable key);
 - `peers`: `peers.<slug>` = `{url, send_path, name, sender, reach, token_file, inbound_token_file, token, inbound_token, shadowed, unknown_reach}`; a token is read as `chat.read_secret` reads it, so a file group or others can read shows its refusal in `error`;
 - `outbound_filter`, `law`: `{content, sha}`;
-- `allowlist`: `{allow, sha, client, builtin}`, and `restart` naming the console and the chat servers;
+- `allowlist`: `{allow, sha, client, builtin}`, and `restart` naming the console;
 - `commands`: `agent-cmd` and `worker-cmd` as `{path, exists, content}`, shown only: no route writes them.
 
 A secret's value is never in the answer: `{set, last4, error}` only, `last4` for a value of 16 characters or more. A key or token file outside `config/` is never read (`set: null`).
@@ -1024,7 +1021,7 @@ Removes the key from the file and deletes the secret file when it is the one thi
 
 ### `POST /api/system/allowlist`
 
-`{"allow": [cidr], "base_sha"}`: `config/net-allowlist.json`'s `allow`, every other key kept. Each entry must be a network the guard reads (`192.0.2.0/24`, not `192.0.2.1/24`) and not `/0`; `400` when the new list would no longer admit the requesting address. The console and each chat server read it when they start: the answer's `restart` names them and the console's restart route.
+`{"allow": [cidr], "base_sha"}`: `config/net-allowlist.json`'s `allow`, every other key kept. Each entry must be a network the guard reads (`192.0.2.0/24`, not `192.0.2.1/24`) and not `/0`; `400` when the new list would no longer admit the requesting address. The console reads it when it starts: the answer's `restart` names it and the console's restart route.
 
 ### `GET /api/system/agent-defaults`
 
@@ -1069,7 +1066,7 @@ These only work when `config/hive.toml` has `enabled = true`. Otherwise `GET /ap
 
 ### `GET /api/hive`
 
-`{"enabled": false}`, or `{"enabled": true, "public_url", "checkin_seconds", "home_chat_url", "default_port": 8210}`. The spawn dialog only offers "Remote" when it's enabled.
+`{"enabled": false}`, or `{"enabled": true, "public_url", "checkin_seconds", "home_cousin", "default_port": 8210}` (`home_cousin` null when unset). The spawn dialog only offers "Remote" when it's enabled.
 
 ### `GET /api/hive/nodes`
 
@@ -1085,7 +1082,7 @@ Build a remote cousin. Body:
  "home_chat": false, "reachable": true}
 ```
 
-`slug` must not be a local cousin (`409`). `role` is required, up to 500 characters; `name` up to 64. `brain` is `placeholder` or `agent`, and `agent` needs `agent_cmd`, the command line the node runs with the prompt on stdin. `home_chat` bakes `home_chat_url` from hive.toml into the node (`400` if hive.toml has none). `reachable` (default true) binds the node's chat server on 0.0.0.0 so the console can reach it; false keeps it on 127.0.0.1.
+`slug` must not be a local cousin (`409`). `role` is required, up to 500 characters; `name` up to 64. `brain` is `placeholder` or `agent`, and `agent` needs `agent_cmd`, the command line the node runs with the prompt on stdin. `home_chat` sets `TELL_HOME=1` in the node's `node.env`, so its `[tell-home: ...]` reaches `home_cousin` through this queen (`400` if hive.toml names no `home_cousin`; the legacy `home_chat_url` is not read). `reachable` (default true) binds the node's chat server on 0.0.0.0 so the console can reach it; false keeps it on 127.0.0.1.
 
 It mints (or reuses) the node's token and builds the archive into a private directory under `shared/hive/downloads/`. `201`:
 

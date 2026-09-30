@@ -64,14 +64,30 @@ class _ChatCase(unittest.TestCase):
 
 
 class TestSendMessage(_ChatCase):
-    def test_posts_to_target_send_endpoint_with_sender_name(self):
+    def test_deliver_to_a_cousin_with_no_runner_fails_with_the_line_and_opens_no_socket(self):
+        # R10: no per-cousin chat server to post to; the target is refused
+        # by name (delivery.lane_refusal), nothing is opened or stored
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+        from cousin_lib import chat
+        from cousin_lib.delivery import lane_refusal
         fw = self._fw({"wren": "", "toki": ""})
-        result = send_message(fw, self._sender(fw, "wren"), "toki", "hello")
-        self.assertEqual(result["id"], 3)
-        self.assertEqual(_Capture.received["path"], "/api/send")
-        self.assertEqual(
-            _Capture.received["payload"], {"user": "Wren", "message": "hello"}
-        )
+        toki = fw.root / "cousins" / "toki"
+        with mock.patch("socket.create_connection", side_effect=AssertionError), \
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError):
+            with self.assertRaises(chat.DeliveryRefused) as ctx:
+                send_message(fw, self._sender(fw, "wren"), "toki", "hello")
+            self.assertEqual(str(ctx.exception), lane_refusal(toki))
+            err = io.StringIO()
+            with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(fw.root),
+                                              "COUSIN_HOME": str(fw.root / "cousins" / "wren")}), \
+                    contextlib.redirect_stderr(err):
+                self.assertEqual(chat.chat_main(["send", "toki", "hello"]), 1)
+            self.assertIn(lane_refusal(toki), err.getvalue())
+        self.assertIsNone(_Capture.received)
+        self.assertFalse((toki / "data" / "chat.db").exists())
 
     def test_sending_to_self_is_refused(self):
         fw = self._fw({"wren": ""})
@@ -102,6 +118,27 @@ class TestListPeers(_ChatCase):
     def test_non_visible_cousin_sees_no_peers(self):
         fw = self._fw({"wren": "", "quiet": "peer_visible = false\n"})
         self.assertEqual(list_peers(fw, "quiet"), [])
+
+    def test_list_prints_the_kind(self):
+        # a cousin has no chat port any more (R10): the list names its kind
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+        from cousin_lib import chat
+        fw = self._fw({"wren": "", "toki": ""})
+        toki = fw.root / "cousins" / "toki" / "cousin.toml"
+        toki.write_text(toki.read_text() + '[agent]\nrunner = "fake"\n')
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(fw.root),
+                                          "COUSIN_HOME": str(fw.root / "cousins" / "wren")}), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(chat.chat_main(["list"]), 0)
+        lines = {line.split()[0]: line for line in out.getvalue().splitlines()}
+        self.assertIn("kind=fake", lines["toki"])
+        self.assertIn("kind=none", lines["wren"])
+        self.assertIn("(self)", lines["wren"])
+        self.assertNotIn("port=", out.getvalue())
 
 
 class TestLoginMarker(HermeticCase):

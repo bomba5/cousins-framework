@@ -37,6 +37,13 @@ existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
 (every start and [flip](glossary.md#flip) does that by itself). See [cousins](cousins.md).
 
+2.0.0 has no legacy tmux lane: a cousin with no `[agent] runner` is refused by
+name, with one line and before anything runs, by `cousin-spawn --start` (exit
+2; creating a cousin with `--start` needs a runner kind), by a stop (the
+console's answers 409), by `cousin-flip` and by `cousin-reincarnate`. A
+[worker](glossary.md#worker) (`[cousin] type = "worker"`) has no session: its stop is a no-op that
+says so.
+
 ```
 cousin-spawn wren --name Wren --role "keeps the house notes" \
     --voice "Short and plain. Says when it does not know." --operator ana --start
@@ -342,11 +349,9 @@ over, but the runner's first fresh session is handed the path; never fails,
 a transcript that cannot be found is recorded missing), `import`
 (`cousin-memory import-auto --apply`), `toml` (`[agent] runner = "sdk"`, and
 the account, once the tmux session is still down), `start` (the review
-gate's cursor opens afresh, the supervisor starts the runner, and the
-cousin's chat server is started, since the supervisor runs none and peers
-reach the inbox through it; afterwards `cousin-chat-watchdog` keeps it up)
-and `verify` (the runner stays up and holds its lock for 10 seconds, and the
-chat server answers `/health`). `--validate` (on `plan`, `apply` or `check`)
+gate's cursor opens afresh and the supervisor starts the runner; no chat
+server is started: 2.0.0 runs none) and `verify` (the runner stays up and
+holds its lock for 10 seconds). `--validate` (on `plan`, `apply` or `check`)
 runs one smallest model turn with the model, effort and account the runner
 will carry, so a model the CLI can't actually run is never written.
 `data/migration.json` keeps the prior `cousin.toml`, its bytes and mode,
@@ -360,7 +365,7 @@ inbox rows still waiting and an inbox it cannot read (`--force` rolls back
 anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]
 [--validate]` is the week's measure, from the migration on by default: inbox
 rows not done after an hour, tool calls with no recorded result, recorder
-hooks that failed, an unreadable inbox, a chat server that does not answer;
+hooks that failed, an unreadable inbox;
 exit 0 clean, 1 not. The runbook, with the fleet's order and the rollback, is
 in [migrating](migrating.md#from-the-tmux-lane-to-the-sdk-runner).
 
@@ -472,7 +477,7 @@ cousin-sync-state --home cousins/wren
 ## Chat
 
 `cousin-reply` stores a reply from the cousin to a person in its own chat
-history (no chat server needs to run). The body comes from stdin or `-m`; `--image` attaches a picture and
+history, in-process. The body comes from stdin or `-m`; `--image` attaches a picture and
 `--video` a video. It
 has no positional text argument.
 
@@ -483,37 +488,24 @@ EOF
 ```
 
 `cousin-chat` sends a message to another cousin (or an external peer), or
-lists who is addressable. A runner cousin (`[agent] runner` set, `tmux` kind
-included) is written directly (its chat history and inbox, no chat server
-needed); a legacy tmux cousin is reached through its chat server. Subcommands:
-`send SLUG TEXT [--from NAME]`, `list`.
+lists who is addressable. A local runner cousin (`[agent] runner` set, `tmux`
+kind included) is written directly, in-process: its chat history and inbox.
+A local cousin with no runner kind is refused with the one line
+`lane_refusal` gives, and nothing is sent (exit 1). `list` prints each
+cousin's kind (`kind=sdk`, `none` for no runner, `worker` for a
+[worker](glossary.md#worker)). Subcommands: `send SLUG TEXT [--from NAME]`,
+`list`.
 
 ```
 cousin-chat send kestrel "the greenhouse report is ready" --from Wren
 ```
 
-`cousin-chat-server` is the per-cousin chat server. `cousin-spawn --start`
-and the console launch it for you; run it by hand for debugging.
-`--no-terminal-delivery` stores messages without typing them into the tmux
-session.
-
-```
-cousin-chat-server --home cousins/wren
-```
-
 `cousin-chat-import` imports a cousin's chat history from the previous
-framework (stop its chat server first). A second run is refused unless
-`--force`.
+framework. Stop the cousin first: it refuses while the cousin's runner holds
+its lock. A second run is refused unless `--force`.
 
 ```
 cousin-chat-import wren --old-home /srv/old/cousins/wren/files
-```
-
-`cousin-chat-watchdog` makes one pass over the fleet: starts a missing chat
-server for a running cousin, reports a sick one, never kills anything.
-
-```
-cousin-chat-watchdog --dry-run
 ```
 
 `cousin-telegram` bridges one cousin's chat to Telegram (long polling, off
@@ -700,3 +692,15 @@ mode only).
 cousin-gate --root /tmp/publish --denylist ~/private/denylist.txt
 cousin-gate --root . --denylist denylist.txt --git-visible
 ```
+
+## Removed in 2.0.0
+
+No cousin runs a chat server of its own in 2.0.0: the console answers chat
+in-process over the cousin's own store, the runner's inbox carries delivery,
+and the hive carries a node's chat through the queen.
+
+| removed | instead |
+|---|---|
+| `cousin-chat-server` | none: the console, `cousin-chat`, `cousin-reply` and the Telegram bridge call the chat API in-process |
+| `cousin-chat-watchdog` (and its timer) | none: there is no chat server to keep up |
+| `cousin-spawn --port` | none: a cousin has no chat port |

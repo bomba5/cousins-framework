@@ -146,8 +146,8 @@ Linux with the same pieces works with its own package names.
 
 When you're done you have: the checkout (which is also the framework root),
 a venv inside it, one cousin under `cousins/wren`, its Claude Code session in
-a tmux session called `wren`, its chat server on a local port, and a handful
-of systemd user units that keep running whether or not you're logged in.
+a tmux session called `wren`, and a handful of systemd user units that keep
+running whether or not you're logged in.
 
 ### What you need
 
@@ -341,17 +341,16 @@ cousin-spawn wren --start
 
 - `cousin-spawn` creates `cousins/wren/` with its `cousin.toml`, `CLAUDE.md`
   from the template, `STATUS.md`, `MEMORY.md`, the MCP registry and
-  `.mcp.json`, and picks a free chat port from 8090 up. `--role` and
-  `--voice` are required. `--operator` is the name you'll chat as; the
-  cousin's `send` tool can reach that name. Leave it out for a cousin with no
-  operator.
+  `.mcp.json`. `--role` and `--voice` are required. `--operator` is the
+  name you'll chat as; the cousin's `send` tool can reach that name. Leave it
+  out for a cousin with no operator.
 - `cousin-mcp approve` marks the home as trusted in `~/.claude.json` and
   enables the cousin's `cousin` MCP server, so Claude Code doesn't stop on
   its trust prompt. The file exists once Claude Code has run once.
 - `cousin-tool-surface` writes `data/tool-surface.md`, which the boot packet
   quotes. Without it the first boot is marked degraded. The daily timer keeps
   it fresh after this.
-- `cousin-spawn wren --start` starts the tmux session and the chat server.
+- `cousin-spawn wren --start` starts the tmux session.
   On a cousin that's already running it does nothing. Before it touches
   anything it checks that tmux and the agent command resolve, and stops with
   the reason if either doesn't.
@@ -375,7 +374,7 @@ done
 systemctl --user daemon-reload
 cousin-console adduser ana
 systemctl --user enable --now cousin-loops.service cousin-console.service
-systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
+systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer
 loginctl enable-linger "$USER"
 ```
 
@@ -391,12 +390,6 @@ restart needed.
 
 `loginctl enable-linger` keeps your user units running after you log out. If
 it's refused, run it with `sudo`.
-
-Don't enable `cousin-chat-server@wren.service`. `--start` already started
-Wren's chat server and the watchdog timer looks after it. A second server on
-the same port fails to bind and restarts every five seconds. The template
-unit is for when you want systemd to own the chat server instead; see
-[the units](../systemd/README.md).
 
 ### 8. Open the console
 
@@ -472,12 +465,20 @@ an editable install only creates wrappers for the commands it knew about.
 If `systemd/` changed in the pull, re-run the `sed` loop from step 7 before
 the `daemon-reload`.
 
-Restarting the console and the loops daemon doesn't touch the cousins or
-their chat servers (both units use `KillMode=process`). Running cousins keep
-the old code in their chat servers until they're restarted or flipped. A
-flip picks up everything new; see [cousins](cousins.md). The console's top
-bar shows the version and commit the console process is running, so a pull
+Restarting the console or the loops daemon restarts only that daemon. A
+runner cousin is the supervisor's child, not theirs, and keeps running.
+Running cousins keep the old code until they're restarted or flipped. A flip
+picks up everything new; see [cousins](cousins.md). The console's top bar
+shows the version and commit the console process is running, so a pull
 without a restart is visible there.
+
+An install upgraded from 1.x still has the old chat server units. 2.0.0 runs
+no chat server, so disable them once, for each slug that had one, and delete
+their files from `~/.config/systemd/user/`:
+
+```
+systemctl --user disable --now cousin-chat-watchdog.timer cousin-chat-server@<slug>.service
+```
 
 If you move the checkout to another path, the cousins' Claude Code settings
 still point at the old one. Fix each with `cousin-spawn <slug>
@@ -491,17 +492,16 @@ The reverse, in order. Back up first if you might want the cousins again:
 
 ```
 systemctl --user disable --now cousin-loops.service cousin-console.service \
-    cousin-sweep.timer cousin-tool-surface.timer cousin-chat-watchdog.timer
+    cousin-sweep.timer cousin-tool-surface.timer
 rm -rf ~/.config/systemd/user/cousin-*        # -r: the LAN drop-in is a directory
 rm -f ~/.local/share/systemd/timers/stamp-cousin-*   # the timers' last-run stamps
 systemctl --user daemon-reload
 systemctl --user reset-failed
 
-# every cousin: the tmux session and the chat server
+# every cousin: the tmux session
 for home in ~/cousins-framework/cousins/*/; do
   slug=$(basename "$home")
   tmux kill-session -t "$slug" 2>/dev/null
-  [ -f "$home/data/chat-server.pid" ] && kill "$(cat "$home/data/chat-server.pid")"
 done
 
 rm -rf ~/cousins-framework     # checkout, venv, config, every cousin home

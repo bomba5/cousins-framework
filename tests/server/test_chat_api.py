@@ -1,6 +1,6 @@
-"""The chat API as library calls (server/chat_api.py): one implementation
-the chat server answers HTTP with and the console calls in-process for a
-runner cousin. Hermetic: a temp home, no server, no tmux."""
+"""The chat API as library calls (server/chat_api.py): what the console,
+the Telegram bridge and cousin-chat call in-process (no cousin runs a
+chat server of its own). Hermetic: a temp home, no server, no tmux."""
 import base64
 import json
 import pathlib
@@ -93,10 +93,8 @@ class TestWrites(ApiCase):
                                   lambda *a, **k: order.append("hooks")):
             out = chat_api.send(self.config, {"user": "Priya", "message": "hi",
                                               "reply_to": {"id": 1}},
-                                deliver=lambda **k: order.append(("deliver", k["message"],
-                                                                  k["context"])),
-                                context=lambda c, u, m: "[fw-recall] x")
-        self.assertEqual(order, [("deliver", "hi", "[fw-recall] x"), "marker", "hooks"])
+                                deliver=lambda **k: order.append(("deliver", k["message"])))
+        self.assertEqual(order, [("deliver", "hi"), "marker", "hooks"])
         [stored] = chat_api.history(self.home, {"user": "Priya"})["messages"]
         self.assertEqual((stored["id"], stored["message"], json.loads(stored["reply_to"])),
                          (out["id"], "hi", {"id": 1}))
@@ -143,15 +141,17 @@ class TestRunnerCousin(ApiCase):
         self.assertEqual(row["thread_id"], "system")
 
 
-class TestTmuxCousinImage(ApiCase):
-    def test_an_image_is_delivered_as_the_pane_marker(self):
+class TestAttachment(ApiCase):
+    def test_an_attachment_is_never_a_read_marker(self):
+        # the "[image attached -> Read <path>]" marker was the tmux pane
+        # line's; every lane gets the saved file's path
         seen = {}
         out = chat_api.send(self.config, {"user": "Priya", "message": "look",
                                           "image": "data:image/png;base64," + _PNG},
                             deliver=lambda **k: seen.update(k))
-        self.assertEqual(seen["attachments"], ["[image attached -> Read %s]"
-                                               % (self.home / "chat" / "inbound"
-                                                  / ("%d.png" % out["id"]))])
+        self.assertEqual(seen["attachments"], [str(self.home / "chat" / "inbound"
+                                                   / ("%d.png" % out["id"]))])
+        self.assertNotIn("context", seen)
 
 
 if __name__ == "__main__":

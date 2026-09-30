@@ -1,5 +1,6 @@
 """Telegram provisioning routes: the token is accepted and never
-answered; enabling a stopped cousin's bridge waits for its start."""
+answered; a bridge is the supervisor's, and a cousin with no runner kind
+has none (the config is written, `bridge` says why)."""
 import json
 import time
 import unittest
@@ -45,8 +46,9 @@ class TestTelegramRoutes(ConsoleCase):
         self.assertEqual(body["operators"], [{"user_id": 42, "name": "Ana"}])
         status, body = self.post("/api/cousins/wren/telegram/enabled",
                                  {"enabled": True})
+        from cousin_lib.delivery import lane_refusal
         self.assertEqual((body["enabled"], body["bridge"], body["running"]),
-                         (True, "starts with the cousin", False))
+                         (True, lane_refusal(self.root / "cousins" / "wren"), False))
         self.assertIsNone(body["ready"])
         self.assertEqual(self.get("/api/cousins/nobody/telegram")[0], 404)
 
@@ -65,12 +67,6 @@ class TestRunnerLaneToggle(ConsoleCase):
             patch = mock.patch.object(telegram_admin, name, fake)
             patch.start()
             self.addCleanup(patch.stop)
-        # telegram_admin.start_bridge's Popen is the unsupervised bridge:
-        # recorded, never run
-        sub = mock.patch.object(telegram_admin, "subprocess")
-        self.popen = sub.start().Popen
-        self.popen.return_value.pid = 4242
-        self.addCleanup(sub.stop)
 
     def runner_cousin(self):
         home = self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
@@ -95,7 +91,6 @@ class TestRunnerLaneToggle(ConsoleCase):
         status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": False})
         self.assertEqual(status, 200, body)
         self.assertEqual(stub.ops(), [("reload", None)] * 3)
-        self.popen.assert_not_called()
 
     def test_a_supervised_disable_leaves_the_stop_to_the_supervisor(self):
         self.runner_cousin()
@@ -156,7 +151,6 @@ class TestRunnerLaneToggle(ConsoleCase):
         status, body = self.post("/api/cousins/wren/telegram/operators", {
             "operators": [{"user_id": 42, "name": "Ana"}]})
         self.assertEqual((status, body["bridge"]), (200, "supervised"), body)
-        self.popen.assert_not_called()
 
     def test_without_a_supervisor_the_toggle_still_starts_nothing(self):
         self.runner_cousin()
@@ -165,7 +159,6 @@ class TestRunnerLaneToggle(ConsoleCase):
         status, body = self.post("/api/cousins/wren/telegram/enabled", {"enabled": True})
         self.assertEqual(status, 200, body)
         self.assertIn("no cousin-supervisor", body["bridge"])
-        self.popen.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
-"""The chat proxy: every chat route forwards to the cousin's own chat
-server by its configured port and stores nothing (docs/reference/console-api.md,
-"Chat: a proxy over each cousin's chat server"). The upstream here is a
-real ChatServer on an ephemeral loopback port; the console side is
-exercised through the router with a minimal request object."""
+"""The chat proxy's upstream path: a chat route for a cousin that is not
+a local runner forwards to its chat server by its configured host and
+port and stores nothing (docs/reference/console-api.md, "Chat"). In
+2.0.0 that server is a hive node's; the upstream here is a test double
+over the same API (tests._fakes.FakeChatUpstream) on an ephemeral
+loopback port; the console side is exercised through the router with a
+minimal request object."""
 import base64
 import json
 import pathlib
@@ -15,7 +17,7 @@ from types import SimpleNamespace
 
 from cousin_lib.config import CousinConfig
 from cousin_lib.console import proxy, router
-from cousin_lib.server.app import ChatServer
+from tests._fakes import FakeChatUpstream as ChatServer
 
 # A 1x1 transparent PNG: a real decodable image for the inbox path.
 _PNG = base64.b64encode(bytes.fromhex(

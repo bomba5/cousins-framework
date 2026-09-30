@@ -9,7 +9,7 @@ snapshotted - a restore regenerates them on the first search.
 The runner's event stream (data/stream/*.jsonl, one append-only file
 per runner session) is copied too, cut in the copy to its last complete
 line: a writer may be mid-line, and a torn tail can end inside a UTF-8
-character, which EventStream.tail() (a text-mode reader) cannot decode.
+character (EventStream.tail() skips such a line, and the copy holds none).
 The small state files a runner restores from are plain copies
 (RUNNER_STATE): the session ids it resumes (runner-session*.json, one
 per session kind), its generation count (generation.txt), and the

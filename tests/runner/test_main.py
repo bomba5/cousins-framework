@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import pathlib
 import signal
 import subprocess
 import sys
@@ -18,6 +19,8 @@ from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.stream import EventStream
 from tests._hermetic import HermeticCase
 from tests.runner._home import temp_home
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _append_agent_key(home, name):
@@ -642,14 +645,16 @@ class TestIsRunning(HermeticCase):
         self.assertFalse(runner_main.is_running(home))
 
     def test_is_running_is_true_while_a_runner_holds_the_lock(self):
+        # #79: the holder is another PROCESS taking the lock the way a
+        # runner does (hold_lock), so the probe sees a real runner's lock
         home = temp_home(self, runner="fake")
-        lock = home / "run" / "runner.lock"
-        holder = ("import fcntl, os, sys, time\n"
-                  "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"
-                  "fcntl.flock(fd, fcntl.LOCK_EX)\n"
-                  "print('locked', flush=True)\n"
-                  "time.sleep(30)\n")
-        with subprocess.Popen([sys.executable, "-c", holder, str(lock)],
+        holder = ("import sys, time\n"
+                  "sys.path.insert(0, sys.argv[2])\n"
+                  "from cousin_lib.runner.main import hold_lock\n"
+                  "with hold_lock(sys.argv[1]):\n"
+                  "    print('locked', flush=True)\n"
+                  "    time.sleep(30)\n")
+        with subprocess.Popen([sys.executable, "-c", holder, str(home), str(REPO)],
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
             try:
                 self.assertEqual(proc.stdout.readline(), b"locked\n")
@@ -668,6 +673,58 @@ class TestIsRunning(HermeticCase):
         self.assertEqual(rc, 0)
 
 
+class TestProbeDoesNotContend(HermeticCase):
+    """#79: is_running must not take the lock a starting runner needs, so a
+    start racing any number of probes is never refused. LOCK_TAKE_S is
+    zeroed so the retry window cannot hide a probe holding the lock."""
+
+    _PROBER = ("import sys\n"
+               "sys.path.insert(0, sys.argv[2])\n"
+               "from cousin_lib.runner.main import is_running\n"
+               "print('probing', flush=True)\n"
+               "while True:\n"
+               "    is_running(sys.argv[1])\n")
+
+    def test_a_start_racing_many_probes_is_never_refused(self):
+        home = temp_home(self, runner="fake")
+        (home / "run").mkdir(parents=True, exist_ok=True)
+        (home / "run" / "runner.lock").touch()
+        probers = []
+        for _ in range(3):
+            proc = subprocess.Popen([sys.executable, "-c", self._PROBER, str(home), str(REPO)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            self.addCleanup(proc.wait, 5)
+            self.addCleanup(proc.kill)
+            self.addCleanup(proc.stdout.close)
+            self.assertEqual(proc.stdout.readline(), b"probing\n")
+            probers.append(proc)
+        refused = 0
+        with mock.patch.object(runner_main, "LOCK_TAKE_S", 0.0):
+            for _ in range(300):
+                try:
+                    with runner_main.hold_lock(home):
+                        pass
+                except runner_main.LockHeld:
+                    refused += 1
+        for proc in probers:
+            self.assertIsNone(proc.poll(), "a prober died: the race was not exercised")
+        self.assertEqual(refused, 0)
+
+    def test_a_probe_sees_the_lock_a_runner_holds_in_this_process_too(self):
+        # an open-file-description lock: a probe on its own descriptor sees
+        # a holder in the same process, and closing the probe's descriptor
+        # does not drop the holder's lock
+        home = temp_home(self, runner="fake")
+        with runner_main.hold_lock(home):
+            for _ in range(3):
+                self.assertTrue(runner_main.is_running(home))
+            with self.assertRaises(runner_main.LockHeld):
+                with mock.patch.object(runner_main, "LOCK_TAKE_S", 0.0):
+                    with runner_main.hold_lock(home):
+                        self.fail("took a lock this process already holds")
+        self.assertFalse(runner_main.is_running(home))
+
+
 class TestHoldLock(HermeticCase):
     def test_hold_lock_is_visible_to_is_running(self):
         home = temp_home(self, runner="fake")
@@ -684,9 +741,10 @@ class TestHoldLock(HermeticCase):
 
 
 class TestHoldLockRetry(HermeticCase):
-    """#79 (review N4): is_running probes by taking the lock for
-    microseconds; hold_lock retries LOCK_EX|LOCK_NB for LOCK_TAKE_S before
-    LockHeld, so a runner starting inside a probe is never refused."""
+    """#79 (review N4): an older version's is_running probed by taking the
+    flock for microseconds, and a long-lived process may still run one;
+    hold_lock retries LOCK_EX|LOCK_NB for LOCK_TAKE_S before LockHeld, so
+    a runner starting inside such a probe is not refused."""
 
     _HOLDER = ("import fcntl, os, sys, time\n"
                "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT)\n"

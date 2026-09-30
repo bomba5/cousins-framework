@@ -169,7 +169,7 @@ A delivered message is a row in the cousin's inbox (`data/inbox.db`). The runner
 
 `pattern` is a Python regex searched in the message. `user` is compared case-insensitively; `*` or leaving it out matches anyone. `desc` is ignored. Every matching entry fires, in file order, after the message is stored and delivered.
 
-- `shell:<path>` runs the script detached, working directory the home, with `COUSIN_HOOK_USER`, `COUSIN_HOOK_MESSAGE`, `COUSIN_HOOK_PATTERN`, `COUSIN_SLUG` and `COUSIN_HOME` set. Output goes to `<home>/data/chat-hooks.log`. A relative path is taken from the home. The script has to be inside the home or the framework root, otherwise it's refused with a line on stderr.
+- `shell:<path>` runs the script detached, working directory the home, with `COUSIN_HOOK_USER`, `COUSIN_HOOK_MESSAGE`, `COUSIN_HOOK_PATTERN`, `COUSIN_SLUG` and `COUSIN_HOME` set; the server's auth variables and every credential-shaped variable (`*SECRET*`, `*_KEY`, `*_TOKEN`, `*_PASSWORD`) are removed. Output goes to `<home>/data/chat-hooks.log`. A relative path is taken from the home. The script has to be inside the home or the framework root, otherwise it's refused with a line on stderr.
 - `inject:<text>` delivers the text to the cousin as its own item, from `fw-hook` on its `system` thread, right after the message.
 
 A missing or broken file, a bad regex or a failing script never affects the send. Hook lines aren't stored in the history.

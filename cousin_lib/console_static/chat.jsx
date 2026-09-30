@@ -260,6 +260,151 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   const readsEffort = !laneKeys || !window.agentLaneReads
     || window.agentLaneReads(cousin.lane, "effort", laneKeys);
 
+  // On a phone (not in an embed, which has its own one-line header) the
+  // toolbar is one row: effort, a search button that opens the field, a
+  // "⋯" menu with archive / archived / media, then the pane and the
+  // fullscreen toggles as icons. Every desktop control stays reachable.
+  const mobile = (window.useMobileLayout ? useMobileLayout() : false) && !embed;
+  const [searchOpen, setSearchOpen] = React.useState(() => !!search);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!menuOpen) return undefined;
+    const away = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    const esc = (e) => { if (e.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menuOpen]);
+  React.useEffect(() => { setMenuOpen(false); }, [cousin.slug, mobile]);
+  const closeSearch = () => { setSearch(""); setSearchOpen(false); };
+
+  if (mobile && searchOpen && !remote) {
+    return (
+      <div className="chat-header ch-mobile ch-searching">
+        <input
+          className="chat-search"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === "Escape") closeSearch(); }}
+          placeholder="search..."
+          aria-label="search this chat"
+          autoFocus
+        />
+        <button className="btn ghost ch-icon ch-search-close" onClick={closeSearch}
+                title="close the search" aria-label="close the search">&times;</button>
+      </div>
+    );
+  }
+
+  if (mobile) {
+    const menuItems = !remote || !!setMediaShown;
+    return (
+      <div className="chat-header ch-mobile">
+        {remote && <span className="ch-sub" title={`a hive node at ${cousin.host}:${cousin.port}`}>remote</span>}
+        {!remote && readsEffort && (
+          <label className="ch-effort">
+            <select
+              value={effort}
+              onChange={e => applyEffort(e.target.value)}
+              disabled={!efforts.length}
+              title={cousin.runner
+                ? "effort: cousin.toml [agent] effort, read by the runner at the next start"
+                : "effort: cousin.toml [runtime] effort, rendered into the agent command at the next start"}
+              aria-label="effort"
+              className="sel-inline"
+            >
+              {!efforts.length && <option value={effort}>{effort || "..."}</option>}
+              {efforts.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {effortHint && (
+              <span className="ch-effort-hint" title={effortHint}
+                    style={{ color: effortHint.startsWith("failed") ? "var(--red)" : "var(--fg-2)" }}>
+                {effortHint}
+              </span>
+            )}
+          </label>
+        )}
+        <span className="ch-fill" />
+        {!remote && (
+          <button className={"btn ghost ch-icon ch-search-open" + (search ? " active" : "")}
+                  onClick={() => setSearchOpen(true)}
+                  title="search this chat" aria-label="search this chat">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5L14 14" />
+            </svg>
+          </button>
+        )}
+        {menuItems && (
+          <span className="ch-more-wrap" ref={menuRef}>
+            <button className={"btn ghost ch-icon ch-more" + (showArchived || !mediaShown ? " active" : "")}
+                    onClick={() => setMenuOpen(v => !v)}
+                    aria-haspopup="menu" aria-expanded={menuOpen}
+                    title="more: archive, archived, media" aria-label="more">
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+                <circle cx="3" cy="8" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" />
+              </svg>
+            </button>
+            {menuOpen && (
+              <div className="ch-menu" role="menu">
+                <div className="ch-menu-who">chat &middot; @{cousin.slug}{chatUser ? ` as ${chatUser}` : ""}</div>
+                {!remote && (<>
+                <button
+                  role="menuitem"
+                  className="btn ghost"
+                  onClick={onArchive}
+                  disabled={!chatUser}
+                  title="archive ALL active messages"
+                >archive</button>
+                <button
+                  role="menuitem"
+                  className={"btn ghost" + (showArchived ? " active" : "")}
+                  onClick={() => { setShowArchived(v => !v); setMenuOpen(false); }}
+                  title={showArchived ? "showing archived messages, click to return to live" : "browse archived messages"}
+                >{showArchived ? "live" : "archived"}</button>
+                </>)}
+                {setMediaShown && (
+                  <button
+                    role="menuitem"
+                    className={"btn ghost chat-media-toggle" + (mediaShown ? "" : " active")}
+                    onClick={() => { setMediaShown(v => !v); setMenuOpen(false); }}
+                    aria-pressed={!mediaShown}
+                    title={mediaShown ? "media shown: click to hide images, videos and audio" : "media hidden: click to show"}
+                  >{mediaShown ? "media on" : "media off"}</button>
+                )}
+              </div>
+            )}
+          </span>
+        )}
+        {!paneOpen && !remote && (
+          <button className="btn ghost ch-icon ch-pane-open"
+                  onClick={() => setPaneOpen(true)}
+                  title={cousin.runner ? "show the reasoning stream" : "show the terminal pane"}
+                  aria-label={cousin.runner ? "reasoning" : "terminal"}>
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="1" /><path d="M9.5 3v10M11 6h1.5M11 8.5h1.5" />
+            </svg>
+          </button>
+        )}
+        {setFullscreen && (
+          <button
+            className="btn ghost ch-icon chat-fullscreen-toggle"
+            onClick={() => setFullscreen(v => !v)}
+            title={fullscreen ? "exit fullscreen" : "fullscreen chat"}
+            aria-label={fullscreen ? "exit fullscreen" : "fullscreen chat"}
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <path d="M9.5 2.5h4v4M13.5 2.5L9 7M6.5 13.5h-4v-4M2.5 13.5L7 9" />
+            </svg>
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="chat-header">
       <span className="ch-title">

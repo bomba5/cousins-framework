@@ -274,6 +274,29 @@ function SecretField({ onSubmit, status, placeholder = "paste the secret", submi
   );
 }
 
+// ---- phone layout -----------------------------------------------------------
+// True on a phone: the same cut as styles.css's `@media (max-width: 820px)`,
+// live as the window turns or resizes. A component that lays itself out
+// differently on a phone (the chat header, the chat status line) branches
+// on it and leaves its desktop markup as it was.
+const MOBILE_QUERY = "(max-width: 820px)";
+function useMobileLayout() {
+  const read = () => typeof window !== "undefined" && !!window.matchMedia
+    && window.matchMedia(MOBILE_QUERY).matches;
+  const [mobile, setMobile] = React.useState(read);
+  React.useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const on = () => setMobile(mq.matches);
+    on();
+    if (mq.addEventListener) mq.addEventListener("change", on); else mq.addListener(on);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", on); else mq.removeListener(on);
+    };
+  }, []);
+  return mobile;
+}
+
 // ---- long operations --------------------------------------------------------
 // A cousin's long operation (console/longop.py): [op, reload] from GET
 // /api/cousins/<slug>/op, reloaded on each `cousin-op` event for the slug
@@ -324,4 +347,5 @@ Object.assign(window, {
   Led, Pill, StatePill, Bar, Spark, HeartbeatGraph, I,
   registerSlot, slotEntries, Slot, registerView, registeredViews, registeredView, RESERVED_VIEW_IDS,
   SlotBoundary, SlotEntry, SecretField, secretStateText, useLongOp, LongOpStatus,
+  useMobileLayout,
 });

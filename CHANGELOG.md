@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 2.2.3 - 2026-09-30
 
 ### Changed
 
@@ -73,6 +73,57 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   disabled tool's sentences, bullets and section go, and the paragraph
   that held them is re-wrapped. With every tool served the contract is
   byte for byte what it was (the prompt cache keys on it).
+
+## 2.2.2 - 2026-09-30
+
+### Fixed
+- Plugins: a plugin's event stream through the console's `/plugins/<name>/`
+  proxy no longer ends after 5 quiet seconds. The proxy asks the service for
+  `Connection: close`, so the connect timeout stayed on the socket the relay
+  reads; a page reconnected every few seconds and missed events sent in the gaps.
+
+- `cousin-runner`: a status probe of a runner's lock no longer takes it
+  (#79). `hold_lock` now also holds an open-file-description lock on
+  `run/runner.lock` beside its flock, and `is_running` reads it with
+  `F_OFD_GETLK`, which takes nothing, so a runner starting while the
+  fleet poll, the loops tick or the console probes it is never refused.
+  The flock still keeps a second runner out, one of an older version
+  included; a runner started before the upgrade reads as stopped to the
+  new probe until it restarts.
+- The runner's event stream reader (`EventStream.tail()`) no longer
+  raises `UnicodeDecodeError` when the stream file ends inside a
+  multi-byte character (a writer that died mid-write): it reads bytes
+  and decodes each complete line, and the partial last line is skipped
+  as before (#86).
+- Chat hooks: a `shell:` handler no longer inherits the chat server's
+  credentials (#88). Its environment is the server's minus the auth
+  variables (`accounts.AUTH_VARS`) and every credential-shaped name
+  (`*SECRET*`, `*_KEY`, `*_TOKEN`, `*_PASSWORD`), the rule the runner
+  already applies to the cousin's own tools.
+- The sdk runner has a test that a turn the CLI ends with an `is_error`
+  result (no exception, no login or rate-limit signal) closes its rows
+  `failed` and the next row still runs (#67).
+- Semantic memory search: a file's last chunk that would add fewer new
+  characters than `chunk_overlap` now joins the chunk before it instead
+  of standing alone as a fragment that is mostly overlap (#82); such
+  fragments ranked erratically. Nothing is re-embedded at upgrade:
+  existing indexes pick it up at their next rebuild or refresh, which
+  re-embeds only the affected files' last chunk.
+
+## 2.2.1 - 2026-09-30
+
+### Fixed
+
+- **The chat header on a phone** ([docs/console.md](docs/console.md#chat)):
+  below the console's 820 px breakpoint the chat toolbar took three rows and
+  the status line under the name wrapped mid-line, so a third of the screen
+  went before the first message. The toolbar is now one row of 36 px
+  targets: the effort select, a search button that opens the search field
+  (with a close x), a "⋯" menu holding archive, archived / live and
+  media on / off (and the "@slug as user" line), then the pane and
+  fullscreen toggles as icons. The status line is one line: dot, state and
+  model (cut with an ellipsis); the slug (the title above) and the heartbeat
+  are left out there. The desktop header and the embed are unchanged.
 
 ## 2.2.0 - 2026-09-30
 

@@ -470,8 +470,10 @@ ollama pull nomic-embed-text
 embed, or every search waits it out and falls back to keyword. On a
 CPU without AVX that was 32 seconds, so use 120 on a CPU-only box; 30
 is plenty with a GPU. Files are embedded in chunks of `chunk_chars`
-(default 2000) overlapping by `chunk_overlap` (default 200), and a hit
-says which chunk matched.
+(default 2000) overlapping by `chunk_overlap` (default 200); a last
+piece that would add fewer new characters than the overlap joins the
+chunk before it instead of standing alone. A hit says which chunk
+matched.
 
 The vectors live in `memory/vectors.db`. Each search embeds only
 new or changed chunks and drops deleted files, so the first search

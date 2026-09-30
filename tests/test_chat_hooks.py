@@ -164,6 +164,32 @@ class TestFireShell(HooksCase):
         self.assertEqual(marker.read_text().strip(),
                          "Sam|pat the cat|p.t|testa|%s" % self.home)
 
+    def test_script_sees_no_credential_from_the_server_env(self):
+        # #88: the server's own env may carry the account's auth variables
+        # and other credential-shaped names; a hook runs without them, as
+        # the runner strips them from the cousin's own tools
+        from cousin_lib import accounts
+        secret = {name: "leak-%d" % i for i, name in enumerate(accounts.AUTH_VARS)}
+        secret.update({"SERVICE_API_KEY": "leak-k", "DEPLOY_TOKEN": "leak-t",
+                       "DB_PASSWORD": "leak-p", "APP_SECRET_SALT": "leak-s"})
+        os.environ.update(secret)
+        os.environ["HARMLESS_SETTING"] = "kept"
+        dump, done = self.home / "data" / "env.txt", self.home / "data" / "env.done"
+        # env(1) and shell builtins only: the test PATH is /usr/bin:/bin
+        self._script("scripts/env.sh",
+                     'env > "%s"\necho done > "%s"\n' % (dump, done))
+        matched = [{"pattern": "p", "handler": "shell:scripts/env.sh"}]
+        chat_hooks.fire(matched, user="Sam", message="p", slug="testa",
+                        home=self.home, inject=None)
+        self.assertTrue(_wait_for(done), "the hook never ran")
+        seen = dict(line.split("=", 1) for line in dump.read_text().splitlines()
+                    if "=" in line)
+        self.assertEqual(sorted(set(seen) & set(secret)), [])
+        self.assertNotIn("leak-", dump.read_text())
+        self.assertEqual(seen.get("HARMLESS_SETTING"), "kept")
+        self.assertEqual(seen.get("COUSIN_HOOK_USER"), "Sam")
+        self.assertIn(secret["ANTHROPIC_API_KEY"], os.environ.values())   # the server's own env is untouched
+
     def test_output_is_appended_to_the_hooks_log(self):
         self._script("h.sh", "echo out; echo err >&2\n")
         matched = [{"pattern": "p", "handler": "shell:h.sh"}]

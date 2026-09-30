@@ -134,7 +134,9 @@ Telegram bridge make.
 
 - `shell:<path>` runs a script in the background, from the cousin home,
   with `COUSIN_HOOK_USER`, `COUSIN_HOOK_MESSAGE`, `COUSIN_HOOK_PATTERN`,
-  `COUSIN_SLUG` and `COUSIN_HOME` set. Output goes to
+  `COUSIN_SLUG` and `COUSIN_HOME` set, and without the server's auth
+  variables or any credential-shaped variable (`*SECRET*`, `*_KEY`,
+  `*_TOKEN`, `*_PASSWORD`). Output goes to
   `data/chat-hooks.log`. A relative path is taken from the home, and the
   script must live inside the home or the framework root; anything else
   is refused.

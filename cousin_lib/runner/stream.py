@@ -35,12 +35,15 @@ class EventStream:
     def tail(self, after=None):
         if not self.path.exists():
             return
-        with open(self.path, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.endswith("\n"):
+        # bytes, decoded one complete line at a time (#86): a writer that
+        # died inside a multi-byte character leaves bytes a text-mode read
+        # would raise on before the partial line could be skipped
+        with open(self.path, "rb") as f:
+            for raw in f:
+                if not raw.endswith(b"\n"):
                     return          # a writer died mid-line; the next append completes the file
                 try:
-                    event = json.loads(line)
+                    event = json.loads(raw.decode("utf-8", errors="replace"))
                 except ValueError:
                     continue
                 if after is not None and event.get("seq", 0) <= after:

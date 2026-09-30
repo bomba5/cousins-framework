@@ -345,7 +345,7 @@ class ChatBesideThePane(unittest.TestCase):
 
     def test_both_columns_share_one_row(self):
         view = _function_body(self.chat, "ChatView")
-        self.assertIn('className={"chat-split" + (paneShown ? " pane-open" : "")}', view)
+        self.assertIn('className={"chat-split" + (paneShown ? " pane-open" : "") + (chatHidden ? " chat-collapsed" : "")}', view)
         self.assertIn('className="chat-col"', view)
         self.assertIn('className={`pane-col ${paneShown ? "open" : ""}`}', view)
         self.assertIn(".chat-split.pane-open .chat-col { flex: 1 1 0; }", self.css)

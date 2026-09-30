@@ -15,6 +15,34 @@ function resolveChatUser(embedUser, cousin, sessionUser) {
   return embedUser || (cousin && cousin.operator) || sessionUser || "";
 }
 
+// The chat column's width below which its header is the compact one row
+// (the phone's): the desktop header needs about this much for one row with
+// the pane open, so any narrower and it would wrap onto two or three.
+const CHAT_COMPACT_PX = 740;
+// How near an edge of the split a dragged divider snaps: the chat's left
+// edge collapses the chat, the right edge closes the pane.
+const SPLIT_SNAP_PX = 40;
+function splitSnap(x, left, right, zone = SPLIT_SNAP_PX) {
+  if (!(right > left)) return null;
+  if (x <= left + zone) return "chat";
+  if (x >= right - zone) return "pane";
+  return null;
+}
+
+// POST /api/chat/send: a stored chat message, as the composer sends it
+// (the pane's say box reuses it for "send as chat"). Resolves to
+// { ok: true, data } or { ok: false, error }; a network error throws.
+async function postChatMessage(body) {
+  const r = await fetch("/api/chat/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.ok === false) return { ok: false, error: d.error || `HTTP ${r.status}` };
+  return { ok: true, data: d };
+}
+
 function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   const c = (cousins || []).find(x => x.slug === activeCousin);
   // The session user is a prop when the shell knows it; otherwise ask once.
@@ -95,24 +123,48 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
     try { localStorage.setItem("fw_pane_w", String(Math.round(paneW * 10) / 10)); }
     catch (e) { /* ignore */ }
   }, [paneW]);
+  // The divider also snaps (#126): let go within SPLIT_SNAP_PX of the
+  // chat's left edge and the chat collapses, the pane covering the whole
+  // area; a strip at that edge brings it back. Let go within SPLIT_SNAP_PX
+  // of the right edge and the pane closes, as its x does. Either way the
+  // split keeps the width it had before the drag (fw_pane_w), so the chat
+  // comes back at its last width; the collapse is kept per browser too.
+  const [chatCollapsed, setChatCollapsed] = React.useState(() => {
+    try { return localStorage.getItem("fw_chat_collapsed") === "1"; }
+    catch (e) { return false; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem("fw_chat_collapsed", chatCollapsed ? "1" : "0"); }
+    catch (e) { /* ignore */ }
+  }, [chatCollapsed]);
   const splitRef = React.useRef(null);
   const onDividerDown = (e) => {
     const el = splitRef.current;
     if (!el) return;
     e.preventDefault();
     el.classList.add("dragging");
+    const startW = paneW;
+    let snap = null;
     const move = (m) => {
       const r = el.getBoundingClientRect();
       if (r.width > 0) setPaneW(Math.min(80, Math.max(20, (r.right - m.clientX) / r.width * 100)));
+      snap = splitSnap(m.clientX, r.left, r.right);
+      el.classList.toggle("snap-chat", snap === "chat");
+      el.classList.toggle("snap-pane", snap === "pane");
     };
     const up = () => {
-      el.classList.remove("dragging");
+      el.classList.remove("dragging", "snap-chat", "snap-pane");
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      if (snap) setPaneW(startW);
+      if (snap === "chat") setChatCollapsed(true);
+      if (snap === "pane") setPaneOpen(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  // The header goes compact when the chat column is narrow, not only on a phone.
+  const [chatColRef, narrowCol] = window.useNarrowerThan ? useNarrowerThan(CHAT_COMPACT_PX) : [null, false];
   React.useEffect(() => {
     try { localStorage.setItem("fw_chat_fullscreen", fullscreen ? "1" : "0"); }
     catch (e) { /* ignore */ }
@@ -163,6 +215,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
   // A remote cousin (a hive node on another machine) has no pane here:
   // the console does not run it, it only proxies its chat.
   const paneShown = paneOpen && !c.remote;
+  // The chat is collapsed only while the pane is there to cover it.
+  const chatHidden = paneShown && chatCollapsed;
+  const closePane = () => { setPaneOpen(false); setChatCollapsed(false); };
   const pluginTabAll = window.pluginTabs ? window.pluginTabs(c) : [];
   const pluginTabList = pluginTabAll.filter(t => t.placement !== "chat");
   // The "chat" pages, over the messages; not in an embed (no pane there either).
@@ -174,9 +229,9 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
       {/* The chat and the pane side by side: the pane is the runner's
           reasoning stream (with the interrupt) or the tmux terminal. On a
           phone the open pane takes the whole width, as it always did. */}
-      <div ref={splitRef} className={"chat-split" + (paneShown ? " pane-open" : "")} style={{ "--pane-w": paneW + "%" }}>
-        <div className="chat-col">
-          <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneShown} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} />
+      <div ref={splitRef} className={"chat-split" + (paneShown ? " pane-open" : "") + (chatHidden ? " chat-collapsed" : "")} style={{ "--pane-w": paneW + "%" }}>
+        <div className="chat-col" ref={chatColRef} aria-hidden={chatHidden || undefined}>
+          <ChatHeader cousin={c} chatUser={chatUser} paneOpen={paneShown} setPaneOpen={setPaneOpen} search={search} setSearch={setSearch} onArchive={onArchive} fullscreen={fullscreen} setFullscreen={embed ? null : setFullscreen} embed={embed} showArchived={showArchived} setShowArchived={setShowArchived} mediaShown={mediaShown} setMediaShown={setMediaShown} narrow={narrowCol} />
           {fullscreen && (
             <button className="chat-fullscreen-exit"
                     onClick={() => setFullscreen(false)}
@@ -192,9 +247,13 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
           <ChatBody key={c.slug + "|" + chatUser} cousin={c} search={search} setSearch={setSearch} chatUser={chatUser} showArchived={showArchived} mediaShown={mediaShown} />
           {toast && <div className="chat-toast">{toast}</div>}
         </div>
-        {paneShown && (
+        {paneShown && !chatHidden && (
           <div className="split-div" onPointerDown={onDividerDown} onDoubleClick={() => setPaneW(50)}
-               title="drag to resize, double-click to reset" role="separator" aria-orientation="vertical" />
+               title="drag to resize, double-click to reset; drag to an edge to collapse" role="separator" aria-orientation="vertical" />
+        )}
+        {chatHidden && (
+          <button className="chat-restore" onClick={() => setChatCollapsed(false)}
+                  title="show the chat" aria-label="show the chat">&rsaquo;</button>
         )}
         <div className={`pane-col ${paneShown ? "open" : ""}`}>
           {paneShown && pluginTabList.length > 0 && window.PluginPaneTabs && (
@@ -205,15 +264,15 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
             <PluginFrame key={c.slug + "|" + activeTab.name} tab={activeTab} />
           )}
           {paneShown && !activeTab && (c.runner
-            ? <RunnerPaneView key={c.slug} cousin={c} onClose={() => setPaneOpen(false)} />
-            : <PaneView cousin={c} onClose={() => setPaneOpen(false)} />)}
+            ? <RunnerPaneView key={c.slug} cousin={c} onClose={closePane} chatUser={chatUser} chatHidden={chatHidden} />
+            : <PaneView cousin={c} onClose={closePane} />)}
         </div>
       </div>
     </div>
   );
 }
 
-function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown }) {
+function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch, onArchive, fullscreen, setFullscreen, embed, showArchived, setShowArchived, mediaShown, setMediaShown, narrow }) {
   const btnH = 28;  // shared height for input + buttons
   // A remote cousin's node serves send and history only: no effort to
   // set, no archive, no pane.
@@ -260,11 +319,13 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   const readsEffort = !laneKeys || !window.agentLaneReads
     || window.agentLaneReads(cousin.lane, "effort", laneKeys);
 
-  // On a phone (not in an embed, which has its own one-line header) the
-  // toolbar is one row: effort, a search button that opens the field, a
-  // "⋯" menu with archive / archived / media, then the pane and the
-  // fullscreen toggles as icons. Every desktop control stays reachable.
-  const mobile = (window.useMobileLayout ? useMobileLayout() : false) && !embed;
+  // On a phone, or in a chat column narrower than CHAT_COMPACT_PX (the
+  // reasoning pane open beside it), and not in an embed (which has its own
+  // one-line header), the toolbar is one row: effort, a search button that
+  // opens the field, a "⋯" menu with archive / archived / media, then the
+  // pane and the fullscreen toggles as icons. Every desktop control stays
+  // reachable.
+  const compact = ((window.useMobileLayout ? useMobileLayout() : false) || !!narrow) && !embed;
   const [searchOpen, setSearchOpen] = React.useState(() => !!search);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef(null);
@@ -279,10 +340,10 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
       document.removeEventListener("keydown", esc);
     };
   }, [menuOpen]);
-  React.useEffect(() => { setMenuOpen(false); }, [cousin.slug, mobile]);
+  React.useEffect(() => { setMenuOpen(false); }, [cousin.slug, compact]);
   const closeSearch = () => { setSearch(""); setSearchOpen(false); };
 
-  if (mobile && searchOpen && !remote) {
+  if (compact && searchOpen && !remote) {
     return (
       <div className="chat-header ch-mobile ch-searching">
         <input
@@ -300,7 +361,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
     );
   }
 
-  if (mobile) {
+  if (compact) {
     const menuItems = !remote || !!setMediaShown;
     return (
       <div className="chat-header ch-mobile">
@@ -750,14 +811,9 @@ function ChatBody({ cousin, search, setSearch, chatUser, showArchived, mediaShow
       const body = { cousin: c.slug, user: chatUser, message: text };
       if (attachment) body.image = attachment.dataUrl;
       if (replyingTo) body.reply_to = replyingTo;
-      const r = await fetch("/api/chat/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.ok === false) {
-        setError(d.error || `HTTP ${r.status}`);
+      const res = await postChatMessage(body);
+      if (!res.ok) {
+        setError(res.error);
         return;
       }
       setError(null);
@@ -2008,7 +2064,7 @@ function rpTurnHead(turn) {
   return { head: rpCut(head, 90), title, snippet: rpCut(rest.replace(/\s+/g, " ").trim(), 110), full: src };
 }
 
-function RunnerPaneView({ cousin, onClose }) {
+function RunnerPaneView({ cousin, onClose, chatUser, chatHidden }) {
   const slug = cousin && cousin.slug;
   const runner = (cousin && cousin.runner) || {};
   const [events, setEvents] = React.useState([]);
@@ -2132,9 +2188,25 @@ function RunnerPaneView({ cousin, onClose }) {
     }
   };
   const interrupt = () => post(`/api/cousins/${encodeURIComponent(slug)}/interrupt`);
+  // While the chat is collapsed (#126) the say box can post a normal,
+  // stored chat message instead, the composer's own /api/chat/send; it
+  // only injects into the running turn otherwise.
+  const [asChat, setAsChat] = React.useState(false);
+  const sendAsChat = asChat && !!chatHidden;
   const say = async () => {
     const text = said.trim();
     if (!text) return;
+    if (sendAsChat) {
+      if (!chatUser) { setNote("no chat user: open the chat to see why"); return; }
+      try {
+        const res = await postChatMessage({ cousin: slug, user: chatUser, message: text });
+        setNote(res.ok ? "sent to the chat" : res.error);
+        if (res.ok) setSaid("");
+      } catch (e) {
+        setNote(String(e.message || e));
+      }
+      return;
+    }
     if (await post(`/api/cousins/${encodeURIComponent(slug)}/say`, { text })) setSaid("");
   };
   const unsupported = runner.unsupported || [];
@@ -2169,10 +2241,16 @@ function RunnerPaneView({ cousin, onClose }) {
       <div className="pane-foot">
         {note && <div className="pane-note">{note}</div>}
         <div className="pane-foot-row">
+          {chatHidden && (
+            <label className="rp-as-chat" title="post a stored chat message, as the chat's composer does, instead of saying it to the running turn">
+              <input type="checkbox" checked={asChat} onChange={e => setAsChat(e.target.checked)} />
+              <span>send as chat</span>
+            </label>
+          )}
           <input className="txt" value={said} onChange={e => setSaid(e.target.value)}
                  onKeyDown={e => { if (e.key === "Enter") say(); }}
-                 placeholder="say to the running turn" style={{ flex: 1 }} />
-          <button className="btn" onClick={say} disabled={!said.trim()}>say</button>
+                 placeholder={sendAsChat ? `message @${slug}` : "say to the running turn"} style={{ flex: 1 }} />
+          <button className="btn" onClick={say} disabled={!said.trim()}>{sendAsChat ? "send" : "say"}</button>
           <button className="btn rp-interrupt" onClick={interrupt} title="interrupt the running turn"
                   disabled={!live.alive || (live.state !== "running" && live.state !== "waiting_permission")}>interrupt</button>
         </div>

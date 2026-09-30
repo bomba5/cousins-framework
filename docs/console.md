@@ -490,11 +490,13 @@ The header has:
   the pane beside the chat, when it is closed.
 - **fullscreen**: hides the rest of the console.
 
-On a phone the header is one row: the effort select, a search button that
-opens the search field (its x closes and clears it), a **⋯** menu with
-archive, archived / live and media on / off (and whose thread you are in),
-then the pane and fullscreen buttons as icons. The status line under the
-name is one line there too: the state and the model.
+On a phone, and whenever the chat column is narrower than 740 px (the pane
+open beside it on a narrow screen), the header is one row: the effort
+select, a search button that opens the search field (its x closes and
+clears it), a **⋯** menu with archive, archived / live and media on / off
+(and whose thread you are in), then the pane and fullscreen buttons as
+icons. The status line under the name never wraps: it is cut with an
+ellipsis, and on a phone it holds only the state and the model.
 
 A remote cousin's chat has only send, history and the media toggle; its node
 has no search, archive, effort or pane.
@@ -602,7 +604,15 @@ you left it and a "new events" button takes you back to the bottom.
 
 The divider between the chat and the pane drags to resize (the pane takes
 20% to 80% of the width, remembered per browser); a double-click puts it
-back to half. "interrupt", beside the say box
+back to half. Let go of it within 40 px of the chat's left edge and the chat
+collapses: the pane covers the whole area, and the thin handle left at that
+edge brings the chat back at its last width. Let go within 40 px of the
+right edge and the pane closes. The collapse is remembered per browser too;
+closing the pane brings the chat back, and a chat plugin strip hides and
+returns with the chat. While the chat is collapsed, "send as chat" beside
+the say box posts what you type as a normal chat message, stored as the
+composer's are, instead of saying it to the running turn.
+"interrupt", beside the say box
 at the foot of the stream, ends the running turn, past its first answer
 too; the button is live only while a turn runs, and the foot says what came
 of it (`delivered`, or `failed` when the turn had already finished or the

@@ -1857,10 +1857,30 @@ body.chat-fullscreen .plugin-strips { display: none; }
 .split-div:hover::after, .chat-split.dragging .split-div::after { background: var(--accent); }
 .chat-split.dragging { cursor: col-resize; user-select: none; }
 .chat-split.dragging .chat-col, .chat-split.dragging .pane-col { transition: none; }
+/* an iframe (a plugin page) would swallow the drag's pointer moves */
+.chat-split.dragging iframe { pointer-events: none; }
+/* The snap (#126): dragged to an edge, that edge lights up; let go there and
+   the chat collapses (.chat-collapsed: the pane covers the area, a strip at
+   the left edge brings the chat back) or the pane closes. The collapsed
+   chat stays mounted, only hidden (its draft, its polling, a plugin strip
+   in it). */
+.chat-split.snap-chat .chat-col { box-shadow: inset 3px 0 0 var(--accent); opacity: 0.55; }
+.chat-split.snap-pane .pane-col { box-shadow: inset -3px 0 0 var(--accent); opacity: 0.55; }
+.chat-split.chat-collapsed .chat-col { flex: 0 0 0; visibility: hidden; }
+.chat-split.chat-collapsed .pane-col { flex: 1 1 auto; border-left-color: transparent; }
+.chat-restore {
+  flex: none; width: 14px; padding: 0; margin: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-1); color: var(--fg-3); border: 0; border-right: 1px solid var(--hair);
+  font-size: 13px; cursor: pointer;
+}
+.chat-restore:hover { background: var(--bg-2); color: var(--accent); }
+.rp-as-chat { flex: none; display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11px; color: var(--fg-2); cursor: pointer; white-space: nowrap; }
 @media (max-width: 820px) {
   .chat-split.pane-open .chat-col { flex: 0 0 0; }
   .chat-split.pane-open .pane-col { flex: 1 1 auto; border-left-color: transparent; }
   .split-div { display: none; }
+  .chat-restore { display: none; }
 }
 .chat-toast {
   position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
@@ -1889,29 +1909,43 @@ body.chat-fullscreen .plugin-strips { display: none; }
   padding: 0 10px; width: 150px; max-width: 40vw; box-sizing: border-box; outline: none;
 }
 .chat-header input.chat-search:focus { border-color: var(--accent); }
-/* The chat on a phone. ChatHeader renders .ch-mobile there (one row of
-   36 px targets: effort, search, the "⋯" menu, pane, fullscreen; the
-   search field and the menu open from it) and MainHeader a one-line
-   status (.hdr-meta-m: dot, state, model cut with an ellipsis). The
+/* The compact chat header. ChatHeader renders .ch-mobile on a phone and in
+   a chat column narrower than CHAT_COMPACT_PX (chat.jsx: the reasoning pane
+   open beside it): one row of 36 px targets (effort, search, the "⋯" menu,
+   pane, fullscreen; the search field and the menu open from it). The wide
    desktop markup does not carry these classes. */
+.chat-header.ch-mobile { flex-wrap: nowrap; position: relative; z-index: 6; padding: 6px 10px; gap: 6px; }
+.ch-mobile .ch-fill { flex: 1 1 0; min-width: 0; }
+.ch-mobile .ch-effort { flex: 0 1 auto; min-width: 0; }
+.ch-mobile select.sel-inline { height: 36px; padding: 0 6px; max-width: 160px; }
+.ch-mobile .ch-effort-hint { font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-header.ch-mobile .btn.ch-icon { flex: none; width: 36px; min-width: 36px; height: 36px; padding: 0; justify-content: center; font-size: 18px; }
+.chat-header.ch-mobile input.chat-search { flex: 1 1 auto; min-width: 0; width: auto; max-width: none; height: 36px; }
+.ch-more-wrap { position: relative; display: inline-flex; flex: none; }
+.ch-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+  min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 12px 32px var(--shadow);
+}
+.ch-menu-who { font-family: var(--mono); font-size: 11px; color: var(--fg-3); padding: 4px 8px 8px; margin-bottom: 2px; border-bottom: 1px solid var(--hair); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-header.ch-mobile .ch-menu .btn { width: 100%; height: 40px; justify-content: flex-start; padding: 0 10px; font-size: 13px; }
+/* The chat's status line never wraps: it is cut with an ellipsis (the path
+   gives way first). */
+.main-header .path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main-header .hdr-meta:not(.hdr-meta-m) { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main-header .hdr-meta:not(.hdr-meta-m) > .led { display: inline-block; margin-right: 6px; vertical-align: 0; }
+/* On a phone the header's phone overrides lose to the compact row (the
+   !importants), the select and the search take 16 px (no zoom on focus),
+   and MainHeader renders a one-line status (.hdr-meta-m: dot, state,
+   model cut with an ellipsis). */
 @media (max-width: 820px) {
-  .chat-header.ch-mobile { flex-wrap: nowrap !important; position: relative; z-index: 6; padding: 6px 10px !important; gap: 6px !important; }
+  .chat-header.ch-mobile { flex-wrap: nowrap !important; padding: 6px 10px !important; gap: 6px !important; }
   .chat-header.ch-mobile > span:first-child { width: auto; }
-  .ch-mobile .ch-fill { flex: 1 1 0; min-width: 0; }
-  .ch-mobile .ch-effort { flex: 0 1 auto; min-width: 0; }
-  .ch-mobile select.sel-inline { height: 36px; font-size: 16px; padding: 0 6px; max-width: 34vw; }
-  .ch-mobile .ch-effort-hint { font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chat-header.ch-mobile .btn.ch-icon { flex: none; width: 36px; min-width: 36px; height: 36px; padding: 0 !important; justify-content: center; font-size: 18px !important; }
-  .chat-header.ch-mobile input.chat-search { flex: 1 1 auto; min-width: 0; width: auto !important; max-width: none !important; height: 36px; font-size: 16px; }
-  .ch-more-wrap { position: relative; display: inline-flex; flex: none; }
-  .ch-menu {
-    position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
-    min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 6px;
-    background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius);
-    box-shadow: 0 12px 32px var(--shadow);
-  }
-  .ch-menu-who { font-family: var(--mono); font-size: 11px; color: var(--fg-3); padding: 4px 8px 8px; margin-bottom: 2px; border-bottom: 1px solid var(--hair); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chat-header.ch-mobile .ch-menu .btn { width: 100%; height: 40px; justify-content: flex-start; padding: 0 10px !important; font-size: 13px !important; }
+  .ch-mobile select.sel-inline { font-size: 16px; max-width: 34vw; }
+  .chat-header.ch-mobile .btn.ch-icon { padding: 0 !important; font-size: 18px !important; }
+  .chat-header.ch-mobile input.chat-search { width: auto !important; max-width: none !important; font-size: 16px; }
+  .chat-header.ch-mobile .ch-menu .btn { padding: 0 10px !important; font-size: 13px !important; }
   .main-header .hdr-meta.hdr-meta-m { flex: 1 1 100%; min-width: 0; white-space: nowrap; overflow: hidden; }
   .hdr-meta-m > * { flex: none; }
   .hdr-meta-m > .hdr-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

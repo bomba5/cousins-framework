@@ -297,6 +297,30 @@ function useMobileLayout() {
   return mobile;
 }
 
+// True while an element is narrower than `px`, measured with a
+// ResizeObserver: the chat header goes compact when its column is narrow
+// (the reasoning pane beside it), not only on a phone. Returns
+// [ref, narrow]; the ref is a callback, so an element that mounts later
+// (after a loading branch) is still observed.
+function useNarrowerThan(px) {
+  const [narrow, setNarrow] = React.useState(false);
+  const obsRef = React.useRef(null);
+  const ref = React.useCallback((el) => {
+    if (obsRef.current) { obsRef.current.disconnect(); obsRef.current = null; }
+    if (!el) return;
+    const read = (w) => setNarrow(w > 0 && w < px);
+    read(el.getBoundingClientRect().width);
+    if (!window.ResizeObserver) return;
+    obsRef.current = new window.ResizeObserver(entries => {
+      const e = entries[entries.length - 1];
+      read(e.contentRect ? e.contentRect.width : el.getBoundingClientRect().width);
+    });
+    obsRef.current.observe(el);
+  }, [px]);
+  React.useEffect(() => () => { if (obsRef.current) obsRef.current.disconnect(); }, []);
+  return [ref, narrow];
+}
+
 // ---- long operations --------------------------------------------------------
 // A cousin's long operation (console/longop.py): [op, reload] from GET
 // /api/cousins/<slug>/op, reloaded on each `cousin-op` event for the slug
@@ -347,5 +371,5 @@ Object.assign(window, {
   Led, Pill, StatePill, Bar, Spark, HeartbeatGraph, I,
   registerSlot, slotEntries, Slot, registerView, registeredViews, registeredView, RESERVED_VIEW_IDS,
   SlotBoundary, SlotEntry, SecretField, secretStateText, useLongOp, LongOpStatus,
-  useMobileLayout,
+  useMobileLayout, useNarrowerThan,
 });

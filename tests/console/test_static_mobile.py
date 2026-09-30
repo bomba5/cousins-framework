@@ -213,8 +213,8 @@ class MobileChatHeader(unittest.TestCase):
 
     def setUp(self):
         self.header = _function(_read("chat.jsx"), "ChatHeader")
-        self.row = _jsx_block(self.header, "if (mobile) {", "}")
-        self.search = _jsx_block(self.header, "if (mobile && searchOpen && !remote) {", "}")
+        self.row = _jsx_block(self.header, "if (compact) {", "}")
+        self.search = _jsx_block(self.header, "if (compact && searchOpen && !remote) {", "}")
         self.menu = _jsx_block(self.row, '{menuOpen && (')
         self.css = _mobile_css()
 
@@ -223,7 +223,7 @@ class MobileChatHeader(unittest.TestCase):
         self.assertIn('const MOBILE_QUERY = "(max-width: 820px)";', ui)
         self.assertIn("window.matchMedia(MOBILE_QUERY)", ui)
         self.assertRegex(ui, r"Object\.assign\(window, \{[^}]*useMobileLayout")
-        self.assertIn("useMobileLayout() : false) && !embed", self.header)
+        self.assertIn("useMobileLayout() : false) || !!narrow) && !embed", self.header)
 
     def test_the_row_holds_effort_search_menu_pane_and_fullscreen_in_order(self):
         order = ["applyEffort(e.target.value)", "ch-search-open",
@@ -265,11 +265,15 @@ class MobileChatHeader(unittest.TestCase):
         self.assertIn('e.key === "Escape"', self.header)
 
     def test_one_row_of_36px_targets(self):
+        # the compact row's own rules hold at every width (a narrow chat
+        # column on a desktop gets it too); the phone adds its overrides
+        css = _read("styles.css")
         self.assertIn(".chat-header.ch-mobile { flex-wrap: nowrap !important;", self.css)
-        self.assertRegex(self.css, r"\.btn\.ch-icon \{[^}]*width: 36px;[^}]*height: 36px;")
-        self.assertRegex(self.css, r"ch-mobile select\.sel-inline \{ height: 36px;")
-        self.assertRegex(self.css, r"ch-mobile input\.chat-search \{[^}]*height: 36px;")
-        self.assertRegex(self.css, r"\.ch-menu \.btn \{[^}]*height: 40px;")
+        self.assertRegex(css, r"\.btn\.ch-icon \{[^}]*width: 36px;[^}]*height: 36px;")
+        self.assertRegex(css, r"ch-mobile select\.sel-inline \{ height: 36px;")
+        self.assertRegex(css, r"ch-mobile input\.chat-search \{[^}]*height: 36px;")
+        self.assertRegex(css, r"\.ch-menu \.btn \{[^}]*height: 40px;")
+        self.assertIn(".ch-mobile select.sel-inline { font-size: 16px;", self.css)
 
 
 class MobileChatStatus(unittest.TestCase):
@@ -307,15 +311,28 @@ class DesktopChatHeaderUnchanged(unittest.TestCase):
         self.assertIn(_squash(_STATUS_DESKTOP_2_2_0), _squash(_read("app.jsx")))
 
     def test_phone_classes_are_styled_only_inside_the_breakpoint(self):
+        # .hdr-meta-m is the phone's alone; the compact row's classes are
+        # styled in its own block (a narrow chat column gets them on a
+        # desktop too) and the phone breakpoint, nowhere else
         css = _read("styles.css")
         mobile = _mobile_css()
+        start = css.index("/* The compact chat header.")
+        compact = css[start:css.index("@media", start)]
         for name in (".ch-mobile", ".ch-menu", ".ch-icon", ".hdr-meta-m", ".ch-more-wrap"):
-            self.assertIn(name, mobile, name)
-            self.assertEqual(css.count(name), mobile.count(name) + _comments(css).count(name), name)
+            self.assertIn(name, mobile if name == ".hdr-meta-m" else compact, name)
+            if name == ".hdr-meta-m":
+                self.assertNotIn(name, _strip_comments(compact).replace(":not(.hdr-meta-m)", ""), name)
+            self.assertEqual(css.count(name),
+                             mobile.count(name) + _strip_comments(compact).count(name)
+                             + _comments(css).count(name), name)
 
 
 def _comments(css):
     return "\n".join(re.findall(r"/\*.*?\*/", css, re.S))
+
+
+def _strip_comments(css):
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
 
 
 if __name__ == "__main__":

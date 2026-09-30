@@ -1685,5 +1685,64 @@ class TestMirrorError(HermeticCase):
         self.assertTrue(any(e.get("mirror_error") and "disk full" in e["error"] for e in errors))
 
 
+class TestTaskEvents(HermeticCase):
+    """#129: a background task's lifecycle reaches the stream with the
+    fields the pane's task list shows, and nothing else of the raw payload
+    (no prompt, no output file, no output)."""
+
+    def _messages(self):
+        from claude_agent_sdk._internal.message_parser import parse_message
+        base = {"type": "system", "uuid": "u", "session_id": "s-1"}
+        raw = [
+            dict(base, subtype="task_started", task_id=" t1 ", tool_use_id="tu-9",
+                 description="  Audit the docs  ", task_type="local_agent",
+                 prompt="SECRET PROMPT"),
+            dict(base, subtype="task_progress", task_id="t1", description="Audit the docs",
+                 last_tool_name="Grep", tool_use_id="tu-9",
+                 usage={"total_tokens": 1200, "tool_uses": 3, "duration_ms": 4000,
+                        "extra": "x"}),
+            dict(base, subtype="task_updated", task_id="t1", patch={"end_time": 5}),
+            dict(base, subtype="task_updated", task_id="t1",
+                 patch={"status": "killed", "result": "SECRET OUTPUT"}),
+            dict(base, subtype="task_notification", task_id="t1", status="stopped",
+                 output_file="/tmp/SECRET", summary="  " + "s" * 400 + "  ",
+                 usage={"total_tokens": 1}),
+        ]
+        return [parse_message(m) for m in raw]
+
+    def test_each_task_message_is_one_bounded_system_event(self):
+        home = temp_home(self)
+        r = SdkRunner(home, client_factory=lambda o: ScriptedClient(
+            o, [[init_msg()] + self._messages() + [assistant(text="ok"), result()]]))
+        self.addCleanup(lambda: r.stop(timeout=5))
+        r.start()
+        r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertTrue(_wait(lambda: _results(r)))
+        got = [e["payload"] for e in r.events() if e["kind"] == "system"
+               and str(e["payload"].get("subtype", "")).startswith("task_")]
+        self.assertEqual(got, [
+            {"subtype": "task_started", "task_id": "t1", "description": "Audit the docs",
+             "task_type": "local_agent", "tool_use_id": "tu-9"},
+            {"subtype": "task_progress", "task_id": "t1", "last_tool_name": "Grep",
+             "usage": {"total_tokens": 1200, "tool_uses": 3, "duration_ms": 4000}},
+            {"subtype": "task_updated", "task_id": "t1"},
+            {"subtype": "task_updated", "task_id": "t1", "status": "killed"},
+            {"subtype": "task_notification", "task_id": "t1", "status": "stopped",
+             "summary": "s" * 300},
+        ])
+        self.assertNotIn("SECRET", json.dumps(got))
+
+    def test_a_malformed_task_message_still_leaves_an_event(self):
+        from cousin_lib.runner.sdk import _task_payload
+        self.assertEqual(_task_payload("task_started", None),
+                         {"subtype": "task_started", "task_id": None, "description": None,
+                          "task_type": None, "tool_use_id": None})
+        self.assertEqual(_task_payload("task_progress", {"task_id": "t", "usage": "x"}),
+                         {"subtype": "task_progress", "task_id": "t", "last_tool_name": None,
+                          "usage": {}})
+        self.assertEqual(_task_payload("task_updated", {"task_id": "t", "patch": None}),
+                         {"subtype": "task_updated", "task_id": "t"})
+
+
 if __name__ == "__main__":
     unittest.main()

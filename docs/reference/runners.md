@@ -235,6 +235,8 @@ none is a contract item:
   child session the runner does not read), and the SDK lane's rule that a
   subagent's `reply` must name its thread is not enforced.
 - **No side sessions** (`[agent.sessions]` with `"own"` is refused).
+- **No background task events:** the `task_*` `system` events and the
+  pane's bg tasks list are the SDK lane's; a subagent here is a job.
 - **No `rate_limited` state:** opencode retries a rate-limited provider
   itself; its retry shows as a `system` event.
 - **A local endpoint model has no context limit** unless its account sets

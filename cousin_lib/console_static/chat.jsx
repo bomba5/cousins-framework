@@ -1543,10 +1543,62 @@ function rpCompact(prev, add) {
 }
 
 const RP_BOOT_KINDS = { runner: 1, policy: 1, mcp_config: 1, session: 1 };
-const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1, task_updated: 1 };
+const RP_SKIP_SYSTEM = { vcs_state_changed: 1, background_tasks_changed: 1 };
+const RP_TASK_SUBTYPES = { task_started: 1, task_progress: 1, task_updated: 1, task_notification: 1 };
+// the SDK's TERMINAL_TASK_STATUSES: task_notification says "stopped",
+// task_updated the raw "killed"
+const RP_TASK_ENDS = { completed: 1, failed: 1, stopped: 1, killed: 1 };
+
+// A background task's lifecycle event onto the strip's task map (#129):
+// task_started adds it, task_progress names its last tool, a terminal
+// task_updated status or a task_notification ends it (the SDK sends
+// either, not always both). An update or an end for a task not in view is
+// ignored. An event with no task_id (a stream recorded before 1.27, the
+// subtype alone) returns its change to the old count instead.
+function rpTaskEvent(tasks, p, ts) {
+  const id = p.task_id;
+  if (!id) return p.subtype === "task_started" ? 1 : p.subtype === "task_notification" ? -1 : 0;
+  if (p.subtype === "task_started") {
+    tasks[id] = { id, desc: p.description || "", type: p.task_type || null, started: ts,
+                  tool: null, status: "running", ended: null, summary: null };
+    return 0;
+  }
+  const t = tasks[id];
+  if (!t) return 0;
+  if (p.subtype === "task_progress") {
+    if (t.ended == null && p.last_tool_name) t.tool = p.last_tool_name;
+  } else if (p.subtype === "task_notification") {
+    t.status = p.status || (t.ended == null ? "ended" : t.status);
+    if (p.summary) t.summary = p.summary;
+    if (t.ended == null) t.ended = ts;
+  } else if (p.subtype === "task_updated" && p.status && t.ended == null) {
+    t.status = p.status;
+    if (RP_TASK_ENDS[p.status]) t.ended = ts;
+  }
+  return 0;
+}
+
+// The list the chip opens: the running tasks, oldest first, then the last
+// `keep` ended ones, newest first.
+function rpTaskList(tasks, keep) {
+  const all = Object.keys(tasks || {}).map(k => tasks[k]);
+  return {
+    running: all.filter(t => t.ended == null).sort((a, b) => (a.started || 0) - (b.started || 0)),
+    ended: all.filter(t => t.ended != null).sort((a, b) => b.ended - a.ended).slice(0, keep == null ? 5 : keep),
+  };
+}
+
+// "agent" or "shell" for the SDK's task types, else the type as sent.
+function rpTaskType(type) {
+  const t = String(type || "");
+  if (/bash|shell/.test(t)) return "shell";
+  if (/agent/.test(t)) return "agent";
+  return t.replace(/_/g, " ") || "task";
+}
 
 function rpModel(events) {
-  const strip = { state: null, activity: null, rate: {}, session: null, tokens: 0, cost: 0, turns: 0, bg: 0, auth: null };
+  const strip = { state: null, activity: null, rate: {}, session: null, tokens: 0, cost: 0, turns: 0,
+                  bg: 0, bgUntracked: 0, tasks: {}, auth: null };
   const rows = [];
   const tools = {};
   // the runner emits a message's recall BEFORE its user event: a folded
@@ -1574,10 +1626,9 @@ function rpModel(events) {
       return;
     }
     if (k === "system") {
-      // background tasks are a count on the strip, not rows: the SDK
-      // reports one around many ordinary tool calls
-      if (p.subtype === "task_started") strip.bg += 1;
-      else if (p.subtype === "task_notification") strip.bg = Math.max(0, strip.bg - 1);
+      // background tasks are a list behind a chip on the strip, not rows:
+      // the SDK reports one around many ordinary tool calls
+      if (RP_TASK_SUBTYPES[p.subtype]) strip.bgUntracked = Math.max(0, strip.bgUntracked + rpTaskEvent(strip.tasks, p, ts));
       else if (p.subtype === "fresh" || p.subtype === "init" || p.subtype === "resumed") rpBoot(rows, key, ev);
       else if (p.subtype === "api_retry") {
         const auth = p.error_status === 401 || p.error_status === 403;
@@ -1586,6 +1637,13 @@ function rpModel(events) {
       }
       else if (!RP_SKIP_SYSTEM[p.subtype]) rows.push({ t: "meta", key, ev });
       return;
+    }
+    if (k === "runner") {
+      // a new runner is a new CLI: the old one's tasks went with it
+      Object.keys(strip.tasks).forEach(id => {
+        const t = strip.tasks[id];
+        if (t.ended == null) { t.ended = ts; t.status = "lost"; t.summary = "the runner restarted"; }
+      });
     }
     if (RP_BOOT_KINDS[k]) { rpBoot(rows, key, ev); return; }
     switch (k) {
@@ -1671,6 +1729,7 @@ function rpModel(events) {
     }
     rows.push({ t: "meta", key, ev });
   });
+  strip.bg = strip.bgUntracked + rpTaskList(strip.tasks, 0).running.length;
   return { strip, rows };
 }
 
@@ -2038,6 +2097,69 @@ function RpRow({ row, now, activeTool }) {
   }
 }
 
+// The "N bg tasks" chip and the list it opens under the strip (#129): the
+// running tasks (what, agent or shell, how long, the last tool), then the
+// last few ended ones. The list keeps its own clock, so the pane's rows do
+// not re-render every second for it; a click outside or on the chip closes it.
+function RpBgTasks({ strip }) {
+  const [open, setOpen] = React.useState(false);
+  const [now, setNow] = React.useState(() => Date.now());
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return undefined;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  if (strip.bg <= 0 && !open) return null;
+  const list = rpTaskList(strip.tasks, 5);
+  const secs = now / 1000;
+  return (
+    <span className="rp-bg" ref={ref}>
+      <button type="button" className={"rp-chip rp-bg-chip" + (open ? " on" : "")} aria-expanded={open}
+              title="background tasks: click for the list" onClick={() => setOpen(o => !o)}>
+        {strip.bg} bg {strip.bg === 1 ? "task" : "tasks"}
+      </button>
+      {open && (
+        <div className="rp-tasks" role="dialog" aria-label="background tasks">
+          {list.running.map(t => (
+            <div key={t.id} className="rp-task" title={t.desc}>
+              <span className="rp-spin" />
+              <span className="rp-task-desc">{t.desc || t.id}</span>
+              <span className="rp-chip">{rpTaskType(t.type)}</span>
+              {t.tool && <span className="rp-dim">{rpToolLabel(t.tool).name}</span>}
+              <span className="rp-task-t">{t.started ? rpElapsed(Math.max(0, secs - t.started)) : ""}</span>
+            </div>
+          ))}
+          {strip.bgUntracked > 0 && (
+            <div className="rp-task rp-dim">{strip.bgUntracked} started with no details (recorded before 1.27)</div>
+          )}
+          {list.running.length === 0 && strip.bgUntracked === 0 && <div className="rp-task rp-dim">none running</div>}
+          {list.ended.length > 0 && <div className="rp-tasks-sep">ended</div>}
+          {list.ended.map(t => (
+            <div key={t.id} className="rp-task is-ended" title={t.summary || t.desc}>
+              <span className={"rp-mark " + (t.status === "completed" ? "rp-ok" : t.status === "failed" || t.status === "lost" ? "rp-err" : "rp-dim")}>
+                {t.status === "completed" ? "✓" : t.status === "failed" || t.status === "lost" ? "✗" : "■"}
+              </span>
+              <span className="rp-task-desc">{t.desc || t.id}</span>
+              <span className="rp-dim">{t.status}</span>
+              <span className="rp-task-t">{fmtAgoShort(secs - t.ended)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function RpStrip({ strip, now, raw, setRaw }) {
   const a = strip.activity;
   const rates = Object.keys(strip.rate).map(t => rpRate(t, strip.rate[t]));
@@ -2069,7 +2191,7 @@ function RpStrip({ strip, now, raw, setRaw }) {
           {strip.turns} {strip.turns === 1 ? "turn" : "turns"} · {rpTok(strip.tokens)} tok{strip.cost ? " · $" + strip.cost.toFixed(2) : ""}
         </span>
       )}
-      {strip.bg > 0 && <span className="rp-chip">{strip.bg} bg {strip.bg === 1 ? "task" : "tasks"}</span>}
+      <RpBgTasks strip={strip} />
       <span style={{ flex: 1 }} />
       <label className="rp-raw" title="one row per stream event, as it arrives">
         <input type="checkbox" checked={raw} onChange={e => setRaw(e.target.checked)} /> raw

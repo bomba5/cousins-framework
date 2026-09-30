@@ -622,7 +622,7 @@ A server-sent event stream over the runner's primary stream: the newest `data/st
 | `session` | `{"session"}` | the stream changed: the runner's first stream appeared (the pane was opened before the runner wrote anything), or the runner restarted (its new stream is read from its first event, the old one to its end first) |
 | `: ping` | comment | 15 s without either |
 
-`kind` is what the runner recorded: `state`, `turn_start`, `text`, `thinking` (`{"length", "text"[, "truncated"]}`, the text bounded at 8000 characters), `tool`, `tool_result`, `tool_call`, `result`, `user`, `error`, `auth`, `rate_limit`, `rollover`, `usage`, `system` and the rest the runner writes. `400` for an `after` that is neither `<seq>` nor `<session>:<seq>`.
+`kind` is what the runner recorded: `state`, `turn_start`, `text`, `thinking` (`{"length", "text"[, "truncated"]}`, the text bounded at 8000 characters), `tool`, `tool_result`, `tool_call`, `result`, `user`, `error`, `auth`, `rate_limit`, `rollover`, `usage`, `system` and the rest the runner writes. A background task's lifecycle is four `system` subtypes (the `sdk` runner only, since 1.27; before it they carried the subtype alone): `task_started` (`{"task_id", "description", "task_type", "tool_use_id"}`), `task_progress` (`{"task_id", "last_tool_name", "usage": {"total_tokens", "tool_uses", "duration_ms"}}`), `task_updated` (`{"task_id"[, "status"]}`, the status only when the update carries one; `completed`, `failed` or `killed` ends the task) and `task_notification` (`{"task_id", "status", "summary"}`, the summary bounded at 300 characters); never the task's prompt or output. `400` for an `after` that is neither `<seq>` nor `<session>:<seq>`.
 
 ### `POST /api/cousins/<slug>/interrupt`
 

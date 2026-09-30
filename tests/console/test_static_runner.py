@@ -579,6 +579,87 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(got["mismatch"], {"cls": "rp-err", "blocking": True,
                                            "text": "credentials mismatch · expected none, got ANTHROPIC_API_KEY"})
 
+    TASKS = """
+const E = (seq, kind, payload) => ({seq, ts: 1000 + seq, kind, payload});
+const S = (seq, payload) => E(seq, "system", payload);
+"""
+
+    def test_the_bg_tasks_list_folds_from_started_and_ended_events(self):
+        """#129: task_started adds a running task, task_progress names its
+        last tool, a task_notification ends it; the count is the running
+        ones; no task event is a row; an end for an unknown task is
+        ignored."""
+        got = self.run_node(self.TASKS + """
+const m = rpModel([
+  S(1, {subtype: "task_started", task_id: "a", description: "Audit the docs", task_type: "local_agent", tool_use_id: "tu1"}),
+  S(2, {subtype: "task_started", task_id: "b", description: "npm test", task_type: "local_bash"}),
+  S(3, {subtype: "task_progress", task_id: "a", last_tool_name: "Grep", usage: {total_tokens: 9}}),
+  S(4, {subtype: "task_notification", task_id: "b", status: "completed", summary: "all green"}),
+  S(5, {subtype: "task_notification", task_id: "zz", status: "failed"}),
+  S(6, {subtype: "task_updated", task_id: "zz", status: "killed"}),
+]);
+const l = rpTaskList(m.strip.tasks, 5);
+process.stdout.write(JSON.stringify({bg: m.strip.bg, rows: m.rows.length,
+  running: l.running.map(t => [t.id, t.desc, rpTaskType(t.type), t.started, t.tool, t.status]),
+  ended: l.ended.map(t => [t.id, rpTaskType(t.type), t.status, t.ended, t.summary]),
+  ids: Object.keys(m.strip.tasks).sort()}));""")
+        self.assertEqual(got["bg"], 1)
+        self.assertEqual(got["rows"], 0)
+        self.assertEqual(got["running"], [["a", "Audit the docs", "agent", 1001, "Grep", "running"]])
+        self.assertEqual(got["ended"], [["b", "shell", "completed", 1004, "all green"]])
+        self.assertEqual(got["ids"], ["a", "b"])
+
+    def test_a_terminal_task_updated_ends_a_task_without_a_notification(self):
+        """The SDK may end a task only with a task_updated whose status is
+        terminal (a TaskStop reports `killed`); a non-terminal or status-less
+        update changes nothing but the status; a later notification keeps
+        the first end time."""
+        got = self.run_node(self.TASKS + """
+const evs = [
+  S(1, {subtype: "task_started", task_id: "a", description: "watch", task_type: "local_bash"}),
+  S(2, {subtype: "task_updated", task_id: "a"}),
+  S(3, {subtype: "task_updated", task_id: "a", status: "running"}),
+];
+const mid = rpModel(evs).strip;
+const killed = rpModel(evs.concat([S(4, {subtype: "task_updated", task_id: "a", status: "killed"})])).strip;
+const late = rpModel(evs.concat([S(4, {subtype: "task_updated", task_id: "a", status: "killed"}),
+                                 S(9, {subtype: "task_notification", task_id: "a", status: "stopped", summary: "stopped by TaskStop"})])).strip;
+const restarted = rpModel(evs.concat([E(7, "runner", {kind: "sdk"})])).strip;
+process.stdout.write(JSON.stringify({
+  mid: [mid.bg, mid.tasks.a.status, mid.tasks.a.ended],
+  killed: [killed.bg, killed.tasks.a.status, killed.tasks.a.ended],
+  late: [late.bg, late.tasks.a.status, late.tasks.a.ended, late.tasks.a.summary],
+  restarted: [restarted.bg, restarted.tasks.a.status, restarted.tasks.a.ended]}));""")
+        self.assertEqual(got["mid"], [1, "running", None])
+        self.assertEqual(got["killed"], [0, "killed", 1004])
+        self.assertEqual(got["late"], [0, "stopped", 1004, "stopped by TaskStop"])
+        self.assertEqual(got["restarted"], [0, "lost", 1007])
+
+    def test_an_old_stream_with_no_task_ids_keeps_the_count(self):
+        """A stream recorded before 1.27 has the subtype alone: the count
+        goes up on task_started and down on task_notification, as before,
+        and a bare task_updated or task_progress changes nothing."""
+        got = self.run_node(self.TASKS + """
+const m = rpModel([
+  S(1, {subtype: "task_started"}), S(2, {subtype: "task_started"}), S(3, {subtype: "task_progress"}),
+  S(4, {subtype: "task_updated"}), S(5, {subtype: "task_notification"}),
+  S(6, {subtype: "task_started", task_id: "n", description: "new"}),
+]).strip;
+const drained = rpModel([S(1, {subtype: "task_notification"}), S(2, {subtype: "task_notification"})]).strip;
+process.stdout.write(JSON.stringify({bg: m.bg, untracked: m.bgUntracked, tasks: Object.keys(m.tasks),
+                                     drained: [drained.bg, drained.bgUntracked]}));""")
+        self.assertEqual(got, {"bg": 2, "untracked": 1, "tasks": ["n"], "drained": [0, 0]})
+
+    def test_the_bg_chip_is_a_button_that_opens_the_list(self):
+        strip = self.chat[self.chat.index("function RpBgTasks("):self.chat.index("function RpStrip(")]
+        self.assertIn('<button type="button" className={"rp-chip rp-bg-chip"', strip)
+        self.assertIn("setOpen(o => !o)", strip)
+        self.assertIn('addEventListener("mousedown", away)', strip)
+        self.assertIn("rpTaskList(strip.tasks, 5)", strip)
+        self.assertIn("<RpBgTasks strip={strip} />", self.chat)
+        for rule in (".rp-bg-chip", ".rp-tasks {", ".rp-task {", ".rp-task-desc"):
+            self.assertIn(rule, self.css)
+
     def test_thinking_ticks_are_compacted_before_the_keep_cap(self):
         got = self.run_node("""
 const T = (ts) => ({kind: "system", ts, payload: {subtype: "thinking_tokens"}});

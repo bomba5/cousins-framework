@@ -1898,6 +1898,7 @@ table.data th.num { font-family: var(--sans); font-size: 10.5px; }
 /* === The folded reasoning pane (#125) ===
    A strip of what the runner is doing now, then one card per real thing. */
 .rp-strip {
+  position: relative; z-index: 5;
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 7px 14px; border-bottom: 1px solid var(--hair); background: var(--bg-0);
   font-family: var(--mono); font-size: 11px; color: var(--fg-2);
@@ -1923,6 +1924,20 @@ table.data th.num { font-family: var(--sans); font-size: 10.5px; }
 .rp-chip { font-size: 10.5px; color: var(--fg-2); background: var(--bg-2); border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
 .rp-chip.is-warn { color: var(--amber); }
 .rp-chip.is-err { color: var(--red); }
+/* the bg tasks chip and the list it opens under the strip (#129) */
+.rp-bg-chip { font-family: inherit; border: 1px solid transparent; cursor: pointer; }
+.rp-bg-chip:hover, .rp-bg-chip.on { border-color: var(--line); color: var(--fg-0); }
+.rp-tasks {
+  position: absolute; top: calc(100% + 3px); left: 14px; width: min(440px, calc(100% - 28px));
+  max-height: 280px; overflow-y: auto; padding: 6px 9px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 7px;
+  box-shadow: 0 6px 18px var(--shadow);
+}
+.rp-task { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0; }
+.rp-task-desc { color: var(--fg-0); font-family: var(--sans); font-size: 12px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-task.is-ended .rp-task-desc { color: var(--fg-2); }
+.rp-task-t { flex: none; color: var(--fg-3); margin-left: auto; }
+.rp-tasks-sep { color: var(--fg-3); font-size: 10.5px; margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--hair); }
 .rp-raw { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-3); cursor: pointer; }
 .rp-list.rp-folded { white-space: normal; }
 .rp-folded > * + * { margin-top: 4px; }

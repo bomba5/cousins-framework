@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Changed
+- Console chat: the compact one-row chat header (2.2.1's phone header) now
+  also shows whenever the chat column is narrower than 740 px, measured on
+  the column with a `ResizeObserver` (the reasoning pane open beside it on a
+  desktop), where the wide header wrapped onto two or three rows. A wider
+  column keeps the desktop header as it was. The status line under the
+  chat's title no longer wraps: it is cut with an ellipsis, the path first.
+
+### Added
+- Console chat: the divider between the chat and the reasoning pane snaps
+  (#126). It still drags; let go within 40 px of the chat's left edge and the
+  chat collapses, the pane covering the whole area, and a thin handle at that
+  edge brings it back at its last width; let go within 40 px of the right
+  edge and the pane closes. The collapse is kept per browser
+  (`fw_chat_collapsed`, beside `fw_pane_w`), and closing the pane brings the
+  chat back. A chat-placement plugin strip hides with the collapsed chat.
+- While the chat is collapsed, the pane's say box has a "send as chat"
+  toggle: the text is posted as a normal stored chat message, through the
+  composer's own send, instead of being said to the running turn.
+
 ## 2.2.2 - 2026-09-30
 
 ### Fixed

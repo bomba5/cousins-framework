@@ -66,7 +66,7 @@ class NoPluginsNoUi(unittest.TestCase):
         self.assertIn("paneShown && pluginTabList.length > 0 && window.PluginPaneTabs", view)
         # with no active plugin tab the pane is exactly the 2.0.0 pane
         self.assertIn("paneShown && !activeTab && (c.runner", view)
-        self.assertIn('<RunnerPaneView key={c.slug} cousin={c} onClose={() => setPaneOpen(false)} />',
+        self.assertIn('<RunnerPaneView key={c.slug} cousin={c} onClose={closePane} chatUser={chatUser} chatHidden={chatHidden} />',
                       view)
         strip = _component(_read("plugins.jsx"), "PluginPaneTabs")
         self.assertIn("if (!tabs || !tabs.length) return null;", strip)
@@ -85,7 +85,11 @@ class NoPluginsNoUi(unittest.TestCase):
         # the chat column less the one guarded strip line is, token for token,
         # the column 2.0.0 and 2.1.0 render
         view = _component(_read("chat.jsx"), "ChatView")
-        col = view[view.index('<div className="chat-col">'):view.index("{paneShown && (")]
+        col = view[view.index('<div className="chat-col"'):view.index("{paneShown && !chatHidden && (")]
+        # less what the chat layout adds since: the column's measuring ref and collapse
+        # (the compact header, #126) and the narrow flag it hands the header
+        col = col.replace(' ref={chatColRef} aria-hidden={chatHidden || undefined}', '', 1)
+        col = col.replace(' narrow={narrowCol} />', ' />', 1)
         strip = re.search(r"\{chatStrips\.length > 0 && window\.PluginChatStrips && \(\s*"
                           r"<PluginChatStrips slug=\{c\.slug\} tabs=\{chatStrips\} />\s*\)\}",
                           col)

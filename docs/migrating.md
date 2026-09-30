@@ -266,7 +266,7 @@ the old transcript's path.
    starts from the state digest, the handoff and memory; the old
    conversation does not carry.
 5. `cousin-migrate tidy <slug> --yes` removes the keys 2.0.0 no longer reads
-   (below).
+   ([below](#removed-keys-after-the-upgrade-to-200)).
 
 ## Checking it
 

@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 2.3.0 - 2026-09-30
 
 ### Changed
 - Console chat: the compact one-row chat header (2.2.1's phone header) now

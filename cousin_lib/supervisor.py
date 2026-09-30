@@ -66,7 +66,11 @@ only while a supervisor holds that lock.
 
 Which cousins. Every cousin whose cousin.toml `[agent] runner` is one of
 delivery.RUNNER_KINDS gets a runner child, unless `[agent] auto_start = false`
-(runner_cousins). A tmux cousin is never ours. SIGHUP and `reload`
+(runner_cousins). A cousin with no runner kind is never ours: `status`
+lists it under `refused` with delivery.lane_refusal (a worker is not
+listed), and `start` answers that line. `status` also names, under
+`config`, every key 2.0.0 removed that a cousin or the install still
+carries (removed_keys, R7): named, never fatal. SIGHUP and `reload`
 rescan the registry: a new runner cousin is started, one that is gone
 or left the runner lane is stopped and removed, a `failing` child is
 cleared and started again; nothing healthy is bounced.
@@ -118,7 +122,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import loops
-from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
+from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds (M6)
 from cousin_lib.runner.main import LOCK_HELD_EXIT, STOP_TIMEOUT_S
 
 STATES = ("running", "backoff", "failing", "stopped")
@@ -906,7 +910,9 @@ class Supervisor:
         `stop` with `wait` is answered when the child is down)."""
         op = req["op"]
         if op == "status":
-            return self.status()
+            # the registry's refusals and removed keys ride the answer, not
+            # the snapshot: it is rewritten every tick, this is read on request
+            return dict(self.status(), **registry_findings(self.root))
         if op == "reload":
             added, removed = self.reload()
             return {"ok": True, "added": added, "removed": removed}
@@ -940,9 +946,13 @@ class Supervisor:
         home = self._runner_home(name)
         if child is None:
             if home is None:
-                return {"ok": False, "error": "%s is not a runner cousin under %s/cousins"
-                        " ([agent] runner = \"sdk\" or \"fake\"); a tmux cousin starts with"
-                        " cousin-spawn --start" % (name.split(":", 1)[-1], self.root)}
+                slug = name.split(":", 1)[-1]
+                if name.startswith("runner:") \
+                        and (self.root / "cousins" / slug / "cousin.toml").exists():
+                    # a cousin with no runner kind (R2): the one line says why
+                    return {"ok": False, "error": lane_refusal(self.root / "cousins" / slug)}
+                return {"ok": False, "error": "%s is not a cousin under %s/cousins"
+                        % (slug, self.root)}
             child = self._add(runner_spec(home))
             self.say("added %s" % child.name)
         if child.stopping:
@@ -1311,6 +1321,32 @@ def runner_cousins(root):
             and not is_held(c.home)]
 
 
+def registry_findings(root):
+    """{"refused": {slug: line}, "config": [finding]} for `status` (R2, R7):
+    every cousin under `root`/cousins with no runner kind, refused with
+    delivery.lane_refusal (a worker is neither, and is not listed), and
+    every key 2.0.0 removed that a cousin or the install still carries
+    (removed_keys.scan; `cousin` is the slug, null for the install's)."""
+    from cousin_lib import removed_keys
+    base = Path(root) / "cousins"
+    refused, config = {}, []
+    entries = sorted(base.iterdir()) if base.is_dir() else []
+    for entry in entries:
+        if not (entry / "cousin.toml").is_file():
+            continue
+        if not is_runner_cousin(entry):
+            try:
+                data = tomllib.loads((entry / "cousin.toml").read_text())
+            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+                data = None
+            if not (isinstance(data, dict)
+                    and (data.get("cousin") or {}).get("type") == "worker"):
+                refused[entry.name] = lane_refusal(entry)
+        config += [dict(f, cousin=entry.name) for f in removed_keys.scan_home(entry)]
+    config += [dict(f, cousin=None) for f in removed_keys.scan_install(root)]
+    return {"refused": refused, "config": config}
+
+
 # ------------------------------------------------------------ clients
 
 def request(root, op, *, timeout=10.0, **args):
@@ -1420,6 +1456,15 @@ def _print_status(body):
         print("  %-20s %-8s %-8s restarts %-3d %s"
               % (name, row["state"], row["pid"] or "-", row["restarts"],
                  row["reason"] or ""))
+    for slug, line in (body.get("refused") or {}).items():
+        print("  refused  %s: %s" % (slug, line))
+    found = body.get("config") or []
+    for f in found:
+        print("  removed  %s%s %s" % ("%s " % f["cousin"] if f.get("cousin") else "",
+                                      f["where"], "" if f["key"] == f["where"] else f["key"]))
+    if found:
+        print("  (2.0.0 no longer reads these; `cousin-migrate tidy --all` shows each line"
+              " and, with --yes, removes them)")
 
 
 def supervisor_main(argv=None):

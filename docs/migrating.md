@@ -547,6 +547,36 @@ second rollback.
 recorded: `kind switch: tmux -> sdk, switched`, or `..., failed (...)`
 for one that hasn't completed.
 
+## Removed keys after the upgrade to 2.0.0
+
+2.0.0 no longer reads the legacy tmux lane's keys (`[chat] port` and
+`tmux_session`, `[runtime]`, the pane patterns in `config/harness.toml`,
+`home_chat_url`, `config/agent-cmd`; the full list is in
+[configuration](configuration.md#removed-in-200)). Every cousin spawned
+on 1.x carries some of them. They do nothing and stop nothing: the runner
+names them at start, `cousin-supervisor status` lists them under `config`,
+and the console's card shows them, until you take them out.
+
+Once every cousin runs on a runner kind, and after disabling the units only
+the old lane used (`cousin-chat-server@<slug>.service` restarts a stopped
+server by itself), look first, then remove:
+
+```
+cousin-migrate tidy --all          # lists each key and its line, writes nothing
+cousin-migrate tidy --all --yes    # removes them
+cousin-migrate tidy --all          # nothing to tidy
+```
+
+Each edited file keeps its prior bytes beside it
+(`<home>/data/cousin.toml.pre-2.0.0`, `config/harness.toml.pre-2.0.0`,
+`config/hive.toml.pre-2.0.0`, `config/agent-cmd.pre-2.0.0`), and only the
+removed lines go: your comments and the other keys stay as they were. A 1.x
+chat server still running for a cousin is stopped, and its
+`data/chat-server.pid` removed. `tidy <slug>` does one cousin only. A cousin
+with no `[agent] runner` is refused, with the way out; `tidy` does not
+convert it. To go back to 1.x, the `.pre-2.0.0` copies are the files as they
+were.
+
 ## Remove the subscription bridge from a live install
 
 Some installs put a Claude-subscription bridge beside a hand-installed

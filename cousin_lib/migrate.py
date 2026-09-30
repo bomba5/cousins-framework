@@ -67,6 +67,20 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             the runner's model, effort and account against the cousin's
             [runtime] (a MISMATCH is not ok), and whether the chat server
             answers
+  tidy      (2.0.0, R7) the keys 2.0.0 no longer reads (removed_keys),
+            removed from one cousin's cousin.toml (`tidy <slug>`) or from
+            every cousin's and the install's config/harness.toml,
+            config/hive.toml and config/agent-cmd (`tidy --all`). A plan
+            by default: with --yes each file's prior bytes go beside it
+            (<home>/data/cousin.toml.pre-2.0.0, config/<file>.pre-2.0.0,
+            never over an earlier copy) and only the removed lines go
+            (comments, order and line endings kept; a table left empty is
+            dropped; a file the line remover cannot edit is left whole and
+            named). A 1.x chat server still running for the cousin is
+            stopped (SIGTERM), found by data/chat-server.pid or its [chat]
+            port, and signalled only when its command line is a chat
+            server for this home; the pid file is removed. A cousin with
+            no runner kind is refused: tidy is not a conversion.
 
 The supervisor interface assumed (phase 6, round 2 as its drafter stated
 it, 9fcf52a): a stop through spawn.stop_cousin waits until the child is
@@ -91,7 +105,8 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
+from cousin_lib import removed_keys
+from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds (M6)
 
 RECORD = "data/migration.json"
 STEPS = ("close", "handover", "import", "toml", "start", "verify")
@@ -1143,6 +1158,7 @@ def check(home, *, since=None, now=None, health=None, root=None, validate=False,
         out["warnings"].append("the account's config holds MCP servers (%s): they load in"
                                " the pane and not in the SDK kind (P11-13)"
                                % ", ".join(account_mcp_servers(account)))
+    out["removed"] = removed_keys.scan(root, home)   # named, never a reason for NOT ok (R7)
     switch = read_switch_record(home)       # a late acceptance reads `switched` here
     if switch is not None:
         out["switch"] = {k: switch.get(k) for k in ("state", "from", "to", "late")}
@@ -1448,7 +1464,8 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
             warnings.append("the account's config holds MCP servers (%s): they load in the"
                             " pane and not in the SDK kind (P11-13)" % ", ".join(servers))
     return {"slug": home.name, "from": current, "to": to, "steps": list(SWITCH_STEPS[to]),
-            "checks": checks, "warnings": warnings, "ready": all(c["ok"] for c in checks)}
+            "checks": checks, "warnings": warnings, "ready": all(c["ok"] for c in checks),
+            "removed": removed_keys.scan(root, home)}
 
 
 def _trust_detail(home, root, account):
@@ -1708,7 +1725,397 @@ def _switch_live():
                 supervisor_up=lambda root: supervisor.snapshot(root) is not None)
 
 
+# ------------------------------------------------------------ tidy (2.0.0, R7)
+# The keys 2.0.0 no longer reads are named everywhere an operator looks
+# (removed_keys); `tidy` removes them. A line-based remover inside the
+# named table, as set_agent_keys writes: comments, order and line endings
+# survive, and the result is checked against the parsed file minus the
+# removed keys before anything is written.
+
+TIDY_SUFFIX = ".pre-2.0.0"
+TIDY_TERM_S = 5.0          # how long a stopped chat server has to go
+PID_FILE = "data/chat-server.pid"
+
+_TABLE_RE = re.compile(r"^[ \t]*\[(?!\[)[ \t]*(.+?)[ \t]*\][ \t]*(#.*)?\r?\n?$")
+_ARRAY_RE = re.compile(r"^[ \t]*\[\[[ \t]*(.+?)[ \t]*\]\][ \t]*(#.*)?\r?\n?$")
+_KEY_RE = re.compile(r"""^[ \t]*((?:[A-Za-z0-9_-]+|"[^"\r\n]*"|'[^'\r\n]*')"""
+                     r"""(?:[ \t]*\.[ \t]*(?:[A-Za-z0-9_-]+|"[^"\r\n]*"|'[^'\r\n]*'))*)[ \t]*=""")
+
+
+class _Unedited(Exception):
+    """The line remover cannot take these keys out of this file."""
+
+
+def _key_path(raw):
+    parts, cur, quote = [], "", None
+    for ch in raw:
+        if quote:
+            if ch == quote:
+                quote = None
+            else:
+                cur += ch
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ".":
+            parts.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur.strip())
+    return tuple(parts)
+
+
+def _blocks(text):
+    """The file as [{"path", "header", "array", "items"}]: the top level,
+    then one block per table header; items are ("blank"|"comment"|"stmt",
+    lines, key path). A statement runs over as many lines as its value
+    needs (it parses on its own once complete)."""
+    lines = text.splitlines(keepends=True)
+    blocks = [{"path": (), "header": None, "array": False, "items": []}]
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        bare = line.strip()
+        if not bare or bare.startswith("#"):
+            blocks[-1]["items"].append(("blank" if not bare else "comment", [line], None))
+            i += 1
+            continue
+        if bare.startswith("["):
+            m = _ARRAY_RE.match(line) or _TABLE_RE.match(line)
+            if m is None:
+                raise _Unedited("a table header it cannot read: %r" % bare)
+            blocks.append({"path": _key_path(m.group(1)), "header": line,
+                           "array": bare.startswith("[["), "items": []})
+            i += 1
+            continue
+        m = _KEY_RE.match(line)
+        if m is None:
+            raise _Unedited("a line it cannot read: %r" % bare)
+        j = i + 1
+        while True:
+            try:
+                tomllib.loads("".join(lines[i:j]))
+                break
+            except tomllib.TOMLDecodeError:
+                if j >= len(lines):
+                    raise _Unedited("a value it cannot delimit: %r" % bare)
+                j += 1
+        blocks[-1]["items"].append(("stmt", lines[i:j], _key_path(m.group(1))))
+        i = j
+    return blocks
+
+
+def _under(prefix, path):
+    return len(path) >= len(prefix) and tuple(path[:len(prefix)]) == tuple(prefix)
+
+
+def _without(data, paths):
+    """`data` with every path in `paths` deleted, and each table that held
+    one dropped when that left it empty."""
+    import copy
+    data = copy.deepcopy(data)
+    for path in paths:
+        chain = [data]
+        for key in path[:-1]:
+            nxt = chain[-1].get(key) if isinstance(chain[-1], dict) else None
+            if not isinstance(nxt, dict):
+                break
+            chain.append(nxt)
+        else:
+            if path[-1] in chain[-1]:
+                del chain[-1][path[-1]]
+                for depth in range(len(chain) - 1, 0, -1):
+                    if chain[depth]:
+                        break
+                    del chain[depth - 1][path[depth - 1]]
+    return data
+
+
+def strip_keys(text, paths):
+    """`text` without the keys (or whole tables) at `paths`: their
+    statement lines and table headers go, a table left with no statement
+    goes with them, and every other byte stays. _Unedited when the result
+    would not be exactly the parsed file minus those keys (an inline
+    table holding one, say): the file is then edited by hand."""
+    paths = [tuple(p) for p in paths]
+    blocks = _blocks(text)
+    touched = set()
+    for b in blocks:
+        if b["header"] is not None and any(_under(p, b["path"]) for p in paths):
+            b["drop"] = True
+            touched.update(b["path"][:k] for k in range(len(b["path"])))
+            continue
+        kept = []
+        for kind, lines, key in b["items"]:
+            full = b["path"] + key if kind == "stmt" else None
+            if full is not None and any(_under(p, full) for p in paths):
+                touched.update(full[:k] for k in range(len(full)))
+                continue
+            kept.append((kind, lines, key))
+        b["items"] = kept
+    for b in blocks:
+        empty = b["header"] is not None and not b["array"] and b["path"] in touched \
+            and not any(kind == "stmt" for kind, _l, _k in b["items"])
+        if b.get("drop") or empty:
+            b["header"] = None
+            b["items"] = [item for item in b["items"] if item[0] == "comment"]
+    new = "".join((b["header"] or "") + "".join("".join(lines) for _k, lines, _p in b["items"])
+                  for b in blocks)
+    try:
+        ok = tomllib.loads(new) == _without(tomllib.loads(text), paths)
+    except tomllib.TOMLDecodeError:
+        ok = False
+    if not ok:
+        raise _Unedited("the keys are not on lines of their own")
+    return new
+
+
+def _prior_copy(path, into):
+    """Copy `path`'s bytes and mode to `into`/<name>.pre-2.0.0 (or .1, .2,
+    ...: never over an earlier copy); the copy's path."""
+    dest = Path(into) / (path.name + TIDY_SUFFIX)
+    n = 0
+    while dest.exists():
+        n += 1
+        dest = Path(into) / ("%s%s.%d" % (path.name, TIDY_SUFFIX, n))
+    dest.write_bytes(path.read_bytes())
+    os.chmod(dest, path.stat().st_mode & 0o7777)
+    return dest
+
+
+def _tidy_file(path, table, where, into, yes, target):
+    """Name `table`'s keys found in the TOML file at `path` and, with
+    `yes`, remove them (the prior bytes copied into `into` first)."""
+    try:
+        text = path.read_bytes().decode("utf-8")
+        data = tomllib.loads(text)
+    except FileNotFoundError:
+        return
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as err:
+        target["errors"].append("%s does not read (%s): not tidied" % (where, err))
+        return
+    found = removed_keys.findings(data, table, where)
+    if not found:
+        return
+    target["findings"] += found
+    paths = [p for p, _k, _l in table if removed_keys.has(data, p)]
+    try:
+        new = strip_keys(text, paths)
+    except _Unedited as err:
+        target["errors"].append("%s: %s; edit it by hand (%s)"
+                                % (where, err, removed_keys.summary(found)))
+        return
+    if not yes:
+        return
+    prior = _prior_copy(path, into)
+    tmp = path.with_name(path.name + ".tidy.tmp")
+    tmp.write_bytes(new.encode("utf-8"))
+    os.chmod(tmp, path.stat().st_mode & 0o7777)
+    os.replace(tmp, path)
+    target["actions"].append("%s: %d removed (the prior bytes: %s)"
+                             % (where, len(found), os.path.relpath(prior, into.parent)))
+
+
+def _chat_server_of(pid, home):
+    """`pid` is a 1.x chat server for `home`: spawn's own test (its command
+    line carries a chat-server marker) and its `--home` names this home,
+    so a reused pid, or another install's server on the same port, is
+    never signalled. Without /proc, the pid file is trusted as spawn does."""
+    from cousin_lib import spawn
+    if not spawn._pid_is_chat_server(pid):
+        return False
+    try:
+        args = [a.decode(errors="replace") for a in
+                Path("/proc/%d/cmdline" % pid).read_bytes().split(b"\0")]
+    except OSError:
+        return not os.path.isdir("/proc")
+    value = None
+    for i, arg in enumerate(args):
+        if arg == "--home" and i + 1 < len(args):
+            value = args[i + 1]
+            break
+        if arg.startswith("--home="):
+            value = arg.split("=", 1)[1]
+            break
+    if not value:
+        return False
+    if not os.path.isabs(value):
+        try:
+            value = os.path.join(os.readlink("/proc/%d/cwd" % pid), value)
+        except OSError:
+            return False
+    return os.path.realpath(value) == os.path.realpath(home)
+
+
+def _tidy_chat_server(home, data, yes, target, *, pid_alive, is_chat_server, port_pid, kill,
+                      term_wait):
+    """A 1.x chat server still running for `home`: by its pid file, else by
+    the `[chat] port` it listens on (read before the key goes). Only a
+    process `is_chat_server` accepts is signalled; the pid file goes."""
+    import signal
+    pid_file = Path(home) / PID_FILE
+    pid, via = None, None
+    try:
+        pid, via = int(pid_file.read_text().strip()), PID_FILE
+    except (OSError, ValueError):
+        pid = None
+    if pid is not None and not (pid_alive(pid) and is_chat_server(pid, home)):
+        pid = None
+    port = ((data or {}).get("chat") or {}).get("port")
+    if pid is None and isinstance(port, int) and not isinstance(port, bool) and port > 0:
+        found = port_pid(port)
+        if found and pid_alive(found) and is_chat_server(found, home):
+            pid, via = found, "[chat] port %d" % port
+    if pid is not None:
+        if not yes:
+            target["actions"].append("chat server: pid %d (%s), a 1.x chat server for this"
+                                     " cousin: stopped with --yes" % (pid, via))
+        else:
+            try:
+                kill(pid, signal.SIGTERM)
+                deadline = time.monotonic() + term_wait
+                while pid_alive(pid) and time.monotonic() < deadline:
+                    try:
+                        os.waitpid(pid, os.WNOHANG)
+                    except ChildProcessError:
+                        pass
+                    time.sleep(0.05)
+                state = "stopped" if not pid_alive(pid) else \
+                    "signalled, still up after %gs" % term_wait
+            except ProcessLookupError:
+                state = "already gone"
+            except PermissionError:
+                state = None
+                target["errors"].append("chat server: pid %d (%s) is not ours to signal"
+                                        % (pid, via))
+            if state:
+                target["actions"].append("chat server: pid %d (%s) %s" % (pid, via, state))
+    if pid_file.exists():
+        if not yes:
+            if pid is None:
+                target["actions"].append("%s names no running chat server: removed with --yes"
+                                         % PID_FILE)
+        else:
+            pid_file.unlink(missing_ok=True)
+            target["actions"].append("%s removed" % PID_FILE)
+
+
+def _tidy_home(home, *, yes, seams):
+    home = Path(home)
+    target = {"target": home.name, "refused": None, "findings": [], "actions": [],
+              "errors": []}
+    try:
+        data = tomllib.loads((home / "cousin.toml").read_text())
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        data = None
+    kind = ((data or {}).get("agent") or {}).get("runner") if isinstance(data, dict) else None
+    worker = isinstance(data, dict) and (data.get("cousin") or {}).get("type") == "worker"
+    if data is None or (kind not in RUNNER_KINDS and not worker):
+        target["refused"] = lane_refusal(home)       # tidy is not a conversion (R2)
+        return target
+    _tidy_chat_server(home, data, yes, target, **seams)
+    _tidy_file(home / "cousin.toml", removed_keys.COUSIN_KEYS, "cousin.toml", home / "data",
+               yes, target)
+    return target
+
+
+def _tidy_install(root, *, yes):
+    root = Path(root)
+    target = {"target": "install", "refused": None, "findings": [], "actions": [],
+              "errors": []}
+    for where, table in removed_keys.FILES:
+        _tidy_file(root / where, table, where, root / "config", yes, target)
+    cmd = root / removed_keys.AGENT_CMD[0]
+    if cmd.exists():
+        target["findings"].append({"where": removed_keys.AGENT_CMD[0],
+                                   "key": removed_keys.AGENT_CMD[0],
+                                   "line": removed_keys.AGENT_CMD[1]})
+        if yes:
+            dest = cmd.with_name(cmd.name + TIDY_SUFFIX)
+            n = 0
+            while dest.exists():
+                n += 1
+                dest = cmd.with_name("%s%s.%d" % (cmd.name, TIDY_SUFFIX, n))
+            os.replace(cmd, dest)
+            target["actions"].append("%s: moved to config/%s"
+                                     % (removed_keys.AGENT_CMD[0], dest.name))
+    return target
+
+
+def tidy(root, homes, *, install=False, yes=False, pid_alive, is_chat_server, port_pid, kill,
+         term_wait=TIDY_TERM_S):
+    """[target] for each home in `homes`, then the install's config files
+    when `install`: {"target" (slug or "install"), "refused" (a cousin
+    with no runner kind: lane_refusal, nothing touched), "findings"
+    ([{"where", "key", "line"}]), "actions" (done with `yes`, else what
+    `yes` would do), "errors" (a file left whole, a process not ours)}.
+    Nothing is written or signalled without `yes`."""
+    seams = dict(pid_alive=pid_alive, is_chat_server=is_chat_server, port_pid=port_pid,
+                 kill=kill, term_wait=term_wait)
+    out = [_tidy_home(home, yes=yes, seams=seams) for home in homes]
+    if install:
+        out.append(_tidy_install(root, yes=yes))
+    return out
+
+
+def _tidy_live():
+    from cousin_lib import spawn
+    return dict(pid_alive=spawn._pid_alive, is_chat_server=_chat_server_of,
+                port_pid=spawn._pid_bound_to_port, kill=os.kill)
+
+
+def _tidy_cli(args, root):
+    if args.all:
+        base = root / "cousins"
+        homes = sorted(e for e in base.iterdir() if (e / "cousin.toml").is_file()) \
+            if base.is_dir() else []
+    else:
+        home = root / "cousins" / args.slug
+        if not (home / "cousin.toml").exists():
+            print("error: no cousin %r under %s" % (args.slug, root), file=sys.stderr)
+            return 2
+        homes = [home]
+    targets = tidy(root, homes, install=args.all, yes=args.yes, **_tidy_live())
+    if not args.all and targets[0]["refused"]:
+        print("error: %s" % targets[0]["refused"], file=sys.stderr)
+        return 2
+    shown = bad = pending = False
+    for t in targets:
+        if t["refused"]:
+            print("%s: refused: %s" % (t["target"], t["refused"]))
+            shown = bad = True
+            continue
+        if not (t["findings"] or t["actions"] or t["errors"]):
+            continue
+        shown = True
+        print("%s:" % t["target"])
+        for f in t["findings"]:
+            print("  %s: %s" % (f["key"] if f["key"] == f["where"] else
+                                "%s %s" % (f["where"], f["key"]), f["line"]))
+        for line in t["actions"]:
+            print("  %s" % line)
+        for line in t["errors"]:
+            print("  NOT tidied: %s" % line)
+        bad = bad or bool(t["errors"])
+        pending = pending or bool(t["findings"] or t["actions"])
+    if not shown:
+        print("nothing to tidy")
+        return 0
+    if pending and not args.yes:
+        print("plan only, nothing written: `cousin-migrate tidy %s --yes` removes them (each"
+              " file's prior bytes go beside it, as <name>%s)"
+              % ("--all" if args.all else args.slug, TIDY_SUFFIX))
+    return 1 if bad else 0
+
+
 # ------------------------------------------------------------ the CLI
+
+def _print_removed(found, indent):
+    """R7: one `warn 2.0.0` line per key 2.0.0 no longer reads."""
+    for f in found or ():
+        print("%swarn 2.0.0 %s: %s" % (indent, f["key"] if f["key"] == f["where"] else
+                                       "%s %s" % (f["where"], f["key"]), f["line"]))
+
 
 def _print_plan(p):
     for c in p["checks"]:
@@ -1736,6 +2143,7 @@ def _switch_cli(args, home, root):
                 print("  %s %-10s %s" % ("ok " if c["ok"] else "NO ", c["check"], c["detail"]))
             for w in p["warnings"]:
                 print("  warn %s" % w)
+            _print_removed(p.get("removed"), "  ")
             print("ready" if p["ready"] else "NOT ready")
             return 0 if p["ready"] else 1
         if args.cmd == "rollback":
@@ -1763,7 +2171,8 @@ def migrate_main(argv=None):
     parser = argparse.ArgumentParser(
         prog="cousin-migrate",
         description="move one cousin from the legacy tmux lane to the SDK runner, and back;"
-                    " --to switches a runner cousin between the sdk and tmux kinds")
+                    " --to switches a runner cousin between the sdk and tmux kinds; tidy"
+                    " removes the keys 2.0.0 no longer reads")
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in ("plan", "apply"):
         p = sub.add_parser(name)
@@ -1791,8 +2200,19 @@ def migrate_main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--validate", action="store_true",
                    help="one smallest model turn with the runner's model, effort and account")
+    p = sub.add_parser("tidy", help="remove the keys 2.0.0 no longer reads (a plan without"
+                                     " --yes) and stop a 1.x chat server still running")
+    p.add_argument("slug", nargs="?", help="one cousin (its cousin.toml and chat server)")
+    p.add_argument("--all", action="store_true",
+                   help="every cousin, and the install's config/harness.toml, config/hive.toml"
+                        " and config/agent-cmd")
+    p.add_argument("--yes", action="store_true", help="really remove them")
     args = parser.parse_args(argv)
+    if args.cmd == "tidy" and (args.slug is None) == (not args.all):
+        parser.error("tidy takes a cousin's slug or --all, exactly one")
     root = FrameworkConfig.resolve().root
+    if args.cmd == "tidy":
+        return _tidy_cli(args, root)
     home = root / "cousins" / args.slug
     if not (home / "cousin.toml").exists():
         print("error: no cousin %r under %s" % (args.slug, root), file=sys.stderr)
@@ -1828,6 +2248,7 @@ def migrate_main(argv=None):
                 print("MISMATCH %s" % line)
             for line in c.get("warnings") or ():
                 print("warn %s" % line)
+            _print_removed(c.get("removed"), "")
             print("ok" if c["ok"] else "NOT ok")
         return 0 if c["ok"] else 1
     if args.cmd in ("apply", "rollback") and not args.yes:

@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import agent_auth, delivery, loops, spawn, supervisor
+from cousin_lib import removed_keys
 from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
                                CousinConfig, FrameworkConfig,
                                MissingConfigError, agent_config,
@@ -340,6 +341,9 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD):
         "runner": runner,
         "tokensSpent": tokens.today_total(server, config.home),
         "supervisor": supervisor_state(snap, config.slug),
+        # R7: keys 2.0.0 no longer reads, named on the card (the install's
+        # own are in `cousin-supervisor status`)
+        "removedKeys": removed_keys.scan_home(config.home),
         **lane_fields(config.home),
     }
 

@@ -150,6 +150,41 @@ class TestHeadEventAttribution(HermeticCase):
         self.assertIs(_head_payload(home)["commit_attribution"], False)
 
 
+class TestRemovedKeysAtStart(HermeticCase):
+    """R7: a key 2.0.0 removed is named at start, once on stderr and one
+    `system` `config` event per finding, and the cousin runs."""
+
+    def test_the_runner_names_them_at_start(self):
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + '\n[chat]\nport = 8091\ntmux_session = "wren"\n')
+        (home.parent.parent / "config").mkdir()
+        (home.parent.parent / "config" / "agent-cmd").write_text("claude\n")
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0, err)
+        lines = [line for line in err.splitlines() if "2.0.0" in line]
+        self.assertEqual(len(lines), 1, err)
+        for key in ("[chat] port", "[chat] tmux_session", "config/agent-cmd",
+                    "cousin-migrate tidy wren"):
+            self.assertIn(key, lines[0])
+        from cousin_lib.runner import status
+        events = [json.loads(line) for line in
+                  status.primary_stream(home).read_text().splitlines()]
+        config = [e["payload"] for e in events
+                  if e["kind"] == "system" and e["payload"].get("subtype") == "config"]
+        self.assertEqual([(c["where"], c["key"]) for c in config],
+                         [("cousin.toml", "[chat] port"), ("cousin.toml", "[chat] tmux_session"),
+                          ("config/agent-cmd", "config/agent-cmd")])
+        self.assertTrue(all(c["line"] for c in config))
+        self.assertEqual(events[0]["kind"], "runner")          # the head stays the head
+
+    def test_a_clean_cousin_says_nothing(self):
+        home = temp_home(self, runner="fake")
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 0)
+        self.assertNotIn("2.0.0", err)
+
+
 class TestRunnerSelection(HermeticCase):
     def test_a_cousin_with_no_runner_key_is_refused_not_given_an_sdk_session(self):
         home = temp_home(self)

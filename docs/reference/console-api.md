@@ -373,6 +373,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `autoStart` | a runner cousin's `[agent] auto_start` (the supervisor starts it with itself unless false); null on `tmux-legacy` |
 | `held` | `<home>/run/held` exists: a stop holds the runner down until the next start |
 | `loginRequired` | the runner waits for a login or billing fix: `{"reason", "action", "since"}` from `data/login-required.json` (`action` is the line to run), else null. The file's `detail` is never shown |
+| `removedKeys` | the keys 2.0.0 no longer reads that this cousin's `cousin.toml` still carries (`[chat] port`, `[runtime] model`, ...): `[{"where", "key", "line"}]`, `line` saying what to do; `[]` when none (and on a file that does not parse). Inert, never a refusal: the card names them until `cousin-migrate tidy <slug> --yes` removes them. The install's own (`config/harness.toml`, ...) are in `cousin-supervisor status` ([configuration](../configuration.md#removed-in-200)). A remote row has none |
 
 With the hive on, remote nodes follow the local rows. They carry the same keys (the local-only ones null or 0) plus `remote: true`, `remoteState` (`online`, `offline`, `pending` = built but never checked in, `revoked`), `online`, `revoked`, `checkedIn`, `lastSeen`, `version`. For a remote row `status` is `running` when online, and `chat` is derived (`ok` online, `down` offline, `none` before the first checkin), never probed. If a slug is both local and a node, the local row wins.
 

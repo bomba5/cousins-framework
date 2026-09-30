@@ -156,11 +156,13 @@ class TestSocket(_Case):
         self.assertEqual((rc, out.strip()), (0, "runner:wren stopped"))
         self.assertFalse(_alive(wren))
         self.assertEqual(self.child("runner:wren")["reason"], "stopped by request")
-        rc, _, err = self.cli("start", "priya")         # a tmux cousin is refused
+        rc, _, err = self.cli("start", "priya")         # no runner: refused by name
         self.assertEqual(rc, 2)
-        self.assertIn("not a runner cousin", err)
+        from cousin_lib.delivery import lane_refusal
+        self.assertIn(lane_refusal(self.root / "cousins" / "priya"), err)
         rc, _, err = self.cli("start", "mallory")       # no such cousin
         self.assertEqual(rc, 2)
+        self.assertIn("mallory is not a cousin", err)
 
     def test_stop_without_wait_answers_at_once(self):
         # R6': `wait: false` is answered once signalled; the table (and the
@@ -271,6 +273,47 @@ class TestSocket(_Case):
         self.supervise()
         self.assertEqual(stat.S_IMODE((self.root / "run").stat().st_mode), 0o700)
         self.assertTrue(stat.S_ISSOCK((self.root / supervisor.SOCKET).stat().st_mode))
+
+
+class TestRefusedAndRemoved(_Case):
+    """R2, R7: `status` lists every cousin it refuses (no runner kind; a
+    worker is not one) with the one line, and every removed key it finds
+    in a cousin or the install, named, not fatal."""
+
+    def test_status_lists_a_refused_cousin(self):
+        from cousin_lib.delivery import lane_refusal
+        _cousin(self.root, "wren", "fake")
+        priya = _cousin(self.root, "priya")                     # no [agent] runner
+        toki = _cousin(self.root, "toki")
+        (toki / "cousin.toml").write_text('[cousin]\nslug = "toki"\ntype = "worker"\n')
+        self.supervise()
+        self.wait_state("runner:wren", "running")
+        body = self.status()
+        self.assertEqual(body["refused"], {"priya": lane_refusal(priya)})
+        rc, out, _ = self.cli("status")
+        self.assertEqual(rc, 0)
+        self.assertIn("refused  priya: %s" % lane_refusal(priya), out)
+        self.assertNotIn("toki", out)
+        self.assertEqual(json.loads(self.cli("status", "--json")[1])["refused"],
+                         {"priya": lane_refusal(priya)})
+
+    def test_status_lists_the_removed_keys(self):
+        wren = _cousin(self.root, "wren", "fake")
+        (wren / "cousin.toml").write_text((wren / "cousin.toml").read_text()
+                                          + '\n[chat]\nport = 8091\n')
+        (self.root / "config" / "harness.toml").write_text('busy_patterns = ["esc"]\n')
+        self.supervise()
+        self.wait_state("runner:wren", "running")              # named, and it runs
+        body = self.status()
+        self.assertEqual([(c["cousin"], c["where"], c["key"]) for c in body["config"]],
+                         [("wren", "cousin.toml", "[chat] port"),
+                          (None, "config/harness.toml", "busy_patterns")])
+        self.assertTrue(all(c["line"] for c in body["config"]))
+        self.assertEqual(body["refused"], {})
+        rc, out, _ = self.cli("status")
+        self.assertIn("removed  wren cousin.toml [chat] port", out)
+        self.assertIn("removed  config/harness.toml busy_patterns", out)
+        self.assertIn("cousin-migrate tidy --all", out)
 
 
 class TestTargets(_Case):

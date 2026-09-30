@@ -359,7 +359,7 @@ class TestCreateRunnerCousin(_Case):
             "runner": "", "account": None})
         self.assertEqual(status, 201, body)
         data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
-        self.assertNotIn("agent", data)
+        self.assertEqual(data["agent"], {"runner": "sdk"})   # R4: the default kind
 
     def test_a_bad_runner_or_account_is_400_and_nothing_is_created(self):
         self.serve()

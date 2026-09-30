@@ -421,7 +421,7 @@ def spawn_lane_options(root):
     return {"runners": kinds, "tmux_lane": agent_settings.TMUX_LEGACY,
             "lane_models": {kind: rule for kind in kinds
                             for rule in [agent_settings.model_rule(kind)] if rule},
-            "default_runner": os.environ.get("COUSIN_DEFAULT_RUNNER") or None,
+            "default_runner": os.environ.get("COUSIN_DEFAULT_RUNNER") or spawn.DEFAULT_RUNNER,
             "accounts": rows, "accounts_error": error,
             "lane_keys": {kind: agent_settings.lane_keys(kind) for kind in kinds}}
 
@@ -590,10 +590,9 @@ def register():
             value = body.get(key)
             if value is not None and value != "":
                 runtime[key] = value
-        # The lane: `runner` (one of RUNNER_KINDS, or "tmux-legacy" for the
-        # tmux lane by name) and the `account` it runs on; absent or empty,
-        # COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT apply (unset: the
-        # tmux lane). The dialog always names the lane.
+        # The lane: `runner` (one of RUNNER_KINDS) and the `account` it runs
+        # on; absent or empty, COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT
+        # apply (unset: sdk). The dialog always names the lane.
         for key in ("runner", "account"):
             value = body.get(key)
             if value is None or value == "":

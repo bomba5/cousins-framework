@@ -792,8 +792,10 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(status, 201, body)
         data = tomllib.loads(
             (self.root / "cousins" / "toki" / "cousin.toml").read_text())
-        self.assertEqual(data["runtime"], {"model": "m-one",
-                                           "effort": "medium"})
+        # R4: no runner named is sdk, whose model and effort are [agent]'s
+        self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one",
+                                         "effort": "medium"})
+        self.assertNotIn("runtime", data)
         self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
         self.assertEqual(data["memory"]["scope"], "shared")
         row = self.get("/api/cousins")[1]["cousins"][0]

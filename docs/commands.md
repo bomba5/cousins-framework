@@ -27,11 +27,11 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one (what the start-at-boot unit
-uses); `--runner sdk|fake|opencode|tmux` and `--account <name>` make it a runner cousin
-(`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
-`COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]` too, where
-the runner reads them, and only on a [lane](glossary.md#lane) that reads them), which `--start`
-starts through `cousin-supervisor`;
+uses); `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
+and account (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER`,
+else `sdk`, and `COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]`
+too, where the runner reads them, and only on a [lane](glossary.md#lane) that reads them); `--start`
+starts it through `cousin-supervisor`;
 `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
@@ -39,7 +39,7 @@ CLAUDE.md framework part differs from the template, and `--apply` writes it
 
 2.0.0 has no legacy tmux lane: a cousin with no `[agent] runner` is refused by
 name, with one line and before anything runs, by `cousin-spawn --start` (exit
-2; creating a cousin with `--start` needs a runner kind), by a stop (the
+2), by a stop (the
 console's answers 409), by `cousin-flip` and by `cousin-reincarnate`. A
 [worker](glossary.md#worker) (`[cousin] type = "worker"`) has no session: its stop is a no-op that
 says so.

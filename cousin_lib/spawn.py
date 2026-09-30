@@ -158,45 +158,40 @@ def _write_identity_files(home, *, claude_md, name, role):
     (home / "MEMORY.md").write_text("# %s - memory index\n" % name)
 
 
+# The kind of a new cousin when neither --runner nor COUSIN_DEFAULT_RUNNER
+# names one (phase 10b R4).
+DEFAULT_RUNNER = "sdk"
+
+
 def spawn_lane(root, runner=None, account=None):
     """(runner, account) a new cousin is created with. runner None reads
-    COUSIN_DEFAULT_RUNNER, where unset or empty is the tmux lane (None,
-    nothing written), and "tmux-legacy" names the tmux lane explicitly (no
-    default read); a runner must be one of RUNNER_KINDS. account None reads
-    COUSIN_DEFAULT_ACCOUNT, which applies only to a runner cousin; an
-    explicit account needs a runner. An account must be `host` or one of
+    COUSIN_DEFAULT_RUNNER, where unset or empty is DEFAULT_RUNNER, `sdk`
+    (R4: 2.0.0 has no legacy tmux lane, so "tmux-legacy" is refused by
+    name); a runner must be one of RUNNER_KINDS. account None reads
+    COUSIN_DEFAULT_ACCOUNT. An account must be `host` or one of
     config/accounts.toml's. SpawnError on anything else, before any
     write."""
     from cousin_lib import accounts
     from cousin_lib.agent_settings import TMUX_LEGACY
     if runner == TMUX_LEGACY:
-        # the tmux lane asked for by name (the console's spawn dialog): the
-        # COUSIN_DEFAULT_RUNNER and COUSIN_DEFAULT_ACCOUNT defaults do not apply
-        if account is not None:
-            raise SpawnError("account %r needs a runner: an account is what a runner cousin"
-                             " runs on, and %s is the tmux lane" % (account, TMUX_LEGACY))
-        return None, None
+        raise SpawnError("%s is not a lane: 2.0.0 has no legacy tmux lane;"
+                         " name one of %s" % (TMUX_LEGACY, ", ".join(RUNNER_KINDS)))
     runner_from = "runner"
     if runner is None:
-        runner = os.environ.get("COUSIN_DEFAULT_RUNNER") or None
+        runner = os.environ.get("COUSIN_DEFAULT_RUNNER") or DEFAULT_RUNNER
         runner_from = "COUSIN_DEFAULT_RUNNER"
-    if runner is not None and runner not in RUNNER_KINDS:
+    if runner not in RUNNER_KINDS:
         raise SpawnError("%s must be one of %s, got %r"
                          % (runner_from, ", ".join(RUNNER_KINDS), runner))
     account_from = "account"
     if account is None:
-        account = (os.environ.get("COUSIN_DEFAULT_ACCOUNT") or None) \
-            if runner is not None else None
+        account = os.environ.get("COUSIN_DEFAULT_ACCOUNT") or None
         account_from = "COUSIN_DEFAULT_ACCOUNT"
     if account is None:
         return runner, None
     if not isinstance(account, str):
         raise SpawnError("%s must be an account name, got %r"
                          % (account_from, account))
-    if runner is None:
-        raise SpawnError("account %r needs a runner: an account is what a"
-                         " runner cousin runs on (runner = %s)"
-                         % (account, " or ".join(RUNNER_KINDS)))
     if account != accounts.HOST:
         try:
             known = accounts.load(root)
@@ -220,8 +215,8 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
     model, effort, heartbeat and memory_scope are optional and land in
     cousin.toml ([runtime], [heartbeat] context_beat_seconds, [memory]
     scope); runner and account land in [agent] (spawn_lane: the
-    COUSIN_DEFAULT_RUNNER and COUSIN_DEFAULT_ACCOUNT defaults, where
-    unset is the tmux lane, unchanged), and so do a runner cousin's model
+    COUSIN_DEFAULT_RUNNER and COUSIN_DEFAULT_ACCOUNT defaults, where an
+    unset runner is `sdk`), and so do a runner cousin's model
     and effort, the keys its runner reads, checked by its lane
     (agent_settings.check_new); each is validated before anything is
     written.
@@ -1384,16 +1379,12 @@ def spawn_main(argv=None):
                              " [operator] and named in the cousin's MCP"
                              " registry so `send` can reach them")
     parser.add_argument("--model",
-                        help="cousin.toml [runtime] model: what the agent"
-                             " command's {model} placeholder renders to;"
-                             " absent, config/harness.toml [agent]"
-                             " default_model applies. A runner cousin's"
-                             " goes to [agent] model, the key its runner reads")
+                        help="cousin.toml [agent] model, the key the"
+                             " cousin's runner reads (checked by its kind);"
+                             " absent, the kind's own default applies")
     parser.add_argument("--effort", choices=EFFORT_LEVELS,
-                        help="cousin.toml [runtime] effort, rendered into"
-                             " the {effort} placeholder; absent, [agent]"
-                             " default_effort applies. A runner cousin's"
-                             " goes to [agent] effort (the sdk and tmux lanes)")
+                        help="cousin.toml [agent] effort (the sdk and tmux"
+                             " kinds read it)")
     parser.add_argument("--heartbeat", type=int, metavar="SECONDS",
                         help="cousin.toml [heartbeat] context_beat_seconds"
                              " (absent: the documented default)")
@@ -1403,14 +1394,13 @@ def spawn_main(argv=None):
                         help="cousin.toml [memory] scope (absent: private);"
                              " shared = may propose to the shared tier")
     parser.add_argument("--runner", choices=RUNNER_KINDS,
-                        help="cousin.toml [agent] runner: the cousin runs on"
-                             " cousin-runner under cousin-supervisor, not in"
-                             " tmux (absent: COUSIN_DEFAULT_RUNNER, else"
-                             " tmux)")
+                        help="cousin.toml [agent] runner: the kind"
+                             " cousin-supervisor runs the cousin on (absent:"
+                             " COUSIN_DEFAULT_RUNNER, else sdk)")
     parser.add_argument("--account",
                         help="cousin.toml [agent] account, one of"
-                             " config/accounts.toml's (a runner cousin only;"
-                             " absent: COUSIN_DEFAULT_ACCOUNT, else host)")
+                             " config/accounts.toml's (absent:"
+                             " COUSIN_DEFAULT_ACCOUNT, else host)")
     parser.add_argument("--start", action="store_true",
                         help="start the cousin (a runner cousin, through"
                              " cousin-supervisor) after creating it; on an EXISTING"
@@ -1483,12 +1473,8 @@ def spawn_main(argv=None):
         # R2: 2.0.0 has no legacy tmux lane: nothing is created or started
         # for a cousin with no runner kind.
         from cousin_lib import delivery
-        if start_existing:
-            why = delivery.lane_refusal(root / "cousins" / args.slug)
-        else:
-            why = ("--start needs a runner kind (--runner %s, or"
-                   " COUSIN_DEFAULT_RUNNER): 2.0.0 has no legacy tmux lane;"
-                   " nothing created" % "|".join(RUNNER_KINDS))
+        # (A new cousin always has one: spawn_lane, R4.)
+        why = delivery.lane_refusal(root / "cousins" / args.slug)
         print("cousin-spawn: %s" % why, file=sys.stderr)
         return 2
     agent_cmd = None

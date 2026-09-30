@@ -16,6 +16,7 @@ the static bundle with its traversal refusal.
 import http.client
 import json
 import pathlib
+import re
 import shutil
 import unittest
 
@@ -47,6 +48,12 @@ class ConsoleEndToEnd(ConsoleCase):
                                 voice="Plain and helpful.",
                                 operator=OPERATOR)
         self.home = created["home"]
+        # a 1.x home, as this walk was written for (the console's legacy
+        # paths stay until the console task retires them): create_cousin
+        # makes an sdk cousin since 2.0.0 (R4), so its [agent] table goes
+        toml_path = self.home / "cousin.toml"
+        toml_path.write_text(re.sub(r"(?ms)^\[agent\][ \t]*\n.*?(?=^\[|\Z)", "",
+                                    toml_path.read_text()))
         # 2. an upstream chat server on an ephemeral port, delivery faked
         self.delivered = []
         self.chat = FakeChatUpstream(

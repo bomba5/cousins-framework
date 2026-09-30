@@ -238,8 +238,11 @@ class TestProjectSettings(ProvisionCase):
         root = self._framework_root()
         home = self._create(root)["home"]
         toml_path = home / "cousin.toml"
+        # the new cousin's own [agent] table (sdk by default, R4)
+        text = toml_path.read_text()
+        self.assertIn("\n[agent]\n", text)
         toml_path.write_text(
-            toml_path.read_text() + '\n[agent]\ncommit_attribution = "off"\n')
+            text.replace("\n[agent]\n", '\n[agent]\ncommit_attribution = "off"\n', 1))
         path = home / ".claude" / "settings.json"
         before = path.read_text()
         rc, _out, err = self._main(["testa", "--root", str(root),

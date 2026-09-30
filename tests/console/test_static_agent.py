@@ -105,9 +105,11 @@ class TheOtherFiles(unittest.TestCase):
         for token in ('field="model"', 'field="effort"', "<AuthField"):
             self.assertIn(token, block, token)
 
-    def test_the_spawn_dialog_names_the_tmux_lane_and_offers_the_accounts_models(self):
+    def test_the_spawn_dialog_offers_the_kinds_and_the_accounts_models(self):
+        # R4: the kinds only, the legacy lane not offered
         modal = _component(_read("cousins.jsx"), "SpawnModal")
-        self.assertIn('{options?.tmux_lane || "..."}', modal)
+        self.assertIn("runners.map(k =>", modal)
+        self.assertNotIn("tmux_lane", modal)
         self.assertIn(".models || []", modal)
         self.assertIn("laneSuggestions.map", modal)
 

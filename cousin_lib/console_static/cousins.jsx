@@ -1396,8 +1396,9 @@ function SpawnModal({ onClose, onSpawn }) {
   const [effort, setEffort] = React.useState("");
   const [heartbeat, setHeartbeat] = React.useState("");
   const [scope, setScope] = React.useState("");
-  // The lane: "" is the tmux lane, else one of the server's runner kinds;
-  // the account it runs on, from the accounts whose `lanes` include it. A
+  // The lane: one of the server's runner kinds, the install's default
+  // (default_runner) preselected; "" only until the options arrive. The
+  // account it runs on, from the accounts whose `lanes` include it. A
   // runner reads [agent] model and effort, and only the keys its lane
   // reads (lane_keys) are sent; its model is free text (an opencode model
   // is "<provider>/<model>"), the catalogue offered as suggestions.
@@ -1454,7 +1455,7 @@ function SpawnModal({ onClose, onSpawn }) {
   }, [name]);
 
   // voice is required: the template refuses to render without it.
-  // the options name the lanes, the tmux one included: nothing is sent before them
+  // the options name the lanes and the default: nothing is sent before them
   const valid = options && name.trim() && slug.trim() && role.trim() && voice.trim()
     && !(laneModelRule && laneModelRule.required && !laneModel.trim());
 
@@ -1469,9 +1470,8 @@ function SpawnModal({ onClose, onSpawn }) {
       const body = { slug, name, role, voice };
       if (roleParagraph.trim()) body.role_paragraph = roleParagraph.trim();
       if (operator.trim()) body.operator = operator.trim();
-      // the lane is always named: "" sends the tmux lane's own name, so an
-      // install's COUSIN_DEFAULT_RUNNER cannot turn it into a runner cousin
-      body.runner = runner || options.tmux_lane;
+      // the lane is always named (the install's default preselected)
+      body.runner = runner || options.default_runner;
       if (runner && account) body.account = account;
       const chosenModel = runner ? laneModel.trim() : model;
       if (chosenModel && laneReads("model")) body.model = chosenModel;
@@ -1485,10 +1485,10 @@ function SpawnModal({ onClose, onSpawn }) {
       if (!r2.ok || !d2.ok) throw new Error("created but start failed: " + (d2.error || `HTTP ${r2.status}`));
       onSpawn({
         slug, name, role, type: "cousin", home: d.home,
-        tmuxSession: slug, operator: operator.trim() || null,
+        operator: operator.trim() || null,
         memoryScope: scope || "private", heartbeat: Number(heartbeat) || 3600,
         model: (laneReads("model") && chosenModel) || null, effort: (laneReads("effort") && effort) || null,
-        lane: runner || options.tmux_lane, account: runner ? (account || null) : null,
+        lane: runner || options.default_runner, account: account || null,
         pid: null, uptime_seconds: null,
         flipAt: null, hidden: false, status: "running", chat: "ok", active: false,
         activity: "", lastMsgTs: 0, tokensSpent: 0,
@@ -1547,9 +1547,9 @@ function SpawnModal({ onClose, onSpawn }) {
           </div>
           <div style={{ marginTop: 14 }} />
           <div className="grid2">
-            <FormField label="lane" hint="tmux-legacy runs the agent in a tmux pane; a runner kind runs it under cousin-supervisor.">
+            <FormField label="lane" hint="The runner kind; cousin-supervisor runs it.">
               <select className="sel" value={runner} onChange={e => setRunner(e.target.value)} disabled={!options}>
-                <option value="">{options?.tmux_lane || "..."}</option>
+                {!options && <option value="">...</option>}
                 {runners.map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </FormField>

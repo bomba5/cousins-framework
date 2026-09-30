@@ -32,7 +32,10 @@ class SpawnOptions(ConsoleCase):
         self.assertIn("effort", body["lane_keys"]["sdk"])
         self.assertNotIn("effort", body["lane_keys"]["opencode"])
         self.assertNotIn("model", body["lane_keys"]["fake"])
-        self.assertIsNone(body["default_runner"])
+        # R4: COUSIN_DEFAULT_RUNNER unset is sdk, the dialog's preselection
+        self.assertEqual(body["default_runner"], "sdk")
+        with mock.patch.dict("os.environ", {"COUSIN_DEFAULT_RUNNER": "fake"}):
+            self.assertEqual(self.get("/api/spawn/options")[1]["default_runner"], "fake")
 
     def test_the_kinds_follow_delivery(self):
         self.serve()
@@ -79,9 +82,9 @@ class SpawnARunnerCousin(ConsoleCase):
         self.assertFalse((self.root / "cousins" / "toki").exists())
 
 
-class SpawnTheTmuxLaneExplicitly(ConsoleCase):
-    """Fix round 1, Important 7: the dialog's tmux-legacy choice is sent as
-    runner "tmux-legacy", so COUSIN_DEFAULT_RUNNER cannot override it."""
+class SpawnTheLegacyLaneRefused(ConsoleCase):
+    """R4: 2.0.0 has no legacy tmux lane; a spawn naming "tmux-legacy" is a
+    400 naming the kinds, and a spawn naming no runner is sdk."""
 
     def setUp(self):
         super().setUp()
@@ -89,21 +92,26 @@ class SpawnTheTmuxLaneExplicitly(ConsoleCase):
         (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
             "# {{NAME}}\n{{ROLE_ONE_LINE}}\n{{VOICE_GUIDE}}\n")
 
-    def test_the_sentinel_beats_the_env_default(self):
+    def test_the_legacy_lane_by_name_is_a_400_that_writes_nothing(self):
         self.serve()
-        with mock.patch.dict("os.environ", {"COUSIN_DEFAULT_RUNNER": "sdk"}):
+        status, body = self.post("/api/cousins", {
+            "slug": "toki", "role": "tester", "voice": "plain",
+            "runner": "tmux-legacy", "model": "m-one"})
+        self.assertEqual(status, 400, body)
+        self.assertIn("no legacy tmux lane", body["error"])
+        self.assertIn("sdk, fake, opencode, tmux", body["error"])
+        self.assertFalse((self.root / "cousins" / "toki").exists())
+
+    def test_no_runner_named_is_sdk(self):
+        self.serve()
+        with mock.patch.dict("os.environ", {}, clear=False) as env:
+            env.pop("COUSIN_DEFAULT_RUNNER", None)
             status, body = self.post("/api/cousins", {
-                "slug": "toki", "role": "tester", "voice": "plain",
-                "runner": "tmux-legacy", "model": "m-one"})
-            self.assertEqual(status, 201, body)
-            data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
-            self.assertNotIn("agent", data)
-            self.assertEqual(data["runtime"]["model"], "m-one")
-            status, body = self.post("/api/cousins", {
-                "slug": "toko", "role": "tester", "voice": "plain",
-                "runner": "tmux-legacy", "account": "fleet"})
-            self.assertEqual(status, 400, body)
-            self.assertIn("needs a runner", body["error"])
+                "slug": "toki", "role": "tester", "voice": "plain", "model": "m-one"})
+        self.assertEqual(status, 201, body)
+        data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
+        self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one"})
+        self.assertNotIn("runtime", data)
 
     def test_options_say_how_each_lane_takes_a_model(self):
         self.serve()

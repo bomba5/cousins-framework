@@ -26,7 +26,9 @@ anyone. Two handler kinds:
   detached (its own session, stdin closed, reaped by a waiter thread so
   a long-lived server never collects zombies) with COUSIN_HOOK_USER,
   COUSIN_HOOK_MESSAGE, COUSIN_HOOK_PATTERN, COUSIN_SLUG and COUSIN_HOME
-  in the environment, stdout and stderr appended to
+  in the environment (the server's own, minus the auth variables and
+  every credential-shaped name, accounts.credential_name), stdout and
+  stderr appended to
   <home>/data/chat-hooks.log. A path that resolves outside both the
   home and the framework root is refused: the hook file is data a
   cousin edits, and data must not be able to name /usr/bin/anything.
@@ -48,6 +50,7 @@ import sys
 import threading
 from pathlib import Path
 
+from cousin_lib import accounts
 from cousin_lib.config import FrameworkConfig, MissingConfigError
 
 HOOKS_FILENAME = "chat-hooks.json"
@@ -180,7 +183,11 @@ def _fire_shell(script, *, user, message, slug, home, pattern):
         return
     if not resolved.is_file():
         return
-    env = os.environ.copy()
+    # the server's env minus every credential (#88): the runner strips
+    # the auth variables from the cousin's own tools, and a hook the
+    # cousin's data names must not see more than those tools do
+    env = {name: value for name, value in os.environ.items()
+           if not accounts.credential_name(name)}
     env.update({
         "COUSIN_HOOK_USER": user or "",
         "COUSIN_HOOK_MESSAGE": message or "",

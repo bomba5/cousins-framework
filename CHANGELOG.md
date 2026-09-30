@@ -20,6 +20,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   multi-byte character (a writer that died mid-write): it reads bytes
   and decodes each complete line, and the partial last line is skipped
   as before (#86).
+- Chat hooks: a `shell:` handler no longer inherits the chat server's
+  credentials (#88). Its environment is the server's minus the auth
+  variables (`accounts.AUTH_VARS`) and every credential-shaped name
+  (`*SECRET*`, `*_KEY`, `*_TOKEN`, `*_PASSWORD`), the rule the runner
+  already applies to the cousin's own tools.
 
 ## 2.1.0 - 2026-09-30
 

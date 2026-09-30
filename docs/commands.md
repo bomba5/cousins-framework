@@ -26,12 +26,11 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 `cousin-spawn` creates a cousin from the template (home, `cousin.toml`,
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it, and `--start --resume` resumes its
-last session instead of opening a new one (what the start-at-boot unit
-uses); `--runner sdk|fake|opencode|tmux` and `--account <name>` make it a runner cousin
-(`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER` and
-`COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]` too, where
-the runner reads them, and only on a [lane](glossary.md#lane) that reads them), which `--start`
-starts through `cousin-supervisor`;
+last session instead of opening a new one; `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
+and account (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER`,
+else `sdk`, and `COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]`
+too, where the runner reads them, and only on a [lane](glossary.md#lane) that reads them); `--start`
+starts it through `cousin-supervisor`;
 `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
@@ -39,7 +38,7 @@ CLAUDE.md framework part differs from the template, and `--apply` writes it
 
 2.0.0 has no legacy tmux lane: a cousin with no `[agent] runner` is refused by
 name, with one line and before anything runs, by `cousin-spawn --start` (exit
-2; creating a cousin with `--start` needs a runner kind), by a stop (the
+2), by a stop (the
 console's answers 409), by `cousin-flip` and by `cousin-reincarnate`. A
 [worker](glossary.md#worker) (`[cousin] type = "worker"`) has no session: its stop is a no-op that
 says so.
@@ -333,52 +332,30 @@ cousin-supervisor stop wren && cousin-supervisor start wren
 cousin-supervisor start --name loops
 ```
 
-`cousin-migrate` moves one cousin from the legacy tmux lane (no `[agent]
-runner`) to the SDK runner, and back. Nothing else ever does: an upgrade or a
-merge leaves every cousin on the lane its `cousin.toml` names. `plan <slug>
-[--account NAME] [--validate]` checks, writing nothing, that the cousin is
-running on the legacy tmux lane (a stopped one would be started by the
-move), with no migration open, that its account is logged in, that a
-`cousin-supervisor` runs, that the SDK is installed and that its auto-memory
-imports without a conflict, then lists the steps; it exits 0 ready, 1 not.
-`apply <slug> [--account NAME] --yes` runs them in order and stops at the
-first that fails: `close` (the console's clean stop: the handoff, the
-transcript mined), `handover` (the legacy lane's transcript path recorded in
-`data/previous-transcript.json`: the working conversation does not carry
-over, but the runner's first fresh session is handed the path; never fails,
-a transcript that cannot be found is recorded missing), `import`
-(`cousin-memory import-auto --apply`), `toml` (`[agent] runner = "sdk"`, and
-the account, once the tmux session is still down), `start` (the review
-gate's cursor opens afresh and the supervisor starts the runner; no chat
-server is started: 2.0.0 runs none) and `verify` (the runner stays up and
-holds its lock for 10 seconds). `--validate` (on `plan`, `apply` or `check`)
-runs one smallest model turn with the model, effort and account the runner
-will carry, so a model the CLI can't actually run is never written.
-`data/migration.json` keeps the prior `cousin.toml`, its bytes and mode,
-written before the first step, and each step's outcome. `rollback <slug>
---yes` undoes what ran: it stops the runner and waits until it lets go of
-its lock, puts the file back, has the supervisor rescan, writes a fresh
-boot packet, starts the tmux session unless it already runs, removes the
-runner lane's session record (`data/runner-session*.json`, the restart
-mark), and releases the supervisor's hold on the runner (`run/held`). It refuses a second rollback,
-inbox rows still waiting and an inbox it cannot read (`--force` rolls back
-anyway; rows stay in `data/inbox.db`). `check <slug> [--since ISO] [--json]
-[--validate]` is the week's measure, from the migration on by default: inbox
-rows not done after an hour, tool calls with no recorded result, recorder
-hooks that failed, an unreadable inbox;
-exit 0 clean, 1 not. The runbook, with the fleet's order and the rollback, is
-in [migrating](migrating.md#from-the-tmux-lane-to-the-sdk-runner).
+`cousin-migrate` switches a runner cousin between the `sdk` and `tmux` kinds,
+measures a cousin, and removes the keys 2.0.0 no longer reads. It moves nothing
+off the legacy tmux lane: 2.0.0 keeps no conversion (move each cousin on the
+last 1.x release first, or by hand: [migrating](migrating.md#a-cousin-with-no-runner)).
+`plan`, `apply` and `rollback` without `--to` exit 2 before doing anything:
+for a cousin with no `[agent] runner` with the one refusal line every entry
+point gives it, for a runner cousin with "name a kind with --to (sdk, tmux)".
+Nothing else ever changes a cousin's kind: an upgrade or a merge leaves every
+cousin on the kind its `cousin.toml` names.
 
-Once a cousin is on the runner lane, `plan`, `apply` and `rollback` also take
-`--to {sdk,tmux}`: this switches a runner cousin between the `sdk` and `tmux`
-kinds (keeping its session, resumed with `claude --resume`) instead of
-migrating off the legacy lane. Switching to `tmux` may need the operator to
+`plan`, `apply` and `rollback` take `--to {sdk,tmux}`: this switches a runner
+cousin between the `sdk` and `tmux` kinds (keeping its session, resumed with
+`claude --resume`). Switching to `tmux` may need the operator to
 accept the CLI's trust or bypass-permissions dialog once in the pane the
 first time; `plan`/`apply` say where to look
 (`tmux -S <root>/run/tmux.sock attach -t tmux-<slug>`, or the console's pane
 view) and wait up to 10 minutes for it. `data/kind-switch.json` records a
 switch; a `rollback --to <kind>` undoes it. See [runners](reference/runners.md)
-for the kinds and [migrating](migrating.md).
+for the kinds and [migrating](migrating.md). `check <slug> [--since ISO]
+[--json] [--validate]` is the measure: inbox rows not done after an hour,
+tool calls with no recorded result, recorder hooks that failed, an
+unreadable inbox, the runner's CLI; `--validate` runs one smallest model
+turn with the model, effort and account the runner carries. Exit 0 clean,
+1 not.
 
 `tidy <slug>|--all [--yes]` removes the keys 2.0.0 no longer reads (the list
 and what each did is in [configuration](configuration.md#removed-in-200)):
@@ -399,12 +376,10 @@ to do, 1 when `--all` met a refused cousin or a file it left whole, 2 when
 `<slug>` is refused.
 
 ```
-cousin-migrate plan wren --account team
-cousin-migrate apply wren --account team --yes
 cousin-migrate plan wren --to tmux
 cousin-migrate apply wren --to tmux --yes
 cousin-migrate check wren
-cousin-migrate rollback wren --yes
+cousin-migrate rollback wren --to sdk --yes
 cousin-migrate tidy --all
 cousin-migrate tidy --all --yes
 ```

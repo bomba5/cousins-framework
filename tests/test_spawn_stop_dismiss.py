@@ -135,5 +135,38 @@ class TestDismissCousin(StopCase):
         self.assertIn(re.sub(r"[^A-Za-z0-9]", "-", str(home)), out["left_in_place"][0])
 
 
+class TestDismissACousinWithNoRunner(StopCase):
+    """A cousin with no [agent] runner is dismissed (archived, removed)
+    without the refused stop: nothing 2.0.0 started can be running for
+    it, and the result says the stop was skipped."""
+
+    def test_archives_and_removes_without_a_stop_or_a_tmux_call(self):
+        from cousin_lib.delivery import lane_refusal
+        home = self._cousin()
+        note = lane_refusal(home)
+        stop = mock.Mock(side_effect=AssertionError("the stop is refused"))
+        for kw in ({"tmux_bin": str(self.tmux)}, {"stop": stop}):
+            if not home.exists():
+                home = self._cousin()
+            out = dismiss_cousin(self.root, slug="wren", **kw)
+            self.assertEqual(out["status"], "deleted")
+            self.assertEqual(out["stop"], "skipped")
+            self.assertIn(note, out["note"])
+            self.assertFalse(home.exists())
+            with tarfile.open(out["archive"]) as tf:
+                self.assertIn("wren/notes/untracked.md", tf.getnames())
+        stop.assert_not_called()
+        self.assertFalse(self.log.exists() and self.log.read_text())
+
+    def test_a_runner_cousins_dismiss_still_stops_it(self):
+        home = self._cousin()
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n\n[agent]\nrunner = "fake"\n')
+        stop = mock.Mock(return_value={"runner": "stopped"})
+        out = dismiss_cousin(self.root, slug="wren", stop=stop)
+        stop.assert_called_once()
+        self.assertNotIn("stop", out)
+
+
 if __name__ == "__main__":
     unittest.main()

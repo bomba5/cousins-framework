@@ -373,39 +373,22 @@ class TestSwitch(AuthCase):
                                  tmux_bin=str(self.tmux),
                                  start_chat_server=lambda home: None, **kw)
 
-    def test_a_stopped_cousin_just_changes_mode(self):
-        self.write_key()
-        out = self.switch(MODE_API_KEY)
-        self.assertFalse(out["restarted"])
-        self.assertEqual(agent_auth.read_mode(self.home), MODE_API_KEY)
-        self.assertTrue(self.cfg()["isolated_dir"].is_dir())
-
-    def test_switching_to_api_key_without_a_key_changes_nothing(self):
-        with self.assertRaises(AuthError):
-            self.switch(MODE_API_KEY)
-        self.assertEqual(agent_auth.read_mode(self.home), MODE_LOGIN)
-
-    def test_a_mid_turn_agent_is_not_restarted(self):
-        self.write_key()
-        self.running("* Cogitating... (12s . esc to interrupt)\n")
-        before = (self.home / "cousin.toml").read_text()
-        with self.assertRaises(AgentBusy):
-            self.switch(MODE_API_KEY)
-        self.assertEqual((self.home / "cousin.toml").read_text(), before)
-        self.assertNotIn("kill-session", self.log.read_text())
-
-    def test_no_resume_rule_refuses_before_anything_changes(self):
+    def test_a_cousin_with_no_runner_is_refused_before_any_tmux_call(self):
+        """R2: the mode switch restarted a legacy session (kill-session,
+        then a start that 2.0.0 refuses): it is refused by name first, with
+        no tmux call, cousin.toml untouched."""
+        from cousin_lib.delivery import lane_refusal
         self.write_key()
         self.running("idle\n")
-        text = (self.root / "config" / "harness.toml").read_text()
-        (self.root / "config" / "harness.toml").write_text(
-            text.replace("[agent.resume]", "[unused]"))
-        with self.assertRaisesRegex(AuthError, "cannot resume"):
-            self.switch(MODE_API_KEY)
+        before = (self.home / "cousin.toml").read_text()
+        for kw in ({}, {"restart": False}, {"force": True}):
+            with self.assertRaises(AuthError) as ctx:
+                self.switch(MODE_API_KEY, **kw)
+            self.assertEqual(str(ctx.exception), lane_refusal(self.home))
+        self.assertEqual((self.home / "cousin.toml").read_text(), before)
         self.assertEqual(agent_auth.read_mode(self.home), MODE_LOGIN)
-        out = self.switch(MODE_API_KEY, restart=False)
-        self.assertFalse(out["restarted"])
-        self.assertEqual(agent_auth.read_mode(self.home), MODE_API_KEY)
+        self.assertFalse(self.log.exists() and self.log.read_text(),
+                         "tmux was called")
 
 
 class TestSecretsStayHome(AuthCase):
@@ -435,7 +418,7 @@ class TestCli(AuthCase):
             rc = agent_auth.auth_main(argv + ["--root", str(self.root)])
         return rc, out.getvalue(), err.getvalue()
 
-    def test_show_key_stdin_and_switch(self):
+    def test_show_and_key_stdin(self):
         rc, out, _ = self.run_cli(["wren"])
         self.assertEqual(rc, 0)
         self.assertIn("auth claude", out)
@@ -444,17 +427,17 @@ class TestCli(AuthCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("ends WXYZ", out)
         self.assertNotIn(KEY, out)
-        rc, out, _ = self.run_cli(["wren", "api_key", "--no-restart"])
-        self.assertEqual(rc, 0)
-        self.assertIn("claude -> api_key", out)
         rc, out, _ = self.run_cli(["wren"])
-        self.assertIn("auth api_key", out)
+        self.assertIn("auth claude", out)
         self.assertNotIn(KEY, out)
 
     def test_a_refusal_is_rc_1(self):
-        rc, _out, err = self.run_cli(["wren", "api_key"])
-        self.assertEqual(rc, 1)
-        self.assertIn("no key file", err)
+        from cousin_lib.delivery import lane_refusal
+        for argv in (["wren", "api_key"], ["wren", "api_key", "--no-restart"]):
+            rc, _out, err = self.run_cli(argv)
+            self.assertEqual(rc, 1, argv)
+            self.assertIn(lane_refusal(self.home), err, argv)
+        self.assertEqual(agent_auth.read_mode(self.home), MODE_LOGIN)
 
 
 if __name__ == "__main__":

@@ -384,8 +384,8 @@ def fleet_rows(server):
 
 def spawn_lane_options(root):
     """What the spawn dialog offers for the lane: `runners` (the kinds,
-    from delivery.RUNNER_KINDS; none chosen is the tmux lane),
-    `default_runner` (COUSIN_DEFAULT_RUNNER, else null), `accounts` (host,
+    from delivery.RUNNER_KINDS), `default_runner` (COUSIN_DEFAULT_RUNNER,
+    else spawn.DEFAULT_RUNNER, the one the dialog preselects), `accounts` (host,
     then config/accounts.toml's by name, each with its kind, the kinds it
     runs on (agent_settings.check_lane, the runner's rule, the tmux kind's
     refusal of a key or token account included) and, for an opencode
@@ -394,7 +394,8 @@ def spawn_lane_options(root):
     with `accounts_error` when the file cannot be read, `lane_keys`, the
     [agent] keys each kind reads, and `lane_models`, how each kind that
     reads a model takes it (agent_settings.model_rule). `tmux_lane` is the
-    runner value that names the tmux lane explicitly."""
+    lane value a fleet row gives a cousin with no runner kind (the spawn
+    route refuses it: 2.0.0 has no legacy tmux lane)."""
     from cousin_lib import accounts, agent_settings
     kinds = agent_settings.kinds()
     error = None
@@ -421,7 +422,7 @@ def spawn_lane_options(root):
     return {"runners": kinds, "tmux_lane": agent_settings.TMUX_LEGACY,
             "lane_models": {kind: rule for kind in kinds
                             for rule in [agent_settings.model_rule(kind)] if rule},
-            "default_runner": os.environ.get("COUSIN_DEFAULT_RUNNER") or None,
+            "default_runner": os.environ.get("COUSIN_DEFAULT_RUNNER") or spawn.DEFAULT_RUNNER,
             "accounts": rows, "accounts_error": error,
             "lane_keys": {kind: agent_settings.lane_keys(kind) for kind in kinds}}
 
@@ -590,10 +591,9 @@ def register():
             value = body.get(key)
             if value is not None and value != "":
                 runtime[key] = value
-        # The lane: `runner` (one of RUNNER_KINDS, or "tmux-legacy" for the
-        # tmux lane by name) and the `account` it runs on; absent or empty,
-        # COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT apply (unset: the
-        # tmux lane). The dialog always names the lane.
+        # The lane: `runner` (one of RUNNER_KINDS) and the `account` it runs
+        # on; absent or empty, COUSIN_DEFAULT_RUNNER / COUSIN_DEFAULT_ACCOUNT
+        # apply (unset: sdk). The dialog always names the lane.
         for key in ("runner", "account"):
             value = body.get(key)
             if value is None or value == "":
@@ -789,6 +789,8 @@ def register():
                     tmux_socket=req.server.tmux_socket)
             except agent_auth.AgentBusy as err:
                 raise HttpError(409, str(err), busy=True)
+            except agent_auth.LaneRefused as err:
+                raise HttpError(409, str(err))
             except agent_auth.AuthError as err:
                 raise HttpError(400, str(err))
         req.server.emit("cousins-refresh", fleet_rows(req.server))

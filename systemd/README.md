@@ -26,7 +26,6 @@ here).
 | `cousin-supervisor.service` | `cousin-supervisor run --console-port 8600`: the console (on loopback), the loops daemon and one `cousin-runner` per runner cousin, restarted with backoff and stopped in order | instead of `cousin-console.service` and `cousin-loops.service`, never beside them (see below) |
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
-| `cousin-start@.service` | `cousin-spawn <slug> --start --resume` for the slug after the `@`: brings the cousin back after a reboot, resuming its last session when it can | once at boot, one per cousin you enable it for |
 
 A `.timer` starts the `.service` with the same name. Enable the timer, not
 the service.
@@ -63,19 +62,11 @@ systemctl --user enable --now cousin-tool-surface.timer cousin-sweep.timer
 loginctl enable-linger "$USER"
 ```
 
-Nothing starts a cousin's session after a reboot unless you ask for it. For
-each cousin you want back, enable its start unit (a stopped cousin you leave
-alone stays stopped):
-
-```
-systemctl --user enable cousin-start@wren.service
-```
-
-It runs once at boot, after the console and the loops daemon. It resumes the
-cousin's last session if `config/harness.toml` has `[agent.resume]` and the
-session's transcript is still there, and starts a new session otherwise. If
-the cousin is already running it does nothing. `systemctl --user disable
-cousin-start@wren.service` stops it coming back.
+A cousin comes back after a reboot with the supervisor: every cousin runs
+on a runner kind, and `cousin-supervisor` starts each one's runner (unless its
+`[agent] auto_start` is false), so enable `cousin-supervisor.service` (below),
+or keep the two units and run the supervisor for the runners only. There is
+no per-cousin start unit.
 
 The `grep` line prints nothing when every placeholder was replaced. If it
 prints a file name, that unit still has a `{{...}}` in it and will fail at
@@ -171,13 +162,15 @@ replace `%h` with that account's home directory (in a system unit `%h` is
 root's home). Put them in the system unit directory and use `systemctl`
 without `--user`.
 
-## No chat server units
+## Units 2.0.0 removed
 
 2.0.0 runs no per-cousin chat server: the console, the runner's inbox and
-the hive carry chat. An install upgraded from 1.x disables the old units
-once (`systemctl --user disable --now cousin-chat-watchdog.timer
-cousin-chat-server@<slug>.service`, for each slug that had one) and removes
-their files from `~/.config/systemd/user/`.
+the hive carry chat. It has no legacy tmux lane either, so no unit starts a
+cousin's session at boot: the supervisor starts every runner cousin. An
+install upgraded from 1.x disables the old units once (`systemctl --user
+disable --now cousin-chat-watchdog.timer cousin-chat-server@<slug>.service
+cousin-start@<slug>.service`, for each slug that had one) and removes their
+files from `~/.config/systemd/user/`.
 
 ## Remove
 

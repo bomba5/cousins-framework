@@ -1408,9 +1408,8 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
         return {"slug": home.name, "from": current, "to": to, "steps": [], "checks": checks,
                 "warnings": warnings, "ready": False}
     if current not in RUNNER_KINDS:
-        checks.append(_check("kind", False, "%s is on the legacy tmux lane: the kind switch is"
-                             " between runner kinds; migrate it first (cousin-migrate apply)"
-                             % home.name))
+        # row 75: 2.0.0 has no migration to point at, only the refusal
+        checks.append(_check("kind", False, lane_refusal(home)))
     elif current == to:
         checks.append(_check("kind", False, "%s is already the %s kind" % (home.name, to)))
     elif current not in SWITCH_KINDS:
@@ -2154,13 +2153,26 @@ def _switch_cli(args, home, root):
     return 0
 
 
+def no_kind_line(home):
+    """Why a plan, apply or rollback without --to is refused (row 72): a
+    cousin with no runner gets delivery.lane_refusal; a runner cousin is
+    told to name a kind."""
+    from cousin_lib.delivery import _runner_kind
+    kind = _runner_kind(home)
+    if kind not in RUNNER_KINDS:
+        return lane_refusal(home)
+    return ("%s runs on %s: name a kind with --to (%s); 2.0.0 has no legacy lane to"
+            " migrate from" % (Path(home).name, kind, ", ".join(SWITCH_KINDS)))
+
+
 def migrate_main(argv=None):
     from cousin_lib.config import FrameworkConfig
     parser = argparse.ArgumentParser(
         prog="cousin-migrate",
-        description="move one cousin from the legacy tmux lane to the SDK runner, and back;"
-                    " --to switches a runner cousin between the sdk and tmux kinds; tidy"
-                    " removes the keys 2.0.0 no longer reads")
+        description="plan, apply and rollback --to switch a runner cousin between the sdk"
+                    " and tmux kinds (without --to they are refused: 2.0.0 has no legacy"
+                    " lane to migrate from); check measures a cousin; tidy removes the"
+                    " keys 2.0.0 no longer reads")
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in ("plan", "apply"):
         p = sub.add_parser(name)
@@ -2239,6 +2251,12 @@ def migrate_main(argv=None):
             _print_removed(c.get("removed"), "")
             print("ok" if c["ok"] else "NOT ok")
         return 0 if c["ok"] else 1
+    if not getattr(args, "to", None):
+        # Row 72: 2.0.0 keeps no conversion from the legacy lane (O3), so a
+        # plan, apply or rollback names a kind; the legacy migration below
+        # is not reached.
+        print("error: %s" % no_kind_line(home), file=sys.stderr)
+        return 2
     if args.cmd in ("apply", "rollback") and not args.yes:
         print("error: %s changes a live cousin; run `cousin-migrate plan %s` first, then"
               " pass --yes" % (args.cmd, args.slug), file=sys.stderr)

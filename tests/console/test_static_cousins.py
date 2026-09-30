@@ -81,13 +81,16 @@ class SpawnDialogLane(unittest.TestCase):
         for kind in ('"sdk"', '"fake"', '"opencode"', '"tmux"'):
             self.assertNotIn(kind, self.src, kind)
 
-    def test_the_tmux_lane_is_sent_explicitly(self):
+    def test_the_default_lane_is_preselected_and_sent(self):
+        # R4: the server's default_runner (COUSIN_DEFAULT_RUNNER, else sdk)
+        # is preselected and sent, never a literal; nothing is sent before
+        # the options have named it; the legacy lane is not offered
         body = self.src[self.src.index("const body"):]
-        # the server's name for it, never a literal; nothing is sent before
-        # the options have named it
-        self.assertIn("body.runner = runner || options.tmux_lane;", body)
+        self.assertIn("setRunner(r => r || d.default_runner", self.src)
+        self.assertIn("body.runner = runner || options.default_runner;", body)
         self.assertIn("const valid = options &&", self.src)
         self.assertNotIn('"tmux-legacy"', self.src)
+        self.assertNotIn("tmux_lane", self.src)
 
     def test_the_model_rule_is_the_lanes(self):
         self.assertIn("lane_models", self.src)

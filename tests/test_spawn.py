@@ -4,6 +4,7 @@ Tested against real temporary framework roots; nothing is mocked below
 the CLI's own seams.
 """
 import json
+import re
 import pathlib
 import shutil
 import tempfile
@@ -28,6 +29,12 @@ class SpawnCase(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         return pathlib.Path(tmp.name)
+
+def _without_agent(text):
+    """cousin.toml's text without its [agent] table (a new cousin gets one:
+    sdk by default since 2.0.0), so a test can write its own."""
+    return re.sub(r"(?ms)^\[agent\][ \t]*\n.*?(?=^\[|\Z)", "", text)
+
 
 class CreateCase(SpawnCase):
     def _framework_root(self):
@@ -111,6 +118,18 @@ class TestCreateCousin(CreateCase):
                 self._create(root)
         self.assertFalse((root / "cousins" / "wren").exists())
 
+def _legacy_home(root, slug="wren"):
+    """A 1.x legacy home, written by hand: cousin.toml with no [agent]
+    table (create_cousin makes an sdk cousin since 2.0.0, R4)."""
+    home = pathlib.Path(root) / "cousins" / slug
+    for sub in ("memory", "data", "notes", "scripts"):
+        (home / sub).mkdir(parents=True, exist_ok=True)
+    (home / "cousin.toml").write_text(
+        '[cousin]\nslug = "%s"\nname = "%s"\nrole = "example cousin"\n'
+        '\n[chat]\ntmux_session = "%s"\n' % (slug, slug.capitalize(), slug))
+    return home
+
+
 class TestLegacyStartRefused(CreateCase):
     """R2: start_cousin refuses a cousin with no [agent] runner by name,
     before any tmux call."""
@@ -120,7 +139,7 @@ class TestLegacyStartRefused(CreateCase):
         import stat
         from cousin_lib.delivery import lane_refusal
         root = self._framework_root()
-        out = self._create(root)
+        out = {"home": _legacy_home(root)}
         tmux = root / "tmux"
         tmux.write_text(_FAKE_TMUX)
         tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
@@ -139,17 +158,19 @@ class TestLegacyStartRefused(CreateCase):
         import os
         from cousin_lib.delivery import lane_refusal
         root = self._framework_root()
-        out = self._create(root)
+        out = {"home": _legacy_home(root)}
         err = io.StringIO()
         with contextlib.redirect_stderr(err), mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("COUSIN_DEFAULT_RUNNER", None)
             rc = spawn_main(["wren", "--root", str(root), "--start"])
             self.assertEqual(rc, 2)
             self.assertIn(lane_refusal(out["home"]), err.getvalue())
+            # the legacy lane named as the install's default is no lane
+            os.environ["COUSIN_DEFAULT_RUNNER"] = "tmux-legacy"
             rc = spawn_main(["sam", "--root", str(root), "--role", "r",
                              "--voice", "v", "--start"])
         self.assertEqual(rc, 2)
-        self.assertIn("needs a runner kind", err.getvalue())
+        self.assertIn("COUSIN_DEFAULT_RUNNER must be one of sdk", err.getvalue())
         self.assertFalse((root / "cousins" / "sam").exists())
 
 
@@ -344,7 +365,7 @@ class TestPersistAgentValues(CreateCase):
         root = self._framework_root()
         out = self._create(root)
         path = out["home"] / "cousin.toml"
-        path.write_text(path.read_text() + '\n[agent]\nrunner = "sdk"\neffort = "low"\n'
+        path.write_text(_without_agent(path.read_text()) + '\n[agent]\nrunner = "sdk"\neffort = "low"\n'
                         + extra)
         return root, out["home"], path
 
@@ -388,7 +409,7 @@ class TestPersistAgentValuesSeveral(CreateCase):
         root = self._framework_root()
         out = self._create(root)
         path = out["home"] / "cousin.toml"
-        path.write_text(path.read_text() + '\n[agent]\nrunner = "sdk"\neffort = "low"\n'
+        path.write_text(_without_agent(path.read_text()) + '\n[agent]\nrunner = "sdk"\neffort = "low"\n'
                         + extra)
         return root, out["home"], path
 
@@ -508,7 +529,7 @@ class TestPersistAgentValuesSeveral(CreateCase):
     def test_a_tmux_legacy_cousin_is_refused(self):
         from cousin_lib import spawn
         root = self._framework_root()
-        home = self._create(root)["home"]
+        home = _legacy_home(root)
         with self.assertRaises(SpawnError):
             spawn.persist_agent_values(home, {"effort": "high"}, root=root)
 
@@ -522,7 +543,7 @@ class TestPersistAgentValuesOnTmux(CreateCase):
         root = self._framework_root()
         home = self._create(root)["home"]
         path = home / "cousin.toml"
-        path.write_text(path.read_text() + '\n[agent]\nrunner = "tmux"\n')
+        path.write_text(_without_agent(path.read_text()) + '\n[agent]\nrunner = "tmux"\n')
         with mock.patch.object(spawn, "validate_turn_out_of_process") as child:
             self.assertTrue(spawn.persist_agent_value(home, "effort", "high", root=root))
             self.assertTrue(spawn.persist_agent_value(home, "model", "m-two", root=root))
@@ -638,14 +659,17 @@ class TestCreateWithRuntimeOptions(CreateCase):
         out = self._create(root, model="m-one", effort="medium",
                            heartbeat=600, memory_scope="both")
         data = tomllib.loads((out["home"] / "cousin.toml").read_text())
-        self.assertEqual(data["runtime"], {"model": "m-one",
-                                           "effort": "medium"})
+        # R4: no runner named is an sdk cousin, whose model and effort
+        # are the [agent] keys its runner reads; no [runtime] table
+        self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one",
+                                         "effort": "medium"})
+        self.assertNotIn("runtime", data)
         self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
         self.assertEqual(data["memory"]["scope"], "shared")
         from cousin_lib.config import CousinConfig
         cfg = CousinConfig.load(out["home"])
-        self.assertEqual((cfg.model, cfg.effort, cfg.heartbeat_seconds,
-                          cfg.memory_scope), ("m-one", "medium", 600, "shared"))
+        self.assertEqual((cfg.heartbeat_seconds, cfg.memory_scope),
+                         (600, "shared"))
 
     def test_options_left_out_write_no_table(self):
         root = self._framework_root()
@@ -683,7 +707,9 @@ class TestSpawnMainRuntimeFlags(CreateCase):
         self.assertEqual(rc, 0, err)
         data = tomllib.loads(
             (root / "cousins" / "wren" / "cousin.toml").read_text())
-        self.assertEqual(data["runtime"], {"model": "m-one", "effort": "max"})
+        self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one",
+                                         "effort": "max"})
+        self.assertNotIn("runtime", data)
         self.assertEqual(data["heartbeat"]["context_beat_seconds"], 900)
         self.assertEqual(data["memory"]["scope"], "shared")
 

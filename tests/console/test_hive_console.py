@@ -486,7 +486,7 @@ class TestBuild(HiveConsoleCase):
             env_text = tar.extractfile("kestrel-node/node.env").read().decode()
         self.assertIn("AGENT_CMD='/opt/agent --plain'", env_text)
         self.assertIn("TELL_HOME=1\n", env_text)
-        self.assertIn("HOME_CHAT_URL=\n", env_text)
+        self.assertNotIn("HOME_CHAT_URL", env_text)
         self.assertNotIn("home.example.invalid", env_text)
         self.assertIn("NODE_HOST=127.0.0.1", env_text)
         self.assertIn("NODE_PORT=8300", env_text)

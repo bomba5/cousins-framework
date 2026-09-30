@@ -56,6 +56,15 @@ class TestState(MigrateCase):
         self.assertTrue(body["supervisor"])
         self.assertEqual({d["id"] for d in body["deferred"]}, {"adopt", "all"})
 
+    def test_a_cousin_with_no_runner_carries_the_refusal_line(self):
+        from cousin_lib.delivery import lane_refusal
+        _, body = self.get("/api/cousins/wren/migrate")
+        self.assertEqual(body["refusal"], lane_refusal(self.home))
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n\n[agent]\nrunner = "sdk"\n')
+        _, body = self.get("/api/cousins/wren/migrate")
+        self.assertIsNone(body["refusal"])
+
     def test_a_record_is_served_without_the_saved_file_bytes(self):
         (self.home / migrate.RECORD).write_text(json.dumps({
             "state": "migrated", "prior_toml_b64": "c2VjcmV0", "prior_mode": 416,
@@ -87,33 +96,27 @@ class TestState(MigrateCase):
 
 
 class TestPlan(MigrateCase):
-    def test_a_plan_without_validate_answers_at_once_and_writes_nothing(self):
+    def test_a_plan_without_to_is_refused_with_the_line(self):
+        """Row 72/79: 2.0.0 keeps no conversion from the legacy lane (O3): a
+        plan without `to` on a cousin with no runner is a 409 carrying
+        delivery.lane_refusal; nothing runs."""
+        from cousin_lib.delivery import lane_refusal
         before = (self.home / "cousin.toml").read_bytes()
-        status, body = self.post("/api/cousins/wren/migrate/plan", {"account": "team"})
-        self.assertEqual(status, 200, body)
-        plan = body["plan"]
-        self.assertEqual(plan["steps"], list(migrate.STEPS))
-        checks = {c["check"]: c for c in plan["checks"]}
-        self.assertFalse(checks["validate"]["ok"])      # a carried model wants one turn
-        self.assertIn("--validate", checks["validate"]["detail"])
+        for body in ({}, {"account": "team"}, {"account": "team", "validate": True}):
+            status, answer = self.post("/api/cousins/wren/migrate/plan", body)
+            self.assertEqual(status, 409, (body, answer))
+            self.assertEqual(answer["error"], lane_refusal(self.home))
         self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
-        self.assertNotIn(("validate",), [c[:1] for c in self.live.calls])
-
-    def test_validate_is_a_long_operation_that_spends_one_turn(self):
-        status, body = self.post("/api/cousins/wren/migrate/plan",
-                                 {"account": "team", "validate": True})
-        self.assertEqual(status, 202, body)
-        op = self.wait_done()
-        self.assertEqual((op["kind"], op["status"]), ("migrate-plan", "done"), op)
-        self.assertTrue(op["result"]["plan"]["ready"], op["result"]["plan"]["checks"])
-        self.assertEqual(sum(1 for c in self.live.calls if c[0] == "validate"), 1)
+        self.assertEqual(self.live.calls, [])
+        self.assertIsNone(longop.status(self.server, "wren"))
 
     def test_the_kind_switch_plan_is_the_same_route_with_to(self):
         status, body = self.post("/api/cousins/wren/migrate/plan", {"to": "sdk"})
         self.assertEqual(status, 200, body)
         self.assertEqual(body["plan"]["to"], "sdk")
         kind = next(c for c in body["plan"]["checks"] if c["check"] == "kind")
-        self.assertIn("legacy tmux lane", kind["detail"])
+        from cousin_lib.delivery import lane_refusal
+        self.assertEqual(kind["detail"], lane_refusal(self.home))
 
     def test_bad_bodies_are_400(self):
         for body in ({"to": "opencode"}, {"account": "Bad Name"}, {"validate": "yes"},
@@ -123,81 +126,16 @@ class TestPlan(MigrateCase):
 
 
 class TestApply(MigrateCase):
-    def test_apply_needs_a_confirmation(self):
-        status, body = self.post("/api/cousins/wren/migrate/apply", {"account": "team"})
-        self.assertEqual(status, 400, body)
-        self.assertEqual(self.live.calls, [])
-
-    def test_apply_needs_the_supervisor(self):
-        self.live.supervisor = False
-        status, body = self.post("/api/cousins/wren/migrate/apply",
-                                 {"account": "team", "validate": True, "confirm": True})
-        self.assertEqual(status, 409, body)
-        self.assertIn("supervisor", body["error"])
-
-    def test_apply_runs_the_steps_as_stages(self):
-        status, body = self.post("/api/cousins/wren/migrate/apply",
-                                 {"account": "team", "validate": True, "confirm": True})
-        self.assertEqual(status, 202, body)
-        self.assertEqual(body["op"]["params"]["steps"], ["plan"] + list(migrate.STEPS))
-        op = self.wait_done()
-        self.assertEqual(op["status"], "done", op)
-        self.assertEqual(self.stages(op), [("plan", "done")] + [(s, "done") for s in migrate.STEPS])
-        self.assertEqual(self.agent()["runner"], "sdk")
-        detail = dict((s["name"], s["detail"]) for s in op["stages"])
-        self.assertIn("runner = 'sdk'", detail["toml"])
-        # the stages came as they happened: close ran before import was reported
-        names = [d["stage"]["name"] for k, d in self.events
-                 if k == longop.EVENT and d["phase"] == "stage"]
-        self.assertLess(names.index("close"), names.index("import"))
-
-    def test_a_failed_step_fails_the_op_and_says_how_to_undo(self):
-        self.live.start_error = "no child"
-        self.post("/api/cousins/wren/migrate/apply",
-                  {"account": "team", "validate": True, "confirm": True})
-        op = self.wait_done()
-        self.assertEqual(op["status"], "failed")
-        self.assertIn("start", op["error"])
-        self.assertIn("roll back", op["error"])
-        self.assertEqual(dict(self.stages(op))["start"], "failed")
-
-    def test_a_plan_that_is_not_ready_changes_nothing(self):
+    def test_an_apply_without_to_is_refused_with_the_line(self):
+        from cousin_lib.delivery import lane_refusal
         before = (self.home / "cousin.toml").read_bytes()
-        self.post("/api/cousins/wren/migrate/apply", {"account": "team", "confirm": True})
-        op = self.wait_done()
-        self.assertEqual(op["status"], "failed")
-        self.assertIn("not ready", op["error"])
+        for body in ({"account": "team"}, {"account": "team", "validate": True, "confirm": True}):
+            status, answer = self.post("/api/cousins/wren/migrate/apply", body)
+            self.assertEqual(status, 409, (body, answer))
+            self.assertEqual(answer["error"], lane_refusal(self.home))
         self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
-        self.assertNotIn("close", [c[0] for c in self.live.calls])
-
-    def test_one_migration_at_a_time_across_the_fleet(self):
-        owl = self.cousin("owl")
-        gate = threading.Event()
-        self.addCleanup(gate.set)
-        orig = self.live.close
-
-        def slow_close(slug, root):
-            gate.wait(5)
-            return orig(slug, root)
-        self.server.state["migrate.live"]["close"] = slow_close
-        status, _ = self.post("/api/cousins/wren/migrate/apply",
-                              {"account": "team", "validate": True, "confirm": True})
-        self.assertEqual(status, 202)
-        status, body = self.post("/api/cousins/owl/migrate/apply",
-                                 {"to": "sdk", "confirm": True})
-        self.assertEqual(status, 409, body)
-        self.assertIn("at a time", body["error"])
-        self.assertTrue(body["busy"])
-        self.assertTrue(owl.exists())
-        gate.set()
-        self.wait_done()
-
-    def test_a_flip_running_on_the_cousin_refuses_the_apply(self):
-        self.server.state.setdefault("flips", {})["wren"] = {"status": "running"}
-        status, body = self.post("/api/cousins/wren/migrate/apply",
-                                 {"account": "team", "validate": True, "confirm": True})
-        self.assertEqual(status, 409, body)
-        self.assertIn("flip", body["error"])
+        self.assertEqual(self.live.calls, [])
+        self.assertIsNone(longop.status(self.server, "wren"))
 
 
 class TestCheck(MigrateCase):
@@ -222,52 +160,16 @@ class TestCheck(MigrateCase):
 
 
 class TestRollback(MigrateCase):
-    def _migrate(self):
-        self.post("/api/cousins/wren/migrate/apply",
-                  {"account": "team", "validate": True, "confirm": True})
-        self.assertEqual(self.wait_done()["status"], "done")
-
-    def test_rollback_needs_a_confirmation_and_force_asks_twice(self):
-        self._migrate()
-        status, _ = self.post("/api/cousins/wren/migrate/rollback", {"which": "migration"})
-        self.assertEqual(status, 400)
-        status, body = self.post("/api/cousins/wren/migrate/rollback",
-                                 {"which": "migration", "confirm": True, "force": True})
-        self.assertEqual(status, 400, body)
-        self.assertIn("second", body["error"])
-
-    def test_rollback_restores_the_file(self):
-        self._migrate()
-        status, body = self.post("/api/cousins/wren/migrate/rollback",
-                                 {"which": "migration", "confirm": True})
-        self.assertEqual(status, 202, body)
-        op = self.wait_done()
-        self.assertEqual((op["kind"], op["status"]), ("migrate-rollback", "done"), op)
-        self.assertEqual((self.home / "cousin.toml").read_bytes(), TOML.encode())
-        self.assertIn("restore", dict(self.stages(op)))
-        self.assertEqual(migrate.read_record(self.home)["state"], "rolled_back")
-
-    def test_waiting_inbox_rows_refuse_without_force(self):
-        self._migrate()
-        from cousin_lib.delivery import Item
-        from cousin_lib.runner.inbox import Inbox
-        Inbox(self.home).put(Item(thread_id="person:ana", source="chat", sender="ana", body="hi"))
-        self.post("/api/cousins/wren/migrate/rollback", {"which": "migration", "confirm": True})
-        op = self.wait_done()
-        self.assertEqual(op["status"], "failed")
-        self.assertIn("--force", op["error"])
-        self.post("/api/cousins/wren/migrate/rollback",
-                  {"which": "migration", "confirm": True, "force": True, "force_confirm": True})
-        op = self.wait_done()
-        self.assertEqual(op["status"], "done", op)
-
-    def test_rollback_needs_the_supervisor(self):
-        self._migrate()
-        self.live.supervisor = False
-        status, body = self.post("/api/cousins/wren/migrate/rollback",
-                                 {"which": "migration", "confirm": True})
-        self.assertEqual(status, 409, body)
-        self.assertIn("supervisor", body["error"])
+    def test_a_migration_rollback_is_refused_with_the_line(self):
+        from cousin_lib.delivery import lane_refusal
+        for body in ({"which": "migration"},
+                     {"which": "migration", "confirm": True, "force": True,
+                      "force_confirm": True}):
+            status, answer = self.post("/api/cousins/wren/migrate/rollback", body)
+            self.assertEqual(status, 409, (body, answer))
+            self.assertEqual(answer["error"], lane_refusal(self.home))
+        self.assertEqual(self.live.calls, [])
+        self.assertIsNone(longop.status(self.server, "wren"))
 
     def test_bad_which_is_400(self):
         status, _ = self.post("/api/cousins/wren/migrate/rollback",
@@ -317,6 +219,39 @@ class SwitchCase(MigrateCase):
 
 
 class TestSwitch(SwitchCase):
+    def test_a_runner_cousin_without_to_is_told_to_name_a_kind(self):
+        before = (self.home / "cousin.toml").read_bytes()
+        for route, body in (("plan", {}), ("apply", {"confirm": True}),
+                            ("rollback", {"which": "migration", "confirm": True})):
+            status, answer = self.post("/api/cousins/wren/migrate/%s" % route, body)
+            self.assertEqual(status, 400, (route, answer))
+            self.assertIn("name a kind with --to (sdk, tmux)", answer["error"])
+        self.assertEqual((self.home / "cousin.toml").read_bytes(), before)
+        self.assertEqual(self.calls, [])
+
+    def test_one_switch_at_a_time_across_the_fleet(self):
+        self.trust()
+        owl = self.cousin("owl")
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        self.during_verify = lambda: gate.wait(5)
+        status, _ = self.post("/api/cousins/wren/migrate/apply", {"to": "tmux", "confirm": True})
+        self.assertEqual(status, 202)
+        status, body = self.post("/api/cousins/owl/migrate/apply",
+                                 {"to": "sdk", "confirm": True})
+        self.assertEqual(status, 409, body)
+        self.assertIn("at a time", body["error"])
+        self.assertTrue(body["busy"])
+        self.assertTrue(owl.exists())
+        gate.set()
+        self.wait_done()
+
+    def test_a_flip_running_on_the_cousin_refuses_the_switch(self):
+        self.server.state.setdefault("flips", {})["wren"] = {"status": "running"}
+        status, body = self.post("/api/cousins/wren/migrate/apply", {"to": "tmux", "confirm": True})
+        self.assertEqual(status, 409, body)
+        self.assertIn("flip", body["error"])
+
     def test_the_plan_says_the_one_time_trust_step(self):
         status, body = self.post("/api/cousins/wren/migrate/plan", {"to": "tmux"})
         self.assertEqual(status, 200, body)

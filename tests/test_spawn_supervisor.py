@@ -250,16 +250,36 @@ class _CreateCase(_Case):
 
 
 class TestCreateOnTheRunnerLane(_CreateCase):
-    def test_no_env_and_no_argument_is_the_tmux_cousin_unchanged(self):
-        """guard: the cousin.toml spawn wrote before this task, byte for byte."""
-        self.create()
-        self.assertEqual(self.toml(), BASE_TOML)
+    def test_with_no_default_a_new_cousin_is_sdk(self):
+        """R4: no runner named and COUSIN_DEFAULT_RUNNER unset or empty is
+        `sdk`; 2.0.0 has no legacy tmux lane to default to."""
+        os.environ.pop("COUSIN_DEFAULT_RUNNER", None)
+        os.environ.pop("COUSIN_DEFAULT_ACCOUNT", None)
+        self.assertEqual(spawn.spawn_lane(self.root), ("sdk", None))
+        os.environ["COUSIN_DEFAULT_RUNNER"] = ""
+        self.assertEqual(spawn.spawn_lane(self.root), ("sdk", None))
+        self.assertEqual(spawn.DEFAULT_RUNNER, "sdk")
 
-    def test_an_empty_env_is_the_tmux_lane(self):
+    def test_no_env_and_no_argument_writes_an_sdk_cousin(self):
+        self.create()
+        self.assertEqual(self.toml(), BASE_TOML + '\n[agent]\nrunner = "sdk"\n')
+
+    def test_an_empty_env_is_sdk(self):
         os.environ["COUSIN_DEFAULT_RUNNER"] = ""
         os.environ["COUSIN_DEFAULT_ACCOUNT"] = ""
         self.create()
-        self.assertEqual(self.toml(), BASE_TOML)
+        self.assertEqual(self.toml(), BASE_TOML + '\n[agent]\nrunner = "sdk"\n')
+
+    def test_tmux_legacy_is_not_a_lane(self):
+        """R4: the legacy lane asked for by name is refused, the line naming
+        the kinds, before anything is written."""
+        for kw in ({}, {"account": "metered"}):
+            with self.assertRaises(spawn.SpawnError) as caught:
+                spawn.spawn_lane(self.root, "tmux-legacy", **kw)
+            why = str(caught.exception)
+            self.assertIn("tmux-legacy", why)
+            self.assertIn("sdk, fake, opencode, tmux", why)
+        self.assertIn("no legacy tmux lane", self.refused(runner="tmux-legacy"))
 
     def test_the_env_default_runner_is_written(self):
         os.environ["COUSIN_DEFAULT_RUNNER"] = "sdk"
@@ -274,11 +294,12 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertEqual(self.toml(), BASE_TOML
                          + '\n[agent]\nrunner = "sdk"\naccount = "metered"\n')
 
-    def test_an_env_account_without_a_runner_writes_nothing(self):
+    def test_an_env_account_goes_with_the_default_sdk(self):
         self.accounts()
         os.environ["COUSIN_DEFAULT_ACCOUNT"] = "metered"
         self.create()
-        self.assertEqual(self.toml(), BASE_TOML)
+        self.assertEqual(self.toml(), BASE_TOML
+                         + '\n[agent]\nrunner = "sdk"\naccount = "metered"\n')
 
     def test_explicit_arguments_beat_the_env(self):
         self.accounts()
@@ -303,9 +324,11 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         os.environ["COUSIN_DEFAULT_ACCOUNT"] = "nobody"
         self.assertIn("COUSIN_DEFAULT_ACCOUNT", self.refused())
 
-    def test_an_account_without_a_runner_is_refused(self):
+    def test_an_account_without_a_runner_goes_with_the_default_sdk(self):
         self.accounts()
-        self.assertIn("needs a runner", self.refused(account="metered"))
+        self.create(account="metered")
+        self.assertEqual(tomllib.loads(self.toml())["agent"],
+                         {"runner": "sdk", "account": "metered"})
 
     def test_the_created_cousin_is_the_supervisors(self):
         self.create(runner="fake")
@@ -318,7 +341,7 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         "tmux" names the tmux kind, a runner kind; a value outside the kinds
         is still not the runner lane."""
         self.create()
-        text = self.toml()
+        text = BASE_TOML   # the hand-written home: its own [agent] below
         for runner, lane in (("tmux-legacy", False), ("bogus", False), ("", False),
                              ("sdk", True), ("fake", True), ("opencode", True),
                              ("tmux", True)):
@@ -340,11 +363,13 @@ class TestCreateARunnerCousinsModel(_CreateCase):
         self.assertEqual(data["agent"], {"runner": "sdk", "account": "fleet",
                                          "model": "claude-x", "effort": "high"})
 
-    def test_a_tmux_cousins_model_stays_in_runtime(self):
+    def test_the_default_sdk_cousins_model_goes_to_agent(self):
+        # R4: no runner named is sdk, so model and effort are [agent]'s
         self.create(model="claude-x", effort="low")
         data = tomllib.loads(self.toml())
-        self.assertEqual(data["runtime"], {"model": "claude-x", "effort": "low"})
-        self.assertNotIn("agent", data)
+        self.assertNotIn("runtime", data)
+        self.assertEqual(data["agent"], {"runner": "sdk", "model": "claude-x",
+                                         "effort": "low"})
 
     def test_the_lane_refuses_what_it_does_not_read(self):
         self.assertIn("model", self.refused(runner="fake", model="claude-x"))

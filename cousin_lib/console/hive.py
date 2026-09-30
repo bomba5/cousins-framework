@@ -431,7 +431,7 @@ def build_request(server, cfg, body):
         result = spawn_node.build_node_archive(
             server.root, slug=slug, queen_url=cfg["public_url"],
             name=name.strip(), role=role.strip(), out=directory,
-            home_chat=None, tell_home=tell_home,
+            tell_home=tell_home,
             port=port, agent_cmd=agent_cmd,
             node_host="0.0.0.0" if reachable else "127.0.0.1")
     except spawn_node.SpawnNodeError as err:

@@ -198,6 +198,24 @@ class TestDismiss(ConsoleCase):
             self.assertIn("wren/notes/only.md", tf.getnames())
         self.assertEqual(self.delete("/api/cousins/wren")[0], 404)
 
+    def test_a_cousin_with_no_runner_is_archived_without_a_stop(self):
+        from cousin_lib.delivery import lane_refusal
+        home = self.cousin("wren")
+        (home / "notes").mkdir()
+        (home / "notes" / "only.md").write_text("x")
+        self.tmux_running(True)
+        self.serve()
+        note = lane_refusal(home)
+        status, body = self.delete("/api/cousins/wren")
+        self.assertEqual(status, 200, body)
+        self.assertEqual((body["status"], body["stop"]), ("deleted", "skipped"))
+        self.assertIn(note, body["note"])
+        self.assertFalse(home.exists())
+        with tarfile.open(body["archive"]) as tf:
+            self.assertIn("wren/notes/only.md", tf.getnames())
+        calls = self.tmux_log.read_text() if self.tmux_log.exists() else ""
+        self.assertNotIn("kill-session", calls)
+
     def test_a_failed_archive_refuses_with_500_and_keeps_the_home(self):
         home = self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
         (self.root / "data").mkdir()
@@ -792,8 +810,10 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(status, 201, body)
         data = tomllib.loads(
             (self.root / "cousins" / "toki" / "cousin.toml").read_text())
-        self.assertEqual(data["runtime"], {"model": "m-one",
-                                           "effort": "medium"})
+        # R4: no runner named is sdk, whose model and effort are [agent]'s
+        self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one",
+                                         "effort": "medium"})
+        self.assertNotIn("runtime", data)
         self.assertEqual(data["heartbeat"]["context_beat_seconds"], 600)
         self.assertEqual(data["memory"]["scope"], "shared")
         row = self.get("/api/cousins")[1]["cousins"][0]

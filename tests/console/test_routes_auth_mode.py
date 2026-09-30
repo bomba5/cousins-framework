@@ -64,37 +64,26 @@ class AuthModeRoutes(ConsoleCase):
         self.assertEqual(status, 400)
         self.assertNotIn("two words", json.dumps(body))
 
-    def test_switch_on_a_stopped_cousin_and_the_row_shows_it(self):
-        self.serve()
-        self.post("/api/cousins/wren/auth/key", {"key": KEY})
-        status, body = self.post("/api/cousins/wren/auth",
-                                 {"mode": agent_auth.MODE_API_KEY})
-        self.assertEqual(status, 200, body)
-        self.assertFalse(body["restarted"])
-        row = self.get("/api/cousins")[1]["cousins"][0]
-        self.assertEqual(row["auth"], agent_auth.MODE_API_KEY)
-        status, body = self.post("/api/cousins/wren/auth", {"mode": "x"})
-        self.assertEqual(status, 400)
-
-    def test_switch_without_a_key_is_400_and_changes_nothing(self):
-        self.serve()
-        status, body = self.post("/api/cousins/wren/auth",
-                                 {"mode": agent_auth.MODE_API_KEY})
-        self.assertEqual(status, 400)
-        self.assertIn("no key file", body["error"])
-        self.assertEqual(agent_auth.read_mode(self.home),
-                         agent_auth.DEFAULT_MODE)
-
-    def test_a_mid_turn_cousin_is_409(self):
+    def test_a_cousin_with_no_runner_is_409_with_the_line_and_no_tmux_call(self):
+        # R2: the mode switch restarts a legacy session; 2.0.0 refuses it
+        # by name before any tmux call, whatever the body says
+        from cousin_lib.delivery import lane_refusal
         self.serve()
         self.post("/api/cousins/wren/auth/key", {"key": KEY})
         self.tmux_running()
-        self.pane.write_text("* Thinking... (3s . esc to interrupt)\n")
-        status, body = self.post("/api/cousins/wren/auth",
-                                 {"mode": agent_auth.MODE_API_KEY})
-        self.assertEqual(status, 409)
-        self.assertTrue(body["busy"])
-        self.assertNotIn("kill-session", self.tmux_log.read_text())
+        self.pane.write_text("idle\n")
+        for body in ({"mode": agent_auth.MODE_API_KEY},
+                     {"mode": agent_auth.MODE_API_KEY, "force": True},
+                     {"mode": agent_auth.MODE_API_KEY, "restart": False}):
+            status, answer = self.post("/api/cousins/wren/auth", body)
+            self.assertEqual(status, 409, (body, answer))
+            self.assertEqual(answer["error"], lane_refusal(self.home))
+        self.assertEqual(agent_auth.read_mode(self.home), agent_auth.DEFAULT_MODE)
+        calls = self.tmux_log.read_text() if self.tmux_log.exists() else ""
+        for verb in ("kill-session", "new-session", "capture-pane"):
+            self.assertNotIn(verb, calls)
+        status, body = self.post("/api/cousins/wren/auth", {"mode": "x"})
+        self.assertEqual(status, 400)
 
 
 class AuthModeRoutesNeedLogin(ConsoleCase):

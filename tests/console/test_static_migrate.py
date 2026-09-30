@@ -39,6 +39,15 @@ class MigrateJsx(unittest.TestCase):
         self.assertIn("validate: spends one model turn", self.src)
         self.assertIn("validate (spends one model turn)", self.src)
 
+    def test_a_cousin_with_no_runner_shows_the_refusal_not_the_migrate_button(self):
+        # row 72/79: 2.0.0 has no migration from the legacy lane; the panel
+        # shows the server's line (GET .../migrate `refusal`) instead
+        panel = self.src[self.src.index("function MigratePanel"):]
+        panel = panel[:panel.index("\n}\n")]
+        self.assertIn("state.refusal ? (", panel)
+        self.assertIn("data-migrate-refusal", panel)
+        self.assertNotIn("migrate to the runner", self.src)
+
     def test_the_deferred_items_say_not_yet(self):
         self.assertIn("<DeferredList items={state.deferred} />", self.src)
         self.assertIn("not yet:", self.src)
@@ -140,7 +149,7 @@ class Helpers(unittest.TestCase):
             rollbackOffers({switch: null, migration: {state: "rolled_back"}})]));
         """)
         self.assertEqual([(o["which"], o["to"]) for o in got[0]], [("switch", "sdk")])
-        self.assertEqual([o["which"] for o in got[1]], ["migration"])
+        self.assertEqual(got[1], [])   # the migration's rollback is gone (row 72)
         self.assertEqual(got[2], [])
 
     def test_bodies_and_the_confirm_phrase(self):

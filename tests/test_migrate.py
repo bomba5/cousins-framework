@@ -723,21 +723,6 @@ class TestCarryRuntime(HermeticCase):
         self.assertTrue((root / ".secrets" / "accounts" / "wren-key").exists())
         self.assertIn("moss", json.dumps(back["rollback_steps"]))
 
-    def test_the_cli_plan_prints_what_it_carries_and_never_the_key(self):
-        root, home = _key_cousin(self)
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
-                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = migrate.migrate_main(["plan", "wren", "--validate"])
-            rc2 = migrate.migrate_main(["apply", "wren", "--validate", "--yes"])
-        self.assertEqual((rc, rc2), (0, 0), err.getvalue())
-        text = out.getvalue()
-        self.assertIn("[runtime] model 'opus' -> [agent] model", text)
-        self.assertIn("[runtime] effort 'high' -> [agent] effort", text)
-        self.assertIn("wren-key", text)
-        self.assertNotIn(KEY, text + err.getvalue())
-
-
 class TestCheckConfig(HermeticCase):
     """#96: check says loudly when the runner would run another model,
     effort or billing than the cousin's [runtime]."""
@@ -886,19 +871,14 @@ class TestValidateTheModel(HermeticCase):
         self.assertIn("2.1.280", c["validate"])
         self.assertEqual(c["cli"], "Claude Code 2.1.277 (bundled)")
 
-    def test_plan_and_check_print_the_runners_cli(self):
+    def test_check_prints_the_runners_cli(self):
         root, home = _key_cousin(self)
         out = io.StringIO()
-        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
-                mock.patch.object(migrate, "chat_health", return_value=(True, "answers")), \
+        with mock.patch.object(migrate, "chat_health", return_value=(True, "answers")), \
                 mock.patch.object(migrate, "runner_cli", return_value="Claude Code 2.1.277 (b)"), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            migrate.migrate_main(["plan", "wren"])
             migrate.migrate_main(["check", "wren"])
-        text = out.getvalue()
-        self.assertIn("the runner's CLI: Claude Code 9.9.9", text)      # plan: the injected one
-        self.assertIn(migrate.NEVER_UNRUN, text)
-        self.assertIn("runner CLI: Claude Code 2.1.277 (b)", text)      # check
+        self.assertIn("runner CLI: Claude Code 2.1.277 (b)", out.getvalue())
 
     @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "needs the sdk extra")
     def test_the_runner_cli_is_the_sdks_bundled_version(self):
@@ -1038,26 +1018,43 @@ class TestFreshPacket(HermeticCase):
         self.assertTrue(pathlib.Path(pending["packet"]).exists())
 
 
-class TestCli(HermeticCase):
+class TestNoLegacyPath(HermeticCase):
+    """Phase 10b row 72: `plan`, `apply` and `rollback` without `--to` exit 2
+    before doing anything: 2.0.0 keeps no conversion from the legacy lane
+    (O3). A cousin with no runner gets delivery.lane_refusal; a runner
+    cousin is told to name a kind."""
+
     def _main(self, *argv):
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                mock.patch.object(migrate, "_live", side_effect=AssertionError("live")), \
+                mock.patch.object(migrate, "_switch_live", side_effect=AssertionError("live")):
             rc = migrate.migrate_main(list(argv))
         return rc, out.getvalue(), err.getvalue()
 
-    def test_apply_needs_yes(self):
+    def test_plan_without_to_on_a_cousin_with_no_runner_prints_the_refusal_and_exits_2(self):
+        from cousin_lib.delivery import lane_refusal
         root, home = _root(self)
-        with mock.patch.object(migrate, "_live", return_value=Live().kw()):
-            rc, out, err = self._main("apply", "wren", "--account", "team")
-            self.assertEqual(rc, 2)
-            self.assertIn("--yes", err)
-            self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
-            rc, out, err = self._main("plan", "wren", "--account", "team", "--validate")
-            self.assertEqual(rc, 0, err)
-            self.assertIn("ready", out)
-            rc, out, err = self._main("apply", "wren", "--account", "team", "--validate", "--yes")
-            self.assertEqual(rc, 0, err)
-            self.assertIn("migrated", out)
+        before = _tree(root)
+        for argv in (("plan", "wren"), ("plan", "wren", "--account", "team", "--validate"),
+                     ("apply", "wren", "--yes"), ("apply", "wren"),
+                     ("rollback", "wren", "--yes"), ("rollback", "wren", "--force")):
+            rc, out, err = self._main(*argv)
+            self.assertEqual(rc, 2, argv)
+            self.assertIn(lane_refusal(home), err, argv)
+            self.assertEqual(out, "", argv)
+        self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
+        self.assertEqual(_tree(root), before)
+
+    def test_without_to_on_a_runner_cousin_it_names_the_kinds(self):
+        root, home = _root(self)
+        text = '[cousin]\nslug = "wren"\n\n[agent]\nrunner = "sdk"\n'
+        (home / "cousin.toml").write_text(text)
+        for argv in (("plan", "wren"), ("apply", "wren", "--yes"), ("rollback", "wren", "--yes")):
+            rc, out, err = self._main(*argv)
+            self.assertEqual(rc, 2, argv)
+            self.assertIn("name a kind with --to (sdk, tmux)", err, argv)
+        self.assertEqual((home / "cousin.toml").read_text(), text)
 
 
 SID = "5e55a0de-0000-4000-8000-00000000abcd"
@@ -1166,25 +1163,6 @@ class TestHandover(HermeticCase):
         migrate.rollback(home, root=root, **live.kw())
         self.assertFalse((home / "data" / "previous-transcript.json.consumed").exists())
 
-    def test_plan_prints_the_cost_line_and_apply_prints_the_paths(self):
-        root, home = _root(self)
-        tdir = _transcripts(self, root, home)
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
-                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = migrate.migrate_main(["plan", "wren", "--account", "team", "--validate"])
-            plan_text = out.getvalue()
-            rc2 = migrate.migrate_main(["apply", "wren", "--account", "team", "--validate",
-                                        "--yes"])
-        self.assertEqual((rc, rc2), (0, 0), err.getvalue())
-        self.assertIn("The working conversation does not carry: the new session starts from"
-                      " the state digest, the handoff and memory, and is handed the previous"
-                      " transcript path", plan_text)
-        applied = out.getvalue()[len(plan_text):]
-        self.assertIn(str(tdir / ("%s.jsonl" % SID)), applied)
-        self.assertIn(str(tdir / ("%s.jsonl" % OLD_SID)), applied)
-
-
 class TestHandoffFreshness(HermeticCase):
     """#103: the runner starts from the handoff; apply says so when the
     close did not leave one written during it."""
@@ -1221,18 +1199,6 @@ class TestHandoffFreshness(HermeticCase):
         root, home = _root(self)
         rec = migrate.apply(home, root=root, validate=True, account="team", **Live().kw())
         self.assertIn("no data/handoff.md", rec["warnings"][0])
-
-    def test_apply_prints_the_warning(self):
-        root, home = _root(self)
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(migrate, "_live", return_value=Live().kw()), \
-                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = migrate.migrate_main(["apply", "wren", "--account", "team", "--validate",
-                                       "--yes"])
-        self.assertEqual(rc, 0, err.getvalue())
-        self.assertIn("warn", out.getvalue())
-        self.assertIn("handoff", out.getvalue())
-
 
 if __name__ == "__main__":
     unittest.main()

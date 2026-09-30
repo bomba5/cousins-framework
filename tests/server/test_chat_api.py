@@ -129,6 +129,13 @@ class TestRunnerCousin(ApiCase):
         self.assertEqual(path, str(self.home / "chat" / "inbound" / ("%d.png" % out["id"])))
         self.assertTrue(pathlib.Path(path).is_file())
 
+    def test_storing_a_message_writes_no_last_user_msg_marker(self):
+        # the marker was the legacy pane line's time baseline; nothing
+        # reads it any more, so a stored message leaves no file behind
+        chat_api.send(self.config, {"user": "Priya", "message": "hello Wren"},
+                      deliver=lambda **k: None)
+        self.assertFalse((self.home / "data" / ".last-user-msg").exists())
+
     def test_make_notify_queues_a_reaction(self):
         chat_api.make_notify(self.config)("[fw-reaction] msg-id=1 emoji=+1 user=Priya"
                                           " tap_count=1 op=added")

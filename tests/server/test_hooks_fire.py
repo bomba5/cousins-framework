@@ -166,20 +166,17 @@ class TestFailuresAreInvisible(HooksServerCase):
         self.assertEqual([m["message"] for m in self._history(server)],
                          ["hello"])
 
-    def test_hooks_fire_after_the_presence_marker_is_touched(self):
-        # Ordering proof: at hook-delivery time the marker already
-        # exists, so the hook line is unambiguously after the message.
-        marker = self.home / "data" / ".last-user-msg"
+    def test_hooks_fire_after_the_message_is_delivered(self):
+        # Ordering proof: the hook line is delivered after the message.
         seen = []
 
         def deliver(**kw):
-            seen.append((kw["user"], marker.exists()))
+            seen.append(kw["user"])
 
         self._hooks([{"pattern": ".", "handler": "inject:x"}])
         server = self._boot(deliver=deliver)
         self._send(server, "hello")
-        self.assertEqual(seen, [("Sam", False),
-                               (chat_hooks.HOOK_SENDER, True)])
+        self.assertEqual(seen, ["Sam", chat_hooks.HOOK_SENDER])
 
 
 if __name__ == "__main__":

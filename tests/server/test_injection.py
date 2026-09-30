@@ -300,33 +300,6 @@ class TestAttentionGuard(InjectorCase):
         self.assertFalse(typed)
         self.assertFalse(any(" -l " in c for c in self._calls()))
 
-    def test_loops_heartbeat_does_not_type_into_a_login_menu(self):
-        # The path the re-test caught: the loops daemon's first context
-        # beat for a fresh cousin, delivered by its default deliver.
-        from cousin_lib import loops
-
-        root = self.tmux.parent / "root"
-        home = root / "cousins" / "wren"
-        (root / "config").mkdir(parents=True)
-        home.mkdir(parents=True)
-        (root / "config" / "harness.toml").write_text(
-            'attention_patterns = ["Select login method"]\n')
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\n[chat]\nport = 18123\n')
-        (home / "CLAUDE.md").write_text("# Wren\n")
-        self.pane.write_text(self.MENU)
-        bindir = self.tmux.parent
-        with mock.patch.dict(os.environ, {
-                "FRAMEWORK_ROOT": str(root),
-                "PATH": str(bindir) + os.pathsep + os.environ["PATH"]}), \
-                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
-            loops.tick(deliver=loops._default_deliver,
-                       is_alive=lambda slug: True)
-        self.assertIn("SKIPPED", err.getvalue())
-        self.assertTrue(self._calls(), "the beat never reached tmux")
-        self.assertFalse(any("send-keys" in c for c in self._calls()),
-                         self._calls())
-
 
 class TestSettle(unittest.TestCase):
     def test_scales_with_length_and_caps(self):

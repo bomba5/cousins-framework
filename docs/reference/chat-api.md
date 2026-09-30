@@ -68,7 +68,7 @@ Body: `user` and a non-empty `message` (both required), plus optional `reply_to`
 Before any of that, every send path checks whether the message is a login
 code a running `cousin-account login|token --via <this cousin>` is waiting
 on (R18). When it is, `/api/send` answers `200 {"ok": true, "id", "timestamp",
-"diverted": true}` and delivers nothing: no recall, no presence marker, no
+"diverted": true}` and delivers nothing: no recall and no
 chat hook ever sees it. The row stored in `chat.db` is a redaction line
 (`[login code received for account <name>]`, or, for a second or late code,
 `[a late login code for account <name> was discarded: ...]`), never the code
@@ -80,8 +80,7 @@ What happens on an ordinary (non-diverted) send, in order:
 2. If `user` is you (`[operator] name`), the message is checked for corrections ("stop", "don't", "instead", ...) and any hit goes to `data/corrections.jsonl`. Failures here never fail the send.
 3. If there's an `image`, it's decoded to `<home>/chat/inbound/<id>.<ext>` (png, jpg, jpeg, gif or webp; any other type is saved as `.bin`). A bad image doesn't fail the send either; the line says `[image attached, decode failed]` instead.
 4. The delivery line is composed and typed into the tmux session on a background thread (see below). If the message is from you (`[operator] name`) it may get a memory recall suffix.
-5. `data/.last-user-msg` is touched. Its mtime is the "time since last message" for the next delivery.
-6. Chat hooks from `<home>/chat-hooks.json` run (see below).
+5. Chat hooks from `<home>/chat-hooks.json` run (see below).
 
 ## `POST /api/<slug>_reply`
 
@@ -218,7 +217,6 @@ A missing or broken file, a bad regex or a failing script never affects the send
 | path | what |
 |---|---|
 | `data/chat.db` | the history and reactions |
-| `data/.last-user-msg` | touched on every inbound message |
 | `data/corrections.jsonl` | corrections spotted in operator messages |
 | `data/chat-hooks.log` | output of shell hooks |
 | `chat/inbound/<id>.<ext>` | inbound images. Nothing cleans this up; it's the cousin's [inbox](../glossary.md#inbox) |

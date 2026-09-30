@@ -160,6 +160,17 @@ class TestRunnerSelection(HermeticCase):
         with self.assertRaises(runner_main.RunnerError):
             runner_main.runner_for(home)
 
+    def test_no_runner_exits_2_with_the_lane_refusal(self):
+        from cousin_lib.delivery import lane_refusal
+        home = temp_home(self)
+        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')
+        with self.assertRaises(runner_main.RunnerError) as caught:
+            runner_main.runner_for(home)
+        self.assertEqual(str(caught.exception), lane_refusal(home))
+        rc, err = _run(["--home", str(home), "--once"])
+        self.assertEqual(rc, 2)
+        self.assertIn(lane_refusal(home), err)
+
     def test_the_command_line_still_overrides_a_missing_key(self):
         home = temp_home(self)
         (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\nname = "Wren"\n')

@@ -152,7 +152,10 @@ class TestProducersUseTheFacade(unittest.TestCase):
                          ("loop", "loop:daemon"))
 
 
-class TestChatServerUsesTheFacade(unittest.TestCase):
+class TestChatApiSeamsUseTheFacade(unittest.TestCase):
+    """chat_api.make_deliver and make_notify (the console's, cousin-chat's)
+    hand items to delivery.deliver without waiting."""
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -161,30 +164,26 @@ class TestChatServerUsesTheFacade(unittest.TestCase):
         (self.home / "data").mkdir(parents=True)
         (self.root / "config").mkdir()
         (self.home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\nname = "Wren"\n[chat]\nport = 0\n'
+            '[cousin]\nslug = "wren"\nname = "Wren"\n'
             '[operator]\nname = "Sam"\n[agent]\nrunner = "fake"\n')
 
-    def _server(self):
-        from cousin_lib.server import app
-        return app.build_server(self.home, framework_root=str(self.root))
+    def _config(self):
+        from cousin_lib.config import CousinConfig
+        return CousinConfig.load(self.home)
 
     def test_a_send_becomes_a_chat_item_on_the_senders_thread(self):
         seen = []
         with mock.patch("cousin_lib.delivery.deliver",
                         lambda home, item, **kw: seen.append((item, kw))
                         or delivery.QUEUED):
-            server = self._server()
-            # Never started, so never stop(): shutdown() blocks forever
-            # without a serve_forever loop. Closing the socket is enough.
-            self.addCleanup(server.httpd.server_close)
-            server.deliver(user="Sam", message="hello", message_id=4,
-                           attachments=["/tmp/a.png"], context="[fw-recall] x")
+            from cousin_lib.server import chat_api
+            chat_api.make_deliver(self._config())(
+                user="Sam", message="hello", message_id=4, attachments=["/tmp/a.png"])
         item, kw = seen[0]
         self.assertEqual(
             (item.thread_id, item.source, item.sender, item.body,
              item.attachments, item.context, item.message_id),
-            ("operator:Sam", "chat", "Sam", "hello", ("/tmp/a.png",),
-             "[fw-recall] x", 4))
+            ("operator:Sam", "chat", "Sam", "hello", ("/tmp/a.png",), "", 4))
         self.assertIs(kw["wait"], False)
 
     def test_a_reaction_notice_is_a_reaction_item(self):
@@ -192,11 +191,8 @@ class TestChatServerUsesTheFacade(unittest.TestCase):
         with mock.patch("cousin_lib.delivery.deliver",
                         lambda home, item, **kw: seen.append(item)
                         or delivery.QUEUED):
-            server = self._server()
-            # Never started, so never stop(): shutdown() blocks forever
-            # without a serve_forever loop. Closing the socket is enough.
-            self.addCleanup(server.httpd.server_close)
-            server.notify("[fw-reaction] msg-id=4 emoji=x user=Sam"
+            from cousin_lib.server import chat_api
+            chat_api.make_notify(self._config())("[fw-reaction] msg-id=4 emoji=x user=Sam"
                           " tap_count=1 op=added")
         self.assertEqual((seen[0].source, seen[0].thread_id),
                          ("reaction", "system"))

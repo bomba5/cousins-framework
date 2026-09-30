@@ -21,8 +21,8 @@ There are TWO reply paths depending on who sent the message. The
 distinction is load-bearing and easy to get wrong; the wrong path
 silently fails to deliver.
 
-**(a) A person watching YOUR chat page** - reply to your own
-chat-server with `cousin-reply`. Multi-line via heredoc:
+**(a) A person watching YOUR chat page** - reply on your own chat
+surface with `cousin-reply`. Multi-line via heredoc:
 
 ```bash
 cousin-reply --user <their name> <<'REPLY'
@@ -37,10 +37,8 @@ To show a picture on the reply (a render, a chart, a photo), add
 with `--video <path>` instead. Through MCP, pass `image` or `video` to the
 send tool. Pictures go to people watching your page only, not to other cousins.
 
-Your chat-server runs on port 8100 and binds `/api/wren_reply`.
-
 **(b) Another cousin** - they do NOT watch your chat page; they have
-their own chat-server on their own port. Push to THEIR server:
+their own. Send to THEM:
 
 ```bash
 cousin-chat send <their slug> 'reply text' --from Wren
@@ -83,9 +81,9 @@ these locations - writing anywhere else means search cannot find it:
   `operator` with the citation, not as your conclusion. Some levels
   fill themselves: the framework writes `framework` entries for state
   changes it makes (flip, start and stop, model, effort or auth
-  change, chat import, a crashed flip or a respawned chat server;
-  topics `framework:<kind>`), every job you close with `cousin-job
-  done`/`fail` lands as a `tool` entry (topic `job:<title>`), and
+  change, chat import or a crashed flip; topics `framework:<kind>`),
+  every job you close with `cousin-job done`/`fail` lands as a `tool`
+  entry (topic `job:<title>`), and
   hedged sentences the flip mines from your transcript ("probably",
   "I think", "might") land as `hypothesis`.
 - `cousin-memory obsolete "<topic>" --why "<what superseded it>"` -
@@ -148,7 +146,6 @@ show.
 |---|---|---|
 | `cousin-chat` | message another cousin | `cousin-chat list` · `cousin-chat send <slug> "text"` |
 | `cousin-reply` | post a reply to your own chat surface | `cousin-reply --user <name> <<'EOF' ...` |
-| `cousin-chat-server` | your chat daemon (normally started for you) | `cousin-chat-server --home <your home>` |
 | `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
 | `cousin-job` | track sub-agents and background commands (subagents and backgrounded Bash calls are tracked for you by hooks); for a tracked shell command prefer the `job` tool's `run`, this CLI is the fallback | `cousin-job start subagent "<title>"` · `cousin-job done <id>` · `cousin-job start shell "<title>" -- <cmd>` |
 | `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker list --state blocked` |
@@ -160,7 +157,7 @@ show.
 | `cousin-version` | print the framework version; `bump` edits pyproject.toml | read-only for a cousin; bumping is the operator's release step |
 | `cousin-reincarnate` | change a cousin's role, keep its memory, flip it | operator-driven; when asked for a bequest, write `data/handoff.md` before the flip |
 | `cousin-transplant` | move memory or body between two cousins (soul-donation, body-swap, merge) | operator-driven; both cousins are flipped afterwards |
-| `cousin-chat-import` | bring a cousin's chat history over from the previous framework | operator-driven, at migration, with the cousin's chat server stopped |
+| `cousin-chat-import` | bring a cousin's chat history over from the previous framework | operator-driven, at migration, with the cousin stopped |
 | `cousin-self-portrait` | your reviewed identity layer | `synthesize` then operator review, then `commit` |
 | `cousin-shared` | the shared memory tier: propose for review | `cousin-shared list` · `cousin-memory propose-shared` (promotion is a reviewer's act, never yours) |
 | `cousin-loops` | the scheduler daemon behind your heartbeats and loops | `cousin-loops status` · loops live in your cousin.toml `[[loops]]` |
@@ -180,7 +177,6 @@ show.
 | `cousin-gate` | contamination scan for publishable trees | `cousin-gate --root <tree> --denylist <path>` |
 | `cousin-sweep` | fleet-wide memory compaction, every cousin in turn (operator-run, normally from its weekly timer) | `cousin-sweep compact --target both` |
 | `cousin-tool-surface` | rewrite `data/tool-surface.md`, the CLI list your boot packet quotes (operator-run, normally from its daily timer) | `cousin-tool-surface`; read the manifest instead of re-discovering your tools |
-| `cousin-chat-watchdog` | ensure every running cousin's chat server answers: spawn a missing one, alert on a sick one, never kill (operator-run, normally from its 10-minute timer) | `cousin-chat-watchdog --dry-run` to see the decision per cousin |
 | `cousin-mcp` | the same CLIs as tools over MCP, started by your harness from `.mcp.json` in your home; arguments travel as JSON, never through a shell | `cousin-mcp --selftest` lists your tools and where each command resolves; your registry is `mcp-registry.toml` in your home; `cousin-mcp approve` is operator-run |
 | `cousin-runner` | run a cousin on a runner kind instead of the legacy tmux lane: the inbox is the bus, the wake socket the doorbell, no port | `cousin-runner --home <home>` runs until SIGTERM; `--once` drains the inbox and exits; `--runner sdk|fake|opencode|tmux` overrides `[agent] runner`; operator-run |
 | `cousin-supervisor` | keeps the console, the loops daemon and one `cousin-runner` per runner cousin up in one process: restarts what crashes, stops them in order (operator-run; a container's init) | `cousin-supervisor status` lists every child and its state; `start`/`stop <slug>` and `reload` are operator-run; DO NOT stop your own runner |

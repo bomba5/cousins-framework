@@ -104,3 +104,88 @@ for a in "$@"; do
 done
 exit "${FAKE_TMUX_RC:-0}"
 """
+
+
+class FakeChatUpstream:
+    """The chat API an upstream chat server answers (docs/reference/
+    chat-api.md: a hive node's, or another install's), over one home's
+    `data/chat.db` through server/chat_api: what the console's proxy
+    forwards to. 2.0.0 runs no per-cousin chat server, so the tests that
+    exercise the upstream path serve this double on a loopback port.
+    `deliver` and `notify` are chat_api's seams; nothing is typed
+    anywhere."""
+
+    def __init__(self, config, *, deliver=None, notify=None, port=0):
+        import urllib.parse
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from cousin_lib.server import chat_api
+        self.config = config
+        upstream = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _json(self, status, payload):
+                body = json.dumps(payload).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _body(self):
+                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                body = json.loads(raw) if raw else {}
+                if not isinstance(body, dict):
+                    raise chat_api.BadRequest("JSON body must be an object")
+                return body
+
+            def do_GET(self):
+                parsed = urllib.parse.urlparse(self.path)
+                query = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items() if v}
+                home = upstream.config.home
+                try:
+                    if parsed.path == "/health":
+                        return self._json(200, {"status": "ok", "slug": upstream.config.slug,
+                                                "port": upstream.port})
+                    if parsed.path == "/api/history":
+                        return self._json(200, chat_api.history(home, query))
+                    if parsed.path == "/api/search":
+                        return self._json(200, chat_api.search(home, query))
+                    self._json(404, {"error": "not found"})
+                except (chat_api.BadRequest, ValueError) as err:
+                    self._json(400, {"error": str(err)})
+
+            def do_POST(self):
+                cfg = upstream.config
+                try:
+                    if self.path == "/api/send":
+                        return self._json(200, chat_api.send(cfg, self._body(), deliver=deliver))
+                    if self.path == "/api/%s_reply" % cfg.slug:
+                        return self._json(200, chat_api.reply(cfg, self._body()))
+                    if self.path == "/api/reactions":
+                        return self._json(200, chat_api.react(cfg.home, self._body(),
+                                                              notify=notify))
+                    if self.path == "/api/archive":
+                        return self._json(200, chat_api.archive(cfg.home, self._body()))
+                    self._json(404, {"error": "not found"})
+                except (chat_api.BadRequest, ValueError) as err:
+                    self._json(400, {"error": str(err)})
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        self._thread = None
+
+    @property
+    def port(self):
+        return self.httpd.server_address[1]
+
+    def start(self):
+        self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        if self._thread:
+            self._thread.join(timeout=5)

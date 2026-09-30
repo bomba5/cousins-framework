@@ -205,16 +205,16 @@ tmux cousins keep the two old units and run the supervisor beside them for
 the runner cousins only (`--no-console --no-loops`). The steps are in
 [the units](../systemd/README.md#one-unit-instead-of-two-the-supervisor).
 
-A few things the container does not do yet: a hive node's `[tell-home]` has
-no chat server to post to there ([remote cousins](remote-cousins.md)), and
-the loops daemon, like on a bare host, delivers at least once, so a stop that
-lands in the middle of its tick can deliver that tick's heartbeat or loop
-again after the start.
+One thing to know, in the container as on a bare host: the loops daemon
+delivers at least once, so a stop that lands in the middle of its tick can
+deliver that tick's heartbeat or loop again after the start.
 
 ## What runs
 
-Five things run under your systemd user manager. The templates and how to
-install them are in [the units](../systemd/README.md).
+Four things run under your systemd user manager, plus the supervisor that
+runs the cousins ([above](#the-container); its unit can take the place of
+the first two). The templates and how to install them are in
+[the units](../systemd/README.md).
 
 - **`cousin-loops.service`** is the scheduler. Every 30 seconds it ticks:
   heartbeats, each cousin's `[[loops]]`, one-shot schedules, timed [flip](glossary.md#flip)
@@ -225,18 +225,16 @@ install them are in [the units](../systemd/README.md).
   nothing but browser sessions and `config/console-users.json`; everything it
   shows it reads from the other stores on each request. Restarting it costs
   every open browser a login and nothing else.
-- **`cousin-chat-watchdog.timer`** runs every 10 minutes and makes sure every
-  running cousin's chat server answers (more below).
 - **`cousin-tool-surface.timer`** runs daily at 06:00 and rewrites
   `data/tool-surface.md`.
 - **`cousin-sweep.timer`** runs Sundays at 05:30 and compacts every cousin's
   memory.
 
-Outside systemd, each running cousin is two processes: its agent in a tmux
-session, and its chat server (`cousin-chat-server --home <home>`), started
-detached by `cousin-spawn --start`, a flip, the console, or the watchdog.
-Both the loops and console units use `KillMode=process`, so restarting them
-doesn't take the chat servers they started down with them.
+Each running cousin is one `cousin-runner`, a child of `cousin-supervisor`,
+and no cousin runs a chat server: the console answers chat itself
+([chat](chat.md#where-a-message-goes)). The runners are not children of the
+console or the loops daemon, so restarting either of those units leaves the
+cousins running.
 
 Check everything at once:
 
@@ -244,8 +242,7 @@ Check everything at once:
 systemctl --user list-units 'cousin-*'
 systemctl --user list-timers 'cousin-*'
 cousin-loops status
-cousin-chat-watchdog --dry-run
-tmux ls
+cousin-supervisor status
 ```
 
 ## Logs
@@ -254,49 +251,13 @@ tmux ls
 |---|---|
 | loops daemon | `journalctl --user -u cousin-loops.service` |
 | console | `journalctl --user -u cousin-console.service` |
-| watchdog | `journalctl --user -u cousin-chat-watchdog.service` |
 | sweep | `journalctl --user -u cousin-sweep.service` |
 | tool surface | `journalctl --user -u cousin-tool-surface.service` |
-| a cousin's chat server | `cousins/<slug>/data/chat-server.log` |
+| the supervisor and its children (runners, bridges) | `journalctl --user -u cousin-supervisor.service`, each line starting with the child's name (`runner:wren`) |
+| what a cousin's runner did | its [stream](glossary.md#stream) in `cousins/<slug>/data/stream/`, or `cousin-watch <slug>` |
+| a cousin's Telegram bridge | `cousins/<slug>/data/telegram.log` |
 | background jobs | `data/job-logs/` under the root, or `cousin-job tail <id>` |
 | what a loop fired, and when | `data/loops-fires.jsonl` under the root |
-
-The chat server writes every failed or skipped delivery into its log as
-`[chat-server] tmux delivery FAILED` or `tmux delivery SKIPPED`. That's the
-first thing to grep when a cousin didn't see a message.
-
-## The chat-server watchdog
-
-A chat server started by spawn or a flip has nobody watching it. The
-watchdog is that somebody. Each run it looks at every cousin and does one of
-four things:
-
-- **skip**: the cousin is not running (a stopped cousin needs no chat) or
-  has no chat port. Running means its tmux session is up, or, for a runner
-  cousin, that its runner holds its lock: the supervisor runs no chat
-  server, so this is what brings a runner cousin's back after a reboot or a
-  crash
-- **ok**: `/health` answers with the cousin's slug
-- **alert**: the port is taken but `/health` doesn't answer with this slug.
-  It logs an alert, exits 1 and touches nothing, because the thing on the
-  port might be a squatter or a stuck server, and killing blind is worse.
-- **spawn**: the port is free, so it starts `cousin-chat-server` detached,
-  logging to `<home>/data/chat-server.log`, and waits up to 5 seconds for it
-  to answer
-
-```
-cousin-chat-watchdog --dry-run
-#   [chat-watchdog] wren: ok
-#   [chat-watchdog] kestrel: spawn (would spawn cousin-chat-server --home ...)
-```
-
-A lock in `data/chat-watchdog.lock` makes an overlapping run exit quietly. If
-your agents live on a non-default tmux socket, add
-`Environment=COUSIN_TMUX_SOCKET=<path>` to the watchdog service.
-
-If you'd rather have systemd own a cousin's chat server, use
-`cousin-chat-server@<slug>.service` instead and leave the watchdog timer off.
-Never both: see [the units](../systemd/README.md#chat-server-pick-one-owner).
 
 ## The daily flip
 
@@ -377,9 +338,9 @@ There's no backup unit on purpose: where snapshots go (rsync, restic, a git
 remote) is your call. The root's `data/*.db` and `shared/hive/` are worth
 copying the same way with `sqlite3 <db> "VACUUM INTO '<dest>'"`.
 
-To restore, stop the cousin and copy the files back into its home. The chat
-server and the loops daemon open their databases lazily and pick up the
-restored files.
+To restore, stop the cousin and copy the files back into its home, then
+start it again. The console and the loops daemon open a cousin's databases
+when they need them and pick up the restored files.
 
 ## The sweep
 
@@ -419,15 +380,19 @@ systemctl --user restart cousin-loops.service cousin-console.service
 ```
 
 If `systemd/` changed, re-render the units first (see
-[the units](../systemd/README.md)). Chat servers keep running the old code
-until they're restarted; a cousin picks up everything on its next flip. To
-restart one chat server by hand, kill it and let the watchdog bring it back,
-or run the watchdog now:
+[the units](../systemd/README.md)). A cousin's runner keeps running the old
+code until it is restarted: the console's restart button, or
+`cousin-supervisor stop <slug>` then `start <slug>`.
+
+An install upgraded from 1.x disables the old chat server units once, since
+2.0.0 runs no chat server:
 
 ```
-kill "$(cat cousins/wren/data/chat-server.pid)"
-cousin-chat-watchdog
+systemctl --user disable --now cousin-chat-watchdog.timer cousin-chat-server@<slug>.service
 ```
+
+with one `cousin-chat-server@<slug>.service` for each slug that had one, and
+removes their files ([the units](../systemd/README.md#no-chat-server-units)).
 
 `cousin-version` prints the version and commit of the checkout; the
 console's top bar shows the one the console process is running.
@@ -444,8 +409,8 @@ systemctl --user enable cousin-start@wren.service
 That runs `cousin-spawn wren --start --resume` once at boot, which picks up
 the cousin's last session where it can and opens a new one where it can't.
 Cousins without the unit stay stopped until you start them from the console
-or with `cousin-spawn <slug> --start`. Either way the watchdog then keeps
-the chat server up. See [systemd/README.md](../systemd/README.md).
+or with `cousin-spawn <slug> --start`. See
+[systemd/README.md](../systemd/README.md).
 
 ## Troubleshooting
 
@@ -465,8 +430,9 @@ recover.
   keeps failing, and every failure is logged there. A cousin.toml that
   doesn't parse, or a loop with two schedule forms or an empty prompt, is
   also logged by name.
-- Fix: fix the delivery (usually the tmux session, see below) or the loop
-  entry. For a worker cousin, check that `config/worker-cmd` exists.
+- Fix: fix the delivery (a cousin with no `[agent] runner` gets none, see
+  [chat](chat.md#where-a-message-goes)) or the loop entry. For a worker
+  cousin, check that `config/worker-cmd` exists.
 - To test a fix without waiting for the schedule: `cousin-loops fire
   <slug> <loop>` queues a request the daemon picks up on its next tick
   and fires that one loop right away, named as it is in `[[loops]]`, or
@@ -474,36 +440,15 @@ recover.
   shows it pending, then `done` or `failed` (with why: an unknown loop
   name, or the delivery that failed).
 
-**A cousin looks stopped, but its tmux session is up**
-- Check: `tmux ls` shows the session, but the console card says stopped. The
-  console and the session are on different tmux sockets, or the session's
-  name isn't `[chat] tmux_session` from `cousin.toml`.
-- Fix: pass `--tmux-socket <path>` in the console unit's `ExecStart`, and
-  `COUSIN_TMUX_SOCKET` for the chat server and watchdog. Or rename the
-  session to match.
-
-**A cousin looks running, but it's dead**
-- Check: `curl -s http://127.0.0.1:<port>/health`. It should answer with this
-  cousin's slug. Something else on the port (another cousin, or an unrelated
-  service) makes a plain port check read "running". The watchdog reports it
-  as ALERT and leaves it alone.
-- Fix: find the process on the port (`ss -ltnp | grep :<port>`), stop it,
-  then run `cousin-chat-watchdog` to start the right server.
-
-**Chat messages don't reach the pane**
-- Check: `grep 'tmux delivery' cousins/<slug>/data/chat-server.log`.
-  - `SKIPPED ... the pane shows "Select login method"` (or another attention
-    pattern): the agent is waiting on a person. The console card also says
-    "needs attention". Log Claude Code in once (`claude` in a shell, or
-    `tmux attach -t <slug>`), or answer the trust prompt, which
-    `cousin-mcp approve <slug>` prevents.
-  - `FAILED ... can't find session`: the tmux session is gone or has another
-    name. Start the cousin, or fix `[chat] tmux_session`.
-  - Nothing at all: the message never reached this chat server. Check the
-    server answers `/health`, and that it wasn't started with
-    `--no-terminal-delivery`.
-- Also: with no `config/harness.toml`, nothing is skipped and text is typed
-  into whatever the pane shows, menus included. Copy the Claude Code preset.
+**A message gets no answer**
+- Check: `cousin-supervisor status`. The cousin's `runner:<slug>` should be
+  running; a `failing` one shows its reason, and a stopped cousin waits for
+  `start <slug>`. A runner whose account needs a login says so in the
+  console and waits.
+- Check: `cousin-watch <slug>` shows the runner's stream: whether a turn
+  took the message, and what it did with it.
+- Check: a cousin with no `[agent] runner` is refused by name, and nothing
+  is delivered to it ([chat](chat.md#where-a-message-goes)).
 
 **The console shows 0 cousins**
 - Check: the startup line in `journalctl --user -u cousin-console.service`
@@ -545,20 +490,9 @@ recover.
   session and starts a new one. The usual causes: `flip_at` in its
   `cousin.toml`, or `flip_when_transcript_mb` in `config/harness.toml`
   (a long session crosses the size and gets flipped).
-- Check: `systemctl --user list-units 'cousin-chat-server@*'`. If a
-  `cousin-chat-server@<slug>` unit is enabled for a cousin whose chat server
-  spawn also starts, the unit loses the port and restarts every 5 seconds.
-- Fix: raise or remove the threshold, move `flip_at`, or disable the extra
-  unit.
+- Fix: raise or remove the threshold, or move `flip_at`.
 
 **Port already in use**
-- A chat server: `chat-server.log` says `cannot bind chat port`. Something
-  else holds `[chat] port`. Stop it, or give the cousin another port in
-  `cousin.toml` and restart it. Spawn picks ports from 8090 up that no other
-  `cousin.toml` claims and nothing listens on, but it can't know about a
-  service that starts later. One such line right after a flip is normal: a
-  flip always launches a chat server, and when the old one is still
-  answering, the new one exits.
 - The console: the unit fails at start with "Address already in use". Change
   `--port` in a drop-in, or stop whatever holds 8600.
 

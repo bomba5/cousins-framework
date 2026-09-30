@@ -51,6 +51,16 @@ class TestRenderer(unittest.TestCase):
         self.assertEqual(out, "# Wren\nx\n")
 
 
+class TestNoChatServerInTheTemplate(unittest.TestCase):
+    def test_the_template_names_no_chat_server_and_no_port(self):
+        # R10: template_sync pushes the template to every cousin, so a
+        # line naming the retired chat server or its port would teach it
+        text = _TEMPLATE.read_text()
+        for word in ("{{PORT}}", "chat-server", "chat server",
+                     "cousin-chat-watchdog", "_reply`"):
+            self.assertNotIn(word, text)
+
+
 class TestShippedTemplate(unittest.TestCase):
     def _render(self):
         return render_template(_TEMPLATE.read_text(), _FULL_VALUES)

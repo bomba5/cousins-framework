@@ -130,8 +130,7 @@ def _registry_rows(root):
     rows = []
     for c in FrameworkConfig(root).list_cousins():
         rows.append({
-            "slug": c.slug, "name": c.name, "type": c.type,
-            "port": c.chat_port, "host": c.chat_host, "home": str(c.home),
+            "slug": c.slug, "name": c.name, "type": c.type, "home": str(c.home),
             "tmuxSession": c.tmux_session, "operator": c.operator_name,
             "memoryScope": c.memory_scope, "heartbeat": c.heartbeat_seconds,
             "flipAt": c.flip_at, **effective_runtime(c, defaults),

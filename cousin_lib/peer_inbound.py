@@ -25,8 +25,9 @@ What `accept` enforces, for every caller:
   P10a-1);
 - the message loses its control characters (tab and newline kept): a
   tmux cousin would take them as keystrokes (review I5);
-- delivery is chat.deliver_to: in-process for a runner cousin, through
-  its chat server for a tmux one, under the display name. A refusal or a
+- delivery is chat.deliver_to: in-process for a runner cousin, refused
+  by name for a cousin with no runner kind, under the display name. A
+  refusal or a
   connection error frees the id (the sender may retry), a timeout keeps
   it (the message may have landed); both answer the sender (502, 504)
   and are logged, never raised into the route.

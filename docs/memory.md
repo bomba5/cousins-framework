@@ -47,7 +47,7 @@ Everything below is relative to the cousin home.
 | Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the one-time backfill (triggered by recall, search, consolidate) copies the decisions only this log holds into raw) |
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
-| Corrections | `data/corrections.jsonl` | the chat server, from your messages | boot packet (calibration layer) |
+| Corrections | `data/corrections.jsonl` | the chat send path, from your messages | boot packet (calibration layer) |
 | Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
 | Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off on the SDK [lane](glossary.md#lane)) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
@@ -83,7 +83,8 @@ object per line:
  "source": "remember", "cite": "chat #412, 2026-09-17"}
 ```
 
-**Corrections** are captured by the chat server: when a message from
+**Corrections** are captured when a chat message is stored (the console,
+`cousin-chat`, the Telegram bridge): when a message from
 the configured operator contains "stop", "don't", "no", "actually",
 "instead" and similar, it's recorded with its class, and the boot
 packet shows the recent ones next to the operator calibration. Only the
@@ -211,7 +212,7 @@ fill themselves in:
   `framework:model`, `framework:auth`: flips (new generation, session,
   clean or emergency handoff), starts and stops, model, effort and auth
   mode changes, chat history imports, role changes, memory transplants,
-  a flip that died halfway, and a dead chat server getting restarted.
+  and a flip that died halfway.
   Nothing is written when nothing changed, and there are no periodic
   entries.
 - **L2 tool.** When a cousin's job finishes as done or failed, its
@@ -599,8 +600,9 @@ turn.
 ### Proactive recall in chat
 
 When you (the operator) send a cousin a message of at least 24
-characters, its chat server searches the cousin's memory and appends one
-line to what the cousin sees:
+characters, the SDK runner's prompt hook searches the cousin's memory and
+adds one line to what the cousin sees (the other runner kinds do not
+recall):
 
 ```
 [fw-recall] possibly relevant from your memory: Upkeep (memory:upkeep.md) - cousin-memory search for details; ignore if not.

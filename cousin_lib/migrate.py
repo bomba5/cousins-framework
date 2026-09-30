@@ -1168,21 +1168,10 @@ def check(home, *, since=None, now=None, health=None, root=None, validate=False,
 # ------------------------------------------------------------ the live actions
 
 def chat_health(home):
-    """(ok, detail): the cousin's chat server answers /health for its slug."""
-    import urllib.request
-    from cousin_lib.config import CousinConfig
-    try:
-        port = CousinConfig.load(home).chat_port
-    except Exception as err:  # noqa: BLE001 - reported, never raised
-        return False, "no chat port: %s" % err
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:%d/health" % port, timeout=3) as resp:
-            body = json.loads(resp.read().decode("utf-8") or "{}")
-    except Exception as err:  # noqa: BLE001 - down is the answer
-        return False, "the chat server on :%s does not answer: %s" % (port, err)
-    if body.get("slug") != Path(home).name:
-        return False, "port %s answers for %r, not %r" % (port, body.get("slug"), Path(home).name)
-    return True, "the chat server answers on :%s" % port
+    """(ok, detail): 2.0.0 runs no per-cousin chat server (R10): the
+    console and the runner's inbox carry chat, so there is nothing to
+    probe and nothing to fail."""
+    return True, "none in 2.0.0 (the console and the inbox carry chat)"
 
 
 def _live():
@@ -1206,7 +1195,6 @@ def _live():
 
     def start(home, root):
         spawn.start_cousin(home, agent_cmd="", root=root)
-        spawn._chat_server_unless_live(home)
 
     def reload(root):
         try:

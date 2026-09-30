@@ -545,7 +545,20 @@ class TestHiveConfig(HiveCase):
         self._write('enabled = true\npublic_url = "http://q.invalid:8600/"\n')
         self.assertEqual(hive_config(self.root), {
             "enabled": True, "public_url": "http://q.invalid:8600",
-            "checkin_seconds": 60, "home_chat_url": "", "home_cousin": ""})
+            "checkin_seconds": 60, "home_cousin": ""})
+
+    def test_home_chat_url_is_not_read(self):
+        # R10: the legacy unauthenticated home chat server is gone; a
+        # node reaches its home cousin through the queen (home_cousin)
+        from cousin_lib.hive import hive_config
+        self._write('enabled = true\npublic_url = "http://q.invalid:8600"\n'
+                    'home_chat_url = "http://h.invalid:8090"\nhome_cousin = "wren"\n')
+        cfg = hive_config(self.root)
+        self.assertNotIn("home_chat_url", cfg)
+        self.assertEqual(cfg["home_cousin"], "wren")
+        self._write('enabled = true\npublic_url = "http://q.invalid:8600"\n'
+                    'home_chat_url = 7\n')
+        self.assertNotIn("home_chat_url", hive_config(self.root))
 
     def test_unusable_values_are_loud(self):
         from cousin_lib.hive import HiveConfigError, hive_config

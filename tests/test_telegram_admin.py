@@ -107,9 +107,10 @@ class TestReady(AdminCase):
         ta.set_operators(self.home, [{"user_id": 42, "name": "Ana"}])
         self.assertIsNone(ta.ready(self.home, self.root))
 
-    def test_not_ready_is_never_started(self):
-        self.assertEqual(ta.start_bridge(self.home, self.root),
-                         ("disabled", None))
+    def test_the_legacy_launcher_is_gone(self):
+        # a bridge runs only as a cousin-supervisor child (R10); the
+        # console still stops one left running outside any supervisor
+        self.assertFalse(hasattr(ta, "start_bridge"))
         self.assertEqual(ta.stop_bridge(self.home), "not running")
 
 

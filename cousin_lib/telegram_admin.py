@@ -9,19 +9,16 @@
   senders it refused (data/telegram-pending.json) and the console
   offers them for one-click adding: the person presses Start, the
   operator adds them.
-- The bridge process belongs to its cousin, like the chat server:
-  started with the cousin when [telegram] enabled is true, stopped with
-  it, its pid in data/telegram.pid and its output in data/telegram.log.
-  start_bridge is the tmux lane's launcher (spawn, the console); a
-  runner cousin's bridge is a cousin-supervisor child instead
-  (supervisor.telegram_spec), which writes the same pid file.
+- The bridge process belongs to its cousin: a cousin-supervisor child
+  (supervisor.telegram_spec) started with the runner when [telegram]
+  enabled is true, stopped with it, its pid in data/telegram.pid. With
+  no supervisor to ask, the console stops a bridge left running outside
+  one (stop_bridge); nothing here starts one.
 """
 import json
 import os
 import re
 import signal
-import subprocess
-import sys
 import time
 import tomllib
 import urllib.request
@@ -306,29 +303,6 @@ def ready(home, root):
         return ("no operators yet: press Start on the bot in Telegram,"
                 " then add yourself from 'waiting to be added'")
     return None
-
-
-def start_bridge(home, root):
-    """Start the bridge detached, unless it runs already or is not
-    ready. Returns ("started"|"running"|<reason>, pid)."""
-    home = Path(home)
-    pid = bridge_pid(home)
-    if pid:
-        return "running", pid
-    why = ready(home, root)
-    if why:
-        return why, None
-    env = dict(os.environ, FRAMEWORK_ROOT=str(root))
-    log = open(home / "data" / "telegram.log", "ab")
-    try:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", _MARKER, "--home", str(home)],
-            stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-            start_new_session=True, env=env)
-    finally:
-        log.close()
-    _pid_path(home).write_text("%d\n" % proc.pid)
-    return "started", proc.pid
 
 
 def stop_bridge(home, *, wait=5.0):

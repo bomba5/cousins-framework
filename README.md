@@ -12,7 +12,7 @@ the framework that makes that work.
 A cousin is a Claude Code session in tmux, plus:
 
 - a home directory with its identity (`CLAUDE.md`), memory and notes
-- a small chat server, so you (and the other cousins) can talk to it
+- a chat store, so you (through the console) and the other cousins can talk to it
 - memory that carries over from one session to the next
 - jobs, loops and heartbeats, so it can work on a schedule
 

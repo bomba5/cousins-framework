@@ -243,7 +243,7 @@ class CousinSettings(AgentCase):
         self.assertEqual(ca["install"], {"value": False, "source": "config/harness.toml [agent]"})
         self.assertFalse(ca["effective"])
         ro = body["readonly"]
-        self.assertEqual(ro["chat.port"], self.dead_port)
+        self.assertNotIn("chat.port", ro)       # no per-cousin chat server (R10)
         self.assertEqual(ro["session.start_hooks"], ["echo hi"])
         self.assertEqual(ro["session.end_hooks"], [])
 
@@ -290,7 +290,7 @@ class CousinSettings(AgentCase):
             "cousin.name", "cousin.peer_visible", "memory.review_batch", "lifecycle.flip_at",
             "memory.review_model", "agent.commit_attribution", "chat.port",
             "session.start_hooks", "cousin.slug"})
-        self.assertIn("read-only", body["errors"]["chat.port"])
+        self.assertIn("not a setting", body["errors"]["chat.port"])
         self.assertEqual((home / "cousin.toml").read_bytes(), before)
 
     def test_commit_attribution_on_a_runner_cousin(self):

@@ -135,15 +135,16 @@ class TestSend(ExternalCase):
         self.assertIn("kestrel", err)
 
     def test_a_local_cousin_wins_over_an_external_entry(self):
+        from cousin_lib.runner.inbox import Inbox
+        home = self._cousin("testa", 18602, extra="")
+        (home / "cousin.toml").write_text(
+            (home / "cousin.toml").read_text() + '[agent]\nrunner = "fake"\n')
         with peer_server() as (url, received):
             self._peers('[peers.testa]\nurl = "%s"\n' % url)
-            with mock.patch.object(chat.urllib.request, "urlopen") as op:
-                op.return_value.__enter__.return_value.read.return_value = \
-                    b'{"id": 3}'
-                rc, _out, err = self._main(["send", "testa", "hi"])
+            rc, _out, err = self._main(["send", "testa", "hi"])
         self.assertEqual(rc, 0, err)
         self.assertEqual(received, [])
-        self.assertIn(":18602/api/send", op.call_args[0][0].full_url)
+        self.assertEqual(Inbox(home).pending(), 1)       # delivered locally
         rc, _out, err = self._main(["list"])
         self.assertIn("local cousin", err)
 

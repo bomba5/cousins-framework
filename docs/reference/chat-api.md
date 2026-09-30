@@ -1,31 +1,30 @@
-# Chat server API
+# Chat API
 
-The HTTP API of the per-cousin chat server, for when you're writing a client, a bridge or a script that talks to one [cousin](../glossary.md#cousin) directly. For how chat works day to day, read [the chat guide](../chat.md).
+The calls that read and write a [cousin](../glossary.md#cousin)'s chat history, for when you're writing a client, a bridge or a script. For how chat works day to day, read [the chat guide](../chat.md).
 
-Every cousin with a `[chat] port` runs its own chat server:
+## Where it runs
 
-```sh
-cousin-chat-server --home cousins/wren
-cousin-chat-server --home cousins/wren --no-terminal-delivery   # store only, never type into tmux
-```
+No cousin on this machine runs a chat server or has a port. The console, `cousin-chat`, `cousin-reply` and the Telegram bridge make these calls in-process, through `cousin_lib/server/chat_api.py` (`history`, `search`, `send`, `reply`, `archive`, `react`), over the cousin's own `data/chat.db`. Each takes the body or query described below and gives back the JSON described below, or the `400` text. A script on this machine goes through `cousin-chat` or the console's chat routes ([the console API](console-api.md)), which answer with these calls.
 
-It reads `cousin.toml` for the slug, display name, port, `[chat] host` (bind address, default `127.0.0.1`), `[chat] tmux_session` (default the slug) and `[operator] name`, which is you. It won't start without a port, when the port can't be bound, or, with terminal delivery on, when there's no `tmux` on the PATH. `COUSIN_TMUX_SOCKET` in its environment picks a tmux socket. The console, `cousin-chat` and the Telegram bridge are plain HTTP clients of this server (`cousin-reply` and the media `chat` commands write the reply route's row themselves, `chat_api.reply`); for a [runner](../glossary.md#runner) cousin (`[agent] runner`) the bridge stores and delivers an inbound message itself instead of calling `/api/send`, and still reads replies through `/api/history`.
+A local cousin with no `[agent] runner` has nothing to deliver to: 2.0.0 has no legacy tmux [lane](../glossary.md#lane). It is refused by name, and `cousin-chat send` to it exits 1.
+
+Over HTTP, this is the API a hive node's own chat server answers (`cousin_node.py`, in the node's archive), and the one the console proxies to for a remote node. A node answers only `GET /health`, `POST /api/send` and `GET /api/history`. Search, reactions, archive and replies have no route on a node; they are in-process calls here. The rest of the node is in [the hive API](hive-api.md#the-nodes-own-endpoints).
 
 ## Who can call it
 
-Every request first goes through the same network guard as the console: loopback, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, plus the ranges in `config/net-allowlist.json`. Anything else is `403 {"error": "address not allowed"}`, sent with a CORS header so a browser shows the 403.
+A node's chat server binds to `NODE_HOST` (`127.0.0.1` by default). A caller on loopback can use `/api/send` and `/api/history` freely. Any other caller has to send the node's own hive token as `Authorization: Bearer <token>`, or it gets `401 {"error": "unauthorized"}`. The console, as the queen, holds that token and sends it on every proxied call. `/health` is open.
 
-That's the only check. There is no login, and `user` on a send is whatever the caller says it is. Don't expose a chat server to a network where you don't trust every machine.
+On this machine there is no port to call. The in-process calls trust their caller: `user` on a send is whatever the caller says it is. The console's chat routes sit behind its login and its network guard.
 
 ## Conventions
 
-- JSON responses with `Cache-Control: no-store` and `Access-Control-Allow-Origin: *`.
-- A body that isn't a JSON object is `400 {"error": "malformed JSON body"}` or `400 {"error": "JSON body must be an object"}`. Other client errors are `400 {"error": "..."}` too.
-- Unknown POST paths are `404 {"error": "not found"}`. Unknown GET paths fall through to the static files.
+- A node answers JSON with `Cache-Control: no-store` and `Access-Control-Allow-Origin: *`.
+- A body that isn't a JSON object is `400 {"error": "malformed JSON body"}` or `400 {"error": "JSON body must be an object"}`. Other client errors are `400 {"error": "..."}` too, on a node and in-process alike.
+- On a node, any other path is `404 {"error": "not found"}`.
 
 ## The message row
 
-Messages live in `<home>/data/chat.db` (SQLite, WAL). Every route that returns messages returns rows like this:
+On this machine messages live in `<home>/data/chat.db` (SQLite, WAL). Every call that returns messages returns rows like this:
 
 ```json
 {"id": 412, "chat_user": "ana", "user": "ana", "message": "morning",
@@ -50,41 +49,46 @@ Messages live in `<home>/data/chat.db` (SQLite, WAL). Every route that returns m
 
 A thread is everything between the cousin and one other party, in both directions: your messages are stored under your name, the cousin's replies to you under `reply_to_user`, which is also you.
 
+A node keeps its messages in `data/chat.jsonl` beside it, in the same shape. There, `reply_to` and the attachment fields are always null, `reactions` is always empty and nothing is ever archived.
+
 ## `GET /health`
 
-`200 {"status": "ok", "slug": "wren", "port": 8611}`. The console uses this for the `chat` column.
+A node only. `200 {"status": "ok", "slug": "kestrel", "port": 8210, "brain": "placeholder"}`; `brain` is `agent` when the node has an `AGENT_CMD`. The node's `install.sh` waits on it.
 
-## `POST /api/send`
+## Send
 
-An inbound message for the cousin.
+An inbound message for the cousin: the in-process `send`, or `POST /api/send` on a node.
 
 ```sh
-curl -s localhost:8611/api/send -H 'Content-Type: application/json' \
+# on the node itself
+curl -s 127.0.0.1:8210/api/send -H 'Content-Type: application/json' \
   -d '{"user": "ana", "message": "can you check the backups?"}'
 ```
 
-Body: `user` and a non-empty `message` (both required), plus optional `reply_to` (any JSON) and `image` (a `data:image/<type>;base64,...` URI). Answers `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored. It doesn't wait for the terminal.
+Body: `user` and a non-empty `message` (both required), plus optional `reply_to` (any JSON) and `image` (a `data:image/<type>;base64,...` URI). A node reads only `user` and `message`. The answer is `200 {"ok": true, "id": 413, "timestamp": "..."}` once the row is stored. It doesn't wait for the cousin.
 
-Before any of that, every send path checks whether the message is a login
+On this machine, before any of that, every send checks whether the message is a login
 code a running `cousin-account login|token --via <this cousin>` is waiting
-on (R18). When it is, `/api/send` answers `200 {"ok": true, "id", "timestamp",
-"diverted": true}` and delivers nothing: no recall and no
-chat hook ever sees it. The row stored in `chat.db` is a redaction line
+on (R18). When it is, the send answers `200 {"ok": true, "id", "timestamp",
+"diverted": true}` and delivers nothing: no chat hook ever sees it. The row
+stored in `chat.db` is a redaction line
 (`[login code received for account <name>]`, or, for a second or late code,
 `[a late login code for account <name> was discarded: ...]`), never the code
 itself.
 
-What happens on an ordinary (non-diverted) send, in order:
+What happens on an ordinary (non-diverted) send on this machine, in order:
 
 1. The row is stored (`type: "user"`, thread = `user`).
-2. If `user` is you (`[operator] name`), the message is checked for corrections ("stop", "don't", "instead", ...) and any hit goes to `data/corrections.jsonl`. Failures here never fail the send.
-3. If there's an `image`, it's decoded to `<home>/chat/inbound/<id>.<ext>` (png, jpg, jpeg, gif or webp; any other type is saved as `.bin`). A bad image doesn't fail the send either; the line says `[image attached, decode failed]` instead.
-4. The delivery line is composed and typed into the tmux session on a background thread (see below). If the message is from you (`[operator] name`) it may get a memory recall suffix.
+2. If there's an `image`, it's decoded to `<home>/chat/inbound/<id>.<ext>` (png, jpg, jpeg, gif or webp; any other type is saved as `.bin`). A bad image doesn't fail the send; the cousin is handed `[image attached, decode failed]` in place of the path.
+3. The message is delivered: a `chat` item on the sender's thread goes into the cousin's [inbox](../glossary.md#inbox), with the image's path as an attachment. The send doesn't wait for it. Nothing is appended to the message; recall is the [runner](../glossary.md#runner)'s own prompt hook.
+4. If `user` is you (`[operator] name`), the message is checked for corrections ("stop", "don't", "instead", ...) and any hit goes to `data/corrections.jsonl`. Failures here never fail the send.
 5. Chat hooks from `<home>/chat-hooks.json` run (see below).
 
-## `POST /api/<slug>_reply`
+On a node the row is stored and the answer goes back at once. The node's brain runs the [turn](../glossary.md#turn) on a background thread, and its reply shows up in the history. A node has no login codes, no corrections and no chat hooks.
 
-The cousin's own outbound message. The slug is in the path so a reply sent to the wrong cousin's server gets a `404` instead of landing in someone else's history. `cousin-reply` stores the same row without the server (`chat_api.reply`, the one implementation both use).
+## Reply
+
+The cousin's own outbound message. `cousin-reply`, the media `chat` commands and the runner's `reply` tool store it in-process (`chat_api.reply`). No route takes it: a node stores its brain's replies itself.
 
 ```sh
 echo "backups are fine" | cousin-reply --user ana
@@ -97,13 +101,13 @@ Body:
  "attachment": {"kind": "image", "path": "/srv/cousins/wren/chat/images/chart.png"}}
 ```
 
-`reply_to_user` is required; there is no default recipient. You need a non-empty `message` or an `attachment` with both `kind` and `path` (a caption-less picture is fine). The row is stored under the recipient's thread with `user` = the cousin's display name and `type` = the slug. Nothing is typed into the pane. `200 {"ok": true, "id", "timestamp"}`.
+`reply_to_user` is required; there is no default recipient. You need a non-empty `message` or an `attachment` with both `kind` and `path` (a caption-less picture is fine). The row is stored under the recipient's thread with `user` = the cousin's display name and `type` = the slug. It is never delivered back to the cousin. The answer is `{"ok": true, "id", "timestamp"}`.
 
-The server stores the attachment path as given; it doesn't check the file. The console only serves attachments that sit directly in `chat/images/`, `chat/audio/` or `chat/video/` of the home. Generated media uses this field. `cousin-reply --image` works differently: it posts the reply, then copies the picture to `chat/inbound/<reply id>.<ext>`, which the console also shows on that message. `cousin-reply` defaults `reply_to_user` to `[operator] name` and sends `--reply-to N` as `{"id": N}`.
+The attachment path is stored as given; nothing checks the file. The console only serves attachments that sit directly in `chat/images/`, `chat/audio/` or `chat/video/` of the home. Generated media uses this field. `cousin-reply --image` works differently: it stores the reply, then copies the picture to `chat/inbound/<reply id>.<ext>`, which the console also shows on that message. `cousin-reply` defaults `reply_to_user` to `[operator] name` and sends `--reply-to N` as `{"id": N}`.
 
-## `GET /api/history`
+## History
 
-One thread, oldest first.
+One thread, oldest first: the in-process `history`, or `GET /api/history` on a node.
 
 | param | meaning |
 |---|---|
@@ -111,17 +115,19 @@ One thread, oldest first.
 | `limit` | default 200 |
 | `before` | page backward: the newest `limit` rows with `id < before` |
 | `since` | poll forward: the oldest `limit` rows with `id > since` |
-| `archived` | `0` (default, live rows), `1` (archived only), `all` |
+| `archived` | `0` (default, live rows), `1` (archived only), `all`. Not on a node |
 
 With neither `before` nor `since` you get the newest `limit` rows. If you pass both, `since` wins. Non-integer numbers are `400`.
 
 Answer: `{"messages": [...], "total": n, "has_more": bool}`. `total` counts the whole thread (with the archive filter). `has_more` is counted, not guessed: whether there are more rows in the direction you're paging. To scroll back, pass the smallest `id` you have as `before`; to poll for new ones, pass the largest as `since`.
 
-## `GET /api/search`
+## Search
 
-`q` (required) is matched as a substring against the message text and the `reply_to` JSON. `user` narrows to one thread; without it all threads are searched. `archived` works as in history. Answer: `{"messages": [...]}`, newest first, at most 50.
+In-process only. `q` (required) is matched as a substring against the message text and the `reply_to` JSON. `user` narrows to one thread; without it all threads are searched. `archived` works as in history. Answer: `{"messages": [...]}`, newest first, at most 50.
 
-## `POST /api/reactions`
+## Reactions
+
+In-process only (`react`).
 
 ```json
 {"message_id": 412, "user": "ana", "emoji": "+1", "action": "tap"}
@@ -134,63 +140,19 @@ All four are required. `message_id` must be an integer, `action` `tap` or `remov
  "reactions": [{"user": "ana", "emoji": "+1", "tap_count": 1}]}
 ```
 
-An add or a bump also types a line into the cousin's pane:
+An add or a bump also tells the cousin: a `reaction` item with this line goes into its inbox, on its `system` thread:
 
 ```
 [fw-reaction] msg-id=412 emoji=+1 user=ana tap_count=2 op=bumped
 ```
 
-## `POST /api/archive`
+## Archive
 
-`{"user": "ana", "keep": 20}`. Archives every live row of that thread except the newest `keep` (default 0, must be a non-negative integer). Answer `{"ok": true, "archived": n}` with the number of rows that actually changed. Archived rows are still there; ask for them with `archived=1` or `all`.
-
-## Static files
-
-Any other GET serves a file from `<home>/www/`, if the cousin has one. Allowed suffixes: `.html .css .js .png .jpg .jpeg .gif .webp .svg .ico`. The resolved path has to stay inside `www/` (links and `..` are resolved first). Anything else is `404`.
+In-process only. `{"user": "ana", "keep": 20}`. Archives every live row of that thread except the newest `keep` (default 0, must be a non-negative integer). Answer `{"ok": true, "archived": n}` with the number of rows that actually changed. Archived rows are still there; ask for them with `archived=1` or `all`.
 
 ## What the cousin sees
 
-An inbound message becomes one line typed into the cousin's tmux session:
-
-```
-[now: 2026-09-18 07:02 UTC | dt-since-msg: 12m] (Chat ana): can you check the backups?
-```
-
-- `dt-since-msg` is the minutes since the previous inbound message, from the mtime of `data/.last-user-msg`. On the first message ever it's left out.
-- Newlines in the message are flattened to spaces. A newline would submit the paste halfway.
-- An inbound image adds `[image attached -> Read /path/to/cousins/wren/chat/inbound/413.png]`, so the cousin can open it.
-- Messages from another cousin arrive the same way, `(Chat Kestrel): ...`. That's how a cousin tells you from a peer: your name is `[operator] name`.
-
-The typing itself: the line is pasted with `send-keys -l` (a line over 12000 bytes goes through `load-buffer` and `paste-buffer` instead, since tmux refuses a command over its ~16 KB message size), the server waits a moment scaled to the length (0.1 s plus a bit per character, at most 0.6 s) so the terminal takes the whole paste, sends Enter, then checks the bottom three lines of the pane. If the text is still sitting in the input box it sends Enter once more. One lock covers all typing in the process, so two messages (or a message and a reaction line, or a keystroke from the console's pane) never interleave.
-
-A chat line that the agent may read as a paste (over 600 bytes, or with a newline in it) gets a one-line header typed first, on its own: `(Chat ana): ana's message follows in full below; answer the message, not this line.` Claude Code treats one keyboard read of more than 800 characters as a paste and wraps it in a pasted-content block that its system prompt tells the model to trust only where the user's own message asks, so a long line typed in one burst arrived with nothing typed outside it (#111). The header is built from the sender's name only, never from the message, and is typed as its own `send-keys` call with no newline, followed by a 0.25 s pause so it is read before the body lands. The attention patterns are checked again after the pause. If the pane now shows one, or the body cannot be typed, the header is taken back out with one `BSpace` per character (never Escape, since a double Escape opens the CLI's rewind) and nothing is submitted. The line after it is unchanged, and the one Enter after the body submits both. Known limit: if a tmux call hangs (a timeout) once the body has started, part of the body may already be in the input box. Nothing is erased then, because erasing the header's length would delete the end of the body instead, and the server logs `stranded input possible in <session>: header + partial body, not erased`. The Enter check cannot see that leftover, since it only looks for the tail of the line it just typed. The next delivery is typed after the leftover, and its Enter submits both together. A short single-line message gets no header.
-
-Two guards from `config/harness.toml` run before anything is typed:
-
-- `attention_patterns`: if the pane shows one of these strings (a login or trust menu, say), the line is not typed at all. Typing into a menu picks options. The server logs `tmux delivery SKIPPED` to stderr.
-- `[input_mode]` with `normal_marker` and `insert_keys`: if the pane shows the marker (a modal editor in command mode), the insert keys are sent first so the text lands as text.
-
-Delivery is best effort. The send answers once the row is stored; if typing fails (session gone, tmux down) the server logs `tmux delivery FAILED` to stderr and the sender never hears about it. The message is still in the history. Check the chat server's log if a cousin seems deaf.
-
-## Memory recall on delivery
-
-When the sender is you (`[operator] name`) and the message is long enough, the server searches the cousin's own memory and appends one suffix to the typed line:
-
-```
-[fw-recall] possibly relevant from your memory: Backup schedule (memory:backups.md); Disk layout (notes:2026-08-01-disks.md) - cousin-memory search for details; ignore if not.
-```
-
-Titles and paths only, never file contents. The stored message never gets the suffix. The knobs:
-
-| where | key | default |
-|---|---|---|
-| `config/embedding.toml [recall]` | `min_chars` | 24 |
-| | `min_score` (semantic similarity a hit needs) | 0.45 |
-| | `top` | 3 |
-| `cousin.toml [memory]` | `proactive_recall` | true |
-| | `recall_keyword_only` | false |
-
-Without `config/embedding.toml` there's no semantic score, so nothing is appended unless the cousin sets `recall_keyword_only = true`, in which case any keyword hit counts. The search runs before the send answers, so a slow search slows the send down, by at most 4 seconds (`RECALL_BUDGET_SECONDS` in `cousin_lib/server/app.py`). Past that budget the message goes out without the suffix, and the search finishes on its own thread. Any error also means the line goes out without a suffix.
+A delivered message is a row in the cousin's inbox (`data/inbox.db`). The runner claims it and writes it into a turn under a one-line header with the thread, the kind of item and the sender, `[operator:ana] chat from ana at 2026-09-18 07:02 UTC`. Messages from another cousin arrive the same way, on a `peer:<slug>` thread. That's how a cousin tells you from a peer: your name is `[operator] name`. An inbound image is handed on as its path; what each runner kind does with it is in [the runners reference](runners.md).
 
 ## Chat hooks
 
@@ -205,22 +167,19 @@ Without `config/embedding.toml` there's no semantic score, so nothing is appende
 ]
 ```
 
-`pattern` is a Python regex searched in the message. `user` is compared case-insensitively; `*` or leaving it out matches anyone. `desc` is ignored. Every matching entry fires, in file order, after the message is stored and its line typed.
+`pattern` is a Python regex searched in the message. `user` is compared case-insensitively; `*` or leaving it out matches anyone. `desc` is ignored. Every matching entry fires, in file order, after the message is stored and delivered.
 
 - `shell:<path>` runs the script detached, working directory the home, with `COUSIN_HOOK_USER`, `COUSIN_HOOK_MESSAGE`, `COUSIN_HOOK_PATTERN`, `COUSIN_SLUG` and `COUSIN_HOME` set. Output goes to `<home>/data/chat-hooks.log`. A relative path is taken from the home. The script has to be inside the home or the framework root, otherwise it's refused with a line on stderr.
-- `inject:<text>` types the text as its own line, `(Chat fw-hook): <text>`, right after the message.
+- `inject:<text>` delivers the text to the cousin as its own item, from `fw-hook` on its `system` thread, right after the message.
 
 A missing or broken file, a bad regex or a failing script never affects the send. Hook lines aren't stored in the history.
 
-## Files a chat server writes
+## Files a send writes
 
 | path | what |
 |---|---|
 | `data/chat.db` | the history and reactions |
+| `data/inbox.db` | the delivered item, for the runner |
 | `data/corrections.jsonl` | corrections spotted in operator messages |
 | `data/chat-hooks.log` | output of shell hooks |
-| `chat/inbound/<id>.<ext>` | inbound images. Nothing cleans this up; it's the cousin's [inbox](../glossary.md#inbox) |
-
-## Remote cousins
-
-A hive node runs a smaller chat server of its own with only `/health`, `/api/send` and `/api/history`, and asks for its hive token from anything that isn't loopback. See [the hive API](hive-api.md#the-nodes-own-endpoints).
+| `chat/inbound/<id>.<ext>` | inbound images. Nothing cleans this up |

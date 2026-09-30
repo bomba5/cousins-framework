@@ -12,11 +12,8 @@ import os
 import pathlib
 import re
 import stat
-import subprocess
-import sys
 import tarfile
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -65,17 +62,6 @@ class StopCase(unittest.TestCase):
         (home / "notes").mkdir()
         (home / "notes" / "untracked.md").write_text("only copy\n")
         return home
-
-    def _fake_chat_server(self, home):
-        # A process whose cmdline carries the chat-server marker, as the
-        # real one does; stop_cousin refuses to kill a pid without it.
-        proc = subprocess.Popen(
-            [sys.executable, "-c",
-             "import time  # cousin_lib.server.app\ntime.sleep(30)"])
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        (home / "data" / "chat-server.pid").write_text(str(proc.pid))
-        return proc
-
 
 class TestLegacyStopRefused(StopCase):
     """R2, R14: stop_cousin refuses a cousin with no [agent] runner by

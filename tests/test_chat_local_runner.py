@@ -62,27 +62,6 @@ class TestSendMessage(HermeticCase):
         self.assertEqual((source, state), ("chat", "queued"))
         self.assertIn("the tins moved", body)
 
-    def test_a_tmux_cousin_is_still_reached_over_http(self):
-        seen = []
-
-        class _Resp:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
-            def read(self):
-                return b'{"ok": true, "id": 5}'
-
-        def urlopen(req, timeout=None):
-            seen.append(req.full_url)
-            return _Resp()
-        with mock.patch("urllib.request.urlopen", side_effect=urlopen):
-            result = chat.send_message(self.fw, self.sender, "sam", "hi")
-        self.assertEqual((seen, result["id"]), (["http://localhost:8092/api/send"], 5))
-        self.assertEqual(_messages(self.root / "cousins" / "sam"), [])
-
     def test_the_outbound_filter_still_runs_first(self):
         from cousin_lib.outbound_filter import FilterBlocked, OutboundPolicy
         (self.root / "config" / "outbound-filter.json").write_text('{"terms": ["zorblatt"]}')

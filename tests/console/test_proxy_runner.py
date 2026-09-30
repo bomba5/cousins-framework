@@ -1,9 +1,9 @@
 """The chat routes for a runner cousin (master plan phase 5 task 5): no
 chat server runs, so the console serves history, search, send, archive
-and reactions itself over the cousin's `chat.db`, through the same
-library the chat server answers with (server/chat_api.py). Parity: each
-route returns what it returned through a real chat server, for a chat.db
-the console did not create."""
+and reactions itself over the cousin's `chat.db`, through
+server/chat_api.py. Parity: each route returns what it returns when the
+console forwards to an upstream chat server (a hive node's, here a test
+double over the same API), for a chat.db the console did not create."""
 import pathlib
 import socket
 import tempfile
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from cousin_lib.config import CousinConfig
 from cousin_lib.console import proxy, router
 from cousin_lib.runner.inbox import Inbox
-from cousin_lib.server.app import ChatServer
+from tests._fakes import FakeChatUpstream as ChatServer
 
 
 def _closed_port():
@@ -51,8 +51,8 @@ class RunnerProxyCase(unittest.TestCase):
         return router.dispatch("POST", path, req=self._req(body=body))
 
     def _through_a_chat_server(self, calls):
-        """Run `calls` against a real chat server (the tmux lane, which
-        creates the chat.db), then stop it; returns their answers."""
+        """Run `calls` through the proxy's upstream path (a chat server
+        that creates the chat.db), then stop it; returns their answers."""
         self._toml(0)
         server = ChatServer(CousinConfig.load(self.home))
         server.start()

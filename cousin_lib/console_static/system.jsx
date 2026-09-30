@@ -568,7 +568,6 @@ const SYS_HIVE_FIELDS = [
   { table: "", key: "public_url", label: "public_url", kind: "url", hint: "the queen as nodes reach it; required when enabled" },
   { table: "", key: "checkin_seconds", label: "checkin_seconds", kind: "int", placeholder: "60" },
   { table: "", key: "home_cousin", label: "home_cousin", kind: "str", hint: "the local cousin a node's tell-home reaches" },
-  { table: "", key: "home_chat_url", label: "home_chat_url", kind: "url", hint: "legacy, unauthenticated" },
 ];
 
 function SysPlainTomlEditor({ title, sub, name, file, fields, reload }) {

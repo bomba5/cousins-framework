@@ -606,28 +606,6 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestDefaultDeliverReportsTheInjection(unittest.TestCase):
-    """Canary (2026-09-18): the default deliver returned True even when
-    the injector skipped a pane parked on a menu, so a skipped heartbeat
-    counted as sent and was lost."""
-
-    def test_default_deliver_returns_the_injector_result(self):
-        from unittest import mock
-        from cousin_lib import loops
-        # The config load and the injector now sit behind
-        # cousin_lib.delivery; the property is unchanged: whatever the
-        # injector reports is what the daemon hears.
-        for result in (True, False):
-            with self.subTest(result=result), \
-                    mock.patch("cousin_lib.server.injection.TmuxInjector") as inj, \
-                    mock.patch("cousin_lib.config.CousinConfig.load") as load, \
-                    mock.patch.object(loops, "FrameworkConfig"):
-                load.return_value.tmux_session = "wren"
-                inj.return_value.inject.return_value = result
-                self.assertIs(loops._default_deliver("wren", "beat"), result)
-                inj.return_value.inject.assert_called_once_with("beat")
-
-
 class TestDefaultDeliverWait(unittest.TestCase):
     def test_a_runner_cousin_is_not_waited_on_and_a_tmux_cousin_is(self):
         import os

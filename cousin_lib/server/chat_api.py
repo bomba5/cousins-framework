@@ -3,19 +3,18 @@
 `/api/archive` and `/api/reactions` do (docs/reference/chat-api.md),
 over a cousin home's `data/chat.db`.
 
-Two transports call it. The cousin's own chat server (server/app.py), a
-tmux cousin's, answers HTTP with it; the console calls it in-process for
-a runner cousin, which runs no chat server (spec, "The store is the
-bus": the console serves chat as a projection of a store it does not
-own). Same function, same body: a route cannot answer one shape on one
-lane and another on the other.
+No cousin runs a chat server of its own (2.0.0): the console, the
+Telegram bridge, `cousin-chat` and `cousin-reply` call these functions
+in-process, over the cousin's own store (spec, "The store is the bus":
+the console serves chat as a projection of a store it does not own). The
+same API over HTTP is what a hive node's chat server answers, which the
+console proxies to.
 
 Each call takes the request's parameters as a plain mapping (query
 parameters: the first value of each, as strings) and returns the JSON
 body of a 200, or raises BadRequest, whose message is the 400 body's
 `error`. The seams a send and a reaction need (delivery, the reaction
-notice, the recall line) are passed in: `make_deliver` and
-`make_notify` build the ones both transports use.
+notice) are passed in: `make_deliver` and `make_notify` build them.
 """
 import json
 from pathlib import Path
@@ -107,25 +106,18 @@ def react(home, body, *, notify=None):
 
 def _attachment(home, message_id, image):
     """The delivered attachment for an inbound data: image, saved as
-    <home>/chat/inbound/<id>.<ext>: the file's path for a runner cousin
-    (the envelope reads it as an image block), the `[image attached ->
-    Read <path>]` marker for a tmux cousin (the pane line carries it)."""
+    <home>/chat/inbound/<id>.<ext>: the file's path (the runner's envelope
+    reads it as an image block)."""
     path = save_data_uri(home, image, folder="inbound", name=str(message_id))
-    if isinstance(delivery.backend_for(home), delivery.InboxBackend):
-        return str(path) if path is not None else "[image attached, decode failed]"
-    if path is None:
-        return "[image attached, decode failed]"
-    return "[image attached -> Read %s]" % path
+    return str(path) if path is not None else "[image attached, decode failed]"
 
 
-def send(config, body, *, deliver=None, context=None):
+def send(config, body, *, deliver=None):
     """One inbound chat message: divert a login code (R18), store the row,
-    deliver it (`deliver(user=, message=, message_id=, attachments=,
-    context=)`, fire-and-forget), touch the presence marker and capture a
-    correction (after delivery composed its line), then fire the chat
-    hooks. `context(config, user, message) -> str` is the recall line the
-    delivered item carries (the tmux lane's; a runner recalls in its own
-    prompt hook, so the console passes None)."""
+    deliver it (`deliver(user=, message=, message_id=, attachments=)`,
+    fire-and-forget), touch the presence marker and capture a correction,
+    then fire the chat hooks. A runner recalls in its own prompt hook, so
+    the delivered item carries no recall line."""
     user = body.get("user")
     message = body.get("message")
     if not user or not message:
@@ -145,8 +137,7 @@ def send(config, body, *, deliver=None, context=None):
     if body.get("image"):
         attachments.append(_attachment(home, row["id"], body["image"]))
     if deliver is not None:
-        deliver(user=user, message=message, message_id=row["id"], attachments=attachments,
-                context=context(config, user, message) if context is not None else "")
+        deliver(user=user, message=message, message_id=row["id"], attachments=attachments)
     after_inbound_stored(config, user, message)
     chat_hooks.on_message(home, user=user, message=message, message_id=row["id"],
                           slug=config.slug, deliver=deliver)
@@ -159,8 +150,8 @@ def reply(config, body):
     `message` or an attachment (`{"kind", "path"}`, a file already staged
     under the home's chat/ folder), and `reply_to_user`, which has no
     default. Every caller runs in the cousin's own context (cousin-reply,
-    the media `chat` commands, the chat server's route), so this is an
-    in-process write, not a request to a server that may not run."""
+    the media `chat` commands, the runner's reply tool), so this is an
+    in-process write, not a request to a server."""
     message = body.get("message") or ""
     reply_to_user = body.get("reply_to_user")
     attachment = body.get("attachment") or {}
@@ -180,26 +171,24 @@ def reply(config, body):
     return {"ok": True, "id": row["id"], "timestamp": row["timestamp"]}
 
 
-def make_deliver(config, **opts):
-    """The `deliver` seam both transports hand to send(): a chat item on the
-    sender's thread (a hook's inject: line on `system`), through
-    delivery.deliver without waiting. `opts` are the tmux backend's
-    (tmux_bin, socket, root); a runner cousin's backend ignores them."""
-    def deliver(*, user, message, message_id, attachments=(), context=""):
+def make_deliver(config):
+    """The `deliver` seam handed to send(): a chat item on the sender's
+    thread (a hook's inject: line on `system`), through delivery.deliver
+    without waiting."""
+    def deliver(*, user, message, message_id, attachments=()):
         source = "hook" if user == chat_hooks.HOOK_SENDER else "chat"
         thread = (delivery.thread_id("system") if source == "hook"
                   else delivery.thread_for_chat(config, user))
         item = delivery.Item(thread_id=thread, source=source, sender=user, body=message,
-                             attachments=tuple(attachments), context=context,
-                             message_id=message_id)
-        return delivery.deliver(config.home, item, wait=False, **opts)
+                             attachments=tuple(attachments), message_id=message_id)
+        return delivery.deliver(config.home, item, wait=False)
     return deliver
 
 
-def make_notify(config, **opts):
+def make_notify(config):
     """The `notify` seam for a reaction: a `reaction` item on `system`."""
     def notify(text):
         item = delivery.Item(thread_id=delivery.thread_id("system"), source="reaction",
                              body=text)
-        return delivery.deliver(config.home, item, wait=False, **opts)
+        return delivery.deliver(config.home, item, wait=False)
     return notify

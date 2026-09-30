@@ -565,24 +565,21 @@ class TestInboundLanes(_BridgeFixture):
     and fires hooks); a runner cousin's is stored and delivered by the
     bridge itself."""
 
-    def test_a_tmux_cousin_gets_the_chat_servers_api_send(self):
-        import json
+    def test_a_bridge_for_a_cousin_with_no_runner_refuses_with_the_line(self):
+        # R10: no chat server to post to; the bridge refuses by name,
+        # at start and per message, and stores nothing
         from cousin_lib import telegram
+        from cousin_lib.delivery import lane_refusal
         cfg = self._bridge()
-        with mock.patch("urllib.request.urlopen") as urlopen:
-            telegram._default_chat_send(cfg, user="Sam", message="hello cousin",
-                                        attachment="data:image/png;base64,AAAA")
-        self.assertEqual(urlopen.call_count, 1)
-        request = urlopen.call_args.args[0]
-        self.assertEqual(urlopen.call_args.kwargs, {"timeout": 10})
-        self.assertEqual(request.full_url, "http://127.0.0.1:8100/api/send")
-        self.assertEqual(request.get_method(), "POST")
-        self.assertEqual(request.headers, {"Content-type": "application/json"})
-        self.assertEqual(request.data, json.dumps(
-            {"user": "Sam", "message": "hello cousin",
-             "image": "data:image/png;base64,AAAA"}).encode())
-        # The bridge itself stores nothing and puts nothing: the chat
-        # server owns the row and the delivery on this lane.
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError) as urlopen:
+            with self.assertRaises(TelegramConfigError) as ctx:
+                telegram._default_chat_send(cfg, user="Sam", message="hello cousin",
+                                            attachment="data:image/png;base64,AAAA")
+            self.assertEqual(str(ctx.exception), lane_refusal(self.home))
+            with self.assertRaises(TelegramConfigError) as ctx:
+                telegram.run_bridge(self.home)
+            self.assertEqual(str(ctx.exception), lane_refusal(self.home))
+        urlopen.assert_not_called()
         self.assertFalse((self.home / "data" / "chat.db").exists())
         self.assertFalse((self.home / "data" / "inbox.db").exists())
         self.assertFalse((self.home / "chat").exists())

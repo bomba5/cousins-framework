@@ -37,12 +37,10 @@ cousins/wren/
   .claude/settings.json  its harness hooks
 ```
 
-A legacy-lane cousin has its own chat server on its own port (8090 to 8200
-by default). People and other cousins talk to it through that server, which
-types incoming messages into the tmux session. A runner cousin needs no chat
-server: its chat history and [inbox](glossary.md#inbox) are written directly, and the console
-reads its chat store itself (`cousin-migrate` still starts one for a cousin
-it moves off the legacy lane). The agent answers with `cousin-reply`, and messages another
+No cousin runs a chat server of its own (2.0.0): a runner cousin's chat
+history and [inbox](glossary.md#inbox) are written directly, and the console reads its chat
+store itself. A cousin with no `[agent] runner` has no chat: it is refused
+by name. The agent answers with `cousin-reply`, and messages another
 cousin with `cousin-chat send`. See [chat](chat.md) and [memory](memory.md)
 for those two halves.
 
@@ -205,15 +203,15 @@ cousin-spawn wren --start          # start an existing cousin (no-op if running)
 This is the legacy lane's start. It creates the tmux session named in
 `[chat] tmux_session`, with the home as working directory and `COUSIN_HOME`
 set, runs `config/agent-cmd` in it behind a small launcher that applies the
-auth mode, and starts the chat server if nothing answers on its port. The
-chat server's pid goes in `data/chat-server.pid` and its log in
-`data/chat-server.log`.
+auth mode. In 2.0.0 it is refused before any of that: a cousin with no
+`[agent] runner` is not started (`cousin-spawn --start` exits 2 with the
+reason).
 
 A runner cousin (`[agent] runner` is `sdk`, `fake`, `opencode` or `tmux`)
 starts and stops a different way: `--start` (or the console) asks the running
 `cousin-supervisor` to start its `runner:<slug>` child instead, and it needs
 `cousin-supervisor run` up first (`NoSupervisor` otherwise). None of
-`config/agent-cmd`, the tmux commands above or `data/chat-server.pid` apply
+`config/agent-cmd` or the tmux commands above apply
 to it. Stop and restart for it are `cousin-supervisor stop|start <slug>`, or
 the console; a stop holds it down (`<home>/run/held`) across a supervisor
 restart until the next start. See [commands](commands.md#running-cousins)
@@ -228,17 +226,12 @@ yet; an immediate stop by hand is:
 
 ```
 tmux kill-session -t wren
-kill "$(cat cousins/wren/data/chat-server.pid)"
 ```
 
 Restart is an immediate stop, a short pause, start. The conversation in the
 session is gone; the next session starts fresh from CLAUDE.md and whatever
 the cousin wrote to disk. To keep the thread across a restart, flip instead
 (below), or switch auth modes, which resumes the same session.
-
-The chat server has no supervisor of its own. `cousin-chat-watchdog`, run from
-a timer, starts a missing one for any running cousin. See
-[operations](operations.md).
 
 To get rid of a cousin, use "dismiss" in the console: it stops it, archives
 the home (without `.secrets/`) to `data/dismissed/<slug>-<timestamp>.tar.gz`
@@ -493,7 +486,7 @@ No `[session]` table means nothing runs, which is fine.
 `[operator] name` in `cousin.toml` is the person the cousin answers to. It
 decides where `cousin-reply` goes when you don't pass `--user`, which chat
 [thread](glossary.md#thread) the console opens, and who `send` in the MCP tools can reach by name.
-Set it at spawn with `--operator` or later in the inspector (the chat server
+Set it at spawn with `--operator` or later in the inspector (the runner
 needs a restart to pick it up).
 
 It's optional. An install with no operator anywhere works; everything that

@@ -37,6 +37,15 @@ class TestPackageData(unittest.TestCase):
             "cousin_lib/ui_static/* is not declared as package-data;"
             " a wheel would omit the web console")
 
+    def test_the_retired_scripts_are_not_shipped(self):
+        # R10: no per-cousin chat server, so neither it nor its watchdog
+        # ships, and their modules are gone
+        scripts = self.pyproject["project"]["scripts"]
+        for name in ("cousin-chat-server", "cousin-chat-watchdog"):
+            self.assertNotIn(name, scripts)
+        for module in ("server/app.py", "server/injection.py", "chat_watchdog.py"):
+            self.assertFalse((_REPO_ROOT / "cousin_lib" / module).exists(), module)
+
     def test_every_console_script_target_imports(self):
         # A stranger's entry points must all resolve - a script
         # pointing at a moved or misnamed function fails only when they

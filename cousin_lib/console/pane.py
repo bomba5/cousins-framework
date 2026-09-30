@@ -25,14 +25,11 @@ handling: the browser terminal must itself be in mouse mode to turn a
 wheel into an SGR report, and a captured frame never contains the
 program's mode-setting escapes, so the frame sets it.
 
-Input goes through the injection module's process-wide lock, so a chat
-delivery and a keystroke never interleave.
-
 A tmux-kind runner cousin (`[agent] runner = "tmux"`, phase 11) is
 addressed where its runner keeps it: the framework's own socket
 (`<root>/run/tmux.sock`) and the session `tmux-<slug>`, matched exactly
 (tmux_runner.pane_for). The runner types into that pane itself, from
-another process the injection lock does not reach, so a person's keys go
+another process, so a person's keys go
 in only to answer a one-screen dialog the runner never types into (the
 trust, bypass and MCP approval dialogs; the login and onboarding flows
 take several screens and text, and are done in a terminal), and only as
@@ -54,7 +51,6 @@ from datetime import datetime
 
 from cousin_lib.console import router, sse
 from cousin_lib.console.proxy import RouteError, find_cousin, guarded
-from cousin_lib.server import injection
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _LITERAL_CHUNK = 4000   # well under tmux's message ceiling
@@ -251,8 +247,8 @@ def chunk_literal(text, limit=_LITERAL_CHUNK):
 
 
 def send_input(tmux, session, data):
-    """Type the bytes into the session under the injection lock. Returns
-    the token count; raises RouteError(500) with tmux's stderr."""
+    """Type the bytes into the session. Returns the token count; raises
+    RouteError(500) with tmux's stderr."""
     tokens = input_tokens(data or "")
     if any(mode == "mouse" for mode, _ in tokens):
         # A report reaches the program as bytes (send-keys -l bypasses
@@ -268,29 +264,27 @@ def send_input(tmux, session, data):
 
 
 def _send_tokens(tmux, session, tokens):
-    """send-keys for each token, under the injection lock; RouteError(500)
-    with tmux's stderr."""
-    with injection._INJECT_LOCK:
-        for mode, payload in tokens:
-            if mode in ("literal", "mouse"):
-                # -l and -- are load-bearing: a run starting with '-' is
-                # otherwise parsed as flags
-                batches = [["-l", "--", piece]
-                           for piece in chunk_literal(payload)]
-            else:
-                batches = [[payload]]
-            for tail in batches:
-                try:
-                    r = tmux.run("send-keys", "-t", session, *tail,
-                                 timeout=8)
-                except (OSError, subprocess.TimeoutExpired) as err:
-                    raise RouteError(500, {"ok": False, "error": str(err)})
-                if r.returncode != 0:
-                    raise RouteError(500, {
-                        "ok": False,
-                        "error": (r.stderr or "").strip()[:200]
-                                 or "tmux send-keys failed (rc=%d)"
-                                    % r.returncode})
+    """send-keys for each token; RouteError(500) with tmux's stderr."""
+    for mode, payload in tokens:
+        if mode in ("literal", "mouse"):
+            # -l and -- are load-bearing: a run starting with '-' is
+            # otherwise parsed as flags
+            batches = [["-l", "--", piece]
+                       for piece in chunk_literal(payload)]
+        else:
+            batches = [[payload]]
+        for tail in batches:
+            try:
+                r = tmux.run("send-keys", "-t", session, *tail,
+                             timeout=8)
+            except (OSError, subprocess.TimeoutExpired) as err:
+                raise RouteError(500, {"ok": False, "error": str(err)})
+            if r.returncode != 0:
+                raise RouteError(500, {
+                    "ok": False,
+                    "error": (r.stderr or "").strip()[:200]
+                             or "tmux send-keys failed (rc=%d)"
+                                % r.returncode})
 
 
 def _iso():

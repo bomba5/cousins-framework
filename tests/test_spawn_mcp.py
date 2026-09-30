@@ -40,7 +40,7 @@ class ProvisionCase(unittest.TestCase):
 
     def _create(self, root, **kw):
         args = dict(slug="testa", name="Testa", role="test cousin",
-                    voice="Plain and helpful.", port=8100)
+                    voice="Plain and helpful.")
         args.update(kw)
         return create_cousin(root, **args)
 
@@ -125,7 +125,7 @@ class ProvisionCase(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = spawn_main(["testa", "--root", str(root), "--role", "x",
-                             "--voice", "v", "--port", "8100",
+                             "--voice", "v",
                              "--operator", "Sam"])
         self.assertEqual(rc, 0, err.getvalue())
         reg = tomllib.loads(
@@ -227,7 +227,7 @@ class TestProjectSettings(ProvisionCase):
             '[agent]\ncommit_attribution = "off"\n')
         rc, _out, err = self._main(
             ["testa", "--root", str(root), "--role", "test cousin",
-             "--voice", "Plain and helpful.", "--port", "8100"])
+             "--voice", "Plain and helpful."])
         self.assertEqual(rc, 2)
         self.assertIn("commit_attribution", err)
         self.assertFalse((root / "cousins" / "testa").exists())
@@ -301,8 +301,7 @@ class TestRelativeRoot(ProvisionCase):
         root = self._framework_root()
         with contextlib.chdir(root):
             rc, _out, err = self._main(["testa", "--root", ".", "--role",
-                                        "x", "--voice", "v", "--port",
-                                        "8100"])
+                                        "x", "--voice", "v"])
         self.assertEqual(rc, 0, err)
         self._assert_absolute(root / "cousins" / "testa", root)
 

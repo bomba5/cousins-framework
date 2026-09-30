@@ -422,9 +422,8 @@ def build_request(server, cfg, body):
     if not isinstance(home_chat, bool) or not isinstance(reachable, bool):
         raise HttpError(400, "home_chat and reachable must be booleans")
     tell_home = bool(home_chat and cfg.get("home_cousin"))
-    if home_chat and not (cfg.get("home_cousin") or cfg["home_chat_url"]):
-        raise HttpError(400, "home chat needs home_cousin (or the legacy home_chat_url) in"
-                             " config/hive.toml")
+    if home_chat and not tell_home:
+        raise HttpError(400, "home chat needs home_cousin in config/hive.toml")
     purge_expired(server)
     directory = tempfile.mkdtemp(prefix="node-",
                                  dir=downloads_dir(server))  # mode 0700
@@ -432,8 +431,7 @@ def build_request(server, cfg, body):
         result = spawn_node.build_node_archive(
             server.root, slug=slug, queen_url=cfg["public_url"],
             name=name.strip(), role=role.strip(), out=directory,
-            home_chat=cfg["home_chat_url"] if home_chat and not tell_home else None,
-            tell_home=tell_home,
+            home_chat=None, tell_home=tell_home,
             port=port, agent_cmd=agent_cmd,
             node_host="0.0.0.0" if reachable else "127.0.0.1")
     except spawn_node.SpawnNodeError as err:
@@ -468,7 +466,7 @@ def register():
             return 200, out
         return 200, {"enabled": True, "public_url": cfg["public_url"],
                      "checkin_seconds": cfg["checkin_seconds"],
-                     "home_chat_url": cfg["home_chat_url"] or None,
+                     "home_cousin": cfg["home_cousin"] or None,
                      "default_port": DEFAULT_NODE_PORT}
 
     @router.route("GET", "/api/hive/nodes")

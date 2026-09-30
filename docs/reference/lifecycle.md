@@ -190,7 +190,7 @@ Both are snapshotted as above, the mode is applied, then both are flipped, donor
 | `body-swap` | Wren's CLAUDE.md, self-portrait and `[cousin]` name and role; her own memory | Kestrel's former identity; her own memory |
 | `merge` | her own MEMORY.md, then `## Memories inherited from Wren (<date>)`, then Wren's; `memory/raw/` merged (files she lacked copied, shared files gain the lines she didn't have) | unchanged |
 
-The slug, chat port and tmux session always stay where they are: a body swap changes who lives at an address, not the address. Because CLAUDE.md contains its own port and reply route, each swapped CLAUDE.md is corrected for its new home (`Your chat-server runs on port ... and binds /api/<slug>_reply.` and any other `/api/<old slug>_reply`).
+The slug and tmux session always stay where they are: a body swap changes who lives at an address, not the address.
 
 Nothing is ever deleted: the donor stays, and the recipient's old files are in its snapshot.
 

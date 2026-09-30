@@ -327,7 +327,7 @@ exit 0
 """
 
 
-class TestChatImportAndWatchdog(HomeCase):
+class TestChatImport(HomeCase):
     def test_a_chat_import_is_recorded_in_the_new_home(self):
         from tests.test_chat_import import ImportCase
 
@@ -341,29 +341,6 @@ class TestChatImportAndWatchdog(HomeCase):
         [row] = framework_rows(case.new_home, "framework:chat-import")
         self.assertIn("%d messages" % report["imported"], row["content"])
         self.assertEqual(framework_rows(case.old_home), [])
-
-    def test_a_chat_server_respawn_is_recorded_a_healthy_pass_is_not(self):
-        from cousin_lib import chat_watchdog as W
-        from tests.test_chat_watchdog import _make_fleet
-        root = self.home.parent / "fleet"
-        _make_fleet(root, {"testa": 8090, "testb": 8091})
-        healthy = {8091}
-
-        def spawn(home):
-            healthy.add(8090)
-            return True
-        seams = dict(has_tmux=lambda s: True,
-                     health=lambda port, slug: port in healthy,
-                     port_in_use=lambda port: port in healthy,
-                     spawn=spawn, sleep=lambda s: None)
-        with contextlib.redirect_stdout(io.StringIO()):
-            W.ensure_pass(root, **seams)
-            W.ensure_pass(root, **seams)
-        a, b = root / "cousins" / "testa", root / "cousins" / "testb"
-        [row] = framework_rows(a, "framework:respawn")
-        self.assertIn("respawned on :8090, health ok", row["content"])
-        self.assertEqual(framework_rows(b), [])
-
 
 class TestLifecycleEvents(unittest.TestCase):
     def _case(self):

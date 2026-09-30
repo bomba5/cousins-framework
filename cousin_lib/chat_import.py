@@ -3,7 +3,8 @@
 `cousin-chat-import <slug> --old-home <dir>` reads <old-home>/data/chat.db
 (the previous framework's shape: original_id plus image/audio/video
 columns) into this cousin's store (<home>/data/chat.db, attachment_kind
-and attachment_path), with the cousin's chat server stopped.
+and attachment_path), with the cousin stopped (no runner holding its
+lock).
 
 - Every old row keeps its id, so reply quotes between old messages still
   point at the right one.
@@ -28,8 +29,6 @@ import re
 import shutil
 import sqlite3
 import sys
-import urllib.error
-import urllib.request
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 MARKER = ".chat-imported.json"
@@ -211,14 +210,6 @@ def import_history(old_home, new_home, *, force=False):
     return report
 
 
-def _server_up(port):
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:%d/health" % port, timeout=2):
-            return True
-    except (urllib.error.URLError, OSError):
-        return False
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="cousin-chat-import",
@@ -239,10 +230,10 @@ def main(argv=None):
     except MissingConfigError as err:
         print("cousin-chat-import: %s" % err, file=sys.stderr)
         return 2
-    if _server_up(cfg.require_chat_port()):
-        print("cousin-chat-import: %s's chat server answers on :%d; stop it"
-              " first (the import rewrites its store)"
-              % (args.slug, cfg.require_chat_port()), file=sys.stderr)
+    from cousin_lib.runner.main import is_running
+    if is_running(cfg.home):
+        print("cousin-chat-import: %s's runner is running; stop it first"
+              " (the import rewrites its store)" % args.slug, file=sys.stderr)
         return 2
     try:
         report = import_history(args.old_home, cfg.home, force=args.force)

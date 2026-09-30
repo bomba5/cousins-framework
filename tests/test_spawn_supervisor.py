@@ -211,8 +211,7 @@ class TestRealSupervisor(_Case):
 # ---- phase 6 task 2, second half: a new cousin is a runner cousin where the install says so
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-BASE_TOML = ('[cousin]\nslug = "wren"\nname = "Wren"\nrole = "example cousin"\n\n'
-             '[chat]\nport = 8100\ntmux_session = "wren"\n')
+BASE_TOML = '[cousin]\nslug = "wren"\nname = "Wren"\nrole = "example cousin"\n'
 ACCOUNTS = ('[accounts.metered]\nkind = "anthropic-key"\n\n'
             '[accounts.fleet]\nkind = "claude-login"\n')
 
@@ -230,7 +229,7 @@ class _CreateCase(_Case):
 
     def create(self, **kw):
         args = dict(slug="wren", name="Wren", role="example cousin",
-                    voice="Plain and helpful.", port=8100)
+                    voice="Plain and helpful.")
         args.update(kw)
         return spawn.create_cousin(self.root, **args)
 
@@ -363,7 +362,7 @@ class TestCreateARunnerCousinsModel(_CreateCase):
 
 class TestSpawnCliOnTheRunnerLane(_CreateCase):
     ARGS = ("wren", "--name", "Wren", "--role", "example cousin",
-            "--voice", "Plain and helpful.", "--port", "8100")
+            "--voice", "Plain and helpful.")
 
     def test_runner_and_account_flags(self):
         self.accounts()

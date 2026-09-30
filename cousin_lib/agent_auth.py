@@ -586,8 +586,6 @@ def switch(root, slug, mode, *, restart=True, force=False, tmux_bin="tmux",
     kwargs = {}
     if start_chat_server is not None:
         kwargs["start_chat_server"] = start_chat_server
-    else:
-        kwargs["start_chat_server"] = spawn._chat_server_unless_live
     try:
         spawn.start_cousin(home, agent_cmd=resume_cmd, tmux_bin=tmux_bin,
                            tmux_socket=tmux_socket, root=root,

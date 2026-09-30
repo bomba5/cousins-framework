@@ -24,11 +24,9 @@ here).
 | `cousin-loops.service` | `cousin-loops run --interval 30`: heartbeats, loops, one-shot schedules, timed flips, the daily `flip_at` | always |
 | `cousin-console.service` | `cousin-console --port 8600`: the web console, on loopback | always |
 | `cousin-supervisor.service` | `cousin-supervisor run --console-port 8600`: the console (on loopback), the loops daemon and one `cousin-runner` per runner cousin, restarted with backoff and stopped in order | instead of `cousin-console.service` and `cousin-loops.service`, never beside them (see below) |
-| `cousin-chat-watchdog.service` + `cousin-chat-watchdog.timer` | `cousin-chat-watchdog`: starts a missing chat server for any running cousin, logs an alert for a sick one, never kills | every 10 minutes |
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
 | `cousin-start@.service` | `cousin-spawn <slug> --start --resume` for the slug after the `@`: brings the cousin back after a reboot, resuming its last session when it can | once at boot, one per cousin you enable it for |
-| `cousin-chat-server@.service` | `cousin-chat-server --home {{ROOT}}/cousins/<slug>` for the slug after the `@` | always, one per cousin, only if you want systemd to own chat servers (see below) |
 
 A `.timer` starts the `.service` with the same name. Enable the timer, not
 the service.
@@ -42,10 +40,6 @@ Every service runs from the root and sets three things:
   it, a flip started by the loops daemon can't find the agent.
 - `PYTHONUNBUFFERED=1`, so status lines reach the journal when they're
   printed, not when a buffer fills.
-
-The console and loops units also set `KillMode=process`. Both start chat
-servers (the console's start button, a flip), and without it a plain
-`systemctl --user restart` would kill every chat server they started.
 
 ## Install as user units
 
@@ -65,7 +59,7 @@ done
 ! grep -l '{{' ~/.config/systemd/user/cousin-*
 systemctl --user daemon-reload
 systemctl --user enable --now cousin-loops.service cousin-console.service
-systemctl --user enable --now cousin-chat-watchdog.timer cousin-tool-surface.timer cousin-sweep.timer
+systemctl --user enable --now cousin-tool-surface.timer cousin-sweep.timer
 loginctl enable-linger "$USER"
 ```
 
@@ -151,12 +145,10 @@ systemctl --user disable --now cousin-supervisor.service && systemctl --user ena
 `systemctl --user reload cousin-supervisor.service` rescans `cousins/`: a new
 runner cousin gets its runner, and nothing healthy restarts.
 
-Its `KillMode=mixed` stops the supervisor's whole control group. A chat
-server or a tmux server that the console started for a tmux cousin lives in
-that group, and stopping or restarting the unit kills it. While you still
-have tmux cousins, keep the two old units and run the supervisor beside them
-for the runner cousins only, with a drop-in (`systemctl --user edit
-cousin-supervisor.service`):
+Its `KillMode=mixed` stops the supervisor's whole control group: the
+runners and their bridges stop with it. To run the supervisor for the
+runners only, beside the two old units, use a drop-in (`systemctl --user
+edit cousin-supervisor.service`):
 
 ```
 [Service]
@@ -179,39 +171,19 @@ replace `%h` with that account's home directory (in a system unit `%h` is
 root's home). Put them in the system unit directory and use `systemctl`
 without `--user`.
 
-## Chat server: pick one owner
+## No chat server units
 
-`cousin-spawn --start`, a flip and the console's start button all start a
-cousin's chat server themselves, detached. The watchdog timer then brings it
-back if it dies. That's the normal setup, and it's why the block above does
-not enable `cousin-chat-server@.service`.
-
-Use `cousin-chat-server@<slug>.service` only if you want systemd to own that
-chat server instead:
-
-```
-kill "$(cat cousins/<slug>/data/chat-server.pid)"      # stop the spawn-started one
-systemctl --user enable --now cousin-chat-server@<slug>.service
-systemctl --user disable --now cousin-chat-watchdog.timer
-```
-
-Never both. Two servers on one port means the second can't bind, and with
-`Restart=always` it retries every five seconds forever while the first one
-looks like it's fine. Spawn and the console check the port first and reuse a
-server that's already answering. A flip always launches one, and with the
-unit's server on the port it fails to bind and exits, leaving a line in
-`chat-server.log`; that's harmless. The watchdog is the one that has to be
-off.
-
-If your agents run on a non-default tmux socket, add
-`Environment=COUSIN_TMUX_SOCKET=<path>` to `cousin-chat-watchdog.service` and
-`cousin-chat-server@.service` (a drop-in is fine).
+2.0.0 runs no per-cousin chat server: the console, the runner's inbox and
+the hive carry chat. An install upgraded from 1.x disables the old units
+once (`systemctl --user disable --now cousin-chat-watchdog.timer
+cousin-chat-server@<slug>.service`, for each slug that had one) and removes
+their files from `~/.config/systemd/user/`.
 
 ## Remove
 
 ```
 systemctl --user disable --now cousin-loops.service cousin-console.service \
-    cousin-chat-watchdog.timer cousin-tool-surface.timer cousin-sweep.timer
+    cousin-tool-surface.timer cousin-sweep.timer
 rm -rf ~/.config/systemd/user/cousin-*
 systemctl --user daemon-reload
 systemctl --user reset-failed

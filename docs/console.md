@@ -119,12 +119,11 @@ warnings, then the running ones, then the stopped ones. The columns:
   `rate limited`, `errored`, `enrolled` (a [worker](glossary.md#worker)) or `stopped`. A cousin
   "needs you" when its pane shows one of the `attention_patterns` or its
   [runner](glossary.md#runner) waits for a permission; the reason replaces the role line in the
-  cousin column. A running cousin whose chat server is down is a warning.
+  cousin column.
   A stopped cousin is never flagged: stopping it was your decision.
 - **cousin**: name, slug and role.
 - **runner**: the [lane](glossary.md#lane), read from the row: the runner's own kind (`sdk`,
-  `opencode`, ...), `tmux`, `worker` or `remote`, with the chat server's
-  state under a tmux cousin.
+  `opencode`, ...), `tmux`, `worker` or `remote`.
 - **model** and effort, what the next start renders.
 - **next flip**: the cousin's own `[lifecycle] flip_at` and how far away it
   is on your browser's clock; `default` when it takes the install default
@@ -146,8 +145,8 @@ One card per cousin. A card shows the name and slug, its state in words, the
 same reading as the overview's (`working` if the pane changed in the last
 minute or the runner is mid-turn, `idle`, `needs you`, `enrolled` for a
 worker, or `stopped`), the role, and
-a row of facts: chat port, memory scope, operator, heartbeat, flip time,
-host, model, the agent's pid and uptime, the last activity line and tokens
+a row of facts: chat, memory scope, operator, heartbeat, flip time,
+model, the agent's pid and uptime, the last activity line and tokens
 spent today. A runner cousin's card shows `chat · console` (the console
 serves its chat), and a runner line: the last state the runner recorded and
 the contract items it declares it does not support, if any. If the pane shows one of the `attention_patterns` from
@@ -170,11 +169,11 @@ Click a card to open the inspector drawer. From top to bottom:
 
 - **Role.** The one-line role, with an edit button. It rewrites `[cousin]
   role` in `cousin.toml`.
-- **Identity.** Slug, type, home, tmux session, chat port and state, model,
+- **Identity.** Slug, type, home, tmux session, chat state, model,
   effort, pid, uptime, flip time, activity. Three of them have an edit
   button:
   - operator: one line, up to 64 characters, no leading or trailing spaces.
-    Needs a restart (the chat server reads it at start).
+    Needs a restart (the runner reads it at start).
   - scope: `private` or `shared` (may propose to the [shared tier](glossary.md#shared-tier)). Applies at once.
   - heartbeat: whole seconds from 60 to 2592000 (30 days). Applies at the
     loops daemon's next tick.
@@ -265,7 +264,7 @@ drift from what the runner accepts.
   attribution: the install default (with where it comes from), on or off.
   On a tmux cousin, commit attribution also rewrites its harness settings
   file, where that lane reads it, and says so when your own
-  `includeCoAuthoredBy` or `attribution` there says the opposite and wins. The chat port, host and tmux session and
+  `includeCoAuthoredBy` or `attribution` there says the opposite and wins. The tmux session and
   the `[session]` hooks are shown read-only.
 
 The chat header's effort select shows only on a kind that reads an effort.
@@ -341,8 +340,8 @@ button opens the same dialog. The routes are in
   Enter). Keys go into a tmux-kind pane only while it waits on a person;
   everywhere else the runner types, and the chat is the way in.
 - **check**: the exit criterion as a report ([inbox](glossary.md#inbox) rows, tool calls with no
-  result, recorder hook errors, the runner's config against the cousin's,
-  the chat server), optionally since a time and with one validating turn.
+  result, recorder hook errors, the runner's config against the cousin's),
+  optionally since a time and with one validating turn.
 - **roll back**: offered while a record allows it, the kind switch back to
   the kind it came from, the migration back to the tmux lane. A second click
   confirms; forcing the migration's rollback past waiting inbox rows asks a
@@ -392,7 +391,6 @@ itself is described in [cousins](cousins.md#generations-and-the-flip).
 | role | one line, required |
 | role paragraph | optional; goes into the Identity section of CLAUDE.md |
 | voice | required; how the cousin writes |
-| chat port | blank picks the next free one (8090 to 8200) |
 | operator | the person it answers to; blank is allowed |
 | kind | the runner kinds the console serves, or tmux-legacy (always an explicit choice); `COUSIN_DEFAULT_RUNNER` preselects one |
 | account | a runner kind only: the accounts that run on it |
@@ -435,7 +433,8 @@ With the hive on, the spawn dialog has two tabs: "This machine" and "Remote
 - brain: "placeholder" (greets, echoes and still remembers) or "agent
   command", a command line that runs on the node, reads the prompt on stdin
   and writes the reply on stdout,
-- "home chat", when `home_chat_url` is set in `hive.toml`,
+- "home chat", when `home_cousin` is set in `hive.toml`: the node's
+  `[tell-home: ...]` reaches that cousin through this queen,
 - "chat from this console" (on by default): the node listens on its network
   so the console can proxy its chat; off loopback it only answers its own
   token.
@@ -449,8 +448,11 @@ The archive holds the node's token, so treat it as a secret. The card shows
 
 ## Chat
 
-The chat page talks to the cousin's own chat server through the console. The
-console stores no messages; what you read is that server's history.
+The console serves a local cousin's chat itself, from the cousin's own
+`chat.db` (no cousin runs a chat server of its own), and forwards a remote
+hive node's chat to the node's chat server. The console stores no messages;
+what you read is the cousin's history. A cousin with no runner kind has no
+chat in 2.0.0.
 
 The [thread](glossary.md#thread) you see is picked like this: `?user=` in the URL, else the
 cousin's operator from `cousin.toml`, else the user you're logged in as. With
@@ -514,9 +516,7 @@ width, as it always did.
 ### The terminal pane
 
 For a tmux cousin the pane is its tmux session, rendered with
-xterm. It's interactive: what you type goes to the session, through the same
-lock the chat server uses to inject messages, so keystrokes and chat
-deliveries never interleave. Keys are batched for 40 ms and mapped to tmux
+xterm. It's interactive: what you type goes to the session. Keys are batched for 40 ms and mapped to tmux
 key names; unusual escape sequences are dropped rather than sent as a stray
 Escape. The pane fits itself to the browser and resizes the tmux window to
 match.
@@ -585,8 +585,7 @@ something to the running turn as its operator: the runner writes it into the
 live turn, or takes it next. What you say there is not stored in the chat,
 as typing into a tmux pane is not; a login code typed there while a login
 waits on this cousin is taken for the login and never reaches the cousin. The chat itself works as for any cousin:
-the console serves it from the cousin's `chat.db`, since a runner cousin runs
-no chat server. `cousin-watch <slug> -f` shows the same stream in a terminal.
+the console serves it from the cousin's `chat.db`. `cousin-watch <slug> -f` shows the same stream in a terminal.
 
 ## Jobs
 

@@ -19,9 +19,5 @@ public_url = "http://192.0.2.10:8600"
 
 # Optional: the local cousin a console-built node's [tell-home: ...]
 # marker reaches, through this queen (POST /hive/tell-home, with the
-# node's token). The build dialog's "home chat" switch needs it, or the
-# legacy home_chat_url below.
+# node's token). The build dialog's "home chat" switch needs it.
 #home_cousin = "wren"
-# Legacy: a chat server (this framework's /api/send) the marker posts to
-# directly, unauthenticated; used only when home_cousin is unset.
-#home_chat_url = "http://192.0.2.10:8090"

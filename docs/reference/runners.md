@@ -357,8 +357,8 @@ above. Each is stated, none is hidden, and none is a contract item except
   oversized image, or a `[attachment: <name>]` line (`runner/envelope.py`);
   on tmux an attachment is silently dropped, with no marker line at all.
 - **No recall.** Nothing on the tmux path computes recall or carries it in
-  the typed envelope; the SDK lane's chat-server recall (operator and person
-  chat only) has no counterpart here.
+  the typed envelope; the SDK lane's recall (its prompt hook, operator and
+  person chat only) has no counterpart here.
 - **A usage-limit screen is caught only through the transcript's limit
   entry, unmeasured live.** An `isApiErrorMessage` transcript entry whose
   text matches `transcript.LIMIT_WORDS` ("usage limit", "limit reached",

@@ -3,8 +3,9 @@
 The route tests exercise each module against a minimal request object;
 this file walks the operator's first session through the console's
 real HTTP surface instead: a temp root with one cousin created by the
-spawn library, that cousin's real chat server on an ephemeral loopback
-port with a fake delivery seam, a fake tmux binary standing in for the
+spawn library, an upstream chat server for it (a test double over the
+chat API, as a hive node's would answer) on an ephemeral loopback port
+with a fake delivery seam, a fake tmux binary standing in for the
 pane, a console user written through the auth module, and the network
 guard built from the root's (absent) allowlist. Then, as a browser
 would: login, `me`, the fleet with its health, a chat message through
@@ -21,9 +22,9 @@ import unittest
 from cousin_lib.config import CousinConfig
 from cousin_lib.console import auth
 from cousin_lib.console.toml_edit import write_key
-from cousin_lib.server.app import ChatServer
 from cousin_lib.server.netguard import NetGuard
 from cousin_lib.spawn import create_cousin
+from tests._fakes import FakeChatUpstream
 from tests.console._harness import ConsoleCase
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -43,12 +44,12 @@ class ConsoleEndToEnd(ConsoleCase):
                     self.root / "templates" / "cousin-CLAUDE.template.md")
         created = create_cousin(self.root, slug=SLUG, name="Testa",
                                 role="test cousin",
-                                voice="Plain and helpful.", port=0,
+                                voice="Plain and helpful.",
                                 operator=OPERATOR)
         self.home = created["home"]
-        # 2. its real chat server on an ephemeral port, delivery faked
+        # 2. an upstream chat server on an ephemeral port, delivery faked
         self.delivered = []
-        self.chat = ChatServer(
+        self.chat = FakeChatUpstream(
             CousinConfig.load(self.home),
             deliver=lambda **kw: self.delivered.append(kw))
         self.chat.start()
@@ -126,7 +127,7 @@ class ConsoleEndToEnd(ConsoleCase):
         self.assertEqual(row["name"], "Testa")
         self.assertEqual(row["role"], "test cousin")
         self.assertEqual(row["type"], "cousin")
-        self.assertEqual(row["port"], self.chat.port)
+        self.assertNotIn("port", row)
         self.assertEqual(row["operator"], OPERATOR)
         self.assertEqual(row["home"], str(self.home))
         self.assertEqual(row["tmuxSession"], SLUG)

@@ -17,7 +17,7 @@ from unittest import mock
 from cousin_lib import corrections
 from cousin_lib.boot import assemble
 from cousin_lib.config import CousinConfig
-from cousin_lib.server.app import ChatServer
+from cousin_lib.server import chat_api
 
 
 class TestDetect(unittest.TestCase):
@@ -181,27 +181,22 @@ class TestBootCalibration(unittest.TestCase):
         self.assertIn("[halt]", self._calibration_section(pkt["text"]))
 
 
-class TestChatServerRecords(unittest.TestCase):
+class TestChatSendRecords(unittest.TestCase):
+    """The in-process chat send (chat_api.send: the console, cousin-chat,
+    the bridge) captures an operator's correction; no chat server runs."""
+
     def _boot(self, toml_extra=""):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         home = pathlib.Path(tmp.name)
         (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "testa"\nname = "Testa"\n'
-            "[chat]\nport = 0\n" + toml_extra)
-        server = ChatServer(CousinConfig.load(home))
-        server.start()
-        self.addCleanup(server.stop)
+            '[cousin]\nslug = "testa"\nname = "Testa"\n' + toml_extra)
         self.home = home
-        return server
+        return CousinConfig.load(home)
 
-    def _send(self, server, user, message):
-        import urllib.request
-        req = urllib.request.Request(
-            "http://127.0.0.1:%d/api/send" % server.port,
-            data=json.dumps({"user": user, "message": message}).encode())
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status
+    def _send(self, config, user, message):
+        out = chat_api.send(config, {"user": user, "message": message})
+        return 200 if out.get("ok") else 500
 
     def _rows(self):
         path = self.home / "data" / "corrections.jsonl"

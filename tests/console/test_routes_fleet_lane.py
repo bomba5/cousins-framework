@@ -61,7 +61,7 @@ class SpawnARunnerCousin(ConsoleCase):
     def test_runner_account_and_model_land_in_agent(self):
         self.serve()
         status, body = self.post("/api/cousins", {
-            "slug": "toki", "role": "tester", "voice": "plain", "port": 8123,
+            "slug": "toki", "role": "tester", "voice": "plain",
             "runner": "sdk", "account": "fleet", "model": "m-one", "effort": "low"})
         self.assertEqual(status, 201, body)
         data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
@@ -72,7 +72,7 @@ class SpawnARunnerCousin(ConsoleCase):
     def test_a_lane_refusal_is_a_400_that_writes_nothing(self):
         self.serve()
         status, body = self.post("/api/cousins", {
-            "slug": "toki", "role": "tester", "voice": "plain", "port": 8123,
+            "slug": "toki", "role": "tester", "voice": "plain",
             "runner": "sdk", "account": "oc"})
         self.assertEqual(status, 400, body)
         self.assertIn("opencode", body["error"])
@@ -93,14 +93,14 @@ class SpawnTheTmuxLaneExplicitly(ConsoleCase):
         self.serve()
         with mock.patch.dict("os.environ", {"COUSIN_DEFAULT_RUNNER": "sdk"}):
             status, body = self.post("/api/cousins", {
-                "slug": "toki", "role": "tester", "voice": "plain", "port": 8123,
+                "slug": "toki", "role": "tester", "voice": "plain",
                 "runner": "tmux-legacy", "model": "m-one"})
             self.assertEqual(status, 201, body)
             data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
             self.assertNotIn("agent", data)
             self.assertEqual(data["runtime"]["model"], "m-one")
             status, body = self.post("/api/cousins", {
-                "slug": "toko", "role": "tester", "voice": "plain", "port": 8124,
+                "slug": "toko", "role": "tester", "voice": "plain",
                 "runner": "tmux-legacy", "account": "fleet"})
             self.assertEqual(status, 400, body)
             self.assertIn("needs a runner", body["error"])

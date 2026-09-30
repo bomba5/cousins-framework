@@ -37,7 +37,7 @@ OP_KIND = "agent-settings"
 NAME_MAX_CHARS = 64
 
 # "table.key" -> spec. restart: whether the running cousin needs a start
-# to see a change (the chat server and the runner load these at start;
+# to see a change (the runner loads these at start;
 # the loops daemon and the review gate read the file each time).
 COUSIN_FIELDS = {
     "cousin.name": {"type": "name", "restart": True,
@@ -63,8 +63,6 @@ COUSIN_FIELDS = {
                                          " default"},
 }
 READONLY_FIELDS = {
-    "chat.port": "changing it breaks every peer that reaches this cousin",
-    "chat.host": "changing it breaks every peer that reaches this cousin",
     "chat.tmux_session": "the session peers and the console type into",
     "session.start_hooks": "shell commands: edit cousin.toml by hand",
     "session.end_hooks": "shell commands: edit cousin.toml by hand",

@@ -1,12 +1,12 @@
 """Cousin-to-cousin chat: send a message to a peer.
 
 Targets resolve from the filesystem registry, so peer chat works with no
-other service running. A local runner-lane peer (`[agent] runner`) is
-written directly, in this process: its chat store and its inbox, through
-server/chat_api.send, the same function its chat server's /api/send
-would run (phase 10a: a runner cousin needs no chat server to be
-reachable). A tmux-lane peer is still reached through its chat server's
-/api/send, until the tmux lane is gone. The peer-visibility gate is bidirectional: a
+other service running. A local peer on a runner kind (`[agent] runner`)
+is written directly, in this process: its chat store and its inbox,
+through server/chat_api.send (no cousin runs a chat server of its own).
+A local cousin with no runner kind is refused by name
+(DeliveryRefused, delivery.lane_refusal): nothing is sent or stored.
+The peer-visibility gate is bidirectional: a
 cousin marked not peer-visible is absent from peer lists and sees no
 peers itself, because isolation that depends on the isolated party not
 looking is not isolation. Operator surfaces do not use this gate.
@@ -60,6 +60,11 @@ class NoContextError(Exception):
 
 class PeerAddressRefused(ValueError):
     """An external peer's address is outside the network guard."""
+
+
+class DeliveryRefused(Exception):
+    """A local cousin with no runner kind: 2.0.0 has no transport to it.
+    The message is delivery.lane_refusal's line."""
 
 
 @dataclass(frozen=True)
@@ -268,8 +273,8 @@ def _resolve(fw, dest_slug):
 
 def deliver_local(target, payload):
     """One message to a local runner-lane cousin, in this process:
-    chat_api.send with the delivery the chat server itself would use.
-    `payload` is /api/send's body ({user, message}). Returns its body."""
+    chat_api.send with the inbox delivery. `payload` is /api/send's body
+    ({user, message}). Returns its body."""
     from cousin_lib.server import chat_api
     return chat_api.send(target, payload, deliver=chat_api.make_deliver(target))
 
@@ -314,22 +319,13 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
 
 
 def deliver_to(target, payload):
-    """One /api/send body to a local cousin: in-process for a runner
-    cousin (deliver_local), through its chat server for a tmux one."""
+    """One /api/send body to a local cousin, in-process (deliver_local).
+    A cousin with no runner kind is DeliveryRefused with
+    delivery.lane_refusal's line: nothing is opened or stored."""
     if is_local_runner(target):
         return deliver_local(target, payload)
-    url = "http://%s:%d/api/send" % (
-        target.chat_host or "localhost",
-        target.require_chat_port(),
-    )
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=5) as r:
-        return json.loads(r.read() or b"{}")
+    from cousin_lib import delivery
+    raise DeliveryRefused(delivery.lane_refusal(target.home))
 
 
 @traced_cli("cousin-chat")
@@ -356,9 +352,12 @@ def chat_main(argv=None):
         except MissingConfigError as e:
             print("cousin-chat: %s" % e, file=sys.stderr)
             return 2
+        from cousin_lib import delivery
         for c in list_peers(fw, sender.slug):
             marker = " (self)" if c.slug == sender.slug else ""
-            print("%-12s port=%-6s%s%s" % (c.slug, c.chat_port or "?", marker,
+            kind = delivery._runner_kind(c.home) or (
+                "worker" if c.type == "worker" else "none")
+            print("%-12s kind=%-8s%s%s" % (c.slug, kind, marker,
                                            login_marker(c.home)))
         for p in external:
             print("%-12s url=%s (external)" % (p.slug, p.url))
@@ -379,7 +378,7 @@ def chat_main(argv=None):
     except (MissingConfigError, NoContextError, ValueError) as e:
         print("cousin-chat: %s" % e, file=sys.stderr)
         return 2
-    except urllib.error.URLError as e:
+    except (DeliveryRefused, urllib.error.URLError) as e:
         print("cousin-chat: %s" % e, file=sys.stderr)
         return 1
     print(json.dumps({"ok": True, "to": args.slug, "id": result.get("id")}, sort_keys=True))

@@ -65,10 +65,10 @@ def hive_config(root):
 
     Keys: enabled (bool), public_url (the queen as nodes reach it,
     required when enabled), checkin_seconds (default 60, at least 5),
-    home_chat_url (optional, legacy: the chat server a console-built
-    node's [tell-home: ...] marker posts to, unauthenticated), home_cousin
-    (optional: the local cousin a node's [tell-home: ...] reaches through
-    the queen's authenticated POST /hive/tell-home, phase 10a)."""
+    home_cousin (optional: the local cousin a node's [tell-home: ...]
+    reaches through the queen's authenticated POST /hive/tell-home, phase
+    10a). The legacy home_chat_url (a per-cousin chat server) is not
+    read: 2.0.0 runs none."""
     path = Path(root) / "config" / "hive.toml"
     if not path.exists():
         return None
@@ -92,16 +92,12 @@ def hive_config(root):
             or checkin < MIN_CHECKIN_SECONDS:
         raise HiveConfigError("%s: checkin_seconds must be an integer >= %d"
                               % (path, MIN_CHECKIN_SECONDS))
-    home_chat = data.get("home_chat_url") or ""
-    if not isinstance(home_chat, str):
-        raise HiveConfigError("%s: home_chat_url must be a string" % path)
     home_cousin = data.get("home_cousin") or ""
     if not isinstance(home_cousin, str) or (
             home_cousin and not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", home_cousin)):
         raise HiveConfigError("%s: home_cousin must be a cousin's slug" % path)
     return {"enabled": True, "public_url": public_url.rstrip("/"),
-            "checkin_seconds": checkin,
-            "home_chat_url": home_chat.rstrip("/"), "home_cousin": home_cousin}
+            "checkin_seconds": checkin, "home_cousin": home_cousin}
 
 
 # ---- the embedder --------------------------------------------------------

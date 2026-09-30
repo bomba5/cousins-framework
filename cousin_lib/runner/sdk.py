@@ -729,8 +729,8 @@ class SdkRunner:
         both sides are compared stripped: first equal, else the longest
         envelope the prompt starts with (an attachment placeholder block
         after the first). The body comes back verbatim, not stripped. ""
-        for a row on a thread that is not operator or person chat (the
-        chat server recalls only for those) and for a prompt no row
+        for a row on a thread that is not operator or person chat (recall
+        is only for those) and for a prompt no row
         matches. Runs on the loop thread, the only writer of `_sent`."""
         prompt = (prompt or "").strip()
         sent = [(row, text.strip()) for row, text in self._sent]

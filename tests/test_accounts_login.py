@@ -12,7 +12,6 @@ import tempfile
 import threading
 import time
 import unittest
-import urllib.request
 from unittest import mock
 
 from cousin_lib import accounts, pty_driver
@@ -388,17 +387,13 @@ class TestDivert(LoginCase):
             self.assertIsNone(divert_login_code(self.config(), "Priya", "hello again"))
         self.assertNotIn("code", accounts.read_capture(self.root, "fleet"))
 
-    def test_api_send_answers_ok_stores_the_redaction_and_delivers_nothing(self):
+    def test_a_chat_send_answers_ok_stores_the_redaction_and_delivers_nothing(self):
         from cousin_lib.config import CousinConfig
-        from cousin_lib.server.app import ChatServer
+        from cousin_lib.server import chat_api
         calls = []
-        server = ChatServer(CousinConfig.load(self.home), deliver=lambda **kw: calls.append(kw))
-        server.start(); self.addCleanup(server.stop)
         self.arm()
-        req = urllib.request.Request("http://127.0.0.1:%d/api/send" % server.port,
-                                     data=json.dumps({"user": "Priya", "message": CODE}).encode())
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = json.loads(resp.read())
+        body = chat_api.send(CousinConfig.load(self.home), {"user": "Priya", "message": CODE},
+                             deliver=lambda **kw: calls.append(kw))
         self.assertEqual((body["ok"], body["diverted"]), (True, True))
         self.assertEqual(calls, [])
         self.assertEqual(self.chat_texts(), ["[login code received for account fleet]"])

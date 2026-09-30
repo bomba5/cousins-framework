@@ -71,8 +71,6 @@ class TestListCousins(ConsoleCase):
         self.assertEqual(wren["name"], "Wren")
         self.assertEqual(wren["role"], "helper")
         self.assertEqual(wren["type"], "cousin")
-        self.assertEqual(wren["port"], self.dead_port)
-        self.assertIsNone(wren["host"])
         self.assertEqual(wren["home"], str(self.root / "cousins" / "wren"))
         self.assertEqual(wren["tmuxSession"], "wren")
         self.assertEqual(wren["operator"], "Sam")
@@ -91,7 +89,6 @@ class TestListCousins(ConsoleCase):
         self.assertEqual(toki["status"], "running")
         self.assertEqual(toki["chat"], "none")
         self.assertIsNone(toki["operator"])
-        self.assertIsNone(toki["port"])
         # No [runtime] value and no harness file: the model and effort
         # the next start would render are unknown, and null says so.
         self.assertIsNone(wren["model"])
@@ -120,6 +117,17 @@ class TestListCousins(ConsoleCase):
         _, body = self.get("/api/cousins")
         self.assertTrue(body["cousins"][0]["active"])
 
+    def test_a_row_has_no_chat_port(self):
+        # R10: no per-cousin chat server, so a local row names no port
+        # and no host (a hive node's remote row keeps its own)
+        self.cousin("wren")
+        self.cousin("toki", extra='\n[agent]\nrunner = "fake"\n')
+        self.serve()
+        _, body = self.get("/api/cousins")
+        for row in body["cousins"]:
+            self.assertNotIn("port", row)
+            self.assertNotIn("host", row)
+
     def test_a_cousin_added_after_boot_appears(self):
         self.serve()
         self.assertEqual(self.get("/api/cousins")[1]["cousins"], [])
@@ -132,7 +140,7 @@ class TestSpawn(ConsoleCase):
     def _template(self):
         (self.root / "templates").mkdir()
         (self.root / "templates" / "cousin-CLAUDE.template.md").write_text(
-            "# {{NAME}} ({{SLUG}}:{{PORT}})\n{{ROLE_ONE_LINE}}\n"
+            "# {{NAME}} ({{SLUG}})\n{{ROLE_ONE_LINE}}\n"
             "{{ROLE_PARAGRAPH}}\n## Voice\n{{VOICE_GUIDE}}\n")
 
     def test_creates_through_spawn_and_answers_201(self):
@@ -140,13 +148,19 @@ class TestSpawn(ConsoleCase):
         self.serve()
         status, body = self.post("/api/cousins", {
             "slug": "toki", "name": "Toki", "role": "tester",
-            "voice": "plain", "port": 8123, "operator": "Sam"})
+            "voice": "plain", "operator": "Sam"})
         self.assertEqual(status, 201, body)
         self.assertEqual(body["slug"], "toki")
-        self.assertEqual(body["port"], 8123)
+        self.assertNotIn("port", body)
         home = self.root / "cousins" / "toki"
         self.assertEqual(body["home"], str(home))
-        self.assertIn("# Toki (toki:8123)", (home / "CLAUDE.md").read_text())
+        self.assertIn("# Toki (toki)", (home / "CLAUDE.md").read_text())
+        # R10: a cousin has no chat port, so a port is refused
+        status, body = self.post("/api/cousins", {
+            "slug": "sam", "role": "tester", "voice": "plain", "port": 8123})
+        self.assertEqual(status, 400, body)
+        self.assertIn("port", body["error"])
+        self.assertFalse((self.root / "cousins" / "sam").exists())
         data = tomllib.loads((home / "cousin.toml").read_text())
         self.assertEqual(data["operator"]["name"], "Sam")
 
@@ -773,7 +787,7 @@ class TestModelAndEffort(ConsoleCase):
         self.serve()
         status, body = self.post("/api/cousins", {
             "slug": "toki", "role": "tester", "voice": "plain",
-            "port": 8123, "model": "m-one", "effort": "medium",
+            "model": "m-one", "effort": "medium",
             "heartbeat": 600, "memory_scope": "both"})
         self.assertEqual(status, 201, body)
         data = tomllib.loads(

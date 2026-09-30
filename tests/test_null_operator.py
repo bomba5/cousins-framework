@@ -10,13 +10,11 @@ and wherever the operator's absence changes behavior, the change is
 explicit (a required argument, a named degradation, a refusal with
 remediation) - never a silently defaulted human being.
 """
-import json
 import os
 import pathlib
 import shutil
 import tempfile
 import unittest
-import urllib.request
 from unittest import mock
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -41,7 +39,7 @@ class NullOperatorCase(unittest.TestCase):
         from cousin_lib.spawn import create_cousin
         out = create_cousin(
             self.root, slug="wren", name="Wren", role="test cousin",
-            voice="Plain.", port=8100)
+            voice="Plain.")
         os.environ["COUSIN_HOME"] = str(out["home"])
         self.addCleanup(os.environ.pop, "COUSIN_HOME", None)
         return out["home"]
@@ -68,31 +66,15 @@ class TestSpawnAndIdentity(NullOperatorCase):
 class TestChatSurface(NullOperatorCase):
     def test_reply_requires_an_explicit_recipient(self):
         from cousin_lib.config import CousinConfig
-        from cousin_lib.server.app import ChatServer
+        from cousin_lib.server import chat_api
         home = self._spawn()
         config = CousinConfig.load(home)
-        config.chat_port = 0
-        server = ChatServer(config)
-        server.start()
-        self.addCleanup(server.stop)
-
-        def post(path, payload):
-            req = urllib.request.Request(
-                "http://127.0.0.1:%d%s" % (server.port, path),
-                data=json.dumps(payload).encode())
-            try:
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    return resp.status
-            except urllib.error.HTTPError as err:
-                return err.code
-
         # No configured operator means no default recipient: a reply
-        # without one is a 400, with one it works.
-        self.assertEqual(
-            post("/api/wren_reply", {"message": "hi"}), 400)
-        self.assertEqual(
-            post("/api/wren_reply",
-                 {"message": "hi", "reply_to_user": "Visitor"}), 200)
+        # without one is refused, with one it works.
+        with self.assertRaises(chat_api.BadRequest):
+            chat_api.reply(config, {"message": "hi"})
+        self.assertTrue(chat_api.reply(
+            config, {"message": "hi", "reply_to_user": "Visitor"})["ok"])
 
 
 class TestMemoryAndLifecycle(NullOperatorCase):

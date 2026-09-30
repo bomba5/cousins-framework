@@ -63,8 +63,6 @@ public_url = "http://192.0.2.10:8600"
 # Optional: the local cousin a node's [tell-home: ...] marker reaches,
 # through the queen, with the node's own token.
 #home_cousin = "wren"
-# Legacy: a chat server the marker posts to directly, unauthenticated.
-#home_chat_url = "http://192.0.2.10:8090"
 ```
 
 Nodes have to reach the console, so it can't stay on its default
@@ -103,8 +101,8 @@ This is how I do it.
      8210.
    - **brain**: `placeholder`, or `agent command` with the command line
      as it runs on the node (see [The brain](#the-brain)).
-   - **home chat**: only available when `home_cousin` (or the legacy
-     `home_chat_url`) is set.
+   - **home chat**: only available when `home_cousin` is set. The
+     node's `[tell-home: ...]` then reaches that cousin through the queen.
    - **chat from this console**: on by default. The node then listens on
      `0.0.0.0` instead of loopback, so the console can proxy chat to it.
 3. Click **build node kestrel**. You get two commands with copy buttons:
@@ -166,7 +164,7 @@ gets a new one.
 | `--queen-url URL` | required. The queen as the node will reach it, not as you reach it from here |
 | `--name N`, `--role R` | required. Rendered into the node's `CLAUDE.md` |
 | `--token T` | use a token already minted on another queen instead of minting one here |
-| `--home-chat URL` | chat server the `[tell-home: ...]` marker posts to; off when absent |
+| `--home-chat URL` | sets `HOME_CHAT_URL` in `node.env` (see [node.env](#nodeenv)); off when absent |
 | `--agent-cmd CMD` | the brain command to put in `node.env`; empty means the placeholder |
 | `--port N` | the node's chat port, default 8210 |
 | `--listen-all` | bind the node's chat on `0.0.0.0` so the console can proxy chat to it. Default is loopback only |
@@ -312,10 +310,10 @@ Each message becomes one turn, whether it arrived on the node's own
      queen, readable by every node whose token has shared scope.
    - `[tell <slug>: text]` sends a message to another cousin through the
      queen.
-   - `[tell-home: text]` reaches the home cousin, if the node was built
-     with home chat: through the queen (`POST /hive/tell-home`, with the
-     node's token) when `home_cousin` is set, else to the legacy
-     `home_chat_url`. Otherwise it's dropped.
+   - `[tell-home: text]` reaches the home cousin through the queen
+     (`POST /hive/tell-home`, with the node's token), if the node was
+     built with home chat. Otherwise it's dropped, unless `HOME_CHAT_URL`
+     is set (see [node.env](#nodeenv)).
 4. **Remember.** The whole exchange is stored on the queen under the
    node's own scope, every turn. Only that node can recall its own
    memories. If the node's disk dies, its memory doesn't.
@@ -336,11 +334,8 @@ cousin can talk to it with a token (`cousin-hive mint wren`, then
 cousin's hive inbox yet. If you want a node's words to land in a local
 cousin's chat, set `home_cousin` to that cousin and build the node with
 home chat: `[tell-home: ...]` then reaches it through the queen, which
-checks the node's token and refuses a replayed message. It needs no chat
-server, so it works in the container too, where `cousin-supervisor`
-starts none. The legacy `home_chat_url` posts to a cousin's chat server
-instead (a [runner](glossary.md#runner) cousin's starts without a tmux binary), and has
-nothing to post to in the container.
+checks the node's token and refuses a replayed message. It works the
+same in the container.
 
 ```sh
 # from anywhere holding a token
@@ -455,7 +450,6 @@ http://<this machine>:8101`.
 | `public_url` | none, required when enabled | the queen as nodes reach it; baked into every archive the console builds and used for download links |
 | `checkin_seconds` | `60` | how often nodes check in; at least 5. Online means a checkin within 2.5 periods |
 | `home_cousin` | empty | the local cousin `[tell-home: ...]` reaches through the queen (`POST /hive/tell-home`) |
-| `home_chat_url` | empty | legacy: a chat server `[tell-home: ...]` posts to, unauthenticated; used only when `home_cousin` is unset |
 
 ### node.env
 
@@ -469,7 +463,7 @@ http://<this machine>:8101`.
 | `QUEEN_URL` | | the queen, reached outbound |
 | `HIVE_TOKEN` | | the node's bearer token. Secret |
 | `TELL_HOME` | empty | `1`: `[tell-home: ...]` goes to the queen's `POST /hive/tell-home` with `HIVE_TOKEN` |
-| `HOME_CHAT_URL` | empty | legacy: where `[tell-home: ...]` posts when `TELL_HOME` is not `1`; empty means it's dropped |
+| `HOME_CHAT_URL` | empty | where `[tell-home: ...]` posts, unauthenticated, when `TELL_HOME` is not `1`; empty means it's dropped. The console always leaves it empty, and nothing in this install serves a chat server for it: set it (by hand or with `--home-chat`) only to reach another install's |
 | `AGENT_CMD` | empty | the brain command; empty means the placeholder |
 | `NODE_POLL_SECONDS` | `5` | inbox poll interval; 0 turns it off |
 | `AGENT_TIMEOUT_SECONDS` | `120` | how long one brain call may take |

@@ -212,7 +212,7 @@ class CousinCardRows(unittest.TestCase):
 
     def test_model_pid_and_uptime_rows_join_the_existing_ones(self):
         for row in ("chat ·", "scope ·", "operator ·", "beat ·", "flip at ·",
-                    "host ·", "model ·", "pid ·", "uptime ·"):
+                    "model ·", "pid ·", "uptime ·"):
             self.assertIn(row, self.src, row)
         self.assertIn("tokens today", self.src)
         self.assertRegex(self.src, r"pid · <b>\{c\.pid \?\? \"-\"\}")

@@ -145,7 +145,7 @@ function CousinsView({ cousins, setCousins, setActiveCousin }) {
           onSpawn={(c) => {
             setCousins(cs => [...cs.filter(x => x.slug !== c.slug), c]);
             setSpawning(false);
-            flash(`spawned cousin ${c.slug} on port ${c.port}`);
+            flash(`spawned cousin ${c.slug}`);
           }}
         />
       )}
@@ -201,7 +201,7 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         <HeartbeatGraph state={c.status === "running" ? (c.active ? "active" : "idle") : "stopped"} width={240} height={22} />
       </div>
       <div className="stats">
-        <div>chat · <b>{c.chat === "ok" ? `:${c.port}` : c.chat}</b></div>
+        <div>chat · <b>{c.chat}</b></div>
         {/* the lane and what it runs on; "held" is a stop that holds the runner down */}
         <div>lane · <b>{c.lane || "-"}</b>{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</div>
         {c.account && <div>account · <b>{c.account}</b></div>}
@@ -210,7 +210,6 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         <div>operator · <b>{c.operator || "-"}</b></div>
         <div>beat · <b>{c.heartbeat}s</b></div>
         <div>flip at · <b>{c.flipAt || "-"}</b></div>
-        <div>host · <b>{c.host || "local"}</b></div>
         {/* model is what the next start renders; pid and uptime are the
             agent process tmux reports, "-" when there is none to ask */}
         <div>model · <b>{c.model || "-"}</b></div>
@@ -324,8 +323,8 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>home</dt><dd style={{ wordBreak: "break-all" }}>{c.home}</dd>
           <dt>operator</dt><dd><IdentityField cousin={c} field="operator" options={options} /></dd>
           <dt>scope</dt><dd><IdentityField cousin={c} field="memory_scope" options={options} /></dd>
-          <dt>tmux</dt><dd>{c.tmuxSession}{c.host ? ` @ ${c.host}` : ""}</dd>
-          <dt>chat</dt><dd>{c.port ? `:${c.port} · ${c.chat}` : "none"}</dd>
+          <dt>tmux</dt><dd>{c.tmuxSession}</dd>
+          <dt>chat</dt><dd>{c.chat || "none"}</dd>
           <dt>heartbeat</dt><dd><IdentityField cousin={c} field="heartbeat" options={options} /></dd>
           {/* model, effort and the auth mode are the tmux-legacy lane's
               ([runtime]); a runner cousin's are its agent panel's (agent.jsx),
@@ -1379,7 +1378,6 @@ function SpawnModal({ onClose, onSpawn }) {
   const [role, setRole] = React.useState("");
   const [roleParagraph, setRoleParagraph] = React.useState("");
   const [voice, setVoice] = React.useState("");
-  const [port, setPort] = React.useState("");
   const [operator, setOperator] = React.useState("");
   // The runtime fields: what the agent command's {model} / {effort}
   // placeholders render to, the heartbeat cadence and the memory
@@ -1463,7 +1461,6 @@ function SpawnModal({ onClose, onSpawn }) {
       // 1. Create the cousin (spawn.create_cousin renders the template)
       const body = { slug, name, role, voice };
       if (roleParagraph.trim()) body.role_paragraph = roleParagraph.trim();
-      if (String(port).trim()) body.port = Number(port);
       if (operator.trim()) body.operator = operator.trim();
       // the lane is always named: "" sends the tmux lane's own name, so an
       // install's COUSIN_DEFAULT_RUNNER cannot turn it into a runner cousin
@@ -1480,7 +1477,7 @@ function SpawnModal({ onClose, onSpawn }) {
       const { r: r2, d: d2 } = await apiSend("POST", `/api/cousins/${slug}/start`);
       if (!r2.ok || !d2.ok) throw new Error("created but start failed: " + (d2.error || `HTTP ${r2.status}`));
       onSpawn({
-        slug, name, role, type: "cousin", port: d.port, host: null, home: d.home,
+        slug, name, role, type: "cousin", home: d.home,
         tmuxSession: slug, operator: operator.trim() || null,
         memoryScope: scope || "private", heartbeat: Number(heartbeat) || 3600,
         model: (laneReads("model") && chosenModel) || null, effort: (laneReads("effort") && effort) || null,
@@ -1537,9 +1534,6 @@ function SpawnModal({ onClose, onSpawn }) {
           </FormField>
           <div style={{ marginTop: 14 }} />
           <div className="grid2">
-            <FormField label="chat port (optional)" hint="Blank picks the next free one.">
-              <input className="txt" type="number" value={port} onChange={e => setPort(e.target.value)} placeholder="auto" />
-            </FormField>
             <FormField label="operator (optional)" hint="The person this cousin answers to; blank is a real state.">
               <input className="txt" value={operator} onChange={e => setOperator(e.target.value)} placeholder="none" />
             </FormField>
@@ -1765,9 +1759,9 @@ function RemoteSpawnForm({ hive, onClose }) {
         )}
         <div style={{ marginTop: 14 }} />
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--fg-1)" }}>
-          <input type="checkbox" checked={homeChat} disabled={!hive.home_chat_url}
+          <input type="checkbox" checked={homeChat} disabled={!hive.home_cousin}
                  onChange={e => setHomeChat(e.target.checked)} />
-          home chat{hive.home_chat_url ? ` (${hive.home_chat_url})` : " (set home_chat_url in config/hive.toml)"}
+          home chat{hive.home_cousin ? ` (${hive.home_cousin}, through the queen)` : " (set home_cousin in config/hive.toml)"}
         </label>
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, color: "var(--fg-1)", marginTop: 8 }}>
           <input type="checkbox" checked={reachable} onChange={e => setReachable(e.target.checked)} />

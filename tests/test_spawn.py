@@ -1,4 +1,4 @@
-"""cousin-spawn: port allocation, creation sequence, cleanup contract.
+"""cousin-spawn: creation sequence, cleanup contract.
 
 Tested against real temporary framework roots; nothing is mocked below
 the CLI's own seams.
@@ -6,7 +6,6 @@ the CLI's own seams.
 import json
 import pathlib
 import shutil
-import socket
 import tempfile
 import tomllib
 import unittest
@@ -15,7 +14,6 @@ from unittest import mock
 
 from cousin_lib.spawn import (
     SpawnError,
-    allocate_port,
     create_cousin,
     spawn_main,
     start_cousin,
@@ -31,61 +29,6 @@ class SpawnCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         return pathlib.Path(tmp.name)
 
-    def _claim(self, root, slug, port):
-        home = root / "cousins" / slug
-        home.mkdir(parents=True)
-        (home / "cousin.toml").write_text(
-            '[cousin]\nslug = "%s"\n[chat]\nport = %d\n' % (slug, port)
-        )
-
-
-class TestAllocatePort(SpawnCase):
-    # The claimed-set tests inject a never-live predicate: the host
-    # running this suite has its own services, and which ports THEY
-    # occupy must not decide whether these tests pass.
-    def test_first_free_port_in_range_skipping_claimed(self):
-        root = self._root()
-        self._claim(root, "a", 8090)
-        self._claim(root, "b", 8091)
-        got = allocate_port(root, start=8090, end=8200,
-                            is_live=lambda p: False)
-        self.assertEqual(got, 8092)
-
-    def test_claimed_ports_outside_the_scan_range_stay_excluded(self):
-        # The scan range decides where to look; the claimed set decides
-        # what to skip. A port hand-configured outside today's range
-        # must not become allocatable when someone widens the range.
-        root = self._root()
-        self._claim(root, "a", 9999)
-        never = lambda p: False
-        self.assertEqual(
-            allocate_port(root, start=9998, end=10000, is_live=never), 9998
-        )
-        self._claim(root, "b", 9998)
-        self.assertEqual(
-            allocate_port(root, start=9998, end=10000, is_live=never), 10000
-        )
-
-    def test_live_bound_port_is_skipped(self):
-        root = self._root()
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        sock.listen(1)
-        self.addCleanup(sock.close)
-        live = sock.getsockname()[1]
-        self.assertEqual(
-            allocate_port(root, start=live, end=live + 1), live + 1
-        )
-
-    def test_exhaustion_is_an_error_never_a_sentinel(self):
-        root = self._root()
-        self._claim(root, "a", 9998)
-        self._claim(root, "b", 9999)
-        with self.assertRaises(SpawnError):
-            allocate_port(root, start=9998, end=9999,
-                          is_live=lambda p: False)
-
-
 class CreateCase(SpawnCase):
     def _framework_root(self):
         root = self._root()
@@ -98,7 +41,7 @@ class CreateCase(SpawnCase):
 
     def _create(self, root, **kw):
         args = dict(slug="wren", name="Wren", role="example cousin",
-                    voice="Plain and helpful.", port=8100)
+                    voice="Plain and helpful.")
         args.update(kw)
         return create_cousin(root, **args)
 
@@ -113,8 +56,7 @@ class TestCreateCousin(CreateCase):
             self.assertTrue((home / sub).is_dir(), sub)
         cfg = tomllib.loads((home / "cousin.toml").read_text())
         self.assertEqual(cfg["cousin"]["slug"], "wren")
-        self.assertEqual(cfg["chat"]["port"], 8100)
-        self.assertEqual(cfg["chat"]["tmux_session"], "wren")
+        self.assertNotIn("chat", cfg)
         claude_md = (home / "CLAUDE.md").read_text()
         self.assertIn("# Wren", claude_md)
         self.assertIn("## Voice", claude_md)
@@ -137,7 +79,7 @@ class TestCreateCousin(CreateCase):
         root = self._framework_root()
         self._create(root)
         with self.assertRaises(SpawnError):
-            self._create(root, port=8101)
+            self._create(root)
 
     def test_orphan_directory_is_reported_with_its_path(self):
         # A directory without cousin.toml is not a cousin; naming its
@@ -168,14 +110,6 @@ class TestCreateCousin(CreateCase):
             with self.assertRaises(SpawnError):
                 self._create(root)
         self.assertFalse((root / "cousins" / "wren").exists())
-
-    def test_port_is_allocated_when_not_given(self):
-        root = self._framework_root()
-        self._claim(root, "a", 8090)
-        out = self._create(root, port=None,
-                           _is_live=lambda p: False)
-        self.assertEqual(out["port"], 8091)
-
 
 class TestLegacyStartRefused(CreateCase):
     """R2: start_cousin refuses a cousin with no [agent] runner by name,
@@ -219,6 +153,35 @@ class TestLegacyStartRefused(CreateCase):
         self.assertFalse((root / "cousins" / "sam").exists())
 
 
+class TestNoChatPort(CreateCase):
+    """R10: no per-cousin chat server, so no port is allocated, written,
+    rendered or accepted."""
+
+    def test_a_new_cousin_toml_has_no_chat_table(self):
+        root = self._framework_root()
+        out = create_cousin(root, slug="wren", name="Wren", role="example cousin",
+                            voice="Plain and helpful.", runner="fake")
+        data = tomllib.loads((out["home"] / "cousin.toml").read_text())
+        self.assertNotIn("chat", data)
+        self.assertNotIn("port", out)
+        self.assertNotIn("{{PORT}}", (out["home"] / "CLAUDE.md").read_text())
+        with self.assertRaises(SpawnError) as ctx:
+            create_cousin(root, slug="sam", role="r", voice="v", port=8100)
+        self.assertIn("port", str(ctx.exception))
+        self.assertFalse((root / "cousins" / "sam").exists())
+
+    def test_spawn_main_rejects_port(self):
+        import contextlib
+        import io
+        root = self._framework_root()
+        with contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as ctx:
+            spawn_main(["wren", "--root", str(root), "--role", "r",
+                        "--voice", "v", "--port", "8100"])
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertFalse((root / "cousins" / "wren").exists())
+
+
 class TestSpawnMain(CreateCase):
     def _main(self, argv):
         import contextlib
@@ -232,10 +195,10 @@ class TestSpawnMain(CreateCase):
         root = self._framework_root()
         rc, out, _ = self._main([
             "wren", "--root", str(root), "--role", "example cousin",
-            "--voice", "Plain and helpful.", "--port", "8100",
+            "--voice", "Plain and helpful.",
         ])
         self.assertEqual(rc, 0)
-        self.assertIn("chat port 8100", out)
+        self.assertIn("created wren at", out)
         self.assertTrue(
             (root / "cousins" / "wren" / "cousin.toml").is_file()
         )
@@ -714,7 +677,7 @@ class TestSpawnMainRuntimeFlags(CreateCase):
         root = self._framework_root()
         rc, _, err = self._main([
             "wren", "--root", str(root), "--role", "x", "--voice", "v",
-            "--port", "8100", "--model", "m-one", "--effort", "max",
+            "--model", "m-one", "--effort", "max",
             "--heartbeat", "900", "--memory-scope", "shared",
         ])
         self.assertEqual(rc, 0, err)

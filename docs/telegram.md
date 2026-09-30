@@ -16,26 +16,25 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
   and posts the cousin's replies back. It opens no port and needs no
   public URL or webhook. Everything in the Telegram chat passes through
   Telegram's servers.
-- **What it touches locally:** for a tmux cousin, the cousin's own
-  chat server on `127.0.0.1:<[chat] port>`, through `POST /api/send`
-  ([reference/chat-api.md](reference/chat-api.md)), and its chat store.
-  It never types into the cousin's terminal and keeps no chat history of
-  its own. The chat server owns all of that: recall, typing the line into
-  the terminal, the presence marker, correction capture and chat hooks.
-  For a [runner](glossary.md#runner) cousin (`[agent] runner` in cousin.toml) there is no
-  terminal: the bridge stores an inbound message in the cousin's
-  `data/chat.db` and delivers it to the runner's [inbox](glossary.md#inbox) itself, then
-  touches the presence marker, captures a correction and fires chat
-  hooks, the steps `/api/send` takes. Replies are read back from the
-  cousin's `data/chat.db` on both [lanes](glossary.md#lane) (what `GET /api/history` returns,
-  read in the bridge's own process), so a runner cousin needs no chat
-  server and no `[chat] port` for the bridge.
+- **What it touches locally:** the cousin's chat store and its
+  [runner](glossary.md#runner)'s [inbox](glossary.md#inbox). The bridge stores an inbound message in the cousin's
+  `data/chat.db` and delivers it to the inbox itself, then captures a
+  correction and fires the chat hooks, the same steps every chat send
+  takes ([chat](chat.md#where-a-message-goes)). Replies are read back from
+  the same `data/chat.db`, in the bridge's own process. It never types
+  into a terminal and keeps no chat history of its own.
+- **Which cousins:** only a runner cousin (`[agent] runner` in
+  cousin.toml). A cousin with no runner is refused by name: the bridge
+  exits 2 at start with the line
+  `<slug> has no [agent] runner: 2.0.0 has no legacy tmux lane ...`
+  on stderr. If the runner is taken out of `cousin.toml` while the bridge
+  runs, each message is refused with the same line in the log and retried
+  on the next pass.
 - **Its only state:** where it is, in `data/telegram-bridge.json`
   ([below](#the-state-file)).
-- **What it depends on:** the bridge belongs to its cousin, like the
-  chat server. It starts and stops with the cousin
-  ([when it runs](#6-when-it-runs)). If a tmux cousin's chat server is
-  down, the bridge retries until it is back.
+- **What it depends on:** the bridge belongs to its cousin. It is a child
+  of `cousin-supervisor` and starts and stops with the cousin's runner
+  ([when it runs](#6-when-it-runs)).
 
 One bridge serves one cousin. For two cousins on Telegram, create two
 bots and run two bridges.
@@ -78,8 +77,9 @@ if the operator's `name` in `[telegram]` matches the thread you use in
 the console. Thread names ignore case and treat spaces as underscores
 (`normalize_chat_user` in `cousin_lib/server/storage.py`). Use the same
 name as the cousin's `[operator] name`. Then Telegram messages count as
-the operator's too, for the recall suffix and correction capture, which
-key off that name (`is_operator` in `cousin_lib/server/storage.py`). An
+the operator's too: they are delivered on the operator's thread, and
+correction capture keys off that name (`is_operator` in
+`cousin_lib/server/storage.py`). An
 entry with no `name` lands in a thread called `operator`
 (`_thread_name`).
 
@@ -185,39 +185,37 @@ The same routes are in the console API reference (`/api/cousins/<slug>/telegram`
 
 ### 6. When it runs
 
-The bridge belongs to its cousin, like the chat server: it starts when the
-cousin starts if `[telegram]` is enabled and complete, and stops when the
-cousin stops. Its pid is in `data/telegram.pid` and its output in
-`data/telegram.log`. A token or operator change from the console restarts it.
-There is no separate service unit: two bridges polling the same bot make
-Telegram answer 409 Conflict. Who starts it depends on the cousin's lane:
+The bridge belongs to its cousin: it starts when the cousin starts if
+`[telegram]` is enabled and complete, and stops when the cousin stops. Its
+pid is in `data/telegram.pid` and its output in `data/telegram.log`. A token
+or operator change from the console restarts it. There is no separate
+service unit: two bridges polling the same bot make Telegram answer 409
+Conflict.
 
-- **A tmux cousin**: `cousin-spawn` starts it right after the chat server (a
-  console start, `cousin-start@`, a [flip](glossary.md#flip)) and stops it with the cousin. The
-  console's switch starts or stops it while the cousin runs.
-- **A runner cousin** (`[agent] runner`): `cousin-supervisor` runs it as a
-  child, `telegram:<slug>`, beside `runner:<slug>`, started after the runner.
-  It is restarted when it crashes, with the same backoff as every other child,
-  and it comes back after a reboot or a [supervisor](glossary.md#supervisor) restart. A stop of the
-  cousin (`cousin-supervisor stop <slug>`, the console's stop button) stops
-  the bridge and holds it with the runner; `start` brings both back. A config
-  that does not pass the bridge's own check (not enabled, no token, no
-  operator) gets no child, and the supervisor prints one line with the reason
-  (`supervisor: telegram:wren not started: no operators configured ...`).
-  `cousin-supervisor status` lists the child with the others. The console's
-  switch, token and operator changes write `cousin.toml` and ask the
-  supervisor to rescan (`reload`), which adds, removes or restarts the bridge;
-  the console never starts a runner cousin's bridge itself. After editing
-  `[telegram]` by hand, run `cousin-supervisor reload`. Its output goes to the
-  supervisor's output (`telegram:wren | ...`) and to `data/telegram.log`.
-  A bridge already running outside the supervisor (one started by hand, or
-  by an older console) is left alone while the config runs: the child waits
-  in `backoff`, says why in `status`, and starts once that bridge is gone.
-  When the config no longer runs (switched off, no operator left), the
-  supervisor's rescan stops that outside bridge too. To hand an old bridge to
-  the supervisor, switch it off and on in the console. With no supervisor
-  running, the console's switch still stops such a bridge; it never starts
-  one.
+`cousin-supervisor` runs it as a child, `telegram:<slug>`, beside
+`runner:<slug>`, started after the runner. It is restarted when it crashes,
+with the same backoff as every other child, and it comes back after a
+reboot or a [supervisor](glossary.md#supervisor) restart. A stop of the cousin (`cousin-supervisor
+stop <slug>`, the console's stop button) stops the bridge and holds it with
+the runner; `start` brings both back. A config that does not pass the
+bridge's own check (not enabled, no token, no operator) gets no child, and
+the supervisor prints one line with the reason (`supervisor: telegram:wren
+not started: no operators configured ...`). `cousin-supervisor status` lists
+the child with the others. The console's switch, token and operator changes
+write `cousin.toml` and ask the supervisor to rescan (`reload`), which adds,
+removes or restarts the bridge; the console never starts a bridge itself.
+After editing `[telegram]` by hand, run `cousin-supervisor reload`. Its
+output goes to the supervisor's output (`telegram:wren | ...`) and to
+`data/telegram.log`.
+
+A bridge already running outside the supervisor (one started by hand, or by
+an older release) is left alone while the config runs: the child waits in
+`backoff`, says why in `status`, and starts once that bridge is gone. When
+the config no longer runs (switched off, no operator left), the
+supervisor's rescan stops that outside bridge too. To hand an old bridge to
+the supervisor, switch it off and on in the console. With no supervisor
+running, the console's switch still stops such a bridge; it never starts
+one.
 
 To run it by hand, `--home` alone is enough on a standard install. The
 root comes from `FRAMEWORK_ROOT` or from the home's location:
@@ -291,8 +289,7 @@ but you may delete the message.
 
 ## Errors and delivery
 
-- **Transient** (network errors, a chat server that is down, Telegram
-  5xx, rate limits (429)): logged (`inbound error, retrying` / `outbound
+- **Transient** (network errors, Telegram 5xx, rate limits (429)): logged (`inbound error, retrying` / `outbound
   error, retrying`) and retried on the next pass. The bridge does not
   exit and nothing is lost. Delivery is at least once: when one of
   several operators fails, the retry can send the reply again to the
@@ -300,9 +297,8 @@ but you may delete the message.
 - **Permanent** (any other 4xx, such as a bot the operator blocked, or no
   Start pressed yet): logged with the message id and skipped, so one bad
   message cannot hold up the ones behind it.
-- An HTTP error in the log carries the server's reason, taken from
-  Telegram's `description` or the chat server's `error`
-  (`_describe`, 0.11.0): `HTTP 403: Forbidden: bot was blocked by the
+- An HTTP error in the log carries Telegram's reason, taken from its
+  `description` (`_describe`, 0.11.0): `HTTP 403: Forbidden: bot was blocked by the
   user`, not just `HTTP Error 403`.
 - A pass runs about every 5 seconds (`run_bridge`, `poll_interval`).
 

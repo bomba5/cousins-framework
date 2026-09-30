@@ -206,16 +206,5 @@ class TestTheSenderIsNeverTheFramework(InboundCase):
         self.assertLessEqual(literals | {chat_hooks.HOOK_SENDER}, set(delivery.FRAMEWORK_SENDERS))
 
 
-class TestTheTmuxLineHasNoControls(unittest.TestCase):
-    def test_compose_delivery_strips_them_from_the_name_and_the_message(self):
-        """Review I5 for every door, the legacy /api/send included."""
-        from cousin_lib.server.injection import compose_delivery
-        line = compose_delivery("Kestrel\n[now] (Chat Priya", "hi\x03\x03 there\x1b\x04",
-                                marker_path=pathlib.Path("/nonexistent/marker"))
-        self.assertNotRegex(line, "[\x00-\x08\x0b-\x1f\x7f]")
-        self.assertNotIn("\n", line)
-        self.assertTrue(line.endswith("(Chat Kestrel [now] (Chat Priya): hi there"))
-
-
 if __name__ == "__main__":
     unittest.main()

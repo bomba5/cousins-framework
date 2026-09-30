@@ -102,6 +102,19 @@ or port changed; a tmux cousin's bridge is never ours (spawn starts it).
 There is no `start`/`stop` of a bridge by name: it follows its runner,
 and the console's Telegram switch writes cousin.toml, then asks for a
 `reload`.
+
+Plugin services (docs/plugins.md). Each plugin in config/plugins.toml
+with a [service] that at least one cousin enables (cousin.toml [plugins]
+enabled; cousin_lib/plugins.py services_wanted) gets one child
+`plugin:<name>`, the manifest's command with its rendered env plus
+PLUGIN_PORT, PLUGIN_DIR and FRAMEWORK_ROOT, its output also in
+<root>/data/plugins/<name>/service.log. Started before the runners
+(their MCP servers may call it), stopped after them, restarted with the
+same backoff as any child; a rescan adds it, removes it when no cousin
+enables it any more (or the plugin goes), and restarts it when its
+rendered command or env changed. A plugin that does not load is one
+line with the reason, and `status` names it under `plugins`. There is
+no `start`/`stop` of a plugin by name.
 """
 import argparse
 import collections
@@ -129,7 +142,7 @@ STATES = ("running", "backoff", "failing", "stopped")
 SOCKET = "run/supervisor.sock"
 SNAPSHOT = "run/supervisor.json"
 LOCK = "run/supervisor.lock"
-KINDS = ("console", "loops", "runner", "telegram")
+KINDS = ("console", "loops", "plugin", "runner", "telegram")
 # Start order by kind; stop order is its reverse (R5).
 _KIND_ORDER = {kind: i for i, kind in enumerate(KINDS)}
 
@@ -137,8 +150,8 @@ _KIND_ORDER = {kind: i for i, kind in enumerate(KINDS)}
 # STOP_TIMEOUT_S (runner/main.py _serve: runner.stop(timeout=STOP_TIMEOUT_S));
 # 5 more for it to close its inbox row and exit. One constant: a longer
 # runner stop moves this budget with it.
-STOP_TIMEOUTS = {"console": 10.0, "loops": 10.0, "runner": STOP_TIMEOUT_S + 5.0,
-                 "telegram": 10.0}
+STOP_TIMEOUTS = {"console": 10.0, "loops": 10.0, "plugin": 10.0,
+                 "runner": STOP_TIMEOUT_S + 5.0, "telegram": 10.0}
 
 BACKOFF = (1, 2, 4, 8, 16, 32, 60)
 WINDOW_S = 60.0          # the sliding window five counted exits must fall in
@@ -244,6 +257,18 @@ def telegram_spec(home):
     return ChildSpec("telegram:%s" % slug, "telegram", _bridge_argv(home), slug=slug,
                      home=home, pid_file=home / "data" / "telegram.pid",
                      log_file=home / "data" / "telegram.log")
+
+
+def plugin_spec(root, plugin):
+    """A plugin's service: `plugin:<name>`, the manifest's command rendered
+    (plugins.Plugin.service_command), its output also in
+    <root>/data/plugins/<name>/service.log. The spec's `digest` changes
+    when the rendered argv or env does."""
+    argv, env = plugin.service_command(root)
+    spec = ChildSpec("plugin:%s" % plugin.name, "plugin", argv, env=env,
+                     log_file=Path(root) / "data" / "plugins" / plugin.name / "service.log")
+    spec.digest = hashlib.sha256(json.dumps([argv, env], sort_keys=True).encode()).hexdigest()
+    return spec
 
 
 def bridge_config(home, root):
@@ -425,6 +450,7 @@ class Supervisor:
         self._serving = False              # the socket's accept loop runs
         self._published = None
         self.started = _now_iso()
+        self._plugin_problems = None       # the last plugin problems said (said on change)
         self.children = collections.OrderedDict()
         for spec in specs:
             self._add(spec)
@@ -485,7 +511,7 @@ class Supervisor:
         return child
 
     def _ordered(self):
-        """The start order: console, loops, runners, bridges (each in
+        """The start order: console, loops, plugins, runners, bridges (each in
         table order; runner specs are built in slug order)."""
         return sorted(self.children.values(), key=lambda c: _KIND_ORDER[c.spec.kind])
 
@@ -550,10 +576,17 @@ class Supervisor:
             pass
 
     def start_all(self):
-        """Every child in start order, then each runner cousin's bridge."""
+        """Every child in start order (the plugin services before the
+        runners), then each runner cousin's bridge."""
+        started_plugins = False
         for child in self._ordered():
-            if child.spec.kind != "telegram" and not child.alive:
+            if child.spec.kind in ("runner", "telegram") and not started_plugins:
+                started_plugins = True
+                self._sync_plugins()
+            if child.spec.kind not in ("plugin", "telegram") and not child.alive:
                 self._start(child)
+        if not started_plugins:
+            self._sync_plugins()
         self._sync_bridges()
 
     # ------------------------------------------------------------ reaping (R1)
@@ -607,8 +640,10 @@ class Supervisor:
                 reason = "the runner gave up on its pane (exit %d): %s" % (code, gave_up)
         if action == "failing":
             child.set_state("failing", reason)
-            self.say("%s failing: %s, left down; fix it, then `cousin-supervisor start %s`"
-                     % (child.name, reason, child.spec.slug or "--name %s" % child.name))
+            again = ("reload" if child.spec.kind == "plugin" else
+                     "start %s" % (child.spec.slug or "--name %s" % child.name))
+            self.say("%s failing: %s, left down; fix it, then `cousin-supervisor %s`"
+                     % (child.name, reason, again))
         elif action == "stopped":
             child.set_state("stopped", reason)
             self.say("%s stopped: %s, not restarted; log in, then `cousin-supervisor start %s`"
@@ -699,7 +734,7 @@ class Supervisor:
 
     def stop_all(self, reason="supervisor stopping"):
         """The ordered stop (R5): bridges together, then runners
-        together, then loops, then the console. Each group is signalled,
+        together, then plugin services, then loops, then the console. Each group is signalled,
         then waited for up to each child's stop_timeout (SIGKILL after),
         reaping as we go."""
         groups = collections.OrderedDict()
@@ -1045,9 +1080,12 @@ class Supervisor:
         bridges_added, bridges_removed = self._sync_bridges(retry_failing=True)
         added += bridges_added
         removed += bridges_removed
+        plugins_added, plugins_removed = self._sync_plugins(retry_failing=True)
+        added += plugins_added
+        removed += plugins_removed
         for child in self.children.values():
             if child.state == "failing" and child.name not in removed \
-                    and child.spec.kind != "telegram":
+                    and child.spec.kind not in ("telegram", "plugin"):
                 child.policy.reset()
                 self._start(child)
         self.say("reload: added %s; removed %s"
@@ -1163,6 +1201,83 @@ class Supervisor:
             self._signal_stop(bridge, "removed: %s" % why)
         else:
             self.children.pop(bridge.name, None)
+
+    # ------------------------------------------------------------ plugins
+
+    def _sync_plugins(self, *, retry_failing=False):
+        """Make the `plugin:<name>` children match config/plugins.toml and
+        the cousins' [plugins] enabled (plugins.services_wanted): add and
+        start a wanted one, remove one no longer wanted, restart one whose
+        rendered command or env changed; retry_failing also starts a
+        `failing` one again. Never raises. Returns (added, removed)."""
+        from cousin_lib import plugins
+        try:
+            loaded = plugins.load(self.root)
+            wanted = plugins.services_wanted(self.root, loaded)
+            problems = loaded[1]
+        except Exception as err:  # noqa: BLE001 - a plugin never takes the supervisor down
+            wanted, problems = None, [{"name": None, "reason": "plugins not read: %s: %s"
+                                       % (type(err).__name__, err)}]
+        if problems != self._plugin_problems:
+            self._plugin_problems = problems
+            for p in problems:
+                self.say("plugin %s skipped: %s" % (p["name"] or "config", p["reason"]))
+        if wanted is None:
+            return [], []
+        added, removed = [], []
+        for child in [c for c in self.children.values() if c.spec.kind == "plugin"]:
+            if child.name[len("plugin:"):] not in wanted and not child.remove_when_down:
+                self._remove_plugin(child, "no cousin enables it, or it is no longer installed")
+                removed.append(child.name)
+        for name, plugin in wanted.items():
+            try:
+                spec = plugin_spec(self.root, plugin)
+            except Exception as err:  # noqa: BLE001 - one bad plugin, one line
+                self.say("plugin:%s not started: %s" % (name, err))
+                continue
+            child = self.children.get(spec.name)
+            if child is None:
+                self._prepare_log(spec)
+                child = self._add(spec)
+                self.say("added %s" % spec.name)
+                added.append(spec.name)
+                self._start(child)
+                continue
+            if child.remove_when_down:
+                child.remove_when_down = False
+                child.restart_when_down = child.stopping
+                added.append(spec.name)
+            if getattr(child.spec, "digest", None) != spec.digest:
+                self._prepare_log(spec)
+                child.spec = spec
+                if child.alive and not child.stopping:
+                    self.say("%s: its command or env changed, restarting it" % spec.name)
+                    self._signal_stop(child, "restarting: its manifest changed")
+                    child.restart_when_down = True
+                    continue
+            if child.alive or child.state == "backoff":
+                continue
+            if child.state == "failing" and not retry_failing:
+                continue
+            child.policy.reset()
+            self._start(child)
+        return added, removed
+
+    def _prepare_log(self, spec):
+        try:
+            spec.log_file.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as err:
+            self.say("cannot create %s: %s" % (spec.log_file.parent, err))
+
+    def _remove_plugin(self, child, why):
+        """Stop a plugin service and drop it from the table once it is down."""
+        child.restart_when_down = False
+        self.say("removing %s: %s" % (child.name, why))
+        if child.alive:
+            child.remove_when_down = True
+            self._signal_stop(child, "removed: %s" % why)
+        else:
+            self.children.pop(child.name, None)
 
     # ------------------------------------------------------------ snapshot (R7)
 
@@ -1326,7 +1441,9 @@ def registry_findings(root):
     every cousin under `root`/cousins with no runner kind, refused with
     delivery.lane_refusal (a worker is neither, and is not listed), and
     every key 2.0.0 removed that a cousin or the install still carries
-    (removed_keys.scan; `cousin` is the slug, null for the install's)."""
+    (removed_keys.scan; `cousin` is the slug, null for the install's);
+    and "plugins": each plugin config/plugins.toml declares that does not
+    load, {"name", "reason"} (plugins.load)."""
     from cousin_lib import removed_keys
     base = Path(root) / "cousins"
     refused, config = {}, []
@@ -1344,7 +1461,12 @@ def registry_findings(root):
                 refused[entry.name] = lane_refusal(entry)
         config += [dict(f, cousin=entry.name) for f in removed_keys.scan_home(entry)]
     config += [dict(f, cousin=None) for f in removed_keys.scan_install(root)]
-    return {"refused": refused, "config": config}
+    try:
+        from cousin_lib import plugins
+        problems = plugins.load(root)[1]
+    except Exception as err:  # noqa: BLE001 - status must answer
+        problems = [{"name": None, "reason": "plugins not read: %s" % err}]
+    return {"refused": refused, "config": config, "plugins": problems}
 
 
 # ------------------------------------------------------------ clients
@@ -1458,6 +1580,8 @@ def _print_status(body):
                  row["reason"] or ""))
     for slug, line in (body.get("refused") or {}).items():
         print("  refused  %s: %s" % (slug, line))
+    for p in body.get("plugins") or []:
+        print("  plugin   %s: %s" % (p.get("name") or "config/plugins.toml", p.get("reason")))
     found = body.get("config") or []
     for f in found:
         print("  removed  %s%s %s" % ("%s " % f["cousin"] if f.get("cousin") else "",

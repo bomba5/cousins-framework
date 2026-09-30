@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from cousin_lib.server.injection import compose_delivery
 import stat
 from unittest import mock
-from tests.server.test_injection import _FAKE_TMUX
+from tests._fakes import _FAKE_TMUX
 from tests._hermetic import HermeticCase
 from types import SimpleNamespace
 

@@ -20,7 +20,7 @@ from cousin_lib.spawn import (
     spawn_main,
     start_cousin,
 )
-from tests.server.test_injection import _FAKE_TMUX
+from tests._fakes import _FAKE_TMUX
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 

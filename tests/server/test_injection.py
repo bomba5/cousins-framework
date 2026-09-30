@@ -23,26 +23,7 @@ from cousin_lib.server.injection import (
     default_settle,
     make_deliver,
 )
-
-_FAKE_TMUX = """#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$FAKE_TMUX_LOG"
-n=$(wc -l < "$FAKE_TMUX_LOG")
-if [ "$1" = load-buffer ]; then cat > "${FAKE_TMUX_STDIN:-/dev/null}"; fi
-# FAKE_TMUX_FAIL_CALL: fail every call of this subcommand;
-# FAKE_TMUX_FAIL_NTH: fail these 1-based call indexes (space separated)
-if [ -n "${FAKE_TMUX_FAIL_CALL:-}" ] && [ "$1" = "$FAKE_TMUX_FAIL_CALL" ]; then exit 1; fi
-case " ${FAKE_TMUX_FAIL_NTH:-} " in *" $n "*) exit 1;; esac
-# FAKE_TMUX_HANG_NTH: these call indexes hang until the caller times out
-case " ${FAKE_TMUX_HANG_NTH:-} " in *" $n "*) exec sleep 10;; esac
-# FAKE_TMUX_PANE2 replaces the pane from call FAKE_TMUX_PANE_AFTER + 1 on
-pane="$FAKE_TMUX_PANE"
-if [ -n "${FAKE_TMUX_PANE_AFTER:-}" ] && [ "$n" -gt "$FAKE_TMUX_PANE_AFTER" ]; then pane="$FAKE_TMUX_PANE2"; fi
-for a in "$@"; do
-  if [ "$a" = capture-pane ]; then cat "$pane" 2>/dev/null; fi
-  if [ "$a" = -l ]; then sleep "${FAKE_TMUX_PASTE_DELAY:-0}"; fi
-done
-exit "${FAKE_TMUX_RC:-0}"
-"""
+from tests._fakes import _FAKE_TMUX
 
 
 class ComposeCase(unittest.TestCase):

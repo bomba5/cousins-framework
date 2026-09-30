@@ -18,7 +18,7 @@ from tests._hermetic import HermeticCase
 
 from cousin_lib.flip import flip
 from tests._fakes import agent_on_path
-from tests.server.test_injection import _FAKE_TMUX
+from tests._fakes import _FAKE_TMUX
 
 
 class FlipCase(unittest.TestCase):

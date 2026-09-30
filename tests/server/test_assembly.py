@@ -15,7 +15,7 @@ import urllib.request
 from unittest import mock
 
 from cousin_lib.server.app import StartupError, build_server
-from tests.server.test_injection import _FAKE_TMUX
+from tests._fakes import _FAKE_TMUX
 
 
 class AssemblyCase(unittest.TestCase):

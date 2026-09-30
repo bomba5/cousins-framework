@@ -48,6 +48,7 @@ class TestLoad(PluginCase):
                                               "title")},
                          {"name": "clock", "mcp": True, "service": True, "console": True,
                           "port": 18180, "title": "Clock"})
+        self.assertEqual(row["placement"], "pane")      # the default: a tab on the pane
 
     def test_an_absolute_path_works_too(self):
         directory = fake.write_plugin(self.root)
@@ -191,7 +192,34 @@ class TestRender(PluginCase):
     def test_the_console_tab(self):
         home = self.home("wren", "clock")
         self.assertEqual(self.clock.console_tab(self.root, slug="wren", home=home),
-                         {"name": "clock", "title": "Clock", "url": "/plugins/clock/page/wren"})
+                         {"name": "clock", "title": "Clock", "url": "/plugins/clock/page/wren",
+                          "placement": "pane"})
+
+
+class TestPlacement(PluginCase):
+    refused = TestRefusals.refused
+
+    def test_chat_and_pane_load(self):
+        fake.write_plugin(self.root, "clock", placement="chat")
+        fake.write_plugin(self.root, "dial", placement="pane")
+        fake.write_plugin(self.root, "bell", mcp=False, service=False, console=False)
+        fake.declare(self.root, "clock", "dial", "bell")
+        loaded, problems = plugins.load(self.root)
+        self.assertEqual(problems, [])
+        self.assertEqual({n: p.placement for n, p in loaded.items()},
+                         {"bell": None, "clock": "chat", "dial": "pane"})
+        self.assertEqual(loaded["clock"].row()["placement"], "chat")
+        self.assertIsNone(loaded["bell"].row()["placement"])
+        home = self.home("wren", "clock", "dial")
+        self.assertEqual([(t["name"], t["placement"]) for t in plugins.console_tabs(home, self.root)],
+                         [("clock", "chat"), ("dial", "pane")])
+
+    def test_a_bad_placement_is_refused_and_named(self):
+        base = 'name = "clock"\n[service]\ncommand = "x"\nport = 9\n[console]\ntitle = "C"\npage = "/"\n'
+        for value in ('"side"', '"Chat"', '""', "1", '["chat"]'):
+            why = self.refused(base + "placement = %s\n" % value)
+            self.assertIn("[console] `placement` must be", why, value)
+            self.assertIn('"pane" or "chat"', why, value)
 
 
 class TestCousin(PluginCase):
@@ -226,7 +254,8 @@ class TestCousin(PluginCase):
         self.assertEqual(list(servers), ["clock"])          # dial has no [mcp]
         self.assertEqual(skipped, [])
         self.assertEqual(plugins.console_tabs(home, self.root),
-                         [{"name": "clock", "title": "Clock", "url": "/plugins/clock/page/wren"}])
+                         [{"name": "clock", "title": "Clock", "url": "/plugins/clock/page/wren",
+                           "placement": "pane"}])
 
     def test_services_wanted_only_when_a_cousin_enables_one(self):
         self.home("wren")

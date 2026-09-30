@@ -72,9 +72,26 @@ class TestApi(PluginConsoleCase):
         self.serve()
         self.assertEqual(self.row("wren")["plugins"], [
             {"name": "clock", "title": "Clock", "description": "a fake clock",
-             "tab": {"title": "Clock", "url": "/plugins/clock/page/wren"}},
+             "tab": {"title": "Clock", "url": "/plugins/clock/page/wren", "placement": "pane"}},
             {"name": "dial", "title": None, "description": "a fake dial", "tab": None}])
         self.assertEqual(self.row("sam")["plugins"], [])
+
+    def test_the_placement_is_carried_by_the_list_and_the_row(self):
+        fake.write_plugin(self.root, "bell", placement="chat")
+        fake.declare(self.root, "clock", "dial", "bell")
+        self.runner_cousin("wren", "clock", "bell", "dial")
+        self.serve()
+        rows = {p["name"]: p for p in self.get("/api/plugins")[1]["plugins"]}
+        self.assertEqual({n: r["placement"] for n, r in rows.items()},
+                         {"bell": "chat", "clock": "pane", "dial": None})
+        tabs = {p["name"]: p["tab"] for p in self.row("wren")["plugins"]}
+        self.assertEqual(tabs["bell"], {"title": "Clock", "url": "/plugins/bell/page/wren",
+                                        "placement": "chat"})
+        self.assertEqual(tabs["clock"]["placement"], "pane")
+        self.assertIsNone(tabs["dial"])
+        body = self.get("/api/cousins/wren/plugins")[1]
+        self.assertEqual({p["name"]: p["placement"] for p in body["available"]},
+                         {"bell": "chat", "clock": "pane", "dial": None})
 
     def test_a_disabled_plugin_is_nowhere(self):
         fake.declare(self.root, "clock", "dial", enabled={"clock": False})

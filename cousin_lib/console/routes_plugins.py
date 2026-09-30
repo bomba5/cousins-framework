@@ -104,14 +104,16 @@ def describe_install(root, *, probe=True):
 
 def cousin_plugins(root, home, loaded=None):
     """The fleet row's `plugins`: the cousin's valid enabled plugins, each
-    {name, title, description, tab} where tab is {title, url} or null."""
+    {name, title, description, tab} where tab is {title, url, placement}
+    or null."""
     loaded = loaded if loaded is not None else plugins.load(root)
     out = []
     for plugin in plugins.enabled_for(home, root, loaded):
         tab = plugin.console_tab(root, slug=home.name, home=home)
         out.append({"name": plugin.name, "title": (plugin.console or {}).get("title"),
                     "description": plugin.description,
-                    "tab": {"title": tab["title"], "url": tab["url"]} if tab else None})
+                    "tab": ({k: tab[k] for k in ("title", "url", "placement")}
+                            if tab else None)})
     return out
 
 

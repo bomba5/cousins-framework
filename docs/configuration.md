@@ -353,8 +353,8 @@ ASCII letter or digit becomes `-`, so `/a/b` is `-a-b` and `/tmp/x_/w.v2` is
 | key | default | meaning |
 |---|---|---|
 | `default_model` | none | the model the console's spawn dialog preselects for a new cousin |
-| `default_effort` | none | the effort it preselects; one of `low`, `medium`, `high`, `xhigh`, `max` |
-| `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list, which follows code updates. |
+| `default_effort` | none | the effort it preselects; one of `low`, `medium`, `high`, `xhigh`, `max` (`EFFORT_LEVELS` in `cousin_lib/config.py`, the one list every command, route and doc follows) |
+| `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list (`DEFAULT_MODELS` in `cousin_lib/config.py`, its first entry the fallback default), which follows code updates. |
 | `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux lane (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` [stream](glossary.md#stream) event, so it is observable without reading either toml file. |
 
 ## console-users.json

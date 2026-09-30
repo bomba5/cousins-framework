@@ -5,6 +5,17 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## Unreleased
 
+### Changed
+
+- **One model catalogue and one effort list** (#41): `DEFAULT_MODELS` and
+  `EFFORT_LEVELS` in `cousin_lib/config.py` are the only copies; every
+  command and route already imported them, and a test now fails when a
+  module spells either out again, when a doc or shipped example lists an
+  effort sequence that is not `EFFORT_LEVELS`, or names a model id outside
+  `DEFAULT_MODELS`. `docs/configuration.md` names both as the source.
+  `config/harness.toml.example` said the built-in list held three names (it
+  holds seven); it now points at `DEFAULT_MODELS`.
+
 ### Fixed
 
 - **The runner contract names only the tools it serves** (#97): the

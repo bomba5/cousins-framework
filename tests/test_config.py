@@ -5,6 +5,7 @@ becomes a lookup here. Fail-loud rule: a missing COUSIN_HOME is an error
 with a message, never a silent fallback to somebody's home directory.
 """
 import pathlib
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -129,6 +130,71 @@ class TestCousinConfig(unittest.TestCase):
         cfg = CousinConfig.load(home)
         with self.assertRaises(MissingConfigError):
             cfg.require_chat_port()
+
+
+_REPO = pathlib.Path(__file__).resolve().parents[1]
+# A model id as the docs and examples write one; claude-login and the like
+# are account kinds, not models.
+_MODEL_ID = re.compile(r"\bclaude-(?:opus|sonnet|haiku|fable)[a-z0-9.-]*(?:\[1m\])?")
+# An effort list: `low` through `max` within one short run of words.
+_EFFORT_RUN = re.compile(r"\blow\b.{0,60}?\bmax\b")
+
+
+def _doc_files():
+    """The user-facing docs and shipped examples; design notes and the
+    changelog are history and keep the words of their day."""
+    docs = [p for p in (_REPO / "docs").rglob("*.md") if "design" not in p.parts]
+    return docs + sorted((_REPO / "config").glob("*.example")) + [_REPO / "README.md"]
+
+
+class TestOneModelAndEffortList(unittest.TestCase):
+    """#41: the model catalogue and the effort levels live once, in
+    cousin_lib/config.py (DEFAULT_MODELS, EFFORT_LEVELS). Code imports them;
+    a doc or example that lists them is checked against them here."""
+
+    def test_no_code_copy(self):
+        from cousin_lib.config import EFFORT_LEVELS
+        # the effort run, not any low/medium/high (capsule.py's confidences)
+        effort_literal = re.compile(r"[\"']high[\"'],\s*[\"']xhigh[\"']")
+        pkg = _REPO / "cousin_lib"
+        for path in sorted(pkg.rglob("*")):
+            if path.suffix not in (".py", ".jsx", ".js") or path.name == "config.py" \
+                    or "__pycache__" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8")
+            self.assertIsNone(_MODEL_ID.search(text), "%s names a model id" % path)
+            self.assertIsNone(effort_literal.search(text), "%s copies the effort levels" % path)
+        self.assertEqual(len(EFFORT_LEVELS), len(set(EFFORT_LEVELS)))
+
+    def test_every_effort_list_in_the_docs_is_the_levels(self):
+        from cousin_lib.config import EFFORT_LEVELS
+        seen = 0
+        for path in _doc_files():
+            flat = " ".join(path.read_text(encoding="utf-8").split())
+            for m in _EFFORT_RUN.finditer(flat):
+                words = [w for w in re.findall(r"[a-z]+", m.group(0)) if w not in ("or", "and")]
+                self.assertEqual(tuple(words), EFFORT_LEVELS, "%s: %r" % (path, m.group(0)))
+                seen += 1
+        self.assertGreater(seen, 0)
+
+    def test_every_model_id_in_the_docs_is_in_the_catalogue(self):
+        from cousin_lib.config import DEFAULT_MODELS
+        seen = 0
+        for path in _doc_files():
+            for model in _MODEL_ID.findall(path.read_text(encoding="utf-8")):
+                self.assertIn(model, DEFAULT_MODELS, "%s names %s" % (path, model))
+                seen += 1
+        self.assertGreater(seen, 0)
+
+    def test_the_catalogue_is_described_not_counted(self):
+        # the example said "a built-in list of three names" while the list
+        # held seven: a doc points at DEFAULT_MODELS instead of sizing it
+        for path in _doc_files():
+            flat = " ".join(path.read_text(encoding="utf-8").split())
+            self.assertIsNone(re.search(r"built-in list of \w+ names", flat), path)
+        conf = (_REPO / "docs" / "configuration.md").read_text(encoding="utf-8")
+        self.assertIn("DEFAULT_MODELS", conf)
+        self.assertIn("EFFORT_LEVELS", conf)
 
 
 if __name__ == "__main__":

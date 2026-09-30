@@ -54,8 +54,9 @@
 # Install-wide agent defaults: the model and effort the console's
 # spawn dialog preselects for a new cousin (it writes them to the
 # cousin's [agent]). `models` is the catalogue the dialog offers;
-# absent, a built-in list of three names is offered. `default_effort`
-# is one of low, medium, high, xhigh, max.
+# absent, the built-in catalogue (cousin_lib/config.py DEFAULT_MODELS)
+# is offered. `default_effort` is one of low, medium, high, xhigh, max
+# (EFFORT_LEVELS there).
 #[agent]
 #default_model = "some-model"
 #default_effort = "high"

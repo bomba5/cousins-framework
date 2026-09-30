@@ -1424,7 +1424,7 @@ def spawn_main(argv=None):
                              " its last session (config/harness.toml"
                              " [agent.resume]) instead of a new one; falls"
                              " back to a new session when that is not"
-                             " possible. What the start-at-boot unit uses")
+                             " possible")
     parser.add_argument("--sync-template", action="store_true",
                         help="create nothing: show how an EXISTING"
                              " cousin's CLAUDE.md framework part differs"

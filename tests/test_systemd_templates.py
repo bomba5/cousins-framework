@@ -21,10 +21,13 @@ REQUIRED_UNITS = {
     "cousin-tool-surface.service", "cousin-tool-surface.timer",
     "cousin-console.service",
 }
-# R10: no per-cousin chat server, so neither its unit nor its watchdog's
+# R10: no per-cousin chat server, so neither its unit nor its watchdog's;
+# row 70: no legacy session to start at boot (the supervisor starts runner
+# cousins itself)
 RETIRED_UNITS = {
     "cousin-chat-server@.service",
     "cousin-chat-watchdog.service", "cousin-chat-watchdog.timer",
+    "cousin-start@.service",
 }
 PLACEHOLDERS = {"ROOT", "USER_BIN", "SYSTEM_PATH"}
 _ABS_PATH = re.compile(r'(?:^|[=:\s"\'])/[A-Za-z0-9_]')
@@ -49,14 +52,15 @@ class TestInventory(unittest.TestCase):
         self.assertTrue(REQUIRED_UNITS <= names,
                         "missing: %s" % sorted(REQUIRED_UNITS - names))
 
-    def test_no_chat_server_or_watchdog_unit_ships(self):
+    def test_no_retired_unit_ships(self):
         names = {p.name for p in _units()}
         self.assertEqual(RETIRED_UNITS & names, set())
         # the README names them only to disable them on an upgrade
         readme = (_UNITS / "README.md").read_text()
         for line in readme.splitlines():
-            if "cousin-chat-server" in line or "cousin-chat-watchdog" in line:
-                self.assertNotIn("enable --now", line.replace("disable --now", ""))
+            if any(stem in line for stem in ("cousin-chat-server", "cousin-chat-watchdog",
+                                              "cousin-start@")):
+                self.assertNotIn("enable", line.replace("disable", ""), line)
                 self.assertFalse(line.startswith("|"), line)
 
     def test_every_timer_has_its_service(self):

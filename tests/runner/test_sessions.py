@@ -181,6 +181,11 @@ class TestSessionsAsARunner(SessionsCase):
             peer = s.enqueue(Item("peer:testa", "chat", "hello?", sender="Testa"))
             self.assertTrue(_wait(lambda: s.inbox.get(peer.inbox_id)["state"] == "done",
                                   timeout=10))
+            # the rebuilt side starts, then its `side_restarted` is appended: it
+            # may take and close the row first (#102)
+            self.assertTrue(_wait(lambda: len([e for e in s.events() if e["kind"] == "system"
+                                               and e["payload"].get("subtype")
+                                               == "side_restarted"]) >= 2))
         self.assertEqual(s.inbox.get(peer.inbox_id)["outcome"], "delivered")
         self.assertTrue(s.worker_alive())
         self.assertIsNone(s.fatal)

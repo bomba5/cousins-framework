@@ -333,7 +333,9 @@ class TestRunnerWaitsForALogin(HermeticCase):
         r = self.build(first_turn=[init_msg(), _said("authentication_failed", LOGGED_OUT), "END"])
         r.start()
         rec = self.op(r)
-        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        # the login file is written, then its `auth` event appended (#102)
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None
+                              and self.events(r, "auth")))
         self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")   # never failed
         self.assertEqual(self.events(r, "auth")[0]["reason"], auth.LOGIN)
         self.assertTrue(r.login_required()); self.assertIsNone(r.fatal)

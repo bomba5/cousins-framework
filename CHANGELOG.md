@@ -18,6 +18,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
+- **SDK-lane tests wait for what they read** (#102): four more tests read
+  something the runner writes after the event they waited for: a login's
+  `auth` event (after its file), the last turn's pressure check (after its
+  row closes), the failure count (after the idle move) and a side
+  session's `side_restarted` (after the rebuilt side starts). Each waits
+  for the thing itself now. Tests only.
 - **Console start and stop around the supervisor** (#92):
   - A stop with no supervisor running and a runner started by hand still
     holding the lock answered `502 cousin-supervisor refused the stop: no

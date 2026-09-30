@@ -371,6 +371,9 @@ class TestPressureTrigger(RolloverCase):
             self.assertTrue(_wait(lambda: len(self.clients) == 2))
             for i in range(3):                     # three more turns at 91%: no second rollover
                 self.work(r, "turn %d" % i)
+            # the pressure check runs after the row closes, then the turn goes
+            # idle: wait for it under the patch, or the last turn checks nothing (#102)
+            self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(len(self.clients), 2)
         events = [e["payload"] for e in r.events()
                   if e["kind"] == "rollover" and e["payload"].get("phase") == "start"]

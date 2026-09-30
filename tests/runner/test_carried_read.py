@@ -165,9 +165,12 @@ class TestCarriedRead(HermeticCase):
         states = [e["payload"]["to"] for e in r.events() if e["kind"] == "state"]
         self.assertNotIn("errored", states)
         self.assertEqual(_errors(r), [])
-        self.assertEqual(r._failures, 0)
         back = [x for x in _results(r) if x.get("requeued") == [b.inbox_id]]
         self.assertEqual([(x["is_error"], x["interrupted"]) for x in back], [(False, False)])
+        # the failure count is set after the idle move and the review gate:
+        # read once the loop has stopped, when nothing can still set it (#102)
+        r.stop(timeout=5)
+        self.assertEqual(r._failures, 0)
 
     def test_a_late_echo_after_the_bound_never_runs_the_row_twice(self):
         # review round 2, 1: the CLI takes b 1.5 s after the interrupt, past

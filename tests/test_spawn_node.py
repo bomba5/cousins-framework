@@ -28,7 +28,6 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 _TEMPLATE_DIR = _REPO_ROOT / "templates" / "hive-node"
 
 QUEEN = "http://queen.example.invalid:8101"
-HOME_CHAT = "http://home.example.invalid:8090"
 
 
 class SpawnNodeCase(unittest.TestCase):
@@ -116,7 +115,7 @@ class TestArchiveInstalls(SpawnNodeCase):
         # what the builder wrote and let install.sh source node.env and
         # render the unit from inside, as the operator would.
         import subprocess
-        tarball = self._build(name="Testa Two", home_chat=HOME_CHAT)["tarball"]
+        tarball = self._build(name="Testa Two", tell_home=True)["tarball"]
         with tarfile.open(tarball) as tar:
             tar.extractall(self.out, filter="data")
         unpacked = self.out / "testa-node"
@@ -137,26 +136,40 @@ class TestNodeEnv(SpawnNodeCase):
                     if line and not line.startswith("#"))
 
     def test_env_carries_queen_token_slug_and_port(self):
-        result = self._build(port=8210, home_chat=HOME_CHAT)
+        result = self._build(port=8210)
         env = self._env(result["tarball"])
         self.assertEqual(env["COUSIN_SLUG"], "testa")
         self.assertEqual(env["NODE_NAME"], "Testa")
         self.assertEqual(env["NODE_PORT"], "8210")
         self.assertEqual(env["QUEEN_URL"], QUEEN)
         self.assertEqual(env["HIVE_TOKEN"], result["token"])
-        self.assertEqual(env["HOME_CHAT_URL"], HOME_CHAT)
         # Present and empty: the placeholder brain until the operator
         # fills it in on the node.
         self.assertEqual(env["AGENT_CMD"], "")
 
-    def test_no_home_chat_means_an_empty_gateway(self):
+    def test_tell_home_is_the_queens_and_no_home_chat_url_is_written(self):
+        # 2.0.0: a node reaches home only through the queen (TELL_HOME=1);
+        # the node template no longer reads HOME_CHAT_URL
         env = self._env(self._build()["tarball"])
-        self.assertEqual(env["HOME_CHAT_URL"], "")
+        self.assertEqual(env["TELL_HOME"], "")
+        self.assertNotIn("HOME_CHAT_URL", env)
+        env = self._env(self._build(slug="testa", tell_home=True)["tarball"])
+        self.assertEqual(env["TELL_HOME"], "1")
+        self.assertNotIn("HOME_CHAT_URL", env)
+
+    def test_the_cli_sets_tell_home_and_has_no_home_chat_flag(self):
+        rc, out, err = self._main(["testa", "--queen-url", QUEEN, "--name", "Testa",
+                                   "--role", "r", "--out", str(self.out), "--tell-home"])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self._env(self.out / "testa-node.tar.gz")["TELL_HOME"], "1")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self._main(["testa", "--queen-url", QUEEN, "--name", "Testa", "--role", "r",
+                        "--out", str(self.out), "--home-chat", "http://h.invalid:1"])
 
     def test_render_quotes_a_value_the_shell_would_split(self):
         text = render_node_env(slug="testa", name="Testa Two", port=8210,
                                queen_url=QUEEN, token="hive_x",
-                               home_chat="", agent_cmd="")
+                               agent_cmd="")
         self.assertIn("NODE_NAME='Testa Two'", text)
         # ... and a plain value stays a plain KEY=VALUE line.
         self.assertIn("COUSIN_SLUG=testa\n", text)

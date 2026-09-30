@@ -34,7 +34,7 @@ class SpawnNodeError(Exception):
     """The archive cannot be built; the message says why."""
 
 
-def render_node_env(*, slug, name, port, queen_url, token, home_chat,
+def render_node_env(*, slug, name, port, queen_url, token,
                     agent_cmd, poll_seconds=5, agent_timeout=120,
                     role="", node_host="127.0.0.1", tell_home=False):
     """The node's environment file: every key the runtime reads, shell
@@ -49,7 +49,6 @@ def render_node_env(*, slug, name, port, queen_url, token, home_chat,
         ("NODE_HOST", node_host),
         ("QUEEN_URL", queen_url),
         ("HIVE_TOKEN", token),
-        ("HOME_CHAT_URL", home_chat or ""),
         ("TELL_HOME", "1" if tell_home else ""),
         ("AGENT_CMD", agent_cmd or ""),
         ("NODE_POLL_SECONDS", str(poll_seconds)),
@@ -102,7 +101,7 @@ def _render_readme(*, slug, name, queen_url, port):
 
 
 def build_node_archive(root, *, slug, queen_url, name, role, out,
-                       token=None, home_chat=None, port=_DEFAULT_PORT,
+                       token=None, port=_DEFAULT_PORT,
                        agent_cmd="", node_host="127.0.0.1", tell_home=False):
     """Mint (or take) the token, render everything in memory, and only
     then write the tarball: a failed render leaves no archive behind.
@@ -149,7 +148,7 @@ def build_node_archive(root, *, slug, queen_url, name, role, out,
         ("CLAUDE.md", claude_md, 0o644),
         ("node.env", render_node_env(
             slug=slug, name=name, port=port, queen_url=queen_url,
-            token=token, home_chat=home_chat, agent_cmd=agent_cmd, tell_home=tell_home,
+            token=token, agent_cmd=agent_cmd, tell_home=tell_home,
             role=role, node_host=node_host), 0o600),
         ("README", _render_readme(slug=slug, name=name,
                                   queen_url=queen_url, port=port), 0o644),
@@ -206,9 +205,11 @@ def spawn_node_main(argv=None):
                         help="a token already minted on a remote queen;"
                              " without it one is minted in this root's"
                              " queen store")
-    parser.add_argument("--home-chat",
-                        help="a chat server the node's [tell-home: ...]"
-                             " marker posts to; off when absent")
+    parser.add_argument("--tell-home", action="store_true",
+                        help="TELL_HOME=1 in node.env: the node's"
+                             " [tell-home: ...] reaches the queen's"
+                             " home_cousin (config/hive.toml); off when"
+                             " absent")
     parser.add_argument("--agent-cmd", default="",
                         help="the backend command line to bake into"
                              " node.env; empty means the placeholder brain")
@@ -232,7 +233,7 @@ def spawn_node_main(argv=None):
         result = build_node_archive(
             root, slug=args.slug, queen_url=args.queen_url,
             name=args.name, role=args.role, out=args.out,
-            token=args.token, home_chat=args.home_chat, port=args.port,
+            token=args.token, tell_home=args.tell_home, port=args.port,
             agent_cmd=args.agent_cmd,
             node_host="0.0.0.0" if args.listen_all else "127.0.0.1")
     except SpawnNodeError as err:

@@ -154,8 +154,9 @@ class TestTheNode(unittest.TestCase):
     def test_the_archive_env_carries_tell_home(self):
         env = spawn_node.render_node_env(slug="kestrel", name="Kestrel", port=8210,
                                          queen_url="http://192.0.2.10:8600", token="hive_x",
-                                         home_chat=None, agent_cmd="", tell_home=True)
+                                         agent_cmd="", tell_home=True)
         self.assertIn("TELL_HOME=1", env)
+        self.assertNotIn("HOME_CHAT_URL", env)
 
 
 if __name__ == "__main__":

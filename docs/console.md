@@ -118,9 +118,8 @@ warnings, then the running ones, then the stopped ones. The columns:
 
 - **state**, in words beside its dot: `working`, `idle`, `needs you`,
   `rate limited`, `errored`, `enrolled` (a [worker](glossary.md#worker)) or `stopped`. A cousin
-  "needs you" when its pane shows one of the `attention_patterns` or its
-  [runner](glossary.md#runner) waits for a permission; the reason replaces the role line in the
-  cousin column.
+  "needs you" when its [runner](glossary.md#runner) waits for a permission
+  or a login; the reason replaces the role line in the cousin column.
   A stopped cousin is never flagged: stopping it was your decision.
 - **cousin**: name, slug and role.
 - **runner**: the [lane](glossary.md#lane), read from the row: the runner's own kind (`sdk`,
@@ -150,10 +149,7 @@ a row of facts: chat, memory scope, operator, heartbeat, flip time,
 model, the agent's pid and uptime, the last activity line and tokens
 spent today. A runner cousin's card shows `chat · console` (the console
 serves its chat), and a runner line: the last state the runner recorded and
-the contract items it declares it does not support, if any. If the pane shows one of the `attention_patterns` from
-`config/harness.toml` (a login menu, a trust prompt) the card says "needs
-attention" with the matching text: the session is running but the agent is
-waiting for a person.
+the contract items it declares it does not support, if any.
 
 Card buttons: start or stop, dismiss, and "open chat". Dismiss asks for a
 second click, then stops the cousin, archives its whole home to

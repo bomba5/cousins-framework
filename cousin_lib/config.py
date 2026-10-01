@@ -355,44 +355,26 @@ def commit_attribution(root, agent_table=None):
 
 def harness_config(root):
     """config/harness.toml: where the agent harness keeps this install's
-    session transcripts and its own auto-memory directory, and the
-    transcript size (flip_when_transcript_mb) past which the loops
-    daemon requests a flip, and settings_file, the harness's own
-    settings JSON that `cousin-mcp approve` edits. Absent: None
-    (transcript mining, the harness memory collection, the size guard
-    and scripted MCP approval are all off).
-    Unparsable, or a threshold that is not a positive number: loud,
-    because it was promised. Path values are templates; expand them
-    per cousin with expand_harness_path. attention_patterns: pane text
-    that means the agent is waiting on a human (a login menu), which
-    the console flags on a running cousin's row; absent, []. host_label:
-    the name the login message gives this host; absent, the hostname."""
+    session transcripts and its own auto-memory directory, settings_file,
+    the harness's own settings JSON that `cousin-mcp approve` edits, and
+    host_label, the name the login message gives this host (absent: the
+    hostname). Absent file: None (transcript mining, the harness memory
+    collection and scripted MCP approval are all off). Unparsable: loud,
+    because it was promised. Path values are templates; expand them per
+    cousin with expand_harness_path. The keys 2.0.0 removed
+    (removed_keys.HARNESS_KEYS, attention_patterns and
+    flip_when_transcript_mb among them) are neither read nor refused
+    here, whatever their value."""
     data = _read_harness_toml(root)
     if data is None:
         return None
-    threshold = data.get("flip_when_transcript_mb")
-    if threshold is not None and (
-            isinstance(threshold, bool)
-            or not isinstance(threshold, (int, float))
-            or threshold <= 0):
-        raise MissingConfigError(
-            "config/harness.toml flip_when_transcript_mb must be a"
-            " positive number of megabytes, got %r" % (threshold,))
-    patterns = data.get("attention_patterns", [])
-    if (not isinstance(patterns, list)
-            or not all(isinstance(p, str) and p for p in patterns)):
-        raise MissingConfigError(
-            "config/harness.toml attention_patterns must be a list of"
-            " non-empty strings, got %r" % (patterns,))
     label = data.get("host_label")
     if label is not None and (not isinstance(label, str) or not label.strip()):
         raise MissingConfigError(
             "config/harness.toml host_label must be a non-empty string, got %r" % (label,))
     return {"transcripts_dir": data.get("transcripts_dir"),
             "auto_memory_dir": data.get("auto_memory_dir"),
-            "flip_when_transcript_mb": threshold,
             "settings_file": data.get("settings_file"),
-            "attention_patterns": list(patterns),
             "host_label": label}
 
 

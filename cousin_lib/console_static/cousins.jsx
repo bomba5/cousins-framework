@@ -178,12 +178,6 @@ function CousinCard({ c, onClick, onAct, onChat }) {
         </div>
       </div>
       <div className="role">{c.role}</div>
-      {c.attention && (
-        <div className="card-attention"
-             title="the pane shows text config/harness.toml attention_patterns lists: the agent is waiting on a person">
-          needs attention · the pane shows "{c.attention}"
-        </div>
-      )}
       {c.supervisor && c.supervisor.state === "failing" && (
         <div className="card-attention" data-runner-failing
              title="the supervisor left the runner down: start it again once the reason is fixed">

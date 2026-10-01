@@ -19,8 +19,7 @@ from cousin_lib import delivery, loops, spawn, supervisor
 from cousin_lib import removed_keys
 from cousin_lib.config import (DEFAULT_MODELS, EFFORT_LEVELS, MEMORY_SCOPES,
                                CousinConfig, FrameworkConfig,
-                               MissingConfigError, agent_config,
-                               harness_config)
+                               MissingConfigError, agent_config)
 from cousin_lib.console import longop, router, tokens
 from cousin_lib.console._common import (chat_call, chat_health, check_slug,
                                         cousin_home, load_cousin, read_toml,
@@ -47,26 +46,6 @@ def _pane_tail(server, config):
     except Exception:
         return None
     return r.stdout or ""
-
-
-def attention_patterns(root):
-    """config/harness.toml attention_patterns; [] when absent or when
-    the file is unusable (the fleet listing must not fail on it)."""
-    try:
-        cfg = harness_config(root)
-    except MissingConfigError:
-        return []
-    return (cfg or {}).get("attention_patterns") or []
-
-
-def _attention(tail, patterns):
-    """The first attention pattern the pane shows, else None."""
-    if not tail:
-        return None
-    for pattern in patterns:
-        if pattern in tail:
-            return pattern
-    return None
 
 
 def _pane_active(server, config, tail=None):
@@ -280,16 +259,16 @@ def _plugins(server, config, loaded):
         return []
 
 
-def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD, plugins=None):
+def fleet_row(server, config, defaults=None, snap=_UNREAD, plugins=None):
     raw = read_toml(config.home)
     cousin = raw.get("cousin", {}) if isinstance(raw, dict) else {}
     chat = None if _is_runner(config) else chat_health(config)
     if defaults is None:
         defaults = agent_defaults(server.root)
-    if patterns is None:
-        patterns = attention_patterns(server.root)
     if snap is _UNREAD:
         snap = supervisor.snapshot(server.root)
+    # Kept on the row, always null: the legacy pane check that set it read
+    # attention_patterns, a key 2.0.0 removed.
     attention = None
     runner = None
     if _is_runner(config):
@@ -312,9 +291,6 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD, plugin
         if status == "running":
             tail = _pane_tail(server, config)
             active = _pane_active(server, config, tail)
-            # "running" says the session exists, not that the agent is
-            # working: a pane parked on a login menu is flagged.
-            attention = _attention(tail, patterns)
     # The agent process and its age: only a local, running session has
     # one to ask tmux about; everything else is null, not zero.
     pid = None
@@ -376,14 +352,13 @@ def fleet_rows(server):
     queen knows as `type: "remote"` rows (cousin_lib/console/hive.py)."""
     from cousin_lib.console import hive as console_hive
     defaults = agent_defaults(server.root)
-    patterns = attention_patterns(server.root)
     snap = supervisor.snapshot(server.root)
     from cousin_lib import plugins as fw_plugins
     try:
         loaded = fw_plugins.load(server.root)
     except Exception:  # noqa: BLE001 - _plugins answers [] per row then
         loaded = None
-    rows = [fleet_row(server, config, defaults, patterns, snap, loaded)
+    rows = [fleet_row(server, config, defaults, snap, loaded)
             for config in FrameworkConfig(server.root).list_cousins()]
     return rows + console_hive.remote_rows(
         server, {row["slug"] for row in rows})

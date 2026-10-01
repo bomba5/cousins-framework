@@ -379,7 +379,7 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `model`, `effort` | what the next start will use: a runner cousin's `[agent] model` and `effort`, else null (the CLI's own default); on `tmux-legacy`, the `[runtime]` value, else `config/harness.toml [agent]` default, else null |
 | `hidden` | `[cousin] hidden` |
 | `status` | `running` or `stopped`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). [Worker](../glossary.md#worker): always `running`. A cousin on `tmux-legacy` (which 2.0.0 refuses to start): its tmux session exists, or with `[chat] host` its chat server answers. |
-| `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
+| `attention` | always null: the pane check that set it read `attention_patterns`, a key 2.0.0 removed (a login wait is `loginRequired`) |
 | `chat` | `console` for a runner cousin, whose chat the console serves itself; for any other cousin `ok`, `down` or `none` (no port) from an upstream chat server's `/health` |
 | `active` | the last 20 pane lines changed in the last 60 seconds; for a runner cousin, a live turn (`running` or `waiting_permission`) |
 | `pid`, `uptime_seconds` | the agent process in the tmux pane and its age (a runner cousin: the `cousin-runner` process); null when unknown, never 0 |

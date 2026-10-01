@@ -37,6 +37,9 @@ class TestSizeGuardGone(LoopsCase):
 
 
 class TestHarnessKey(unittest.TestCase):
+    """flip_when_transcript_mb is inert: harness_config neither reads nor
+    refuses it, whatever its value."""
+
     def _root(self, body):
         import tempfile
         tmp = tempfile.TemporaryDirectory()
@@ -46,23 +49,14 @@ class TestHarnessKey(unittest.TestCase):
         (root / "config" / "harness.toml").write_text(body)
         return root
 
-    def test_key_is_read_as_a_number(self):
-        cfg = config.harness_config(self._root(
-            "flip_when_transcript_mb = 150\n"))
-        self.assertEqual(cfg["flip_when_transcript_mb"], 150)
-
-    def test_key_absent_is_none(self):
-        cfg = config.harness_config(self._root(
-            'transcripts_dir = "/var/lib/h/{home_encoded}"\n'))
-        self.assertIsNone(cfg["flip_when_transcript_mb"])
-
-    def test_non_positive_or_non_numeric_is_loud(self):
-        for body in ('flip_when_transcript_mb = "big"\n',
+    def test_any_value_is_neither_read_nor_refused(self):
+        for body in ("flip_when_transcript_mb = 150\n",
+                     'flip_when_transcript_mb = "big"\n',
                      "flip_when_transcript_mb = 0\n",
                      "flip_when_transcript_mb = -5\n",
                      "flip_when_transcript_mb = true\n"):
-            with self.assertRaises(config.MissingConfigError, msg=body):
-                config.harness_config(self._root(body))
+            cfg = config.harness_config(self._root(body))
+            self.assertNotIn("flip_when_transcript_mb", cfg, body)
 
 
 if __name__ == "__main__":

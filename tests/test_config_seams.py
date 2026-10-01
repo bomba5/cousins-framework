@@ -42,10 +42,7 @@ class HarnessSeam(unittest.TestCase):
                 'transcripts_dir = "/tmp/h/projects/{home_encoded}"\n')
             cfg = config.harness_config(Path(root))
             self.assertEqual(set(cfg), {"transcripts_dir", "auto_memory_dir",
-                                        "flip_when_transcript_mb",
-                                        "settings_file",
-                                        "attention_patterns", "host_label"})
-            self.assertEqual(cfg["attention_patterns"], [])
+                                        "settings_file", "host_label"})
             self.assertIsNone(cfg["host_label"])
             self.assertIsNone(cfg["auto_memory_dir"])
             self.assertIsNone(cfg["settings_file"])
@@ -83,16 +80,22 @@ class HarnessSeam(unittest.TestCase):
             config.expand_harness_path("~/.h/projects/{home_encoded}", home),
             Path.home() / ".h" / "projects" / "-srv-fw-cousins-testa")
 
-    def test_attention_patterns_are_a_list_of_strings_or_loud(self):
+    def test_the_keys_2_0_0_removed_are_inert_whatever_their_value(self):
+        # attention_patterns and flip_when_transcript_mb: named by
+        # removed_keys, never read, never a refusal (configuration.md)
         with tempfile.TemporaryDirectory() as root:
             (Path(root) / "config").mkdir()
             path = Path(root) / "config" / "harness.toml"
-            path.write_text('attention_patterns = ["Select login method"]\n')
-            self.assertEqual(config.harness_config(Path(root))
-                             ["attention_patterns"], ["Select login method"])
-            path.write_text('attention_patterns = "Select login method"\n')
-            with self.assertRaises(config.MissingConfigError):
-                config.harness_config(Path(root))
+            for body in ('attention_patterns = "Select login method"\n',
+                         'attention_patterns = [1, ""]\n',
+                         'flip_when_transcript_mb = "big"\n',
+                         "flip_when_transcript_mb = 0\n",
+                         "flip_when_transcript_mb = true\n"):
+                path.write_text(body + 'transcripts_dir = "/t/{home_encoded}"\n')
+                cfg = config.harness_config(Path(root))
+                self.assertEqual(cfg["transcripts_dir"], "/t/{home_encoded}", body)
+                self.assertNotIn("attention_patterns", cfg, body)
+                self.assertNotIn("flip_when_transcript_mb", cfg, body)
 
     def test_the_shipped_claude_code_preset_parses(self):
         preset = (Path(__file__).resolve().parents[1] / "config"

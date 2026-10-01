@@ -1706,7 +1706,6 @@ function fleetAttention(c) {
     return { level: "needs", why: "failing: " + (c.supervisor.reason || "left down by the supervisor") };
   if (!c || c.status !== "running") return null;
   if (c.loginRequired && !c.remote) return { level: "needs", why: fleetLoginWhy(c.loginRequired) };
-  if (c.attention) return { level: "needs", why: "the pane shows \"" + c.attention + "\"" };
   const r = c.runner;
   if (r && r.alive) {
     if (r.state === "waiting_permission") return { level: "needs", why: "waiting for a permission" };

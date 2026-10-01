@@ -17,11 +17,11 @@ from tests.console._harness import ConsoleCase
 
 
 class TestAttention(ConsoleCase):
-    """A running session whose pane shows one of the harness's
-    attention_patterns (a login menu, say) is flagged on its row:
-    "running" alone read as healthy while the agent waited on a human."""
+    """attention_patterns is a key 2.0.0 removed: a leftover one is inert,
+    so a pane showing its text flags nothing, and the row's `attention`
+    stays null (kept on the row for the clients that read it)."""
 
-    def test_a_matching_pane_is_flagged(self):
+    def test_a_leftover_pattern_flags_nothing(self):
         (self.root / "config" / "harness.toml").write_text(
             'attention_patterns = ["Select login method"]\n')
         self.cousin("wren")
@@ -30,28 +30,16 @@ class TestAttention(ConsoleCase):
         self.serve()
         row = self.get("/api/cousins")[1]["cousins"][0]
         self.assertEqual(row["status"], "running")
-        self.assertEqual(row["attention"], "Select login method")
+        self.assertIsNone(row["attention"])
 
-    def test_no_match_or_no_patterns_is_null(self):
-        self.cousin("wren")
-        self.pane.write_text("Select login method:\n")
-        self.tmux_running()
-        self.serve()
-        self.assertIsNone(self.get("/api/cousins")[1]["cousins"][0]
-                          ["attention"])
+    def test_a_malformed_leftover_never_breaks_the_listing(self):
         (self.root / "config" / "harness.toml").write_text(
-            'attention_patterns = ["Paste code here"]\n')
-        self.assertIsNone(self.get("/api/cousins")[1]["cousins"][0]
-                          ["attention"])
-
-    def test_a_stopped_cousin_is_never_flagged(self):
-        (self.root / "config" / "harness.toml").write_text(
-            'attention_patterns = ["Select login method"]\n')
+            'attention_patterns = "Select login method"\n')
         self.cousin("wren")
-        self.pane.write_text("Select login method:\n")
         self.serve()
-        self.assertIsNone(self.get("/api/cousins")[1]["cousins"][0]
-                          ["attention"])
+        status, body = self.get("/api/cousins")
+        self.assertEqual(status, 200)
+        self.assertIsNone(body["cousins"][0]["attention"])
 
 
 class TestListCousins(ConsoleCase):

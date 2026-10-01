@@ -181,11 +181,12 @@ class CousinCardRows(unittest.TestCase):
     def setUp(self):
         self.src = _component(_read("cousins.jsx"), "CousinCard")
 
-    def test_a_row_needing_attention_says_so(self):
-        # "running" with the agent parked on a login menu read as
-        # healthy; the row's attention field is shown on the card.
-        self.assertIn("c.attention", self.src)
-        self.assertIn("needs attention", self.src)
+    def test_no_pane_attention_line(self):
+        # the row's `attention` is always null since attention_patterns,
+        # a key 2.0.0 removed, is inert; a login wait has its own line
+        self.assertNotIn("c.attention", self.src)
+        self.assertNotIn("attention_patterns", _read("cousins.jsx"))
+        self.assertNotIn("c.attention", _read("views.jsx"))
 
     def test_lane_account_hold_and_a_login_wait(self):
         for token in ("lane ·", "account ·", "c.lane", "c.account", "c.held",

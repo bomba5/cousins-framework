@@ -1,35 +1,27 @@
-"""The flip: end a generation, start the next on a fresh session
-identity.
+"""The flip: end a generation, start the next on a fresh session.
 
-Stage order and its guarantees are specified in
-docs/reference/lifecycle.md. The properties that matter: nothing
-destructive happens before preflight passes; the dying session gets a
-bounded chance to hand off before the framework synthesizes an
-emergency handoff; the respawn goes through spawn.start_cousin - the
-codebase's single tmux-creation site; and the result's ok reflects
-whether the new session identity actually persisted, because a flip
-that lost its identity write did not succeed, whatever else worked.
+On a runner cousin the flip is a rollover: a `flip` row through the
+cousin's inbox, which the runner carries out between turns and answers
+(_flip_runner); docs/reference/lifecycle.md has the contract. A cousin
+with no runner kind is refused by name before anything runs.
 
-Crash recovery is the operator: a stale in-progress marker is reported
-and overwritten, never auto-recovered.
+What else lives here is the legacy lane's clean stop (close_session)
+and its helpers: the pre-exit prompt, the bounded handoff wait, the
+emergency handoff and the generation archive. Crash recovery is the
+operator: a stale in-progress marker is reported and overwritten,
+never auto-recovered.
 """
 import json
 import shutil
 import subprocess
 import time
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import agent_auth, audits, boot, transcript_mine
-from cousin_lib.config import read_session_id as config_read_session_id
-from cousin_lib.config import (CousinConfig, FrameworkConfig,
-                               MissingConfigError, harness_config)
+from cousin_lib import audits, boot
+from cousin_lib.config import CousinConfig, FrameworkConfig, MissingConfigError
 from cousin_lib import delivery
-from cousin_lib.spawn import (SpawnError, _mint_session_id,
-                              _persist_session_id, framework_event,
-                              pending_boot_path, render_agent_cmd,
-                              start_cousin, start_preflight, stop_cousin)
+from cousin_lib.spawn import framework_event, pending_boot_path, stop_cousin
 from cousin_lib.trace import traced_cli
 
 HANDOFF_DEADLINE_SECONDS = 300
@@ -119,36 +111,6 @@ def _archive_generation(home, generation, *, transcript_tail):
     if transcript_tail:
         (arch / "transcript-tail.txt").write_text(transcript_tail)
     return arch
-
-
-def _read_session_id(home):
-    """The dying generation's runtime.session_id, or "" when none was
-    ever persisted (a hand-made cousin, or a first flip). The boot
-    packet reads the same value to scope its MCP warning, so it lives
-    in config."""
-    return config_read_session_id(home)
-
-
-def _mine_transcript(home, root, *, dry_run):
-    """Stage record for mining the dying session's transcript into raw
-    memory. Best-effort by construction: every way this can go wrong
-    becomes a named skip, never an exception out of the flip."""
-    stage = {"stage": "transcript_mine"}
-    if dry_run:
-        stage["skipped"] = "dry-run"
-        return stage
-    try:
-        if harness_config(root) is None:
-            stage["skipped"] = "config/harness.toml absent"
-            return stage
-        session_id = _read_session_id(home)
-        if not session_id:
-            stage["skipped"] = "no runtime.session_id in cousin.toml"
-            return stage
-        stage["mined"] = transcript_mine.mine(home, root, session_id)
-    except Exception as err:  # noqa: BLE001 - best-effort stage
-        stage["skipped"] = "error: %s" % err
-    return stage
 
 
 def _sender(home, tmux_bin, tmux_socket):
@@ -276,192 +238,6 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     from cousin_lib.delivery import lane_refusal
     result["error"] = lane_refusal(home)
     return result
-    session = config.tmux_session
-
-    # Concurrency guard: a FRESH marker means another flip is mid-run;
-    # a second one would double-bump the generation and inject into the
-    # first flip's new session. Stale markers pass through - crashed
-    # flips are reported to the operator, never auto-recovered.
-    marker = _marker_path(home)
-    if marker.exists() and not dry_run:
-        age = None
-        try:
-            started = datetime.fromisoformat(
-                json.loads(marker.read_text())["started_at"])
-            age = (datetime.now(timezone.utc) - started).total_seconds()
-        except (ValueError, KeyError, OSError):
-            pass
-        if age is not None and age < handoff_deadline + 180:
-            result["stages"].append(
-                {"stage": "concurrency_guard", "ok": False})
-            result["error"] = (
-                "another flip started %ds ago - refusing concurrent"
-                " flip" % int(age))
-            return result
-        # A stale marker is a flip that died mid-run: reported (here
-        # and in raw memory), then overwritten, never auto-recovered.
-        framework_event(home, "crash", "an earlier flip did not finish"
-                        " (stale in-progress marker%s); this flip"
-                        " overwrites it" % (
-                            ", %d min old" % (age // 60)
-                            if age is not None else ""))
-
-    # Preflight: zero side effects, runs even under dry-run - a
-    # dry-run that skips preflight lies about what a real flip would
-    # do.
-    failures = []
-    agent_cmd_template = _read_agent_cmd_template(root)
-    if not agent_cmd_template:
-        failures.append("no agent command at %s"
-                        % (root / "config" / "agent-cmd"))
-    else:
-        # The {model}/{effort} render is checked here, before the
-        # kill: a placeholder nothing defines would otherwise fail the
-        # respawn with the old session already gone.
-        try:
-            rendered = render_agent_cmd(agent_cmd_template, home, root=root)
-        except SpawnError as err:
-            failures.append(str(err))
-        else:
-            # The host half: tmux and the agent's executable, checked
-            # before the kill for the same reason. PATH is this
-            # process's; a unit's PATH is often narrower than a login
-            # shell's, which is exactly the case this catches.
-            failures.extend(start_preflight(
-                rendered.replace("{session_id}", "x"), tmux_bin=tmux_bin,
-                which=which))
-        # The auth mode (cousin.toml [runtime] auth) is checked before
-        # the kill too: a missing key file would otherwise leave the
-        # cousin with no session at all.
-        try:
-            agent_auth.preflight(home, root)
-        except agent_auth.AuthError as err:
-            failures.append("auth: %s" % err)
-    if failures:
-        result["stages"].append({"stage": "preflight", "ok": False,
-                                 "failures": failures})
-        result["error"] = "preflight failed: " + "; ".join(failures)
-        return result
-    result["stages"].append({"stage": "preflight", "ok": True})
-
-    if not dry_run:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(json.dumps({
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "slug": slug,
-        }))
-
-    # Capture before anything destructive.
-    alive = _session_alive(session, tmux_bin, tmux_socket)
-    tail = _capture_tail(session, tmux_bin, tmux_socket) if alive else ""
-    result["stages"].append({"stage": "capture", "alive": alive,
-                             "transcript_chars": len(tail)})
-
-    send = _sender(home, tmux_bin, tmux_socket)
-    result["stages"].extend(_hand_off(
-        home, slug, session, alive=alive, dry_run=dry_run,
-        send=send, prompt=_HANDOFF_PROMPT, event="cousin-flip",
-        tmux_bin=tmux_bin, tmux_socket=tmux_socket,
-        deadline_seconds=handoff_deadline, halfway=halfway))
-
-    # Mine the dying session's transcript into raw candidates BEFORE
-    # the identity is re-minted (the transcript belongs to the old id)
-    # and before archive. Best-effort: a stage record, never a failure.
-    result["stages"].append(_mine_transcript(home, root, dry_run=dry_run))
-
-    # Archive, bump, assemble.
-    prior_gen = boot.read_generation(home)
-    if not dry_run:
-        arch = _archive_generation(home, prior_gen, transcript_tail=tail)
-        result["stages"].append({"stage": "archive", "path": str(arch)})
-    new_gen = (boot.bump_generation(home) if not dry_run
-               else prior_gen + 1)
-    result["new_generation"] = new_gen
-    packet = boot.assemble(slug, home, generation=new_gen)
-    result["boot_packet_tokens"] = packet["approx_tokens"]
-    result["degraded_sections"] = packet["degraded_sections"]
-    if dry_run:
-        result["stages"].append({"stage": "kill_and_respawn",
-                                 "skipped": "dry-run"})
-        result["ok"] = True
-        return result
-    packet_path = (Path(home) / "data"
-                   / ("boot-packet-gen-%04d.md" % new_gen))
-    packet_path.write_text(packet["text"])
-    result["stages"].append({"stage": "assemble_packet",
-                             "path": str(packet_path)})
-
-    # Kill, mint identity, respawn through the single tmux site,
-    # persist the identity - ok hangs on that persist.
-    if alive:
-        _tmux(["kill-session", "-t", session], tmux_bin, tmux_socket)
-    # A packet an earlier clean stop left is superseded by this one,
-    # which the flip injects itself below.
-    pending_boot_path(home).unlink(missing_ok=True)
-    # Minted and persisted even when the agent-cmd carries no
-    # {session_id} placeholder: the generation record is more useful
-    # with it.
-    #
-    # ORDER MATTERS, and one reader depends on it: the packet is
-    # assembled above while cousin.toml still holds the DYING id, and
-    # boot._mcp_warning reads that id to scope its MCP warning to the
-    # generation that just died. Persist earlier and the warning
-    # scopes to a session with no log yet, returns None and goes
-    # silent forever: a diagnostic that dies quietly. Guarded by
-    # tests.test_flip.TestAssembleSeesTheDyingSessionId.
-    session_id = _mint_session_id()
-    agent_cmd = agent_cmd_template.replace("{session_id}", session_id)
-    try:
-        start_cousin(home, agent_cmd=agent_cmd, tmux_bin=tmux_bin,
-                     tmux_socket=tmux_socket, root=root, record=False)
-    except SpawnError as err:
-        result["stages"].append({"stage": "respawn", "ok": False,
-                                 "error": str(err)})
-        result["error"] = "respawn failed: %s" % err
-        return result
-    result["stages"].append({"stage": "respawn", "ok": True})
-    try:
-        _persist_session_id(home, session_id)
-        persisted = True
-    except (OSError, tomllib.TOMLDecodeError) as err:
-        result["stages"].append({"stage": "persist_identity",
-                                 "ok": False, "error": str(err)})
-        persisted = False
-    if persisted:
-        result["stages"].append({"stage": "persist_identity", "ok": True})
-        handoff = next((st for st in result["stages"]
-                        if st["stage"] == "wait_handoff"), None)
-        framework_event(home, "flip", "flipped to generation %d (from %d),"
-                        " session %s; handoff %s" % (
-                            new_gen, prior_gen, session_id[:8],
-                            "not asked (no live session)" if handoff is None
-                            else "clean" if handoff["wrote_clean"]
-                            else "emergency (timed out)"),
-                        generation=new_gen)
-        # The packet's floor was distilled before this record existed;
-        # fold it in so the floor doesn't lag the flip itself by one
-        # entry until the next start. Best-effort.
-        try:
-            from cousin_lib import distill
-            distill.distill(home)
-        except Exception:
-            pass
-
-    # Inject the packet after the session settles. The seam should be
-    # invisible: no announcement unless the operator asked.
-    time.sleep(settle)
-    preamble = ("[cousin-flip] boot packet follows. Do not announce"
-                " the respawn." if not confirm else
-                "[cousin-flip] boot packet follows. Operator asked for"
-                " confirmation: post one line to your chat surface"
-                " when oriented.")
-    send(preamble + "\n" + packet["text"], "boot")
-    result["stages"].append({"stage": "inject_packet",
-                             "tokens": packet["approx_tokens"]})
-
-    marker.unlink(missing_ok=True)
-    result["ok"] = persisted
-    return result
 
 
 _STOP_AFTER = ("The cousin is being stopped; the next start boots on a"
@@ -473,7 +249,7 @@ def close_session(slug, *, tmux_bin="tmux", tmux_socket=None,
                   halfway=HANDOFF_HALFWAY_SECONDS):
     """A clean stop: the first half of a flip, then the stop. The live
     session is asked for its pre-exit writes (handoff_prompt, with the
-    memory step), its transcript is mined, the generation is archived
+    memory step), the generation is archived
     and bumped and the next packet assembled; then the agent and chat
     server stop. The packet waits in data/pending-boot.json, and the
     next start of any kind boots a fresh session on it instead of
@@ -527,7 +303,6 @@ def close_session(slug, *, tmux_bin="tmux", tmux_socket=None,
             event="cousin-stop", tmux_bin=tmux_bin,
             tmux_socket=tmux_socket, deadline_seconds=handoff_deadline,
             halfway=halfway))
-        result["stages"].append(_mine_transcript(home, root, dry_run=False))
         prior_gen = boot.read_generation(home)
         arch = _archive_generation(home, prior_gen, transcript_tail=tail)
         result["stages"].append({"stage": "archive", "path": str(arch)})

@@ -51,16 +51,6 @@ class FlipCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         agent_on_path(self, self.root)
-        # A flip respawns through start_cousin, whose default launches a
-        # REAL chat server; in a test it outlived its deleted temp home
-        # on :8100 (install re-test 5). The respawn is what is tested,
-        # not the server.
-        import functools
-        from cousin_lib import flip as flip_mod
-        start = mock.patch.object(flip_mod, "start_cousin", functools.partial(
-            flip_mod.start_cousin, start_chat_server=lambda home: None))
-        start.start()
-        self.addCleanup(start.stop)
 
     def _flip(self, **kw):
         kw.setdefault("tmux_bin", str(self.tmux))
@@ -89,7 +79,7 @@ class TestLegacyFlipRefused(FlipCase):
 
 class TestMintSessionId(unittest.TestCase):
     def test_minted_ids_stay_inside_the_charset(self):
-        from cousin_lib.flip import _mint_session_id
+        from cousin_lib.spawn import _mint_session_id
         for _ in range(20):
             self.assertRegex(_mint_session_id(), r"^[a-z0-9-]+$")
 
@@ -97,12 +87,11 @@ class TestMintSessionId(unittest.TestCase):
         # The constraint must travel with the mint and survive -O: if
         # the generation line ever changes to something that can emit
         # shell-relevant characters, the constructor itself refuses.
-        from cousin_lib import flip as flip_mod
         from cousin_lib import spawn as spawn_mod
         with mock.patch.object(spawn_mod.uuid, "uuid4",
                                return_value="Bad_ID!;rm"):
             with self.assertRaises(ValueError):
-                flip_mod._mint_session_id()
+                spawn_mod._mint_session_id()
 
 
 class TestCli(FlipCase):

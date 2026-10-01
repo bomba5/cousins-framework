@@ -2103,22 +2103,6 @@ def _print_removed(found, indent):
                                        "%s %s" % (f["where"], f["key"]), f["line"]))
 
 
-def _print_plan(p):
-    for c in p["checks"]:
-        if c["check"] == "carry" and c["ok"]:
-            print("  ok  carry")
-            for r in p["carry"]["rows"]:
-                print("        %-7s %s" % (r["action"], r["detail"]))
-            continue
-        print("  %s %-10s %s" % ("ok " if c["ok"] else "NO ", c["check"], c["detail"]))
-    for line in p.get("notes") or ():
-        print("  note %s" % line)
-    print("steps: %s" % " -> ".join(p["steps"]))
-    print("%s: %s" % (p["slug"], "ready (run: cousin-migrate apply %s%s --yes)" % (
-        p["slug"], " --validate" if any(c["check"] == "validate" for c in p["checks"]) else "")
-        if p["ready"] else "not ready"))
-
-
 def _switch_cli(args, home, root):
     live = _switch_live()
     try:
@@ -2176,11 +2160,6 @@ def migrate_main(argv=None):
     for name in ("plan", "apply"):
         p = sub.add_parser(name)
         p.add_argument("slug")
-        p.add_argument("--account", default=None,
-                       help="the config/accounts.toml account it runs on (default: the host login)")
-        p.add_argument("--validate", action="store_true",
-                       help="one smallest model turn with the model, effort and account the"
-                            " runner will run (needed when a model is carried: %s)" % NEVER_UNRUN)
         p.add_argument("--to", choices=SWITCH_KINDS, default=None,
                        help="switch a runner cousin between the sdk and tmux kinds")
         if name == "apply":
@@ -2190,8 +2169,6 @@ def migrate_main(argv=None):
     p.add_argument("--yes", action="store_true")
     p.add_argument("--to", choices=SWITCH_KINDS, default=None,
                    help="roll a kind switch back to the kind it came from")
-    p.add_argument("--force", action="store_true",
-                   help="roll back with inbox rows waiting, or an inbox that cannot be read")
     p = sub.add_parser("check")
     p.add_argument("slug")
     p.add_argument("--since", default=None,
@@ -2221,7 +2198,7 @@ def migrate_main(argv=None):
         if args.since and since is None:
             print("error: --since %r is not an ISO time" % args.since, file=sys.stderr)
             return 2
-        c = check(home, since=since, health=chat_health, root=root, validate=args.validate)
+        c = check(home, since=since, root=root, validate=args.validate)
         if args.json:
             print(json.dumps(c, indent=1))
         else:
@@ -2232,7 +2209,6 @@ def migrate_main(argv=None):
             print("tool calls: %d, unrecorded: %s" % (c["tool_calls"],
                                                       ", ".join(c["unrecorded"]) or "none"))
             print("recorder hook errors: %s" % ("; ".join(c["hook_errors"]) or "none"))
-            print("chat server: %s" % c["chat"])
             print("runner CLI: %s" % c["cli"])
             if c.get("switch"):
                 sw = c["switch"]
@@ -2252,45 +2228,14 @@ def migrate_main(argv=None):
         return 0 if c["ok"] else 1
     if not getattr(args, "to", None):
         # 2.0.0 keeps no conversion from the legacy lane, so a
-        # plan, apply or rollback names a kind; the legacy migration below
-        # is not reached.
+        # plan, apply or rollback names a kind.
         print("error: %s" % no_kind_line(home), file=sys.stderr)
         return 2
     if args.cmd in ("apply", "rollback") and not args.yes:
         print("error: %s changes a live cousin; run `cousin-migrate plan %s` first, then"
               " pass --yes" % (args.cmd, args.slug), file=sys.stderr)
         return 2
-    if getattr(args, "to", None):
-        return _switch_cli(args, home, root)
-    live = _live()
-    try:
-        if args.cmd == "plan":
-            p = plan(home, root=root, account=args.account, validate=args.validate, **live)
-            _print_plan(p)
-            return 0 if p["ready"] else 1
-        if args.cmd == "apply":
-            rec = apply(home, root=root, account=args.account, validate=args.validate, **live)
-        else:
-            rec = rollback(home, root=root, force=args.force, **live)
-    except MigrateError as err:
-        print("error: %s" % err, file=sys.stderr)
-        return 2
-    for s in rec.get("steps", []) if args.cmd == "apply" else rec.get("rollback_steps", []):
-        print("  %s %-10s %s" % ("ok " if s.get("ok", True) else "NO ", s["step"], s["detail"]))
-    if args.cmd == "apply":
-        for line in rec.get("warnings") or ():
-            print("  warn %s" % line)
-        got = rec.get("handover")
-        if got is not None:
-            for t in got["transcripts"]:
-                print("previous transcript (%s): %s" % (t["which"], t["path"]))
-            if got["missing"]:
-                print("previous transcript missing: %s" % got["missing"])
-    print("%s: %s" % (args.slug, rec["state"]))
-    if rec["state"] == "failed":
-        print("undo with: cousin-migrate rollback %s --yes" % args.slug)
-        return 1
-    return 0
+    return _switch_cli(args, home, root)
 
 
 if __name__ == "__main__":

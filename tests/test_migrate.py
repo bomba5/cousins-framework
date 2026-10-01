@@ -155,12 +155,6 @@ class TestPlan(HermeticCase):
         root, home = _root(self)
         p = migrate.plan(home, root=root, validate=True, account="team", **Live().kw())
         self.assertNotIn("warnings", p)
-        import contextlib
-        import io
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            migrate._print_plan(p)
-        self.assertNotIn("2.0.0", out.getvalue())
 
     def test_the_plan_lists_the_mcp_servers_the_runner_will_load_by_name(self):
         root, home = _root(self)
@@ -182,10 +176,6 @@ class TestPlan(HermeticCase):
         self.assertNotIn("plain-4b1d", json.dumps(p))  # names only
         self.assertNotIn("ha.example", json.dumps(p))
         self.assertEqual(_tree(root), before)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            migrate._print_plan(p)
-        self.assertIn("ha, notes", out.getvalue())
 
     def test_the_plan_says_when_there_is_no_mcp_json(self):
         root, home = _root(self)
@@ -879,6 +869,8 @@ class TestValidateTheModel(HermeticCase):
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             migrate.migrate_main(["check", "wren"])
         self.assertIn("runner CLI: Claude Code 2.1.277 (b)", out.getvalue())
+        # no per-cousin chat server to report on in 2.0.0
+        self.assertNotIn("chat server", out.getvalue())
 
     @unittest.skipUnless(importlib.util.find_spec("claude_agent_sdk"), "needs the sdk extra")
     def test_the_runner_cli_is_the_sdks_bundled_version(self):
@@ -1036,15 +1028,27 @@ class TestNoLegacyPath(HermeticCase):
         from cousin_lib.delivery import lane_refusal
         root, home = _root(self)
         before = _tree(root)
-        for argv in (("plan", "wren"), ("plan", "wren", "--account", "team", "--validate"),
-                     ("apply", "wren", "--yes"), ("apply", "wren"),
-                     ("rollback", "wren", "--yes"), ("rollback", "wren", "--force")):
+        for argv in (("plan", "wren"), ("apply", "wren", "--yes"), ("apply", "wren"),
+                     ("rollback", "wren", "--yes")):
             rc, out, err = self._main(*argv)
             self.assertEqual(rc, 2, argv)
             self.assertIn(lane_refusal(home), err, argv)
             self.assertEqual(out, "", argv)
         self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
         self.assertEqual(_tree(root), before)
+
+    def test_the_legacy_migrations_flags_are_gone(self):
+        # plan/apply --account and --validate, rollback --force: read only by
+        # the legacy migration, which no argv reaches; refused, not ignored
+        root, home = _root(self)
+        for argv in (("plan", "wren", "--to", "sdk", "--account", "team"),
+                     ("plan", "wren", "--to", "sdk", "--validate"),
+                     ("apply", "wren", "--to", "sdk", "--yes", "--account", "team"),
+                     ("apply", "wren", "--to", "sdk", "--yes", "--validate"),
+                     ("rollback", "wren", "--to", "sdk", "--yes", "--force")):
+            with self.assertRaises(SystemExit) as caught:
+                self._main(*argv)
+            self.assertEqual(caught.exception.code, 2, argv)
 
     def test_without_to_on_a_runner_cousin_it_names_the_kinds(self):
         root, home = _root(self)

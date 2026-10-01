@@ -3,6 +3,7 @@ accounts and the keys each lane reads; the spawn route puts a runner
 cousin's model in [agent]; the fleet row says which lane, account, hold,
 auto start and login wait a cousin has (audit defects 1 and 2, WP0)."""
 import json
+import os
 import tomllib
 import unittest
 from unittest import mock
@@ -79,6 +80,19 @@ class SpawnARunnerCousin(ConsoleCase):
             "runner": "sdk", "account": "oc"})
         self.assertEqual(status, 400, body)
         self.assertIn("opencode", body["error"])
+        self.assertFalse((self.root / "cousins" / "toki").exists())
+
+    def test_an_opencode_cousin_without_the_binary_is_a_400_that_says_why(self):
+        os.environ.pop("COUSIN_OPENCODE_BIN", None)
+        os.environ["COUSIN_IN_CONTAINER"] = "1"
+        os.environ["PATH"] = str(self.root / "empty-bin")
+        self.serve()
+        status, body = self.post("/api/cousins", {
+            "slug": "toki", "role": "tester", "voice": "plain",
+            "runner": "opencode", "account": "oc", "model": "openai/gpt-5"})
+        self.assertEqual(status, 400, body)
+        self.assertIn("opencode binary not found or not executable", body["error"])
+        self.assertIn("cp compose.opencode.yml compose.override.yml", body["error"])
         self.assertFalse((self.root / "cousins" / "toki").exists())
 
 

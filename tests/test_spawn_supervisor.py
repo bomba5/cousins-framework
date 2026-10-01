@@ -422,8 +422,46 @@ class TestCreateARunnerCousinsModel(_CreateCase):
         self.assertIn("kind opencode", self.refused(runner="sdk", account="oc"))
         self.assertIn("P9-1", self.refused(runner="opencode", account="oc",
                                            model="openai/claude-x"))
+        os.environ["COUSIN_OPENCODE_BIN"] = self.fake_opencode()
         self.create(runner="opencode", account="oc", model="openai/gpt-5")
         self.assertEqual(tomllib.loads(self.toml())["agent"]["model"], "openai/gpt-5")
+
+    def fake_opencode(self):
+        path = self.dir / "bin" / "opencode"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+        return str(path)
+
+    def no_opencode(self):
+        (self.root / "config" / "accounts.toml").write_text(
+            ACCOUNTS + '\n[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
+        os.environ.pop("COUSIN_OPENCODE_BIN", None)
+        empty = self.dir / "empty"
+        empty.mkdir(exist_ok=True)
+        os.environ["PATH"] = str(empty)
+
+    def test_an_opencode_cousin_without_the_binary_is_refused_on_a_host(self):
+        self.no_opencode()
+        os.environ.pop("COUSIN_IN_CONTAINER", None)
+        why = self.refused(runner="opencode", account="oc", model="openai/gpt-5")
+        self.assertIn("opencode binary not found or not executable: opencode", why)
+        self.assertIn("COUSIN_OPENCODE_BIN", why)
+
+    def test_an_opencode_cousin_without_the_binary_is_refused_in_the_image(self):
+        self.no_opencode()
+        os.environ["COUSIN_IN_CONTAINER"] = "1"
+        why = self.refused(runner="opencode", account="oc", model="openai/gpt-5")
+        self.assertIn("this image has no opencode", why)
+        self.assertIn("cp compose.opencode.yml compose.override.yml", why)
+
+    def test_the_binary_named_by_the_env_is_the_one_checked(self):
+        self.no_opencode()
+        os.environ["COUSIN_OPENCODE_BIN"] = str(self.dir / "no-such-opencode")
+        self.assertIn("no-such-opencode",
+                      self.refused(runner="opencode", account="oc", model="openai/gpt-5"))
+        os.environ["COUSIN_OPENCODE_BIN"] = self.fake_opencode()
+        self.create(runner="opencode", account="oc", model="openai/gpt-5")
 
 
 class TestSpawnCliOnTheRunnerLane(_CreateCase):
@@ -441,6 +479,21 @@ class TestSpawnCliOnTheRunnerLane(_CreateCase):
         rc, out, err = self.cli(*self.ARGS, "--runner", "fake", "--account", "nobody")
         self.assertEqual(rc, 2)
         self.assertIn("nobody", err)
+        self.assertFalse(self.home.exists())
+
+    def test_an_opencode_cousin_without_the_binary_exits_2_before_any_start(self):
+        (self.root / "config" / "accounts.toml").write_text(
+            ACCOUNTS + '\n[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
+        os.environ.pop("COUSIN_OPENCODE_BIN", None)
+        os.environ["COUSIN_IN_CONTAINER"] = "1"
+        os.environ["PATH"] = str(self.dir / "empty-bin")
+        stub = self.stub()
+        rc, out, err = self.cli(*self.ARGS, "--runner", "opencode", "--account", "oc",
+                                "--model", "openai/gpt-5", "--start")
+        self.assertEqual(rc, 2, out)
+        self.assertIn("opencode binary not found or not executable: opencode", err)
+        self.assertIn("cp compose.opencode.yml compose.override.yml", err)
+        self.assertEqual(stub.ops(), [])
         self.assertFalse(self.home.exists())
 
     def test_start_on_the_runner_lane_asks_the_supervisor_not_tmux(self):

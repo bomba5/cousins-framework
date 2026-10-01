@@ -29,7 +29,7 @@ alone on an existing cousin it starts it, and `--start --resume` resumes its
 last session instead of opening a new one; `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
 and account (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER`,
 else `sdk`, and `COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]`
-too, where the runner reads them, and only on a [lane](glossary.md#lane) that reads them); `--start`
+too, where the runner reads them, and only on a [lane](glossary.md#lane) that reads them; `--runner opencode` is refused before anything is written when the opencode binary is not found); `--start`
 starts it through `cousin-supervisor`;
 `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its

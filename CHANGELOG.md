@@ -22,6 +22,18 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `--method ... --via`), so its runner retries at once, as on a manual
   retry. Only after a good login, only the `--via` cousin's file, and
   never a file naming another account.
+- **A missing opencode binary says what to do.** An opencode cousin on the
+  default image (which has no opencode) failed every start with only
+  "opencode binary not found or not executable: opencode". Inside the
+  framework's image the error now says the image has no opencode and names
+  the fix on the Docker host: `cp compose.opencode.yml compose.override.yml
+  && docker compose up -d --build`. Outside it, the error says to install
+  opencode on `PATH` or name the binary in `COUSIN_OPENCODE_BIN` or
+  `[agent] opencode_bin`. `cousin-spawn --runner opencode` and the
+  console's spawn dialog now refuse a new opencode cousin with the same
+  message when the binary is not found, before anything is written.
+  docs/install.md makes switching to the opencode image a separate first
+  step.
 
 ## 2.3.4 - 2026-10-01
 

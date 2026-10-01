@@ -63,10 +63,18 @@ out is to put your one override in `compose.override.yml` and never use
 
 ### A first cousin on opencode's free model
 
-From the checkout, with nothing else set up:
+From the checkout, with nothing else set up. First, before the first
+start, switch to the opencode image: the default image has no opencode
+binary, and an opencode cousin on it is refused (`opencode binary not
+found or not executable`):
 
 ```
 cp compose.opencode.yml compose.override.yml
+```
+
+Then start it:
+
+```
 docker compose up -d --build
 docker compose logs framework
 ```

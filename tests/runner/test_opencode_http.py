@@ -170,6 +170,37 @@ class TestOpencodeServer(ServerCase):
             srv.start()
         self.assertIn("no-such-opencode", str(err.exception))
 
+    def missing(self):
+        empty = self.dir / "empty"
+        empty.mkdir(exist_ok=True)
+        srv = OpencodeServer("opencode", cwd=self.home, env=self.env(PATH=str(empty)),
+                             config_path=self.config)
+        with self.assertRaises(OpencodeError) as err:
+            srv.start()
+        return str(err.exception)
+
+    def test_a_missing_binary_on_a_host_says_how_to_install_or_name_it(self):
+        os.environ.pop("COUSIN_IN_CONTAINER", None)
+        text = self.missing()
+        self.assertEqual(text, opencode_http.missing_binary("opencode"))
+        self.assertTrue(text.startswith("opencode binary not found or not executable: opencode"))
+        for part in ("install opencode", "PATH", "COUSIN_OPENCODE_BIN", "[agent] opencode_bin"):
+            self.assertIn(part, text)
+        self.assertNotIn("compose", text)
+
+    def test_a_missing_binary_in_the_image_names_the_opencode_image(self):
+        """The default image has no opencode: the error says which image to
+        run instead and the command that does it, on the Docker host."""
+        os.environ["COUSIN_IN_CONTAINER"] = "1"
+        text = self.missing()
+        self.assertEqual(text, opencode_http.missing_binary("opencode"))
+        self.assertTrue(text.startswith("opencode binary not found or not executable: opencode"))
+        self.assertIn("this image has no opencode", text)
+        self.assertIn("on the Docker host", text)
+        self.assertIn("`cp compose.opencode.yml compose.override.yml"
+                      " && docker compose up -d --build`", text)
+        self.assertNotIn("COUSIN_OPENCODE_BIN", text)
+
 
 class TestOrphans(ServerCase):
     """Review Important 2: `opencode serve` runs in its own session, so the

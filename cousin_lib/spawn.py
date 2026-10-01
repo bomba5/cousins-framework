@@ -204,6 +204,17 @@ def spawn_lane(root, runner=None, account=None):
     return runner, account
 
 
+def _check_opencode_binary():
+    """A new opencode cousin's binary, as its runner will look for it (no
+    [agent] opencode_bin yet: COUSIN_OPENCODE_BIN, else `opencode` on
+    PATH): SpawnError with what to do when it is missing, before any write,
+    so the default image refuses here and not at every start."""
+    from cousin_lib.runner import opencode, opencode_http
+    argv0 = opencode.opencode_bin({})
+    if not opencode_http.find_binary(argv0, os.environ.get("PATH", os.defpath)):
+        raise SpawnError(opencode_http.missing_binary(argv0))
+
+
 def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
                   voice=None, port=None, template_path=None, operator=None,
                   model=None, effort=None, heartbeat=None, memory_scope=None,
@@ -244,6 +255,8 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
             agent_settings.check_new(root, table)
         except agent_settings.SettingsError as err:
             raise SpawnError("[agent] for runner %s: %s" % (runner, err))
+    if runner == "opencode":
+        _check_opencode_binary()
     home = root / "cousins" / slug
     if (home / "cousin.toml").is_file():
         raise SpawnError("cousin %r already exists" % slug)

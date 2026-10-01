@@ -75,6 +75,33 @@ class OpencodeError(Exception):
         self.body = body
 
 
+# The default image has no opencode binary; compose.opencode.yml runs the
+# one that has (docs/install.md, "Install with Docker").
+IMAGE_HINT = ("this image has no opencode: run the opencode image instead, on the Docker"
+              " host: `cp compose.opencode.yml compose.override.yml && docker compose up -d"
+              " --build` (with -f files, add -f compose.opencode.yml to every compose command)")
+HOST_HINT = ("install opencode and put it on PATH, or name the binary in COUSIN_OPENCODE_BIN"
+             " or the cousin's [agent] opencode_bin")
+
+
+def find_binary(argv0, path=None):
+    """`argv0` as the server would exec it: a path when it names one and is
+    executable, else looked up on `path` (os.defpath when None); None when
+    neither finds it."""
+    argv0 = str(argv0)
+    if os.sep in argv0:
+        return argv0 if os.access(argv0, os.X_OK) else None
+    return shutil.which(argv0, path=os.defpath if path is None else path)
+
+
+def missing_binary(argv0):
+    """The refusal for an opencode binary that cannot be found, with what to
+    do about it: inside the framework's image, which image to run; on a
+    host, how to install or name the binary."""
+    return "opencode binary not found or not executable: %s; %s" % (
+        argv0, IMAGE_HINT if accounts.in_container() else HOST_HINT)
+
+
 def _basic(password):
     return "Basic " + base64.b64encode(("%s:%s" % (USERNAME, password)).encode()).decode()
 
@@ -297,12 +324,9 @@ class OpencodeServer:
         return env
 
     def _binary(self, env):
-        if os.sep in self.argv0:
-            found = self.argv0 if os.access(self.argv0, os.X_OK) else None
-        else:
-            found = shutil.which(self.argv0, path=env.get("PATH", os.defpath))
+        found = find_binary(self.argv0, env.get("PATH", os.defpath))
         if not found:
-            raise OpencodeError("opencode binary not found or not executable: %s" % self.argv0)
+            raise OpencodeError(missing_binary(self.argv0))
         return found
 
     def start(self):

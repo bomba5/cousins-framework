@@ -277,7 +277,7 @@ it forwards to the node's own chat endpoint ([console](console.md)).
 - The media button in the chat header hides or shows all attachments.
   It's remembered in your browser only.
 - Search, reply-to, reactions, archive and the [reasoning pane](console.md#the-reasoning-pane-a-runner-cousin) (the
-  runner's live stream of the cousin's turns, with the interrupt) are all
+  runner's live [stream](glossary.md#stream) of the cousin's turns, with the interrupt) are all
   in the same view.
 
 ## Telegram bridge

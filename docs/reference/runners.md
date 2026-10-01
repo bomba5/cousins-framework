@@ -30,7 +30,7 @@ in the cousin's stream, which the console shows.
 | `waiting_permission` | the agent CLI asked for a permission (`sdk` kind); the turn goes on, and the state is `running` again at the CLI's next message. A `policy.toml` `ask` passes through it and is enforced as a deny | `running`, `idle`, `errored`, `stopped` |
 | `rate_limited` | the account hit its usage limit; the runner claims nothing until the limit's reset time, then goes `idle`. Queued rows wait, none is lost (`sdk` and `tmux`; opencode retries on its own) | `running`, `idle`, `errored`, `stopped` |
 | `rolling_over` | the cousin is handing off to a new session (context pressure, the daily flip or an explicit flip); rows wait for it | `idle`, `errored`, `stopped` |
-| `errored` | a turn or the connection failed. After a turn's failure the runner recovers to `idle` and runs the next row. When the account needs a login it stays `errored` and waits for one (`cousin-chat list` says LOGIN REQUIRED); when it cannot connect, `cousin-runner` exits and the supervisor restarts it | `idle`, `stopped` |
+| `errored` | a turn or the connection failed. After a turn's failure the runner recovers to `idle` and runs the next row. When the account needs a login it stays `errored` and waits for one (`cousin-chat list` says LOGIN REQUIRED); when it cannot connect, `cousin-runner` exits and the [supervisor](../glossary.md#supervisor) restarts it | `idle`, `stopped` |
 | `stopped` | the runner was stopped; nothing leaves this state, a start is a new runner | none |
 
 Anything that reaches a cousin (chat, a reaction, a loop, a schedule, a

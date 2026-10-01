@@ -40,7 +40,7 @@ Everything below is relative to the cousin home.
 |---|---|---|---|
 | Active state | `STATUS.md`, `data/handoff.md`, `data/handoff-manual.md`, `data/active-threads.md`, `data/session-checkpoint.md`, `data/pre-compact-checkpoint.md` | the cousin; the checkpoint files by the harness hooks | boot packet, heartbeat, session start hook |
 | Index | `MEMORY.md` | the cousin | boot packet (the first 1000 characters), heartbeat |
-| Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining after each turn, a transplant merge | distiller, boot packet |
+| Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining after each [turn](glossary.md#turn), a transplant merge | distiller, boot packet |
 | Monthly digests | `memory/raw/YYYY-MM-digest.jsonl` | the raw fold | distiller, boot packet |
 | Raw archive | `memory/raw/archive/YYYY-MM.jsonl.gz` | the raw fold | search (an entry also in a monthly digest is indexed once), explorer |
 | Distilled views | `memory/distilled/*.md` | the distiller | boot packet |
@@ -49,7 +49,7 @@ Everything below is relative to the cousin home.
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
 | Corrections | `data/corrections.jsonl` | the chat send path, from your messages | boot packet (calibration layer) |
 | Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
-| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off by the `sdk` and `tmux` runner kinds) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
+| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off by the `sdk` and `tmux` [runner](glossary.md#runner) kinds) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
 | Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
@@ -61,7 +61,7 @@ A few notes on the ones that aren't obvious.
 **Active state** is what the cousin is doing right now. `STATUS.md`
 holds the open loops, `data/handoff.md` is what the last generation
 told the next one, and `data/active-threads.md` is one bullet per thread in flight.
-The `handoff` tool writes them when a flip ends a session (the thread
+The `handoff` tool writes them when a flip ends a session (its `active_threads`
 list when the cousin gives one).
 `data/handoff-manual.md` is for a handoff written by hand; the
 framework never writes it. The two checkpoint files come from the

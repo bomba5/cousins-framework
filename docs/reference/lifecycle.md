@@ -73,7 +73,7 @@ cousin-flip wren --dry-run      # checks the cousin can be flipped; no rollover
 
 The console's flip button, a timed flip and a daily `flip_at` all call the same function ([loops](loops.md#flips)). A cousin never flips itself.
 
-`cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's [inbox](../glossary.md#inbox) (the same row `Runner.rollover` puts when the context fills up) and wait for its answer, up to the handoff deadline plus a minute. One rollover is pending per cousin: a second request joins the first, except a long or multi-line reason (a bequest), which is never merged away. The runner claims the row between turns, never in the middle of one.
+`cousin-flip`, the loops daemon and the lifecycle commands run in another process than the runner, so they put a `flip` row into the cousin's [inbox](../glossary.md#inbox) (the same row `Runner.rollover` puts when the context fills up) and wait for its answer, up to the handoff deadline plus a minute. One rollover is pending per cousin: a second request joins the first, except a long or multi-line reason (a bequest), which is never merged away. The runner claims the row between [turns](../glossary.md#turn), never in the middle of one.
 
 The row's body is the reason, and the model reads it in its handoff request: `cousin-flip` by hand, `max_age` from the daily `flip_at` cadence, `timed flip` from a timed flip, the bequest text from reincarnate.
 

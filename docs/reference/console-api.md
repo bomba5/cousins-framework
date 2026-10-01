@@ -65,7 +65,7 @@ Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"o
 
 ## Telegram
 
-Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process is a `cousin-supervisor` child (`telegram:<slug>`) that follows its cousin's runner: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. These routes write `cousin.toml` and ask the [supervisor](../glossary.md#supervisor) to rescan, and never start a bridge themselves.
+Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process is a `cousin-supervisor` child (`telegram:<slug>`) that follows its cousin's [runner](../glossary.md#runner): it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. These routes write `cousin.toml` and ask the [supervisor](../glossary.md#supervisor) to rescan, and never start a bridge themselves.
 
 A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last five people who wrote to the bot and were refused, so they can be added without looking up a numeric id. Anyone who messages the bot can appear there.
 

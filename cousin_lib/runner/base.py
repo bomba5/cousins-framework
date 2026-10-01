@@ -1,6 +1,6 @@
 """The runner contract every runner is written against.
 
-docs/design/agent-loop-runner.md, "The runner". The Protocol below is
+docs/reference/runners.md, "What a runner is". The Protocol below is
 the locked interface from the master plan; every runner kind implements
 it (`FakeRunner`, `SdkRunner`, `OpencodeRunner`, `TmuxRunner`) and one
 contract suite tests them.

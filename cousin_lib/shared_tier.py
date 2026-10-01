@@ -23,7 +23,15 @@ class PromoteRefused(Exception):
     """Promotion cannot proceed; the message says why and how to fix."""
 
 
-def _shared_root():
+# The house rules a fresh install ships with (docs/house-rules.md): every
+# *.md directly in it is seeded; examples/ below it never is.
+HOUSE_RULES = Path(__file__).resolve().parents[1] / "templates" / "shared"
+SEED_ACTOR = "install"
+
+
+def _shared_root(root=None):
+    if root is not None:
+        return Path(root) / "shared"
     return FrameworkConfig.from_env().root / "shared"
 
 
@@ -31,10 +39,10 @@ def _proposed_name(slug, file):
     return "%s__%s.md" % (slug, Path(file).stem)
 
 
-def _audit(kind, actor, file, extra=None):
+def _audit(kind, actor, file, extra=None, root=None):
     """Append-only write log with source attribution - every mutation
     of the tier leaves a row, successes and overwrites alike."""
-    path = _shared_root() / "audit.jsonl"
+    path = _shared_root(root) / "audit.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -46,6 +54,56 @@ def _audit(kind, actor, file, extra=None):
         entry.update(extra)
     with open(path, "a") as fh:
         fh.write(json.dumps(entry) + "\n")
+
+
+def _seeded(root):
+    """The file names a seed row of the audit already names: written or
+    kept, each is the install's to keep or delete from then on."""
+    try:
+        lines = (_shared_root(root) / "audit.jsonl").read_text().splitlines()
+    except OSError:
+        return set()
+    names = set()
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("kind") == "seed":
+            names.add(entry.get("file"))
+    return names
+
+
+def seed_house_rules(root, *, source=None):
+    """Copy the shipped house rules into <root>/shared/ as canonical
+    entries, like a config default: they come with the install, so they
+    skip the propose/promote review. Each file is seeded at most once,
+    ever: a name with a seed row in the audit is never looked at again,
+    so a rule the operator deleted stays deleted and a later release's
+    new rule still arrives. An existing file is never overwritten (its
+    row says "kept"). Returns the names written."""
+    source = HOUSE_RULES if source is None else Path(source)
+    shared = _shared_root(root)
+    done = _seeded(root)
+    written = []
+    for template in sorted(source.glob("*.md")):
+        name = template.name
+        if name in done or not template.is_file():
+            continue
+        body = template.read_text()
+        shared.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(shared / name, "x") as fh:     # never clobbers, even racing
+                fh.write(body)
+        except FileExistsError:
+            _audit("seed", SEED_ACTOR, name, {"action": "kept"}, root=root)
+            continue
+        _audit("seed", SEED_ACTOR, name, {
+            "action": "written",
+            "sha": hashlib.sha256(body.encode()).hexdigest()[:12],
+        }, root=root)
+        written.append(name)
+    return written
 
 
 def list_shared():

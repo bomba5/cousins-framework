@@ -17,6 +17,15 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   named. The login lands in the image user's `~/.claude`, on the volume
   (`HOME=/data/home`), so it stays across a restart. Outside the image the
   line is unchanged.
+- **The fleet row's `tmuxSession` and `auth` say what a runner cousin
+  has.** `GET /api/cousins` gave every cousin `[chat] tmux_session` (default
+  the slug) and the legacy lane's `[runtime] auth` mode (default `claude`),
+  so an opencode cousin read as a Claude login in a tmux session. Both keys
+  stay; on a runner cousin `auth` is now null (no runner reads the mode;
+  the credential is the row's `account`) and `tmuxSession` is null, except
+  on the `tmux` kind, where it is the runner's own `tmux-<slug>` (the row
+  said the slug, a session that does not exist). `tmux-legacy` rows are
+  unchanged. The inspector shows "none" for a null session.
 
 ## 2.3.3 - 2026-10-01
 

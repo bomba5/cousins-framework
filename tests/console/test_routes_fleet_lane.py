@@ -165,5 +165,46 @@ class RowLaneFields(ConsoleCase):
                          ("sdk", "host", False, True, None))
 
 
+class RowTmuxSessionAndAuth(ConsoleCase):
+    """`tmuxSession` and `auth` say what the cousin's lane has: a tmux
+    session name and a [runtime] auth mode on the legacy lane, the tmux
+    runner's own session name on the tmux kind, null on every other
+    runner (its credential is `account`). The keys stay on every row."""
+
+    def row(self, slug):
+        return next(c for c in self.get("/api/cousins")[1]["cousins"] if c["slug"] == slug)
+
+    def test_the_legacy_lane_keeps_its_session_and_mode(self):
+        self.cousin("tess")
+        self.serve()
+        row = self.row("tess")
+        self.assertEqual((row["tmuxSession"], row["auth"]), ("tess", "claude"))
+
+    def test_an_opencode_cousin_has_no_session_and_no_claude_mode(self):
+        self.cousin("toki", extra='\n[agent]\nrunner = "opencode"\naccount = "oc"\n'
+                                  'model = "opencode/m-one"\n')
+        self.serve()
+        row = self.row("toki")
+        self.assertIn("tmuxSession", row); self.assertIn("auth", row)
+        self.assertEqual((row["lane"], row["tmuxSession"], row["auth"]),
+                         ("opencode", None, None))
+        self.assertEqual(row["account"], "oc")
+
+    def test_an_sdk_cousin_has_no_session_and_no_legacy_mode(self):
+        self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\n')
+        self.serve()
+        row = self.row("wren")
+        self.assertEqual((row["tmuxSession"], row["auth"]), (None, None))
+
+    def test_the_tmux_runner_names_its_own_session(self):
+        from cousin_lib.runner import tmux_runner
+        home = self.cousin("sam", extra='\n[agent]\nrunner = "tmux"\n')
+        self.serve()
+        row = self.row("sam")
+        self.assertEqual((row["tmuxSession"], row["auth"]),
+                         (tmux_runner.session_name(home), None))
+        self.assertEqual(row["tmuxSession"], "tmux-sam")
+
+
 if __name__ == "__main__":
     unittest.main()

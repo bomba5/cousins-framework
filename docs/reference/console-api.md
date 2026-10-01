@@ -371,14 +371,14 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `slug`, `name`, `role` | from `[cousin]` |
 | `type` | `cousin`, `worker`, or `remote` (a hive node) |
 | `home` | the cousin's home directory |
-| `tmuxSession` | `[chat] tmux_session`, default the slug |
+| `tmuxSession` | the tmux session the cousin runs in: on `tmux-legacy`, `[chat] tmux_session`, default the slug; on the `tmux` runner kind, the runner's own `tmux-<slug>`; null on every other runner kind (`sdk`, `opencode`, `fake`), which has no tmux session |
 | `operator` | `[operator] name`, or null |
 | `memoryScope` | `private`, `shared` or `both` |
 | `heartbeat` | context heartbeat in seconds (default 3600) |
 | `flipAt` | `[lifecycle] flip_at`, or null |
 | `model`, `effort` | what the next start will use: the cousin's `[runtime]` value, else `config/harness.toml [agent]` default, else null |
 | `hidden` | `[cousin] hidden` |
-| `auth` | `claude` or `api_key`; null if cousin.toml holds a mode the framework doesn't know |
+| `auth` | the legacy lane's `[runtime] auth` mode, `claude` or `api_key`, on `tmux-legacy`; null if cousin.toml holds a mode the framework doesn't know. Null on every runner kind: no runner reads the mode, and a runner cousin's credential is its `account` |
 | `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. [Worker](../glossary.md#worker): always `running`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). |
 | `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
 | `chat` | `console` for a runner cousin, whose chat the console serves itself; for any other cousin `ok`, `down` or `none` (no port) from an upstream chat server's `/health` |

@@ -330,7 +330,7 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>home</dt><dd style={{ wordBreak: "break-all" }}>{c.home}</dd>
           <dt>operator</dt><dd><IdentityField cousin={c} field="operator" options={options} /></dd>
           <dt>scope</dt><dd><IdentityField cousin={c} field="memory_scope" options={options} /></dd>
-          <dt>tmux</dt><dd>{c.tmuxSession}</dd>
+          <dt>tmux</dt><dd>{c.tmuxSession || "none"}</dd>
           <dt>chat</dt><dd>{c.chat || "none"}</dd>
           <dt>heartbeat</dt><dd><IdentityField cousin={c} field="heartbeat" options={options} /></dd>
           {/* model, effort and the auth mode are the tmux-legacy lane's

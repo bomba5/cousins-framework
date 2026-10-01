@@ -323,20 +323,21 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD, plugin
     elif status == "running" and config.type != "worker" \
             and not config.chat_host:
         pid = _pane_pid(server, config)
+    lane = lane_fields(config.home)
     return {
         "slug": config.slug,
         "name": config.name,
         "role": str(cousin.get("role", "")),
         "type": config.type,
         "home": str(config.home),
-        "tmuxSession": config.tmux_session,
+        "tmuxSession": _tmux_session(config, lane["lane"]),
         "operator": config.operator_name,
         "memoryScope": config.memory_scope,
         "heartbeat": config.heartbeat_seconds,
         "flipAt": config.flip_at,
         **effective_runtime(config, defaults),
         "hidden": bool(cousin.get("hidden", False)),
-        "auth": _auth_mode(config.home),
+        "auth": _auth_mode(config.home, lane["lane"]),
         "status": status,
         "attention": attention,
         "chat": chat,
@@ -354,13 +355,31 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD, plugin
         "removedKeys": removed_keys.scan_home(config.home),
         # the plugins it enables, each with its console tab or null
         "plugins": _plugins(server, config, plugins),
-        **lane_fields(config.home),
+        **lane,
     }
 
 
-def _auth_mode(home):
-    """The cousin's auth mode for its row; null when cousin.toml holds
-    a value the framework does not know (the start would refuse it)."""
+def _tmux_session(config, lane):
+    """The row's tmux session: `[chat] tmux_session` on the legacy lane,
+    the tmux runner's own session on the tmux kind, null on every other
+    runner (sdk, opencode, fake), which has none."""
+    from cousin_lib import agent_settings
+    if lane == agent_settings.TMUX_LEGACY:
+        return config.tmux_session
+    if lane == "tmux":
+        from cousin_lib.runner import tmux_runner
+        return tmux_runner.session_name(config.home)
+    return None
+
+
+def _auth_mode(home, lane):
+    """The cousin's [runtime] auth mode for a legacy-lane row; null when
+    cousin.toml holds a value the framework does not know (the start
+    would refuse it). A runner cousin's row has null: no runner reads
+    the mode, its credential is the row's `account`."""
+    from cousin_lib import agent_settings
+    if lane != agent_settings.TMUX_LEGACY:
+        return None
     try:
         return agent_auth.read_mode(home)
     except agent_auth.AuthError:

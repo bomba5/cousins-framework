@@ -373,7 +373,7 @@ class TmuxRunner:
         if self._pane_factory is not None:
             return self._pane_factory(path)
         sock = self._socket or (Path(self.root) / "run" / "tmux.sock")
-        return TmuxPane(sock, "tmux-%s" % self.home.name)
+        return TmuxPane(sock, session_name(self.home))
 
     def _argv(self, fresh):
         if self._launch_argv is not None:
@@ -1645,13 +1645,19 @@ class TmuxRunner:
 REAP_EXIT_OK, REAP_EXIT_NO_PANE = 0, 0
 
 
+def session_name(home):
+    """The tmux session a tmux-kind cousin runs in (the runner's own
+    choice, interfaces I3; never `[chat] tmux_session`)."""
+    return "tmux-%s" % Path(home).name
+
+
 def pane_for(home, *, socket=None):
     """The pane a tmux-kind cousin runs in: the framework socket, the
-    cousin's session name (the runner's own choice, interfaces I3)."""
+    cousin's session name (session_name)."""
     from cousin_lib.config import FrameworkConfig
     home = Path(home)
     root = FrameworkConfig.root_from_home(home) or home.parent.parent
-    return TmuxPane(socket or (Path(root) / "run" / "tmux.sock"), "tmux-%s" % home.name)
+    return TmuxPane(socket or (Path(root) / "run" / "tmux.sock"), session_name(home))
 
 
 def reap_pane(home, *, pane=None):

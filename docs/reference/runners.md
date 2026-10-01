@@ -7,8 +7,8 @@ each kind does with every item of the runner contract. For the keys, read
 
 ## What a runner is
 
-A runner is the process that drives a [cousin](../glossary.md#cousin)'s agent loop in place of a tmux
-pane. `cousin-runner --home <home>` (started for you by `cousin-supervisor`)
+A runner is the process that drives a [cousin](../glossary.md#cousin)'s agent loop.
+`cousin-runner --home <home>` (started for you by `cousin-supervisor`)
 builds the runner `[agent] runner` in `cousin.toml` names, takes one lock per
 cousin, and serves the cousin's [inbox](../glossary.md#inbox) (`data/inbox.db`): every chat message,
 peer message, loop, schedule, [flip](../glossary.md#flip) and interrupt is a row there, and the
@@ -17,6 +17,62 @@ row `delivered` or `failed`. What happens in a turn goes to the cousin's event
 [stream](../glossary.md#stream) (`data/stream/`), which the console's pane and `cousin-watch` read. The
 framework's tools (`reply`, `handoff`, memory, jobs, ...) run inside the
 runner's process against the live turn, whatever the kind.
+
+## States and outcomes
+
+A runner is always in one of seven states. Every change is a `state` event
+in the cousin's stream, which the console shows.
+
+| state | what it means for you | can move to |
+|---|---|---|
+| `idle` | no turn is running; the next row is claimed at once | `running`, `rolling_over`, `errored`, `stopped` |
+| `running` | a turn is running | `idle`, `waiting_permission`, `rate_limited`, `rolling_over`, `errored`, `stopped` |
+| `waiting_permission` | the agent CLI asked for a permission (`sdk` kind); the turn goes on, and the state is `running` again at the CLI's next message. A `policy.toml` `ask` passes through it and is enforced as a deny | `running`, `idle`, `errored`, `stopped` |
+| `rate_limited` | the account hit its usage limit; the runner claims nothing until the limit's reset time, then goes `idle`. Queued rows wait, none is lost (`sdk` and `tmux`; opencode retries on its own) | `running`, `idle`, `errored`, `stopped` |
+| `rolling_over` | the cousin is handing off to a new session (context pressure, the daily flip or an explicit flip); rows wait for it | `idle`, `errored`, `stopped` |
+| `errored` | a turn or the connection failed. After a turn's failure the runner recovers to `idle` and runs the next row. When the account needs a login it stays `errored` and waits for one (`cousin-chat list` says LOGIN REQUIRED); when it cannot connect, `cousin-runner` exits and the supervisor restarts it | `idle`, `stopped` |
+| `stopped` | the runner was stopped; nothing leaves this state, a start is a new runner | none |
+
+Anything that reaches a cousin (chat, a reaction, a loop, a schedule, a
+meeting line, a flip) is handed to its runner's inbox and answered with one
+of three outcomes:
+
+- `delivered`: the runner ran the row and closed it delivered.
+- `queued`: the row is stored and waits for the runner. A runner that does
+  not answer in time (busy, stopped, restarting) is `queued`, never
+  `failed`: the row is durable, and a sender that retried would deliver it
+  twice.
+- `failed`: nothing was kept (the inbox could not be written), the cousin
+  has no runner (it is refused, with the reason), or the runner ran the row
+  and the turn failed.
+
+At a turn boundary the runner claims the queued row with the lowest rank,
+oldest first within a rank:
+
+| rank | rows |
+|---|---|
+| 0 | a flip (the handoff) and an interrupt |
+| 1 | chat from an operator or a person, a reaction, a chat hook, a boot row |
+| 2 | a meeting line |
+| 3 | chat from a peer |
+| 4 | a schedule |
+| 5 | a loop |
+| 6 | a memory proposal |
+
+An interrupt row claimed with no turn running is closed `failed` and never
+runs as a turn.
+
+The system prompt is composed, never copied, and never truncated: the
+framework law, the framework contract (generated from the tool registry, so
+it names exactly the tools the cousin has), the cousin's authored identity
+(the authored parts of its `CLAUDE.md` and its committed self-portrait), and
+the operator rules every cousin shares. The `sdk` kind passes
+`setting_sources=[]`, so the agent CLI inherits no settings file: what the
+cousin has is what the runner passes. The prompt holds nothing volatile (no
+clock, counter or generation; those go in the first message's state digest)
+and stays byte-identical across sessions, so a new session reads it from the
+prompt cache. For the same reason a cousin's working directory, its home,
+never changes.
 
 ## What folds into a running turn
 
@@ -110,8 +166,8 @@ so `data/kind-switch.json` keeps `failed` until it is next read:
 `cousin-migrate check <slug>` (it prints `kind switch: ... switched` and
 a `late` note) or a rollback, which then rolls back a switch.
 
-A cousin with no `[agent] runner` is a legacy tmux cousin: it has no runner at
-all.
+A cousin with no `[agent] runner` has no runner and is refused: nothing is
+delivered to it and it does not start, and the refusal names the reason.
 
 ## Picking one
 
@@ -142,11 +198,11 @@ Anthropic provider (or `ANTHROPIC_BASE_URL`) pointed at a loopback address.
 Removing a bridge a live install still carries is an operator step:
 [migrating](../migrating.md).
 
-**Another vendor's subscription (ruling P9-2).** An opencode account may
+**Another vendor's subscription.** An opencode account may
 hold another vendor's OAuth login (`cousin-account login <name> --provider
 <id> --method <label>`) as well as API keys or a local model.
 
-**No Claude model on this lane (ruling P9-1).** Claude cousins run on the
+**No Claude model on this lane.** Claude cousins run on the
 Agent SDK and nowhere else, so an opencode account that names the
 `anthropic` provider, and an `endpoint_model`, `[agent] model` or
 `small_model` whose id contains `claude` or `anthropic` (any case), are
@@ -275,7 +331,7 @@ none is a contract item:
   inside one turn, a detached process prompting the server between turns, a
   turn kept going by folded messages, and the rollover's turns all pass it.
   The containment is the container: a cousin's shell is the
-  container ([the design](../design/agent-loop-runner.md)); on a bare host,
+  container ([operations](../operations.md#the-container)); on a bare host,
   run an opencode cousin as a user that can read nothing it should not.
 - **What the model starts is found by a marker it can drop.** A stop, and
   the next start after a hard kill, kill every process carrying the start's
@@ -318,7 +374,7 @@ none is a contract item:
 
 ## Lane differences on tmux
 
-- The pane's CLI runs with `--dangerously-skip-permissions` (P11-11: the
+- The pane's CLI runs with `--dangerously-skip-permissions` (the
   trust and bypass dialogs are the operator's, answered once in the pane
   when it shows them; the runner never answers them), so the harness's own
   permission system is never
@@ -336,7 +392,7 @@ none is a contract item:
 - The composed system prompt reaches the pane only on a fresh start, as
   `--append-system-prompt` read from `data/run/tmux-context.md`; a resume or
   a kind switch gets a short pointer instead, never the full block again
-  (`runner/prompt.py`, R10).
+  (`runner/prompt.py`).
 
 ## Known gaps on tmux
 
@@ -396,7 +452,7 @@ above. Each is stated, none is hidden, and none is a contract item except
   tmux-kind cousin's pane lives on one tmux server, one socket
   (`<framework root>/run/tmux.sock`, `TmuxRunner._make_pane`), each in its
   own session (`tmux-<home.name>`); the pane's own process environment is
-  isolated per pane (`exec env -i`, R3), but the server process itself, and
+  isolated per pane (`exec env -i`), but the server process itself, and
   the `run/` directory it lives in (chmod 0700 on every pane start), are one
   and the same for every tmux cousin on the host.
 - **A trailing `;` in the typed first line is lost.** The first line goes
@@ -411,7 +467,7 @@ above. Each is stated, none is hidden, and none is a contract item except
   window is one tmux call wide; nothing closes it.
 - **An unheld stop, then a kind change outside `cousin-migrate`, leaves
   claims behind.** An unheld stop keeps the pane and leaves
-  `data/tmux-claims.json` for the next tmux start to settle (R23). If
+  `data/tmux-claims.json` for the next tmux start to settle. If
   `[agent] runner` is edited to `sdk` by hand before that start, the SDK
   kind's start sweep requeues the claimed rows without reading the pane's
   transcript, and a row the pane had already taken can be delivered twice.

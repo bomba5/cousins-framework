@@ -300,7 +300,7 @@ Body `{"which": "migration" | "switch", "confirm": true, ...}`. `"switch"` takes
 
 ### `GET /api/lifecycle/modes`
 
-`{"ok", "modes": [{"id", "confirm": "second" | "typed", "phrase"?, "what"}], "op_kinds", "timeout", "timeout_range", "role_max"}`: the transplant modes (soul-donation, body-swap, merge), what each does and how it is confirmed (`phrase`, with `{donor}` and `{recipient}`, for a typed one), the op kinds, and reincarnate's bequest wait and role limits.
+`{"ok", "modes": [{"id", "confirm": "second" | "typed", "phrase"?, "what"}], "op_kinds", "role_max"}`: the transplant modes (soul-donation, body-swap, merge), what each does and how it is confirmed (`phrase`, with `{donor}` and `{recipient}`, for a typed one), the op kinds, and reincarnate's role limit.
 
 ### `GET /api/cousins/<slug>/lifecycle`
 
@@ -308,7 +308,7 @@ Body `{"which": "migration" | "switch", "confirm": true, ...}`. `"switch"` takes
 
 ### `POST /api/cousins/<slug>/reincarnate`
 
-Body `{"new_role", "confirm": true, "timeout"?}`: one line of at most 200 characters, the bequest wait in whole seconds (10 to 600, default 300). `202 {"ok": true, "op"}`, kind `reincarnate`, stages `snapshot`, `bequest` (the tmux lane asks the cousin for `data/handoff.md` and waits; a runner cousin's bequest rides the flip's own handoff request), `rewrite` (the role in CLAUDE.md and cousin.toml), `flip`. The op fails when the flip does. `400` a bad role or timeout, or no confirm; `409` busy.
+Body `{"new_role", "confirm": true}`: one line of at most 200 characters. `202 {"ok": true, "op"}`, kind `reincarnate`, stages `snapshot`, `bequest` (it rides the flip's own handoff request, under the runner's handoff deadline), `rewrite` (the role in CLAUDE.md and cousin.toml), `flip`. The op fails when the flip does. `400` a bad role or no confirm; `409` busy.
 
 ### `POST /api/lifecycle/transplant`
 

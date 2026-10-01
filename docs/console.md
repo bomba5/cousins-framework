@@ -348,10 +348,9 @@ The inspector's "lifecycle" panel runs `cousin-reincarnate` and
 `cousin-transplant`, each in the background with its steps:
 
 - **reincarnate**: a new one-line role, the memory kept. A snapshot, the
-  bequest (the cousin is asked for its handoff and the console waits, up to
-  the wait you set; a runner cousin answers it on the flip's own handoff
-  request), the role rewritten in CLAUDE.md and cousin.toml, then a flip. A
-  second click confirms.
+  bequest (the cousin answers it on the flip's own handoff request), the
+  role rewritten in CLAUDE.md and cousin.toml, then a flip. A second click
+  confirms.
 - **transplant**: a donor, a recipient and a mode: soul-donation (the
   recipient carries the donor's memory), body-swap (the two trade identity
   files, name and role) or merge (the donor's memory braided into the

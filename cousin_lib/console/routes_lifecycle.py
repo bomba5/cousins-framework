@@ -2,10 +2,9 @@
 "Lifecycle"): reincarnate and transplant through cousin_lib.lifecycle,
 each a long operation (console/longop.py).
 
-reincarnate is the cousin's own op: a snapshot, the bequest (the tmux
-lane asks the cousin for data/handoff.md and waits for it; the runner
-lane carries it on the rollover's handoff request), the role rewritten in
-CLAUDE.md and cousin.toml, then a flip. transplant touches two cousins:
+reincarnate is the cousin's own op: a snapshot, the bequest (carried on
+the rollover's handoff request), the role rewritten in CLAUDE.md and
+cousin.toml, then a flip. transplant touches two cousins:
 it runs as the recipient's op while the donor is held
 (longop.exclusive), so nothing else, no flip, no stop and no other op,
 starts on either until it ends. Every refusal changes nothing, and the
@@ -13,12 +12,10 @@ library writes its own audit (data/lifecycle/audit.jsonl) and snapshots
 (data/lifecycle/<slug>/<ts>/).
 
 The library's steps come back at its end; the stages in between come
-from the two actions it is handed (the bequest prompt and the flip),
-each wrapped so the op shows what runs.
+from the flip it is handed, wrapped so the op shows what runs.
 
-Test seams on req.server.state (never set by a request):
-`lifecycle.do_flip` (the flip, lifecycle's do_flip) and `lifecycle.send`
-(the bequest prompt, lifecycle's send)."""
+Test seam on req.server.state (never set by a request):
+`lifecycle.do_flip` (the flip, lifecycle's do_flip)."""
 from __future__ import annotations
 
 import re
@@ -29,7 +26,6 @@ from cousin_lib.console import longop, router
 from cousin_lib.console.app import HttpError
 
 ROLE_MAX = 200
-MIN_TIMEOUT_S, MAX_TIMEOUT_S = 10, 600
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 OP_KINDS = ("reincarnate", "transplant")
 # a mode that replaces what a cousin is (its memory, its identity) is
@@ -56,10 +52,6 @@ def _do_flip(server):
     return server.state.get("lifecycle.do_flip") or lifecycle._default_do_flip(server.root)
 
 
-def _send(server):
-    return server.state.get("lifecycle.send") or lifecycle.send_prompt
-
-
 def _role(body):
     role = body.get("new_role")
     if not isinstance(role, str) or not role.strip():
@@ -68,16 +60,6 @@ def _role(body):
     if _CONTROL.search(role) or len(role) > ROLE_MAX:
         raise HttpError(400, "new_role is one line of at most %d characters" % ROLE_MAX)
     return role
-
-
-def _timeout(body):
-    value = body.get("timeout", lifecycle.BEQUEST_TIMEOUT_SECONDS)
-    if value is None:
-        return lifecycle.BEQUEST_TIMEOUT_SECONDS
-    if isinstance(value, bool) or not isinstance(value, int) \
-            or not MIN_TIMEOUT_S <= value <= MAX_TIMEOUT_S:
-        raise HttpError(400, "timeout is whole seconds, %d to %d" % (MIN_TIMEOUT_S, MAX_TIMEOUT_S))
-    return value
 
 
 def confirm_phrase(mode, donor, recipient):
@@ -141,36 +123,23 @@ def _wrap_flip(op, real, name_of, before=None):
 
 
 def _bequest_stage(step):
-    if step.get("carried"):
-        return "done", step.get("skipped") or "carried on the rollover's handoff request"
-    if step.get("wrote"):
-        return "done", "the cousin wrote data/handoff.md"
-    return "skipped", step.get("reason") or "no bequest"
+    return "done", step.get("skipped") or "carried on the rollover's handoff request"
 
 
-def _reincarnate_work(server, slug, role, timeout):
-    real_flip, real_send = _do_flip(server), _send(server)
+def _reincarnate_work(server, slug, role):
+    real_flip = _do_flip(server)
 
     def work(op):
         op.stage("snapshot", "running")
-        asked = []
-
-        def send(config, text):
-            asked.append(True)
-            op.stage("snapshot", "done")
-            op.stage("bequest", "running", "asked for data/handoff.md; waiting up to %ds" % timeout)
-            return real_send(config, text)
 
         def before_flip(_slug):
             op.stage("snapshot", "done")
-            # the tmux lane asked and waited already; the runner lane's
-            # bequest rides the flip's own handoff request
-            op.stage("bequest", "done", None if asked else
-                     "carried on the rollover's handoff request")
+            # the bequest rides the flip's own handoff request
+            op.stage("bequest", "done", "carried on the rollover's handoff request")
             op.stage("rewrite", "done", "the role in CLAUDE.md and cousin.toml")
 
         result = lifecycle.reincarnate(
-            slug, new_role=role, root=server.root, timeout=timeout, send=send,
+            slug, new_role=role, root=server.root,
             do_flip=_wrap_flip(op, real_flip, lambda s: "flip", before_flip))
         for step in result.get("steps") or ():
             if step.get("step") == "snapshot":
@@ -232,22 +201,21 @@ def register():
     @router.route("GET", "/api/lifecycle/modes")
     def modes(req):
         return 200, {"ok": True, "modes": [dict(m) for m in MODES], "op_kinds": list(OP_KINDS),
-                     "timeout": lifecycle.BEQUEST_TIMEOUT_SECONDS,
-                     "timeout_range": [MIN_TIMEOUT_S, MAX_TIMEOUT_S], "role_max": ROLE_MAX}
+                     "role_max": ROLE_MAX}
 
     @router.route("POST", "/api/cousins/{slug}/reincarnate")
     def reincarnate(req, slug):
         server = req.server
         _home(server, slug)
         body = req.body
-        role, timeout = _role(body), _timeout(body)
+        role = _role(body)
         if body.get("confirm") is not True:
             raise HttpError(400, "reincarnate rewrites the role and flips %s: confirm it" % slug)
         record = {"op": "reincarnate", "slug": slug, "actor": req.user, "new_role": role}
         answer = longop.start_response(
             server, slug, "reincarnate",
-            _audited(server, _reincarnate_work(server, slug, role, timeout), record),
-            params={"new_role": role, "timeout": timeout, "by": req.user})
+            _audited(server, _reincarnate_work(server, slug, role), record),
+            params={"new_role": role, "by": req.user})
         return answer
 
     @router.route("GET", "/api/cousins/{slug}/lifecycle")

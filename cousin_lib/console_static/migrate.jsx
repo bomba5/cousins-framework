@@ -662,20 +662,17 @@ function ReincarnateDialog({ cousin, onClose }) {
   const [meta, metaError] = useLifecycleModes();
   const [op] = useLongOp(slug);
   const [role, setRole] = React.useState("");
-  const [timeout, setTimeoutS] = React.useState("");
   const [armed, setArmed] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [opId, setOpId] = React.useState(null);
   const [msg, setMsg] = React.useState(null);
   const max = (meta && meta.role_max) || 200;
-  const range = (meta && meta.timeout_range) || [10, 600];
   const clean = role.trim();
   const valid = clean && clean.length <= max && !/[\r\n]/.test(role);
   const start = async () => {
     if (!armed) { setArmed(true); return; }
     setArmed(false); setBusy(true); setMsg(null);
     const body = { new_role: clean, confirm: true };
-    if (String(timeout).trim()) body.timeout = Number(timeout);
     const res = await migPost(`/api/cousins/${slug}/reincarnate`, body);
     setBusy(false);
     if (!res.ok) { setMsg({ err: true, text: res.d.error || `HTTP ${res.status}` }); return; }
@@ -693,18 +690,13 @@ function ReincarnateDialog({ cousin, onClose }) {
         <div className="body" style={MIG_COL}>
           <div style={MIG_HINT}>
             The role changes, the memory stays. A snapshot of the continuity files first
-            (data/lifecycle/{slug}/), then the bequest: the cousin is asked for data/handoff.md and the
-            console waits for it (a runner cousin answers it on the flip's own handoff request), then the
-            role is rewritten in CLAUDE.md and cousin.toml, then a flip.
+            (data/lifecycle/{slug}/), then the role is rewritten in CLAUDE.md and cousin.toml, then a
+            flip, on whose own handoff request the cousin is asked for its bequest.
           </div>
           <MigLoadError error={metaError} />
           <div style={MIG_MONO}>role now: {cousin.role || "-"}</div>
           <FormField label="new role" hint={`one line, at most ${max} characters`}>
             <input className="txt" value={role} maxLength={max} autoFocus onChange={e => { setRole(e.target.value); setArmed(false); }} />
-          </FormField>
-          <FormField label="bequest wait (seconds)" hint={`${range[0]} to ${range[1]}; default ${(meta && meta.timeout) || 300}`}>
-            <input className="txt" type="number" value={timeout} min={range[0]} max={range[1]} style={{ width: 100 }}
-                   onChange={e => setTimeoutS(e.target.value)} />
           </FormField>
           {shown && <MigrateOpStages op={shown} />}
           <MigMsg msg={msg} />

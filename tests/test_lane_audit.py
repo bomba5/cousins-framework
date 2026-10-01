@@ -86,8 +86,6 @@ SITES = (
     ('cousin_lib/lifecycle.py', 'from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal', 'kinds'),
     ('cousin_lib/lifecycle.py', 'if _runner_kind(home) not in RUNNER_KINDS:', 'transport'),
     ('cousin_lib/lifecycle.py', 'result["error"] = lane_refusal(home)', 'refusal'),
-    ('cousin_lib/lifecycle.py', 'from cousin_lib.delivery import RUNNER_KINDS, _runner_kind', 'kinds'),
-    ('cousin_lib/lifecycle.py', 'if _runner_kind(home) in RUNNER_KINDS:', 'transport'),
     ('cousin_lib/lifecycle.py', 'from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal', 'kinds'),
     ('cousin_lib/lifecycle.py', 'if _runner_kind(cfg.home) not in RUNNER_KINDS:', 'transport'),
     ('cousin_lib/lifecycle.py', 'result["error"] = lane_refusal(cfg.home)', 'refusal'),

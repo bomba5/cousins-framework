@@ -3,9 +3,9 @@
 A cousin's working state lives in a finite context window; its
 durable state lives in files. Changing who a cousin is (its role, or
 which memory it carries) without losing the thread it was holding is
-a ceremony, not an edit: snapshot first, ask the running session for
-a bequest, mutate the files, then flip so the next generation boots
-from the new identity. Every step lands in an audit log.
+a ceremony, not an edit: snapshot first, mutate the files, then flip
+so the next generation boots from the new identity, its predecessor's
+bequest asked on the way out. Every step lands in an audit log.
 
 Two operations, specified in docs/reference/lifecycle.md:
 
@@ -19,10 +19,10 @@ Two operations, specified in docs/reference/lifecycle.md:
       body-swap:     the two bodies trade places; memory stays put.
       merge:         A's memory is braided into B's; A keeps its own.
 
-Nothing here talks to a console: the registry is the filesystem
-(FrameworkConfig.list_cousins), the restart is flip.flip, and the one
-network call is the bequest prompt to the cousin's own chat server.
-The flip is an injected seam (`do_flip`) so the choreography is
+Nothing here talks to a console or the network: the registry is the
+filesystem (FrameworkConfig.list_cousins), the restart is flip.flip,
+and the bequest rides the flip's own handoff request. The flip is an
+injected seam (`do_flip`) so the choreography is
 testable without a terminal.
 """
 import argparse
@@ -31,10 +31,7 @@ import os
 import re
 import shutil
 import sys
-import time
 import tomllib
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,7 +39,6 @@ from cousin_lib.backup import MEMORY_SKIP
 from cousin_lib.config import FrameworkConfig, MissingConfigError
 from cousin_lib.trace import traced_cli
 
-BEQUEST_TIMEOUT_SECONDS = 300
 MODES = ("soul-donation", "body-swap", "merge")
 # The continuity files a snapshot preserves; memory/ travels whole
 # (minus rebuildable indexes) beside them.
@@ -51,18 +47,8 @@ SNAPSHOT_FILES = ("MEMORY.md", "STATUS.md", "CLAUDE.md", "cousin.toml",
 IDENTITY_FILES = ("CLAUDE.md", "self-portrait.md")
 BEQUEST_SENDER = "framework"
 
-BEQUEST_PROMPT = (
-    "[cousin-reincarnate] You are about to be reincarnated: your role"
-    " changes, your memory persists. Before the framework rebuilds"
-    " your session, write data/handoff.md in your own voice, present"
-    " tense: who you are right now, the last work that mattered and"
-    " its texture, what is in flight, and a bequest to your successor"
-    " - what nothing else on disk will tell them. You have {timeout}"
-    " seconds; the flip follows either way."
-)
-
-# The runner lane's bequest: the same request, answered through the handoff
-# tool. Over 120 characters, so rollover.is_bequest keeps it whole.
+# The bequest: asked on the rollover's own handoff request, answered through
+# the handoff tool. Over 120 characters, so rollover.is_bequest keeps it whole.
 BEQUEST_PROMPT_RUNNER = (
     "[cousin-reincarnate] You are about to be reincarnated: your role"
     " changes, your memory persists. Before the framework rebuilds"
@@ -157,60 +143,6 @@ def _flip_one(root, slug, do_flip, base_record, reason=None):
     return ok, result
 
 
-# ---------- the bequest ----------
-
-def send_prompt(config, text):
-    """Deliver a prompt to a cousin through its own chat server's
-    /api/send: it lands in the chat history and in the terminal, the
-    same path an operator's message takes."""
-    payload = {"user": BEQUEST_SENDER, "message": text}
-    url = "http://%s:%d/api/send" % (config.chat_host or "localhost",
-                                     config.require_chat_port())
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=5) as r:
-        return json.loads(r.read() or b"{}")
-
-
-def _wait_for_write(path, mtime_before, timeout):
-    """Bounded wait for a file's mtime to move past what it was when the
-    prompt went out; a file that appears counts as a write."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            if path.stat().st_mtime > mtime_before:
-                return True
-        except FileNotFoundError:
-            pass
-        time.sleep(0.05)
-    try:
-        return path.stat().st_mtime > mtime_before
-    except FileNotFoundError:
-        return False
-
-
-def _bequest(config, home, *, timeout, send):
-    """Ask the running cousin for its bequest and wait, bounded, for
-    data/handoff.md to change. Never raises: an unreachable chat server
-    or a silent cousin is a recorded outcome, and the flip that follows
-    has its own handoff window."""
-    handoff = Path(home) / "data" / "handoff.md"
-    mtime_before = handoff.stat().st_mtime if handoff.exists() else 0.0
-    step = {"step": "bequest", "sent": False, "wrote": False}
-    try:
-        send(config, BEQUEST_PROMPT.format(timeout=int(timeout)))
-        step["sent"] = True
-    except (urllib.error.URLError, OSError, ValueError,
-            MissingConfigError) as err:
-        step["reason"] = "prompt not delivered: %s" % err
-        return step
-    step["wrote"] = _wait_for_write(handoff, mtime_before, timeout)
-    if not step["wrote"]:
-        step["reason"] = "no handoff write within %ss" % timeout
-    return step
-
-
 # ---------- rewriting identity ----------
 
 def rewrite_role(claude_md, *, name, new_role):
@@ -284,11 +216,12 @@ def _event(home, kind, content):
 
 # ---------- reincarnate ----------
 
-def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
-                do_flip=None, send=send_prompt):
-    """Snapshot, bequest, rewrite, flip. Returns a structured result;
-    ok reflects the flip's own verdict. Refusals come back as a result
-    with an error and touch nothing."""
+def reincarnate(slug, *, new_role, root, do_flip=None):
+    """Snapshot, bequest, rewrite, flip. The bequest rides the flip: its
+    request goes on the rollover's own handoff request, under the
+    runner's handoff deadline. Returns a structured result; ok reflects
+    the flip's own verdict. Refusals come back as a result with an error
+    and touch nothing."""
     root = Path(root)
     result = {"op": "reincarnate", "slug": slug, "ok": False, "steps": []}
     if not (new_role or "").strip():
@@ -313,15 +246,10 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
     result["steps"].append({"step": "snapshot", "path": str(snap)})
     _audit(root, dict(base, step="snapshot", path=str(snap)))
 
-    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind
-    bequest_reason = None
-    if _runner_kind(home) in RUNNER_KINDS:
-        from cousin_lib.runner.rollover import HANDOFF_DEADLINE_S
-        bequest_reason = BEQUEST_PROMPT_RUNNER.format(timeout=int(HANDOFF_DEADLINE_S))
-        step = {"step": "bequest", "sent": False, "carried": True,
-                "skipped": "runner lane: the bequest rides the rollover's handoff request"}
-    else:
-        step = _bequest(config, home, timeout=timeout, send=send)
+    from cousin_lib.runner.rollover import HANDOFF_DEADLINE_S
+    bequest_reason = BEQUEST_PROMPT_RUNNER.format(timeout=int(HANDOFF_DEADLINE_S))
+    step = {"step": "bequest", "sent": False, "carried": True,
+            "skipped": "runner lane: the bequest rides the rollover's handoff request"}
     result["steps"].append(step)
     _audit(root, dict(base, **step))
 
@@ -546,9 +474,8 @@ def _finish(prog, result):
 
 @traced_cli("cousin-reincarnate")
 def reincarnate_main(argv=None):
-    """cousin-reincarnate <slug> --new-role TEXT [--root R]
-    [--timeout N]. Operator-driven; a cousin never reincarnates
-    itself."""
+    """cousin-reincarnate <slug> --new-role TEXT [--root R].
+    Operator-driven; a cousin never reincarnates itself."""
     parser = argparse.ArgumentParser(
         prog="cousin-reincarnate",
         description="change a cousin's role, keep its memory, flip it")
@@ -557,16 +484,11 @@ def reincarnate_main(argv=None):
                         help="the new one-line role")
     parser.add_argument("--root", help="framework root (else"
                                        " FRAMEWORK_ROOT)")
-    parser.add_argument("--timeout", type=float,
-                        default=BEQUEST_TIMEOUT_SECONDS,
-                        help="seconds to wait for the bequest"
-                             " (default %d)" % BEQUEST_TIMEOUT_SECONDS)
     args = parser.parse_args(argv)
     root = _root_or_exit(parser.prog, args.root)
     if root is None:
         return 2
-    result = reincarnate(args.slug, new_role=args.new_role, root=root,
-                         timeout=args.timeout)
+    result = reincarnate(args.slug, new_role=args.new_role, root=root)
     return _finish(parser.prog, result)
 
 

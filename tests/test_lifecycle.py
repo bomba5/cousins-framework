@@ -5,8 +5,9 @@ with two registered cousins. The flip is injected (`do_flip`) so the
 suite asserts the ORDER and the bookkeeping - snapshot, bequest,
 rewrite, flip, audit - without respawning anything; one test wires
 the real flip through the fake tmux executable to prove the seam
-actually reaches it. The bequest prompt goes to a loopback capture
-server standing in for the cousin's chat server.
+actually reaches it. The bequest rides the flip's handoff request; a
+loopback capture server stands in for a chat server to prove nothing
+is posted anywhere else.
 """
 import contextlib
 import http.server
@@ -127,7 +128,6 @@ class LifecycleCase(unittest.TestCase):
 
     def _reincarnate(self, slug="testa", **kw):
         kw.setdefault("do_flip", self._fake_flip)
-        kw.setdefault("timeout", 0.5)
         return reincarnate(slug, new_role="mender of the fence",
                            root=self.root, **kw)
 
@@ -210,7 +210,7 @@ class TestReincarnate(LifecycleCase):
         self.assertFalse((self.root / "data" / "lifecycle").exists())
 
     def test_every_step_lands_in_the_audit_log(self):
-        self._reincarnate(timeout=0.2)
+        self._reincarnate()
         rows = self._audit()
         self.assertEqual([r["step"] for r in rows],
                          ["snapshot", "bequest", "rewrite", "flip", "done"])
@@ -250,7 +250,6 @@ class TestReincarnate(LifecycleCase):
 
     def test_a_failed_flip_makes_the_result_not_ok(self):
         out = self._reincarnate(
-            timeout=0.2,
             do_flip=lambda slug, reason=None: {"slug": slug, "ok": False,
                                   "error": "preflight failed"})
         self.assertFalse(out["ok"])
@@ -272,11 +271,25 @@ class TestReincarnate(LifecycleCase):
                 lifecycle, "_default_do_flip",
                 lambda root: self._fake_flip):
             rc = reincarnate_main(
-                ["testa", "--new-role", "x", "--root", str(self.root),
-                 "--timeout", "0.2"])
+                ["testa", "--new-role", "x", "--root", str(self.root)])
         self.assertEqual(rc, 0)
         self.assertIn('"ok": true', out.getvalue())
         self.assertEqual(self.flips, ["testa"])
+
+    def test_timeout_is_gone_from_the_cli_and_the_library(self):
+        # the bequest rides the rollover's handoff request, whose deadline
+        # is the runner's own: the window the flag set was never used
+        with contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as caught:
+            reincarnate_main(["testa", "--new-role", "x", "--root", str(self.root),
+                              "--timeout", "5"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("unrecognized arguments: --timeout", err.getvalue())
+        with self.assertRaises(TypeError):
+            reincarnate("testa", new_role="x", root=self.root, do_flip=self._fake_flip,
+                        timeout=5)
+        self.assertEqual(self.flips, [])
+        self.assertFalse(hasattr(lifecycle, "send_prompt"))
 
 
 class TestTransplantRefusals(LifecycleCase):
@@ -500,14 +513,11 @@ class TestReincarnateOnTheRunnerLane(HermeticCase):
             clients.append(ScriptedClient(options, [[init_msg(session="s-%d" % (len(clients) + 1)),
                                                      assistant(text="ok"), result()]] * 4))
             return clients[-1]
-        sent = []
         with hold_lock(home):
             r = SdkRunner(home, client_factory=factory, handoff_deadline_s=0.5)
             r.start(); self.addCleanup(lambda: r.stop(timeout=5))
-            out = lifecycle.reincarnate("wren", new_role="audits the audits", root=root,
-                                        send=lambda cfg, text: sent.append(text))
+            out = lifecycle.reincarnate("wren", new_role="audits the audits", root=root)
         self.assertTrue(out["ok"], out)
-        self.assertEqual(sent, [])                                        # no chat-server prompt
         bequest = [s for s in out["steps"] if s.get("step") == "bequest"][0]
         self.assertTrue(bequest["carried"])
         asked = [q["message"]["content"][0]["text"] for q in clients[0].queries]

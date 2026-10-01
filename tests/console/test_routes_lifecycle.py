@@ -22,7 +22,7 @@ class LifecycleCase(ConsoleCase):
         (self.wren / "MEMORY.md").write_text("wren remembers\n")
         (self.owl / "MEMORY.md").write_text("owl remembers\n")
         self.serve()
-        self.flips, self.prompts = [], []
+        self.flips = []
         self.flip_ok = True
         self.gate = None
 
@@ -33,12 +33,7 @@ class LifecycleCase(ConsoleCase):
             return {"ok": self.flip_ok, "new_generation": 4,
                     **({} if self.flip_ok else {"error": "the pane never came back"})}
 
-        def send(config, text):
-            self.prompts.append((config.slug, text))
-            (config.home / "data" / "handoff.md").write_text("my bequest\n")
-            return {"ok": True}
         self.server.state["lifecycle.do_flip"] = do_flip
-        self.server.state["lifecycle.send"] = send
 
     def wait_done(self, slug, timeout=10.0):
         deadline = time.monotonic() + timeout
@@ -60,9 +55,13 @@ class TestReincarnate(LifecycleCase):
         for role in ("", "   ", "two\nlines", "x" * 201, 7):
             status, _ = self.post(url, {"new_role": role, "confirm": True})
             self.assertEqual(status, 400, role)
-        self.assertEqual(self.post(url, {"new_role": "librarian", "confirm": True,
-                                         "timeout": 5})[0], 400)
         self.assertEqual(self.flips, [])
+
+    def test_the_modes_carry_no_bequest_wait(self):
+        # the bequest rides the rollover's handoff request: no wait to set
+        body = self.get("/api/lifecycle/modes")[1]
+        self.assertNotIn("timeout", body)
+        self.assertNotIn("timeout_range", body)
 
     def test_it_runs_snapshot_bequest_rewrite_flip(self):
         status, body = self.post("/api/cousins/wren/reincarnate",
@@ -74,7 +73,8 @@ class TestReincarnate(LifecycleCase):
         self.assertEqual(self.stages(op), [("snapshot", "done"), ("bequest", "done"),
                                            ("rewrite", "done"), ("flip", "done")])
         self.assertEqual([slug for slug, _ in self.flips], ["wren"])
-        self.assertEqual(self.prompts, [])      # a runner's bequest rides the rollover
+        # a runner's bequest rides the rollover: the flip carries it
+        self.assertIn("[cousin-reincarnate]", self.flips[0][1])
         self.assertTrue((self.wren / "CLAUDE.md").read_text().startswith("# Wren - librarian"))
         role = tomllib.loads((self.wren / "cousin.toml").read_text())["cousin"]["role"]
         self.assertEqual(role, "librarian")

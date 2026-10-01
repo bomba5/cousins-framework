@@ -34,6 +34,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   message when the binary is not found, before anything is written.
   docs/install.md makes switching to the opencode image a separate first
   step.
+- **The suite passes without an agent CLI on the host.** The account
+  status, check and login-flow tests hand `status()` their own `run` and
+  the flows a fake `spawn`, but still resolved the real `claude` binary
+  first, so on CI (no `claude` on `PATH`, no `sdk` extra) they failed with
+  "no agent CLI". They now point the CLI lookup at a fake path, as the
+  console's account routes already did. No product change.
 
 ## 2.3.4 - 2026-10-01
 

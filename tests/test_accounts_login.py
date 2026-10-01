@@ -81,6 +81,11 @@ class LoginCase(HermeticCase):
                                                '[chat]\nport = 0\n\n'
                                                '[operator]\nname = "Priya"\n')
         self.relayed = []
+        # the flows exec _cli() through a fake spawn: never need a real
+        # agent CLI on the host (CI has none)
+        patcher = mock.patch.object(accounts, "_cli", return_value="/opt/fake/claude")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def status(self, payload):
         return mock.patch.object(accounts, "status", return_value=payload)

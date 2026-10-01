@@ -38,6 +38,13 @@ class AccountsCase(HermeticCase):
     def write(self, text=TOML):
         (self.root / "config" / "accounts.toml").write_text(text)
 
+    def fake_cli(self):
+        """_cli() names a fake binary: a test that hands status() its own
+        `run` must not need a real agent CLI on the host (CI has none)."""
+        patcher = mock.patch.object(accounts, "_cli", return_value="/opt/fake/claude")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def secret(self, rel, value, mode=0o600, dir_mode=0o700):
         path = self.root / rel
         path.parent.mkdir(parents=True, exist_ok=True); os.chmod(path.parent, dir_mode)
@@ -211,6 +218,10 @@ class TestPerKind(AccountsCase):
 
 
 class TestStatusAndCheck(AccountsCase):
+    def setUp(self):
+        super().setUp()
+        self.fake_cli()
+
     def run_with(self, payload):
         def run(argv, **kw):
             self.argv, self.env = argv, kw.get("env")
@@ -287,6 +298,10 @@ class TestLoginActionInTheContainer(AccountsCase):
     `docker compose exec` on the Docker host, landing in ~/.claude on the
     volume."""
     HOST = accounts.Account(accounts.HOST, "claude-login", None, None, implicit=True)
+
+    def setUp(self):
+        super().setUp()
+        self.fake_cli()
 
     def test_outside_the_container_the_host_user_logs_in(self):
         self.assertFalse(accounts.in_container())

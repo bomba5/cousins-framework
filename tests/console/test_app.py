@@ -178,21 +178,6 @@ class TestEntryPoint(ConsoleCase):
                 mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(app.console_main(["--port", "0"]), 2)
 
-    def test_cousin_ui_points_at_cousin_console(self):
-        import contextlib
-        import io
-        from cousin_lib.ui import ui_main
-        import tempfile
-        err = io.StringIO()
-        # Outside any checkout: inside one, the root defaults to it.
-        with tempfile.TemporaryDirectory() as tmp, \
-                contextlib.chdir(tmp), \
-                mock.patch.dict(os.environ, {}, clear=True), \
-                contextlib.redirect_stderr(err):
-            rc = ui_main(["--port", "0"])
-        self.assertEqual(rc, 2)
-        self.assertIn("cousin-console", err.getvalue())
-
     def test_build_from_cli_flag_wins_over_env(self):
         self.cousin("wren")
         other = self.root / "decoy"

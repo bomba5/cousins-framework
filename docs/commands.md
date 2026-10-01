@@ -685,6 +685,7 @@ cousin-gate --root . --denylist denylist.txt --git-visible
 | removed | instead |
 |---|---|
 | `cousin-auth` (and the console's auth control) | a runner cousin authenticates through its `[agent] account`; `cousin-account` and the console's accounts page manage the accounts ([configuration](configuration.md#accountstoml)) |
+| `cousin-ui` (a retired alias of `cousin-console`) | `cousin-console`, same flags |
 
 ## Removed in 2.0.0
 

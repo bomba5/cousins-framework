@@ -26,7 +26,7 @@ _STATIC_TYPES = {
 
 class UIServer:
     def __init__(self, root, *, guard=None, host="127.0.0.1", port=0):
-        self.root = Path(root)  # read by ui_main for its startup line
+        self.root = Path(root)
         self.guard = guard
         server = self
 
@@ -59,7 +59,7 @@ def build_ui(root, *, guard=None, host="127.0.0.1", port=0):
 def _ui_parser():
     import argparse
 
-    parser = argparse.ArgumentParser(prog="cousin-ui")
+    parser = argparse.ArgumentParser(prog="cousin_lib.ui")
     parser.add_argument(
         "--root",
         help="the framework root: a directory containing cousins/ and"
@@ -72,7 +72,7 @@ def _ui_parser():
 
 def build_ui_from_cli(argv=None):
     """Parse argv and build the server. The root comes from the shared
-    resolver, so cousin-ui and cousin-spawn agree on --root vs
+    resolver, so this daemon and cousin-spawn agree on --root vs
     FRAMEWORK_ROOT rather than each having its own rule."""
     from cousin_lib.server.netguard import NetGuard
 
@@ -80,21 +80,6 @@ def build_ui_from_cli(argv=None):
     root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
     guard = NetGuard.from_config(root)
     return build_ui(root, guard=guard, host=args.host, port=args.port)
-
-
-def ui_main(argv=None):
-    """Retired alias, kept for one release: `cousin-ui` prints a pointer
-    and runs `cousin-console` with the same flags (--root, --host,
-    --port are shared; the console adds --tmux-bin and --tmux-socket).
-    The small daemon above stays importable for its tests until the
-    console's end-to-end suite replaces them."""
-    import sys
-
-    from cousin_lib.console.app import console_main
-
-    print("cousin-ui is retired: use cousin-console (same flags); running"
-          " it for you", file=sys.stderr)
-    return console_main(argv)
 
 
 class _UIHandler(BaseHTTPRequestHandler):

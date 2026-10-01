@@ -197,16 +197,8 @@ class TestCommandsThroughStores(UICase):
 
 
 class TestCli(UICase):
-    def test_main_needs_a_framework_root(self):
-        import contextlib
-        from cousin_lib.ui import ui_main
-        # Outside any checkout: inside one, the root defaults to it.
-        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp), \
-                mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(ui_main(["--port", "0"]), 2)
-
     def test_root_accepts_the_same_flag_as_spawn(self):
-        # cousin-spawn takes --root; cousin-ui must too, or the two
+        # cousin-spawn takes --root; this daemon must too, or the two
         # entry points disagree about how to be told the same fact and
         # the disagreement is discovered by failing, not by --help.
         self._cousin("wren")

@@ -52,7 +52,8 @@ model:
 - **An Anthropic API key**, metered:
   [a cousin on a Claude key or login](#a-cousin-on-a-claude-key-or-login).
 - **A Claude login**, the same section. The terms risk of running cousins on
-  a subscription login, in a container or anywhere else, is yours.
+  a subscription login, in a container or anywhere else, is yours: read
+  [Claude logins and Anthropic's terms](terms-risk.md) before you pick it.
 
 **Every compose command uses the same files.** compose reads `compose.yml`
 and, when it exists, `compose.override.yml` by itself, but only when you

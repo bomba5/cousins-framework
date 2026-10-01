@@ -49,6 +49,16 @@ machine (in the container, on Docker). That is the trade this framework asks
 you to make. If you are not comfortable with an autonomous agent holding a
 shell on your box, continuously, this is not for you.
 
+## Claude logins and Anthropic's terms
+
+A cousin can run on a Claude subscription login, but Anthropic's terms do not
+clearly allow it: they tell products built on the Agent SDK to use API keys,
+and Anthropic may enforce that without notice. If you run cousins on your
+subscription, the risk to that account is yours. This project is not
+affiliated with or endorsed by Anthropic. An API key or opencode avoids the
+question; [Claude logins and Anthropic's terms](docs/terms-risk.md) has the
+details.
+
 ## Quick start: Docker, no key, no Claude account
 
 ```

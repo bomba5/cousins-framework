@@ -160,7 +160,7 @@ both images.
   not a good idea: two processes refreshing one login race on its token file.
 
 The terms risk of running cousins on a subscription login, in a container or
-anywhere else, is yours.
+anywhere else, is yours: see [Claude logins and Anthropic's terms](terms-risk.md).
 
 **Cousins on opencode.** A cousin with `[agent] runner = "opencode"` runs its
 turns through `opencode serve` on another provider's API key or a local

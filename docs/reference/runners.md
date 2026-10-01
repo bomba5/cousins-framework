@@ -74,6 +74,11 @@ the cousin's card and its chat header. Nothing is skipped silently.
 | `opencode` | `opencode serve`, driven over HTTP and its event stream (`OpencodeRunner`) | `opencode` only | another provider's models on its own API key, or a local OpenAI-compatible model. Never a Claude subscription |
 | `tmux` | the host's interactive Claude Code CLI in a tmux pane on the framework's own socket (`run/tmux.sock`), driven by `TmuxRunner`; the CLI's transcript is the source of truth, its hooks only wake the runner | `claude-login` (and `host`) only | the fallback if Agent SDK usage moves off subscription limits. It cannot fold a message into a running turn (`midturn_fold`) |
 
+`sdk` and `tmux` on a `claude-login` or `claude-token` account run on a Claude
+subscription, which Anthropic's terms do not clearly allow for a product like
+this one: read [Claude logins and Anthropic's terms](../terms-risk.md) before
+you use them that way.
+
 A cousin moves between `sdk` and `tmux` with `cousin-migrate --to <kind>`,
 keeping its session (`data/runner-session.json`, resumed with `claude
 --resume`). The source stops held, claiming nothing new once the stop is

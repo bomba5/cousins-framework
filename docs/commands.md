@@ -101,7 +101,8 @@ so first. The login lane is every `claude-login` account (`host` and each
 named one) and every `claude-token` account (a long-lived subscription token
 from `claude setup-token`): putting a subscription's credentials into the
 framework with `login` or `token` carries the same terms risk as running a
-cousin on the login lane at all, and it is the user's.
+cousin on the login lane at all, and it is the user's (see
+[Claude logins and Anthropic's terms](terms-risk.md)).
 
 ```
 cousin-account login fleet --via wren

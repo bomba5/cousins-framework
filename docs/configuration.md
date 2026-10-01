@@ -101,7 +101,8 @@ The login lane is every `claude-login` account (the host's `~/.claude` and
 each named one) and every `claude-token` account (a long-lived subscription
 token from `claude setup-token`): putting a subscription's credentials into
 the framework with `cousin-account login|token` carries the same terms risk
-as any other use of the login lane, and it is the user's.
+as any other use of the login lane, and it is the user's: read
+[Claude logins and Anthropic's terms](terms-risk.md) first.
 
 ```toml
 [accounts.fleet]
@@ -807,7 +808,7 @@ starts, so nothing is inherited from the shell, and checks the account before it
 unknown account, or a secret file that is open to others or malformed, is
 exit 2; a missing secret file is let through as a login to do, see
 [accounts.toml](#accountstoml)). The terms risk of running a cousin on a login is the
-user's.
+user's: see [Claude logins and Anthropic's terms](terms-risk.md).
 
 `cousin-spawn --runner sdk|fake|opencode|tmux [--account <name>]` (or the console's spawn
 with `runner` and `account`) writes both keys when the cousin is created, and

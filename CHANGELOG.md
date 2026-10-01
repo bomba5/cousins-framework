@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Documentation
+
+- **Claude logins and Anthropic's terms** (#52): a new page,
+  `docs/terms-risk.md`, quotes what Anthropic's Claude Code legal page and
+  Help Center say about subscription logins and the Agent SDK (checked
+  2026-10-01), lists plainly where a cousin on a subscription meets those
+  terms (an Agent SDK product, a stored subscription token, a sign-in relayed
+  through chat, fleet usage), and states that the risk is the user's and the
+  project is not affiliated with Anthropic. The README gets a short section
+  ahead of the quick start, and every place that mentioned the terms risk
+  (install, configuration, commands, operations, the runners reference) links
+  to it.
+
 ## 2.4.0 - 2026-10-01
 
 ### Changed

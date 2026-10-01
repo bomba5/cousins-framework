@@ -39,7 +39,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   Context pressure still measures the last answer alone.
 
 - **A cousin started after the day's flip time is no longer flipped at
-  once** (#136). The daily flip catches up late, once a day, and a cousin
+  once**. The daily flip catches up late, once a day, and a cousin
   the loops daemon had no record of (a new one, say) whose day's `flip_at`
   had already passed was flipped seconds after its first boot, its first
   turn followed by "Your generation is ending (max_age)". The daily flip now
@@ -54,7 +54,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   change.
 
 - **STATUS.md's open loops read the same everywhere, and the handoff no
-  longer strands them** (#137). The handoff writes the bare `## Open loops`
+  longer strands them**. The handoff writes the bare `## Open loops`
   section, but the boot packet took the first "## Open loops" substring
   anywhere (also a "### Open loops archive" or prose quoting it),
   `data/state.json` took the first heading starting with "open loops", the
@@ -78,7 +78,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Documentation
 
-- **Claude logins and Anthropic's terms** (#52): a new page,
+- **Claude logins and Anthropic's terms**: a new page,
   `docs/terms-risk.md`, quotes what Anthropic's Claude Code legal page and
   Help Center say about subscription logins and the Agent SDK (checked
   2026-10-01), lists plainly where a cousin on a subscription meets those
@@ -122,7 +122,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   against 500 ms (1500 ms for the bare inline renderer), still far below
   the quadratic case it guards against (about 5 s on 80 KB). The
   supervisor's orphan-reaping test waits up to 60 s for the supervisor to
-  stop instead of 20 s (#135). What each test checks is unchanged.
+  stop instead of 20 s. What each test checks is unchanged.
 
 ## 2.3.5 - 2026-10-01
 
@@ -207,14 +207,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 - **A killed pane's CLI is SIGKILLed before the tmux runner gives up on
-  it** (#130). The runner waits for an old or refused pane's CLI to be gone
+  it**. The runner waits for an old or refused pane's CLI to be gone
   before it starts another on the same session: SIGKILL after
   `kill_grace_s`, give up at `kill_bound_s`. It checked the bound first, so
   a poll a loaded host returned past both gave up without ever sending the
   SIGKILL, and the reopen failed with "the old CLI is still running"
   against a CLI nobody had killed. The SIGKILL now comes first and is
   polled once more before the runner gives up.
-- The between-turns reader (#134, 2.3.2) opened a `background_turn` for a
+- The between-turns reader (2.3.2) opened a `background_turn` for a
   subagent's own messages, which the CLI forwards to the parent's stream
   (seen live: a "turn" that never ended, handed over at the next row). A
   background turn is now opened only by the model's own message (no
@@ -254,7 +254,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `cousin-spawn --runner opencode` skips the model; the entrypoint's
   first-start checklist no longer suggests an editor the image does not
   have.
-- **Timing tests that failed on a loaded host and passed alone** (#130):
+- **Timing tests that failed on a loaded host and passed alone**:
   the tmux runner, kind switch, job run, SDK backoff and console memory
   explorer tests now wait for the condition they assert under deadlines a
   loaded host does not reach, instead of fixed sleeps, wall-clock bounds or
@@ -266,7 +266,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
-- **The SDK runner reads the CLI between turns** (#134). It read the CLI's
+- **The SDK runner reads the CLI between turns**. It read the CLI's
   stream only inside a turn, on the assumption that the CLI is quiet
   between turns. It is not when a background task runs: a subagent or a
   background shell streams its progress after the turn that started it has
@@ -292,7 +292,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Changed
 
-- **One model catalogue and one effort list** (#41): `DEFAULT_MODELS` and
+- **One model catalogue and one effort list**: `DEFAULT_MODELS` and
   `EFFORT_LEVELS` in `cousin_lib/config.py` are the only copies; every
   command and route already imported them, and a test now fails when a
   module spells either out again, when a doc or shipped example lists an
@@ -303,13 +303,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
-- **SDK-lane tests wait for what they read** (#102): four more tests read
+- **SDK-lane tests wait for what they read**: four more tests read
   something the runner writes after the event they waited for: a login's
   `auth` event (after its file), the last turn's pressure check (after its
   row closes), the failure count (after the idle move) and a side
   session's `side_restarted` (after the rebuilt side starts). Each waits
   for the thing itself now. Tests only.
-- **Console start and stop around the supervisor** (#92):
+- **Console start and stop around the supervisor**:
   - A stop with no supervisor running and a runner started by hand still
     holding the lock answered `502 cousin-supervisor refused the stop: no
     reason given`; nothing had refused. It is `503` saying that no
@@ -329,7 +329,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     recycled inode under another path (a later temporary root in a test
     run) could have it close a descriptor that was not its own. It checks
     the path too, where `/proc/self/fd` says.
-- **Runner review leftovers** (#68):
+- **Runner fixes**:
   - `cousin-runner --once` gave up after 10 s on a runner `errored` inside
     its resync, whose drain may take its `drain_timeout_s` (30 s), and
     exited 3 on a runner about to recover. The drain now comes on top of
@@ -349,11 +349,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     the turn), failed about 4 runs in 6; it waits for the echo now.
   - A row with an image and a file attachment is echoed and closed as
     any other: now pinned by a test.
-- **The runner pane marks where markdown stops** (#99): past the first
+- **The runner pane marks where markdown stops**: past the first
   20 000 characters a text is not parsed, and the rest (`.rp-md-rest`) had
   no style, so a raw `**` there looked like a rendering bug. It now sits
   under a thin dashed rule with a muted "raw text from here" note.
-- **The runner contract names only the tools it serves** (#97): the
+- **The runner contract names only the tools it serves**: the
   doctrine prose ("How you answer", "Memory", "Tools, not the terminal
   CLIs") named `send`, `memory`, `job`, `schedule` and `meeting` from a
   fixed text, so a cousin whose registry disables one was told to use a
@@ -373,8 +373,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   chat's title no longer wraps: it is cut with an ellipsis, the path first.
 
 ### Added
-- Console chat: the divider between the chat and the reasoning pane snaps
-  (#126). It still drags; let go within 40 px of the chat's left edge and the
+- Console chat: the divider between the chat and the reasoning pane snaps.
+  It still drags; let go within 40 px of the chat's left edge and the
   chat collapses, the pane covering the whole area, and a thin handle at that
   edge brings it back at its last width; let go within 40 px of the right
   edge and the pane closes. The collapse is kept per browser
@@ -392,8 +392,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `Connection: close`, so the connect timeout stayed on the socket the relay
   reads; a page reconnected every few seconds and missed events sent in the gaps.
 
-- `cousin-runner`: a status probe of a runner's lock no longer takes it
-  (#79). `hold_lock` now also holds an open-file-description lock on
+- `cousin-runner`: a status probe of a runner's lock no longer takes it.
+  `hold_lock` now also holds an open-file-description lock on
   `run/runner.lock` beside its flock, and `is_running` reads it with
   `F_OFD_GETLK`, which takes nothing, so a runner starting while the
   fleet poll, the loops tick or the console probes it is never refused.
@@ -404,18 +404,18 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   raises `UnicodeDecodeError` when the stream file ends inside a
   multi-byte character (a writer that died mid-write): it reads bytes
   and decodes each complete line, and the partial last line is skipped
-  as before (#86).
+  as before.
 - Chat hooks: a `shell:` handler no longer inherits the chat server's
-  credentials (#88). Its environment is the server's minus the auth
+  credentials. Its environment is the server's minus the auth
   variables (`accounts.AUTH_VARS`) and every credential-shaped name
   (`*SECRET*`, `*_KEY`, `*_TOKEN`, `*_PASSWORD`), the rule the runner
   already applies to the cousin's own tools.
 - The sdk runner has a test that a turn the CLI ends with an `is_error`
   result (no exception, no login or rate-limit signal) closes its rows
-  `failed` and the next row still runs (#67).
+  `failed` and the next row still runs.
 - Semantic memory search: a file's last chunk that would add fewer new
   characters than `chunk_overlap` now joins the chunk before it instead
-  of standing alone as a fragment that is mostly overlap (#82); such
+  of standing alone as a fragment that is mostly overlap; such
   fragments ranked erratically. Nothing is re-embedded at upgrade:
   existing indexes pick it up at their next rebuild or refresh, which
   re-embeds only the affected files' last chunk.
@@ -547,7 +547,7 @@ sessions. A cousin.toml `tidy` edited has its prior bytes in
 - Docs describe runner kinds only (cousins.md, configuration.md, chat.md,
   chat-api.md, migrating.md, operations.md, remote-cousins.md, telegram.md,
   console.md, the glossary, the loops pages), plus eight doc and comment
-  fixes found by the framework map.
+  fixes.
 
 ## 1.27.0 - 2026-09-30
 
@@ -555,7 +555,7 @@ sessions. A cousin.toml `tidy` edited has its prior bytes in
 - Reasoning pane: the "N bg tasks" chip opens the list of background tasks
   (subagents, background shells): the running ones with their description,
   kind, elapsed time and last tool, then the last few ended ones with their
-  status (#129). The SDK runner now keeps each task event's id, description,
+  status. The SDK runner now keeps each task event's id, description,
   kind, status, last tool and a short summary on the stream (no prompt, no
   output).
 
@@ -604,7 +604,7 @@ sessions. A cousin.toml `tidy` edited has its prior bytes in
 ## 1.25.0 - 2026-09-25
 
 ### Added
-- The reasoning pane is folded by default (#125). A strip under the header
+- The reasoning pane is folded by default. A strip under the header
   shows what the runner is doing now (a spinner while it thinks or runs a
   tool, with the elapsed time), the Claude usage limit as a bar with its
   reset day, the session's model and whether it runs on the host login or
@@ -654,18 +654,18 @@ sessions. A cousin.toml `tidy` edited has its prior bytes in
 Three runner fixes, each proven by a test that failed before it.
 
 ### Fixed
-- A new session's id is on file as soon as the SDK's init names it (#119),
+- A new session's id is on file as soon as the SDK's init names it,
   so a runner killed during a new session's first turn resumes that session
   instead of starting fresh. A lost resume keeps the old id on file until
   its fresh start has run. A failing write is retried once per turn, not per
   message.
 - A turn's `result` event reaches the stream before its inbox rows close, on
-  every kind (#87): a closed row's result is always visible. The row close
+  every kind: a closed row's result is always visible. The row close
   sits in a try/finally, so a failed append never leaves a row claimed. The
   contract suite checks the order. Known exception: the tmux kind's
   `_pane_lost` and `_settle_on_stop`.
 - The SDK runner's carried read (a row written while the CLI finished a
-  turn, its echo not yet come) honours stop and interrupt (#66). A stop
+  turn, its echo not yet come) honours stop and interrupt. A stop
   gives the echo up to 2 s, then requeues the rows the CLI never took up.
   An interrupt is taken, and sent again to the turn if the CLI was idle
   when it first went; after `drain_timeout_s` with no echo the client is
@@ -675,9 +675,7 @@ Three runner fixes, each proven by a test that failed before it.
 
 ## 1.24.1 - 2026-09-25
 
-The documentation sweep (master plan 10c, task 6) and the glossary (task 7),
-against the running 1.24.0. The 2.0.0 steps of 10c (the CHANGELOG migration
-section, the major bump) wait for 10b, the legacy lane's retirement.
+A documentation sweep, checked against 1.24.0, and a glossary.
 
 ### Added
 - `docs/glossary.md`: the words the docs use in a sense of their own, one
@@ -701,10 +699,6 @@ section, the major bump) wait for 10b, the legacy lane's retirement.
 - `cousin-migrate --help` names the kind switch and the legacy lane.
 
 ## 1.24.0 - 2026-09-25
-
-Phase 11 of the runner plan, integrated onto 1.23.0. The live proofs the
-phase's exit criteria require (a kind switch both ways on a real cousin, the
-pane under a real login) passed on this release candidate before it shipped.
 
 ### Added
 - The console finishes its map of the framework:
@@ -750,7 +744,7 @@ pane under a real login) passed on this release candidate before it shipped.
   continue at a usage limit and remote control off, `editorMode` normal,
   `policy.toml`'s `deny_tools` as `permissions.deny`, and the bridge hooks;
   `remove_kind_settings` undoes exactly what the kind added. Attribution
-  on the pane follows `[agent] commit_attribution` (#112), as on every
+  on the pane follows `[agent] commit_attribution`, as on every
   other kind.
 - The kind switch: `cousin-migrate plan|apply <slug> --to sdk|tmux` moves a
   runner cousin between the two Claude kinds as a step machine, keeping its
@@ -782,7 +776,7 @@ pane under a real login) passed on this release candidate before it shipped.
   tmux-kind home, through the runner's own tool code.
 
 ### Fixed
-- A runner asked to stop claims nothing new (live proofs, finding 3: during
+- A runner asked to stop claims nothing new (during
   a held close for a kind switch the SDK runner answered a queued row before
   it stopped). `cousin-runner`'s signal handler calls the runner's
   `begin_stop()` at once (`SdkRunner`, `TmuxRunner`, the side sessions'
@@ -791,9 +785,9 @@ pane under a real login) passed on this release candidate before it shipped.
   stop raced goes back to the queue. What is live is still finished or
   settled. A signal during the stop's own teardown does nothing more, and
   the wake poke it sends never raises.
-- The kind switch's notice is the first turn after the switch (finding 4:
-  rows queued before the switch were answered by a model that still
-  believed the old kind). It is queued before the target starts, ranked
+- The kind switch's notice is the first turn after the switch (rows
+  queued before the switch were answered by a model that still believed
+  the old kind). It is queued before the target starts, ranked
   ahead of every row (a flip or an interrupt included). A rollback closes
   it if it is still queued or claimed, and clears the tmux runner's
   `data/login-required.json`, so the restored kind never reads LOGIN
@@ -801,13 +795,13 @@ pane under a real login) passed on this release candidate before it shipped.
   up but whose target took the notice later (the trust dialog accepted
   late) reads `switched`, with a `late` note, at the next read of its
   record; `cousin-migrate check` prints it.
-- A pane lost while the runner stops is the stop's cut (finding 5: under a
+- A pane lost while the runner stops is the stop's cut (under a
   systemd stop the unit's cgroup kill takes the tmux server first). The cut
   row reads "cut by restart", or "cut by a requested stop" when held (the
   held stop's own settle uses the same words), the restart mark tells the
   next start, and the loss counts toward no give-up.
 - A tmux rollover's `data/runner-session.json` names the rollover's
-  generation as soon as it moves (finding 6: it kept the old one until the
+  generation as soon as it moves (it kept the old one until the
   new session's first turn).
 
 ### Deferred to 1.24.x
@@ -818,8 +812,8 @@ pane under a real login) passed on this release candidate before it shipped.
 ## 1.23.0 - 2026-09-25
 
 ### Added
-- The console maps the rest of the framework (the operator's rule: every
-  function has a UI path):
+- The console maps the rest of the framework, so every function has a UI
+  path:
   - **Accounts**: every account with its kind, where it lives, its lanes
     and its cousins, never a secret. Check (no model call), validate (one
     turn, asked first), add, edit and remove entries through a validated
@@ -888,8 +882,8 @@ pane under a real login) passed on this release candidate before it shipped.
   or a long operation runs on it).
 - The SDK runner names a turn's long wait on its stream: a `system` `stall`
   event while a write, a fold or a control call runs past 30 s, and again
-  with its duration when it ends (#104).
-- `[agent] commit_attribution` (tracker #112): install-wide in
+  with its duration when it ends.
+- `[agent] commit_attribution`: install-wide in
   `config/harness.toml`, overridable per cousin in `cousin.toml`. `false`
   turns off the harness's own injected commit/PR attribution (a
   Co-Authored-By trailer, a "Generated with Claude Code" line); unset
@@ -905,25 +899,25 @@ pane under a real login) passed on this release candidate before it shipped.
 - A resumed runner session is told why its last turn was cut: a runner
   restart or crash says it was not the operator and to continue; a requested
   stop says so; a console restart says to continue. The note is put once and
-  never aborts start-up (#98).
+  never aborts start-up.
 - A runner cousin's model and effort change in the console writes `[agent]`
   (not `[runtime]`), validated per lane: the SDK lane runs one smallest
   turn on the cousin's own account in a child process (the console's own
   environment is never touched), opencode checks the model and refuses an
-  effort. An unchanged value runs nothing and asks for no restart (#100).
+  effort. An unchanged value runs nothing and asks for no restart.
 - A runner's PreToolUse/PostToolUse job recorder waits at most 2 s on the
   shared jobs store; past that the tool runs, a late registration is
-  withdrawn, and no row is left running (#104).
+  withdrawn, and no row is left running.
 - `{home_encoded}` is Claude Code's own project-dir encoding: every
-  non-alphanumeric character is a dash (#106).
-- A migration rollback removes the runner lane's session records (#107).
+  non-alphanumeric character is a dash.
+- A migration rollback removes the runner lane's session records.
 - The console's Telegram toggle runs its own bridge stop only when no
-  supervisor is there at all; a slow supervisor stops nothing (#113).
+  supervisor is there at all; a slow supervisor stops nothing.
 - `cousin-job` and the `job` tool refuse an empty program, or one with
-  leading or trailing whitespace, before any row exists (#115).
+  leading or trailing whitespace, before any row exists.
 - The template sync now corrects a cousin's `mcp-registry.toml` when a
   `description` field still holds text an earlier framework release
-  shipped, not just what it lacks entirely (#110). The `job` tool's `run`
+  shipped, not just what it lacks entirely. The `job` tool's `run`
   command shipped with new wording for its own tool description and its
   `kind`, `title` and `desc` property descriptions, but the sync only ever
   ADDED missing tables and keys: a cousin spawned before `run` kept the
@@ -938,7 +932,7 @@ pane under a real login) passed on this release candidate before it shipped.
   regenerated to match.
 - A peer's message (another cousin, thread `peer:<slug>`) that arrives while
   a turn runs is folded into that turn, as an operator's or a person's is,
-  on the `sdk`, `opencode` and `fake` runners (#118). It used to wait for the
+  on the `sdk`, `opencode` and `fake` runners. It used to wait for the
   turn to end, and a turn has no length bound: a coordinator's 13 messages,
   two of them STOP, sat queued behind one 60-minute turn while the peer
   duplicated finished work. Meeting, loop and schedule rows still wait for a
@@ -954,7 +948,7 @@ pane under a real login) passed on this release candidate before it shipped.
   reads the CLI's output: once that output was full and unread, the CLI
   stopped reading its input, the write blocked, the reader waiting on it
   never drained the output, and hook replies queued behind the transport's
-  write lock timed out, the 18-39 minute stalls (#104). Each turn now has one
+  write lock timed out, the 18-39 minute stalls. Each turn now has one
   writer task that takes those writes in order (a fold taken before an
   interrupt is written before it) while the reader keeps reading. A folded
   row still counts as delivered only when the CLI echoes it; a write that
@@ -1024,7 +1018,7 @@ pane under a real login) passed on this release candidate before it shipped.
 
 ### Fixed
 - A long chat message on the tmux lane no longer reaches the cousin as a bare
-  paste (#111). Claude Code reads one keyboard read of more than 800
+  paste. Claude Code reads one keyboard read of more than 800
   characters as a paste and wraps it in a pasted-content block its system
   prompt tells the model to trust only where the user's own message asks: in
   one cousin's transcript 41 of 244 inbound messages arrived that way, with
@@ -1039,7 +1033,7 @@ pane under a real login) passed on this release candidate before it shipped.
   `(Chat <Name>): ` prefix and the single Enter are unchanged, and short
   messages are typed exactly as before (docs/reference/chat-api.md).
 - A runner cousin's Telegram bridge is now a `cousin-supervisor` child,
-  `telegram:<slug>`, beside `runner:<slug>` (#101). It used to start only
+  `telegram:<slug>`, beside `runner:<slug>`. It used to start only
   from the console's switch, as a process nothing watched: nothing brought it
   back after a reboot, a supervisor restart or a crash, and nothing stopped it
   with the runner. Now it starts after its runner when `[telegram]` passes the
@@ -1056,7 +1050,7 @@ pane under a real login) passed on this release candidate before it shipped.
   down keeps it. The token and operator routes report `bridge` like the
   switch does. A tmux cousin's bridge is unchanged.
 - A cousin moved to the runner by `cousin-migrate apply` is handed its
-  conversation from before the move (#103). The working conversation does not
+  conversation from before the move. The working conversation does not
   carry: the runner starts a new session from the state digest, the handoff
   and memory. A new `handover` step, after `close`, records the tmux lane's
   last transcript (and the newest other one in the same directory) in
@@ -1138,7 +1132,7 @@ pane under a real login) passed on this release candidate before it shipped.
   budget; `docker compose -f compose.yml -f compose.opencode.yml up -d`
   runs the framework on it (an override file, not a profile). The default
   image is unchanged.
-- Claude runs on the Agent SDK only (ruling P9-1): on the opencode lane an
+- Claude runs on the Agent SDK only: on the opencode lane an
   account naming the `anthropic` provider, and a model, `small_model` or
   `endpoint_model` whose id contains `claude` or `anthropic`, are refused
   (exit 2). A test by name, a floor rather than a proof (docs/reference/runners.md).
@@ -1192,7 +1186,7 @@ pane under a real login) passed on this release candidate before it shipped.
 ### Fixed
 - A runner cousin is told, in the fixed part of its contract, to reply, send,
   remember and schedule through its tools, not through the terminal CLIs an
-  identity file may still name (#95). It applies at each cousin's next
+  identity file may still name. It applies at each cousin's next
   rollover; a restart resumes the recorded prompt.
 - `validate` (`cousin-runner --check-auth --validate`, `cousin-migrate
   --validate`) fails on an error inside the turn, a non-success result or an
@@ -1440,8 +1434,8 @@ pane under a real login) passed on this release candidate before it shipped.
   binary: its deliveries are inbox rows, so a node's `[tell-home]` and a peer's
   message reach the runner on a host without tmux.
 - The console API reference said the restart route exits 0; it exits 75.
-- `cousin-runner` retries its lock for about a second before it exits 5
-  (#79): `is_running` probes by taking the same lock for microseconds (the
+- `cousin-runner` retries its lock for about a second before it exits 5:
+  `is_running` probes by taking the same lock for microseconds (the
   loops tick, the fleet poll, the console's stream), and a runner starting
   inside a probe was refused. This closes the race for every prober.
 - `hold_loops_lock` closes its own fd in every process forked from the
@@ -1555,11 +1549,11 @@ pane under a real login) passed on this release candidate before it shipped.
   "console"`, `active` a live turn, `pid` the runner's, `lastMsgTs` read from
   `chat.db` read-only; no chat server call and no tmux call for it.
 - `policy.toml`'s `ask` is enforced as deny with no approval surface yet; the
-  deny reason, the docs and the example no longer promise one in a phase.
+  deny reason, the docs and the example no longer promise one.
 
 ### Fixed
 - The reasoning stream carries a thinking block's text (bounded at 8000
-  characters, `truncated` when cut); since phase 2 it held only its length.
+  characters, `truncated` when cut); it used to hold only its length.
 
 ## 1.13.1 - 2026-09-24
 
@@ -1760,12 +1754,7 @@ pane under a real login) passed on this release candidate before it shipped.
 - `cousin-schedule tick` keeps a job pending when its deliverer says the
   delivery was not accepted.
 - `[agent] runner = "sdk"` is no longer experimental for chat, schedules,
-  loops and meetings; the composed prompt and the console views arrive in
-  phases 4 and 5.
-- The master plan takes the accepted review's order and, after 2.0.0, a
-  wishlist; phases 4, 5, 7 and 10 gain the breakdown ledger, the cache hit
-  rate in the tokens view, valid-time claims with a tensions view, a review
-  gate for bulk memory writes, and a glossary.
+  loops and meetings.
 
 ## 1.10.0 - 2026-09-23
 
@@ -1783,7 +1772,7 @@ pane under a real login) passed on this release candidate before it shipped.
   interrupt, outcomes, failure recovery, stop, the event stream) tests both.
   `cousin.toml [agent] runner = "sdk"` switches a cousin over and routes
   `deliver()` to the inbox; every tmux cousin is untouched and the key is
-  experimental until phase 3 moves the producers. The auth lane is the
+  experimental. The auth lane is the
   presence of the key in the session environment and nothing else (the
   login lane scrubs `ANTHROPIC_*` from the runner's environment), and
   `apiKeySource` from every session init is recorded so a cousin on the
@@ -1796,16 +1785,14 @@ pane under a real login) passed on this release candidate before it shipped.
   answer neither lost nor misattributed.
 
 ### Changed
-- `Inbox` grew `requeue`, `unfinished` and `get`; the master plan's locked
-  interfaces say so, and it takes the operator-accepted review: the twelve
-  unplaced parity rows placed, `max_age` as the flip cadence, phase 7 tasks
-  1-2 ticked, and the order 2, 3, 4, 7(3-6), 5, 6, 7(7-8), 8, 9, 10.
+- `Inbox` grew `requeue`, `unfinished` and `get`.
+
 ## 1.9.1 - 2026-09-23
 
 ### Changed
-- `claude-opus-5-5` heads the built-in model catalogue (`DEFAULT_MODELS`),
-  probed live on five running cousins the day it was released. The spawn
-  dialog's default follows the catalogue head when `default_model` is unset.
+- `claude-opus-5-5` heads the built-in model catalogue (`DEFAULT_MODELS`).
+  The spawn dialog's default follows the catalogue head when `default_model`
+  is unset.
 
 ## 1.9.0 - 2026-09-22
 
@@ -1815,7 +1802,7 @@ pane under a real login) passed on this release candidate before it shipped.
   so the flag was produced and never displayed: a semantic leg that had ranked
   against 24 of 416 chunks returned `notice=None` and its hits came back
   looking like a complete result over the whole corpus. Measured on a cold
-  home 2026-09-22, 5.8% of the corpus, by the peer that hit it. Hits from 6%
+  home: 5.8% of the corpus. Hits from 6%
   of a corpus presented as complete are how a confident wrong file gets cited
 
 ### Added
@@ -1875,6 +1862,7 @@ pane under a real login) passed on this release candidate before it shipped.
   a month in both `<YYYY-MM>-digest.jsonl` and `archive/<YYYY-MM>.jsonl.gz`,
   and the twins carry the same topic and content under different metadata, so
   one memory returned as two hits (344 duplicates on the benchmark corpus)
+
 ## 1.6.3 - 2026-09-21
 
 ### Changed
@@ -1893,7 +1881,7 @@ pane under a real login) passed on this release candidate before it shipped.
   with no persisted `runtime.session_id` (hand-made, or on its first flip) fell
   back to the newest log file, which is the pre-1.6.0 reading and may belong to
   an older generation. The line now says it could not be scoped instead of
-  claiming the generation that just died (#54)
+  claiming the generation that just died
 
 ### Documentation
 - The 1.5.1 WAL entry stated a property the build only permits; it now names the
@@ -1907,7 +1895,7 @@ pane under a real login) passed on this release candidate before it shipped.
   order, and inverting it would have made the warning scope to a session with
   no log and go quiet forever. Named at the persist site and guarded by
   `tests.test_flip.TestAssembleSeesTheDyingSessionId`, which was proven to go
-  red under the inversion (#54)
+  red under the inversion
 
 ## 1.6.0 - 2026-09-21
 
@@ -1926,14 +1914,14 @@ a third state on its public interface. Everything else here is a fix.
 - The boot packet's MCP line no longer predicts the session that is booting.
   It names the session it is about, reports that session's attempt time, and
   is scoped to the generation that just died whenever a `runtime.session_id`
-  is on file; see 1.6.2 for what it says when none is (#54)
+  is on file; see 1.6.2 for what it says when none is
 - An attempt whose outcome nobody recorded reads as unrecorded, not as a
   failure, and a failure in wording the parser has no literal for keeps its
   reason instead of printing "no reason recorded". Measured over 5908 harness
   logs: 93 files were reported FAILED with no reason; 80 held the reason and
-  13 held no outcome at all, one of them since April (#54)
+  13 held no outcome at all
 - The warning no longer claims "Nothing retries it": a harness session
-  reconnects inside itself, which 186 of those logs record (#54)
+  reconnects inside itself, which 186 of those logs record
 
 ## 1.5.1 - 2026-09-20
 
@@ -1941,7 +1929,7 @@ a third state on its public interface. Everything else here is a fix.
 - WAL mode on `jobs.db`, `scheduled.db`, `hive.db` and the memory indexes,
   best-effort: `sqlite_util.wal` swallows a `sqlite3.Error` and SQLite converts
   the journal on the first WRITE, so a database on a network filesystem, or one
-  nobody has written since, stays in the rollback journal (#38)
+  nobody has written since, stays in the rollback journal
   <!-- wording corrected in 1.6.2: the original entry stated the property
        without the condition the build merely permits -->
 
@@ -1949,7 +1937,7 @@ a third state on its public interface. Everything else here is a fix.
 
 ### Added
 - `cousin-mcp --last-connection`: why a cousin's MCP server failed, with the
-  server's own stderr (#36)
+  server's own stderr
 - The boot packet reports a failed MCP connection
 - `mcp_logs_dir` in `config/harness.toml`
 
@@ -1971,7 +1959,7 @@ a third state on its public interface. Everything else here is a fix.
 
 ### Changed
 - A tool that does not validate is skipped with a warning instead of killing
-  the MCP server. Unparseable TOML and the tool ceiling stay fatal (#35)
+  the MCP server. Unparseable TOML and the tool ceiling stay fatal
 - `cousin-mcp --selftest` exits 1 when a tool was skipped
 
 ## 1.2.2 - 2026-09-20
@@ -1988,7 +1976,7 @@ a third state on its public interface. Everything else here is a fix.
 
 ### Fixed
 - The MCP registry sync is additive at every level. A command or property
-  added inside a tool block a cousin already had never reached it (#32)
+  added inside a tool block a cousin already had never reached it
 
 ## 1.1.0 - 2026-09-19
 
@@ -2038,7 +2026,7 @@ a third state on its public interface. Everything else here is a fix.
 ## 0.11.0 - 2026-09-19
 
 ### Added
-- `cousin-reply --image` and `--video` attach to the reply (#24)
+- `cousin-reply --image` and `--video` attach to the reply
 
 ### Fixed
 - Telegram attachments over the upload limit, and rejected sends log the reason
@@ -2051,7 +2039,7 @@ a third state on its public interface. Everything else here is a fix.
 ## 0.9.0 - 2026-09-19
 
 ### Added
-- Telegram carries images, video and voice both ways (#13)
+- Telegram carries images, video and voice both ways
 
 ## 0.8.2 - 2026-09-19
 

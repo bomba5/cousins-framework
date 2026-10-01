@@ -35,7 +35,7 @@ class EventStream:
     def tail(self, after=None):
         if not self.path.exists():
             return
-        # bytes, decoded one complete line at a time (#86): a writer that
+        # bytes, decoded one complete line at a time: a writer that
         # died inside a multi-byte character leaves bytes a text-mode read
         # would raise on before the partial line could be skipped
         with open(self.path, "rb") as f:

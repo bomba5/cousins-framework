@@ -1,7 +1,7 @@
-"""The interactive CLI's transcript, read by the tmux kind (phase 11, R6,
-R7, P11-9). The transcript is that kind's source of truth: which prompt
-the model took, when a turn ended, how it ended. Hooks only wake the
-runner up; nothing here trusts them.
+"""The interactive CLI's transcript, read by the tmux kind. The
+transcript is that kind's source of truth: which prompt the model took,
+when a turn ended, how it ended. Hooks only wake the runner up; nothing
+here trusts them.
 
 The shapes are the ones measured on Claude Code 2.1.281 in a tmux pane
 (docs/design/plans/phase-11-findings.md):
@@ -26,8 +26,8 @@ that does not parse: every complete entry at its end is recovered and
 classified as any other (`recover_line`; two tears in a row can leave
 more than one), and the torn head, never an entry, is kept as an `other`
 entry marked `fragments_dropped`. `turn_nonce` looks for a KNOWN nonce in
-such raw text only inside a user entry that holds no tool result (R7,
-P11-9), so a row is neither typed twice nor taken by a tool's output."""
+such raw text only inside a user entry that holds no tool result, so a
+row is neither typed twice nor taken by a tool's output."""
 import json
 import re
 from dataclasses import dataclass, field
@@ -159,8 +159,8 @@ def recover_line(text):
 def raw_nonces(entry, known):
     """The KNOWN nonces in a line that did not parse and whose tail did not
     parse either: each at the start of a JSON string INSIDE a user entry's
-    segment that holds no tool result (the fallback of R7, P11-9); [] for a
-    parsed entry."""
+    segment that holds no tool result (the fallback for a torn line); [] for
+    a parsed entry."""
     text = entry.raw.get("_unparsed") if isinstance(entry.raw, dict) else None
     if not text:
         return []

@@ -1,4 +1,4 @@
-"""The runner's tools as a remote MCP server on loopback (phase 9 R7).
+"""The runner's tools as a remote MCP server on loopback.
 
 The SDK lane serves the framework's tools in process
 (tools.build_tool_server). opencode cannot load a Python server into

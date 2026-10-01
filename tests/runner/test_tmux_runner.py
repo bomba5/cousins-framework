@@ -1,7 +1,6 @@
-"""The tmux kind's rules beyond the contract suite (phase 11 R4, R6, R6b,
-R6c, R21, R23): what closes a row and when, what a turn start nobody typed
-is, what a restart does with rows already typed, and the screens the runner
-never types into."""
+"""The tmux kind's rules beyond the contract suite: what closes a row and
+when, what a turn start nobody typed is, what a restart does with rows
+already typed, and the screens the runner never types into."""
 import json
 import threading
 import time
@@ -15,7 +14,7 @@ from tests.runner._fake_pane import FakePane
 from tests.runner._home import temp_home
 
 
-WAIT_S = 30.0   # a deadline, not a delay: _wait returns as soon as the condition holds (#130)
+WAIT_S = 30.0   # a deadline, not a delay: _wait returns as soon as the condition holds
 
 
 def _wait(pred, timeout=WAIT_S):
@@ -29,7 +28,7 @@ def _wait(pred, timeout=WAIT_S):
 
 def _result_append_fails_once(r):
     """The runner's first `result` append raises (a full disk, say): the
-    rows it names must still close as its branch closes them (#87 review)."""
+    rows it names must still close as its branch closes them."""
     real, said = r.stream.append, []
 
     def append(kind, payload):
@@ -56,7 +55,7 @@ class Case(HermeticCase):
                        handoff_deadline_s=deadline,
                        launch_argv=lambda sid, fresh: ["claude", sid] + (["--fresh"] if fresh else []))
         # Cleanups run last-in first-out: the runner stops, then the fake
-        # CLIs end their turns, then the home goes (#130).
+        # CLIs end their turns, then the home goes.
         self.addCleanup(FakePane.quiesce_all)
         self.addCleanup(lambda: r.stop(timeout=5))
         self.panes = panes
@@ -74,7 +73,7 @@ class Case(HermeticCase):
             fh.write(json.dumps(obj) + "\n")
 
     def hook_record(self, r, pane):
-        """What the pane's SessionStart hook writes (tmux_hook, R24): the
+        """What the pane's SessionStart hook writes (tmux_hook): the
         record a later runner needs before it adopts `pane`."""
         (self.home / "run" / "tmux-session.json").write_text(json.dumps(
             {"session_id": r.session_id(), "transcript_path": str(r._path),
@@ -87,7 +86,7 @@ class TestTyping(Case):
         r.start()
         rec = r.enqueue(Item("operator:wren", "chat", "hi", sender="Wren"))
         self.assertTrue(_wait(lambda: r.login_required()))
-        # the flag is set a moment before the file is written (#130)
+        # the flag is set a moment before the file is written
         self.assertTrue(_wait(lambda: (self.home / "data" / "login-required.json").exists()))
         self.assertEqual(self.outcome(r, rec)[0], "queued")
         self.assertEqual(self.panes[0].typed, [])
@@ -127,7 +126,7 @@ class TestTyping(Case):
 
 
 class TestStoppingClaimsNothing(Case):
-    """Live proofs 09-25, finding 3: a runner asked to stop (held or not)
+    """A runner asked to stop (held or not)
     claims nothing new; it only finishes or settles what it has."""
 
     def test_a_runner_asked_to_stop_types_no_queued_row(self):
@@ -154,7 +153,7 @@ class TestStoppingClaimsNothing(Case):
         rec = r.enqueue(Item("operator:wren", "chat", "raced", sender="Wren"))
         self.assertTrue(_wait(lambda: r._stopping.is_set()))
         # the requeue follows the stop on the runner's thread: waited for,
-        # never a fixed sleep (#130: 'claimed' after 0.3 s on a loaded host)
+        # never a fixed sleep ('claimed' can last past 0.3 s on a loaded host)
         self.assertTrue(_wait(lambda: self.outcome(r, rec)[0] == "queued"), self.outcome(r, rec))
         self.assertEqual(self.panes[0].typed, [])
 
@@ -167,7 +166,7 @@ class TestTurns(Case):
         self.write(r, {"type": "user", "promptSource": "typed", "promptId": "px",
                        "message": {"role": "user", "content": "someone at the keyboard"}})
         self.assertTrue(_wait(lambda: "foreign_turn" in self.kinds(r)))
-        # the event is appended a moment before the state moves (#130)
+        # the event is appended a moment before the state moves
         self.assertTrue(_wait(lambda: r.state() == "running"), r.state())
         self.write(r, {"type": "system", "subtype": "turn_duration", "durationMs": 1})
         self.assertTrue(_wait(lambda: r.state() == "idle"))
@@ -185,7 +184,7 @@ class TestTurns(Case):
         self.assertTrue(results()[0]["interrupted"])
 
     def test_an_interrupt_row_whose_escape_was_refused_closes_failed(self):
-        """Review minor: a refused Escape (an attention screen showing) is
+        """A refused Escape (an attention screen showing) is
         not a delivered interrupt; the turn runs on."""
         from cousin_lib.runner.base import INTERRUPT
         r = self.runner(slow=True, slow_s=3.0)
@@ -215,7 +214,7 @@ class TestTurns(Case):
 
 class TestCursor(Case):
     def test_the_cursor_is_saved_per_line_so_a_failure_never_replays_the_ones_before(self):
-        """Review minor: _pump saved the cursor after ALL entries, so one
+        """_pump once saved the cursor after ALL entries, so one
         that raised replayed every entry before it every 0.2 s."""
         r = self.runner()
         r.start()
@@ -233,7 +232,7 @@ class TestCursor(Case):
                            "message": {"role": "user", "content": "someone %s" % pid}})
         self.assertTrue(_wait(lambda: handled.count("p2") >= 3))
         self.assertEqual(handled.count("p1"), 1, "the line before the failing one is not replayed")
-        # round 2: after three replays (four failures) the line is skipped, said once
+        # after three replays (four failures) the line is skipped, said once
         offset = len(r._path.read_text().splitlines()[0]) + 1
         skipped = lambda: [e["payload"]["error"] for e in r.events() if e["kind"] == "error"
                            and "skipped" in e["payload"]["error"]]
@@ -247,8 +246,8 @@ class TestCursor(Case):
 
 
 class TestSkippedLines(Case):
-    """Round 4: a line whose handling keeps raising is skipped; if it ended
-    the live turn, the turn is closed with the skip as the reason (Q5)."""
+    """A line whose handling keeps raising is skipped; if it ended the
+    live turn, the turn is closed with the skip as the reason."""
 
     def test_a_skipped_turn_end_closes_the_live_turn(self):
         r = self.runner()
@@ -290,7 +289,7 @@ class TestSkippedLines(Case):
         self.assertTrue(_wait(lambda: r.state() == "idle"))
 
     def test_a_skipped_limit_requeues_the_rows_and_waits_as_a_limit_does(self):
-        """R6's limit end, even when its line is skipped: the taken row is
+        """A limit end, even when its line is skipped: the taken row is
         requeued, never failed, and the runner is rate_limited."""
         self.on_prompt = lambda pane, first, body: "limit"
         r = self.runner()
@@ -333,7 +332,7 @@ class TestSkippedLines(Case):
 
 
 class TestCutPrefix(Case):
-    """Round 4 minor 4: the expired notice's prefix stays until its row is
+    """The expired notice's prefix stays until its row is
     TAKEN (a row retyped after it was not taken still carries it), and a
     rollover drops it (a new session had no turn cut)."""
 
@@ -375,7 +374,7 @@ class TestCutPrefix(Case):
 
 
 class TestGiveUpHold(Case):
-    """Round 4: a give-up survives the supervisor: exit 2 (never
+    """A give-up survives the supervisor: exit 2 (never
     restarted), and a marker the next start honours for an hour, or until
     an explicit start clears it."""
 
@@ -411,7 +410,7 @@ class TestGiveUpHold(Case):
 
 
 class TestContext(Case):
-    """R10 (review C2, I2): the block the launcher appends on a fresh start,
+    """The block the launcher appends on a fresh start,
     the pointer a resumed session gets, the live turn for the stdio server."""
 
     def context(self):
@@ -434,7 +433,7 @@ class TestContext(Case):
         before = time.time()
         r = self.runner()
         r.start()
-        # recorded just after the pane starts: waited for, never raced (#130)
+        # recorded just after the pane starts: waited for, never raced
         self.assertTrue(_wait(lambda: (boot.generation_started(self.home) or 0) >= before))
         rec = r.enqueue(Item("operator:wren", "chat", "one turn", sender="Wren"))
         self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
@@ -495,8 +494,8 @@ class TestContext(Case):
 
 
 class TestPaneLoss(Case):
-    """Review C3: the CLI exits under a live runner. The runner stops
-    claiming, says so, settles the rows per R23 (never `failed` for a dead
+    """The CLI exits under a live runner. The runner stops
+    claiming, says so, settles the rows (never `failed` for a dead
     pane) and resumes the session in a new pane, with a backoff."""
 
     def lost(self, r):
@@ -586,7 +585,7 @@ class DiesAtBoot(FakePane):
 
 
 class TestBootLoop(Case):
-    """Round 2 N1 (probe D): a pane that dies at boot is not restarted every
+    """A pane that dies at boot is not restarted every
     second forever; after five failed starts the runner gives up, errored,
     naming why, and its worker ends (exit 3: the supervisor sees it)."""
 
@@ -611,13 +610,13 @@ class TestBootLoop(Case):
 
     def test_the_launchers_refusal_is_named(self):
         class Refused(DiesAtBoot):
-            why = "tmux-launch: refused, a claude-token account (P11-6)"
+            why = "tmux-launch: refused, a claude-token account (refused)"
         r = self.runner(pane=lambda path: Refused(path, boot_s=1.0, context_home=self.home))
         r.reopen_base_s = 0.05
         r.start()
         self.assertTrue(_wait(lambda: not r.worker_alive()))
-        self.assertIn("claude-token account (P11-6)", self.failing(r)[0]["reason"])
-        self.assertIn("claude-token account (P11-6)", r.fatal)
+        self.assertIn("claude-token account (refused)", self.failing(r)[0]["reason"])
+        self.assertIn("claude-token account (refused)", r.fatal)
 
     def test_the_backoff_grows_across_boot_deaths(self):
         r = self.runner(pane=lambda path: DiesAtBoot(path, boot_s=1.0, context_home=self.home))
@@ -645,7 +644,7 @@ class TestBootLoop(Case):
         self.assertTrue(_wait(lambda: r._reopen_fails == 0))
 
     def test_a_pane_that_passes_its_proof_and_dies_again_and_again_is_given_up_on(self):
-        """Round 3: a CLI that outlives the proof and then dies, over and
+        """A CLI that outlives the proof and then dies, over and
         over, is capped by a sliding window: more than 5 losses in 10 min."""
         class DiesLater(FakePane):
             def start(self, argv, *, cwd, env_base):
@@ -667,7 +666,7 @@ class TestBootLoop(Case):
         self.assertIn("6 pane losses", r.fatal)
 
     def test_a_pane_that_draws_its_box_and_dies_at_once_is_still_a_failed_start(self):
-        """The re-review's probe D as it was run: the box shows at once."""
+        """A pane that dies at boot with its box already drawn."""
         r = self.runner(pane=lambda path: DiesAtBoot(path, context_home=self.home))
         r.reopen_base_s = 0.1
         r.start()
@@ -676,7 +675,7 @@ class TestBootLoop(Case):
 
 
 class TestUnreachable(Case):
-    """Round 2 N2 (probe G): one failed has-session is not a dead pane."""
+    """One failed has-session is not a dead pane."""
 
     def test_one_failed_has_session_mid_turn_settles_nothing(self):
         class Flaky(FakePane):
@@ -760,7 +759,7 @@ class TestUnreachable(Case):
         self.assertEqual(len(shared[0].typed), 1, "nothing typed into the live turn")
 
     def test_an_unreachable_pane_is_asked_less_often_and_lost_after_a_bound(self):
-        """Round 4 minor 1 (probe_unreach): tmux stops answering for good
+        """tmux stops answering for good
         while the CLI's pid runs on. The check backs off to 5 s, nothing is
         typed meanwhile, and after the bound the pane is lost and reopened."""
         calls = {"n": 0}
@@ -806,7 +805,7 @@ class TestUnreachable(Case):
             outliving the first SIGKILL, gone after the second. Driven by
             the kills, never by a count of polls: the polls one kill bound
             holds depend on the host's load, and a count ran the runner into
-            its give-up on a loaded host (#130)."""
+            its give-up on a loaded host."""
             lingering = None
 
             def process_alive(self, pid):
@@ -831,7 +830,7 @@ class TestUnreachable(Case):
     def test_a_poll_late_past_the_bound_still_sends_the_sigkill(self):
         """A loaded host can hold one poll past both the grace and the
         bound: the CLI is SIGKILLed before the runner gives up on it, never
-        left running unkilled (#130)."""
+        left running unkilled."""
         class Late(FakePane):
             polls = 0
 
@@ -847,7 +846,7 @@ class TestUnreachable(Case):
         self.assertEqual(r.pane.sigkills, [4242])
 
 
-class TestRound2Minors(Case):
+class TestFreshStartAndNotices(Case):
     def test_a_fresh_start_removes_a_stale_resume_pointer(self):
         self.home = temp_home(self)
         (self.home / "data" / "run").mkdir(parents=True)
@@ -936,7 +935,7 @@ class TestStop(Case):
                 self._dead = True                  # a killed CLI writes nothing more
                 super().kill()
         # The turn would run 120 s: the stop returns long before it (its
-        # own 2 s, plus whatever a loaded host adds; #130 saw 5.1 s).
+        # own 2 s, plus whatever a loaded host adds; 5.1 s has been seen).
         r = self.runner(pane=lambda path: Unstoppable(path, slow=True, slow_s=120.0,
                                                       context_home=self.home))
         r.start()
@@ -952,9 +951,9 @@ class TestStop(Case):
 
 
 class TestPaneLostInAStop(Case):
-    """Live proofs 09-25, finding 5: under a systemd stop the unit's cgroup
+    """Under a systemd stop the unit's cgroup
     kill takes the tmux server while the runner stops. A pane lost once a
-    stop was asked for is the stop's cut, worded as exit criterion 2 has it
+    stop was asked for is the stop's cut, worded as a restart's is
     ("cut by restart"; "cut by a requested stop" when held), and the next
     start is told."""
 
@@ -1014,7 +1013,7 @@ class TestPaneLostInAStop(Case):
 
 
 class TestRecovery(Case):
-    """R23: a second runner on the same home settles what the first typed."""
+    """A second runner on the same home settles what the first typed."""
 
     def first_runner_types(self, **kw):
         r = self.runner(**kw)
@@ -1049,7 +1048,7 @@ class TestRecovery(Case):
                                           for _f, body in self.panes[-1].typed)))
 
     def test_the_cut_notice_waits_for_a_pane_still_booting(self):
-        """Review I1 (probe B): the pane's box appears 1.5 s after start."""
+        """The pane's box appears 1.5 s after start."""
         r, rec = self.first_runner_types(slow=True)
         self.assertTrue(_wait(lambda: r.state() == "running"))
         r._stop.set()
@@ -1134,7 +1133,7 @@ class TestRecovery(Case):
         self.assertEqual(len(self.panes[0].typed), 1, "never typed twice")
 
     def test_an_adopted_row_still_queued_in_the_cli_keeps_its_nonce(self):
-        """Review I4: a row typed and queued by the CLI behind a turn when the
+        """A row typed and queued by the CLI behind a turn when the
         runner restarted is put back with its nonce, never retyped: its turn
         start takes it, once."""
         class Queuing(FakePane):
@@ -1260,7 +1259,7 @@ class TestRollover(Case):
         self.assertEqual([e["session_id"] for e in finals], [old], "a final mine of the old session")
 
     def test_the_session_record_names_the_rollovers_generation(self):
-        """Live proofs 09-25, finding 6: runner-session.json kept the old
+        """runner-session.json once kept the old
         generation (written before the bump) until the new session's first
         turn; a kind switch or a reader in that window saw 0 against the
         rollover's 1. It is the rollover's generation when the row closes."""
@@ -1343,7 +1342,7 @@ class TestRollover(Case):
 
 class TestMiningCursor(HermeticCase):
     def test_a_cursor_moved_to_the_end_mines_nothing_already_there(self):
-        """R17: after a switch the session keeps its id and the mining
+        """After a switch the session keeps its id and the mining
         cursor moves to the end of the target's transcript."""
         from cousin_lib.runner import extract, transcript
         home = temp_home(self)
@@ -1362,7 +1361,7 @@ if __name__ == "__main__":
 
 
 class TestResultBeforeRows(Case):
-    """#87 review: the result is appended before the rows close, and the
+    """The result is appended before the rows close, and the
     rows close even when that append raises."""
 
     def claimed(self, r, body="hi"):

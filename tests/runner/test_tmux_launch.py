@@ -1,4 +1,4 @@
-"""Phase 11 Task 6: the in-pane launcher (I6, R3, R13). The pane runs
+"""The in-pane launcher. The pane runs
 `exec env -i <env_base> <python> <launcher> --home H [--fresh] -- claude ...`;
 the launcher adds the account and the kind's switches, applies the hard
 deny again, and execs the CLI. No secret in any argv."""
@@ -149,7 +149,7 @@ class TestMain(LaunchCase):
         self.assertEqual(rc, 0)
         self.assertTrue(seen["env"]["CLAUDE_CONFIG_DIR"].endswith("accounts/team"))
 
-    def test_a_token_or_key_account_is_refused_naming_a4(self):
+    def test_a_token_or_key_account_is_refused_saying_why(self):
         for name, kind in (("fleet", "claude-token"), ("metered", "anthropic-key")):
             with self.subTest(kind=kind):
                 home = self.home('[accounts.%s]\nkind = "%s"\n' % (name, kind), account=name)
@@ -159,11 +159,11 @@ class TestMain(LaunchCase):
                         "PATH": "/usr/bin", "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
                 self.assertEqual(rc, 2)
                 self.assertEqual(seen, {})                     # never exec'd
-                self.assertIn("A4", err[0])
-                self.assertIn("P11-6", err[0])
+                self.assertIn("skippable by seeding", err[0])
+                self.assertIn("login-free config dir", err[0])
 
     def test_a_refusal_is_left_for_the_runner_and_an_exec_clears_the_last_one(self):
-        """Round 2 N1: the pane dies with the launcher, so the runner reads
+        """The pane dies with the launcher, so the runner reads
         why from data/run/tmux-launch-exit.txt when it gives up."""
         home = self.home('[accounts.fleet]\nkind = "claude-token"\n', account="fleet")
         with mock.patch.object(tmux_launch, "_say", lambda m: None):
@@ -171,7 +171,7 @@ class TestMain(LaunchCase):
                 "PATH": "/usr/bin", "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
         self.assertEqual(rc, 2)
         left = home / "data" / "run" / "tmux-launch-exit.txt"
-        self.assertIn("P11-6", left.read_text())
+        self.assertIn("login-free config dir", left.read_text())
         ok = self.home()
         (ok / "data" / "run" / "tmux-launch-exit.txt").write_text("an older refusal")
         rc, _seen = self.run_main(ok, fresh=False, environ={

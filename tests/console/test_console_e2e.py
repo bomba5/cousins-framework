@@ -50,7 +50,7 @@ class ConsoleEndToEnd(ConsoleCase):
         self.home = created["home"]
         # a 1.x home, as this walk was written for (the console's legacy
         # paths stay until the console task retires them): create_cousin
-        # makes an sdk cousin since 2.0.0 (R4), so its [agent] table goes
+        # makes an sdk cousin since 2.0.0, so its [agent] table goes
         toml_path = self.home / "cousin.toml"
         toml_path.write_text(re.sub(r"(?ms)^\[agent\][ \t]*\n.*?(?=^\[|\Z)", "",
                                     toml_path.read_text()))

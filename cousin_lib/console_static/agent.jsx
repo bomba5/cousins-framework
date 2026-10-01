@@ -1,4 +1,4 @@
-// WP-A, agent and cousin settings: this package's own file (index.html's package block).
+// Agent and cousin settings: this package's own file (index.html's package block).
 // Its routes are cousin_lib/console/routes_agent.py (docs/reference/console-api.md,
 // "Agent and cousin settings").
 //
@@ -6,7 +6,7 @@
 //   AgentSettingsPanel   the lane's [agent] keys, as GET /api/cousins/<slug>/agent
 //                        describes them (agent_settings.describe): kind read-only
 //                        with "switch kind" (the window event fw-open-kind-switch,
-//                        WP-B's dialog), model, effort, account, auto_start and the
+//                        migrate.jsx's dialog), model, effort, account, auto_start and the
 //                        hold, rollover, side sessions, the opencode keys, env_allow.
 //   CousinSettingsPanel  name, peer_visible, the [memory] recall and review keys,
 //                        [lifecycle] flip_at, [agent] commit_attribution; [chat]
@@ -109,7 +109,7 @@ const agentMono = { fontFamily: "var(--mono)", fontSize: 11 };
 const agentHint = { fontSize: 10, color: "var(--fg-3)", lineHeight: 1.5 };
 const agentErr = { fontFamily: "var(--mono)", fontSize: 10, color: "var(--red)", whiteSpace: "pre-wrap" };
 
-// Ask WP-B's kind-switch dialog to open for this cousin.
+// Ask migrate.jsx's kind-switch dialog to open for this cousin.
 function openKindSwitch(slug) {
   window.dispatchEvent(new CustomEvent("fw-open-kind-switch", { detail: { slug } }));
 }

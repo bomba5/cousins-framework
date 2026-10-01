@@ -197,7 +197,7 @@ function CousinCard({ c, onClick, onAct, onChat }) {
           {c.loginRequired.action ? <> · run <code>{c.loginRequired.action}</code></> : null}
         </div>
       )}
-      {/* keys 2.0.0 no longer reads: inert, named until tidied (R7) */}
+      {/* keys 2.0.0 no longer reads: inert, named until tidied */}
       {c.removedKeys && c.removedKeys.length > 0 && (
         <div className="card-attention" data-removed-keys
              title={c.removedKeys.map(k => `${k.key}: ${k.line}`).join("\n")}>
@@ -418,7 +418,7 @@ function fmtBeat(sec) {
 // A select's choices come from /api/spawn/options, so the catalogue is
 // the install's (config/harness.toml), never one written here. Model
 // and effort live in [agent] for a runner cousin (its row carries
-// `runner`), in [runtime] for a tmux one (#100).
+// `runner`), in [runtime] for a tmux one.
 const agentOrRuntime = c => (c && c.runner ? "[agent]" : "[runtime]");
 const IDENTITY_FIELDS = {
   operator:     { url: slug => `/api/cousins/${slug}/operator`,     row: "operator",    kind: "text",

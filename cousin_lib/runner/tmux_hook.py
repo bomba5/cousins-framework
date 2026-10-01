@@ -1,4 +1,4 @@
-"""The tmux kind's pane hook (phase 11 R6, R19, R24, M-a).
+"""The tmux kind's pane hook.
 
 The pane's CLI runs it for UserPromptSubmit, Stop, Notification and
 SessionStart (harness_settings.TMUX_HOOK_EVENTS):
@@ -8,24 +8,24 @@ SessionStart (harness_settings.TMUX_HOOK_EVENTS):
 with the hook's JSON on stdin. It does two things:
 
   - on SessionStart, writes {session_id, transcript_path, source, pid} to
-    <home>/run/tmux-session.json, atomically and 0600 (R24): the runner
+    <home>/run/tmux-session.json, atomically and 0600: the runner
     reads the transcript path from it, and `pid` is the CLI's own;
   - on every event but an `idle_prompt` Notification, sends the runner
     one datagram, {"event", "session_id"} as JSON (SessionStart adds its
     `source`, a Notification its `type`), on its wake socket
     (runner/wake.py). Hooks are wake-ups: the runner decides nothing on
-    one, the transcript confirms (R19).
+    one, the transcript confirms.
 
-Only the pane's own CLI does either (R24, review minor 4): the launcher
+Only the pane's own CLI does either: the launcher
 exports its pid as COUSIN_PANE_PID, and the exec chain makes that the
 pane's pid and the CLI's. A hook whose CLI is not that pid (an operator's
 claude in the home, a claude the pane's model started) writes nothing and
 sends nothing.
 
 On a SessionStart whose source is "resume" or "compact" it also prints
-the runner's pointer (<home>/data/run/tmux-resume.md, R10) as the
+the runner's pointer (<home>/data/run/tmux-resume.md) as the
 hook's `additionalContext`: `--append-system-prompt` is dropped on a
-resume (S7), SessionStart context reaches a resumed session (S7b).
+resume, while SessionStart context does reach a resumed session.
 
 A hook must never block or fail the CLI: it always exits 0, prints
 nothing else on stdout (SessionStart's and UserPromptSubmit's stdout
@@ -171,7 +171,7 @@ def session_start(home, data):
 
 
 def pointer(home, data):
-    """R10's resume pointer as SessionStart's hook output, or None."""
+    """The runner's resume pointer as SessionStart's hook output, or None."""
     if data.get("source") not in POINTER_SOURCES:
         return None
     try:

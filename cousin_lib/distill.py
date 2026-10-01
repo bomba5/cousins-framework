@@ -46,7 +46,7 @@ DEFAULT_TRUTH_LEVEL = memory.DEFAULT_TRUTH_LEVEL
 # transcript miners (episode:), the jobs ledger (job:) and framework
 # state changes (framework:). Indexed like every raw entry, but in a
 # distilled file they rank after every authored topic, so they take
-# only the lines authored memory leaves (master plan phase 7 task 3).
+# only the lines authored memory leaves.
 MACHINE_PREFIXES = ("episode:", "job:", "framework:")
 OPERATOR_TRUTH_LEVEL = "operator-stated"
 

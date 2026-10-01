@@ -343,7 +343,7 @@ class TestSdkRunner(HermeticCase):
         self.assertIn("replay-user-messages", r.options().extra_args)
         self.assertIsNone(r.options().extra_args["replay-user-messages"])
 
-    # -- commit attribution (tracker #112) --------------------------------
+    # -- commit attribution ---------------------------------------------
     def test_options_carry_no_settings_by_default(self):
         r, _ = self._runner([])
         self.assertIsNone(r.options().settings)
@@ -365,9 +365,9 @@ class TestSdkRunner(HermeticCase):
     def test_the_real_transport_puts_it_on_the_cli_argv(self):
         # Not the SDK's own dataclass, the actual argv SubprocessCLITransport
         # would exec: options.settings is a free-form field several SDK
-        # layers could still drop before it reaches the CLI (review round 1
-        # minor). _cli_path is set by hand so _build_command runs without
-        # connect()'s real CLI discovery / subprocess spawn.
+        # layers could still drop before it reaches the CLI. _cli_path is
+        # set by hand so _build_command runs without connect()'s real CLI
+        # discovery / subprocess spawn.
         from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
         (self.home / "cousin.toml").write_text(
             (self.home / "cousin.toml").read_text() + "commit_attribution = false\n")
@@ -386,7 +386,7 @@ class TestSdkRunner(HermeticCase):
                                   assistant(text="done"), result()]])
         r.start()
         receipt = r.enqueue(self._op("hello"))
-        # the result is appended, then the row closes (#87): wait for both
+        # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: any(e["kind"] == "result" for e in r.events())
                               and r.inbox.get(receipt.inbox_id)["state"] == "done"))
         kinds = [e["kind"] for e in r.events()]
@@ -419,7 +419,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(init["payload"]["tools"], [])
         self.assertEqual(init["payload"]["mcp_servers"], [])
 
-    # -- usage (A1) ----------------------------------------------------------
+    # -- usage ---------------------------------------------------------------
     def test_a_successful_results_usage_dict_lands_in_the_event(self):
         usage = {"input_tokens": 10, "output_tokens": 3,
                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 128}
@@ -458,7 +458,7 @@ class TestSdkRunner(HermeticCase):
         self.addCleanup(lambda: r.stop(timeout=5))
         r.start()
         a = r.enqueue(self._op("x"))
-        # the result is appended, then the row closes (#87): wait for both
+        # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: len(_results(r)) == 2
                               and r.inbox.get(a.inbox_id)["state"] == "done"))
         res = _results(r)
@@ -466,7 +466,7 @@ class TestSdkRunner(HermeticCase):
                          [([], 9), ([a.inbox_id], 5)])
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "delivered")
 
-    # -- folding (A1) ------------------------------------------------------------
+    # -- folding -----------------------------------------------------------------
     def test_a_midturn_operator_message_is_queried_into_the_live_turn(self):
         # PAUSE holds the stream open until the second row is in: a timed
         # delay left the fold to the scheduler and flaked under load
@@ -513,7 +513,7 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(_wait(lambda: len(_results(r)) == 2))
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         c = r.enqueue(self._op("third"))
-        # the result is appended, then the row closes (#87): wait for both
+        # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: len(_results(r)) == 3
                               and r.inbox.get(c.inbox_id)["state"] == "done"))
         res = _results(r)
@@ -544,7 +544,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual((res[1]["inbox_ids"], res[1]["interrupted"]), ([b.inbox_id], False))
 
     def test_a_midturn_peer_message_is_queried_into_the_live_turn(self):
-        """#118: a peer (a cousin, thread peer:<slug>) folds like an
+        """A peer (a cousin, thread peer:<slug>) folds like an
         operator: a coordinator's STOP must reach a peer in a long turn.
         It goes through the same write as an operator fold (`_send`), with
         its thread in the envelope header."""
@@ -568,7 +568,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
 
     def test_meeting_loop_and_schedule_rows_wait_for_the_turn_boundary(self):
-        """What stays unfolded (#118 kept it): a meeting line is a round's
+        """What stays unfolded: a meeting line is a round's
         turn, a loop or a schedule is the cousin's own timer; each is a
         turn of its own, never written into someone else's."""
         r, made = self._runner([[init_msg(), assistant(tool="Bash"), "PAUSE",
@@ -588,7 +588,7 @@ class TestSdkRunner(HermeticCase):
                          [[a.inbox_id]] + [[w.inbox_id] for w in waiting])
 
     def test_with_a_peer_folded_reply_never_targets_the_peer_and_send_does(self):
-        """#118: an operator turn with a peer folded has two live threads.
+        """An operator turn with a peer folded has two live threads.
         reply is the chat surface only: named, the peer thread is refused
         with the send hint; unnamed, it is refused (never guessed); named,
         the operator's thread works. send reaches the peer."""
@@ -659,7 +659,7 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(self._reached_init(r))
         self._ask_permission(r)
         made["client"].resume()
-        # the hook's own event, not any `system` one: a start appends `fresh` (Task 11)
+        # the hook's own event, not any `system` one: a start appends `fresh`
         self.assertTrue(_wait(lambda: any(e["kind"] == "system"
                                           and e["payload"].get("subtype") == "hook_response"
                                           for e in r.events())
@@ -760,7 +760,7 @@ class TestSdkRunner(HermeticCase):
         self.assertIsNone(_results(r)[0]["usage"])
 
     def test_an_is_error_result_closes_its_rows_failed_and_the_next_row_runs(self):
-        # #67: the CLI answers the turn with an error result (no exception,
+        # the CLI answers the turn with an error result (no exception,
         # no auth or rate-limit signal): _close fails the rows that result
         # closes, the result event names them, and the runner goes on
         r, _ = self._runner([[init_msg(), assistant(text="boom"), result(is_error=True)],
@@ -814,7 +814,7 @@ class TestSdkRunner(HermeticCase):
                             delay=0.3, idle_timeout_s=1.0)
         r.start()
         a = r.enqueue(self._op("x"))
-        # the result is appended, then the row closes (#87): wait for both
+        # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: _results(r) and r.inbox.get(a.inbox_id)["state"] == "done",
                               timeout=8))
         self.assertEqual(_errors(r), [])
@@ -846,13 +846,13 @@ class TestSdkRunner(HermeticCase):
         r, made = self._runner([
             [init_msg(), assistant(tool="Bash"), "HANG", result(num_turns=1, cost=0.01)],
             [assistant(text="second"), result(num_turns=7, cost=0.07)]], idle_timeout_s=1.0)
-        r.tool_idle_timeout_s = 1.0     # the Bash call stays open: its bound times out (#68)
+        r.tool_idle_timeout_s = 1.0     # the Bash call stays open: its bound times out
         r.start()
         a = r.enqueue(self._op("first"))
         self.assertTrue(_wait(lambda: any("no message for" in e for e in _errors(r)), timeout=5.0))
         self.assertTrue(_wait(lambda: r.state() == "idle", timeout=5.0))
         b = r.enqueue(self._op("second"))
-        # the result is appended, then the row closes (#87): wait for both
+        # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: len(_results(r)) == 2
                               and r.inbox.get(b.inbox_id)["state"] == "done"))
         second = _results(r)[1]
@@ -905,7 +905,7 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(len(clients), 2)
         self.assertIsNone(asked_resume(clients[0].options))
-        # the login lane (the init said "none"): the CLI's own --resume (Task 11)
+        # the login lane (the init said "none"): the CLI's own --resume
         self.assertEqual(clients[1].options.extra_args["resume"], "s-orig")
         self.assertFalse(clients[0].connected)
         reconnect = next(e for e in r.events() if e["kind"] == "error"
@@ -913,7 +913,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(reconnect["payload"]["resumed"], "s-orig")
         self.assertEqual(r.inbox.get(a.inbox_id)["outcome"], "failed")
         b = r.enqueue(self._op("again"))
-        # the result is appended, then the row closes (#87): wait for both
+        # the result is appended, then the row closes: wait for both
         self.assertTrue(_wait(lambda: len(_results(r)) == 2
                               and r.inbox.get(b.inbox_id)["state"] == "done"))
         second = _results(r)[1]
@@ -950,7 +950,7 @@ class TestSdkRunner(HermeticCase):
             r.enqueue(Item("loop:heartbeat", "loop", "fails %d" % i, sender=""))
         r.start()
         # Deadlines, not delays: five turns and their backoffs take well
-        # under a second here; a starved host took past a flat 8 s (#117, #130).
+        # under a second here; a starved host can take past a flat 8 s.
         self.assertTrue(_wait(lambda: len(_results(r)) == 5, timeout=60))
         ok = r.enqueue(self._op("works"))
         self.assertTrue(_wait(lambda: r.inbox.get(ok.inbox_id)["state"] == "done", timeout=60))
@@ -994,7 +994,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(r.inbox.get(b.inbox_id)["state"], "queued")
         self.assertEqual(r.state(), "errored")
 
-    # -- a stop claims nothing new (live proofs 09-25, finding 3) ------------
+    # -- a stop claims nothing new --------------------------------------------
     def test_a_runner_asked_to_stop_claims_no_queued_row(self):
         r, _ = self._runner([])
         r.start()
@@ -1069,7 +1069,7 @@ class TestSdkRunner(HermeticCase):
         self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
         self.assertEqual([x["num_turns"] for x in _results(r) if not x["is_error"]], [2])
 
-    # -- the doorbell (A4) -------------------------------------------------------
+    # -- the doorbell ------------------------------------------------------------
     def test_a_wake_socket_that_cannot_bind_falls_back_to_polling(self):
         run = self.home / "run"
         os.rmdir(run)
@@ -1081,7 +1081,7 @@ class TestSdkRunner(HermeticCase):
         self.assertTrue(any(str(wake.socket_path(self.home)) in e for e in _errors(r)))
         self.assertTrue(r.worker_alive())
 
-    # -- the event floor (A5) ------------------------------------------------------
+    # -- the event floor -----------------------------------------------------------
     def test_every_message_leaves_at_least_one_event(self):
         thinking = AssistantMessage(content=[ThinkingBlock(thinking="hmm", signature="s")],
                                     model="m")
@@ -1115,7 +1115,7 @@ class TestSdkRunner(HermeticCase):
                 sys.modules[k] = v
             importlib.reload(m)
 
-    # -- Turn (task 3) -------------------------------------------------------
+    # -- Turn ----------------------------------------------------------------
     def test_the_turn_carries_both_threads_of_a_fold(self):
         r, made = self._runner([[init_msg(), assistant(tool="Bash"), assistant(text="x"), result()]],
                                delay=0.15)
@@ -1136,7 +1136,7 @@ class TestSdkRunner(HermeticCase):
 
 
 class BackpressureClient(ScriptedClient):
-    """The bundled CLI once its stdout is full (#104, measured on SDK
+    """The bundled CLI once its stdout is full (measured on SDK
     0.2.159): while more than `cap` messages sit unread (the SDK's
     100-message buffer, then the pipe), the CLI stops reading stdin, so a
     write (a query, or a control request such as interrupt) does not
@@ -1184,9 +1184,9 @@ def _long_turn(n=150):
 
 
 class TestFoldWriteNeverBlocksTheReader(HermeticCase):
-    """#118 follow-up to #104: the fold's write must never be awaited on the
+    """The fold's write must never be awaited on the
     path that reads the CLI's output, or a full stdout deadlocks the turn
-    (the 18-39 min stalls)."""
+    (stalls of 18 to 39 minutes)."""
 
     def setUp(self):
         super().setUp()
@@ -1244,7 +1244,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         a = r.enqueue(Item("operator:priya", "chat", "first", sender="Priya"))
         self.assertTrue(_wait(lambda: made.get("clients") and made["clients"][0].paused))
         b = r.enqueue(Item("peer:testa", "chat", "STOP", sender="Testa"))
-        # the result is appended, then the rows close (#87): wait for both
+        # the result is appended, then the rows close: wait for both
         self.assertTrue(_wait(lambda: [x for x in _results(r) if x["is_error"]]
                               and r.inbox.get(a.inbox_id)["state"] == "done"))
         self.assertTrue(any("not ready for writing" in e for e in _errors(r)))
@@ -1256,7 +1256,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "done", timeout=8))
 
     def test_an_interrupt_row_cut_off_mid_write_by_the_turn_end_is_closed(self):
-        """Review of #118: the interrupt's control write is still pending
+        """The interrupt's control write is still pending
         when the turn ends (its result arrived meanwhile). The row must not
         stay `claimed`: it is closed delivered, "written as the turn ended"."""
         class SlowInterrupt(ScriptedClient):
@@ -1285,7 +1285,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertIn("written as the turn ended", row["detail"])
 
     def test_a_result_before_a_queued_interrupt_was_sent_is_not_interrupted(self):
-        """Review of #118 (minor 3): an interrupt row taken while a fold's
+        """An interrupt row taken while a fold's
         write is blocked waits behind it; a result that comes first was
         not interrupted, whatever was asked."""
         import threading
@@ -1325,7 +1325,7 @@ class TestFoldWriteNeverBlocksTheReader(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(stop.inbox_id)["state"] == "done", timeout=8))
 
     def test_every_fold_write_that_wrote_nothing_goes_back_to_the_queue(self):
-        """Review round 2 of #118: a closed transport refuses every fold of
+        """A closed transport refuses every fold of
         one claim without a byte written. Each row goes back exactly once,
         not only the first: a second one (a STOP, say) must not stay
         claimed until the next start."""
@@ -1442,7 +1442,7 @@ class TestTurnWriter(HermeticCase):
 
 
 class TestTurnWriterEdges(HermeticCase):
-    """Review of #118: the writer's close and its failures."""
+    """The writer's close and its failures."""
 
     def test_a_raising_on_dropped_does_not_orphan_the_jobs_behind_it(self):
         from cousin_lib.runner.sdk import _Job, _Writer
@@ -1559,7 +1559,7 @@ def _broken_render(real):
 
 
 class TestUnrenderableRow(HermeticCase):
-    """#118 review: a row that cannot be rendered is not transient. It is
+    """A row that cannot be rendered is not transient. It is
     closed FAILED with the reason, never requeued, never left claimed."""
 
     def setUp(self):
@@ -1633,7 +1633,7 @@ class TestUnrenderableRow(HermeticCase):
 
 class TestRefusedSubmit(HermeticCase):
     def test_a_fold_the_writer_refuses_is_in_no_list_and_goes_back(self):
-        """#118 review item 4: a submit refused (the writer ended) leaves
+        """A submit refused (the writer ended) leaves
         the row out of open_rows and requeues it and the rest."""
         from cousin_lib.runner.base import RunnerError
         from cousin_lib.runner.sdk import _sdk, _Writer
@@ -1655,7 +1655,7 @@ class TestRefusedSubmit(HermeticCase):
 
 
 class TestDeadWriter(HermeticCase):
-    """#118 review round 4: a writer whose task ended on its own."""
+    """A writer whose task ended on its own."""
 
     def _runner(self):
         r = SdkRunner(temp_home(self), client_factory=lambda o: ScriptedClient(o, []))
@@ -1714,7 +1714,7 @@ class TestMirrorError(HermeticCase):
 
 
 class TestIdlePump(HermeticCase):
-    """#134: between turns the runner reads the CLI's stream. A background
+    """Between turns the runner reads the CLI's stream. A background
     task streams progress after the turn that started it has ended, and
     its completion starts a CLI turn of its own; unread, the SDK's buffer
     fills and every hook of the background task times out."""
@@ -1826,7 +1826,7 @@ class TestIdlePump(HermeticCase):
 
 
 class TestTaskEvents(HermeticCase):
-    """#129: a background task's lifecycle reaches the stream with the
+    """A background task's lifecycle reaches the stream with the
     fields the pane's task list shows, and nothing else of the raw payload
     (no prompt, no output file, no output)."""
 

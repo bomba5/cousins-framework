@@ -1,5 +1,5 @@
-"""routes_migrate (WP-B): cousin-migrate's plan, apply, check and rollback,
-and the phase 11 kind switch (`--to sdk|tmux`), from the console. Every
+"""routes_migrate: cousin-migrate's plan, apply, check and rollback, and
+the kind switch (`--to sdk|tmux`), from the console. Every
 live action (the clean stop, the supervisor, tmux, the account check, a
 model turn) is injected through the server's test seams: this touches no
 live home, no tmux, no supervisor and no model."""
@@ -97,7 +97,7 @@ class TestState(MigrateCase):
 
 class TestPlan(MigrateCase):
     def test_a_plan_without_to_is_refused_with_the_line(self):
-        """Row 72/79: 2.0.0 keeps no conversion from the legacy lane (O3): a
+        """2.0.0 keeps no conversion from the legacy lane: a
         plan without `to` on a cousin with no runner is a 409 carrying
         delivery.lane_refusal; nothing runs."""
         from cousin_lib.delivery import lane_refusal

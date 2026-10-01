@@ -1,10 +1,10 @@
 """What the harness recorded about a cousin's own MCP server.
 
-On 2026-09-20 four cousins booted with no MCP tools at all. The boot
-packet said only CONNECTION_CLOSED; the reason - the server printing
-`registry: meeting: no commands` and exiting 377 ms in - was in the
-harness's own log directory, which nothing surfaced. Every cousin fell
-back to the CLIs and carried on, because a degraded surface that still
+A cousin can boot with no MCP tools at all while the boot packet says
+only CONNECTION_CLOSED; the reason (for example the server printing
+`registry: meeting: no commands` and exiting 377 ms in) is in the
+harness's own log directory, which nothing else surfaces. A cousin falls
+back to the CLIs and carries on, because a degraded surface that still
 works is the easiest failure to ignore.
 """
 import json
@@ -169,7 +169,7 @@ _UNKNOWN_WORDING = [
 class TestOutcomeVocabulary(unittest.TestCase):
     """An attempt whose result nobody wrote down is not a failure, and a
     failure the parser has no literal for is not a silence. Measured
-    2026-09-21 over 5908 harness logs: 93 files were reported FAILED
+    over 5908 real harness logs: 93 files were reported FAILED
     with "no reason recorded"; 80 of them held the reason and 13 held
     no outcome at all."""
 

@@ -120,7 +120,7 @@ class TestCreateCousin(CreateCase):
 
 def _legacy_home(root, slug="wren"):
     """A 1.x legacy home, written by hand: cousin.toml with no [agent]
-    table (create_cousin makes an sdk cousin since 2.0.0, R4)."""
+    table (create_cousin makes an sdk cousin since 2.0.0)."""
     home = pathlib.Path(root) / "cousins" / slug
     for sub in ("memory", "data", "notes", "scripts"):
         (home / sub).mkdir(parents=True, exist_ok=True)
@@ -131,7 +131,7 @@ def _legacy_home(root, slug="wren"):
 
 
 class TestLegacyStartRefused(CreateCase):
-    """R2: start_cousin refuses a cousin with no [agent] runner by name,
+    """start_cousin refuses a cousin with no [agent] runner by name,
     before any tmux call."""
 
     def test_starting_a_cousin_with_no_runner_is_refused_and_runs_no_tmux(self):
@@ -175,7 +175,7 @@ class TestLegacyStartRefused(CreateCase):
 
 
 class TestNoChatPort(CreateCase):
-    """R10: no per-cousin chat server, so no port is allocated, written,
+    """No per-cousin chat server, so no port is allocated, written,
     rendered or accepted."""
 
     def test_a_new_cousin_toml_has_no_chat_table(self):
@@ -356,7 +356,7 @@ class TestPersistRuntimeValues(CreateCase):
 
 
 class TestPersistAgentValues(CreateCase):
-    """#100 review: the sdk lane's validating turn runs in a child
+    """The sdk lane's validating turn runs in a child
     process. validate_account scrubs os.environ process-wide for the turn
     (_ScrubbedAuthEnv), so run inside the console it would pull the auth
     variables from under every other thread of the console."""
@@ -400,7 +400,7 @@ class TestPersistAgentValues(CreateCase):
 
 
 class TestPersistAgentValuesSeveral(CreateCase):
-    """WP-A: persist_agent_values is the ONE [agent] write path, the
+    """persist_agent_values is the ONE [agent] write path, the
     console's settings panel and the model and effort routes both: the
     lane's checks (agent_settings.validate), the sdk model's validating
     turn in a child, then agent_settings.apply."""
@@ -481,8 +481,8 @@ class TestPersistAgentValuesSeveral(CreateCase):
         self.assertNotIn("auto_start", tomllib.loads(path.read_text())["agent"])
 
     def test_the_turn_runs_on_the_account_and_effort_being_written(self):
-        """Review round 1: the child read the account from cousin.toml, which
-        still names the old one while the change is pending."""
+        """Not the account in cousin.toml, which still names the old one
+        while the change is pending."""
         from cousin_lib import spawn
         root, home, path = self._runner_cousin()
         (root / "config").mkdir(exist_ok=True)
@@ -535,7 +535,7 @@ class TestPersistAgentValuesSeveral(CreateCase):
 
 
 class TestPersistAgentValuesOnTmux(CreateCase):
-    """Phase 11: the tmux kind's pane takes --model and --effort, so both
+    """The tmux kind's pane takes --model and --effort, so both
     are its [agent] keys; no validating turn runs (no pane here)."""
 
     def test_model_and_effort_are_written_with_no_turn(self):
@@ -659,7 +659,7 @@ class TestCreateWithRuntimeOptions(CreateCase):
         out = self._create(root, model="m-one", effort="medium",
                            heartbeat=600, memory_scope="both")
         data = tomllib.loads((out["home"] / "cousin.toml").read_text())
-        # R4: no runner named is an sdk cousin, whose model and effort
+        # no runner named is an sdk cousin, whose model and effort
         # are the [agent] keys its runner reads; no [runtime] table
         self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one",
                                          "effort": "medium"})
@@ -723,8 +723,8 @@ class TestSpawnMainRuntimeFlags(CreateCase):
 
 class TestResumePlan(unittest.TestCase):
     """cousin-spawn --start --resume: the start-at-boot unit resumes a
-    cousin's last session. Canary (2026-09-18): nothing restarted a
-    cousin after a reboot, and a plain start threw the session away."""
+    cousin's last session. Without it, nothing restarts a cousin after a
+    reboot, and a plain start throws the session away."""
 
     def _home(self, tmp, session_id="", harness=""):
         import pathlib
@@ -1005,7 +1005,7 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
     """A cousin's registry that still carries the job tool's pre-`run`
     description and `kind` text (what the sync only ever ADDED to, never
     corrected) gets the current wording; a cousin's own rewrite of the
-    same field is never touched; correcting is idempotent (tracker #110).
+    same field is never touched; correcting is idempotent.
     """
 
     def setUp(self):

@@ -28,7 +28,7 @@ class TestLiveAuth(HermeticCase):
         self.assertFalse((home / "data" / "sessions.db").exists())   # --validate left no trace
 
     def test_report_what_the_initialize_answer_carries(self):
-        """R16: does get_server_info() carry account.tokenSource / apiKeySource
+        """Does get_server_info() carry account.tokenSource / apiKeySource
         after connect, with no model turn? Reported, not asserted."""
         import asyncio
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient

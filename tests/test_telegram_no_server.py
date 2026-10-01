@@ -1,8 +1,8 @@
 """The Telegram bridge needs no chat server to relay a cousin's replies
-(phase 10a, one inbound surface): it reads the operator thread from the
-cousin's own chat store (chat_api.history, the function the chat
-server's /api/history runs), and a runner cousin's cousin.toml needs no
-[chat] port for the bridge to start."""
+(one inbound surface): it reads the operator thread from the cousin's own
+chat store (chat_api.history, the function the chat server's /api/history
+runs), and a runner cousin's cousin.toml needs no [chat] port for the
+bridge to start."""
 import os
 import pathlib
 import tempfile

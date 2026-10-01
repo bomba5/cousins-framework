@@ -1,4 +1,4 @@
-"""console/toml_edit beyond a cousin.toml (WP-F, the install config
+"""console/toml_edit beyond a cousin.toml (the install config
 editors): a top-level key (the root table, `table=""`), a whole table
 removed, and the same checked atomic write over any TOML file, created
 when absent."""

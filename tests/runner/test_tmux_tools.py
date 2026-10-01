@@ -1,4 +1,4 @@
-"""Phase 11 Task 8 (I5, I8, R10, R11): the tmux kind's prompt block, and
+"""The tmux kind's prompt block, and
 `reply` and `handoff` on the stdio `cousin-mcp` server, routed by
 run/turn.json. The SDK kind's prompt and tools are unchanged."""
 import json
@@ -116,7 +116,7 @@ class TestStdioPaneTools(HermeticCase):
                         threads=["operator:priya", "person:sam"])
         text, is_error = mcp_server.call_pane_tool(home, "reply", {"text": "which?"})
         self.assertTrue(is_error)
-        self.assertIn("reply never guesses", text)            # #118 names each thread's way
+        self.assertIn("reply never guesses", text)            # the refusal names each thread's way
 
     def test_handoff_writes_the_handoff_file(self):
         _root, home = _home(self)

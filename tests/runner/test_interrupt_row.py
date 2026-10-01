@@ -1,4 +1,4 @@
-"""The out-of-process interrupt (phase 5): an `interrupt` inbox row. The
+"""The out-of-process interrupt: an `interrupt` inbox row. The
 contract suite proves both runners honour it; this module pins the seams
 around it: its priority, what the delivery facade answers a caller that
 waits (the console's route), and that a tmux cousin never gets one typed

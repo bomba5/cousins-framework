@@ -1,9 +1,9 @@
-"""Static-file contract for the runner cousin's views (master plan phase 5
-tasks 2, 4 and 6): the chat page's pane is the reasoning stream for a
-runner cousin and the tmux terminal for any other, the fleet card shows the
-runner's state and what it declares unsupported, and the tokens view shows
-the cache hit rate. The routes it calls are the spec's (the chat module's
-own test checks every route against docs/reference/console-api.md)."""
+"""Static-file contract for the runner cousin's views: the chat page's
+pane is the reasoning stream for a runner cousin and the tmux terminal for
+any other, the fleet card shows the runner's state and what it declares
+unsupported, and the tokens view shows the cache hit rate. The routes it
+calls are the spec's (the chat module's own test checks every route
+against docs/reference/console-api.md)."""
 import json
 import pathlib
 import re
@@ -41,15 +41,15 @@ class TestRunnerPane(unittest.TestCase):
         self.assertNotIn("/api/pane/", pane)
 
     def test_events_are_batched_into_one_render_per_frame(self):
-        """Review I4: a burst of SSE messages is one React update per
+        """A burst of SSE messages is one React update per
         animation frame, not one per event."""
         pane = self.chat[self.chat.index("function RunnerPaneView("):]
         pane = pane[:pane.index("\n}\n")]
         self.assertIn("requestAnimationFrame", pane)
 
     def test_a_dead_runner_is_not_running_and_cannot_be_interrupted(self):
-        """Review M2: after the runner is gone its last recorded state stays
-        in the stream; the pane says it is not running. Review 3b: the
+        """After the runner is gone its last recorded state stays
+        in the stream; the pane says it is not running. The
         fleet row is only the fallback/tiebreaker (paneLiveness), read
         through `runner.alive`, not the pane's only source of truth."""
         pane = self.chat[self.chat.index("function RunnerPaneView("):]
@@ -87,13 +87,13 @@ process.stdout.write(JSON.stringify([
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_pane_liveness_follows_the_stream_not_the_15s_fleet_poll(self):
-        """Review 3b: the header and the interrupt button used to read
+        """The header and the interrupt button used to read
         straight off the fleet row (`cousin.runner.alive`), which only
         refreshes on the 15s `cousins-refresh` poll, so a restart or a stop
         lagged by up to 15s while the stream already had the truth. The
         fleet row is now only the fallback before any stream evidence, and
         the tiebreaker whenever it refreshes after the last stream event.
-        Round 1 fixes: a `session` frame resets state to a neutral
+        A `session` frame resets state to a neutral
         "starting" (never a stale leftover state like "stopped" read as
         live), and a `fleet` event that IS applied adopts alive and state
         TOGETHER, never a mismatched pair."""
@@ -129,7 +129,7 @@ process.stdout.write(JSON.stringify(results));
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_the_fleet_effect_is_keyed_on_the_runners_own_data_not_the_cousin_row(self):
-        """Round 1 finding 1: app.jsx's `cousin-status` SSE handler (around
+        """app.jsx's `cousin-status` SSE handler (around
         app.jsx:454, driven by routes_fleet.py's `cousin-status` events on
         the console's own start/stop actions) spreads a brand new cousin
         row on every status patch WITHOUT touching `c.runner`. Keying the
@@ -163,7 +163,7 @@ process.stdout.write(JSON.stringify({same: a === b, different: a === c}));
 
 
 class TestRunnerPaneHighlighting(unittest.TestCase):
-    """The pane's syntax highlighting (operator's ask): the kind label in the
+    """The pane's syntax highlighting: the kind label in the
     accent, the model's text in the primary foreground, tool executions
     muted, diffs in diff colors, JSON and light markdown on top. The helpers
     are pure (a node tree of strings and {tag, cls, children}); only
@@ -347,7 +347,7 @@ process.stdout.write(JSON.stringify({tags: [...tags].sort(), texts, made}));
             self.assertIsNone(el["href"])
 
     def test_where_the_markdown_stops_is_marked(self):
-        """#99: past the cap the text is plain, and nothing said so: a raw
+        """Past the cap the text is plain, and nothing said so: a raw
         `**` after 20k characters looked like a rendering bug. The rest
         gets a thin rule and a muted note, from the theme's variables."""
         self.assertIn('cls: "rp-md-rest"', self.chat)
@@ -362,10 +362,10 @@ process.stdout.write(JSON.stringify({tags: [...tags].sort(), texts, made}));
 
 
 class TestRunnerPaneHighlightingCost(unittest.TestCase):
-    """Review round 1: the text is untrusted and the pane's thread renders
+    """The text is untrusted and the pane's thread renders
     it, so no input may cost more than linear time. The link alternative
     was unbounded (a line of unclosed `[` was quadratic: 80 KB took about
-    5 s at a374601), and text events reached the markdown renderer with no
+    5 s), and text events reached the markdown renderer with no
     length cap."""
 
     def setUp(self):
@@ -451,7 +451,7 @@ process.stdout.write(JSON.stringify({
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
 class TestRunnerPaneFolded(unittest.TestCase):
-    """The folded pane (#125): the stream becomes a status strip (activity,
+    """The folded pane: the stream becomes a status strip (activity,
     quota, session, totals) and one row per real thing (a turn, a tool with
     its result, a reply, text, a turn's summary). Raw keeps one row per
     event. The fold is pure, so it is tested on event lists in node."""
@@ -521,7 +521,7 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(got["footer"], "done · 3 steps · 255k tok · $0.44 est · 2 memories · checkpoint")
 
     def test_a_background_turn_is_its_own_turn_row(self):
-        # #134: a CLI turn of its own between turns (a task notification)
+        # a CLI turn of its own between turns (a task notification)
         got = self.run_node(self.EVENTS + """
 const more = [
   E(30, "system", {subtype: "background_turn", phase: "start"}),
@@ -629,7 +629,7 @@ const S = (seq, payload) => E(seq, "system", payload);
 """
 
     def test_the_bg_tasks_list_folds_from_started_and_ended_events(self):
-        """#129: task_started adds a running task, task_progress names its
+        """task_started adds a running task, task_progress names its
         last tool, a task_notification ends it; the count is the running
         ones; no task event is a row; an end for an unknown task is
         ignored."""
@@ -727,7 +727,7 @@ class TestFleetAndTokens(unittest.TestCase):
     def test_the_card_shows_the_runners_state_and_unsupported_items(self):
         cousins = (_STATIC / "cousins.jsx").read_text()
         self.assertIn("c.runner.state", cousins)
-        self.assertIn("c.runner.alive", cousins)            # review M2
+        self.assertIn("c.runner.alive", cousins)            # a dead runner reads as not running
         self.assertIn("(not running)", cousins)
         self.assertIn("c.runner.unsupported.join", cousins)
 

@@ -1,6 +1,6 @@
 """One memory writer at a time per cousin home.
 
-Two sessions of one cousin (phase 8: a primary and its side sessions,
+Two sessions of one cousin (a primary and its side sessions,
 threads of one runner process) and the cousin's own `cousin-memory`
 commands (another process) write the same files: the raw day file, the
 decisions log and its rotation, the recall counts, the distilled views,

@@ -74,7 +74,7 @@ class TestDone(InboxCase):
                          ("done", "delivered", "turn 1"))
 
     def test_one_result_closes_two_rows(self):
-        # Finding 1: a message sent mid-turn is folded into the running
+        # a message sent mid-turn is folded into the running
         # turn and ONE result closes both. done() per consumed row.
         a = self.inbox.put(_item(body="first"))
         b = self.inbox.put(_item(body="second, mid-turn"))

@@ -20,11 +20,10 @@ trace ledger; the cousin's own conclusions were the gap. Sidechain
 turns (sub-agents) are excluded: their results surface in the main
 thread anyway.
 
-Where the transcripts live is configuration (config/harness.toml,
-Task 1's seam); absent means the capability is off. Best-effort
-throughout: mine() returns 0 for an absent config, an absent file, or
-a session with nothing worth keeping, and never raises for malformed
-lines. The flip records it as a stage but cannot be failed by it.
+Where the transcripts live is configuration (config/harness.toml);
+absent means the capability is off. Best-effort throughout: mine()
+returns 0 for an absent config, an absent file, or a session with
+nothing worth keeping, and never raises for malformed lines. The flip records it as a stage but cannot be failed by it.
 """
 import json
 import re

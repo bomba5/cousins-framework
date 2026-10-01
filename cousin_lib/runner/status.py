@@ -46,7 +46,7 @@ def _head_kind(path):
 def primary_stream(home):
     """The runner's primary stream: the newest data/stream/*.jsonl whose
     first event is `runner` (cousin-runner writes it before anything
-    else). Phase 8's side-session streams are headed `side_session`, never
+    else). Side-session streams are headed `side_session`, never
     `runner`, so a busier, newer side stream never wins. Only a home where
     no file has a `runner` head (streams from before 1.14) falls back to
     the newest file. None when there is no stream."""

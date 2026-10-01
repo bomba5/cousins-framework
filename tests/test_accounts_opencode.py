@@ -1,6 +1,6 @@
-"""Accounts, kind = "opencode" (phase 9 R12): a data dir, provider keys
+"""Accounts, kind = "opencode": a data dir, provider keys
 opencode keeps in its own auth.json or a local endpoint; the env it gets;
-presence-only status; the lane check (R12, R13's account half)."""
+presence-only status; the lane check and the bridge guard's account side."""
 import io
 import json
 import os
@@ -183,7 +183,7 @@ class TestEnvironment(OpencodeCase):
         self.assertNotIn("fake-a", str(cm.exception))
 
     def test_an_auth_json_entry_named_for_claude_refuses_the_start_whatever_its_type(self):
-        """Review round 2, minor 3: ruling P9-1 reaches auth.json. opencode
+        """The Claude-by-name refusal reaches auth.json. opencode
         reads every entry live, so an Anthropic key (or any entry whose id
         says claude or anthropic) on this lane is refused, not only an OAuth
         login."""
@@ -201,7 +201,7 @@ class TestEnvironment(OpencodeCase):
                 self.assertNotIn("fake-", str(cm.exception))
 
     def test_auth_json_holds_api_keys_and_non_anthropic_oauth_only(self):
-        """Review Critical 1: opencode reads every auth.json entry live, and
+        """opencode reads every auth.json entry live, and
         a `wellknown` entry (or any type it may add) brings in a config or a
         token source the guard never sees. Only `api`, and `oauth` on a
         provider other than Anthropic, start; the refusal names the provider
@@ -220,7 +220,7 @@ class TestEnvironment(OpencodeCase):
         self.auth_json("oc", {"openai": {"type": "api", "key": "fake-openai"},
                               "github-copilot": {"type": "oauth", "refresh": "fake-r",
                                                  "access": "fake-a", "expires": 0}})
-        accounts.preflight(acc, self.root)                    # another vendor's OAuth: P9-2
+        accounts.preflight(acc, self.root)                    # another vendor's OAuth
 
     def test_scrub_then_set(self):
         self.write(TOML)
@@ -268,7 +268,7 @@ class TestStatusAndCheck(OpencodeCase):
         self.assertEqual(rc, 4)
         self.assertIn("account=keyed kind=opencode", line)
         # an API key never travels through chat: the action names the key's
-        # way in, and --via only with an OAuth --method (phase 9 R12')
+        # way in, and --via only with an OAuth --method
         self.assertIn("`cousin-account login keyed --provider mistral`", line)
         self.assertIn("--key-file", line)
         self.assertIn("--method <label> --via wren", line)
@@ -371,8 +371,8 @@ class TestLane(OpencodeCase):
             accounts.check_lane(acc[name], "opencode")
 
     def test_claude_by_name_never_runs_on_the_opencode_lane(self):
-        """Ruling P9-1 (review Important 5 and 6): "Claude cousins run on the
-        Agent SDK and nowhere else", read literally. On the opencode lane an
+        """Claude cousins run on the Agent SDK and nowhere else, read
+        literally. On the opencode lane an
         account that names the anthropic provider, or an endpoint model whose
         id says claude or anthropic, is refused: the latter is the shape of
         any OpenAI-compatible proxy in front of a Claude subscription."""

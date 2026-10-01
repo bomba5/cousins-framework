@@ -1,6 +1,6 @@
-"""The tensions view (master plan phase 7 task 9): topics whose live claims
+"""The tensions view: topics whose live claims
 disagree, for the operator to settle. "Disagree" is not judged by a model
-here (ruling in the phase 7b plan): an authored topic with two or more live
+here: an authored topic with two or more live
 claims of different content is a tension, the way a later correction or a
 "RESOLVED" beside the claim it resolves is; settling one claim (obsolete
 --entry) clears it. Machine topics (the framework's own log) never are."""
@@ -86,7 +86,7 @@ class TestCli(HermeticCase):
         self.assertEqual([t["topic"] for t in json.loads(out)], ["keys"])
 
     def test_the_settle_hint_quotes_a_topic_with_spaces(self):
-        """Review M3: the printed command must run as printed."""
+        """The printed command must run as printed."""
         home = _home(self)
         memory.remember(home, "spare keys", "The spare keys are in the blue tin.")
         memory.remember(home, "spare keys", "The spare keys moved to the shed.")
@@ -101,7 +101,7 @@ class TestCli(HermeticCase):
 
 class TestTheRunnersTool(HermeticCase):
     def test_the_memory_tool_settles_one_by_its_id(self):
-        """Review m5: a runner cousin settles a tension through its own
+        """A runner cousin settles a tension through its own
         memory tool, as the CLI and the console can."""
         import types
         from cousin_lib.runner import tools
@@ -124,7 +124,7 @@ class TestRoute(ConsoleCase):
         self.assertEqual([t["topic"] for t in body["tensions"]], ["keys"])
 
     def test_the_console_settles_one_by_its_id(self):
-        """Review M3: what the console lists, it can settle."""
+        """What the console lists, it can settle."""
         home = self.cousin("wren")
         _seed(home)
         self.serve()

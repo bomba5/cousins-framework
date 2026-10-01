@@ -162,7 +162,7 @@ class RemoveAndRestore(ExplorerCase):
 
 
 class MarkObsolete(ExplorerCase):
-    """Canary (2026-09-18): L5 had no writer. The explorer marks a topic
+    """L5 needs a writer: the explorer marks a topic
     obsolete by appending an L5 entry (nothing is removed), recorded as
     by the logged-in user, and the distilled views drop the topic."""
 

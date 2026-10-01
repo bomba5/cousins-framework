@@ -57,9 +57,9 @@ class TestResume(HermeticCase):
 
     def one_turn(self, r, body="hi"):
         rec = r.enqueue(Item("operator:priya", "chat", body, sender="Priya"))
-        # the runner appends a turn's result, then closes its rows (#87), runs its
+        # the runner appends a turn's result, then closes its rows, runs its
         # post-turn work (the session file, usage, mining, the proposal), then goes
-        # idle (#102)
+        # idle
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"
                               and r.state() == "idle"))
 
@@ -98,7 +98,7 @@ class TestResume(HermeticCase):
         self.assertEqual(boot.generation_started(self.home), 1000.0)
 
     def test_the_key_lane_resumes_from_the_store(self):
-        # the account's kind decides the resume path (R12 folded into accounts)
+        # the account's kind decides the resume path
         key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
         r1 = self.runner(source="ANTHROPIC_API_KEY", account=key)
         r1.start(); self.one_turn(r1); r1.stop(timeout=5)
@@ -111,7 +111,7 @@ class TestResume(HermeticCase):
 
     def test_the_account_kind_decides_the_resume_path_whatever_the_init_says(self):
         # a key account whose init reports "none" still resumes store-backed;
-        # the init's source is the CHECK that the account took effect (Task 16)
+        # the init's source is the CHECK that the account took effect
         key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
         r1 = self.runner(account=key); r1.start(); self.one_turn(r1); r1.stop(timeout=5)
         self.assertEqual(self.session_file()["lane"], "login")     # the record, not the decider
@@ -220,7 +220,7 @@ class TestResume(HermeticCase):
         return r
 
     def test_a_new_sessions_id_is_on_file_while_its_first_turn_runs(self):
-        # #119: a runner killed inside a brand-new session's first turn never
+        # a runner killed inside a brand-new session's first turn never
         # reaches the turn's end nor its teardown; what is on file at that
         # moment is what the next start resumes
         r = self.hanging_runner("s-first")
@@ -235,7 +235,7 @@ class TestResume(HermeticCase):
         self.assertEqual(self.session_file()["lane"], "login")
 
     def test_a_lost_resume_leaves_the_file_alone_until_the_fresh_start(self):
-        # the init named another session than the resume asked for (R12): the
+        # the init named another session than the resume asked for: the
         # fresh start with the digest runs at the boundary after this turn; a
         # kill before it must find the old id, so the next start takes the
         # lost-resume path again instead of resuming a session with no digest
@@ -250,7 +250,7 @@ class TestResume(HermeticCase):
         self.assertEqual(self.session_file()["session_id"], "s-old")
 
     def test_a_lost_resume_keeps_the_old_id_until_its_fresh_start_runs(self):
-        # review round 2, 5: between the lost-resume turn's result and the
+        # between the lost-resume turn's result and the
         # fresh start with the digest, a kill must still find the old id,
         # or the next start resumes the new session and no digest ever comes
         (self.home / "data" / "runner-session.json").write_text(
@@ -270,7 +270,7 @@ class TestResume(HermeticCase):
         self.assertTrue(_wait(lambda: r.saved_session() == "s-other"))   # once the digest is in
 
     def test_a_failing_session_write_is_retried_once_per_turn_not_per_message(self):
-        # review round 2, 6: a full disk is one error at the init and one at
+        # a full disk is one error at the init and one at
         # the result, not one per streamed message
         def factory(options):
             self.options.append(options)
@@ -299,7 +299,7 @@ if __name__ == "__main__":
 
 
 class TestRestartNote(HermeticCase):
-    """#98: a runner restart interrupts the turn in flight, and the agent CLI
+    """A runner restart interrupts the turn in flight, and the agent CLI
     records that as the user's stop ("[Request interrupted by user]", "stop
     and wait for the user"), so a resumed cousin read it as the operator's
     and parked. A stop that interrupted a live turn leaves a mark; the next
@@ -342,7 +342,7 @@ class TestRestartNote(HermeticCase):
     def test_a_stop_mid_turn_puts_the_restart_line_first_in_the_resumed_session(self):
         # an established session (an earlier turn recorded its id): the case
         # a restart interrupts. A session cut in its very first turn is on
-        # file from its init (#119), so it resumes the same way.
+        # file from its init, so it resumes the same way.
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-live", "lane": "login"}))
         r1 = self.runner([init_msg(session="s-live"), "HANG", result(session="s-live")])
@@ -366,7 +366,7 @@ class TestRestartNote(HermeticCase):
         self.assertFalse(self.mark().exists(), "the mark is taken once")
 
     def test_a_requested_stop_mid_turn_is_never_called_a_restart(self):
-        """#98 review, Critical: an operator's stop (console, cousin-supervisor
+        """An operator's stop (console, cousin-supervisor
         stop) writes run/held before it signals. The resumed session must be
         told a requested stop cut its turn, never "not the operator"."""
         from cousin_lib import supervisor
@@ -393,7 +393,7 @@ class TestRestartNote(HermeticCase):
         self.assertIn("priya from the console", note["body"])
 
     def test_a_requested_restart_mid_turn_is_told_to_continue(self):
-        """#98 review: the console's restart holds the runner with its own
+        """The console's restart holds the runner with its own
         name ("console restart") before it signals; the resumed session is
         told a requested restart cut its turn and to continue it, never
         that a requested stop did."""

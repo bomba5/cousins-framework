@@ -65,7 +65,7 @@ _SNIPPET_CHARS = 160
 # search() asks each leg for this many candidates, not just `top`: a
 # hit ranked just past `top` in BOTH legs would out-score a
 # single-leg hit once RRF sums the two, but only if fusion ever saw
-# it (tracker #83). _fuse still cuts the fused result to `top`.
+# it. _fuse still cuts the fused result to `top`.
 FUSION_DEPTH_MIN = 20
 FUSION_DEPTH_FACTOR = 4
 _DEFAULTS = {"chunk_chars": 2000, "chunk_overlap": 200}
@@ -112,7 +112,7 @@ def _index_path(home):
     float32 blob.
 
     It was a single JSON object, read and parsed in full on every
-    search. Measured 2026-09-21 on a real cousin: 31.6 MB and 1283 ms
+    search. Measured on a real home: 31.6 MB and 1283 ms
     per query, against the 938 ms embedding call the index exists to
     serve, and growing with the memory. Same data, same access pattern
     (every vector is scored), but unpacking binary beats parsing text
@@ -190,7 +190,7 @@ def _imported(home):
 def _imported_current(path, imported):
     """True when a harness file's imported copy is current: one memory is
     one hit, found as the copy. A file changed since the import stays
-    searchable here until it is imported again (R9). Hashed only for the
+    searchable here until it is imported again. Hashed only for the
     names the manifest holds."""
     if path.name not in imported:
         return False
@@ -204,7 +204,7 @@ def _imported_current(path, imported):
 # the jobs ledger and framework events all write. It was not indexed
 # at all: `_sources` collects `*.md`, so an entry reached recall only
 # through `distill`, which keeps one truncated line per topic and caps
-# each file. Measured 2026-09-21 on a real cousin: 904 entries over
+# each file. Measured on a real home: 904 entries over
 # 789 topics survived as 139 lines, so 82% of topics could not be
 # found. Entries are indexed one per entry, not one per day file: a
 # day file mixes unrelated topics, which is a bad unit for BM25 and a
@@ -232,7 +232,7 @@ def _raw_entries(home):
 
     The same entry is indexed once however many files hold it:
     raw_fold keeps a month in both `<YYYY-MM>-digest.jsonl` and
-    `archive/<YYYY-MM>.jsonl.gz` (measured on a real cousin: 149 of
+    `archive/<YYYY-MM>.jsonl.gz` (measured on a real home: 149 of
     149 entries identical), and indexing both returns one memory as
     two hits. Files are walked hot-first, so the copy that survives is
     the readable one.
@@ -289,7 +289,7 @@ def _source_text(collection, path, rel):
     a memory_import copy (memory/imported/auto/*.md) is indexed as the
     original it was rendered from. The copy's provenance lines would
     otherwise shift every chunk window and re-embed every chunk, and a
-    replay would measure that noise as a lost memory (P7-10)."""
+    replay would measure that noise as a lost memory."""
     body = _read(path)
     if body is None or collection != "memory":
         return body
@@ -513,7 +513,7 @@ def _chunk_text(body, *, size=2000, overlap=200):
     positive so a careless overlap cannot stall.
 
     A tail that would be mostly overlap (fewer new chars than the
-    overlap) joins the chunk before it instead (#82), so the last chunk
+    overlap) joins the chunk before it instead, so the last chunk
     runs up to size + overlap - 1 chars: such fragments carried little
     text of their own and ranked erratically."""
     if not body:
@@ -658,7 +658,7 @@ def _lock_path(home):
 # A foreground pass (a search) embeds at most this many chunks and
 # leaves the rest to the loops daemon. A search must never pay for a
 # whole backfill: with the raw store indexed a cousin has thousands of
-# chunks, and on 2026-09-21 a peer's first query after the change sat
+# chunks, and a first query against an unembedded store can sit
 # over three minutes with the embedding service pinned.
 FOREGROUND_BUDGET = 24
 
@@ -686,9 +686,9 @@ def ensure_index(home, config, *, force=False, root=None, wait=True,
 
     One pass per home at a time, under an flock on
     memory/.embeddings.lock: concurrent searches each re-embedding the
-    same chunks is a thundering herd on the embedding service (seen
-    2026-09-18: one recall thread per operator message, 19 at once, the
-    service at 18 s a request and every recall past its budget). With
+    same chunks is a thundering herd on the embedding service (one
+    recall thread per operator message, 19 at once, put the service at
+    18 s a request and every recall past its budget). With
     wait=False a held lock returns at once with busy=True and the
     caller searches the index as it stands; wait=True queues behind it.
 
@@ -876,7 +876,7 @@ def _fuse(keyword_hits, semantic_hits, top, bonuses=None):
 # The collections a cousin writes ON PURPOSE as durable topic files,
 # best first. Raw entries are short and dense, so BM25's length
 # normalisation ranks them above a long curated file that mentions the
-# term once: measured 2026-09-21, indexing the raw store took curated
+# term once: measured on a real home, indexing the raw store took curated
 # files from 13 of 45 top-three slots to 2. One slot is reserved so the
 # summary a cousin wrote cannot be crowded out of its own search.
 _CURATED = ("memory", "harness")
@@ -947,7 +947,7 @@ def search(query, *, top=5, home=None, collection=None, root=None, record=True):
     home = Path(home) if home else _home()
     if collection in (None, "raw"):
         from cousin_lib import memory
-        memory.try_backfill(home)   # decisions only the old log holds reach raw first (R2)
+        memory.try_backfill(home)   # decisions only the old log holds reach raw first
     depth = max(FUSION_DEPTH_MIN, FUSION_DEPTH_FACTOR * top)
     keyword_hits = _keyword_search(query, home, depth, collection, root)
     config = _embedding_config(root)
@@ -988,13 +988,13 @@ def search(query, *, top=5, home=None, collection=None, root=None, record=True):
     # An explicit collection filter is never overridden: the caller
     # asked for one collection and gets one.
     # Bonuses are computed from each leg's first `top` entries only
-    # (the pre-#83 reach): the depth-widened lists feed _fuse's rank
-    # sums so a hit strong in both legs can still be found, but a
-    # bonus must never let a path _fuse could not have fetched at
-    # `top` before #83 (a low keyword-only or semantic-only rank)
-    # outrank a path that was already within `top` on its own merit -
+    # (what a leg reaches without the fusion depth): the depth-widened
+    # lists feed _fuse's rank sums so a hit strong in both legs can
+    # still be found, but a bonus must never let a path a leg ranks
+    # below `top` (a low keyword-only or semantic-only rank) outrank
+    # a path that was already within `top` on its own merit -
     # that would carry it past a better match, which _fuse's contract
-    # forbids (ruling P1131-1).
+    # forbids.
     hits = _fuse(keyword_hits, semantic_hits, top,
                  _bonuses(home, keyword_hits[:top], semantic_hits[:top]))
     if collection is None:

@@ -400,7 +400,7 @@ def expand_harness_path(template, home):
     """Expand a harness.toml path template for one cousin home. {home}
     is the home verbatim; {home_encoded} is the harness's project-dir
     encoding of it: every character that is not an ASCII letter or digit
-    becomes '-' (Claude Code's own; #106), so /a/b -> -a-b and
+    becomes '-' (Claude Code's own), so /a/b -> -a-b and
     /tmp/x_/w.v2 -> -tmp-x--w-v2. A leading ~ is the user's home, as the
     shell would read it."""
     home = Path(home)

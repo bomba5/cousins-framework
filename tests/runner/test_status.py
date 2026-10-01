@@ -83,8 +83,8 @@ class TestLongStreams(HermeticCase):
         self.assertGreater(status.primary_stream(home).stat().st_size, 1_000_000)
 
     def test_a_side_sessions_newer_stream_never_wins(self):
-        """Phase 8 writes a side session's stream beside the primary one,
-        headed `side_session`, never `runner` (agreed with the phase 8 plan):
+        """A side session's stream is written beside the primary one,
+        headed `side_session`, never `runner`:
         the primary is the newest file whose first event is `runner`."""
         home = _fake_home(self)
         primary = EventStream(home, "sdk-primary")

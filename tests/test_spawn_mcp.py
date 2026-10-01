@@ -218,7 +218,7 @@ class TestProjectSettings(ProvisionCase):
         self.assertEqual(path.read_text(), first)
 
     def test_create_refuses_a_non_boolean_install_commit_attribution(self):
-        # tracker #112, Critical 2, the create path (not just repair):
+        # the create path (not just repair):
         # create_cousin's own SpawnError conversion already catches
         # anything apply_project_settings raises; this proves a bad
         # commit_attribution rides that same path, home removed.
@@ -233,12 +233,12 @@ class TestProjectSettings(ProvisionCase):
         self.assertFalse((root / "cousins" / "testa").exists())
 
     def test_repair_settings_refuses_a_non_boolean_commit_attribution(self):
-        # tracker #112, Critical 2: surfaced the way spawn's other
+        # surfaced the way spawn's other
         # config errors are (exit 2, printed, nothing written).
         root = self._framework_root()
         home = self._create(root)["home"]
         toml_path = home / "cousin.toml"
-        # the new cousin's own [agent] table (sdk by default, R4)
+        # the new cousin's own [agent] table (sdk by default)
         text = toml_path.read_text()
         self.assertIn("\n[agent]\n", text)
         toml_path.write_text(

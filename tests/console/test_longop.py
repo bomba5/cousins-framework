@@ -97,7 +97,7 @@ class Lifecycle(LongOpCase):
 
 
 class Robustness(LongOpCase):
-    """Fix round 1, Importants 2 and 3."""
+    """An op ends failed on any exit, and only an op error shows its words."""
 
     def test_a_system_exit_still_ends_the_op_failed(self):
         def work(op):
@@ -140,7 +140,7 @@ class Robustness(LongOpCase):
 
 
 class FleetRefusesDuringAnOp(LongOpCase):
-    """Fix round 1, Important 4: dismiss, start, stop and restart are 409
+    """Dismiss, start, stop and restart are 409
     while an op runs on the cousin, as the flip is."""
 
     def test_each_is_409(self):
@@ -160,7 +160,7 @@ class FleetRefusesDuringAnOp(LongOpCase):
 
 
 class Exclusive(LongOpCase):
-    """Fix round 2, Important: routes_fleet's five routes (dismiss, start,
+    """routes_fleet's five routes (dismiss, start,
     stop, restart, set_auth) used to read op_running() unlocked and then
     do their own unlocked work, marking the cousin busy nowhere - a
     longop.start() (a migrate, a login) could start beside them. exclusive()
@@ -209,7 +209,7 @@ class Exclusive(LongOpCase):
         self.wait_done()
 
     def test_a_held_mark_is_invisible_to_status_and_the_op_route(self):
-        # Fix round 3, Important 2: a held entry must not leak through as
+        # A held entry must not leak through as
         # a fake running op, on either the function or the GET route -
         # op_running() is the only thing that needs to see it.
         hold = longop.exclusive(self.server, "wren", "dismiss")

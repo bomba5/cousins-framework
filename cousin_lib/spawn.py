@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 from cousin_lib import agent_auth, memory
-from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds (M6)
+from cousin_lib.delivery import RUNNER_KINDS  # the one list of runner kinds
 from cousin_lib.config import (
     EFFORT_LEVELS,
     MEMORY_SCOPES,
@@ -109,7 +109,7 @@ def _write_cousin_toml(home, *, slug, name, role, operator=None,
     [runtime], [heartbeat], [memory] and [agent] tables exist only when
     a value was given for them: an absent key is the documented default,
     never a copied-out one. There is no [chat] table: no cousin runs a
-    chat server of its own (R10)."""
+    chat server of its own."""
     text = (
         "[cousin]\n"
         "slug = %s\n"
@@ -159,14 +159,14 @@ def _write_identity_files(home, *, claude_md, name, role):
 
 
 # The kind of a new cousin when neither --runner nor COUSIN_DEFAULT_RUNNER
-# names one (phase 10b R4).
+# names one.
 DEFAULT_RUNNER = "sdk"
 
 
 def spawn_lane(root, runner=None, account=None):
     """(runner, account) a new cousin is created with. runner None reads
     COUSIN_DEFAULT_RUNNER, where unset or empty is DEFAULT_RUNNER, `sdk`
-    (R4: 2.0.0 has no legacy tmux lane, so "tmux-legacy" is refused by
+    (2.0.0 has no legacy tmux lane, so "tmux-legacy" is refused by
     name); a runner must be one of RUNNER_KINDS. account None reads
     COUSIN_DEFAULT_ACCOUNT. An account must be `host` or one of
     config/accounts.toml's. SpawnError on anything else, before any
@@ -222,7 +222,7 @@ def create_cousin(root, *, slug, role, name=None, role_paragraph=None,
     """The creation sequence from the spec: validate, create, write
     atomically, render, provision the MCP adapter - and on any failure
     after the home exists, remove everything this run created. port is
-    refused: no cousin runs a chat server of its own (R10).
+    refused: no cousin runs a chat server of its own.
     model, effort, heartbeat and memory_scope are optional and land in
     cousin.toml ([runtime], [heartbeat] context_beat_seconds, [memory]
     scope); runner and account land in [agent] (spawn_lane: the
@@ -428,7 +428,7 @@ def _foreign_runner(home, root):
 def runner_lane(home):
     """The cousin runs on cousin-runner (`[agent] runner` is one of RUNNER_KINDS),
     the test every runner-lane caller uses; its start and stop are the
-    supervisor's (R10). A cousin.toml that is missing or does not parse
+    supervisor's. A cousin.toml that is missing or does not parse
     is the tmux lane, as delivery reads it."""
     from cousin_lib import delivery
     return delivery._runner_kind(home) in RUNNER_KINDS
@@ -447,8 +447,8 @@ def _supervisor_root(home, root):
 def _start_runner(home, root):
     """Ask the supervisor to start the cousin's runner. NoSupervisor with
     none; ForeignRunner, before asking, when a runner it did not start
-    holds the lock (#92: its start answered "running" for a second runner
-    that sat in backoff); StillStopping for its transient "still stopping"
+    holds the lock (else its start would answer "running" for a second
+    runner that sat in backoff); StillStopping for its transient "still stopping"
     refusal; SpawnError with the reason for any other refusal."""
     from cousin_lib import supervisor
     root = _supervisor_root(home, root)
@@ -476,7 +476,7 @@ def _stop_runner(home, root, wait=True, by="spawn.stop_cousin"):
     wait the answer comes once it is down; without, once it is signalled
     (`stopping`). A timeout while the supervisor is still up reads as
     `stopping`, never as stopped. With no supervisor running nothing
-    runs to stop, but the stop still holds (O9): the hold is written
+    runs to stop, but the stop still holds: the hold is written
     here, `"held": true`, so a supervisor started later leaves the cousin
     down until `start`, as it would had it been up to take the stop.
     With no supervisor to ask, delivery.is_alive still says whether a
@@ -527,9 +527,9 @@ def stop_cousin(home, *, tmux_bin="tmux", tmux_socket=None,
     marker.
 
     A worker has no session: its stop is a no-op that says so,
-    {"worker": "no session", "note": <lane_refusal>} (R14). Any other
+    {"worker": "no session", "note": <lane_refusal>}. Any other
     cousin with no runner kind is refused with delivery.lane_refusal
-    before any tmux call (R2)."""
+    before any tmux call."""
     if runner_lane(home):
         return _stop_runner(home, root, wait=wait, by=by)
     from cousin_lib import delivery
@@ -607,7 +607,7 @@ def dismiss_cousin(root, *, slug, tmux_bin="tmux", tmux_socket=None,
     config/harness.toml are left in place and reported.
 
     A cousin with no runner kind (not a worker) is dismissed without the
-    stop, which 2.0.0 refuses for it (R2): nothing 2.0.0 started can be
+    stop, which 2.0.0 refuses for it: nothing 2.0.0 started can be
     running for it. The result then carries "stop": "skipped" and a
     "note" with delivery.lane_refusal."""
     root = FrameworkConfig(root).root
@@ -765,7 +765,7 @@ def validate_turn_out_of_process(home, root, model, effort, *, account=None,
     """(rc, line) of one validating turn on the cousin's account, run in a
     child of the same interpreter (runner.validate_turn), never in this
     process: sdk.validate_account scrubs os.environ process-wide for the
-    turn, and the console has other threads (#100 review). The child
+    turn, and the console has other threads. The child
     starts without any accounts.AUTH_VARS variable and in a session of its
     own, so a timeout kills it and the CLI it started. Only its JSON
     verdict is read; anything else is a failed turn (4). `account` names
@@ -834,7 +834,7 @@ def _agent_unchanged(agent, key, value):
 def persist_agent_values(home, changes, *, root=None):
     """Write `changes` ({key: value}, None removes the key) into a runner-lane
     cousin's [agent], the keys its runner reads: the ONE write path for
-    them (the console's settings panel, its model and effort routes, #100).
+    them (the console's settings panel, its model and effort routes).
     A value the table already holds is dropped first: a same-value save
     runs no turn, writes nothing and records nothing. What is left is
     checked as the runner checks it (agent_settings.validate: every key on
@@ -898,7 +898,7 @@ def persist_agent_values(home, changes, *, root=None):
 
 def persist_agent_value(home, key, value, *, root=None):
     """Set a runner-lane cousin's [agent] model or effort (the console's
-    model and effort routes, #100; [runtime] is the tmux lane's and the
+    model and effort routes; [runtime] is the tmux lane's and the
     runner never reads it): check_runtime_value's one-word rule, then
     persist_agent_values, the one write path, with its refusal as a
     SpawnError. True when the value changed."""
@@ -1128,12 +1128,12 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
 
     On the runner lane (runner_lane) nothing here runs: the
     cousin-supervisor is asked to start the cousin's runner, the one
-    launcher of a runner process (R10), and agent_cmd, the tmux
+    launcher of a runner process, and agent_cmd, the tmux
     arguments and start_chat_server are not used. No supervisor is
     NoSupervisor; a refused start is a SpawnError with its reason.
 
     A cousin with no runner kind is refused with delivery.lane_refusal
-    before anything runs: 2.0.0 has no legacy tmux lane (R2)."""
+    before anything runs: 2.0.0 has no legacy tmux lane."""
     if runner_lane(home):
         return _start_runner(home, root)
     from cousin_lib import delivery
@@ -1151,7 +1151,7 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
     # The durable floor is a derived view of raw memory; the boot
     # packet regenerates it, but only a flip assembles one. A plain
     # start or a --resume at boot never did, so a cousin that was only
-    # ever resumed had no distilled views at all (2026-09-18). Every
+    # ever resumed had no distilled views at all. Every
     # start refreshes it. Best-effort: a failed distill never stops a
     # start.
     try:
@@ -1535,10 +1535,10 @@ def spawn_main(argv=None):
     if start_existing and on_runner:
         return _start_existing_runner(root, args.slug)
     if args.start and not on_runner:
-        # R2: 2.0.0 has no legacy tmux lane: nothing is created or started
+        # 2.0.0 has no legacy tmux lane: nothing is created or started
         # for a cousin with no runner kind.
         from cousin_lib import delivery
-        # (A new cousin always has one: spawn_lane, R4.)
+        # (A new cousin always has one: spawn_lane.)
         why = delivery.lane_refusal(root / "cousins" / args.slug)
         print("cousin-spawn: %s" % why, file=sys.stderr)
         return 2

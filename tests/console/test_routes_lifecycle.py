@@ -1,4 +1,4 @@
-"""routes_lifecycle (WP-B): reincarnate and transplant from the console,
+"""routes_lifecycle: reincarnate and transplant from the console,
 each a long operation over cousin_lib.lifecycle. The flip and the
 bequest prompt are injected through the server's test seams; nothing is
 respawned and no chat server is reached."""

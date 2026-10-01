@@ -1,4 +1,4 @@
-"""The bridge guard (phase 9 R13): the opencode lane never carries Claude
+"""The bridge guard: the opencode lane never carries Claude
 subscription traffic.
 
 The subscription bridge (an opencode plugin that starts a local
@@ -53,7 +53,7 @@ def _refuse(marker, where):
 
 
 def move_hint(marker):
-    """What a refusal on the port marker adds: R13's cost, said."""
+    """What a refusal on the port marker adds: the guard's cost, said."""
     if marker is PORT_MARKER:
         return "; port 3456 is the bridge's proxy port: move a legitimate local proxy to" \
                " another port"

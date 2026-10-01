@@ -197,7 +197,7 @@ class TestOption(PromptCase):
 
 
 class TestRunnerLaneDoctrine(PromptCase):
-    """#95: authored text written for the tmux lane reaches the runner's
+    """Authored text written for the tmux lane reaches the runner's
     prompt as identity; the contract ahead of it overrides the CLI habit."""
 
     def test_an_identity_that_says_cousin_reply_is_overridden_by_the_contract(self):

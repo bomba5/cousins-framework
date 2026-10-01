@@ -35,7 +35,7 @@ class TestEventStream(HermeticCase):
         self.assertEqual([e["seq"] for e in EventStream(self.home, "sess-1").tail()], [1, 2, 3])
 
     def test_a_last_line_cut_mid_character_is_skipped_not_fatal(self):
-        # #86: a writer that died inside a multi-byte UTF-8 character left
+        # a writer that died inside a multi-byte UTF-8 character left
         # bytes that do not decode; the partial line is skipped as any
         # partial line is, and the next writer's line is read after it
         s = EventStream(self.home, "sess-1")

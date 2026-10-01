@@ -1,4 +1,4 @@
-"""WP-F, the System view's routes (console/routes_system.py): the
+"""The System view's routes (console/routes_system.py): the
 supervisor through its own request API (a stub on the socket), per-cousin
 one-shot schedules, console users with write-only passwords, backup as a
 LongOp per cousin into a checked destination, and the install config

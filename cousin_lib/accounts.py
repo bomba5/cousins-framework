@@ -1,11 +1,11 @@
-"""Accounts: which credentials a cousin runs on (operator addition,
-2026-09-23). Named once in config/accounts.toml, applied the same way by
+"""Accounts: which credentials a cousin runs on. Named once in
+config/accounts.toml, applied the same way by
 the runner, `cousin-account` and `cousin-runner --check-auth`.
 
 A cousin never obtains credentials: it runs on what it is given. The
 host's default login (~/.claude) is the implicit account `host`; the
-phase-2 `[agent] api_key_file` is an implicit anthropic-key account. The
-tmux lane keeps agent_auth.py until phase 10."""
+older `[agent] api_key_file` is an implicit anthropic-key account. The
+tmux lane keeps its own agent_auth.py."""
 import argparse
 import contextlib
 import fcntl
@@ -39,8 +39,8 @@ AUTH_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
              "AWS_BEARER_TOKEN_BEDROCK", "ANTHROPIC_FOUNDRY_API_KEY",
              "ANTHROPIC_FOUNDRY_AUTH_TOKEN", "ANTHROPIC_AWS_API_KEY",
              "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY")
-# A name shaped like a credential: *SECRET*, *_PASSWORD, *_KEY, *_TOKEN
-# (opencode review round 2, minor 6). One rule for every kind that builds a
+# A name shaped like a credential: *SECRET*, *_PASSWORD, *_KEY, *_TOKEN.
+# One rule for every kind that builds a
 # model's environment from names (opencode's shell_env, the tmux pane).
 SECRET_NAME = re.compile(r"SECRET|_PASSWORD$|_KEY$|_TOKEN$", re.IGNORECASE)
 
@@ -66,7 +66,7 @@ _ALLOWED = {"claude-login": {"kind", "config_dir"},
             "anthropic-key": {"kind", "secret_file"},
             "opencode": {"kind", "data_dir", "providers", "endpoint", "endpoint_model",
                          "endpoint_context", "endpoint_output"}}
-# An opencode account (phase 9 R12): opencode's HOME and its four XDG
+# An opencode account: opencode's HOME and its four XDG
 # directories live in the account's data dir, so its auth.json (the
 # provider keys, 0600, written by opencode itself) never leaves it.
 _PROVIDER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -82,8 +82,8 @@ AUTH_JSON = ("data", "opencode", "auth.json")
 KEYLESS_PROVIDERS = ("opencode",)
 EXPECTED_SOURCE = {"claude-login": "none", "claude-token": "none",
                    "anthropic-key": "ANTHROPIC_API_KEY"}
-# What `claude auth status --json` reads for each kind (R16: a fake key read
-# api_key and a fake CLAUDE_CODE_OAUTH_TOKEN read oauth_token on this host).
+# What `claude auth status --json` reads for each kind (a fake key reads
+# api_key and a fake CLAUDE_CODE_OAUTH_TOKEN reads oauth_token).
 # The CLI's word for a key is joined, not spelled: it happens to equal the
 # tmux lane's mode name, which only agent_auth.py may spell
 # (test_agent_auth.test_no_other_module_spells_the_mode_names), and the two
@@ -98,8 +98,8 @@ class AccountsError(Exception):
 
 
 class SecretMissing(AccountsError):
-    """The account's secret file is not there yet: a login to do (Task 16
-    waits for it), not a configuration error."""
+    """The account's secret file is not there yet: a login to do
+    (`cousin-runner --check-auth` waits for it), not a configuration error."""
 
 
 @dataclass(frozen=True)
@@ -110,14 +110,14 @@ class Account:
     secret_file: Path | None
     implicit: bool = False
     secret_value: str | None = field(default=None, repr=False)
-    # kind = "opencode" only (phase 9 R12): exactly one of providers or
+    # kind = "opencode" only: exactly one of providers or
     # endpoint (with endpoint_model) is set.
     data_dir: Path | None = None
     providers: tuple = ()
     endpoint: str | None = None
     endpoint_model: str | None = None
-    # the endpoint model's context window and output bound, in tokens (Task
-    # 6): rendered as its `limit`, so context pressure works for it
+    # the endpoint model's context window and output bound, in tokens:
+    # rendered as its `limit`, so context pressure works for it
     endpoint_context: int | None = None
     endpoint_output: int | None = None
 
@@ -244,7 +244,8 @@ def _load_opencode(root, name, table, where):
 
 def _check_endpoint(endpoint, where):
     """An http(s) base URL with a host and no credentials in it, that does
-    not name the subscription bridge (R13's account half). The message
+    not name the subscription bridge (the account side of the bridge
+    guard). The message
     never repeats the URL: it might hold a password."""
     from cousin_lib.runner import opencode_guard
     bad = AccountsError("%s endpoint must be an http(s) base URL with a host, for example"
@@ -267,25 +268,25 @@ def _check_endpoint(endpoint, where):
                             % (where, marker.pattern, opencode_guard.move_hint(marker)))
 
 
-# Ruling P9-1: "Claude cousins run on the Agent SDK and nowhere else", read
-# literally. On the opencode lane a provider or a model whose id says claude
-# or anthropic is refused. A name is a weak test (a proxy can serve Claude
-# under any id); it stops the honest mistake and the obvious proxy, and the
-# operator's account config stays the real boundary.
+# Claude cousins run on the Agent SDK and nowhere else, read literally. On
+# the opencode lane a provider or a model whose id says claude or anthropic
+# is refused. A name is a weak test (a proxy can serve Claude under any id);
+# it stops the honest mistake and the obvious proxy, and the operator's
+# account config stays the real boundary.
 CLAUDE_NAME = re.compile(r"claude|anthropic", re.IGNORECASE)
 
 
 def refuse_claude_name(what, text):
     """AccountsError when `text` (a provider or model id) names Claude or
-    Anthropic, on the opencode lane (ruling P9-1)."""
+    Anthropic, on the opencode lane."""
     if isinstance(text, str) and CLAUDE_NAME.search(text):
         raise AccountsError("%s %r names Claude or Anthropic: Claude cousins run on the Agent"
-                            " SDK and nowhere else (ruling P9-1), so the opencode lane never"
+                            " SDK and nowhere else, so the opencode lane never"
                             " runs one; use runner = \"sdk\" for a Claude model" % (what, text))
 
 
 def check_lane(account, runner_kind):
-    """R12: an opencode runner runs on an opencode account only, and an
+    """An opencode runner runs on an opencode account only, and an
     opencode account on an opencode runner only. The Claude kinds (a login,
     a token, an Anthropic key, the host's login) never reach the opencode
     lane; opencode's data dir never reaches the SDK."""
@@ -316,7 +317,7 @@ def write_entry(root, name, entry, *, expect=None, check=None):
     exists, "present" one that does not. Every other line of the file is
     kept byte for byte (console/toml_edit.set_key); the new text must read
     back with only this entry changed and pass load()'s rules as a whole,
-    and an opencode entry must not name Claude (ruling P9-1), before the
+    and an opencode entry must not name Claude, before the
     atomic rename that keeps the file's mode. `check(account)` (the new
     Account, None on removal) runs last, under the same lock: raise
     AccountsError there to refuse (the console refuses a change a cousin
@@ -385,8 +386,8 @@ def write_entry(root, name, entry, *, expect=None, check=None):
 def _check_entry(name, entry):
     """The entry's shape before any text is touched: a table, a known kind,
     only that kind's keys, TOML-able values, and on an opencode entry no
-    provider or endpoint model that names Claude (P9-1: such an account
-    could never run on its only lane)."""
+    provider or endpoint model that names Claude (such an account could
+    never run on its only lane)."""
     where = "account %s" % name
     if not isinstance(entry, dict):
         raise AccountsError("%s must be a table of keys" % where)
@@ -603,7 +604,7 @@ def _auth_entries(account):
 
 
 # The auth.json entry types an opencode account may hold: a provider's API
-# key, or another vendor's OAuth login (ruling P9-2). opencode reads every
+# key, or another vendor's OAuth login. opencode reads every
 # entry live, and any other type (`wellknown` fetches a config and a token
 # from a URL) is a source the bridge guard never sees.
 AUTH_TYPES = ("api", "oauth")
@@ -616,7 +617,7 @@ def _entry_types(data, path):
                             " opencode lane never carries subscription traffic: remove it and"
                             " use an API key" % path)
     for provider, kind in sorted(entries.items()):
-        refuse_claude_name("%s entry" % path, provider)       # P9-1, whatever its type
+        refuse_claude_name("%s entry" % path, provider)       # whatever its type
         if kind not in AUTH_TYPES:
             raise AccountsError("%s entry %s is of type %s; an opencode account holds only %s"
                                 " entries (a key, or another vendor's OAuth login): remove it"
@@ -659,7 +660,7 @@ def scrub(env):
 
 
 def resume_via_cli(account):
-    """claude-login refreshes its own token: resume through the CLI (R12)."""
+    """claude-login refreshes its own token: resume through the CLI."""
     return account.kind == "claude-login"
 
 
@@ -670,7 +671,7 @@ def expected_source(account):
 def _cli():
     """The agent CLI as an ABSOLUTE path: the SDK's bundled binary (found
     without importing the SDK), else `claude` on PATH, resolved. Never a
-    bare name: the pty driver execs a path (Task 15)."""
+    bare name: the pty driver execs a path."""
     import importlib.util
     import shutil
     spec = importlib.util.find_spec("claude_agent_sdk")
@@ -733,7 +734,7 @@ def in_container():
 def login_action(account, via=None, provider=None):
     """What the operator runs to fix this account's login. opencode: the
     provider to log in (the first named when none is given), or the
-    endpoint to check. An API key never travels through chat (R12'): it
+    endpoint to check. An API key never travels through chat: it
     goes on stdin or in a key file, and `--via` is named only with an
     OAuth `--method`. `host` inside the framework's image: there is no
     host user there and `claude` is not on PATH, but the image's HOME is
@@ -760,7 +761,7 @@ def login_action(account, via=None, provider=None):
 
 
 def check(home, root, *, run=subprocess.run):
-    """(exit code, line) for `cousin-runner --check-auth` (Task 16) and
+    """(exit code, line) for `cousin-runner --check-auth` and
     `cousin-account status`."""
     try:
         account = for_cousin(home, root)
@@ -825,7 +826,7 @@ DONE_RX = r"(Login successful)|" + FAIL_RX
 TOKEN_RX = r"Your\s*OAuth\s*token\s*\(valid\s*for[^)]*\):\s*(sk-ant-oat\S+)\s"
 TOKEN_UNTIL = TOKEN_RX + "|" + FAIL_RX
 # The page shows `code#state`; once a window has closed, only a message of
-# this shape is taken as a LATE code (R18).
+# this shape is taken as a LATE code.
 CODE_SHAPE = re.compile(r"^[A-Za-z0-9._~-]{16,}#[A-Za-z0-9._~-]{8,}$")
 CAPTURE_TTL_S = 600
 TOMBSTONE_S = 3600
@@ -893,7 +894,7 @@ def _run_code_flow(argv, env, *, relay, await_code, spawn, timeout, until,
 def login_flow(account, root, *, relay, await_code, spawn=None, timeout=CAPTURE_TTL_S):
     """`claude auth login --claudeai` under the account's config dir. A
     failure line is the CLI's own verdict; a success line is not: `claude
-    auth status` is (R17)."""
+    auth status` is."""
     if account.kind != "claude-login":
         raise AccountsError("login is for claude-login accounts; %s is %s"
                             % (account.name, account.kind))
@@ -927,7 +928,7 @@ def _write_secret(path, value):
 def token_flow(account, root, *, relay, await_code, spawn=None, timeout=CAPTURE_TTL_S):
     """`claude setup-token` in a throwaway config dir; the token is read
     from its screen, VERIFIED with `claude auth status` (logged in, method
-    oauth_token: R16), then saved 0600. The result never carries it."""
+    oauth_token), then saved 0600. The result never carries it."""
     import shutil
     import tempfile
     if account.kind != "claude-token":
@@ -957,7 +958,7 @@ def token_flow(account, root, *, relay, await_code, spawn=None, timeout=CAPTURE_
     return {"ok": True, "saved": str(account.secret_file), "status": st}
 
 
-# ------------------------------------------------------------ opencode login (phase 9 R12')
+# ------------------------------------------------------------ opencode login
 #
 # An API key never travels through chat: it comes from stdin (hidden on a
 # terminal) or a strict key file and is written straight into the account's
@@ -976,7 +977,7 @@ OC_DONE_RX = r"(Login successful)|(Failed to authorize[^\n]*|Error:[^\n]*)"
 _OC_DECOR = re.compile(r"^[\s|\u2502\u250c\u2514\u25cf\u2022\u25c6\u25c7\u25d2\u25d0\u25d3\u25d1]+")
 # What the login child may inherit: everything else (OPENCODE_CONFIG_CONTENT,
 # a provider's *_API_KEY, the Claude variables) stays out, so the account's
-# data dir is its only source (Task 1 finding 1).
+# data dir is its only source.
 OPENCODE_PASS_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "SSL_CERT_FILE",
                      "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "HTTPS_PROXY", "HTTP_PROXY",
                      "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
@@ -1001,7 +1002,7 @@ def opencode_bin():
 
 
 def check_opencode_login(account, provider, method=None):
-    """R12' refusals, before any key is read or any process runs: a Claude
+    """The refusals, before any key is read or any process runs: a Claude
     subscription (Anthropic, or any method named Claude, by OAuth),
     a bridge marker, a provider the account does not name (opencode's own
     hosted service, Zen, only when the account names `opencode`), and every
@@ -1158,7 +1159,7 @@ def opencode_login_flow(account, root, *, provider, method, relay, spawn=None, b
     return {"ok": True, "cli_said": done.group(1), "status": _opencode_status(account)}
 
 
-# ------------------------------------------------------------ the one-shot code capture (R18)
+# ------------------------------------------------------------ the one-shot code capture
 
 def capture_path(root, name):
     """OUTSIDE every cousin home: no home's backup, git or chat history can
@@ -1198,7 +1199,7 @@ def read_capture(root, name):
     except (OSError, ValueError):
         return None
     # Valid JSON that is not an object (a list, a number, ...) is not a
-    # capture: skip it like unparsable data (tracker #84), not an
+    # capture: skip it like unparsable data, not an
     # AttributeError on the .get() every caller does next.
     return data if isinstance(data, dict) else None
 
@@ -1337,7 +1338,7 @@ def _span(seconds):
 
 def relay_notice(home, *, operator, account_name, url, timeout=CAPTURE_TTL_S):
     """One framework-authored row to the operator on this cousin's chat
-    surface (R18); Telegram's outbound pump relays it like any cousin row."""
+    surface; Telegram's outbound pump relays it like any cousin row."""
     slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
     text = ("Login for account %s: open %s , sign in, and reply HERE with the whole code the"
             " page shows. It looks like `code#state`: paste all of it, the part after # included."
@@ -1350,7 +1351,7 @@ def relay_notice(home, *, operator, account_name, url, timeout=CAPTURE_TTL_S):
 
 def relay_url_notice(home, *, operator, account_name, provider, url, instructions,
                      timeout=CAPTURE_TTL_S):
-    """The opencode OAuth notice (R12'): the URL and opencode's own
+    """The opencode OAuth notice: the URL and opencode's own
     instruction line. Nothing is taken back from the chat: no capture is
     armed, the login finishes on the provider's side."""
     slug = tomllib.loads((Path(home) / "cousin.toml").read_text())["cousin"]["slug"]
@@ -1630,7 +1631,7 @@ def account_main(argv=None):
         # every command a cousin runs, so the model's own Bash stops here,
         # and `env -u` is caught by the ancestor check. A determined
         # process can still get past both; the account files stay
-        # readable by the same Unix user until the phase 6 container.
+        # readable by the same Unix user outside the framework's container.
         if os.environ.get("COUSIN_HOME") or os.environ.get("COUSIN_SLUG"):
             print("cousin-account: operator-run only; a cousin never obtains credentials",
                   file=sys.stderr)
@@ -1642,11 +1643,11 @@ def account_main(argv=None):
                   file=sys.stderr)
             return 2
         # A usability check, not a safeguard: anything can fake a terminal.
-        # An opencode API key may come on a pipe (R12'): that path checks
+        # An opencode API key may come on a pipe: that path checks
         # its own flags once the account is known.
         key_path = args.cmd == "login" and (args.provider or args.key_file) and not args.method
         if not key_path and not sys.stdin.isatty():
-            print("cousin-account: %s wants a terminal: run it from a shell on the host (R20)"
+            print("cousin-account: %s wants a terminal: run it from a shell on the host"
                   % args.cmd, file=sys.stderr)
             return 2
         if args.timeout <= 0:

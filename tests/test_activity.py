@@ -1,8 +1,7 @@
 """The activity log and the job logs the harness hooks write: every
 tool call a cousin or its subagents make lands as one readable line,
 and every subagent and background shell job carries a readable log,
-with nothing asked of the cousin (operator, 2026-09-18: "transparent
-for the cousin ... they just do")."""
+with nothing asked of the cousin: transparent to it, it just works."""
 import io
 import json
 import os

@@ -1,4 +1,4 @@
-"""Console routes for WP-F, system and install config: the supervisor, schedules, console users, backup and the install config editors.
+"""Console routes for system and install config: the supervisor, schedules, console users, backup and the install config editors.
 
 A package seam (app.py PACKAGE_ROUTE_MODULES): this module is the
 package's own. Its routes are registered in register() below with

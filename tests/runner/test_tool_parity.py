@@ -36,7 +36,7 @@ class TestParity(HermeticCase):
             if name == "send":
                 continue
             if name not in reg["tools"]:
-                continue  # HANDLERS may carry a tool this registry does not enable (P11)
+                continue  # HANDLERS may carry a tool this registry does not enable
             commands = set(reg["tools"][name]["commands"])
             if reg["tools"][name]["kind"] == "job":
                 commands |= {"status", "result"}

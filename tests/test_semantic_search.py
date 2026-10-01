@@ -112,10 +112,9 @@ class TestSemanticLeg(SemanticCase):
         self.assertIn("sky.md", hits[0]["path"])
 
     def test_semantic_leg_runs_without_framework_root_in_the_env(self):
-        # Canary (install re-test 2026-09-18): a new shell inside the
-        # checkout had COUSIN_HOME but no FRAMEWORK_ROOT, and search went
-        # keyword-only with no notice although config/embedding.toml
-        # existed. The home lives at <root>/cousins/<slug>, so the root
+        # A new shell inside the checkout can have COUSIN_HOME but no
+        # FRAMEWORK_ROOT; search must not go keyword-only with no notice
+        # when config/embedding.toml exists. The home lives at <root>/cousins/<slug>, so the root
         # is derived from it when the env does not name one.
         self._configure_embedding(self._serve_fake())
         env = {k: v for k, v in os.environ.items() if k != "FRAMEWORK_ROOT"}
@@ -209,9 +208,9 @@ class TestSemanticLeg(SemanticCase):
 
 
 class TestFusionDepth(unittest.TestCase):
-    """Tracker #83: search() asked each leg for exactly `top` candidates,
-    so a document ranked just past the cut in BOTH legs could never
-    reach _fuse, although a hit present (even weakly) in both legs
+    """search() must not ask each leg for exactly `top` candidates: a
+    document ranked just past the cut in BOTH legs would never reach
+    _fuse, although a hit present (even weakly) in both legs
     beats a single strong leg once RRF sums the two.
 
     Fixture (20 files, one chunk each):
@@ -296,7 +295,7 @@ class TestFusionDepth(unittest.TestCase):
         names = [pathlib.Path(h["path"]).name for h in hits]
         self.assertIn("buried.md", names,
                        "a doc ranked 6th in BOTH legs must still fuse"
-                       " into a top=5 result (tracker #83)")
+                       " into a top=5 result")
 
     def test_fused_rank_is_stable_across_top(self):
         hits5, _ = search("needle", top=5)

@@ -137,7 +137,7 @@ def _head_payload(home):
 
 
 class TestHeadEventAttribution(HermeticCase):
-    """Tracker #112: the head `runner` event says commit_attribution, so
+    """The head `runner` event says commit_attribution, so
     it is observable without reading cousin.toml or config/harness.toml."""
 
     def test_true_by_default(self):
@@ -154,7 +154,7 @@ class TestHeadEventAttribution(HermeticCase):
 
 
 class TestRemovedKeysAtStart(HermeticCase):
-    """R7: a key 2.0.0 removed is named at start, once on stderr and one
+    """A key 2.0.0 removed is named at start, once on stderr and one
     `system` `config` event per finding, and the cousin runs."""
 
     def test_the_runner_names_them_at_start(self):
@@ -337,7 +337,7 @@ class TestAuthLane(HermeticCase):
         self.assertEqual(seen["environ"], {k: None for k in AUTH})
 
     def test_agent_model_effort_and_account_reach_the_options(self):
-        """#96: what cousin-migrate carries from [runtime] into [agent]
+        """What cousin-migrate carries from [runtime] into [agent]
         reaches the CLI: the model, the effort (ClaudeAgentOptions.effort,
         the CLI's --effort) and the key account's key."""
         home = temp_home(self, runner="sdk")
@@ -367,7 +367,7 @@ class TestAuthLane(HermeticCase):
         self.assertIn("effort", err)
 
     def test_a_non_boolean_cousin_commit_attribution_is_exit_2_at_start(self):
-        # tracker #112, Critical 2: bool("false") is True, so this must
+        # bool("false") is True, so this must
         # be refused, not silently accepted, at the same runner-start
         # point as an effort the CLI would refuse.
         home = temp_home(self, runner="sdk")
@@ -645,7 +645,7 @@ class TestIsRunning(HermeticCase):
         self.assertFalse(runner_main.is_running(home))
 
     def test_is_running_is_true_while_a_runner_holds_the_lock(self):
-        # #79: the holder is another PROCESS taking the lock the way a
+        # the holder is another PROCESS taking the lock the way a
         # runner does (hold_lock), so the probe sees a real runner's lock
         home = temp_home(self, runner="fake")
         holder = ("import sys, time\n"
@@ -674,7 +674,7 @@ class TestIsRunning(HermeticCase):
 
 
 class TestProbeDoesNotContend(HermeticCase):
-    """#79: is_running must not take the lock a starting runner needs, so a
+    """is_running must not take the lock a starting runner needs, so a
     start racing any number of probes is never refused. LOCK_TAKE_S is
     zeroed so the retry window cannot hide a probe holding the lock."""
 
@@ -741,7 +741,7 @@ class TestHoldLock(HermeticCase):
 
 
 class TestHoldLockRetry(HermeticCase):
-    """#79 (review N4): an older version's is_running probed by taking the
+    """An older version's is_running probed by taking the
     flock for microseconds, and a long-lived process may still run one;
     hold_lock retries LOCK_EX|LOCK_NB for LOCK_TAKE_S before LockHeld, so
     a runner starting inside such a probe is not refused."""
@@ -790,7 +790,7 @@ class TestHoldLockRetry(HermeticCase):
 
 class TestStopTimeout(HermeticCase):
     def test_serve_stops_the_runner_with_the_one_constant(self):
-        # R5': the supervisor's runner budget is STOP_TIMEOUT_S + 5, so _serve
+        # the supervisor's runner budget is STOP_TIMEOUT_S + 5, so _serve
         # must give the turn exactly STOP_TIMEOUT_S, read at stop time
         self.assertEqual(runner_main.STOP_TIMEOUT_S, 30.0)
         home = temp_home(self, runner="fake")
@@ -811,7 +811,7 @@ class TestStopTimeout(HermeticCase):
 
 class TestSignalBeginsTheStop(HermeticCase):
     def test_sigterm_tells_the_runner_to_claim_nothing_before_stop_runs(self):
-        """Finding 3: between the signal and runner.stop() the loop polls
+        """Between the signal and runner.stop() the loop polls
         (up to 0.2 s); the handler itself tells the runner a stop began."""
         home = temp_home(self, runner="fake")
         runner = runner_main.runner_for(home)
@@ -839,7 +839,7 @@ class TestSignalBeginsTheStop(HermeticCase):
 
 class TestSignalAfterTheStop(HermeticCase):
     def test_a_signal_during_the_finally_does_nothing_more(self):
-        """Proof-fix review M1: _serve's finally sets its stop first, and a
+        """_serve's finally sets its stop first, and a
         signal that lands after it (during runner.stop()) returns at once."""
         home = temp_home(self, runner="fake")
         runner = runner_main.runner_for(home)
@@ -864,7 +864,7 @@ class TestSignalAfterTheStop(HermeticCase):
 
 class TestWakeSendNeverRaises(HermeticCase):
     def test_a_socket_that_cannot_be_made_is_a_false_not_a_raise(self):
-        """M1: poke runs from a signal handler (begin_stop); making the
+        """Poke runs from a signal handler (begin_stop); making the
         socket is inside the try."""
         from cousin_lib.runner import wake
         home = temp_home(self, runner="fake")
@@ -874,7 +874,7 @@ class TestWakeSendNeverRaises(HermeticCase):
 
 class TestRestartMark(HermeticCase):
     def test_a_claim_a_dead_runner_left_marks_the_restart(self):
-        """#98: a runner killed without its teardown left its row claimed;
+        """A runner killed without its teardown left its row claimed;
         the next start's sweep requeues it, and that turn was cut as much as
         a stop's: the restart mark says so to the resumed session."""
         from cousin_lib.delivery import Item
@@ -893,7 +893,7 @@ class TestRestartMark(HermeticCase):
         self.assertIsNone(restart_note.read(home))
 
     def test_the_sweep_keeps_the_hold_a_requested_stop_marked(self):
-        """#98 review minor: a requested stop marked the cut turn with its
+        """A requested stop marked the cut turn with its
         hold; the next start's sweep finds the same turn's row claimed and
         must not overwrite the mark into "not the operator"."""
         from cousin_lib.delivery import Item
@@ -977,7 +977,7 @@ class TestCheckAuthAndLogin(HermeticCase):
         val.assert_not_called()
 
     def test_a_missing_key_file_is_a_login_to_do_not_a_config_error(self):
-        """Replaces test_a_missing_key_file_under_a_real_root_is_a_config_error."""
+        """A missing key file is a login to do (exit 4), not a config error."""
         import json
         from cousin_lib import accounts
         home = temp_home(self, runner="sdk")
@@ -987,7 +987,7 @@ class TestCheckAuthAndLogin(HermeticCase):
         with mock.patch.object(runner_main, "ERRORED_GIVE_UP_S", 0.2), \
                 mock.patch.object(accounts, "status", return_value={"loggedIn": False}):
             rc, err = _run(["--home", str(home), "--once"])
-        self.assertEqual(rc, 4, err)                                 # R15: never 3
+        self.assertEqual(rc, 4, err)                                 # a login to do, never 3
         data = json.loads((home / "data" / "login-required.json").read_text())
         self.assertIn("keys/token", data["action"])
 

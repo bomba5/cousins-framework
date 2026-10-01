@@ -1,4 +1,4 @@
-"""A runner cousin's fleet row (master plan phase 5 task 4): liveness from
+"""A runner cousin's fleet row: liveness from
 the runner's lock, its state and its declared-unsupported items from its
 own stream (runner/status.py), the last reply from chat.db; never a chat
 server call, never tmux."""
@@ -65,7 +65,7 @@ class TestRunnerRow(ConsoleCase):
 
     def test_the_fleet_read_creates_no_chat_db(self):
         """A GET has no side effect: a runner cousin with no chat yet keeps
-        having none (review M10)."""
+        having none."""
         home = self.cousin("wren", operator="Priya", extra=RUNNER)
         self.serve()
         self.assertEqual(self._row()["lastMsgTs"], 0)

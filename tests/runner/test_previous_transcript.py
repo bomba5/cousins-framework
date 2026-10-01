@@ -1,4 +1,4 @@
-"""#103: a cousin moved from the tmux lane gets its previous transcript's
+"""A cousin moved from the tmux lane gets its previous transcript's
 path in the first message of its first fresh session, once."""
 import json
 import os

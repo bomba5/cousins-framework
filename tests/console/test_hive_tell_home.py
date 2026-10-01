@@ -1,4 +1,4 @@
-"""A hive node's [tell-home: ...] through the queen (phase 10a, one inbound
+"""A hive node's [tell-home: ...] through the queen (one inbound
 surface): `POST /hive/tell-home` authenticates the node's bearer token,
 takes the sender from the token (never the body), and delivers to the
 install's home cousin only (config/hive.toml `home_cousin`), through
@@ -47,7 +47,7 @@ class TestTellHome(HiveConsoleCase):
         self.assertEqual(_messages(self.other), [])
 
     def test_a_node_cannot_rename_itself_at_checkin(self):
-        """Ruling P10a-1 (review C1): the node checks in as the operator, as
+        """The node checks in as the operator, as
         a local cousin, or with a newline that would forge a second line;
         its message still lands under the name the operator minted."""
         self.enable(home_cousin="wren")
@@ -134,7 +134,7 @@ class TestTheNode(unittest.TestCase):
         self.assertLess(abs(kw["body"]["sent_at"] - time.time()), 5)
 
     def test_a_dropped_tell_home_is_logged_and_never_retried(self):
-        """Review round 2 on M4: the node sends a tell-home once; when the
+        """The node sends a tell-home once; when the
         queen does not take it, or no home is configured, the log says so."""
         node = self._node()
         for env in ({"COUSIN_SLUG": "kestrel", "HIVE_TOKEN": "hive_x",

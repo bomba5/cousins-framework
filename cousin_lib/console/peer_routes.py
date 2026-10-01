@@ -1,4 +1,4 @@
-"""The external peers' door (phase 10a, one inbound surface): another
+"""The external peers' door (one inbound surface): another
 install's cousin sends to one of ours with `POST /peer/send`.
 
 A third authentication world beside the two in console/hive.py:
@@ -6,7 +6,7 @@ A third authentication world beside the two in console/hive.py:
 - /hive/* is the hive nodes' (their bearer token, no guard);
 - /peer/* is the external peers': behind the network guard (they sit on
   the ranges config/net-allowlist.json allows), and a signature per
-  message (ruling P10a-2): `Authorization: HMAC <sender>:<hex>`, where
+  message: `Authorization: HMAC <sender>:<hex>`, where
   <sender> names an entry of config/external-peers.toml and <hex> is
   chat.peer_signature over (sender, to, sent_at, msg_id, the message's
   sha256) keyed with that entry's `inbound_token_file` (a 0600 file: the
@@ -18,15 +18,15 @@ No route here reads a session cookie or a bearer token, and no /api/ or
 its own world.
 
 Until the signature verifies, every refusal is the same `401
-unauthorized` (review round 2, N2): an unknown sender, a wrong signature,
+unauthorized`: an unknown sender, a wrong signature,
 a malformed body, an unusable config/external-peers.toml and a secret
 file that is unreadable or readable by others look alike, so a caller
 cannot tell which peers are configured. An authenticated entry is usable
-only when it names a `reach` (ruling P10a-3: the local cousins it may
-write to; there is no default-all) and its slug is not a local cousin's
-(review I1); an unusable one is answered with a generic 503. Either way
+only when it names a `reach` (the local cousins it may
+write to; there is no default-all) and its slug is not a local cousin's;
+an unusable one is answered with a generic 503. Either way
 the detail is logged here, and nothing about peers, paths or file modes
-goes to the wire (review I4). The message itself goes through peer_inbound.accept (the
+goes to the wire. The message itself goes through peer_inbound.accept (the
 window, the dedupe, the rate, the size, a plain name that is never the
 operator's or a cousin's, and a 404 for anything outside the reach,
 identical to a cousin that does not exist).

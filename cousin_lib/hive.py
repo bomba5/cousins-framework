@@ -327,8 +327,7 @@ class HiveStore:
     def minted_name(self, slug):
         """The name the operator gave `slug`'s live token when it was minted
         (the build dialog, cousin-spawn-node), or None. Never the name a
-        node reports at checkin: that one is the node's own claim (phase
-        10a, ruling P10a-1)."""
+        node reports at checkin: that one is the node's own claim."""
         with self._lock:
             row = self.conn.execute(
                 "SELECT name FROM tokens WHERE slug=? AND COALESCE(revoked, 0)=0"

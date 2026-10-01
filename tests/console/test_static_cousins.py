@@ -82,7 +82,7 @@ class SpawnDialogLane(unittest.TestCase):
             self.assertNotIn(kind, self.src, kind)
 
     def test_the_default_lane_is_preselected_and_sent(self):
-        # R4: the server's default_runner (COUSIN_DEFAULT_RUNNER, else sdk)
+        # the server's default_runner (COUSIN_DEFAULT_RUNNER, else sdk)
         # is preselected and sent, never a literal; nothing is sent before
         # the options have named it; the legacy lane is not offered
         body = self.src[self.src.index("const body"):]
@@ -353,7 +353,7 @@ class InspectorIdentityEditors(unittest.TestCase):
         self.assertIn("setErr(", self.field)
 
     def test_model_and_effort_name_the_table_the_lane_writes(self):
-        """#100 review: a runner cousin's model and effort go to [agent];
+        """A runner cousin's model and effort go to [agent];
         the labels said [runtime] for every cousin."""
         self.assertNotIn('"[runtime] model"', self.cousins)
         self.assertNotIn('"[runtime] effort"', self.cousins)
@@ -417,7 +417,7 @@ class TelegramPanel(unittest.TestCase):
 
 
 class CardRemovedKeys(unittest.TestCase):
-    """R7: the card says when the cousin's cousin.toml still carries keys
+    """The card says when the cousin's cousin.toml still carries keys
     2.0.0 removed, names them, and points at `cousin-migrate tidy`."""
 
     def setUp(self):

@@ -1,7 +1,8 @@
 """One clock per root: `cousin-loops run` holds <root>/run/loops.lock for
-its life, and a second daemon on the same root exits 5, busy (phase 6
-task 1, review C2; round 2 N1: busy, not configuration, so a supervisor
-waits for the holder instead of marking its loops child `failing`). Two daemons would each fire every due one-shot, heartbeat,
+its life, and a second daemon on the same root exits 5, busy (busy,
+not configuration, so a supervisor waits for the holder instead of
+marking its loops child `failing`). Two daemons would each fire every
+due one-shot, heartbeat,
 [[loops]] entry and daily flip. Every process is killed in cleanup and
 every wait has a deadline."""
 import fcntl
@@ -85,7 +86,7 @@ class TestTheForkHandlerClosesOnlyItsOwnLock(HermeticCase):
     """A handler outlives its lock (one per call, never unregistered).
     Once the lock file is gone its inode can be recycled for a new file
     that a reused fd number then names: device and inode match, and the
-    stale handler closed a descriptor that was not its own (#92)."""
+    stale handler closed a descriptor that was not its own."""
 
     def setUp(self):
         super().setUp()
@@ -129,8 +130,8 @@ class TestLoopsLockSurvivesFork(HermeticCase):
     daemon's own process to run a worker loop's command; flock locks are
     shared across fork, so the job-runner child inherits the daemon's
     copy of run/loops.lock and, without a fix, holds it open until the
-    job ends - the daemon can die and the clock stays held (phase 6 fix
-    wave item 1). hold_loops_lock must close its own fd in every forked
+    job ends - the daemon can die and the clock stays held.
+    hold_loops_lock must close its own fd in every forked
     child from then on, tolerant of a fd already closed."""
 
     def setUp(self):

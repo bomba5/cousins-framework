@@ -2,11 +2,11 @@
 
 The harness keeps one log per session per MCP server, JSON lines
 carrying a timestamp, the session id and either a debug line or an
-error, including the failing server's stderr verbatim. Nothing
-surfaced it to the cousin: on 2026-09-20 four cousins booted with no
-MCP tools at all, saw only `CONNECTION_CLOSED` in the boot packet, and
-fell back to the CLIs. The reason (`registry: meeting: no commands`,
-377 ms in) sat in a cache directory for sixteen hours.
+error, including the failing server's stderr verbatim. Unless it is
+surfaced, a cousin can boot with no MCP tools at all, see only
+`CONNECTION_CLOSED` in the boot packet, and fall back to the CLIs, while
+the reason (say `registry: meeting: no commands`, 377 ms in) sits in a
+cache directory for hours.
 
 A degraded surface that still works is the easiest failure to ignore,
 so the boot packet now says when the last recorded connection failed
@@ -59,8 +59,8 @@ def _verdict(rows):
         elif "Connection failed" in text and state == "unrecorded":
             state, detail = "failed", text
         elif row.get("error") and state == "unrecorded":
-            # A failure in wording this parser has no literal for. On
-            # 2026-09-21, 80 of 5908 harness logs held one (the
+            # A failure in wording this parser has no literal for. In
+            # one measured set, 80 of 5908 harness logs held one (the
             # claude.ai proxy transport), and every one was reported
             # as "no reason recorded" with the reason in the file.
             state, detail = "failed", text
@@ -71,10 +71,10 @@ def _outcome(rows):
     """The last connection attempt in one file, as a dict, or None.
 
     Three states, because two is what made this lie: an attempt whose
-    result nobody recorded is `unrecorded`, not a failure. Measured
-    2026-09-21 over 5908 harness logs, 93 were reported FAILED with no
-    reason; 80 held the reason in wording with no literal here and 13
-    held no outcome at all, one of them since April.
+    result nobody recorded is `unrecorded`, not a failure. Measured over
+    5908 real harness logs, 93 were reported FAILED with no reason; 80
+    held the reason in wording with no literal here and 13 held no
+    outcome at all, one of them for months.
 
     The anchor is deliberately the LAST "Starting connection" in the
     file. A session reconnects, so answering from an earlier attempt

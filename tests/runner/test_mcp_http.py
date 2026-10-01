@@ -1,4 +1,4 @@
-"""The runner's tools as a remote MCP server on loopback (phase 9 R7).
+"""The runner's tools as a remote MCP server on loopback.
 
 opencode reaches the framework's tools over MCP streamable HTTP; every
 call must land in tools.call with the runner's own ToolContext (the live
@@ -218,7 +218,7 @@ class TestCalls(McpCase):
         self.assertEqual(self.chat_rows(), [("priya", "Wren", "hello Priya")])
 
     def test_a_call_the_policy_denies_never_reaches_the_tool(self):
-        """Review minor: the plugin's veto runs inside opencode, but the MCP
+        """The plugin's veto runs inside opencode, but the MCP
         server is reachable over loopback with its bearer token, so it
         applies policy.toml too (the SDK lane's names), as defence in depth."""
         from cousin_lib.runner.policy import Policy

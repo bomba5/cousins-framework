@@ -1,4 +1,4 @@
-"""The configuration 2.0.0 removed with the legacy tmux lane (R7): one
+"""The configuration 2.0.0 removed with the legacy tmux lane: one
 table, cousin_lib/removed_keys, named where an operator looks (the
 runner's start, `cousin-supervisor status`, the console's row,
 `cousin-migrate plan|check`) and never fatal; `cousin-migrate tidy`

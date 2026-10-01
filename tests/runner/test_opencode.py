@@ -1,7 +1,6 @@
-"""OpencodeRunner (phase 9 Task 5) against the fake `opencode serve` (R15):
-the rendered config (R5, R6, Review Focus 2), the server's environment
-(an allowlist), the bridge guard (R13), the MCP check, and turns (R2',
-R14'): events, fold, a peer held, interrupt with requeue, the doubled
+"""OpencodeRunner against the fake `opencode serve`: the rendered config,
+the server's environment (an allowlist), the bridge guard, the MCP check,
+and turns: events, fold, a peer held, interrupt with requeue, the doubled
 idle, auth, a reconnect's gap, stop. Never the opencode binary."""
 import http.client
 import json
@@ -158,7 +157,7 @@ def _op(body, who="priya"):
 
 def _result_append_fails_once(r):
     """The runner's first `result` append raises (a full disk, say): the
-    rows it names must still close as its branch closes them (#87 review)."""
+    rows it names must still close as its branch closes them."""
     real, said = r.stream.append, []
 
     def append(kind, payload):
@@ -228,7 +227,7 @@ class OpencodeCase(HermeticCase):
 
 class TestConfig(OpencodeCase):
     def test_the_rendered_config_disables_opencodes_own_provider_and_names_the_model(self):
-        """Review Focus 2: opencode's hosted provider off, the model named,
+        """Opencode's hosted provider off, the model named,
         the runner's MCP server the only one, on the rendered file only."""
         r = self.started(self.runner(home=self.home(extra='small_model = "local/m1-mini"\n')))
         path = Path(self.factory.calls[0]["config_path"])
@@ -267,7 +266,7 @@ class TestConfig(OpencodeCase):
         self.assertNotIn("provider", config)
 
     def test_an_account_that_names_opencode_keeps_its_hosted_service_on(self):
-        """#127: the free models are opencode/<model> on opencode's own
+        """The free models are opencode/<model> on opencode's own
         service, which is on only when the account names it."""
         self.home()
         config = opencode.render_config(
@@ -347,7 +346,7 @@ class TestEnvironment(OpencodeCase):
         for name in self.PLANTED:
             if name not in ("HOME", "XDG_DATA_HOME"):
                 self.assertNotIn(name, env)
-        self.assertNotIn("OPENCODE_DISABLE_MODELS_FETCH", env)       # R21: allowed by default
+        self.assertNotIn("OPENCODE_DISABLE_MODELS_FETCH", env)       # allowed by default
         # what OpencodeServer then gives the child: the switches, nothing planted
         srv = OpencodeServer("opencode", **{k: v for k, v in self.factory.calls[0].items()
                                             if k != "argv0"})
@@ -407,7 +406,7 @@ class TestGuards(OpencodeCase):
         self.assertIn("environment variable PATH", str(err.exception))
 
     def test_a_claude_model_is_refused_on_the_opencode_lane(self):
-        """Ruling P9-1: the models cousin.toml names, by id."""
+        """The models cousin.toml names, by id."""
         for extra, needle in (("", "local/claude-3-5-haiku"),
                               ('small_model = "local/Anthropic-small"\n', "Anthropic-small")):
             with self.subTest(needle=needle):
@@ -437,7 +436,7 @@ class TestGuards(OpencodeCase):
                 (data / ".opencode", "dir"), (home / ".opencode", "dir")]
 
     def test_a_config_source_opencode_would_merge_refuses_the_runner(self):
-        """Review Critical 1: opencode merges its global config file and
+        """Opencode merges its global config file and
         loads its plugin and tool dirs over the one the runner renders, so
         any of them refuses the runner (exit 2), named; opencode's own and
         the seed's files in its config dir do not."""
@@ -458,8 +457,8 @@ class TestGuards(OpencodeCase):
                 shutil.rmtree(path) if kind == "dir" else path.unlink()
 
     def test_the_config_dirs_own_files_are_the_measured_ones_and_the_lock_is_the_seeds(self):
-        """Review round 2, minor 4: names alone let a package.json (or a lock
-        naming other packages) sit in opencode's config dir. The allowlist is
+        """Names alone would let a package.json (or a lock naming other
+        packages) sit in opencode's config dir. The allowlist is
         what a clean start measured (.gitignore, and the seed's node_modules
         and package-lock.json), and the lock's root may name only the plugin
         library the seed writes."""
@@ -499,7 +498,7 @@ class TestGuards(OpencodeCase):
         self.assertEqual(self.factory.calls, [])            # no server was started
 
     def test_the_effective_config_is_checked_not_only_the_rendered_one(self):
-        """Review Critical 1: after the server starts, GET /config (what
+        """After the server starts, GET /config (what
         opencode runs with, every source merged) must hold exactly the
         policy plugin, exactly the cousin MCP server, the account's
         providers only, the named models, and no bridge marker."""
@@ -542,8 +541,8 @@ class TestGuards(OpencodeCase):
 
 
 class TestEveryTurnIsGuarded(OpencodeCase):
-    """Review round 2, Important 1 (and 7b): the start's checks bind the
-    config opencode loads at start, but the model can change it later
+    """The start's checks bind the config opencode loads at start, but
+    the model can change it later
     (PATCH /global/config reloads plugins and providers live, measured on
     1.18.31, writing <data_dir>/config/opencode/opencode.jsonc), and a key
     can change without a 401. So every turn starts with the start's checks
@@ -590,9 +589,9 @@ class TestEveryTurnIsGuarded(OpencodeCase):
         self.assert_refused_before_the_turn(r, "wellknown")
 
     def test_an_unreadable_config_dir_requeues_and_gives_up_never_a_stuck_claim(self):
-        """Review round 3, minor 4: chmod 000 on opencode's config dir made
-        the check raise PermissionError out of the guard, the worker died
-        and the claimed row stayed claimed."""
+        """chmod 000 on opencode's config dir must not raise PermissionError
+        out of the guard: the worker would die and the claimed row would
+        stay claimed."""
         r = self.first_turn()
         g = Path(r.account.data_dir) / "config" / "opencode"
         g.mkdir(parents=True, exist_ok=True)
@@ -603,7 +602,7 @@ class TestEveryTurnIsGuarded(OpencodeCase):
         self.assertTrue(errors and errors[-1].get("fatal"), errors)
 
     def test_a_transient_config_read_is_retried_once(self):
-        """Review round 3, minor 5: one timeout of GET /config (or one failed
+        """One timeout of GET /config (or one failed
         read of auth.json) is retried before the runner gives up."""
         r = self.first_turn()
         real, fails = r._client.request, []
@@ -646,7 +645,7 @@ class TestEveryTurnIsGuarded(OpencodeCase):
 
 
 class TestLeftoverServer(OpencodeCase):
-    """Review Important 2: a server an earlier runner left behind (killed
+    """A server an earlier runner left behind (killed
     before its teardown) is killed at the next start, found by the pidfile
     in the account's data dir; the runner writes that file for its own
     server and removes it at its stop."""
@@ -690,7 +689,7 @@ class TestLeftoverServer(OpencodeCase):
 
 
 class TestOneCousinPerAccount(OpencodeCase):
-    """Review Important 3: the per-start files (the rendered config with the
+    """The per-start files (the rendered config with the
     MCP token, the policy file and its acknowledgement) and opencode's own
     store live in the account's data dir, so two cousins on one opencode
     account overwrite each other. The account is held for the runner's life;
@@ -748,7 +747,7 @@ class TestTurns(OpencodeCase):
         self.assertEqual(echo["echo_of"], a.inbox_id)
 
     def test_the_prompt_body_is_exactly_parts_system_and_model(self):
-        """R8, R22: the composed prompt (opencode's tool names) as `system`,
+        """The composed prompt (opencode's tool names) as `system`,
         the named model, the envelope as the only part."""
         r = self.started(self.runner())
         a = r.enqueue(_op("hi there"))
@@ -772,13 +771,13 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
         time.sleep(0.3)
         results = self.payloads(r, "result")
-        self.assertEqual(len(results), 1, "one idle closes both (R14')")
+        self.assertEqual(len(results), 1, "one idle closes both")
         self.assertEqual(sorted(results[0]["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
         self.assertEqual((self.outcome(r, a), self.outcome(r, b)), ("delivered", "delivered"))
         self.assertEqual(r.turn.active, False)
 
     def test_a_peer_message_mid_turn_is_folded_into_the_run(self):
-        """#118: a peer folds as an operator does, its thread in the header."""
+        """A peer folds as an operator does, its thread in the header."""
         r = self.started(self.runner([[("SLOW", 1.0), ("text", "first")], [("text", "second")]]))
         a = r.enqueue(_op("first"))
         self.assertTrue(_wait(lambda: r.state() == "running"))
@@ -789,7 +788,7 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: self.settled(r, peer) is not None, 8))
         time.sleep(0.3)
         results = self.payloads(r, "result")
-        self.assertEqual(len(results), 1, "one idle closes both (R14')")
+        self.assertEqual(len(results), 1, "one idle closes both")
         self.assertEqual(sorted(results[0]["inbox_ids"]), sorted([a.inbox_id, peer.inbox_id]))
         self.assertEqual((self.outcome(r, a), self.outcome(r, peer)), ("delivered", "delivered"))
 
@@ -808,7 +807,7 @@ class TestTurns(OpencodeCase):
                          [[a.inbox_id]] + [[w.inbox_id] for w in waiting])
 
     def test_an_interrupt_aborts_and_requeues_what_the_abort_dropped(self):
-        """R14': an abort drops the prompt queued behind the running one;
+        """An abort drops the prompt queued behind the running one;
         the runner sends it again in a turn of its own."""
         r = self.started(self.runner([[("HANG",)], [("text", "queued answer")]]))
         a = r.enqueue(_op("hang"))
@@ -845,7 +844,7 @@ class TestTurns(OpencodeCase):
         self.assertFalse(r.interrupt())
 
     def test_the_doubled_idle_after_a_failure_is_ignored(self):
-        """A failure emits error, idle, idle, the message, idle, idle (R2'):
+        """A failure emits error, idle, idle, the message, idle, idle:
         one result for the failed turn, and the next turn is not closed by
         the leftover idles."""
         r = self.started(self.runner([[("FAIL", "UnknownError", "the provider broke")],
@@ -944,7 +943,7 @@ class TestTurns(OpencodeCase):
         self.assertTrue(_wait(lambda: any(p.get("restored") for p in self.payloads(r, "auth"))))
 
     def test_a_credential_change_is_checked_before_the_login_block_lifts(self):
-        """Review Important 7: opencode reads auth.json live, so the retry that
+        """Opencode reads auth.json live, so the retry that
         a credential change starts must not run on a file the start would
         have refused (here a `wellknown` entry): the check is made before the
         block lifts, and a refusal is fatal (the runner gives up, exit 3; its
@@ -1109,7 +1108,7 @@ class TestSession(OpencodeCase):
         self.assertEqual([q for q in shared.fake.requests if q["path"] == "/session"
                           and q["method"] == "POST"].__len__(), 1)
         self.assertEqual(self.prompts(), [], "a resumed session gets no digest")
-        # review minor: the probe is GET /session/{id}, never the whole history
+        # the probe is GET /session/{id}, never the whole history
         probes = [q["path"] for q in shared.fake.requests if q["method"] == "GET"
                   and q["path"].startswith("/session/%s" % sid)]
         self.assertEqual(probes, ["/session/%s" % sid])
@@ -1151,7 +1150,7 @@ if __name__ == "__main__":
 
 class TestResultBeforeRows(OpencodeCase):
     def test_a_refused_prompt_is_failed_even_when_its_result_cannot_be_written(self):
-        """#87 review: _unsent appends the result, then closes the row; an
+        """_unsent appends the result, then closes the row; an
         append that raises still leaves the row closed and the turn ended."""
         r = self.runner()
         rid = r.inbox.put(_op("refused"))

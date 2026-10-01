@@ -1,5 +1,5 @@
 """The one-time import of the agent CLI's own memory (spec, "One memory
-system"; master plan phase 7 task 5).
+system").
 
 The harness keeps an auto-memory directory per cousin
 (config/harness.toml `auto_memory_dir`). The SDK lane switches it off
@@ -23,9 +23,9 @@ memory_search skips a harness file whose imported copy is current, so
 one memory is one hit, and indexes each copy as original_text(), the
 source's exact text, so the copy ranks where its original did.
 
-verify() is the check (master task 5's recall regression test), before
-against after. The queries are the cousin's own (memory/.recall-log.jsonl,
-written by reinforce.record on every search). Just before apply() writes,
+verify() is the recall regression check, before against after. The
+queries are the cousin's own (memory/.recall-log.jsonl, written by
+reinforce.record on every search). Just before apply() writes,
 take_baseline() replays the newest logged queries that surfaced a
 harness file and keeps what each surfaces NOW; verify() replays the same
 query text and reports any that lost a memory the baseline had (a
@@ -238,8 +238,9 @@ def apply(home, *, root, now=None, sample=REPLAY_SAMPLE):
     tmp = tdir / (MANIFEST + ".tmp")
     tmp.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     tmp.replace(tdir / MANIFEST)
-    # Usage bonuses are keyed by absolute path, and R9 hides the original
-    # that carried them: the copy inherits its original's history.
+    # Usage bonuses are keyed by absolute path, and memory_search hides the
+    # original that carried them once its copy is current: the copy
+    # inherits its original's history.
     from cousin_lib import reinforce
     reinforce.carry(home, {str(src / r["name"]): str(tdir / r["name"]) for r in todo})
     return rows
@@ -283,9 +284,9 @@ def _index_current(home, root):
     before a replay searches: a search embeds at most FOREGROUND_BUDGET
     stale chunks, and right after an import every copy is a new key, so a
     replay on a partly built index would measure the index filling in,
-    not the import (R19). The one-time decisions backfill runs first, for
-    the same reason: a replay's first search runs it too (memory_search's
-    R2), and a home that reaches it here first would have the index
+    not the import. The one-time decisions backfill runs first, for
+    the same reason: a replay's first search runs it too (memory_search
+    does), and a home that reaches it here first would have the index
     declared current, then re-staled by the raw entries that search's
     backfill appends, caught up only FOREGROUND_BUDGET chunks at a time.
     ensure_backfilled (not try_backfill) so a broken backfill fails loudly

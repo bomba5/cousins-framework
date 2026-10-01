@@ -179,7 +179,7 @@ class TestMerge(SettingsCase):
 
 
 class TestAttribution(SettingsCase):
-    """Tracker #112: config.commit_attribution decides whether the
+    """config.commit_attribution decides whether the
     settings file carries includeCoAuthoredBy: false and an empty
     attribution object - the tmux lane's own reach for the same
     outcome the SDK runner gets through --settings."""
@@ -257,10 +257,10 @@ class TestAttribution(SettingsCase):
         self.assertIs(self._read()["includeCoAuthoredBy"], True)
 
     def test_an_operator_value_matching_the_frameworks_own_shape_survives(self):
-        # Critical 1 (review round 1): value equality alone is not
-        # ownership. An operator who happens to write exactly what the
-        # framework would write, with commit_attribution unset (true,
-        # nothing this module ever wrote), must not have it deleted.
+        # Value equality alone is not ownership. An operator who happens
+        # to write exactly what the framework would write, with
+        # commit_attribution unset (true, nothing this module ever wrote),
+        # must not have it deleted.
         path = settings_path(self.home)
         path.parent.mkdir()
         path.write_text(json.dumps({
@@ -305,11 +305,11 @@ class TestAttribution(SettingsCase):
 
 
 class TestAttributionCrashSafety(SettingsCase):
-    """Round 3 review: the two writes are ordered by DIRECTION, not
-    always the same way, so neither crash window ever needs a
-    claim-by-match to heal (round 2's claim-by-match reopened Critical
-    1: an operator's own pre-existing includeCoAuthoredBy: false got
-    adopted on a turn-off and then deleted on a later turn-on).
+    """The two writes are ordered by DIRECTION, not always the same
+    way, so neither crash window ever needs a claim-by-match to heal (a
+    claim-by-match would adopt an operator's own pre-existing
+    includeCoAuthoredBy: false on a turn-off and then delete it on a
+    later turn-on).
     Turning off ADDS keys: the marker goes first (it can only ever
     under-claim, never over-claim, across a crash). Turning on REMOVES
     keys: settings.json goes first, and a stale marker claim is
@@ -368,7 +368,7 @@ class TestAttributionCrashSafety(SettingsCase):
         self.assertNotIn("attribution", data)
 
     def test_operators_preexisting_identical_value_survives_off_then_on(self):
-        # Critical 1, reopened by round 2's claim-by-match: the operator
+        # Claim-by-match must not adopt this: the operator
         # already had includeCoAuthoredBy: false, with no marker entry,
         # before this module ever ran. Off must never claim it; on must
         # then have nothing of its own to remove.
@@ -435,8 +435,8 @@ if __name__ == "__main__":
 
 
 class TestTmuxKindSettings(SettingsCase):
-    """Phase 11 Task 3, the settings half (I7, P11-8, P11-12): the tmux kind's
-    pane runs the real CLI, so its project settings carry the kind's switches,
+    """The tmux kind's pane runs the real CLI, so its project settings
+    carry the kind's switches,
     the policy's deny rules and the four bridge hooks; an sdk or legacy home
     gets none of them, and a switch back to sdk removes exactly those."""
 
@@ -473,7 +473,7 @@ class TestTmuxKindSettings(SettingsCase):
         self.assertEqual(out["warnings"], [])
 
     def test_ask_and_deny_bash_patterns_are_warned_not_silently_dropped(self):
-        """I5: neither reaches the pane under --dangerously-skip-permissions
+        """Neither reaches the pane under --dangerously-skip-permissions
         (only deny_tools does); the gap is declared to whoever writes the
         settings, not just to docs/reference/runners.md."""
         (self.home / "policy.toml").write_text(
@@ -525,7 +525,7 @@ class TestTmuxKindSettings(SettingsCase):
             '[cousin]\nslug = "testa"\n\n[agent]\nrunner = "tmux"\n' + extra)
 
     def test_attribution_on_the_pane_follows_commit_attribution(self):
-        """#112 owns attribution on every kind: the tmux kind forces
+        """commit_attribution owns attribution on every kind: the tmux kind forces
         nothing, so the operator's commit_attribution decides the pane's."""
         self._agent("")
         self._apply(kind="tmux")
@@ -537,7 +537,7 @@ class TestTmuxKindSettings(SettingsCase):
         data = self._read()
         self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
         self.assertIs(data["includeCoAuthoredBy"], False)
-        harness_settings.remove_kind_settings(self.home)      # a switch back keeps #112's own keys
+        harness_settings.remove_kind_settings(self.home)      # a switch back keeps attribution's own keys
         data = self._read()
         self.assertEqual(data["attribution"], {"commit": "", "pr": ""})
         self.assertIs(data["includeCoAuthoredBy"], False)

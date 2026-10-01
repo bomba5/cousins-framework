@@ -1,7 +1,7 @@
-"""Two OpencodeRunner fixes that Task 7's proofs surfaced (phase 9 Task 7),
+"""OpencodeRunner fixes surfaced by runs against the real binary,
 pinned on the fake `opencode serve`; never the binary.
 
-1. The live proof on the real binary, offline: opencode installs
+1. A run on the real binary, offline: opencode installs
    `@opencode-ai/plugin` from npm into its config dir whenever ANY plugin
    is configured, and loads no plugin (so answers no /event) until that
    install ends: 71 s and a failure with no network, npm egress at every
@@ -15,8 +15,8 @@ pinned on the fake `opencode serve`; never the binary.
    fold's claim and requeue of a queued peer or loop row) outlasted
    `poll_s`, so a 25-event turn took 25 cycles. It now reads every event
    already there before polling again.
-3. The live proof's aborts, which the fake did not model (Review Focus 4),
-   now reproduced by it (`PARTIAL`, `PREP`) with the runner's outcome for
+3. The real binary's aborts, which the fake did not model, now
+   reproduced by it (`PARTIAL`, `PREP`) with the runner's outcome for
    each: an abort mid-text (the open text part ends only after the first
    idle pair) and an abort before the model answered (one idle pair, no
    error, no assistant message)."""
@@ -84,7 +84,7 @@ class TestPluginDependencySeed(Case):
                          {opencode.PLUGIN_DEPENDENCY: "*"})
 
     def test_an_existing_lock_naming_another_package_refuses_the_start(self):
-        """Review round 2, minor 4: a lock in opencode's config dir may name
+        """A lock in opencode's config dir may name
         only the plugin library (an online install names nothing else), so
         one naming another package is a foreign source, never merged into."""
         r = self.runner()

@@ -1,18 +1,18 @@
-"""POST /peer/send (phase 10a, one inbound surface): another install's
+"""POST /peer/send (one inbound surface): another install's
 cousin reaches one of ours with a message signed by the secret the two
-installs share (config/external-peers.toml `inbound_token_file`; ruling
-P10a-2: `Authorization: HMAC <sender>:<hex>`, the secret never on the
+installs share (config/external-peers.toml `inbound_token_file`;
+`Authorization: HMAC <sender>:<hex>`, the secret never on the
 wire), behind the network guard, with no console session. The signature
 names the sender: the body's `user` is ignored, and the message is shown
-under the entry's `name`. A peer needs a `reach` (P10a-3), and anything
+under the entry's `name`. A peer needs a `reach`, and anything
 outside it answers 404 like an absent cousin; a replay is refused. Until
-the signature verifies, every refusal is the same 401 (review round 2,
-N2: an unknown sender, a bad signature, a malformed body and an unusable
+the signature verifies, every refusal is the same 401 (an
+unknown sender, a bad signature, a malformed body and an unusable
 entry or secret file look alike, so a caller cannot list the peers); an
 authenticated peer whose entry is unusable gets a generic 503; the detail
-of either goes to the log (review I4). A peer signature opens nothing under /api/, a console session
-or a bearer token nothing under /peer/. The sending side signs and never
-sends its secret."""
+of either goes to the log. A peer signature opens nothing under /api/,
+a console session or a bearer token nothing under /peer/. The sending
+side signs and never sends its secret."""
 import json
 import os
 import pathlib
@@ -130,7 +130,7 @@ class TestPeerSend(PeerCase):
         self.assertIn("reach is required", " ".join(self.logged))
 
     def test_a_secret_file_others_can_read_says_nothing_on_the_wire(self):
-        """Review I4: the detail goes to the log, never to the caller."""
+        """The detail goes to the log, never to the caller."""
         os.chmod(self.secret_file, 0o644)
         self.serve()
         self.assertEqual(self.peer_send(self.body()), (401, {"error": "unauthorized"}))
@@ -138,7 +138,7 @@ class TestPeerSend(PeerCase):
         self.assertEqual(_messages(self.home), [])
 
     def test_before_the_signature_every_refusal_is_the_same(self):
-        """Review round 2, N2: nothing tells a known sender from an unknown one."""
+        """Nothing tells a known sender from an unknown one."""
         self.serve()
         body = self.body()
         bad = "HMAC kestrel:" + "0" * 64
@@ -158,8 +158,8 @@ class TestPeerSend(PeerCase):
         self.assertEqual(_messages(self.home), [])
 
     def test_a_peer_that_shares_a_local_cousins_slug_is_refused(self):
-        """Review I1: an entry [peers.sam] would be threaded as the local Sam.
-        #114: the test once built two bodies, one sent and one signed; a
+        """An entry [peers.sam] would be threaded as the local Sam.
+        The test once built two bodies, one sent and one signed; a
         clock tick between them (a loaded full run) signed another sent_at,
         so the signature failed (401) before the slug check (503). It runs
         under a clock that ticks at every read, which made it fail every
@@ -243,7 +243,7 @@ class TestTheSendingSide(PeerCase):
     def test_a_signed_send_never_carries_the_secret(self):
         [(url, auth, data)] = self._send('token_file = ".secrets/peers/kestrel"\nsender = "testbed"\n')
         payload = json.loads(data)
-        self.assertEqual(url, "http://192.0.2.20:8600/peer/send")      # the default with a token (M6)
+        self.assertEqual(url, "http://192.0.2.20:8600/peer/send")      # the default with a token
         self.assertNotIn(SECRET, auth + data.decode())
         self.assertEqual(auth, "HMAC testbed:%s" % chat.peer_signature(
             SECRET, "testbed", "kestrel", payload["sent_at"], payload["msg_id"], "hello"))

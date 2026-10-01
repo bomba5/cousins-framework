@@ -1,5 +1,5 @@
 """A peer message to a local runner-lane cousin needs no chat server
-(phase 10a, one inbound surface): `cousin-chat send`, the runner's `send`
+(one inbound surface): `cousin-chat send`, the runner's `send`
 tool (both through chat.send_message) and the console's peer route write
 the target's chat store and inbox in-process, through chat_api.send, the
 function its chat server's /api/send runs. A tmux-lane target is still

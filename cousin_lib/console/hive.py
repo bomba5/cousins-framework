@@ -101,7 +101,7 @@ def tell_home(server, home, slug, body):
     """A node's tell-home, authenticated by its token (`slug`): through
     peer_inbound.accept to the home cousin only, under the name the
     operator minted the token with (else the slug), never the name the
-    node checks in with (ruling P10a-1). Returns (status, payload)."""
+    node checks in with. Returns (status, payload)."""
     from cousin_lib import peer_inbound
     display = store(server).minted_name(slug) or slug
     try:

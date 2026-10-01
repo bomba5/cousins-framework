@@ -81,15 +81,14 @@ class TestSearch(SearchCase):
 
 class TestBonusReach(SearchCase):
     def test_a_bonus_beyond_top_never_displaces_a_path_ranked_within_top(self):
-        # Ruling P1131-1: the #83 fusion-depth fix widened each leg's
-        # candidate list past `top` so a path just past the old cut
-        # could be fused at all, but _bonuses must not widen with it -
-        # _fuse's contract is "nudged up, never carried past a better
-        # match". Reproduces the reviewer's case through search():
+        # The fusion depth widens each leg's candidate list past `top`
+        # so a path just past the cut can be fused at all, but _bonuses
+        # must not widen with it - _fuse's contract is "nudged up, never
+        # carried past a better match". The case through search():
         # keyword ranks 0..19 for widget*.md, a near-MAX_BONUS bonus
-        # recorded on the rank-10 file (kw10.md), which the pre-#83
-        # top=5 leg could never even fetch. kw10 must not displace
-        # kw4 (rank 4, inside top=5).
+        # recorded on the rank-10 file (kw10.md), which a top=5 leg
+        # without the widening could never even fetch. kw10 must not
+        # displace kw4 (rank 4, inside top=5).
         build_index()
         for i in range(20):
             (self.home / "memory" / ("kw%d.md" % i)).write_text(
@@ -106,7 +105,7 @@ class TestBonusReach(SearchCase):
         self.assertEqual(len(names), 5)
         self.assertNotIn("kw10.md", names,
                          "a bonus on a path beyond top must not reach"
-                         " into the fused result (ruling P1131-1)")
+                         " into the fused result")
         self.assertIn("kw4.md", names,
                       "the rank-4 path must not be displaced by a"
                       " deeper path's bonus")
@@ -248,7 +247,7 @@ class TestRawEntriesAreIndexed(SearchCase):
     write, and it was never indexed: search covered `*.md` only, so an
     entry reached recall only through `distill`, which keeps one
     truncated line per topic and caps each file at 40 lines. Measured
-    2026-09-21 on a real cousin: 904 entries over 789 topics reached
+    on a real cousin: 904 entries over 789 topics reached
     recall as 139 lines, so 82% of topics could not be found at all.
     """
 
@@ -382,8 +381,7 @@ class TestCuratedFloor(SearchCase):
     a real corpus and pushed curated topic files from 13 to 2: BM25
     rewards a short document, so a 900-character entry outranks a 10 KB
     note that carries the same term. One slot is reserved so the thing a
-    cousin wrote on purpose cannot be crowded out entirely. Operator's
-    choice, 2026-09-21."""
+    cousin wrote on purpose cannot be crowded out entirely."""
 
     def _raw(self, *entries):
         raw = self.home / "memory" / "raw"

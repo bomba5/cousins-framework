@@ -1,8 +1,8 @@
-"""The prompt-cache hit rate in the tokens view (master plan phase 5 task
-6): cache_read / (cache_read + cache_creation + input), per cousin and per
-day, from the usage the model reported (usage.db on the SDK lane, the
-harness transcript on the tmux lane), measured not inferred. A result that
-carried no usage is left out of the rate, never counted as a miss."""
+"""The prompt-cache hit rate in the tokens view: cache_read / (cache_read
++ cache_creation + input), per cousin and per day, from the usage the
+model reported (usage.db on the SDK lane, the harness transcript on the
+tmux lane), measured not inferred. A result that carried no usage is left
+out of the rate, never counted as a miss."""
 import json
 import os
 import pathlib
@@ -96,8 +96,8 @@ class TestTmuxLane(Fleet):
 
 
 class TestTmuxKind(Fleet):
-    """Phase 11 Task 9 (R16): a runner = "tmux" cousin's usage is its pane
-    CLI's transcripts, under its account's config dir (R13), whether or
+    """A runner = "tmux" cousin's usage is its pane CLI's transcripts,
+    under its account's config dir, whether or
     not the install has a harness seam."""
 
     def _transcript(self, projects, home):

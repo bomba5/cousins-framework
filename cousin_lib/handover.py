@@ -1,4 +1,4 @@
-"""The previous conversation, handed across a move to the SDK runner (#103).
+"""The previous conversation, handed across a move to the SDK runner.
 
 `cousin-migrate apply` stops the tmux session cleanly and the runner then
 starts a FRESH session on the state digest: by design the working

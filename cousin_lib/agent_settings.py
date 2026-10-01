@@ -7,7 +7,7 @@ The lanes are delivery.RUNNER_KINDS, read at call time and never copied
 here: a cousin whose [agent] runner is not one of them is on the tmux
 lane ("tmux-legacy"), whose model and effort are [runtime]'s and which
 has no [agent] settings. Each key names the lanes that read it; a kind
-added to RUNNER_KINDS later (phase 11's `tmux`) gets the keys that name
+added to RUNNER_KINDS later (as `tmux` was) gets the keys that name
 it plus the ones every lane reads, so its slot below (`env_allow`) is
 live the day the kind is.
 
@@ -69,12 +69,12 @@ SCHEMA = {
     "api_key_file": {"type": "str", "lanes": ("sdk", "fake"), "readonly": True,
                      "deprecated": True, "only_when_set": True,
                      "hint": "deprecated: move the key to an account"},
-    # tracker #112: every kind reads it (runner/main.commit_attribution_of);
+    # every kind reads it (runner/main.commit_attribution_of);
     # unset is config/harness.toml [agent]'s install default
     "commit_attribution": {"type": "bool", "lanes": ALL, "default": None,
                            "hint": "the harness's own attribution on commits and PRs;"
                                    " unset is the install default"},
-    # The tmux kind's own key (phase 11): its pane's environment allowlist.
+    # The tmux kind's own key: its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},
 }
@@ -107,7 +107,7 @@ def lane_keys(lane):
 
 def _check_lane(account, lane):
     """accounts.check_lane, plus the tmux kind's own refusal (runner/main.py
-    runner_for, phase 11 P11-6): a token or API-key account never runs a
+    runner_for): a token or API-key account never runs a
     pane. An AccountsError either way."""
     accounts.check_lane(account, lane)
     if lane == "tmux":
@@ -190,7 +190,7 @@ def _check_value(key, value, lane, home):
             try:
                 accounts.refuse_claude_name("cousin.toml [agent] %s" % key, value)
                 opencode.split_model(value, key)
-                # the runner's bridge guard (R13), on the value as it is rendered
+                # the runner's bridge guard, on the value as it is rendered
                 opencode_guard.refuse_bridge({key: value}, {})
             except opencode_guard.BridgeRefused as err:
                 raise ValueError(err.reason)

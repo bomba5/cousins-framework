@@ -554,7 +554,7 @@ def _cmd_start(args):
     slug = cfg.slug
     cmd = list(args.cmdline or [])
     if cmd and not cmd[0].strip():
-        # an empty program registers a job that dies 127 (#115)
+        # an empty program would register a job that dies 127
         print("cousin-job: the command's program is empty", file=sys.stderr)
         return 2
     if cmd and cmd[0] != cmd[0].strip():
@@ -738,8 +738,8 @@ def _cmd_tail(args):
 
 def _start_options(p, *, help_text=False):
     """`start`'s own options, the one set every parser of the start line
-    reads (#115: the separated shape's check and the title-first re-parse
-    had copies)."""
+    reads, so the separated shape's check and the title-first re-parse
+    keep no copies of their own."""
     p.add_argument("--desc")
     p.add_argument("--log")
     if help_text:

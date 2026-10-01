@@ -1,4 +1,4 @@
-"""opencode's v1 HTTP API, for OpencodeRunner (phase 9 R1, R3). Stdlib only.
+"""opencode's v1 HTTP API, for OpencodeRunner. Stdlib only.
 
 OpencodeServer   one `opencode serve` child on loopback with a fresh
                  basic-auth password per start, in its own process group;
@@ -16,7 +16,7 @@ EventReader      a thread reading GET /event: each `data:` frame becomes a
                  consumer that sees a second one knows it may have missed
                  events in between.
 
-Measured on 1.18.31 (the phase 9 survey): a prompt is only accepted by
+Measured on 1.18.31: a prompt is only accepted by
 prompt_async (204); its progress, its end (`session.idle`) and its
 failure (`session.error`) arrive on the event stream.
 """
@@ -40,7 +40,7 @@ from cousin_lib import accounts
 
 USERNAME = "opencode"
 HOST = "127.0.0.1"
-# Set on every start, over anything inherited (R3, R5).
+# Set on every start, over anything inherited.
 FIXED_ENV = {"OPENCODE_DISABLE_AUTOUPDATE": "1", "OPENCODE_DISABLE_SHARE": "1",
              "OPENCODE_DISABLE_CLAUDE_CODE": "1", "OPENCODE_DISABLE_PROJECT_CONFIG": "1"}
 # Inherited variables that would undo what the runner sets: a username the
@@ -117,7 +117,7 @@ def _die_with(parent):
     dies (PR_SET_PDEATHSIG; the runner's worker thread lives as long as its
     server), and exit at once when that parent is already gone, the race
     prctl cannot see. The supervisor's SIGKILL of the runner's group, an
-    OOM kill or a crash then take the server with it (review Important 2).
+    OOM kill or a crash then take the server with it.
     What the server started does not die with it (the model's shell is in
     a session of its own, measured on 1.18.31): kill_marked and
     reap_leftover find it by the start's marker."""
@@ -286,7 +286,7 @@ class OpencodeServer:
     """`<argv0> serve --hostname 127.0.0.1 --port <free>` in `cwd`, with
     `env` scrubbed of every Claude credential (accounts.scrub) plus
     OPENCODE_SERVER_PASSWORD, OPENCODE_CONFIG=`config_path` and FIXED_ENV.
-    The caller's `env` carries HOME and the XDG directories (R3)."""
+    The caller's `env` carries HOME and the XDG directories."""
 
     def __init__(self, argv0, *, cwd, env, config_path, timeout=30):
         self.argv0 = str(argv0)
@@ -426,7 +426,7 @@ class OpencodeServer:
 
 
 class OpencodeClient:
-    """The v1 routes (R1). Each call opens one connection, bounded by
+    """The v1 routes. Each call opens one connection, bounded by
     `timeout` seconds."""
 
     def __init__(self, url, password, *, timeout=10.0):

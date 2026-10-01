@@ -3,13 +3,13 @@
 After every completed turn the runner mines the transcript entries the
 session store received since the last mine, with the flip miner's own
 rules (transcript_mine): no model call, a keyword test per sentence,
-hedged sentences at L4. Phase 0 finding 5: cost is nothing, VOLUME is
+hedged sentences at L4. Cost is nothing, VOLUME is
 the constraint, so two rules bound it:
 - dedupe: a sentence raw memory already holds (either miner, the hot
   raw files: DEDUPE_DAYS = compaction's hot window, since older files
   are folded into archives this does not read) is not written again;
 - a rolling window per cousin: at most WINDOW_CAP new entries in any
-  WINDOW_S, however often the cousin rolls over (R8).
+  WINDOW_S, however often the cousin rolls over.
 A cursor per session makes a re-run a no-op; the dedupe makes it one
 even when the cursor is lost.
 
@@ -18,7 +18,7 @@ Mining writes the turn's sentences as `episode:` entries, the log
 lacks is the model being ASKED (spec, "One memory system"), so
 propose_turn decides whether to ask: a turn whose text reached a
 conclusion (the miner's own L3 rule) AND carries a decision word
-(PROPOSAL_WORDS; R11, the operator's rule) and which recorded none
+(PROPOSAL_WORDS) and which recorded none
 through the memory tool gets one proposal, queued by the runner as a
 `propose` row, the lowest priority. Never about a proposal's own turn,
 once per turn (a cursor of its own), at most PROPOSAL_CAP per rolling
@@ -35,17 +35,17 @@ from pathlib import Path
 
 from cousin_lib import compact, memory, memory_lock, transcript_mine
 
-WINDOW_CAP = 24                          # R8: new raw entries per rolling window
+WINDOW_CAP = 24                          # new raw entries per rolling window
 WINDOW_S = 86400
 DEDUPE_DAYS = compact.DEFAULT_HOT_DAYS   # older raw files are archived, unread here
 SOURCE = "turn-extract"
 _CURSOR = ("data", "extract-cursor.json")
 PROPOSAL_SOURCE = "propose"             # delivery.SOURCES; base.SOURCE_PRIORITY: the lowest
 PROPOSAL_MARK = "[memory proposal]"
-PROPOSAL_CAP = 6                        # R11 (OPERATOR): proposals per cousin per rolling WINDOW_S
+PROPOSAL_CAP = 6                        # proposals per cousin per rolling WINDOW_S
 PROPOSAL_SENTENCES = 3
 MEMORY_TOOL = "mcp__cousin__memory"     # the runner's tool server is registered as "cousin"
-# R11 (OPERATOR): what makes a turn worth a proposal. The miner's own L3
+# What makes a turn worth a proposal. The miner's own L3
 # rule alone qualifies 59% of turns (157 of 265 real turns, measured over
 # 12 transcripts), which spends the day's cap in the first hour; an L3
 # sentence that also carries a decision word qualifies 2% (6 of 265).
@@ -75,7 +75,7 @@ def _save(home, state, parts=_CURSOR):
 
 
 def set_cursor(home, session_id, cursor):
-    """Move one session's mining cursor (R17: a kind switch keeps the
+    """Move one session's mining cursor (a kind switch keeps the
     session id and moves the cursor to the end, in the TARGET kind's unit:
     a byte offset in the CLI's transcript for tmux, a store row id for the
     SDK), so nothing is mined twice across the switch."""

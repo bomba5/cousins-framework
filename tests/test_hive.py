@@ -548,7 +548,7 @@ class TestHiveConfig(HiveCase):
             "checkin_seconds": 60, "home_cousin": ""})
 
     def test_home_chat_url_is_not_read(self):
-        # R10: the legacy unauthenticated home chat server is gone; a
+        # the legacy unauthenticated home chat server is gone; a
         # node reaches its home cousin through the queen (home_cousin)
         from cousin_lib.hive import hive_config
         self._write('enabled = true\npublic_url = "http://q.invalid:8600"\n'

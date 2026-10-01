@@ -15,8 +15,8 @@ deny_tools = ["WebFetch", "WebSearch"]              # exact names or prefix*
 deny_bash_patterns = [                                # regexes on any tool's string `command` (Bash, PowerShell, Monitor, ...)
     '\brm\s+-rf\s+/',
     '\bgit\s+push\s+--force',
-    # operator-run: a cousin never obtains credentials (a guardrail; the
-    # files are the same Unix user's until phase 6)
+    # operator-run: a cousin never obtains credentials (a guardrail: the
+    # credential files belong to the same Unix user)
     '\bcousin-account\b',
 ]
 ask = []                                              # operator approval; no approval surface yet: enforced as deny

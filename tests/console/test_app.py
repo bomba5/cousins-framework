@@ -55,7 +55,7 @@ class TestGuardAndConventions(ConsoleCase):
 
 class TestRegistryIsShared(ConsoleCase):
     def test_route_modules_are_a_list_later_tasks_extend(self):
-        # Task 2 appends its own modules to this list; the server loads
+        # Later route modules append themselves to this list; the server loads
         # every name at construction so a module registered after import
         # still serves.
         self.assertIsInstance(app.ROUTE_MODULES, list)

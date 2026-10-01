@@ -48,7 +48,7 @@ _LOCK_SCRIPT = _REPO / "docker" / "lock.sh"
 # default is the tag pinned by a multi-arch index digest.
 _BASE = "${PYTHON_IMAGE}"
 _PINNED_BASE = re.compile(r"^python:3\.13-slim@sha256:[0-9a-f]{64}$")
-# The opencode binary (phase 9 R17), in the default image: the npm registry's platform package
+# The opencode binary, in the default image: the npm registry's platform package
 # of the pinned release, checked twice (the tarball the build downloads,
 # then the binary it copies). The binary's sha256 is the live install's
 # pinned copy's; the tarball's was computed once from the registry's file,
@@ -60,7 +60,7 @@ _OPENCODE_TGZ_SHA256 = "6d89da252a8b030d923e728396dc34465cf6095101b78222b0ee337b
 _OPENCODE_BIN_SHA256 = "f9dab32248695e9ebd56b16a1921798fd85112cf5a69c7dfd0cabc1e17be4a11"
 _OPENCODE_BIN = "/opt/opencode/bin/opencode"
 # The default image carries the opencode binary: 240 MB is the old 180 MB
-# (phase 0 finding 6) plus the pinned tarball (60.2 MB), rounded; measured
+# plus the pinned tarball (60.2 MB), rounded; measured
 # 224.8 MB. The slim target, the image without it, keeps the old 180 MB
 # (measured 164.2 MB).
 _BUDGET = 240000000
@@ -68,7 +68,7 @@ _SLIM_BUDGET = 180000000
 # Executables of a JS runtime or its package manager, as words: the
 # registry's host name (registry.npmjs.org) is not one.
 _JS_TOOLS = re.compile(r"\b(node|nodejs|npm|npx|bun|bunx|yarn|pnpm)\b")
-# R5': a runner gets runner.main.STOP_TIMEOUT_S + 5 = 35 s after SIGTERM;
+# A runner gets runner.main.STOP_TIMEOUT_S + 5 = 35 s after SIGTERM;
 # then the loops daemon and the console get 10 s each, one after the
 # other; each step adds the supervisor's KILL_GRACE_S after a SIGKILL.
 _RUNNER_STOP_S = 35
@@ -442,8 +442,8 @@ class TestDockerfile(unittest.TestCase):
 
 class TestDockerfileOpencode(unittest.TestCase):
     """`docker build .` (no target) is the default image: final plus the
-    pinned opencode binary (R17's `opencode` target, kept as a name for
-    it); `--target slim` is final alone, without opencode."""
+    pinned opencode binary (the older `opencode` target, kept as a name
+    for it); `--target slim` is final alone, without opencode."""
 
     def setUp(self):
         self.ins = _instructions(_DOCKERFILE.read_text())
@@ -821,7 +821,7 @@ _PROBE = ("import os, shutil\n"
 
 @unittest.skipUnless(_docker_enabled(), "opt-in: COUSIN_DOCKER=1 and docker on PATH")
 class TestOpencodeImage(unittest.TestCase):
-    """R17 against built images: the default image (no target) carries the
+    """Built images: the default image (no target) carries the
     pinned binary, `--target slim` does not, `--target opencode` is the
     default image under its old name. COUSIN_DOCKER_IMAGE,
     COUSIN_DOCKER_SLIM_IMAGE and COUSIN_DOCKER_OPENCODE_IMAGE name images
@@ -1061,7 +1061,7 @@ class TestCompose(unittest.TestCase):
 
 
 class TestComposeOpencode(unittest.TestCase):
-    """R17: an image choice is an override of the one framework service
+    """An image choice is an override of the one framework service
     (its build target and tag), never a second service on the same
     volume. The default image carries opencode; compose.slim.yml picks the
     image without it, and compose.opencode.yml (no longer needed) still

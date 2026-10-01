@@ -1,4 +1,4 @@
-"""The inbox claims by thread kind (phase 8): a side session takes only its
+"""The inbox claims by thread kind: a side session takes only its
 kinds, the primary everything but them, so a row runs in exactly one
 session."""
 import unittest

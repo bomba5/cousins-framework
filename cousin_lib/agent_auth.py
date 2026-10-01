@@ -540,7 +540,7 @@ def switch(root, slug, mode, *, restart=True, force=False, tmux_bin="tmux",
 
     A cousin with no runner kind is refused with delivery.lane_refusal
     before anything runs, tmux included: the restart would kill its
-    legacy session and then be refused by start_cousin (R2)."""
+    legacy session and then be refused by start_cousin."""
     from cousin_lib import delivery, spawn
     check_mode(mode)
     root = Path(root)

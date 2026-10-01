@@ -1,4 +1,4 @@
-"""The reaper (phase 11 R21, P11-10): a tmux-kind cousin stopped while its
+"""The reaper: a tmux-kind cousin stopped while its
 runner is down still has a pane that may be running a turn. The supervisor
 has it killed through `cousin-runner --reap-pane`, which holds the runner
 lock while it kills and stays out of the way of a live runner."""

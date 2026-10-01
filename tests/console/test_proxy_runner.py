@@ -1,4 +1,4 @@
-"""The chat routes for a runner cousin (master plan phase 5 task 5): no
+"""The chat routes for a runner cousin: no
 chat server runs, so the console serves history, search, send, archive
 and reactions itself over the cousin's `chat.db`, through
 server/chat_api.py. Parity: each route returns what it returns when the

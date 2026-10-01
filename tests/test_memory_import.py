@@ -121,7 +121,7 @@ class TestImport(ImportCase):
         self.assertTrue(text.endswith("---\nSam uses CRLF.\n"), text)
 
     def test_the_copy_inherits_its_originals_usage_history(self):
-        """Usage bonuses are keyed by absolute path, and R9 hides the
+        """Usage bonuses are keyed by absolute path, and the dedupe hides the
         original once its copy is current: without a carry the import
         silently resets every imported memory's bonus to zero."""
         from cousin_lib import reinforce
@@ -179,8 +179,8 @@ class TestCli(ImportCase):
 
 
 class TestManifestIsTheRecord(ImportCase):
-    """Review fix round 1: the manifest is what keeps an edited copy from
-    being overwritten and a removed one from coming back (R8). A manifest
+    """The manifest is what keeps an edited copy from being overwritten
+    and a removed one from coming back. A manifest
     that will not parse must stop an import, not reset it; and a copy that
     exists with no manifest row is an import only when it is exactly what
     the import would write."""
@@ -286,7 +286,7 @@ class TestReplay(ImportCase):
         self.assertEqual((report["queries"], report["kept"], report["lost"]), (2, 2, []))
 
     def test_a_lost_memory_is_reported(self):
-        """The dedupe (R9) hides a harness file whose source is unchanged;
+        """The dedupe hides a harness file whose source is unchanged;
         a copy that no longer holds the memory must show as a loss. (The
         query avoids the file's own name: the keyword index matches paths.)"""
         self._search("Priya quokka Monday")
@@ -311,8 +311,7 @@ class TestReplay(ImportCase):
         self.assertEqual(memory_import.verify(self.home, root=self.root)["lost"], [])
 
     def test_the_replay_does_not_reinforce_what_it_measures(self):
-        """guard: search(record=False) arrives in Task 2; this pins that the
-        baseline and the replay both use it."""
+        """The baseline and the replay both search with record=False."""
         self._search("quokka ledgers Monday")
         log = self.home / "memory" / ".recall-log.jsonl"
         before = log.read_text()
@@ -341,9 +340,9 @@ class TestReplay(ImportCase):
 
 
 class TestReplayOverACorruptManifest(ImportCase):
-    """Controller ruling on Task 6 (Task 5's strict manifest kept): a
-    --verify over a manifest it cannot read must not pretend to compare,
-    because without it a dropped copy looks like a loss."""
+    """The strict manifest holds for --verify too: a --verify over a
+    manifest it cannot read must not pretend to compare, because without
+    it a dropped copy looks like a loss."""
 
     def test_verify_refuses_and_the_cli_exits_2(self):
         memory_search.search("Priya quokka Monday", top=3, home=self.home, root=self.root)
@@ -360,7 +359,7 @@ class TestReplayOverACorruptManifest(ImportCase):
 
 
 class TestReplayIndex(ImportCase):
-    """R19: every search a replay runs sees a fully current index. The
+    """Every search a replay runs sees a fully current index. The
     embedder is a stub, and the foreground budget is cut to 1 so a single
     search cannot catch up by itself."""
 
@@ -444,7 +443,7 @@ class TestReplayIndexOverAnUnbackfilledDecisionLog(ImportCase):
 
 
 class TestOriginalText(unittest.TestCase):
-    """P7-10: original_text() inverts render() byte for byte, so the
+    """original_text() inverts render() byte for byte, so the
     index can read an imported copy as exactly its original."""
 
     SOURCES = {
@@ -525,10 +524,10 @@ def _concept_embed(text, config):
 
 
 class TestTheCopyIndexesLikeItsOriginal(ImportCase):
-    """P7-10: an imported copy indexes exactly like its original. Measured
-    before the fix: the copy's provenance lines shifted every chunk window
-    and changed every embedding, and the replay reported semantic-only
-    memories as lost although every one was still findable."""
+    """An imported copy indexes exactly like its original. Otherwise the
+    copy's provenance lines shift every chunk window and change every
+    embedding, and the replay reports semantic-only memories as lost
+    although every one is still findable."""
 
     def setUp(self):
         super().setUp()
@@ -575,7 +574,7 @@ class TestTheCopyIndexesLikeItsOriginal(ImportCase):
                                                        root=self.root), [])
 
     def test_a_semantic_only_hit_keeps_its_rank_after_the_import(self):
-        """The Review Focus: found by the semantic leg only, at rank 0 of
+        """Found by the semantic leg only, at rank 0 of
         2 before; after apply() the copy is found at the same rank."""
         before, hits = self._names("automobile", 2)
         self.assertEqual(before, ["reference_garage.md", "driveway.md"])

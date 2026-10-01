@@ -1,4 +1,4 @@
-"""system.jsx, the System view (WP-F): pinned by text, as the other
+"""system.jsx, the System view: pinned by text, as the other
 static tests pin theirs. It registers its view and a schedules panel in
 the inspector through the seams, calls only routes routes_system.py
 registers, keeps secrets in SecretField, asks twice (or for a typed name)

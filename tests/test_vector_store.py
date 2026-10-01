@@ -1,7 +1,7 @@
 """The vector store: SQLite with float32 blobs, not a JSON file.
 
 The index was one JSON object read and parsed in full on every search.
-Measured 2026-09-21 on a real cousin: 31.6 MB and 1283 ms per query,
+Measured on a real cousin: 31.6 MB and 1283 ms per query,
 against 938 ms for the embedding call it exists to serve, and linear
 in the size of the memory. The numbers are the whole reason for this
 module; the tests below are about the properties that must survive the
@@ -107,9 +107,9 @@ class TestForegroundBudget(VectorStoreCase):
     `search()` calls `ensure_index(wait=False)`, which means "do not
     queue behind another pass", not "do not do the work": with the lock
     free, that search runs every embedding itself, in the foreground.
-    Before 2026-09-21 a cousin had a few hundred chunks and that cost
-    seconds; indexing the raw store multiplied the chunk count by about
-    ten and a peer's first query sat over three minutes with the
+    With only curated files a cousin had a few hundred chunks and that
+    cost seconds; indexing the raw store multiplied the chunk count by
+    about ten and a peer's first query sat over three minutes with the
     embedding service pinned. The daemon finishes the rest.
     """
 
@@ -155,10 +155,10 @@ class TestTheBudgetIsNotSilent(HermeticCase):
 
     `ensure_index` has always reported `incomplete`, but `search()`
     read only `busy` and `failed`, so the flag was produced and never
-    displayed. Measured by a peer on a cold home 2026-09-22: the
+    displayed. Measured by a peer on a cold home: the
     semantic leg ranked against 24 of 416 chunks, 5.8% of the corpus,
     and the call returned notice=None. Hits from 6% of a corpus that
-    look like a complete result are how a librarian cites a confident
+    look like a complete result are how a cousin cites a confident
     wrong file. The tests below assert the flag where it is DISPLAYED;
     TestForegroundBudget asserts it where it is produced.
     """
@@ -193,8 +193,8 @@ class TestTheBudgetIsNotSilent(HermeticCase):
         Counting those as ranked reported "30 of 30 ... the rest
         keyword-only", self-contradictory on its face, and overstated
         in the dangerous direction: a confident hit on a file whose
-        content moved. Found in review 2026-09-22, measured at 6 stale
-        of 30. The ordinary case is a heartbeat rewriting one big file.
+        content moved. Measured at 6 stale of 30. The ordinary case is a
+        heartbeat rewriting one big file.
         """
         from tests._fakes import fake_embedder
         self._sources(30)

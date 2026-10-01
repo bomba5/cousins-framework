@@ -1,4 +1,4 @@
-"""The memory explorer's operator actions (WP-E), pinned by text: each
+"""The memory explorer's operator actions, pinned by text: each
 new panel is reachable from the rail and calls its route, the gates the
 server enforces are said in the UI ahead of time, and the pure helpers
 behave (run in node when it is installed)."""
@@ -115,8 +115,9 @@ class TheGatesAreSaid(unittest.TestCase):
         self.assertNotIn("—", self.src)
 
 
-class RoundOne(unittest.TestCase):
-    """The review round's findings, pinned."""
+class GuardsAndErrors(unittest.TestCase):
+    """Disabled confirms, operator-claim guards, error handling and list
+    guards, pinned."""
 
     def setUp(self):
         self.src = _read("explorer.jsx")

@@ -1,6 +1,6 @@
 """SqliteSessionStore: the SDK's SessionStore protocol over
 <home>/data/sessions.db (spec, "The runner": the framework owns the
-transcript; phase 0 finding 2: resume reads this store alone).
+transcript; resume reads this store alone).
 
 Entries are opaque JSON the SDK owns; we persist them in append order
 and give them back deep-equal. An entry with a `uuid` is idempotent

@@ -2,8 +2,8 @@
 # contract suite inside it (tests/ is never in the image, so it is
 # mounted read-only for the run), run the opt-in image and compose tests
 # on the runner host against that image, then hold the compressed size
-# to its budget: 240 MB, phase 0 finding 6's 180 MB plus the opencode
-# binary the default image carries (a 60.2 MB tarball). The image tests
+# to its budget: 240 MB, the 180 MB the image was first sized at plus the
+# opencode binary the default image carries (a 60.2 MB tarball). The image tests
 # hold the slim target, the image without it, to the old 180 MB.
 name: image
 

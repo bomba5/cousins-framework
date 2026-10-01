@@ -66,7 +66,7 @@ class TestOneStore(HermeticCase):
         self.assertIn("ports: exclude claimed ports\n  Why: they collide\n", text)
 
     def test_decide_still_appends_decisions_jsonl(self):
-        """guard (R2): the compatibility log keeps being written for its
+        """The compatibility log keeps being written for its
         other readers (the boot staleness warning, the shell hooks)."""
         home = _home(self)
         memory.decide(home, "ports", "exclude claimed ports", "they collide")
@@ -209,7 +209,7 @@ class TestRecallFacts(HermeticCase):
 
 class TestRecallToolRoot(HermeticCase):
     def test_the_recall_tool_never_reads_the_environments_install(self):
-        """Review Focus 1, the memory tool's leg: recall reads the runner's
+        """Through the memory tool, recall reads the runner's
         root. The environment names another install whose embedding
         service must never be called."""
         from cousin_lib.runner import tools
@@ -233,7 +233,7 @@ class TestRecallToolRoot(HermeticCase):
 
 
 class TestBackfillNeverSilencesRecall(HermeticCase):
-    """Review fix round 1, finding 1: the backfill runs inside search() and
+    """The backfill runs inside search() and
     recall; a failure there (a bad byte in the log, a read-only data/) must
     cost the backfill, never the search, and leave no mark so it retries."""
 
@@ -265,7 +265,7 @@ class TestBackfillNeverSilencesRecall(HermeticCase):
 
 
 class TestBackfillRespectsTheTrash(HermeticCase):
-    """Review fix round 1, finding 2 (ruling P7-7): a raw line the operator
+    """A raw line the operator
     trashed must not come back from the old log it is still in."""
 
     def test_a_trashed_raw_twin_is_not_resurrected(self):

@@ -1,4 +1,4 @@
-"""THE contract suite: one suite, every runner (master plan, Phase 2).
+"""THE contract suite: one suite, every runner.
 
 A concrete case mixes this in, subclasses HermeticCase, and defines
 `make_runner(home, *, slow=False, fail_first=False)`:
@@ -85,7 +85,7 @@ class RunnerContract:
         return row["outcome"] if row and row["state"] == "done" else None
 
     def _closed_before_result(self, r):
-        """#87: the ids whose row was closed before a `result` event named
+        """The ids whose row was closed before a `result` event named
         them. A turn's result goes on the stream first, so whoever reads the
         row closed also finds the result that closed it."""
         early, real = [], r.inbox.done
@@ -118,7 +118,7 @@ class RunnerContract:
     def test_items_are_consumed_in_priority_order(self):
         r = self._runner()
         # none of these three folds into another's turn (a peer would fold
-        # into the operator's, #118), so each is a turn of its own
+        # into the operator's), so each is a turn of its own
         r.enqueue(Item("loop:heartbeat", "loop", "loop"))
         r.enqueue(Item("schedule", "schedule", "schedule"))
         r.enqueue(_op("op"))
@@ -142,7 +142,7 @@ class RunnerContract:
         early = self._closed_before_result(r)
         r.start()
         a = r.enqueue(_op("one"))
-        # the result naming the row is on the stream before the row closes (#87)
+        # the result naming the row is on the stream before the row closes
         self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
         self.assertNotIn(a.inbox_id, early)
         self.assertEqual(self._row_outcome(r, a), "delivered")
@@ -155,7 +155,7 @@ class RunnerContract:
         early = self._closed_before_result(r)
         r.start()
         a = r.enqueue(_op("one"))
-        # the result naming the row is on the stream before the row closes (#87)
+        # the result naming the row is on the stream before the row closes
         self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None))
         self.assertNotIn(a.inbox_id, early)
         self.assertEqual(self._row_outcome(r, a), "failed")
@@ -200,7 +200,7 @@ class RunnerContract:
         self.assertTrue(r.interrupt())
         self.assertTrue(_wait(lambda: self._row_outcome(r, a) is not None, timeout=3.0))
         self.assertEqual(self._row_outcome(r, a), "delivered", "the model received it")
-        # the turn's `result` is on the stream before its row closes (#87)
+        # the turn's `result` is on the stream before its row closes
         self.assertNotIn(a.inbox_id, early)
         self.assertTrue(_results(r)[-1]["interrupted"])
 
@@ -215,7 +215,7 @@ class RunnerContract:
 
     @item("interrupt_row")
     def test_an_interrupt_row_ends_the_live_turn_and_is_delivered(self):
-        """The out-of-process interrupt (phase 5): a process that holds no
+        """The out-of-process interrupt: a process that holds no
         runner object puts an `interrupt` row; the live turn ends, its own
         row is still delivered, and the interrupt row says it landed."""
         r = self._runner(slow=True)
@@ -297,7 +297,7 @@ class RunnerContract:
         r = self._runner()
         for name in r.unsupported():
             self.assertIn(name, CONTRACT_ITEMS)
-        # plugin_items() is optional (R19): a PLUGIN item is still run by
+        # plugin_items() is optional: a PLUGIN item is still run by
         # this suite, so it can never also be declared unsupported
         plugin = getattr(r, "plugin_items", lambda: [])()
         for name in plugin:
@@ -314,7 +314,7 @@ class RunnerContract:
 
     @item("midturn_fold")
     def test_a_midturn_operator_or_peer_message_is_closed_by_the_same_result(self):
-        """Operator chat and, since #118, a peer's (a cousin's STOP) reach a
+        """Operator chat and a peer's (a cousin's STOP) reach a
         running turn, not the turn after it."""
         r = self._runner(slow=True)
         r.start()
@@ -325,7 +325,7 @@ class RunnerContract:
         self.assertTrue(_wait(lambda: "result" in _kinds(r), timeout=8.0))
         time.sleep(0.3)
         results = _results(r)
-        self.assertEqual(len(results), 1, "one result closes all three (finding 1)")
+        self.assertEqual(len(results), 1, "one result closes all three")
         self.assertEqual(sorted(results[0]["inbox_ids"]),
                          sorted([first.inbox_id, second.inbox_id, peer.inbox_id]))
 

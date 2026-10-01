@@ -1,4 +1,4 @@
-// WP-D, MCP and policy: this package's own file (index.html's package block).
+// MCP and policy: this package's own file (index.html's package block).
 // Its routes are cousin_lib/console/routes_mcp.py (docs/reference/console-api.md,
 // "MCP and policy").
 //

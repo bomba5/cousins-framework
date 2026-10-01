@@ -1,4 +1,4 @@
-"""Tracker routes over the phase 4 store: list open-first, create,
+"""Tracker routes over the tracker store: list open-first, create,
 update, delete, with the store's errors mapped to 400 and 404 and a
 tracker-change event per mutation."""
 import unittest

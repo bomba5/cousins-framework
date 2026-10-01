@@ -161,7 +161,7 @@ class ConsoleCase(unittest.TestCase):
         # The server's stop waits 5 s for its threads, then lets them run
         # on. On a loaded host the events poller can still be in a poll
         # (it opens the stores under root/data) when the temp root is
-        # removed, which then fails "Directory not empty" (#130). The
+        # removed, which then fails "Directory not empty". The
         # harness waits for both threads, generously, before the root goes.
         from cousin_lib.console import sse
         poller = sse._poller

@@ -1,9 +1,8 @@
-"""THE contract suite against OpencodeRunner (phase 9 Task 7, R14'),
-on the fake `opencode serve` (R15) through the runner's server_factory
-seam: no binary, no network. Every item passes or is declared in
-unsupported() with its evidence; none is declared (midturn_fold is
-measured, R14'). The live proof on the real binary is
-tests/runner/test_opencode_live.py."""
+"""THE contract suite against OpencodeRunner, on the fake `opencode
+serve` through the runner's server_factory seam: no binary, no network.
+Every item passes or is declared in unsupported() with its evidence;
+none is declared (midturn_fold is measured). The live test on the real
+binary is tests/runner/test_opencode_live.py."""
 import unittest
 
 from cousin_lib import accounts

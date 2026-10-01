@@ -1,8 +1,8 @@
 """The automatic truth-level writers.
 
-Canary (2026-09-18): L1, L2, L4 and L5 were never written. Only
-`decide`, `remember` and the flip miner produced raw entries, and none
-of them picked those levels on its own. Each writer below has a test
+Canary: L1, L2, L4 and L5 once went unwritten. Only `decide`,
+`remember` and the flip miner produced raw entries, and none of them
+picked those levels on its own. Each writer below has a test
 that fails when the writer is removed:
 
 - L1 framework: the framework records the state changes it makes or

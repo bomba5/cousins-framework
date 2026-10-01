@@ -34,7 +34,7 @@ def _wait(pred, timeout=10.0):
 
 def _result_append_fails_once(r):
     """The runner's first `result` append raises (a full disk, say): the
-    rows it names must still close as its branch closes them (#87 review)."""
+    rows it names must still close as its branch closes them."""
     real, said = r.stream.append, []
 
     def append(kind, payload):
@@ -96,7 +96,7 @@ class TestRateLimited(HermeticCase):
         r = self.build([init_msg(), _limit("rejected", resets_in=5.0), result(is_error=True)])
         r.start()
         rec = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
-        # the result is appended, then the row goes back to the queue (#87, #102)
+        # the result is appended, then the row goes back to the queue
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"
                               and r.state() == "rate_limited"
                               and any(e["kind"] == "result" and e["payload"].get("requeued")

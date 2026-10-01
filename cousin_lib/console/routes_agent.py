@@ -1,4 +1,4 @@
-"""Console routes for WP-A, agent and cousin settings.
+"""Console routes for agent and cousin settings.
 
 A cousin's [agent] table, per lane, and the rest of its cousin.toml that
 the console edits. Each kind of key has one write path:
@@ -24,7 +24,7 @@ Routes:
   GET  /api/cousins/<slug>/settings   the COUSIN_FIELDS and the read-only rows
   POST /api/cousins/<slug>/settings   {"changes": {"table.key": value|null}}
 
-The install-wide [agent] defaults are WP-F's (routes_system.py)."""
+The install-wide [agent] defaults are routes_system.py's."""
 from __future__ import annotations
 
 import re

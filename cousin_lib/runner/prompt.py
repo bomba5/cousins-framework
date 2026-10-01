@@ -7,9 +7,8 @@
                   + operator rules          the shared tier's kind: rule entries
     first message = the state digest (state_digest, below)
 
-The system prompt MUST be byte-stable across generations (phase 0
-finding 3): nothing here reads a clock, a counter, the generation, a
-hash or any state file. The digest carries all of that, under the boot
+The system prompt MUST be byte-stable across generations: nothing here
+reads a clock, a counter, the generation, a hash or any state file. The digest carries all of that, under the boot
 packet's budget rules (boot.fit). Every read is under the `root` the
 caller passes; nothing here discovers a root from the environment."""
 import hashlib
@@ -65,7 +64,7 @@ def _template_paragraphs(root, home):
 
 
 def _claude_identity(text, template):
-    """The operator-authored parts of a CLAUDE.md (R3)."""
+    """The operator-authored parts of a CLAUDE.md."""
     if not text.strip():
         return ""
     kept = []
@@ -111,7 +110,7 @@ def compose_system_prompt(home, *, root, registry, version=None, tool_name=None,
 
 
 def compose_context_block(home, *, root, registry, version=None):
-    """The tmux kind's block (phase 11 I8, R10): law + contract (the pane's
+    """The tmux kind's block: law + contract (the pane's
     runner label, the stdio server's `cousin` tool names) + operator rules,
     no identity: the pane's CLI reads the identity from CLAUDE.md itself.
     The runner writes it to data/run/tmux-context.md; the launcher appends it
@@ -156,10 +155,10 @@ DIGEST_ORDER = [("shared_index" if v == "shared" else v) for v in boot.TRUNCATE_
 DIGEST_HEADER_ALLOWANCE = 600
 DIGEST_MAX_CHARS = boot.TOTAL_MAX_CHARS - DIGEST_HEADER_ALLOWANCE
 
-# Absent when empty BY DESIGN: calibration (R1: the prompt carries the
+# Absent when empty BY DESIGN: calibration (the prompt carries the
 # portrait's) and the shared index (no entries). Every other layer always
 # prints its header, as boot does: an empty layer that is legitimately empty
-# (a new cousin's memories) is information, not a missing section (W3-1).
+# (a new cousin's memories) is information, not a missing section.
 _OMIT_WHEN_EMPTY = ("calibration", "shared_index")
 
 _TITLES = (("Operator Calibration", "calibration"), ("Active State", "active_state"),
@@ -173,7 +172,7 @@ _open_loops = boot._open_loops_section
 
 
 def _calibration(home):
-    """R1: the distilled calibration and the recent corrections, or "".
+    """The distilled calibration and the recent corrections, or "".
     Never the portrait's section: the prompt already carries it."""
     parts = []
     body = boot._distilled_body(Path(home) / "memory" / "distilled" / "operator-calibration.md")

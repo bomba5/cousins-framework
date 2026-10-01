@@ -2,7 +2,7 @@
 
 `reply` routes by it (spec, "Features as in-process tools"): one live
 thread means a reply with no destination goes there; two (an operator
-message folded into a running turn, finding 1) means the destination
+message folded into a running turn) means the destination
 must be named. The runner owns the writes; tool handlers only read.
 """
 import threading

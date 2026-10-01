@@ -25,7 +25,7 @@ handling: the browser terminal must itself be in mouse mode to turn a
 wheel into an SGR report, and a captured frame never contains the
 program's mode-setting escapes, so the frame sets it.
 
-A tmux-kind runner cousin (`[agent] runner = "tmux"`, phase 11) is
+A tmux-kind runner cousin (`[agent] runner = "tmux"`) is
 addressed where its runner keeps it: the framework's own socket
 (`<root>/run/tmux.sock`) and the session `tmux-<slug>`, matched exactly
 (tmux_runner.pane_for). The runner types into that pane itself, from

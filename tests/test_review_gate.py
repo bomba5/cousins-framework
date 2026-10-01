@@ -1,11 +1,11 @@
-"""The review gate for bulk memory writes (master plan phase 7 task 10):
-more than N new authored raw entries since the gate last looked are held,
-out of every memory view, until a reviewer (a second model on the runner
-lane, the operator with `cousin-memory review`) keeps or drops each. N
-comes from cousin.toml `[memory] review_batch` (default 3). raw stays
-append-only: a hold and a keep are raw records of their own (topic
-`framework:review-gate`), and a drop is one line that is both its
-release and an entry-level obsolete mark (valid time, task 9)."""
+"""The review gate for bulk memory writes: more than N new authored raw
+entries since the gate last looked are held, out of every memory view,
+until a reviewer (a second model on the runner lane, the operator with
+`cousin-memory review`) keeps or drops each. N comes from cousin.toml
+`[memory] review_batch` (default 3). raw stays append-only: a hold and
+a keep are raw records of their own (topic `framework:review-gate`),
+and a drop is one line that is both its release and an entry-level
+obsolete mark (valid time)."""
 import contextlib
 import io
 import json
@@ -109,7 +109,7 @@ class TestGate(HermeticCase):
 
 
 class TestTheCursor(HermeticCase):
-    """Review I2 and I4: the gate counts per home from a cursor on disk."""
+    """The gate counts per home from a cursor on disk."""
 
     def test_writes_nobody_gated_are_held_by_the_next_gate(self):
         """A runner that died after the writes, or a turn that errored:
@@ -157,7 +157,7 @@ class TestTheCursor(HermeticCase):
         self.assertEqual(review_gate.pending(home), [])
 
     def test_the_gate_reads_only_new_files_never_the_archives(self):
-        """Review M1: a gate after every result must not scan the history."""
+        """A gate after every result must not scan the history."""
         home = _home(self)
         _write(home, 4)
         with mock.patch.object(memory, "_all_raw", side_effect=AssertionError("read history")):
@@ -166,7 +166,7 @@ class TestTheCursor(HermeticCase):
 
 class TestBegin(HermeticCase):
     def test_what_was_written_just_before_the_cursor_opened_is_not_counted(self):
-        """Review m1: the clean stop's handoff memories, written seconds
+        """The clean stop's handoff memories, written seconds
         before the runner starts, are not the gate's."""
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
         home = pathlib.Path(tmp.name) / "cousins" / "wren"
@@ -178,7 +178,7 @@ class TestBegin(HermeticCase):
         self.assertEqual(len(review_gate.hold_new(home)), 4)
 
     def test_a_reset_opens_the_cursor_again(self):
-        """Review N1: `cousin-migrate apply` resets it; what the cousin
+        """`cousin-migrate apply` resets it; what the cousin
         wrote on the tmux lane since is not held."""
         home = _home(self)
         review_gate.begin(home, now=time.time() - 10 * 86400, reset=True)   # a stale cursor
@@ -188,7 +188,7 @@ class TestBegin(HermeticCase):
 
 
 class TestTheModelMayOnlyKeepAnOperatorFact(HermeticCase):
-    """Ruling P7b-1 (execution review): a drop is an entry-level mark with
+    """A drop is an entry-level mark with
     no undo, so the reviewing model may keep an operator-level entry but
     never drop one; that drop stays the operator's (`review --drop`)."""
 
@@ -230,10 +230,10 @@ class TestTheModelMayOnlyKeepAnOperatorFact(HermeticCase):
 
 
 class TestTheLockIsTheMemoryWriteLock(HermeticCase):
-    """Execution review: the gate's read-decide-write takes phase 8's
-    memory_lock.write_lock (reentrant per thread), so it is atomic against
-    every memory writer, not only another gate, and it opens no file of
-    its own (a read-write 0600 lock file shut out a second uid)."""
+    """The gate's read-decide-write takes memory_lock.write_lock
+    (reentrant per thread), so it is atomic against every memory writer,
+    not only another gate, and it opens no file of its own (a read-write
+    0600 lock file would shut out a second uid)."""
 
     def test_a_hold_waits_for_a_memory_writer(self):
         """Under the batch (no hold is written), so only the gate's own lock
@@ -261,7 +261,7 @@ class TestTheLockIsTheMemoryWriteLock(HermeticCase):
 
 class TestADropIsOneLine(HermeticCase):
     def test_the_release_and_the_mark_are_the_same_line(self):
-        """Review M5: no crash can leave a drop retired but still held."""
+        """No crash can leave a drop retired but still held."""
         home = _home(self)
         _write(home, 4)
         rows = review_gate.hold_new(home)
@@ -278,7 +278,7 @@ def _old(minutes=0):
 
 
 class TestTheFoldKeepsAHold(HermeticCase):
-    """Review C1: the monthly fold must not let a held entry, or the gate's
+    """The monthly fold must not let a held entry, or the gate's
     records, into the views."""
 
     def test_held_entries_stay_out_after_the_fold(self):
@@ -312,7 +312,7 @@ class TestTheFoldKeepsAHold(HermeticCase):
 
 
 class TestTheBootPacket(HermeticCase):
-    """Review I3: what the gate holds or drops never reaches a new session."""
+    """What the gate holds or drops never reaches a new session."""
 
     def test_held_dropped_and_gate_lines_are_not_recent_raw_memory(self):
         home = _home(self)
@@ -330,14 +330,14 @@ class TestTheBootPacket(HermeticCase):
         self.assertNotIn("obsolete:", text)
 
     def test_the_packet_says_how_many_are_held(self):
-        """Review m7: held entries are not silent at boot."""
+        """Held entries are not silent at boot."""
         home = _home(self)
         _write(home, 4)
         review_gate.hold_new(home)
         self.assertIn("4 memory entries are held by the review gate", boot._memories(home, 20000))
 
     def test_a_held_entry_that_is_gone_is_not_counted(self):
-        """Execution review: the count is of held entries that exist; one
+        """The count is of held entries that exist; one
         removed from raw (the trash) leaves no ghost."""
         home = _home(self)
         _write(home, 4)
@@ -383,7 +383,7 @@ class TestCli(HermeticCase):
         self.assertEqual(out.strip(), "nothing held for review")
 
     def test_the_cousin_cannot_release_its_own_writes(self):
-        """Review I5: a verdict from inside a cousin's process tree."""
+        """A verdict from inside a cousin's process tree."""
         home = _home(self)
         _write(home, 4)
         review_gate.hold_new(home)

@@ -1,4 +1,4 @@
-"""docs/migrating.md's "A cousin with no runner" (2.0.0, phase 10b R2): the
+"""docs/migrating.md's "A cousin with no runner" (2.0.0): the
 refusal it quotes is the one the code prints, and the way out is written
 down both ways (the last 1.x release, and by hand)."""
 import pathlib

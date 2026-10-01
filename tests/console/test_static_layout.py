@@ -1,7 +1,7 @@
 """The chat and its pane laid out, pinned by text (the console compiles its
 JSX in the browser; there is no build step to test against): the compact
 header on a narrow chat column, the status line that never wraps, the
-divider's snap that collapses the chat under the pane (#126) and the say
+divider's snap that collapses the chat under the pane and the say
 box's "send as chat" while it is collapsed. The pure helpers run under
 node, lifted out of chat.jsx as they are.
 """
@@ -98,7 +98,7 @@ class StatusLineNeverWraps(unittest.TestCase):
 
 
 class SnapCollapsesTheChat(unittest.TestCase):
-    """#126: the divider still drags; let go near the chat's left edge and
+    """The divider still drags; let go near the chat's left edge and
     the chat collapses under the pane, a strip brings it back at its last
     width; near the right edge the pane closes. Kept per browser."""
 

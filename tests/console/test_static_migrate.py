@@ -1,4 +1,4 @@
-"""migrate.jsx (WP-B): the kind switch dialog, the migration and lifecycle
+"""migrate.jsx: the kind switch dialog, the migration and lifecycle
 panels. Pinned by text where the contract is a string (the event the
 dialog opens on, the routes, the confirmations, the words that say what
 a step spends), and the pure helpers run under node."""

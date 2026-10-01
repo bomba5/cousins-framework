@@ -1,16 +1,16 @@
-"""The live proof (phase 9 R16, Review Focus 4): the REAL `opencode serve`
+"""The live test: the REAL `opencode serve`
 through the real OpencodeRunner (runner_for, no server_factory), against
 the loopback fake provider (tests/runner/_fake_provider.py). No
 credentials: the account is an `endpoint` account pointed at the fake
 provider, whose model is `local/m1`. No network: the models.dev fetch is
 off (`[agent] opencode_models_fetch = false`) and the plugin dependency
-is seeded (Task 7), so the proof also runs in a network namespace with
+is seeded, so the test also runs in a network namespace with
 only loopback, as it was measured.
 
 Opt in: COUSIN_LIVE_OPENCODE=1 and OPENCODE_BIN=<the pinned opencode>.
 Each test starts one server in a throwaway root and stops it (the server's
 process group is killed if a stop failed). Besides the runner's outcomes,
-each test pins the raw event shapes the fake server models (R15): the
+each test pins the raw event shapes the fake server models: the
 first idle after an announced prompt ends a turn, an abort or a failure
 sends session.error before a doubled idle pair, a prompt sent while busy
 is answered by the same run. A mismatch here is the fake lying."""
@@ -170,7 +170,7 @@ class TestLiveOpencode(HermeticCase):
         self.assertFalse(result[0]["interrupted"])
         # opencode stored exactly the text the runner sent (the echo is an exact match)
         self.assertEqual([u["echo_of"] for u in self.payloads("user")], [a.inbox_id])
-        # the fake provider is the model's endpoint (Review Focus 2); the composed
+        # the fake provider is the model's endpoint; the composed
         # system prompt reaches it, naming the tools as opencode does
         chats = self.provider.chats(aux=True)
         self.assertEqual({(c["path"], c["model"]) for c in chats},
@@ -201,7 +201,7 @@ class TestLiveOpencode(HermeticCase):
         a = r.enqueue(_op("please reply"))
         self.assertEqual(self.done(a), "delivered")
         first, second = self.provider.chats()[:2]
-        # the model really sees the cousin_* names (Task 4)
+        # the model really sees the cousin_* names
         self.assertIn("cousin_reply", first["tools"])
         self.assertIn("cousin_handoff", first["tools"])
         self.assertNotIn("mcp__cousin__reply", first["tools"])
@@ -238,7 +238,7 @@ class TestLiveOpencode(HermeticCase):
                         "the model's reply started streaming")
         t0 = time.monotonic()
         self.assertTrue(r.interrupt())
-        self.assertEqual(self.done(a, 15), "delivered")      # R14': the turn's first row
+        self.assertEqual(self.done(a, 15), "delivered")      # the turn's first row
         self.assertTrue(_wait(lambda: r.state() == "idle", 15))
         took = time.monotonic() - t0
         self.assertLess(took, 10.0)

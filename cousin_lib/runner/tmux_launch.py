@@ -1,4 +1,4 @@
-"""The tmux kind's in-pane launcher (phase 11 Task 6; I6, R3, R13).
+"""The tmux kind's in-pane launcher.
 
 The pane's command is `exec env -i <env_base> <python> <this file> --home H
 [--fresh] -- claude ...`: tmux's own environment is rebuilt by the login
@@ -7,12 +7,12 @@ launcher then
 
   - reads the cousin's account (accounts.for_cousin) and adds its
     variables (a named login's CLAUDE_CONFIG_DIR; `host` adds none);
-    `claude-token` and `anthropic-key` accounts are refused (P11-6);
+    `claude-token` and `anthropic-key` accounts are refused;
   - adds CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 and DISABLE_AUTOUPDATER=1, and
     COUSIN_PANE_PID: its own pid, which the exec chain makes the pane's and
     the CLI's (the pane hook writes only for that CLI, tmux_hook.from_pane);
   - on a fresh start (--fresh) appends `--append-system-prompt` with the
-    text of data/run/tmux-context.md (R10), read here so it never passes
+    text of data/run/tmux-context.md, read here so it never passes
     through tmux's parser;
   - applies the hard deny again (DENY_PREFIXES), except the variables it
     set itself, and refuses the print-mode flags;
@@ -136,7 +136,7 @@ def main(argv=None):
     if account.kind in REFUSED_KINDS:
         return _refuse(home, "the tmux kind runs on a subscription login (host or a claude-login"
                        " account); %s accounts are refused until a login-free config dir is shown"
-                       " to start with no menu (phase 11 P11-6; A4: onboarding is skippable by"
+                       " to start with no menu (onboarding is skippable by"
                        " seeding, but a token's login screen is not measured)" % account.kind)
     try:
         own = accounts.account_env(account, root)

@@ -2,8 +2,8 @@
 
 What a cousin must know about the framework, GENERATED from the one tool
 registry and the release, instead of copied into every home's identity
-file. It sits in the byte-stable system prompt (phase 0 finding 3: one
-changed byte re-creates the whole appended block), so it is a pure
+file. It sits in the byte-stable system prompt (one changed byte
+re-creates the whole appended block), so it is a pure
 function of (registry, MAJOR.MINOR): no clock, no path, no slug, no
 count of anything that grows. A PATCH release never changes a schema,
 so it changes a byte here only when it edits the static text below."""
@@ -25,8 +25,8 @@ contract says otherwise, this contract is right: identity files were
 written for an older framework and are not always updated with it."""
 
 # A `[[<tools>|text]]` segment names a registry tool: it stays, byte for
-# byte, when the runner serves every tool named, and goes when it does not
-# (#97), so a registry that disables a tool gets no instruction to use it.
+# byte, when the runner serves every tool named, and goes when it does
+# not, so a registry that disables a tool gets no instruction to use it.
 # `<tools>` is one name or several joined by `+` (_segment). A paragraph or
 # bullet that lost or changed a segment is re-wrapped; with every tool
 # served the text is the hand-wrapped one below, unchanged.
@@ -196,16 +196,16 @@ def _tool_block(definition, registry, tool_name):
     return "\n".join(lines)
 
 
-# The tmux kind's name in "Tools, not the terminal CLIs" (phase 11 I8, R10).
+# The tmux kind's name in "Tools, not the terminal CLIs".
 PANE_RUNNER = "an interactive Claude Code pane"
 
 
 def render(registry, version, *, tool_name=None, runner=None, other_servers=OTHER_SERVERS):
     """The contract for this registry at this release. Same inputs, same bytes.
-    Its prose names only the tools tool_definitions(registry) serves (#97).
+    Its prose names only the tools tool_definitions(registry) serves.
 
     `tool_name(name) -> str` is the name the model sees for a tool on its
-    lane (phase 9 R7): None is the SDK lane's (sdk_tool_name), whose bytes
+    lane: None is the SDK lane's (sdk_tool_name), whose bytes
     the prompt cache keys on; the opencode lane passes `cousin_<name>`. It
     names the tools in "Tools, not the terminal CLIs" too. `runner` is that
     section's name for the lane ("You run on <runner>"): None is "the SDK

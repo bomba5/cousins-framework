@@ -65,7 +65,7 @@ class AuthModeRoutes(ConsoleCase):
         self.assertNotIn("two words", json.dumps(body))
 
     def test_a_cousin_with_no_runner_is_409_with_the_line_and_no_tmux_call(self):
-        # R2: the mode switch restarts a legacy session; 2.0.0 refuses it
+        # the mode switch restarts a legacy session; 2.0.0 refuses it
         # by name before any tmux call, whatever the body says
         from cousin_lib.delivery import lane_refusal
         self.serve()

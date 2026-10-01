@@ -1,4 +1,4 @@
-"""Side sessions (spec, "Threads"; master plan phase 8).
+"""Side sessions (spec, "Threads").
 
 The runner ships primary-only: every thread runs in the one session. A
 cousin turns side sessions on in cousin.toml:
@@ -9,7 +9,7 @@ cousin turns side sessions on in cousin.toml:
 
 A kind mapped to "own" gets ONE side session for all its threads: the
 same system prompt, tools and working directory as the primary (so the
-cached prefix is shared, phase 4 R1), the same memory, its own context.
+cached prefix is shared), the same memory, its own context.
 A side session merges with the primary through memory, never through
 context.
 
@@ -174,16 +174,16 @@ class SideSession(SdkRunner):
     (a final mine, a new session, the side digest again), with no handoff,
     no [session] hooks and no generation of its own."""
 
-    # An interrupt row rides the `system` thread, the primary's (R2, R12): a
-    # side session that took it would interrupt its own turn and close the
-    # row delivered while the primary's task runs on (round 2 review N1).
-    # SdkRunner._take_interrupts reads this flag (phase 5, ruling P5-2).
+    # An interrupt row rides the `system` thread, the primary's: a side
+    # session that took it would interrupt its own turn and close the row
+    # delivered while the primary's task runs on.
+    # SdkRunner._take_interrupts reads this flag.
     takes_interrupts = False
 
     # The review gate's start-up sweep offers every held entry; only the
-    # primary runs it, or every side session would review the same rows
-    # (phase 7b review round 2, N2). A side session still holds after its
-    # own turns and reviews what it held.
+    # primary runs it, or every side session would review the same rows.
+    # A side session still holds after its own turns and reviews what it
+    # held.
     sweeps_at_start = False
     takes_restart_note = False
 
@@ -197,7 +197,7 @@ class SideSession(SdkRunner):
         self._digest_due = False     # the next turn carries the side digest
         self._reset_due = None       # why the next boundary resets, or None
         self._generation = None      # the primary's generation this session belongs to
-        # The stream's head (the P8-2 rule): a side session's stream starts
+        # The stream's head: a side session's stream starts
         # with `side_session`, never with the `runner` event that marks the
         # primary's, so a reader of "the runner's stream" never takes it.
         self.stream.append(SIDE_HEAD, {"kind": kind, "id": self.session_id,
@@ -207,7 +207,7 @@ class SideSession(SdkRunner):
         return wake.Poller()
 
     async def _start_fresh(self, *, with_digest):
-        # due first: a new session's first turn carries the side digest (R6),
+        # due first: a new session's first turn carries the side digest,
         # even when the generation read below fails for a moment
         self._digest_due = True
         self._generation = await asyncio.to_thread(boot.read_generation, self.home)
@@ -235,8 +235,8 @@ class SideSession(SdkRunner):
                            kind=self.kind, primary=self.primary_activity())
 
     def _session_generation(self):
-        """The generation this session belongs to, not the home's current one
-        (review M3): a reset that fell back to the old session keeps saying so,
+        """The generation this session belongs to, not the home's current one:
+        a reset that fell back to the old session keeps saying so,
         and the next start resets it."""
         if self._generation is not None:
             return self._generation
@@ -257,7 +257,7 @@ class SideSession(SdkRunner):
         """Reset first when one is due. The claimed `row` is this session's
         to give back: whatever happens here (a stop, an unreadable
         generation file, a reset that raised, no session afterwards), it
-        goes back to the queue and the loop runs no turn (review I1)."""
+        goes back to the queue and the loop runs no turn."""
         try:
             why = await self._reset_reason()
             if why is None:
@@ -312,19 +312,19 @@ class SideSession(SdkRunner):
             self._fresh_pending = True        # the login retry starts it fresh
             return True
         # the new session did not start: back on the old one, else give up
-        # (Sessions restarts a side session that gave up, review I3)
+        # (Sessions restarts a side session that gave up)
         if old and await self._connect(resume=old, why="side reset failed", fatal=False):
             self._resume_id = self._pending_save = old
-            await self._flush_session()       # with the generation it belongs to (M3)
+            await self._flush_session()       # with the generation it belongs to
             self.stream.append("rollover", {"phase": "failed", "reason": why,
                                             "session": self.kind, "old_session": old,
                                             "error": self._last_connect_error})
             return True
         if self._login_blocked:
-            # the fallback was refused for the login: a login is never fatal
-            # (R15). Wait for it on the old session, as the fallback would
+            # the fallback was refused for the login: a login is never fatal.
+            # Wait for it on the old session, as the fallback would
             # have been: the login retry resumes it.
-            self._resume_id = self._expect_session = old   # R12, as _main does
+            self._resume_id = self._expect_session = old   # as _main does
             return True
         self._fail_connect("side session %s has no session after a reset: %s"
                            % (self.kind, self._last_connect_error))
@@ -345,7 +345,7 @@ class SideSession(SdkRunner):
 
 # A side session that gave up is rebuilt after RESTART_BASE_S, doubling per
 # attempt, capped at RESTART_CAP_S; one that stays up RESTART_RESET_S is a
-# recovery, and the next failure starts the backoff over (ruling P8-1).
+# recovery, and the next failure starts the backoff over.
 RESTART_BASE_S = 1.0
 RESTART_CAP_S = 300.0
 RESTART_RESET_S = 300.0
@@ -360,12 +360,12 @@ class Sessions:
     names every session, for the views. `factories` maps a session name
     to its client factory (tests); `client_factory` is the default.
 
-    A side session that gives up never ends the process (ruling P8-1): a
+    A side session that gives up never ends the process: a
     watcher thread records it on the primary's stream, puts the rows it had
     claimed back, and rebuilds it after a backoff. The primary and its
     running turn are never touched by a side session's failure."""
 
-    kind = "sdk"          # what the `runner` head event reports (phase 5)
+    kind = "sdk"          # what the `runner` head event reports
     watch_s = 0.2
 
     def __init__(self, home, *, kinds, client_factory=None, factories=None, **kw):
@@ -399,7 +399,7 @@ class Sessions:
         """{name: runner}: "primary" first, then each side kind."""
         return dict({PRIMARY: self.primary}, **self.sides)
 
-    # -- the side sessions' supervisor (ruling P8-1) -------------------------
+    # -- the side sessions' supervisor ---------------------------------------
     def _watch(self):
         while not self._stopping.wait(self.watch_s):
             for kind in self.kinds:
@@ -470,7 +470,7 @@ class Sessions:
     def stop(self, *, timeout=30.0):
         """The watcher first (nothing is rebuilt during a stop), then every
         session at once. `timeout` bounds the WHOLE stop, the watcher's join
-        and every session's included (phase 6: the supervisor kills the child
+        and every session's included (the supervisor kills the child
         a few seconds after it); a session still stopping at the deadline is
         left to the process's exit (its thread is a daemon)."""
         import threading
@@ -520,7 +520,7 @@ class Sessions:
     # -- cousin-runner's conveniences --------------------------------------
     def worker_alive(self):
         """The primary's: a side session that gave up is restarted here, never
-        a reason for the process to exit (ruling P8-1)."""
+        a reason for the process to exit."""
         return self.primary.worker_alive()
 
     @property
@@ -528,19 +528,18 @@ class Sessions:
         return self.primary.fatal
 
     def login_required(self):
-        """Any session waiting for a login: `--once` exits 4 on it (review I4)."""
+        """Any session waiting for a login: `--once` exits 4 on it."""
         return any(r.login_required() for r in self.sessions().values())
 
     def side_stalled(self):
         """True from a side session's give-up until a rebuild of it has
         CONNECTED once: while it waits for its rebuild, and while the
         rebuilt side has not opened a client (`_opened`, which a failed
-        connect never sets). `--once` exits 3 on it after its give-up clock
-        (round 2 review N2). The clock runs on across failed rebuilds (each
-        rebuild once restarted it, so under the real backoff exit 3 came
-        after about 26 s, not 10: final review), and a rebuild that connects
-        clears it at once (re-review: a healthy side serving a slow row must
-        not make `--once` exit 3). The long-running mode keeps rebuilding it
-        (P8-1)."""
+        connect never sets). `--once` exits 3 on it after its give-up clock.
+        The clock runs on across failed rebuilds (were each rebuild to
+        restart it, exit 3 would come after about 26 s under the real
+        backoff, not 10), and a rebuild that connects clears it at once (a
+        healthy side serving a slow row must not make `--once` exit 3). The
+        long-running mode keeps rebuilding it."""
         return bool(self._restart_at) or any(
             self._attempts[kind] and not self.sides[kind]._opened for kind in self.kinds)

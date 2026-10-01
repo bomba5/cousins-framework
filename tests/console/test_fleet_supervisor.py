@@ -1,6 +1,6 @@
 """The console's start, stop and restart on the runner lane go through
 cousin-supervisor, and the fleet row carries the supervisor's view of
-the cousin's runner (phase 6 task 2, R7, R10). The supervisor is a stub
+the cousin's runner. The supervisor is a stub
 answering its socket; the tmux lane's routes are covered, unchanged, by
 test_routes_fleet."""
 import os
@@ -85,7 +85,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual(self.tmux_calls(), "")
 
     def test_clean_stop_on_the_runner_lane_is_202_stopping(self):
-        # R6': the supervisor is asked without waiting; the fleet row's
+        # the supervisor is asked without waiting; the fleet row's
         # supervisor.state shows when the runner is down
         self.cousin("wren", extra=RUNNER)
         stub = self.stub()
@@ -102,7 +102,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual(self.tmux_calls(), "")
 
     def test_the_stop_route_never_waits_for_a_busy_runner(self):
-        # I6: a supervisor that would hold a waited stop for the runner's
+        # a supervisor that would hold a waited stop for the runner's
         # turn (here 5 s) does not hold the HTTP request
         self.cousin("wren", extra=RUNNER)
 
@@ -128,7 +128,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual((body["status"], body["runner"]), ("stopped", "stopped"))
 
     def test_a_refused_stop_is_502_with_the_error_never_stopped(self):
-        # N7: only `stopping` and stopped/not running are outcomes; a
+        # only `stopping` and stopped/not running are outcomes; a
         # supervisor that refused the stop is a bad gateway, with its reason
         self.cousin("wren", extra=RUNNER)
         self.stub(stop={"ok": False, "error": "the supervisor is stopping"})
@@ -152,9 +152,9 @@ class TestRunnerLaneStartStop(_Case):
         return seen
 
     def test_a_stop_of_a_hand_started_runner_with_no_supervisor_says_so(self):
-        # #92: the stop found no supervisor and a runner holding the lock
-        # (started by hand): 502 "cousin-supervisor refused the stop: no
-        # reason given" named a refusal nobody made
+        # the stop found no supervisor and a runner holding the lock
+        # (started by hand): it must not answer 502 "cousin-supervisor
+        # refused the stop: no reason given", a refusal nobody made
         from cousin_lib import supervisor
         home = self.cousin("wren", extra=RUNNER)
         server = self.serve()
@@ -173,7 +173,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertIn(("cousin-status", {"slug": "wren", "status": "stop failed"}), seen)
 
     def test_a_still_stopping_start_is_409(self):
-        # #92: transient, the caller's to retry; it was a 500
+        # transient, the caller's to retry; not a 500
         from cousin_lib import supervisor
         home = self.cousin("wren", extra=RUNNER)
         self.stub(start={"ok": False, "name": "runner:wren",
@@ -189,9 +189,9 @@ class TestRunnerLaneStartStop(_Case):
         self.assertIn("still stopping", statuses[-1]["error"])
 
     def test_a_start_beside_a_hand_started_runner_is_409_and_starts_nothing(self):
-        # #92: held, a runner started by hand alive, a supervisor with no
-        # child of its own running: "started" was answered for a second
-        # runner that sat in backoff behind the first one's lock
+        # held, a runner started by hand alive, a supervisor with no
+        # child of its own running: "started" must not be answered for a
+        # second runner that would sit in backoff behind the first one's lock
         from cousin_lib import supervisor
         home = self.cousin("wren", extra=RUNNER)
         stub = self.stub()
@@ -205,7 +205,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertNotIn(("start", "wren"), stub.ops())
 
     def test_any_refused_start_is_a_start_failed_event(self):
-        # #92: `starting` went out and nothing after it on a refusal
+        # a refusal after `starting` must still be followed by an event
         self.cousin("wren", extra=RUNNER)
         server = self.serve()
         seen = self._events(server)
@@ -226,7 +226,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual(stub.ops(), [("stop", "wren")])
 
     def test_a_stop_with_no_supervisor_is_200_stopped_and_held(self):
-        # O9 through the console: nothing ran, the hold is written
+        # through the console: nothing ran, the hold is written
         from cousin_lib import supervisor
         home = self.cousin("wren", extra=RUNNER)
         self.serve()
@@ -278,13 +278,13 @@ class TestRunnerLaneStartStop(_Case):
         while ("start", "wren") not in stub.ops() and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertEqual(stub.ops(), [("stop", "wren"), ("status", None), ("start", "wren")])
-        # #98 review: the hold a restart writes names the restart, so the
+        # the hold a restart writes names the restart, so the
         # resumed session is told to continue, not that a stop cut it
         self.assertEqual(stub.requests[0]["by"], "console restart")
         self.assertEqual(self.tmux_calls(), "")
 
     def test_restart_holds_the_mark_until_start_when_down_finishes(self):
-        # fix round 2: the route answers 202 and returns, but its own
+        # the route answers 202 and returns, but its own
         # background half (_start_when_down) is still waiting on the
         # supervisor - the exclusive mark must stay held for that whole
         # window, released only once that half is done, not when the
@@ -317,7 +317,7 @@ class TestRunnerLaneStartStop(_Case):
         self.assertEqual(stub.ops(), [("stop", "wren"), ("status", None), ("start", "wren")])
 
     def test_a_failed_handoff_releases_the_hold(self):
-        # Fix round 3, Important 1: handed_off must flip only once
+        # handed_off must flip only once
         # Thread.start() has actually returned; if it raises instead (a
         # thread the OS refused, say), the mark must not leak forever.
         self.cousin("wren", extra=RUNNER)
@@ -367,7 +367,7 @@ class TestFleetRowSupervisor(_Case):
                                              "reason": "configuration (exit 2)",
                                              "last_exit": "exit 2"}})
         self.serve()
-        # round 4: the reason rides along, so the console can say why
+        # the reason rides along, so the console can say why
         self.assertEqual(self.row("wren")["supervisor"],
                          {"state": "failing", "reason": "configuration (exit 2)"})
         self.assertIn("supervisor", self.row("sam"))
@@ -404,7 +404,7 @@ class TestRestartSupervised(_Case):
 
 
 class TestCreateRunnerCousin(_Case):
-    """POST /api/cousins takes `runner` and `account` (phase 6 task 2)."""
+    """POST /api/cousins takes `runner` and `account`."""
 
     def setUp(self):
         super().setUp()
@@ -433,7 +433,7 @@ class TestCreateRunnerCousin(_Case):
             "runner": "", "account": None})
         self.assertEqual(status, 201, body)
         data = tomllib.loads((self.root / "cousins" / "toki" / "cousin.toml").read_text())
-        self.assertEqual(data["agent"], {"runner": "sdk"})   # R4: the default kind
+        self.assertEqual(data["agent"], {"runner": "sdk"})   # the default kind
 
     def test_a_bad_runner_or_account_is_400_and_nothing_is_created(self):
         self.serve()

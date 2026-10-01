@@ -182,7 +182,7 @@ class TestBraidMemory(unittest.TestCase):
 
 
 class TestLegacyReincarnateRefused(LifecycleCase):
-    """R2: reincarnate refuses a cousin with no [agent] runner by name
+    """Reincarnate refuses a cousin with no [agent] runner by name
     and touches nothing: no snapshot, no rewrite, no flip, no tmux."""
 
     def test_reincarnate_on_a_cousin_with_no_runner_is_refused(self):

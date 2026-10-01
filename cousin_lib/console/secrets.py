@@ -13,7 +13,8 @@ printable non-space characters, at most agent_auth.KEY_MAX_CHARS, in a 0700
 directory of ours). What that reader would refuse at the next start is
 refused here, before anything is written.
 
-Kept out of _common.py on purpose (phase 11 edits that file)."""
+Kept out of _common.py on purpose: the secret writer stays in one small
+module of its own."""
 from __future__ import annotations
 
 import os

@@ -118,7 +118,7 @@ class TestListCousins(ConsoleCase):
         self.assertTrue(body["cousins"][0]["active"])
 
     def test_a_row_has_no_chat_port(self):
-        # R10: no per-cousin chat server, so a local row names no port
+        # no per-cousin chat server, so a local row names no port
         # and no host (a hive node's remote row keeps its own)
         self.cousin("wren")
         self.cousin("toki", extra='\n[agent]\nrunner = "fake"\n')
@@ -155,7 +155,7 @@ class TestSpawn(ConsoleCase):
         home = self.root / "cousins" / "toki"
         self.assertEqual(body["home"], str(home))
         self.assertIn("# Toki (toki)", (home / "CLAUDE.md").read_text())
-        # R10: a cousin has no chat port, so a port is refused
+        # a cousin has no chat port, so a port is refused
         status, body = self.post("/api/cousins", {
             "slug": "sam", "role": "tester", "voice": "plain", "port": 8123})
         self.assertEqual(status, 400, body)
@@ -228,9 +228,9 @@ class TestDismiss(ConsoleCase):
 
 
 class TestStartStopRestart(ConsoleCase):
-    """R2: a cousin with no runner kind is refused by name (409) by the
+    """A cousin with no runner kind is refused by name (409) by the
     start, the stop and the restart, before any tmux call and with no
-    chat server; a worker's stop is a no-op that says so (R14)."""
+    chat server; a worker's stop is a no-op that says so."""
 
     def test_start_stop_and_restart_of_a_cousin_with_no_runner_are_409(self):
         from cousin_lib.delivery import lane_refusal
@@ -256,9 +256,9 @@ class TestStartStopRestart(ConsoleCase):
 
 
 class TestExclusiveMark(ConsoleCase):
-    """Fix round 2, Important: dismiss, start, stop, restart and set_auth
-    used to read longop.op_running() unlocked and then do their own
-    unlocked work - nothing marked the cousin busy, so a migrate or a
+    """Dismiss, start, stop, restart and set_auth used to read
+    longop.op_running() unlocked and then do their own unlocked work -
+    nothing marked the cousin busy, so a migrate or a
     login (longop.start) could start on the same cousin mid-route. Each
     route now holds an exclusive mark (routes_fleet._exclusive, backed by
     longop.exclusive) for as long as its own work runs."""
@@ -270,10 +270,9 @@ class TestExclusiveMark(ConsoleCase):
         return slow_start
 
     def test_a_route_holding_the_mark_refuses_a_longop(self):
-        # the reviewer's repro: while start's own work runs, nothing
-        # used to mark the cousin busy, so a migrate could start beside
-        # it (and, in the real finding, beside a dismiss archiving and
-        # deleting the home).
+        # while start's own work runs, nothing used to mark the cousin
+        # busy, so a migrate could start beside it (and beside a dismiss
+        # archiving and deleting the home).
         self.cousin("wren", extra='\n[agent]\nrunner = "fake"\n')
         (self.root / "config" / "agent-cmd").write_text("my-agent\n")
         server = self.serve()
@@ -647,7 +646,7 @@ class TestModelAndEffort(ConsoleCase):
                                    {"model": "m"})[0], 404)
 
     def test_a_runner_cousins_effort_goes_to_agent_where_the_runner_reads_it(self):
-        """#100: the runner reads [agent] model and effort, never [runtime]:
+        """The runner reads [agent] model and effort, never [runtime]:
         the console's change of a runner-lane cousin did nothing."""
         home = self.cousin("wren", extra='\n[runtime]\nsession_id = "abc"\n'
                                          '\n[agent]\nrunner = "sdk"\n')
@@ -663,10 +662,10 @@ class TestModelAndEffort(ConsoleCase):
 
     def test_a_runner_cousins_model_is_validated_by_one_turn_before_it_is_written(self):
         """As migrate does (NEVER_UNRUN): one smallest turn with the model on
-        the cousin's own account, in a child process (#100 review: the
-        turn's scrub of os.environ is process-wide); a failure is the API's
-        words, nothing written. The console never runs the turn itself.
-        WP-A round 1: the turn is the cousin's long operation (202), the
+        the cousin's own account, in a child process (the turn's scrub
+        of os.environ is process-wide); a failure is the API's words,
+        nothing written. The console never runs the turn itself. The
+        turn is the cousin's long operation (202), the
         same `agent-settings` op the agent panel starts."""
         import time
         from unittest import mock
@@ -726,7 +725,7 @@ class TestModelAndEffort(ConsoleCase):
                 hold.release()
 
     def test_an_unchanged_model_or_effort_asks_no_restart_and_refreshes_nothing(self):
-        """#100 re-review minor: a save of the value the cousin already has
+        """A save of the value the cousin already has
         changes nothing, so it needs no restart and no fleet refresh."""
         from unittest import mock
         home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\nmodel = "m-one"\n'
@@ -810,7 +809,7 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(status, 201, body)
         data = tomllib.loads(
             (self.root / "cousins" / "toki" / "cousin.toml").read_text())
-        # R4: no runner named is sdk, whose model and effort are [agent]'s
+        # no runner named is sdk, whose model and effort are [agent]'s
         self.assertEqual(data["agent"], {"runner": "sdk", "model": "m-one",
                                          "effort": "medium"})
         self.assertNotIn("runtime", data)
@@ -978,7 +977,7 @@ class TestPidAndUptime(ConsoleCase):
 
 
 class TestRemovedKeysRow(ConsoleCase):
-    """R7: a row names the keys 2.0.0 removed that its cousin.toml still
+    """A row names the keys 2.0.0 removed that its cousin.toml still
     carries (the install's own are the supervisor's status); the cousin is
     served as usual."""
 

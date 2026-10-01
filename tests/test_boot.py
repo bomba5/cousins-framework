@@ -203,7 +203,7 @@ class TestSharedLayer(BootCase):
 
     def test_pending_proposals_never_reach_the_packet(self):
         (self.root / "shared" / "proposed").mkdir(parents=True)
-        (self.root / "shared" / "proposed" / "bart__x.md").write_text(
+        (self.root / "shared" / "proposed" / "sam__x.md").write_text(
             "---\nkind: rule\n---\nUNREVIEWED RULE\n")
         text = assemble("wren", self.home)["text"]
         self.assertNotIn("UNREVIEWED RULE", text)

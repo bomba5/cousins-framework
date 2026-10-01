@@ -1,4 +1,4 @@
-"""The bridge guard (phase 9 R13): the Claude-subscription bridge cannot
+"""The bridge guard: the Claude-subscription bridge cannot
 come back through a config line, a plugin entry, a header or the
 environment. One subtest per marker, in the config and in the env."""
 import ast
@@ -12,7 +12,7 @@ from cousin_lib.runner import opencode_guard
 from cousin_lib.runner.opencode_guard import BRIDGE_MARKERS, BridgeRefused, refuse_bridge
 from tests._hermetic import HermeticCase
 
-# What the runner renders (R5), a local OpenAI-compatible endpoint included.
+# What the runner renders, a local OpenAI-compatible endpoint included.
 CLEAN_CONFIG = {
     "$schema": "https://opencode.ai/config.json",
     "model": "local/qwen3-coder", "small_model": "local/qwen3-coder",

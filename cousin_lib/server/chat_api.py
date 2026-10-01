@@ -113,7 +113,7 @@ def _attachment(home, message_id, image):
 
 
 def send(config, body, *, deliver=None):
-    """One inbound chat message: divert a login code (R18), store the row,
+    """One inbound chat message: divert a login code, store the row,
     deliver it (`deliver(user=, message=, message_id=, attachments=)`,
     fire-and-forget), touch the presence marker and capture a correction,
     then fire the chat hooks. A runner recalls in its own prompt hook, so

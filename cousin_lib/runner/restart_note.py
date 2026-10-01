@@ -1,4 +1,4 @@
-"""The runner restarted: say so to the resumed session (#98).
+"""The runner restarted: say so to the resumed session.
 
 A runner stop interrupts the turn in flight, and the agent CLI records that
 interruption in the session's transcript as the user's ("[Request

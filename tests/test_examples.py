@@ -56,7 +56,7 @@ class TestWren(unittest.TestCase):
     def test_cousin_toml_parses_with_matching_identity(self):
         cfg = tomllib.loads((_WREN / "cousin.toml").read_text())
         self.assertEqual(cfg["cousin"]["slug"], "wren")
-        self.assertNotIn("chat", cfg)   # no per-cousin chat server (R10)
+        self.assertNotIn("chat", cfg)   # no per-cousin chat server
 
 
 if __name__ == "__main__":

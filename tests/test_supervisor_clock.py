@@ -1,4 +1,4 @@
-"""The clock (phase 6 task 10): the supervisor owns schedules and loops
+"""The clock: the supervisor owns schedules and loops
 by running the loops daemon as its child; one process is the clock,
 never each runner. A real `cousin-supervisor run` over one `fake` runner
 cousin: a one-shot and a `[[loops]]` entry land in the runner's inbox on
@@ -176,7 +176,7 @@ class TestTheClock(_ClockCase):
         self.assertEqual(len(shots), 1, rows)
         self.assertEqual(len(loops), 1, rows)
         self.assertEqual(len(rows), 2, "nothing else is due (no beat, no flip): %r" % rows)
-        # the daemon's delivery shape (R18): thread loop:daemon, source loop
+        # the daemon's delivery shape: thread loop:daemon, source loop
         for thread_id, source, _body, created_at in shots + loops:
             self.assertEqual((thread_id, source), ("loop:daemon", "loop"))
             self.assertGreaterEqual(created_at, self.started)
@@ -233,12 +233,13 @@ class TestTheClock(_ClockCase):
 
 @unittest.skipUnless(os.path.isdir("/proc/self"), "reads the process table from /proc")
 class TestABusyClock(_ClockCase):
-    """Review round 2, N1: a stray `cousin-loops run` (an orphan of a
+    """A stray `cousin-loops run` (an orphan of a
     SIGKILLed supervisor, a hand-started one, a unit still enabled)
     holds run/loops.lock BEFORE the supervisor starts. The supervisor's
     loops child exits 5, busy: it waits in `backoff`, never `failing`,
-    and becomes the clock once the stray is gone. Before the fix it was
-    `failing` after five exits (about 15 s) and nothing ticked again."""
+    and becomes the clock once the stray is gone. Counted as failures, it
+    would be `failing` after five exits (about 15 s) and nothing would
+    tick again."""
 
     BUSY = "another loops daemon holds its lock (exit 5)"
     COUNTED_EXITS = 5            # supervisor.MAX_EXITS: what used to mark it failing

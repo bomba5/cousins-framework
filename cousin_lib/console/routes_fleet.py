@@ -226,7 +226,7 @@ def effective_runtime(config, defaults):
     """The model and effort the NEXT start of this cousin renders. A tmux
     cousin: its own [runtime] value, else the install default, else null (a
     placeholder would then fail the start, and the row says so by showing
-    nothing rather than a guess). A runner cousin (#100): its [agent]
+    nothing rather than a guess). A runner cousin: its [agent]
     value, the one its runner reads, else null (the CLI's own default)."""
     if spawn.runner_lane(config.home):
         try:
@@ -245,7 +245,7 @@ def supervisor_state(snap, slug):
     """The supervisor's view of a cousin's runner: {"state", "reason"} from
     its snapshot (run/supervisor.json), or None when there is no live
     snapshot or no `runner:<slug>` child in it. Unknown is null, never
-    "stopped" (R7). The reason says why a child is `failing` (a tmux
+    "stopped". The reason says why a child is `failing` (a tmux
     runner that gave up on its pane names what it saw)."""
     children = (snap or {}).get("children")
     row = children.get("runner:%s" % slug) if isinstance(children, dict) else None
@@ -350,7 +350,7 @@ def fleet_row(server, config, defaults=None, patterns=None, snap=_UNREAD, plugin
         "runner": runner,
         "tokensSpent": tokens.today_total(server, config.home),
         "supervisor": supervisor_state(snap, config.slug),
-        # R7: keys 2.0.0 no longer reads, named on the card (the install's
+        # keys 2.0.0 no longer reads, named on the card (the install's
         # own are in `cousin-supervisor status`)
         "removedKeys": removed_keys.scan_home(config.home),
         # the plugins it enables, each with its console tab or null
@@ -480,7 +480,7 @@ def _start_runner(server, slug, config):
     and for a runner the supervisor did not start holding the lock (a
     start would add a second one in backoff, spawn.ForeignRunner); 500
     for any other refusal. Every refusal is a `start failed` event with
-    its error, after the `starting` one (#92)."""
+    its error, after the `starting` one."""
     if delivery.is_alive(config.home) and not supervisor.is_held(config.home):
         return {"ok": True, "slug": slug, "status": "already running"}
     server.emit("cousin-status", {"slug": slug, "status": "starting"})
@@ -498,7 +498,7 @@ def _start(server, slug):
     config = load_cousin(server, slug)
     if spawn.runner_lane(config.home):
         return _start_runner(server, slug, config)
-    # R2: 2.0.0 has no legacy tmux lane: a cousin with no runner kind is
+    # 2.0.0 has no legacy tmux lane: a cousin with no runner kind is
     # refused by name, before any tmux call and with no chat server
     raise HttpError(409, delivery.lane_refusal(config.home))
 
@@ -506,15 +506,15 @@ def _start(server, slug):
 def _stop(server, slug, by="console"):
     """Stop at once; `by` names the request in the runner's hold (a
     restart's names itself, restart_note.REQUESTED_RESTART_BY, so the
-    resumed session is told to continue, #98). On the runner lane the supervisor is asked with
-    wait false (R6'): the answer comes once the runner is signalled,
+    resumed session is told to continue). On the runner lane the supervisor is asked with
+    wait false: the answer comes once the runner is signalled,
     `status: "stopping"`, and the fleet row's `supervisor.state` shows
     when it is down; a turn in hand can take up to 35 s. Only `stopping`
     and stopped or not running are outcomes: anything else (the
     supervisor refused, `runner: "unknown"`) is a 502 with its error,
-    never `status: "stopped"` (N7). With no supervisor and a runner
+    never `status: "stopped"`. With no supervisor and a runner
     started by hand still holding the lock, nothing here can signal it:
-    503 saying so, with the hold the stop wrote (#92)."""
+    503 saying so, with the hold the stop wrote."""
     home = cousin_home(server, slug)
     server.emit("cousin-status", {"slug": slug, "status": "stopping"})
     if spawn.runner_lane(home):
@@ -543,7 +543,7 @@ def _stop(server, slug, by="console"):
         result = spawn.stop_cousin(home, tmux_bin=server.tmux_bin,
                                    tmux_socket=server.tmux_socket)
     except spawn.SpawnError as err:
-        # R2: a cousin with no runner kind is refused by name (a worker's
+        # a cousin with no runner kind is refused by name (a worker's
         # stop is a no-op that says so)
         raise HttpError(409, str(err))
     return {"ok": True, "slug": slug, "status": "stopped", **result}
@@ -632,7 +632,7 @@ def register():
             raise HttpError(400, "voice is required: the template refuses"
                                  " to render without one")
         if body.get("port") is not None:
-            # R10: no per-cousin chat server, so a cousin has no port
+            # no per-cousin chat server, so a cousin has no port
             raise HttpError(400, "port: 2.0.0 runs no per-cousin chat server,"
                                  " so a cousin has no chat port")
         # The four runtime fields the dialog sends; each is validated
@@ -711,7 +711,7 @@ def register():
             if spawn.runner_lane(config.home):
                 out = _stop(server, slug)
                 return (202 if out["status"] == "stopping" else 200), out
-            # R2: no legacy tmux lane: _stop refuses a cousin with no runner
+            # no legacy tmux lane: _stop refuses a cousin with no runner
             # kind (409) before any tmux call; a worker's stop is a no-op
             return 200, _stop(server, slug)
             if not clean or not session_alive(server, config):
@@ -765,7 +765,7 @@ def register():
     def restart(req, slug):
         # A restart stays immediate: it applies a setting (a model, an
         # auth mode) and comes straight back; a clean stop is the stop
-        # button's. On the runner lane the stop does not wait (R6'): a
+        # button's. On the runner lane the stop does not wait: a
         # runner mid-turn is answered 202 and started again in the
         # background once the supervisor reports it down.
         server = req.server
@@ -794,7 +794,7 @@ def register():
                 started = _start(server, slug)
             except HttpError as err:
                 if stopped.get("held"):
-                    # the stop half held a cousin no supervisor ran (O9); a
+                    # the stop half held a cousin no supervisor ran; a
                     # restart asked for it running, so a refused start leaves no
                     # hold of its own - but an earlier hold stays, word for word
                     if earlier_hold is None:
@@ -918,7 +918,7 @@ def register():
         # already shows the new one, so the client is told which. A save
         # of the value it already has changes nothing: no restart, no refresh.
         if spawn.runner_lane(home):
-            # the runner reads [agent], never [runtime] (#100), through the
+            # the runner reads [agent], never [runtime], through the
             # agent settings' one path (routes_agent.change_agent): held
             # exclusively, and an sdk model's validating turn is the
             # cousin's `agent-settings` long operation (202)
@@ -1028,7 +1028,7 @@ def register():
         from cousin_lib.server import chat_api
         if chat.is_local_runner(dest):
             # a runner cousin needs no chat server: its store and inbox
-            # directly (phase 10a)
+            # directly
             try:
                 body = chat.deliver_local(dest, payload)
             except chat_api.BadRequest as err:

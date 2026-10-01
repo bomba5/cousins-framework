@@ -573,8 +573,8 @@ class TestCliAndRun(LoopsCase):
 
 class TestOneShotsFireFromTheTick(LoopsCase):
     """docs/reference/loops.md tick step 4: the daemon fires due one-shots
-    from the scheduler store. Canary: before the fix nothing but a
-    hand-run `cousin-schedule tick` ever fired them."""
+    from the scheduler store. Canary: without it nothing but a
+    hand-run `cousin-schedule tick` ever fires them."""
 
     def _add_job(self, slug, prompt, target_ts):
         from cousin_lib import schedule
@@ -765,7 +765,7 @@ class TestDefaultIsAliveForARunnerCousin(unittest.TestCase):
 
 
 class TestMaxAgeOnTheRunnerLane(HermeticCase):
-    """Master plan phase 4 task 6: max_age fires at the configured cadence
+    """max_age fires at the configured cadence
     with the stagger intact, for runner cousins."""
     def test_two_due_runner_cousins_roll_over_one_per_tick_with_reason_max_age(self):
         import contextlib

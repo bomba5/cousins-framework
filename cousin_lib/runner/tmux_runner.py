@@ -1,20 +1,20 @@
 """TmuxRunner: an interactive Claude Code in a tmux pane behind the runner
-protocol (phase 11; plan R2-R25, interfaces I2).
+protocol.
 
 The pane is driven, never trusted: the runner types a row and learns what
 happened only from the CLI's own transcript (runner/transcript.py). A row
 is TAKEN when a turn start's first line begins with its nonce, and it
 CLOSES once, at that turn's end: `turn_duration` delivers it, the
 interrupt entry delivers it (interrupted), an API error fails it, a limit
-error requeues it (R4, R6). A turn start while a turn is live ends that
+error requeues it. A turn start while a turn is live ends that
 turn as interrupted ("send now" writes no end of its own; measured).
 
-Continuity is the session id (P11-2): start() adopts a live pane whose
+Continuity is the session id: start() adopts a live pane whose
 hook record (run/tmux-session.json, runner/tmux_hook.py) names the recorded
 session and the pane's CLI pid, else kills it and resumes the recorded
-session in a new pane, else starts fresh (R24); nothing
+session in a new pane, else starts fresh; nothing
 depends on the pane outliving the runner. A stop always ends the live
-turn; the pane is killed only when the stop is a hold (run/held, P11-10).
+turn; the pane is killed only when the stop is a hold (run/held).
 
 The structure is FakeRunner's (the reference runner): one worker thread,
 the wake socket, the state machine, `_fail_turn` never silent, the
@@ -65,8 +65,8 @@ CLAIMS_FILE = "tmux-claims.json"
 CURSOR_FILE = "tmux-cursor.json"
 SESSION_FILE = "runner-session.json"
 HOOK_RECORD = ("run", "tmux-session.json")    # written by the pane's SessionStart hook
-CONTEXT_FILE = ("data", "run", "tmux-context.md")     # R10: the launcher appends it on --fresh
-POINTER_FILE = ("data", "run", "tmux-resume.md")      # R10: the hook's SessionStart context on a resume
+CONTEXT_FILE = ("data", "run", "tmux-context.md")     # the launcher appends it on --fresh
+POINTER_FILE = ("data", "run", "tmux-resume.md")      # the hook's SessionStart context on a resume
 ORIGINS_FILE = ("data", "run", "tmux-context-origin.json")   # session id -> the block it was born with
 ORIGINS_KEPT = 32
 LAUNCH_EXIT = ("data", "run", "tmux-launch-exit.txt")   # tmux_launch's last refusal
@@ -120,9 +120,9 @@ def clear_giving_up(home):
 
 class TmuxRunner:
     kind = "tmux"
-    UNSUPPORTED = ("midturn_fold",)   # the CLI queues or interrupts, never folds (S3, S3b)
+    UNSUPPORTED = ("midturn_fold",)   # the CLI queues or interrupts, never folds
     PLUGIN_ITEMS = ()
-    recovers_claims = True            # _serve leaves recovery to start() (P11-9)
+    recovers_claims = True            # _serve leaves recovery to start()
     takes_interrupts = True
 
     def __init__(self, home, *, account=None, model=None, effort=None, policy=None,
@@ -164,17 +164,17 @@ class TmuxRunner:
         self._handoff_limited = False
         self._turn_seq = 0
         self._runner_turn_seen = False   # a runner-nonce turn started since the flag was cleared
-        self._hook_heard = False         # a pane hook's datagram for this session arrived (M-a)
+        self._hook_heard = False         # a pane hook's datagram for this session arrived
         self._first_end = None           # monotonic time of the first turn end
         self._hooks_silent_said = False
         self._changes_said = {}          # session ids a SessionStart named that are not ours
-        self._lost = None                # {"attempt", "next"} while the pane is gone (C3)
+        self._lost = None                # {"attempt", "next"} while the pane is gone
         self._next_alive = 0.0
         self._blocked = None             # {"delay", "until"} while typing is refused
         self._notice = None              # {"text", "nonce"}: a runner line owed at the first idle
         self._pane_pid = None            # the pane's CLI, as last seen alive
         self._probation = None           # {"since"} until a started pane has stayed up probation_s
-        self._reopen_fails = 0           # consecutive starts that failed or died unproven (N1)
+        self._reopen_fails = 0           # consecutive starts that failed or died unproven
         self._gave_up = False
         self.fatal = None                # why the worker gave up (main prints it)
         self.exit_code = None            # cousin-runner's exit then (GAVE_UP_EXIT)
@@ -220,19 +220,19 @@ class TmuxRunner:
 
     def begin_stop(self):
         """A stop was asked for (cousin-runner's signal handler, before
-        stop() runs): nothing new is claimed from now on (live proofs
-        09-25, finding 3); the live turn is finished or settled by stop()."""
+        stop() runs): nothing new is claimed from now on; the live turn is
+        finished or settled by stop()."""
         self._stopping.set()
         wake.poke(self.home)
 
     def stop(self, *, timeout=30.0):
-        """End the live turn and stop at idle (R21, R17's close): no new
+        """End the live turn and stop at idle: no new
         claim, one Escape on a live turn, then the worker reads the turn's
         end from the transcript (the row closes there, once) for at most
         STOP_SETTLE_S; only then does the loop end, and a held stop kill the
         pane. A claim still open once the pane is killed is settled here, as
-        R23 settles a dead pane's (review C5): the next runner, of either
-        kind, finds nothing claimed. A turn the stop cut leaves the #98 mark
+        a dead pane's are: the next runner, of either
+        kind, finds nothing claimed. A turn the stop cut leaves a mark
         (restart_note), so the resumed session is told who stopped it."""
         if self.machine.state == "stopped":
             return
@@ -328,7 +328,7 @@ class TmuxRunner:
     # -- the pane and the session ----------------------------------------
     def _recorded_session(self):
         """(session_id or None, fresh): `fresh` is a rollover's new id whose
-        CLI never started (N9): it starts fresh under that id, not resumed."""
+        CLI never started: it starts fresh under that id, not resumed."""
         data = _read_json(self._data(SESSION_FILE)) or {}
         sid = data.get("session_id")
         if not (isinstance(sid, str) and sid):
@@ -347,7 +347,7 @@ class TmuxRunner:
         return _read_json(self.home.joinpath(*HOOK_RECORD))
 
     def _adopt_refusal(self):
-        """Why the live pane may not be adopted (R24), or None: the hook's
+        """Why the live pane may not be adopted, or None: the hook's
         record must name the recorded session and the pane's CLI pid."""
         rec = self._hook_record()
         if rec is None:
@@ -380,7 +380,7 @@ class TmuxRunner:
             return self._launch_argv(self._session_id, fresh)
         try:
             from cousin_lib.runner import tmux_launch
-        except ImportError as exc:  # Task 6 lands tmux_launch.py
+        except ImportError as exc:  # an install without tmux_launch.py
             raise RunnerError("the tmux kind's launcher is not installed: %s" % exc)
         return tmux_launch.argv(home=self.home, session=("--session-id" if fresh else "--resume",
                                                         self._session_id),
@@ -394,12 +394,12 @@ class TmuxRunner:
         return tmux_launch.env_base(dict(os.environ), env_allow=self.env_allow)
 
     def _write_context(self, fresh):
-        """R10, before every pane start: the block (law, the pane's contract,
+        """Before every pane start: the block (law, the pane's contract,
         operator rules; prompt.compose_context_block) to data/run/
         tmux-context.md, which the launcher appends on a fresh start. A fresh
         session's block is remembered by its digest; a resumed one gets
         data/run/tmux-resume.md, the short pointer the pane's SessionStart
-        hook hands the model (S7: --append-system-prompt is dropped on a
+        hook hands the model (--append-system-prompt is dropped on a
         resume): the file's path and whether it changed since the session
         started with it."""
         from cousin_lib.runner import prompt, tools
@@ -448,7 +448,7 @@ class TmuxRunner:
                                          % (type(exc).__name__, exc)})
 
     def _turn_file(self, threads=None, nonce=""):
-        """run/turn.json for the stdio server (I5, R11): the live turn's
+        """run/turn.json for the stdio server: the live turn's
         threads, or cleared (None). Never fails a turn."""
         try:
             if threads is None:
@@ -460,7 +460,7 @@ class TmuxRunner:
             self.stream.append("error", {"error": "run/turn.json: %s" % exc})
 
     def _open_session(self):
-        """Adopt, else resume, else fresh (P11-2). Returns how."""
+        """Adopt, else resume, else fresh. Returns how."""
         recorded, fresh = self._recorded_session()
         self._session_id = recorded or str(uuid.uuid4())
         self._path = self._transcript_path()
@@ -468,7 +468,7 @@ class TmuxRunner:
         self.pane = self._make_pane(self._path)
         # a live pane runs the recorded id, fresh or not: a rollover ends the
         # old CLI before it writes the new id, so the pane is never the old one;
-        # the hook's record proves it (R24), and a pane it does not prove is
+        # the hook's record proves it, and a pane it does not prove is
         # killed (reap_pane's own kill: this runner already holds the lock)
         how = None
         if recorded is not None and self.pane.alive():
@@ -506,8 +506,8 @@ class TmuxRunner:
 
     def _start_pane(self, fresh):
         """The context block, then the pane; the pane is on probation until
-        it has stayed up probation_s: one that dies before is a failed start
-        (N1), counted toward REOPEN_GIVE_UP."""
+        it has stayed up probation_s: one that dies before is a failed start,
+        counted toward REOPEN_GIVE_UP."""
         self._prepare_start(fresh)
         self.home.joinpath(*LAUNCH_EXIT).unlink(missing_ok=True)
         self.pane.start(self._argv(fresh), cwd=str(self.home), env_base=self._env_base())
@@ -525,7 +525,7 @@ class TmuxRunner:
         """A started pane proves itself by staying up probation_s; the count
         of failed starts then begins again. Its box or its SessionStart
         datagram is not proof enough: a CLI can draw its box, fire its hook
-        and exit a moment later (the re-review's probe D), and counting that
+        and exit a moment later, and counting that
         as healthy restarts it about every second, forever."""
         p = self._probation
         if p is not None and time.monotonic() - p["since"] >= self.probation_s:
@@ -536,7 +536,7 @@ class TmuxRunner:
         kill_grace_s, False when it is still there at kill_bound_s. The
         SIGKILL comes first and is polled once more: a poll a loaded host
         returns past both the grace and the bound never gives up on a CLI
-        it has not killed (#130)."""
+        it has not killed."""
         if pid is None:
             return True
         start, killed = time.monotonic(), False
@@ -550,11 +550,11 @@ class TmuxRunner:
             time.sleep(POLL_S)
         return True
 
-    # -- a pane that went away (review C3) -----------------------------------
+    # -- a pane that went away -----------------------------------------------
     def _check_alive(self, force=False):
         """True while the pane is there; asked of tmux at most every
         ALIVE_CHECK_S unless `force`. One failed has-session (its own
-        timeout included) is not a dead pane (N2): a second one must fail
+        timeout included) is not a dead pane: a second one must fail
         too, and the pane's CLI must be gone; a CLI still running behind a
         tmux that does not answer is said once and settled never. A pane
         found gone is settled here. False whenever the pane is not usable."""
@@ -591,11 +591,11 @@ class TmuxRunner:
 
     def _pane_lost(self):
         """The CLI exited under a live runner: stop claiming, read what it
-        wrote before it went, settle every claim as R23 does for a dead pane
+        wrote before it went, settle every claim as for a dead pane
         (a taken row whose turn has no end closes `delivered`, cut, and the
         model is told once the pane is back; an untaken row is requeued;
         never `failed`), say it once, and reopen the session. A pane that
-        dies before it proved itself is a failed start (N1): backed off, and
+        dies before it proved itself is a failed start: backed off, and
         given up on after REOPEN_GIVE_UP in a row."""
         try:
             self._pump()
@@ -624,7 +624,7 @@ class TmuxRunner:
         self._turn_file(None)
         self._to("idle", "pane lost")
         if cut and stopping:
-            self._stop_cut = True            # stop() marks it; the next start says it (#98)
+            self._stop_cut = True            # stop() marks it; the next start says it
         elif cut:
             self._owe_notice("The previous turn was cut short: the pane's CLI exited before it"
                              " finished, and the runner resumed this session in a new pane. Its"
@@ -643,7 +643,7 @@ class TmuxRunner:
         while self._losses and now - self._losses[0] > self.loss_window_s:
             self._losses.popleft()
         if len(self._losses) > self.loss_max:
-            # a CLI that outlives its proof and dies, over and over (round 3)
+            # a CLI that outlives its proof and dies, over and over
             self._give_up("%d pane losses within %.0f s" % (len(self._losses), self.loss_window_s),
                           fatal="the runner gave up on its pane",
                           counts={"losses": len(self._losses), "window_s": self.loss_window_s})
@@ -655,9 +655,9 @@ class TmuxRunner:
         self._lost = {"next": time.monotonic()}
 
     def _cut_detail(self):
-        """A taken row's close when the pane went during a stop (live proofs
-        09-25, finding 5: a unit's cgroup kill takes the tmux server as the
-        runner stops): the stop's cut, as exit criterion 2 words it."""
+        """A taken row's close when the pane went during a stop (a unit's
+        cgroup kill takes the tmux server as the runner stops): the stop's
+        cut."""
         return "cut by a requested stop" if restart_note.held_by(self.home) else "cut by restart"
 
     def _failed_start(self, why):
@@ -702,8 +702,8 @@ class TmuxRunner:
     def _reopen(self):
         """One try at a pane on the recorded session once the backoff is
         over: the old CLI must be gone first (a second CLI on one session
-        writes one transcript twice); a live pane is adopted and recovered
-        (N2), a dead one resumed (or fresh under a rollover's id)."""
+        writes one transcript twice); a live pane is adopted and recovered,
+        a dead one resumed (or fresh under a rollover's id)."""
         if time.monotonic() < self._lost["next"]:
             return
         try:
@@ -725,7 +725,7 @@ class TmuxRunner:
                                       "source": how, "failed_before": self._reopen_fails})
 
     def _after_adopt_reopen(self):
-        """The pane was there after all (N2): its claims recovered as a
+        """The pane was there after all: its claims recovered as a
         start's are, and a turn that was live at the loss and has no end in
         the transcript is live again, so nothing is typed into it; it was
         never cut, so nobody is told it was."""
@@ -766,7 +766,7 @@ class TmuxRunner:
                         "until": time.monotonic() + self.notice_wait_s}
 
     def _owe_start_notice(self, how):
-        """What a start owes the model (R23, #98): a turn a restart or a
+        """What a start owes the model: a turn a restart or a
         stop cut, said as the one it was. The mark a stop left
         (restart_note) says who cut it; it is taken once the line is typed.
         A fresh session has nothing interrupted in it: the mark is dropped."""
@@ -806,9 +806,9 @@ class TmuxRunner:
         self._cut_prefix = None
 
     def _maybe_notice(self):
-        """A runner line owed at the first idle (a cut turn, R23), typed
-        before any row once the pane takes input (review I1: a pane still
-        booting has no box), tried again until NOTICE_WAIT_S, then said as a
+        """A runner line owed at the first idle (a cut turn), typed
+        before any row once the pane takes input (a pane still booting has
+        no box), tried again until NOTICE_WAIT_S, then said as a
         `notice_not_typed` event. True when this tick was spent on it."""
         if self._notice is None or self._pending_typed():
             return False
@@ -857,7 +857,7 @@ class TmuxRunner:
             return 0
 
     def _recover(self, how):
-        """Claims a previous runner left (R23, P11-9): scan the transcript
+        """Claims a previous runner left: scan the transcript
         from each claim's own offset; a taken row whose turn ended closes by
         that end; a taken row whose turn never ended closes `delivered`,
         cut by restart, when the pane is new; an untaken row is requeued."""
@@ -880,7 +880,7 @@ class TmuxRunner:
                 # untaken. A new pane never saw it: requeued above. A live
                 # pane may still hold it (queued behind a turn, or in the
                 # box): back with its nonces, and _run or _check_consumed
-                # decides (R23, review I4); a retype would deliver it twice
+                # decides; a retype would deliver it twice
                 if how == "adopted" and self.inbox.claim_id(row["id"], claimant=self.runner_id):
                     self._claims[row["id"]] = {"row": row, "nonces": sorted(nonces),
                                                "offset": int(c.get("offset") or 0),
@@ -912,7 +912,7 @@ class TmuxRunner:
 
     def _clear_stranded(self):
         """An adopted pane with no live turn and text in its box: a paste the
-        previous runner left un-entered (R23). Its row was requeued by
+        previous runner left un-entered. Its row was requeued by
         _recover, so the text is cleared, never entered: entering it would
         merge it with the next row's prompt."""
         stranded = self.pane.box_text()
@@ -922,7 +922,7 @@ class TmuxRunner:
                                          "text": stranded[:120]})
 
     def _release_adopted_untaken(self):
-        """R23 on a live pane: an untaken row is requeued only when the tail
+        """On a live pane, an untaken row is requeued only when the tail
         is at a turn end, the box is empty (a stranded paste was just
         cleared) and no queued input shows; otherwise it stays claimed under
         its nonces until its turn takes it or _check_consumed gives up."""
@@ -1007,7 +1007,7 @@ class TmuxRunner:
 
     def _hook_message(self, raw):
         """A pane hook's datagram as (event, session_id, source), or None for
-        anything else: a plain poke, or a shape no hook sends (review minor 5)."""
+        anything else: a plain poke, or a shape no hook sends."""
         try:
             data = json.loads(raw)
         except ValueError:
@@ -1024,8 +1024,8 @@ class TmuxRunner:
     def _heard(self, listener):
         """The pane hooks' datagrams (runner/tmux_hook.py). One is only a
         wake: it counts as heard when it names this session, and nothing
-        else is done on it (R19). No datagram within hooks_silent_s (5 s) of
-        the first turn end is a `hooks_silent` event, once (M-a). A runner
+        else is done on it. No datagram within hooks_silent_s (5 s) of
+        the first turn end is a `hooks_silent` event, once. A runner
         polling without its socket (wake.Poller) hears nothing by design and
         already said why, so it says nothing more."""
         for raw in listener.messages:
@@ -1104,7 +1104,7 @@ class TmuxRunner:
         """A skipped turn end (a turn_duration, an interrupt, an API error
         or a limit) while a turn is live: the turn is closed here, its rows
         `delivered`, or `failed` for an API error that is not a limit, with
-        the skip as the reason, and the runner goes idle; a limit is R6's
+        the skip as the reason, and the runner goes idle; a limit takes the
         limit end (_skipped_limit). Otherwise the live turn would hold the
         claim loop forever."""
         if self._live is None or e.kind not in ENDS:
@@ -1118,7 +1118,7 @@ class TmuxRunner:
         try:
             self.stream.append("result", {"inbox_ids": self._live_ids(),
                                           "interrupted": e.kind == "interrupt",
-                                          "is_error": outcome == FAILED})   # before the rows (#87)
+                                          "is_error": outcome == FAILED})   # before the rows
         finally:
             # the rows close and the runner idles even when the append raises
             try:
@@ -1131,7 +1131,7 @@ class TmuxRunner:
             self._to("idle", "turn closed by a skipped line")
 
     def _skipped_limit(self, e, fails, exc):
-        """R6's limit end for a skipped limit line: the taken rows requeued,
+        """The limit end for a skipped limit line: the taken rows requeued,
         never failed, and `rate_limited` (_limit_live); if that raises too,
         the same by hand, row by row."""
         try:
@@ -1163,7 +1163,7 @@ class TmuxRunner:
             nonce = transcript.turn_nonce(e, self._known_nonces())
             if nonce is None:
                 return
-            # a torn line merged with a turn start (P11-9): that turn started
+            # a torn line merged with a turn start: that turn started
             self.stream.append("error", {"error": "torn transcript line holding [inbox:%s]" % nonce})
             e = transcript.Entry(e.offset, e.end, "turn_start", nonce=nonce, raw={})
         if e.kind == "turn_start":
@@ -1244,7 +1244,7 @@ class TmuxRunner:
         return [row["id"] for row in (self._live["rows"] if self._live else [])]
 
     def _end_turn(self, *, interrupted):
-        # the result first (#87): whoever reads a row closed finds its result;
+        # the result first: whoever reads a row closed finds its result;
         # the rows close even when the append raises
         try:
             self.stream.append("result", {"inbox_ids": self._live_ids(),
@@ -1280,7 +1280,7 @@ class TmuxRunner:
         self.stream.append("error", {"error": message})
         try:
             self.stream.append("result", {"inbox_ids": self._live_ids(), "interrupted": False,
-                                          "is_error": True})        # before the rows (#87)
+                                          "is_error": True})        # before the rows
         finally:
             self._close_rows(FAILED, message)
         self._live, self._interrupting = None, False
@@ -1307,7 +1307,7 @@ class TmuxRunner:
         self.stream.append("error", {"error": message})
         try:
             self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
-                                          "interrupted": False, "is_error": True})   # first (#87)
+                                          "interrupted": False, "is_error": True})   # the result first
         finally:
             for row in consumed:
                 self.inbox.done(row["id"], FAILED, message)
@@ -1317,7 +1317,7 @@ class TmuxRunner:
 
     # -- interrupts ----------------------------------------------------------
     def _send_interrupt(self):
-        """One Escape on a live turn (R8); never a second one blind."""
+        """One Escape on a live turn; never a second one blind."""
         if self.pane is None or self.pane.attention():
             return False
         with self._lock:
@@ -1407,7 +1407,7 @@ class TmuxRunner:
     def _render(self, row, nonce):
         sender = row.get("sender") or "someone"
         first = "[inbox:%s] [%s] %s from %s" % (nonce, row["thread_id"], row["source"], sender)
-        first = printable(" ".join(first.split()))   # one line whatever the sender is (C4)
+        first = printable(" ".join(first.split()))   # one line whatever the sender is
         body = row.get("body") or ""
         if self._cut_prefix is not None:
             body = self._cut_prefix["text"] + "\n\n" + body
@@ -1420,7 +1420,7 @@ class TmuxRunner:
         nonce = secrets.token_hex(6)
         self._claims[row["id"]] = {"row": row, "nonces": [nonce], "offset": self._size(),
                                    "taken": None, "typed_at": time.monotonic()}
-        self._persist_claims()                      # before any key (P11-9)
+        self._persist_claims()                      # before any key
         first, body = self._render(row, nonce)
         # the expired notice rides on this row until the row is TAKEN
         # (_begin_turn): a row retyped after it was not taken carries it again
@@ -1445,7 +1445,7 @@ class TmuxRunner:
         try:
             self.stream.append("result", {"inbox_ids": [row["id"]], "interrupted": False,
                                           "is_error": True})
-        finally:                        # after its result (#87), even when the append raises
+        finally:                        # after its result, even when the append raises
             self.inbox.done(row["id"], FAILED, "the pane refused the row")
 
     def _check_consumed(self, pending):
@@ -1461,7 +1461,7 @@ class TmuxRunner:
             if self._attempts.get(row["id"], 0) >= 1:
                 try:
                     self.stream.append("result", {"inbox_ids": [row["id"]], "interrupted": False,
-                                                  "is_error": True})    # before the row (#87)
+                                                  "is_error": True})    # before the row
                 finally:
                     self.inbox.done(row["id"], FAILED, "the CLI never took the prompt")
             else:
@@ -1484,7 +1484,7 @@ class TmuxRunner:
             return 0
 
     def _ask_handoff(self, reason):
-        """The handoff turn (R9): the request typed under a runner nonce,
+        """The handoff turn: the request typed under a runner nonce,
         then the wait for data/handoff.md to change (the handoff tool writes
         it last; flip.py's wait). 'clean' when it changed in time;
         'emergency' when it did not (the file is then written from the
@@ -1562,7 +1562,7 @@ class TmuxRunner:
     def _rollover_row(self, row):
         """FakeRunner's sequence on a pane: the handoff turn, end hooks, the
         archive, a final mine, `/exit`, the new session id written before
-        its pane starts (N9), then the generation, start hooks and the
+        its pane starts, then the generation, start hooks and the
         digest. A failure before the new pane runs fails the row and keeps
         the old session recorded; after it, a failure degrades the rollover
         and is named in the detail (the SDK kind's point of no return)."""
@@ -1597,7 +1597,7 @@ class TmuxRunner:
             self._notice = None
             self._path = self._transcript_path()
             self._claims, self._cursor, self._runner_nonces = {}, 0, set()
-            self._save_session()                       # the new id before its pane (N9)
+            self._save_session()                       # the new id before its pane
             self._persist_claims()
             self.pane = self._make_pane(self._path)
             self._start_pane(True)
@@ -1620,9 +1620,9 @@ class TmuxRunner:
             problems.append("generation not moved: %s: %s" % (type(exc).__name__, exc))
         else:
             try:
-                # the record was written before the bump (N9): it names the
+                # the record was written before the bump: it names the
                 # new generation now, not only from the new session's first
-                # turn (live proofs 09-25, finding 6)
+                # turn
                 self._save_session()
             except Exception as exc:  # noqa: BLE001 - named in the detail
                 problems.append("runner-session.json: %s: %s" % (type(exc).__name__, exc))
@@ -1656,7 +1656,7 @@ REAP_EXIT_OK, REAP_EXIT_NO_PANE = 0, 0
 
 def session_name(home):
     """The tmux session a tmux-kind cousin runs in (the runner's own
-    choice, interfaces I3; never `[chat] tmux_session`)."""
+    choice; never `[chat] tmux_session`)."""
     return "tmux-%s" % Path(home).name
 
 
@@ -1670,7 +1670,7 @@ def pane_for(home, *, socket=None):
 
 
 def reap_pane(home, *, pane=None):
-    """`cousin-runner --home H --reap-pane` (R21, P11-10): kill the pane of a
+    """`cousin-runner --home H --reap-pane`: kill the pane of a
     cousin whose runner is down, holding the runner lock while it does, so
     no starting runner adopts a pane being killed. Exit 0 whether or not a
     pane was there; LOCK_HELD_EXIT when a runner holds the lock (stop the

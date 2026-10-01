@@ -1,4 +1,4 @@
-"""The Claude-subscription bridge leaves no trace (phase 9 R13, R18).
+"""The Claude-subscription bridge leaves no trace.
 
 The bridge is a third-party opencode plugin that starts a local proxy on a
 Claude login; it hooks in through a plugin name, a provider baseURL on
@@ -21,12 +21,12 @@ import unittest
 
 _REPO = pathlib.Path(__file__).resolve().parents[1]
 
-# The wide pattern (Survey 8), as an ERE: the same string is the check in
+# The wide pattern, as an ERE: the same string is the check in
 # docs/migrating.md, so the runbook and this test cannot disagree.
 BRIDGE_PATTERN = (r"opencode-with-claude|meridian|rynfar|claude-max-proxy|"
                   r"CLAUDE_PROXY_(PORT|HOST)|MERIDIAN_|x-meridian|127\.0\.0\.1:3456")
 _BRIDGE = re.compile(BRIDGE_PATTERN, re.I)
-# The master plan's test, word for word: grep -rniE "meridian|opencode-with-claude".
+# The narrow check, word for word: grep -rniE "meridian|opencode-with-claude".
 _LITERAL = re.compile(r"meridian|opencode-with-claude", re.I)
 
 _ROOTS = ("cousin_lib", "config", "plugins", "templates", "docs")
@@ -111,7 +111,7 @@ class TestNoBridge(unittest.TestCase):
         hits = scan(_REPO, paths, _BRIDGE)
         self.assertEqual(hits, [], "\n".join(hits))
 
-    def test_the_master_plans_grep_prints_nothing(self):
+    def test_the_literal_grep_prints_nothing(self):
         # grep -rniE "meridian|opencode-with-claude" over cousin_lib, config,
         # plugins and docs outside docs/design/.
         hits = scan(_REPO, _LITERAL_ROOTS, _LITERAL)
@@ -141,8 +141,9 @@ class TestNoBridge(unittest.TestCase):
                      "docs/install.md", "docs/migrating.md"):
             self.assertIn(name, seen)
         self.assertTrue(any(n.startswith("templates/") for n in seen))
-        self.assertTrue(any(n.startswith(_DESIGN) for n in seen),
-                        "docs/design/ is listed, then skipped by the scan")
+        if (_REPO / _DESIGN).is_dir():
+            self.assertTrue(any(n.startswith(_DESIGN) for n in seen),
+                            "docs/design/ is listed, then skipped by the scan")
 
 
 class TestScanner(unittest.TestCase):

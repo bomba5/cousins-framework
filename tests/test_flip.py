@@ -74,7 +74,7 @@ class FlipCase(unittest.TestCase):
 
 
 class TestLegacyFlipRefused(FlipCase):
-    """R2: a cousin with no [agent] runner is refused by name before any
+    """A cousin with no [agent] runner is refused by name before any
     tmux call; 2.0.0 has no legacy lane to flip it on."""
 
     def test_flipping_a_cousin_with_no_runner_is_refused_with_the_line(self):

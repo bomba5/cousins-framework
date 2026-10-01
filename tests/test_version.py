@@ -115,7 +115,7 @@ class VersionRoute(ConsoleCase):
 
 class RepoUrl(unittest.TestCase):
     """The badge links to the repository the checkout came from. Canary:
-    operator asked for the version to be a link to the repo (2026-09-18)."""
+    the version is a link to the repo."""
 
     def test_remote_forms_become_a_browsable_https_url(self):
         cases = {
@@ -166,7 +166,7 @@ if __name__ == "__main__":
 
 
 class BadgeLinks(unittest.TestCase):
-    """Operator (2026-09-18): links in the accent colour, and a link's
+    """Links in the accent colour, and a link's
     tooltip is its address."""
 
     def test_links_are_accent_and_title_their_address(self):

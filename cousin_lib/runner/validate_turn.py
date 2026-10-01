@@ -1,5 +1,5 @@
 """One validating model turn for a cousin's account, in a process of its
-own (#100 review). sdk.validate_account scrubs os.environ for the turn
+own. sdk.validate_account scrubs os.environ for the turn
 (_ScrubbedAuthEnv), which is process-wide: a long-lived process with
 other threads, the console above all, must never run it in place. It
 runs this module as a child instead and reads only the verdict:

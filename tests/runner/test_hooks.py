@@ -243,7 +243,7 @@ class TestOffTheLoop(HooksCase):
 
 
 class TestRecorderBudget(HooksCase):
-    """#104 (a): the recorder writes <root>/data/jobs.db, one database every
+    """The recorder writes <root>/data/jobs.db, one database every
     cousin on the host shares (sqlite timeout 5 s per connect, and a call
     connects more than once). The CLI waits for the PreToolUse answer, so the
     hook bounds its wait on the recorder and fails open past the budget: the
@@ -274,7 +274,7 @@ class TestRecorderBudget(HooksCase):
         holder.execute("ROLLBACK")
 
     def test_a_late_registration_is_cancelled_and_leaves_no_row(self):
-        """#104 review: past the budget the hook answered {} (no rewrite, so
+        """Past the budget the hook once answered {} (no rewrite, so
         no trap to close a shell's row); the recording then finished on its
         thread and left a running row nobody would close. Now the late
         recording is cancelled: no row, nothing remembered, and Post finds
@@ -304,7 +304,7 @@ class TestRecorderBudget(HooksCase):
         self.assertEqual(jobs.list_jobs(), [])
 
     def _budget_runs_out_in_set_log_path(self, tool, tool_input, response):
-        """#104 re-review: the budget runs out AFTER _register's second check,
+        """The budget runs out AFTER _register's second check,
         while mint_log's set_log_path waits on the busy store again. The hook
         has answered {} (no rewrite, no trap); no row may survive it, and the
         Post finds nothing to annotate."""
@@ -337,7 +337,7 @@ class TestRecorderBudget(HooksCase):
             "Agent", {"prompt": "x", "description": "late"}, {"content": "done"})
 
     def test_a_cancelled_hook_sets_the_flag_and_propagates(self):
-        """#104 re-review minor: the SDK cancelling the hook task is past the
+        """The SDK cancelling the hook task is past the
         budget as much as a timeout: the late recording must be dropped."""
         seen = []
         started = threading.Event()
@@ -391,8 +391,8 @@ class TestRecorderBudget(HooksCase):
                             for e in errors), errors)
 
     def test_a_post_past_its_budget_says_what_a_post_misses(self):
-        """#104 review minor: "the call runs without its job row or rewrite"
-        is the PreToolUse's; a PostToolUse's call has already run."""
+        """The words "the call runs without its job row or rewrite"
+        are the PreToolUse's; a PostToolUse's call has already run."""
         cbs = hooks.callbacks(self.home, slug="wren", root=self.root, machine=self.machine,
                               stream=self.stream, recorder=lambda payload: time.sleep(0.4))
         with mock.patch.object(hooks, "RECORD_BUDGET_S", 0.1):

@@ -1,4 +1,4 @@
-"""A small pty driver for the CLI's interactive login flows (Task 15).
+"""A small pty driver for the CLI's interactive login flows.
 
 `claude auth login` and `claude setup-token` want a terminal. This runs
 one in a pty whose window size is set in the CHILD before exec, so the

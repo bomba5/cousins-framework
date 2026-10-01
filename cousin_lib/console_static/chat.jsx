@@ -123,7 +123,7 @@ function ChatView({ activeCousin, cousins, embedUser, embed, sessionUser }) {
     try { localStorage.setItem("fw_pane_w", String(Math.round(paneW * 10) / 10)); }
     catch (e) { /* ignore */ }
   }, [paneW]);
-  // The divider also snaps (#126): let go within SPLIT_SNAP_PX of the
+  // The divider also snaps: let go within SPLIT_SNAP_PX of the
   // chat's left edge and the chat collapses, the pane covering the whole
   // area; a strip at that edge brings it back. Let go within SPLIT_SNAP_PX
   // of the right edge and the pane closes, as its x does. Either way the
@@ -281,7 +281,7 @@ function ChatHeader({ cousin, chatUser, paneOpen, setPaneOpen, search, setSearch
   // Effort: the levels come from the server (GET /api/spawn/options),
   // the current value from the cousin row, and a change persists to
   // cousin.toml through the effort route: [agent] for a runner cousin,
-  // [runtime] for a tmux one (#100). The running agent
+  // [runtime] for a tmux one. The running agent
   // keeps the level it started with, so a saved change shows "restart
   // to apply" rather than pretending it is live.
   const [efforts, setEfforts] = React.useState([]);
@@ -1751,7 +1751,7 @@ function runnerFleetKey(runner) {
   return JSON.stringify([r.alive, r.state, r.session, r.since]);
 }
 
-// === The folded view of the stream (operator's ask, #125) ===
+// === The folded view of the stream ===
 // The raw stream is one row per event; most of it is bookkeeping. rpModel
 // folds it into a status strip (what the runner is doing now, the quota,
 // the session, the totals) and a log of real things: a turn, a tool with
@@ -1781,7 +1781,7 @@ const RP_TASK_SUBTYPES = { task_started: 1, task_progress: 1, task_updated: 1, t
 // task_updated the raw "killed"
 const RP_TASK_ENDS = { completed: 1, failed: 1, stopped: 1, killed: 1 };
 
-// A background task's lifecycle event onto the strip's task map (#129):
+// A background task's lifecycle event onto the strip's task map:
 // task_started adds it, task_progress names its last tool, a terminal
 // task_updated status or a task_notification ends it (the SDK sends
 // either, not always both). An update or an end for a task not in view is
@@ -1862,7 +1862,7 @@ function rpModel(events) {
       // the SDK reports one around many ordinary tool calls
       if (RP_TASK_SUBTYPES[p.subtype]) strip.bgUntracked = Math.max(0, strip.bgUntracked + rpTaskEvent(strip.tasks, p, ts));
       else if (p.subtype === "fresh" || p.subtype === "init" || p.subtype === "resumed") rpBoot(rows, key, ev);
-      // #134: a CLI turn of its own between turns (a task notification)
+      // a CLI turn of its own between turns (a task notification)
       else if (p.subtype === "background_turn" && p.phase === "start") {
         turn = { t: "turn", key, ev, thread: "background", bodies: [], user: null, recall: null, meta: newMeta() };
         recalls = [];
@@ -2080,7 +2080,7 @@ function RunnerPaneView({ cousin, onClose, chatUser, chatHidden }) {
   const [status, setStatus] = React.useState("connecting");
   // Liveness/state follow the stream (paneLiveness), with the fleet row as
   // the fallback before any stream evidence and the tiebreaker whenever it
-  // refreshes after the last stream evidence (review 3b: the fleet row's
+  // refreshes after the last stream evidence (the fleet row's
   // own 15s poll otherwise left the header and the interrupt button lagging
   // a runner restart or stop by up to 15s).
   const [live, setLive] = React.useState(() => paneLiveness(null, { kind: "fleet" }, runner));
@@ -2197,7 +2197,7 @@ function RunnerPaneView({ cousin, onClose, chatUser, chatHidden }) {
     }
   };
   const interrupt = () => post(`/api/cousins/${encodeURIComponent(slug)}/interrupt`);
-  // While the chat is collapsed (#126) the say box can post a normal,
+  // While the chat is collapsed the say box can post a normal,
   // stored chat message instead, the composer's own /api/chat/send; it
   // only injects into the running turn otherwise.
   const [asChat, setAsChat] = React.useState(false);
@@ -2360,7 +2360,7 @@ function RpRow({ row, now, activeTool }) {
   }
 }
 
-// The "N bg tasks" chip and the list it opens under the strip (#129): the
+// The "N bg tasks" chip and the list it opens under the strip: the
 // running tasks (what, agent or shell, how long, the last tool), then the
 // last few ended ones. The list keeps its own clock, so the pane's rows do
 // not re-render every second for it; a click outside or on the chip closes it.

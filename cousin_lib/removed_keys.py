@@ -1,4 +1,4 @@
-"""The configuration 2.0.0 removed with the legacy tmux lane (R7): one
+"""The configuration 2.0.0 removed with the legacy tmux lane: one
 table, read in four places. A key on it does nothing any more: no runner
 kind reads it. It is named, never fatal and never silently ignored: by
 `cousin-runner` at start (one stderr line, and one `system` `config`

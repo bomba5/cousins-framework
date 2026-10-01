@@ -215,7 +215,7 @@ class TestErrorText(unittest.TestCase):
 
 
 class TestCursors(_BridgeFixture):
-    """Tracker #18: a cursor moves only past what was delivered, and it
+    """A cursor moves only past what was delivered, and it
     survives a restart."""
 
     def test_cursors_round_trip_through_the_home(self):
@@ -378,7 +378,7 @@ class TestOperatorThreads(TelegramCase):
 
 
 class TestMediaUpload(_BridgeFixture):
-    """Tracker #13: an attachment reply uploads the file, the method and
+    """An attachment reply uploads the file, the method and
     field matching its kind."""
 
     def test_kind_picks_the_method_and_field(self):
@@ -566,7 +566,7 @@ class TestInboundLanes(_BridgeFixture):
     bridge itself."""
 
     def test_a_bridge_for_a_cousin_with_no_runner_refuses_with_the_line(self):
-        # R10: no chat server to post to; the bridge refuses by name,
+        # no chat server to post to; the bridge refuses by name,
         # at start and per message, and stores nothing
         from cousin_lib import telegram
         from cousin_lib.delivery import lane_refusal

@@ -37,8 +37,8 @@ def _cfg(url):
 
 
 def _index(home):
-    """The stored index, whatever the storage is. It became SQLite on
-    2026-09-21; every behavioural assertion below is unchanged."""
+    """The stored index, whatever the storage is (SQLite now; every
+    behavioural assertion below holds for any storage)."""
     return memory_search._load_index(home) or {}
 
 
@@ -61,7 +61,7 @@ class TestChunkText(unittest.TestCase):
                          + chunks[-1], body)
 
     def test_a_tail_that_would_be_mostly_overlap_joins_the_previous_chunk(self):
-        # #82: 150 new chars after the first window would make a 350-char
+        # 150 new chars after the first window would make a 350-char
         # tail that is mostly the previous chunk's end; it merges instead
         body = "".join(chr(65 + i % 26) for i in range(2150))
         self.assertEqual(memory_search._chunk_text(body, size=2000, overlap=200), [body])
@@ -294,7 +294,7 @@ class TestEnsureIndex(unittest.TestCase):
 class TestSingleFlight(unittest.TestCase):
     """One refresh per home at a time. A recall past its budget keeps
     refreshing on its own thread, so N operator messages used to mean
-    N full re-embeds at once (2026-09-18: 19 of them, the embedding
+    N full re-embeds at once (19 of them were seen, the embedding
     service at 18 s a request)."""
 
     def _hold_lock(self, home):

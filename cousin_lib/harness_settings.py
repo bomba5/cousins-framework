@@ -47,7 +47,7 @@ JOB_HOOK_EVENTS = (("PreToolUse", JOB_HOOK_MATCHERS),
                    ("SubagentStop", (None,)))
 JOB_HOOK_TIMEOUT = 10
 
-# Tracker #112: what this module writes to turn Claude Code's own
+# What this module writes to turn Claude Code's own
 # injected attribution (a Co-Authored-By trailer, a "Generated with
 # Claude Code" line) off, for the tmux lane (the SDK runner reaches the
 # same outcome through options.settings, sdk.py's ATTRIBUTION_OFF_SETTINGS).
@@ -61,12 +61,12 @@ ATTRIBUTION_OFF = {"commit": "", "pr": ""}
 # runner-session.json, login-required.json), so a sidecar there is the
 # framework's own convention, not a new one.
 ATTRIBUTION_MARKER = pathlib.Path("data") / "harness-attribution-owned.json"
-# The tmux kind (phase 11 I7, P11-8, P11-12): its pane runs the host's
+# The tmux kind: its pane runs the host's
 # interactive CLI, so its project settings carry the kind's switches (no
 # built-in editor, no auto-continue at a limit, no auto-compaction, no
 # remote control), the policy's deny_tools as the CLI's permissions.deny,
 # and the hooks that bridge the pane to its runner. Attribution is not one
-# of the kind's keys: [agent] commit_attribution (#112, below) owns it for
+# of the kind's keys: [agent] commit_attribution (below) owns it for
 # every kind, so the operator's setting decides it on the pane too.
 TMUX_KEYS = {"editorMode": "normal", "autoContinueAtUsageLimit": False,
              "autoCompactEnabled": False, "remoteControlAtStartup": False}
@@ -172,9 +172,9 @@ def _write_owned_attribution(home, owned, *, previous):
     """The sidecar recording exactly what this module currently owns;
     removed (not left as `{}`) when nothing is owned any more, so its
     mere presence answers "does this module own anything here". Skipped
-    entirely when `owned` already matches `previous` (round 2 review,
-    Minor): settings.json already short-circuits its own unchanged
-    write, and the marker deserves the same - it is called after every
+    entirely when `owned` already matches `previous`: settings.json
+    already short-circuits its own unchanged write, and the marker
+    deserves the same - it is called after every
     apply_project_settings, not only when something moved."""
     if owned == previous:
         return
@@ -194,9 +194,8 @@ def _write_owned_attribution(home, owned, *, previous):
 
 def _reconcile_owned(data, owned):
     """`owned`, with every entry dropped whose key is no longer in
-    `data`, or whose value there no longer matches (round 3 review,
-    "generally": reconciled against settings.json at the start of every
-    run). Both are read events, not writes: a crash in a previous run
+    `data`, or whose value there no longer matches (reconciled against
+    settings.json at the start of every run). Both are read events, not writes: a crash in a previous run
     can leave the marker claiming a key settings.json never got (a
     turn-off crash before its write) or one settings.json no longer has
     (a turn-on crash after its write); either way this is the one place
@@ -209,10 +208,9 @@ def _compute_attribution_off(data, owned):
     """(data, new_owned) for commit_attribution == False: only a key
     ABSENT from `data` is added; a key already present, at any value,
     is left exactly as it is and never claimed - including one that
-    already holds the exact off value (round 3 review, C1 reopened:
-    claiming an already-matching value with no marker entry is how an
-    operator's own pre-existing includeCoAuthoredBy: false got deleted
-    on a later turn-on; that claim is gone, not just "accepted", now).
+    already holds the exact off value (claiming an already-matching
+    value with no marker entry would delete an operator's own
+    pre-existing includeCoAuthoredBy: false on a later turn-on).
     `owned` is the already-reconciled map (_reconcile_owned), so every
     entry in it is a real, currently-true claim; those keys are kept in
     `new_owned` unchanged whether or not this call adds anything."""
@@ -297,13 +295,13 @@ def _tmux_hooks(home, python):
 def _policy_deny(home):
     """policy.toml's deny_tools, as the CLI's permissions.deny entries.
     deny_bash_patterns are regular expressions, which the CLI's rules
-    cannot say; the pane's PreToolUse hook is not ours to add (T3 notes)."""
+    cannot say; the pane's PreToolUse hook is not ours to add."""
     from cousin_lib.runner.policy import Policy
     return list(Policy.load(home).deny_tools)
 
 
 def _policy_gap_warnings(home):
-    """One line per policy.toml rule the tmux pane cannot enforce (I5):
+    """One line per policy.toml rule the tmux pane cannot enforce:
     under --dangerously-skip-permissions the CLI never consults
     can_use_tool, so only deny_tools, rendered into permissions.deny,
     still holds; deny_bash_patterns and ask need that live veto and are
@@ -383,7 +381,7 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None, kind=Non
                                 % (path, event))
         hooks[event] = current + groups
     data["hooks"] = hooks
-    # Tracker #112: the install's config/harness.toml [agent]
+    # The install's config/harness.toml [agent]
     # commit_attribution, overridden by this cousin's own cousin.toml
     # [agent] commit_attribution - the tmux lane's reach for the same
     # outcome the SDK runner gets through options.settings. A value
@@ -399,7 +397,7 @@ def apply_project_settings(home, *, root, python=None, hooks_root=None, kind=Non
     owned_raw = _read_owned_attribution(home)
     owned = _reconcile_owned(data, owned_raw)
     # The two writes (settings.json, the marker) are ordered by
-    # direction (round 3 review), so neither crash window ever needs a
+    # direction, so neither crash window ever needs a
     # claim-by-match to heal:
     #
     # - Turning off ADDS keys: the marker goes first, recording only

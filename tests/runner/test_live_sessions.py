@@ -1,18 +1,18 @@
-"""Side sessions against the real SDK (phase 8). Opt in: COUSIN_LIVE_SDK=1.
+"""Side sessions against the real SDK. Opt in: COUSIN_LIVE_SDK=1.
 Costs a few small model calls on whatever lane the machine has.
 
-The exit criterion by effect: a person is answered, through the reply
+What it proves, by effect: a person is answered, through the reply
 tool, while the primary session is still inside a long task (a Bash
 command that blocks LONG_S seconds; the person writes only once that
 command is seen running, and the reply must be stored before the primary's
 result event); and the side
-session does not re-create the law block the primary created (phase 4 R1:
-same prompt, same tools, same working directory). The bar is phase 4's
-(tests/runner/test_live_prompt.py, ruling W9-5): a per-run nonce first in
+session does not re-create the law block the primary created (the
+same prompt, same tools, same working directory). The bar is the one in
+tests/runner/test_live_prompt.py: a per-run nonce first in
 the law makes the primary create the block cold, and the side session's
 cumulative cache creation must stay under the primary's minus a lower bound
 on the law's tokens. `cache_read > 0` alone proves nothing: the turn's second
-model call reads what its first call wrote (review I2)."""
+model call reads what its first call wrote."""
 import os
 import pathlib
 import sqlite3
@@ -24,11 +24,11 @@ import uuid
 from cousin_lib.delivery import Item
 from cousin_lib.runner import sessions
 from tests._hermetic import HermeticCase
-from tests.runner.test_live_prompt import LAW as _PHASE4_LAW
+from tests.runner.test_live_prompt import LAW as _BASE_LAW
 
-# This module's own nonce (round 2 review N4): phase 4's law, re-headed, so a
+# This module's own nonce: test_live_prompt's law, re-headed, so a
 # run after tests/runner/test_live_prompt.py in one process starts cold too.
-LAW = "Run %s.\n" % uuid.uuid4().hex + _PHASE4_LAW.split("\n", 1)[1]
+LAW = "Run %s.\n" % uuid.uuid4().hex + _BASE_LAW.split("\n", 1)[1]
 LAW_TOKENS_LOWER_BOUND = len(LAW) // 6
 
 MODEL = "claude-haiku-4-5-20251001"
@@ -118,7 +118,7 @@ class TestLiveSideSession(HermeticCase):
                          "the primary's long task finished first: nothing was proven")
         self.assertTrue(_wait(lambda: s.inbox.get(person.inbox_id)["state"] == "done", 60))
         self.assertTrue(_wait(lambda: s.inbox.get(op.inbox_id)["state"] == "done", LONG_S + 180))
-        # the result is appended before the row closes (#87); kept as a wait (#102)
+        # the result is appended before the row closes; kept as a wait
         self.assertTrue(_wait(lambda: primary_events("result"), 30))
         result_ts = primary_events("result")[0]["ts"]
         print("\nREPORT ordering: side reply seen %.1f s before the primary's result"

@@ -1,5 +1,5 @@
 """Content blocks as stream events, one mapping for every runner that
-reads Claude messages (phase 11 Task 2, R7).
+reads Claude messages.
 
 The SDK runner receives message objects and the tmux kind reads the
 interactive CLI's transcript as dicts; both record the same event kinds
@@ -8,7 +8,7 @@ cousin-watch whichever kind ran it. A parity test runs the SDK runner's
 own path on the same content (tests/runner/test_tmux_blocks.py).
 
 One difference is declared, not hidden: the interactive CLI keeps a
-thinking block's signature but not its text (phase 11 findings I14b), so
+thinking block's signature but not its text (measured), so
 such a block is recorded with length 0 and `"redacted": true`."""
 
 THINKING_CHARS = 8000       # a thinking block's text in the stream, bounded

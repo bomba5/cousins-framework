@@ -74,7 +74,7 @@ class TestContract(HermeticCase):
 
 
 class TestRunnerLaneDoctrine(HermeticCase):
-    """#95: a runner cousin's identity and memories were written for the
+    """A runner cousin's identity and memories may be written for the
     tmux lane (`cousin-reply`, `cousin-chat send`, `cousin-memory`). The
     contract names the tools as the way and the CLIs as the fallback only."""
 
@@ -108,20 +108,20 @@ class TestRunnerLaneDoctrine(HermeticCase):
         # operator level only for the operator's words; nobody else's
         self.assertIn("at level `operator` when the operator said it", self.flat)
         self.assertIn("at the default level when anyone else did", self.flat)
-        # an unasked remark is not a write (review: 'a fact about their
-        # life' fired on incidental remarks)
+        # an unasked remark is not a write ('a fact about their life'
+        # fired on incidental remarks)
         self.assertIn("A remark nobody asked you to keep is not a memory write", self.flat)
         self.assertNotIn("a fact about their life", self.flat)
 
     def test_being_asked_what_you_remember_searches_memory_first(self):
         """Asked 'what do you remember about me', a cousin read its memory
-        files with sed instead of searching (09-24)."""
+        files with sed instead of searching."""
         self.assertIn("asked what you know or remember", self.flat)
         self.assertIn("`search` or `recall` first", self.flat)
 
     def test_a_long_shell_command_is_the_job_tools_run(self):
         """A runner cousin ran `cousin-job start shell` through Bash because
-        the job tool had no way to launch a command (09-24)."""
+        the job tool had no way to launch a command."""
         self.assertIn("A long shell command is the `job` tool's `run`", self.flat)
         self.assertIn("`run_in_background`", self.flat)
         self.assertIn("never `cousin-job` through Bash", self.flat)
@@ -133,9 +133,9 @@ class TestRunnerLaneDoctrine(HermeticCase):
 
 
 class TestDoctrineFollowsServedTools(HermeticCase):
-    """#97: the doctrine prose named `send`, `memory`, `job`, `schedule` and
-    `meeting` from a fixed text, so a cousin whose registry disables one was
-    told to use a tool it does not have. The prose names only the tools the
+    """Doctrine prose naming `send`, `memory`, `job`, `schedule` and
+    `meeting` from a fixed text would tell a cousin whose registry disables
+    one to use a tool it does not have. The prose names only the tools the
     runner serves (tool_definitions)."""
 
     def _without(self, name, **kw):

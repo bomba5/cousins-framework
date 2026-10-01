@@ -74,7 +74,7 @@ class _RaisesAfterStopRunner(FakeRunner):
 class _RaisesOnFirstResultRunner(FakeRunner):
     """A FakeRunner whose very first "result" stream event raises,
     simulating a failure in the turn's success TAIL. The result is appended
-    before the rows close (#87), and the rows close `delivered` even so.
+    before the rows close, and the rows close `delivered` even so.
     Proves that failure does not re-close those rows as `failed`
     (`Inbox.done` has no re-close guard)."""
 
@@ -184,7 +184,7 @@ class TestFakeRunner(HermeticCase):
         self.assertEqual(row["outcome"], "failed")
 
         r.enqueue(Item("operator:priya", "chat", "ok", sender="Priya"))
-        # the result is appended, then the row closes and the machine idles (#87)
+        # the result is appended, then the row closes and the machine idles
         self.assertTrue(_wait(lambda: any(
             e["kind"] == "result" and e["payload"].get("is_error") is False
             for e in r.events()) and r.state() == "idle"))
@@ -224,7 +224,7 @@ class TestFakeRunner(HermeticCase):
         self.assertEqual(row["outcome"], "delivered")
 
         r.enqueue(Item("operator:priya", "chat", "second", sender="Priya"))
-        # the result is appended, then the row closes and the machine idles (#87)
+        # the result is appended, then the row closes and the machine idles
         self.assertTrue(_wait(lambda: any(
             e["kind"] == "result" and e["payload"].get("is_error") is False
             for e in r.events()) and r.state() == "idle"))
@@ -276,7 +276,7 @@ class TestFakeRunner(HermeticCase):
         self.assertTrue(any(str(wake.socket_path(self.home)) in e for e in errors))
         self.assertTrue(r.worker_alive())
 
-    # -- Turn (task 3) -------------------------------------------------------
+    # -- Turn ----------------------------------------------------------------
     def test_the_turn_carries_both_threads_of_a_fold(self):
         r = FakeRunner(self.home, turn_seconds=1.0)
         self.addCleanup(lambda: r.stop(timeout=5))

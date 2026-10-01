@@ -6,7 +6,7 @@ False and the row waits in the inbox for the next start. A runner that
 cannot bind the socket polls the inbox instead (`listen`): it answers
 on the same cadence, only without the early wake.
 
-The boundary is the uid (phase 11 R19): the socket is 0600 in a `run/`
+The boundary is the uid: the socket is 0600 in a `run/`
 created 0700, and on Linux every datagram carries its sender's
 credentials (SO_PASSCRED), so one from another uid (root, which the
 mode does not stop) wakes nothing. What a datagram says is kept in

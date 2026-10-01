@@ -1,4 +1,4 @@
-"""The tmux kind's pane hook (phase 11 R6, R19, R24, M-a): it records
+"""The tmux kind's pane hook: it records
 SessionStart's session for the runner, wakes the runner on every event,
 and never blocks or fails the CLI that runs it."""
 import io
@@ -59,8 +59,8 @@ class Case(HermeticCase):
 
 
 class TestResumePointer(Case):
-    """R10: a resumed session gets only a short pointer to the block, as
-    SessionStart's additionalContext (S7b); a fresh one gets nothing."""
+    """A resumed session gets only a short pointer to the block, as
+    SessionStart's additionalContext; a fresh one gets nothing."""
 
     def run_hook(self, source):
         out = io.StringIO()
@@ -372,7 +372,7 @@ class TestRunnerSide(Case):
 
 
 class TestAdopt(Case):
-    """R24: a live pane is adopted only when the hook's record names the
+    """A live pane is adopted only when the hook's record names the
     recorded session and the pane's CLI pid; otherwise it is killed and the
     session resumed in a new pane, and the refusal is said."""
 

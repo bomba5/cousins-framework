@@ -25,8 +25,8 @@ _SPEC = _REPO_ROOT / "docs" / "reference" / "console-api.md"
 _MINE = ("chat.jsx", "media.jsx", "styles.css", "manifest.webmanifest", "favicon.svg")
 
 # Names of surfaces the contract dropped. None may appear, in any case,
-# in the files this module owns. The media viewer and inline players came
-# back on 2026-09-18 (docs/reference/console-api.md, "The chat media viewer"); the
+# in the files this module owns. The media viewer and inline players are
+# back (docs/reference/console-api.md, "The chat media viewer"); the
 # engagement pings, the recorder and the media-kind filter stay out.
 _DROPPED_NAMES = (
     "engagement", "presence",
@@ -281,7 +281,7 @@ class PaneScrollsBack(unittest.TestCase):
 
     def test_a_frame_repaints_in_one_write_without_a_blank(self):
         # reset() blanked the screen and the write landed a render
-        # later: a busy pane flickered twice a second (2026-09-19).
+        # later: a busy pane flickered twice a second.
         start = self.pane.index("const applyFrame = ")
         body = self.pane[start:self.pane.index("};", start)]
         self.assertNotIn("term.reset()", body)
@@ -334,7 +334,7 @@ class PaneScrollsTheProgram(unittest.TestCase):
 
 
 class ChatBesideThePane(unittest.TestCase):
-    """The chat and the pane side by side (design A, 2026-09-22): the
+    """The chat and the pane side by side: the
     runner's reasoning stream or the tmux terminal sits beside the chat,
     never in its place, on a screen wide enough for both; the interrupt
     is on the stream's side."""

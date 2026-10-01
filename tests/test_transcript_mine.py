@@ -137,9 +137,9 @@ class TestMine(MineCase):
 
 
 class TestHypotheses(MineCase):
-    """Canary (2026-09-18): no writer produced L4. A kept sentence that
-    hedges is a hypothesis, written at L4 under its own topic; the rest
-    stays L3 exactly as before."""
+    """L4 needs a writer: a kept sentence that hedges is a hypothesis,
+    written at L4 under its own topic; the rest stays L3 exactly as
+    before."""
 
     def test_hedged_sentences_go_to_l4_the_rest_stay_l3(self):
         self._configure()

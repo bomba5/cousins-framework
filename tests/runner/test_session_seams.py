@@ -1,4 +1,4 @@
-"""The seams side sessions stand on (phase 8): an SdkRunner that claims
+"""The seams side sessions stand on: an SdkRunner that claims
 only some thread kinds, keeps its own session file, says what it is doing
 without saying whose words it is reading, and a handoff refused outside
 the primary session."""
@@ -164,7 +164,7 @@ class TestHandoffIsThePrimarys(HermeticCase):
         self.assertTrue((home / "data" / "handoff.md").exists())
 
     def test_a_side_sessions_activity_note_names_its_session(self):
-        """Review M5: the note is the home's; a side session's never passes
+        """The note is the home's; a side session's never passes
         for what the primary is doing."""
         home = temp_home(self)
         for session, expected in (("peer", "[peer session] answering Testa"),
@@ -176,7 +176,7 @@ class TestHandoffIsThePrimarys(HermeticCase):
             self.assertTrue(note.rstrip("\n").endswith(": " + expected), note)
 
     def test_the_tool_list_is_the_same_in_every_session(self):
-        """Phase 4 R1: the cached prefix holds the tools; a side session
+        """The cached prefix holds the tools; a side session
         that dropped handoff would cache apart. It is refused, not removed."""
         self.assertIn("handoff", [d["name"] for d in tools.tool_definitions(
             {"tools": {}})])

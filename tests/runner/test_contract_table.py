@@ -1,4 +1,4 @@
-"""The per-runner contract table (phase 9 Task 11, R19): the item list is
+"""The per-runner contract table: the item list is
 the suite's, every runner kind has a class and a contract module, each
 cell comes from the class-level declarations, and
 docs/reference/runners.md holds exactly what the module renders."""
@@ -98,11 +98,10 @@ class TestDeclarations(HermeticCase):
             ct.runner_class("pane")
 
     def test_the_shipped_runners_declare_only_what_was_measured(self):
-        """R14 (OPERATOR), measured in phase 9 Task 7: opencode DECLARES no
-        item and no item rides on a plugin (the plugin pack is the policy
-        veto, not a contract item). Phase 11 (I2, S3/S3b): the tmux kind's
-        CLI queues or interrupts a message sent mid-turn, never folds it, so
-        it DECLARES midturn_fold and nothing else."""
+        """As measured: opencode DECLARES no item and no item rides on a
+        plugin (the plugin pack is the policy veto, not a contract item).
+        The tmux kind's CLI queues or interrupts a message sent mid-turn,
+        never folds it, so it DECLARES midturn_fold and nothing else."""
         declared = {"tmux": {"midturn_fold"}}
         for kind, column in ct.cells().items():
             with self.subTest(kind=kind):

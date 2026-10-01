@@ -1,4 +1,4 @@
-"""Claims carry valid time (master plan phase 7 task 9): every raw entry has
+"""Claims carry valid time: every raw entry has
 a `valid_from` (when it was written, or its own field) and a `valid_to`
 (when an obsolete mark covering it was written, or its own field). raw
 stays append-only: validity is derived, never written back. A topic-level
@@ -134,7 +134,7 @@ def _views(home):
 
 
 class TestTheFoldKeepsEntryLevelMarks(HermeticCase):
-    """Review C1: the monthly fold keeps one digest line per topic with its
+    """The monthly fold keeps one digest line per topic with its
     newest line's text and level only, so the views must not trust a
     digest for a topic that has retired entries."""
 
@@ -176,7 +176,7 @@ class TestTheFoldKeepsEntryLevelMarks(HermeticCase):
 
 class TestOnlyAMarkIsBookkeeping(HermeticCase):
     def test_a_claim_that_happens_to_carry_an_entry_field_is_distilled(self):
-        """Review M4: only an L5 line with `entry` is an entry-level mark."""
+        """Only an L5 line with `entry` is an entry-level mark."""
         home = _home(self)
         _write(home, "2026-01-01", [
             {"timestamp": "2026-01-01T10:00:00+00:00", "topic": "ledger", "entry": "row 4",

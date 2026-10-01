@@ -1,4 +1,4 @@
-"""agent.jsx (WP-A): the Inspector's agent and cousin settings panels, and
+"""agent.jsx: the Inspector's agent and cousin settings panels, and
 the lane-aware bits it gives the Inspector's identity rows, the spawn
 dialog and the chat header's effort select. Pinned by text where the
 contract is a string (the slot, the routes, the kind-switch event), and
@@ -48,7 +48,7 @@ class AgentJsx(unittest.TestCase):
             self.assertIn(key, self.src, key)
 
     def test_no_kind_is_named_in_the_page(self):
-        """Round 1: the lanes, the model shape and the turn come from the
+        """The lanes, the model shape and the turn come from the
         server (describe()'s tmux_lane, model_rule, model_change_spends_turn)."""
         for kind in ("sdk", "fake", "opencode", "tmux", "tmux-legacy"):
             self.assertNotIn('"%s"' % kind, self.src, kind)
@@ -98,7 +98,7 @@ class AgentJsx(unittest.TestCase):
 class TheOtherFiles(unittest.TestCase):
     def test_the_inspector_shows_model_effort_and_auth_on_the_tmux_legacy_lane_only(self):
         inspector = _component(_read("cousins.jsx"), "Inspector")
-        # the name the server gives the lane, never a literal (round 1)
+        # the name the server gives the lane, never a literal
         self.assertIn("c.lane === options.tmux_lane", inspector)
         self.assertNotIn('"tmux-legacy"', inspector)
         block = inspector[inspector.index("{tmuxLane && <>"):inspector.index("</>}")]
@@ -106,7 +106,7 @@ class TheOtherFiles(unittest.TestCase):
             self.assertIn(token, block, token)
 
     def test_the_spawn_dialog_offers_the_kinds_and_the_accounts_models(self):
-        # R4: the kinds only, the legacy lane not offered
+        # the kinds only, the legacy lane not offered
         modal = _component(_read("cousins.jsx"), "SpawnModal")
         self.assertIn("runners.map(k =>", modal)
         self.assertNotIn("tmux_lane", modal)

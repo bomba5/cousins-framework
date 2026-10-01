@@ -53,7 +53,7 @@ class TestRenderer(unittest.TestCase):
 
 class TestNoChatServerInTheTemplate(unittest.TestCase):
     def test_the_template_names_no_chat_server_and_no_port(self):
-        # R10: template_sync pushes the template to every cousin, so a
+        # template_sync pushes the template to every cousin, so a
         # line naming the retired chat server or its port would teach it
         text = _TEMPLATE.read_text()
         for word in ("{{PORT}}", "chat-server", "chat server",
@@ -132,7 +132,7 @@ class TestShippedTemplate(unittest.TestCase):
         self.assertIn("run_in_background", out)
 
     def test_job_run_is_the_doctrine_and_the_cli_is_only_the_fallback(self):
-        # tracker #110: a tracked shell command goes through the job
+        # a tracked shell command goes through the job
         # tool's `run` command first; `cousin-job start shell` through
         # Bash is named only as what to use when the tool is missing.
         out = self._render()

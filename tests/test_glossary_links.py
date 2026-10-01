@@ -1,4 +1,4 @@
-"""Master plan 10c task 7: every page links the first use of each glossary
+"""Every page links the first use of each glossary
 term to its entry in docs/glossary.md.
 
 A use is the term as a word (a plural counts) in prose: not in a code
@@ -10,7 +10,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GLOSSARY = ROOT / "docs" / "glossary.md"
-# the plan's list, longest first so "shared tier" is never read as "tier"
+# the glossary's terms, longest first so "shared tier" is never read as "tier"
 TERMS = ("shared tier", "supervisor", "distilled", "rollover", "cousin", "worker",
          "thread", "runner", "inbox", "stream", "lane", "turn", "fold", "flip")
 # Ordinary-English uses of a term, and other senses the glossary does not

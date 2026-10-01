@@ -1,4 +1,4 @@
-"""[agent.sessions] and the side session's digest (phase 8): which thread
+"""[agent.sessions] and the side session's digest: which thread
 kinds get a session of their own, and what that session is told first."""
 import os
 import unittest

@@ -1,5 +1,5 @@
 """The out-of-process interrupt on the SDK lane past a turn's first answer
-(phase 5 review C1) and when the CLI refuses it (I1). A folded follow-up
+and when the CLI refuses it. A folded follow-up
 starts a second CLI turn after the first result; an interrupt row must
 still end it, from a process that holds no runner object."""
 import time
@@ -63,9 +63,9 @@ class TestContinuation(Case):
 
 
 class TestASessionThatTakesNoInterrupts(Case):
-    """Ruling P5-2 (phase 5 review round 2, N1): the console's interrupt
+    """The console's interrupt
     targets the primary session's live turn. A runner class that sets
-    `takes_interrupts = False` (phase 8's SideSession) leaves an interrupt
+    `takes_interrupts = False` (SideSession) leaves an interrupt
     row alone during its live turn; at the turn boundary it is closed
     NO_TURN, never taken as that session's interrupt."""
 

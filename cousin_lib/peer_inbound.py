@@ -1,5 +1,5 @@
 """The one gate for a message from outside this install's process tree
-(phase 10a, one inbound surface): a hive node's tell-home
+(one inbound surface): a hive node's tell-home
 (`POST /hive/tell-home`, console/hive) and an external peer's send
 (`POST /peer/send`, console/peer_routes). Both routes authenticate a
 bearer token first and hand `accept` the identity it resolved to; the
@@ -21,10 +21,9 @@ What `accept` enforces, for every caller:
 - the display name is the one the operator configured for that sender
   (the route passes it), and it must be a plain name ([A-Za-z0-9 ._-],
   1-64) that is neither the target's operator nor a local cousin's slug or
-  name: a sender is never shown, threaded or treated as either (ruling
-  P10a-1);
+  name: a sender is never shown, threaded or treated as either;
 - the message loses its control characters (tab and newline kept): a
-  tmux cousin would take them as keystrokes (review I5);
+  tmux cousin would take them as keystrokes;
 - delivery is chat.deliver_to: in-process for a runner cousin, refused
   by name for a cousin with no runner kind, under the display name. A
   refusal or a
@@ -96,7 +95,7 @@ def check_display(root, target, display):
     """Refuse a display name that is not a plain name, that the framework
     writes itself (delivery.FRAMEWORK_SENDERS: "fw-hook" would be threaded
     on `system` as a hook), or that the target would take for its operator
-    or a local cousin (ruling P10a-1)."""
+    or a local cousin."""
     from cousin_lib.config import FrameworkConfig
     from cousin_lib.delivery import FRAMEWORK_SENDERS
     from cousin_lib.server.storage import is_operator, normalize_chat_user

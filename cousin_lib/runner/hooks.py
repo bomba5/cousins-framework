@@ -47,7 +47,7 @@ PRE_MATCHER = "Agent|Task|Bash"
 RECALL_BUDGET_S = 4.0
 # The recorder writes <root>/data/jobs.db, which every cousin on the host
 # shares (sqlite waits up to 5 s per connect, and a call connects more than
-# once), and the CLI holds the tool until the hook answers (#104): past this
+# once), and the CLI holds the tool until the hook answers: past this
 # budget the hook answers without it and says so. A PreToolUse's late
 # recording is cancelled (the call runs unrecorded, and no row outlives it);
 # a later event's finishes on its thread when the store frees.

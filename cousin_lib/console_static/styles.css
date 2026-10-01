@@ -1859,7 +1859,7 @@ body.chat-fullscreen .plugin-strips { display: none; }
 .chat-split.dragging .chat-col, .chat-split.dragging .pane-col { transition: none; }
 /* an iframe (a plugin page) would swallow the drag's pointer moves */
 .chat-split.dragging iframe { pointer-events: none; }
-/* The snap (#126): dragged to an edge, that edge lights up; let go there and
+/* The snap: dragged to an edge, that edge lights up; let go there and
    the chat collapses (.chat-collapsed: the pane covers the area, a strip at
    the left edge brings the chat back) or the pane closes. The collapsed
    chat stays mounted, only hidden (its draft, its polling, a plugin strip
@@ -1978,7 +1978,7 @@ body.chat-fullscreen .plugin-strips { display: none; }
 }
 .rp-empty { color: var(--fg-3); font-family: var(--sans); font-size: 12px; padding: 8px 0; }
 
-/* === The folded reasoning pane (#125) ===
+/* === The folded reasoning pane ===
    A strip of what the runner is doing now, then one card per real thing. */
 .rp-strip {
   position: relative; z-index: 5;
@@ -2007,7 +2007,7 @@ body.chat-fullscreen .plugin-strips { display: none; }
 .rp-chip { font-size: 10.5px; color: var(--fg-2); background: var(--bg-2); border-radius: 5px; padding: 1px 7px; white-space: nowrap; }
 .rp-chip.is-warn { color: var(--amber); }
 .rp-chip.is-err { color: var(--red); }
-/* the bg tasks chip and the list it opens under the strip (#129) */
+/* the bg tasks chip and the list it opens under the strip */
 .rp-bg-chip { font-family: inherit; border: 1px solid transparent; cursor: pointer; }
 .rp-bg-chip:hover, .rp-bg-chip.on { border-color: var(--line); color: var(--fg-0); }
 .rp-tasks {

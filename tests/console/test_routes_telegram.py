@@ -55,7 +55,7 @@ class TestTelegramRoutes(ConsoleCase):
 
 
 class TestRunnerLaneToggle(ConsoleCase):
-    """A runner cousin's bridge is the supervisor's child (#101): the
+    """A runner cousin's bridge is the supervisor's child: the
     console flips the config and asks the supervisor to rescan; it never
     starts a bridge of its own."""
 
@@ -121,7 +121,7 @@ class TestRunnerLaneToggle(ConsoleCase):
         self.assertEqual(len(stops), 1)
 
     def test_a_slow_supervisor_is_not_a_missing_one(self):
-        """#113: only no supervisor at all runs the console's own stop; a
+        """Only no supervisor at all runs the console's own stop; a
         live one slower than the timeout does its rescan when it answers,
         and a second stop from the console would race it."""
         from cousin_lib import supervisor

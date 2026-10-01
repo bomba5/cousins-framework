@@ -9,8 +9,8 @@ rows the new home already holds to ids after the old ones (renaming their
 inbound files and fixing reply quotes that point at them), and copies old
 pictures under their message id.
 
-Canary: migrations moved memory but left chat history behind; the
-operator asked for it to come along with every cousin (2026-09-18).
+Canary: a migration that moves memory must not leave chat history
+behind; it comes along with every cousin.
 """
 import base64
 import json
@@ -111,7 +111,7 @@ class ImportCase(unittest.TestCase):
 
 class TestRefusesWhileTheRunnerRuns(ImportCase):
     def test_import_refuses_while_the_runner_runs(self):
-        # no chat server to probe (R10): the cousin's runner holding its
+        # no chat server to probe: the cousin's runner holding its
         # lock is what "running" means, and the import waits for a stop
         import contextlib
         import io
@@ -194,7 +194,7 @@ class TestImport(ImportCase):
         self.assertEqual(len(backups), 1)
 
     def test_a_missing_new_store_is_created_first(self):
-        # Canary (2026-09-18): a cousin whose chat server never wrote a
+        # Canary: a cousin whose chat server never wrote a
         # row has no store yet; the import creates it instead of refusing.
         (self.new_home / "data" / "chat.db").unlink()
         report = self._run()

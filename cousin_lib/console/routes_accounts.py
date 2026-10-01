@@ -1,4 +1,4 @@
-"""Console routes for WP-C, accounts (docs/reference/console-api.md,
+"""Console routes for accounts (docs/reference/console-api.md,
 "Accounts"): the accounts list and a per-row status (no model call), the
 validated accounts.toml writer (accounts.write_entry), the write-only
 keys, the claude-login / claude-token flows and the opencode OAuth method

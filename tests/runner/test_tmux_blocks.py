@@ -1,9 +1,9 @@
-"""The content-block mapping the tmux kind reads its transcript with
-(phase 11 Task 2, R7): one mapping for both runners, so a turn reads the
-same in the console whichever kind ran it. Parity is pinned against the
+"""The content-block mapping the tmux kind reads its transcript with:
+one mapping for both runners, so a turn reads the same in the console
+whichever kind ran it. Parity is pinned against the
 SDK runner's own `_record` path on the same content; the one declared
-difference is a thinking block the interactive CLI keeps without its text
-(findings I14b): its length is 0 and it is marked redacted."""
+difference is a thinking block the interactive CLI keeps without its text:
+its length is 0 and it is marked redacted."""
 import unittest
 
 from cousin_lib.runner import blocks

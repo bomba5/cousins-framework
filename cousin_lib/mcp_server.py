@@ -669,7 +669,7 @@ def _is_pane_home(home):
 
 
 def pane_tools(home):
-    """`reply` and `handoff` for a tmux-kind home (phase 11 R11): its pane's
+    """`reply` and `handoff` for a tmux-kind home: its pane's
     CLI reaches the framework through this stdio server, which has no live
     turn of its own. Any other home gets none: the SDK and opencode
     runners serve them in-process."""

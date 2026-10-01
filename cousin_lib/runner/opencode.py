@@ -1,14 +1,14 @@
-"""OpencodeRunner: a cousin on opencode instead of the Claude Agent SDK
-(phase 9), behind the same Runner protocol, inbox and event stream.
+"""OpencodeRunner: a cousin on opencode instead of the Claude Agent SDK,
+behind the same Runner protocol, inbox and event stream.
 
 The runner owns one `opencode serve` child (opencode_http.OpencodeServer)
 on loopback with a per-run password, its HOME and XDG directories in the
-account's data dir, working in the cousin's home (R4), started with an
-ALLOWLISTED environment and a config the runner renders at every start
-(R5): opencode's own hosted provider disabled unless the account names it,
-the model named (R6), the
+account's data dir, working in the cousin's home, started with an
+ALLOWLISTED environment and a config the runner renders at every start:
+opencode's own hosted provider disabled unless the account names it,
+the model named, the
 plugin pack, and one MCP server, the runner's own (mcp_http.McpHttpServer),
-so every framework tool runs in this process against the live Turn (R7),
+so every framework tool runs in this process against the live Turn,
 plus one `local` MCP server per framework plugin the cousin enables that
 declares [mcp] (cousin_lib/plugins.py; the home's .mcp.json is not read
 on this kind).
@@ -20,23 +20,23 @@ The loop is FakeRunner's shape: claim one row, run one turn, close every
 row with a result, route every failure to an outcome. A turn is one
 `prompt_async` (204; the turn itself arrives on GET /event) and ends at
 the first `session.idle` that follows a prompt the runner sent and whose
-user message opencode announced (R2'): an idle with nothing outstanding
+user message opencode announced: an idle with nothing outstanding
 is ignored (opencode doubles the idle pair after an abort or a failure).
 While the run is busy, operator, person and peer chat is sent at once
-and opencode folds it into the same run (R14', measured), so it closes at
+and opencode folds it into the same run (measured), so it closes at
 the same idle; meeting, loop and schedule rows wait for their own turn
-(#118, `base.FOLDED_KINDS`). An abort drops a prompt
+(`base.FOLDED_KINDS`). An abort drops a prompt
 queued behind the running one, so every row sent into an aborted run
 that the model never started is requeued. A `session.error` classifies
-the turn (R2): an auth error puts the rows back and waits for the login,
+the turn: an auth error puts the rows back and waits for the login,
 an abort is an interruption, anything else fails the turn.
 
-The policy veto lives in the plugin pack (R9): the runner renders
+The policy veto lives in the plugin pack: the runner renders
 policy.toml as `<data dir>/cousin-policy.json`, names it to opencode in
 COUSIN_POLICY_FILE, and refuses to run turns until opencode's config lists
 the plugin AND the plugin acknowledged this start's file (opencode lists a
 plugin whether or not it loaded). Recording, subagent jobs and checkpoints
-come from SSE, here (R10): a tool part's `running` state carries its
+come from SSE, here: a tool part's `running` state carries its
 arguments, and the runner hands the recording library the SDK lane's hook
 payloads, the tool named in the SDK form (`bash` -> `Bash`, `cousin_reply`
 -> `mcp__cousin__reply`), the one form policy.toml and the recorder use.
@@ -72,7 +72,7 @@ from cousin_lib.runner.turn import Turn
 
 LANE = "opencode"
 CHECKOUT = Path(__file__).resolve().parents[2]
-# The plugin pack (Task 6 writes it): the checkout's, as hooks/ is.
+# The plugin pack: the checkout's, as hooks/ is.
 PLUGIN = CHECKOUT / "plugins" / "opencode" / "cousin-policy.js"
 CONFIG_NAME = "opencode.runner.json"
 SCHEMA = "https://opencode.ai/config.json"
@@ -82,26 +82,25 @@ ENDPOINT_PROVIDER = "local"
 # The only variables the server inherits from the runner's environment
 # (plus LC_*): opencode reads provider keys (*_API_KEY), config sources
 # (OPENCODE_CONFIG_CONTENT, OPENCODE_CONFIG_DIR) and switches
-# (OPENCODE_*) from its environment, so nothing else passes (Task 1,
-# finding 1). The CA bundle paths are not secrets and an https provider
-# may need them.
+# (OPENCODE_*) from its environment, so nothing else passes. The CA
+# bundle paths are not secrets and an https provider may need them.
 ENV_ALLOW = ("PATH", "LANG", "LANGUAGE", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR")
-HEALTH_TIMEOUT_S = 60.0         # R3': a fresh HOME measured 13.6 s
-BRIDGE_PORT = 3456              # the bridge guard refuses a URL on it (R13')
+HEALTH_TIMEOUT_S = 60.0         # a fresh HOME measured 13.6 s
+BRIDGE_PORT = 3456              # the bridge guard refuses a URL on it
 THINKING_CHARS = 8000           # SdkRunner's bound on a thinking block
 TEXT_CHARS = 2000               # a tool result's, a user echo's bound
 # opencode installs this package from npm into its config dir whenever any
 # plugin is configured, and loads no plugin (answers no /event) until the
 # install ends: 71 s and a failure offline, npm egress online (measured on
-# 1.18.31, Task 7). The pack imports nothing, so the runner marks it
+# 1.18.31). The pack imports nothing, so the runner marks it
 # present (seed_plugin_dependency) and opencode installs nothing.
 PLUGIN_DEPENDENCY = "@opencode-ai/plugin"
 # The plugin pack's policy file, its acknowledgement and how the plugin
-# finds the file (R9). Both files live in the account's data dir.
+# finds the file. Both files live in the account's data dir.
 POLICY_NAME = "cousin-policy.json"
 POLICY_ACK = "cousin-policy.ack.json"
 POLICY_ENV = "COUSIN_POLICY_FILE"
-# The model's shell (review Important 4): opencode merges the plugin's
+# The model's shell: opencode merges the plugin's
 # `shell.env` answer over the server's environment, so what the shell must
 # not inherit is set empty (XDG says empty is unset), never deleted. HOME is
 # the cousin's home; SHELL_PASS and `[agent] shell_env` come from the runner's
@@ -110,8 +109,8 @@ SHELL_BLANK = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_
                "OPENCODE_SERVER_PASSWORD", "OPENCODE_CONFIG", POLICY_ENV)
 SHELL_PASS = ("USER", "LOGNAME")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-# A name shaped like a credential is never passed to the model's shell
-# (review round 2, minor 6): accounts.credential_name, shared with the tmux pane.
+# A name shaped like a credential is never passed to the model's shell:
+# accounts.credential_name, shared with the tmux pane.
 TURN_GUARD_RETRY_S = 0.5            # one more try of the per-turn checks before giving up
 ACCOUNT_HOLDER = "account.holder"   # the home of the runner holding the account (its flock)
 ACCOUNT_TAKE_S = 1.0                # a restarting runner's predecessor may still be exiting
@@ -137,7 +136,7 @@ CONFIG_DIR_OWN = frozenset((".gitignore", "node_modules", "package-lock.json"))
 
 
 def tool_name(name):
-    """What opencode calls the registry's tool `name` (Survey 5)."""
+    """What opencode calls the registry's tool `name`."""
     return "%s%s" % (OWN_PREFIX, name)
 
 
@@ -153,7 +152,7 @@ def sdk_tool_name(name):
 
 
 def render_policy(policy, *, nonce, ack, shell_env=None):
-    """policy.toml as the plugin reads it (R9): the same lists, each
+    """policy.toml as the plugin reads it: the same lists, each
     pattern with the reason Policy.decide gives, the name table, this
     start's nonce and acknowledgement path, and what the plugin's
     `shell.env` hook sets for the model's shell (`shell_env`)."""
@@ -217,7 +216,7 @@ def _agent_table(home):
 
 def opencode_bin(agent, environ=None):
     """[agent] opencode_bin, else COUSIN_OPENCODE_BIN (the image sets it),
-    else `opencode` on PATH (R3, R17')."""
+    else `opencode` on PATH."""
     environ = os.environ if environ is None else environ
     return str(agent.get("opencode_bin") or environ.get("COUSIN_OPENCODE_BIN") or "opencode")
 
@@ -245,7 +244,7 @@ def local_mcp(server):
 
 def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLUGIN,
                   servers=None):
-    """The config the runner renders (R5). opencode merges other sources
+    """The config the runner renders. opencode merges other sources
     over it (its global config dir, `$HOME/.opencode`, a managed config):
     `foreign_config_sources` refuses those the runner can see, and the
     effective config is checked after the server starts
@@ -261,7 +260,7 @@ def render_config(account, *, model, small_model, mcp_url, mcp_token, plugin=PLU
         "disabled_providers": [] if "opencode" in account.providers else ["opencode"],
         "autoupdate": False,
         "share": "disabled",
-        "permission": {"*": "allow"},           # never an interactive ask (R9)
+        "permission": {"*": "allow"},           # never an interactive ask
         "plugin": [plugin_entry(plugin)],
         "mcp": {"cousin": {"type": "remote", "url": mcp_url,
                            "headers": {"Authorization": "Bearer %s" % mcp_token}}},
@@ -286,23 +285,23 @@ def server_env(account, root, *, home, environ=None, models_fetch=True):
     """The server's environment: the allowlist, the account's HOME and XDG
     directories, and the cousin's own two variables (the model's shell runs
     the `cousin-*` commands). OpencodeServer adds the password, the config
-    path and the fixed switches (R3, R3')."""
+    path and the fixed switches."""
     environ = os.environ if environ is None else environ
     env = {k: v for k, v in environ.items() if k in ENV_ALLOW or k.startswith("LC_")}
     env.update(accounts.account_env(account, root))
     env["COUSIN_HOME"] = str(home)
     env["FRAMEWORK_ROOT"] = str(root)
-    env[POLICY_ENV] = str(Path(account.data_dir) / POLICY_NAME)      # the plugin's (R9)
+    env[POLICY_ENV] = str(Path(account.data_dir) / POLICY_NAME)      # the plugin's
     if not models_fetch:
-        env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"          # R21
+        env["OPENCODE_DISABLE_MODELS_FETCH"] = "1"
     return env
 
 
 def check_model(account, model, what="model"):
-    """`model` is one this opencode account can run: not named for Claude
-    (ruling P9-1), "<provider>/<model>", on the account's endpoint or one of
+    """`model` is one this opencode account can run: not named for Claude,
+    "<provider>/<model>", on the account's endpoint or one of
     its providers. RunnerError naming the key. The runner checks both of its
-    models at construction; the console checks a model change (#100)."""
+    models at construction; the console checks a model change."""
     try:
         accounts.refuse_claude_name("cousin.toml [agent] %s" % what, model)
     except accounts.AccountsError as err:
@@ -414,7 +413,7 @@ def seed_plugin_dependency(config_dir):
 
 
 def classify(error):
-    """(kind, detail) of a session.error (R2): "auth" (an APIError 401/403,
+    """(kind, detail) of a session.error: "auth" (an APIError 401/403,
     a ProviderAuthError), "aborted" (MessageAbortedError) or "failed"."""
     error = error if isinstance(error, dict) else {}
     name = str(error.get("name") or "UnknownError")
@@ -479,7 +478,7 @@ class _Run:
         self.user_ids = {}          # user message id -> _Sent
         self.assistant_ids = set()  # assistant messages answering this turn's prompts
         self.costs = {}
-        self.tokens = None          # the LAST answer's tokens: the context's size (R11)
+        self.tokens = None          # the LAST answer's tokens: the context's size
         self.spent = {}             # assistant message id -> its tokens, the newest copy
         self.recorded = (dict.fromkeys(usage.USAGE_KEYS, 0), 0.0)   # at the last result
         self.error = None           # (kind, detail) seen after an echo
@@ -501,13 +500,13 @@ class _Run:
 class OpencodeRunner:
     kind = "opencode"     # what runner/status.py reports (the `runner` event)
     # The contract items this runner DECLARES unsupported, and those a
-    # plugin meets; read at class level by runner/contract_table.py (R19)
-    UNSUPPORTED = ()           # R14, measured in Task 7: none (midturn_fold folds)
+    # plugin meets; read at class level by runner/contract_table.py
+    UNSUPPORTED = ()           # measured: none (midturn_fold folds)
     PLUGIN_ITEMS = ()          # the plugin pack is the policy veto, not a contract item
     takes_interrupts = True
     poll_s = 0.2
     # how long a session.error with no announced prompt waits for one
-    # (a prompt opencode never stored has no idle: survey 3, "no providers")
+    # (a prompt opencode never stored has no idle, as with "no providers")
     error_grace_s = 2.0
     # how long a stopping runner waits for its aborted turn's idle
     stop_grace_s = 2.0
@@ -535,7 +534,7 @@ class OpencodeRunner:
         except accounts.AccountsError as err:
             raise RunnerError(str(err))
         self.account = account
-        # R6: named, never defaulted
+        # the model is named, never defaulted
         self.model = model or agent.get("model")
         if not self.model:
             raise RunnerError("%s/cousin.toml [agent] model is required for runner = \"opencode\""
@@ -555,7 +554,7 @@ class OpencodeRunner:
         self._plugin_mcp = mcp_config.add_plugins(mcp_config.Loaded(False), self.home,
                                                   self.root, environ=environ)
         self._plugin_mcp_said = False
-        # the bridge guard at construction (runner_for, exit 2: R13), on the
+        # the bridge guard at construction (runner_for, exit 2), on the
         # config as it will be rendered and the environment it will get
         self._render(mcp_url="http://127.0.0.1:0/mcp", mcp_token="-")
         self._check_models()
@@ -576,7 +575,7 @@ class OpencodeRunner:
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
                                               registry=registry)
-        # The rollover (R11): the handoff tool, reached over MCP, hands its
+        # The rollover: the handoff tool, reached over MCP, hands its
         # summary to the box; pressure is read after every good turn.
         self.handoff_deadline_s = float(handoff_deadline_s or _rollover.HANDOFF_DEADLINE_S)
         self.rollover_at_percent = float(agent.get("rollover_at_percent",
@@ -584,7 +583,7 @@ class OpencodeRunner:
         self.handoff_box = _rollover.HandoffBox()
         self.hysteresis = _rollover.Hysteresis()
         self.tool_context.on_handoff = self.handoff_box.set
-        # R10: the SDK lane's recording library, fed hook payloads from SSE
+        # the SDK lane's recording library, fed hook payloads from SSE
         self.recorder = recorder or (lambda payload: recording.handle(
             payload, self.home, self.root, slug=slug))
         self._policy_nonce = None
@@ -628,7 +627,7 @@ class OpencodeRunner:
             return self.home.name, self.home.name.capitalize()
 
     def _render(self, *, mcp_url, mcp_token):
-        """(config, env), refused when either names the bridge (R13)."""
+        """(config, env), refused when either names the bridge."""
         config = render_config(self.account, model=self.model, small_model=self.small_model,
                                mcp_url=mcp_url, mcp_token=mcp_token,
                                servers=self._plugin_servers())
@@ -655,7 +654,7 @@ class OpencodeRunner:
             self.stream.append("mcp_config", dict(self._plugin_mcp.event(), file=None))
 
     def _refuse_foreign_config(self):
-        """Review Critical 1: a config source opencode would merge over the
+        """A config source opencode would merge over the
         rendered one refuses the start, named (the model could have written
         it: its shell's HOME is the account's data dir)."""
         found = foreign_config_sources(self.account, self.root, self.home)
@@ -758,7 +757,7 @@ class OpencodeRunner:
 
     # -- start and teardown --------------------------------------------------
     def _hold_account(self):
-        """Review Important 3: one opencode account serves one cousin. Its
+        """One opencode account serves one cousin. Its
         data dir holds this start's rendered config (the MCP token), the
         policy file and its acknowledgement, and opencode's own store and
         session, so a second runner on it would overwrite the first's. An
@@ -837,7 +836,7 @@ class OpencodeRunner:
         return path
 
     def _write_policy(self):
-        """The plugin's policy file for this start (R9), a fresh nonce, and no
+        """The plugin's policy file for this start, a fresh nonce, and no
         acknowledgement left from an earlier start."""
         ack = Path(self.account.data_dir) / POLICY_ACK
         ack.unlink(missing_ok=True)
@@ -846,7 +845,7 @@ class OpencodeRunner:
                                                 shell_env=self.shell_env), POLICY_NAME)
 
     def _check_plugin_listed(self, env):
-        """The veto's first half (R9, Review Focus 3): opencode's config
+        """The veto's first half: opencode's config
         lists the plugin pack. This is also the instance's first request,
         on which opencode bootstraps the instance and loads its plugins, so
         it is bounded by `plugin_timeout_s` (without seed_plugin_dependency
@@ -1005,7 +1004,7 @@ class OpencodeRunner:
         return Path(self.account.data_dir) / opencode_http.PIDFILE
 
     def _reap_leftover(self):
-        """Review Important 2: kill the server an earlier runner on this
+        """Kill the server an earlier runner on this
         account left behind (it was SIGKILLed before its teardown, or its
         death signal was not delivered), so two servers never share the
         account's store and session."""
@@ -1023,7 +1022,7 @@ class OpencodeRunner:
 
     def _check_mcp(self):
         """opencode must report the runner's MCP server `connected` before
-        the first prompt (Task 4): without it the model has no framework
+        the first prompt: without it the model has no framework
         tools. `needs_auth` is a token the server refused: no retry heals it."""
         deadline = time.monotonic() + self.mcp_timeout_s
         status = None
@@ -1226,7 +1225,7 @@ class OpencodeRunner:
             if self.machine.state == "errored" and not self._login_blocked:
                 self.machine.to("idle", "recovered")
 
-    # -- the rollover (R11) ------------------------------------------------------
+    # -- the rollover -----------------------------------------------------------
     def _rollover_row(self, row):
         """At a turn boundary: the handoff (asked in the old session), end
         hooks, archive, a NEW opencode session, THEN the generation, start
@@ -1359,7 +1358,7 @@ class OpencodeRunner:
 
     def _close_duplicates(self, row, outcome, detail):
         """A plain duplicate `flip` row gets this rollover's answer; a
-        bequest never (R10). The close is guarded on the body read here."""
+        bequest never. The close is guarded on the body read here."""
         for other in self.inbox.open_rows("flip"):
             if other["id"] != row["id"] and other["state"] == "queued" \
                     and not _rollover.is_bequest(other["body"]) \
@@ -1393,8 +1392,8 @@ class OpencodeRunner:
         return limit
 
     def _pressure(self, run):
-        """After a good turn: the last answer's tokens against the limit
-        (R11), held back by the hysteresis after a rollover."""
+        """After a good turn: the last answer's tokens against the limit,
+        held back by the hysteresis after a rollover."""
         try:
             limit = self._context_limit()
             tokens = run.tokens or {}
@@ -1544,7 +1543,7 @@ class OpencodeRunner:
                          part, state)
 
     def _record(self, event, part, state):
-        """R10: one tool part as the SDK lane's hook payload, to the recording
+        """One tool part as the SDK lane's hook payload, to the recording
         library (activity line, subagent job for `task`), with its arguments.
         A PreToolUse the policy denies is not recorded (hooks.recorder_for's
         rule: the call never ran). A recorder failure is a `hook` event."""
@@ -1582,7 +1581,7 @@ class OpencodeRunner:
         return path
 
     def _on_compacted(self):
-        """opencode compacted the session (R10): the pre-compact checkpoint,
+        """opencode compacted the session: the pre-compact checkpoint,
         then, as the SDK lane's PreCompact does, a rollover at the next turn
         boundary (a fresh generation with a handoff beats a summary)."""
         self._checkpoint("pre_compact", trigger="session.compacted")
@@ -1608,20 +1607,20 @@ class OpencodeRunner:
         kind = classify(error)
         if any(s.echoed and not s.closed for s in run.sent):
             if run.error is None:
-                run.error = kind            # the first error decides (R2)
+                run.error = kind            # the first error decides
         else:
             run.pending_error, run.pending_at = kind, time.monotonic()
 
     def _on_idle(self, run):
         """The first idle after an announced prompt ends what it answered;
-        an idle with nothing announced is ignored (R2')."""
+        an idle with nothing announced is ignored."""
         if run is None or not self._live or run.over:
             return
         if any(s.echoed and not s.closed for s in run.sent):
             self._settle(run)
 
     def _on_permission(self, p):
-        """opencode's permission config is allow-all (R9): an ask that still
+        """opencode's permission config is allow-all: an ask that still
         arrives is rejected at once, never left to hang the turn."""
         request = p.get("id")
         try:
@@ -1641,7 +1640,7 @@ class OpencodeRunner:
                     context=row["context"], message_id=row["message_id"])
 
     def _send(self, run, row, text=None):
-        """One prompt into the session (R8, R22): the composed prompt as
+        """One prompt into the session: the composed prompt as
         `system`, the named model, the envelope text as the only part."""
         if text is None:
             text = envelope.render(self._row_item(row))
@@ -1699,7 +1698,7 @@ class OpencodeRunner:
                                           "error": message})
         finally:
             try:
-                if requeue:                           # after its result (#87), even when
+                if requeue:                           # after its result, even when
                     self.inbox.requeue(row["id"])     # the append raises
                 else:
                     self.inbox.done(row["id"], FAILED, message)
@@ -1796,7 +1795,7 @@ class OpencodeRunner:
             return False
 
     def _take_interrupts(self):
-        """Interrupt rows (phase 5) on their own path, every poll: the first
+        """Interrupt rows on their own path, every poll: the first
         aborts the run, and every one closes `delivered`; one opencode
         refused closes `failed` and the turn runs on."""
         if not self.takes_interrupts or not self._live:
@@ -1814,8 +1813,8 @@ class OpencodeRunner:
 
     def _fold(self, run):
         """Operator, person and peer chat that lands during the live turn
-        is sent at once: opencode folds it into the running run (R14',
-        #118). Anything else goes back to the queue (`base.FOLDED_KINDS`
+        is sent at once: opencode folds it into the running run.
+        Anything else goes back to the queue (`base.FOLDED_KINDS`
         says why)."""
         if self._interrupt_requested or run.over or not run.fold:
             return
@@ -1838,7 +1837,7 @@ class OpencodeRunner:
     def _check_gap(self, run):
         """A reconnected event stream may have missed the idle: read the
         session's messages and settle the turn when its last answer is
-        complete (Task 3, finding 5)."""
+        complete."""
         try:
             messages = self._client.messages(self.opencode_session) or []
         except OpencodeError as err:
@@ -1869,7 +1868,7 @@ class OpencodeRunner:
         """Close what this idle answered. Delivered: every announced prompt
         of a good run. Interrupted: the prompts the model received (the
         turn's first, and any it started); the rest go back, since an abort
-        drops a queued prompt (R14'). Failed: the same split, failed. Auth:
+        drops a queued prompt. Failed: the same split, failed. Auth:
         everything back, and the runner waits for the login."""
         kind, detail = run.error or (None, None)
         interrupted = self._interrupt_requested or kind == "aborted" or stopping
@@ -1907,7 +1906,7 @@ class OpencodeRunner:
         run.results += 1
         try:
             if not run.quiet:
-                # the result first (#87): whoever reads a row closed finds its
+                # the result first: whoever reads a row closed finds its
                 # result; the rows close even when the append raises
                 self.stream.append("result", payload)
         finally:
@@ -2024,7 +2023,7 @@ class OpencodeRunner:
                else "manual retry" if (self._login_file_seen and not present) else None)
         if why is None:
             return
-        # Review Important 7: opencode reads auth.json live, so the changed
+        # opencode reads auth.json live, so the changed
         # file is held to the start's checks before any turn runs on it
         try:
             accounts.preflight(self.account, self.root)

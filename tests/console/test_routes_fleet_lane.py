@@ -33,7 +33,7 @@ class SpawnOptions(ConsoleCase):
         self.assertIn("effort", body["lane_keys"]["sdk"])
         self.assertNotIn("effort", body["lane_keys"]["opencode"])
         self.assertNotIn("model", body["lane_keys"]["fake"])
-        # R4: COUSIN_DEFAULT_RUNNER unset is sdk, the dialog's preselection
+        # COUSIN_DEFAULT_RUNNER unset is sdk, the dialog's preselection
         self.assertEqual(body["default_runner"], "sdk")
         with mock.patch.dict("os.environ", {"COUSIN_DEFAULT_RUNNER": "fake"}):
             self.assertEqual(self.get("/api/spawn/options")[1]["default_runner"], "fake")
@@ -98,7 +98,7 @@ class SpawnARunnerCousin(ConsoleCase):
 
 
 class SpawnTheLegacyLaneRefused(ConsoleCase):
-    """R4: 2.0.0 has no legacy tmux lane; a spawn naming "tmux-legacy" is a
+    """2.0.0 has no legacy tmux lane; a spawn naming "tmux-legacy" is a
     400 naming the kinds, and a spawn naming no runner is sdk."""
 
     def setUp(self):

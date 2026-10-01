@@ -165,7 +165,7 @@ class TestFireShell(HooksCase):
                          "Sam|pat the cat|p.t|testa|%s" % self.home)
 
     def test_script_sees_no_credential_from_the_server_env(self):
-        # #88: the server's own env may carry the account's auth variables
+        # the server's own env may carry the account's auth variables
         # and other credential-shaped names; a hook runs without them, as
         # the runner strips them from the cousin's own tools
         from cousin_lib import accounts

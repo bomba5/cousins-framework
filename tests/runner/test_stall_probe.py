@@ -1,6 +1,5 @@
-"""#104 (b): the SDK runner names what its turn waits on when the wait runs
-long. The incidents #104 names show the runner's consumer stopped for
-18-39 minutes mid-turn (no stream writes while the CLI kept running tools)
+"""The SDK runner names what its turn waits on when the wait runs long.
+A runner's consumer has been seen stopped for 18-39 minutes mid-turn (no stream writes while the CLI kept running tools)
 until the SDK's 100-message buffer filled and its reader stopped answering
 hooks. A turn's fold, interrupt-row control and query write run under a
 site marker; a watchdog on the runner's loop writes a `system` `stall`
@@ -65,7 +64,7 @@ class TestStallProbe(HermeticCase):
                             "no stall named while it ran")
             self.assertTrue(_wait(lambda: any(not s.get("ongoing") for s in stalls()), 5),
                             "no stall named when it ended")
-        # the fold hands its write to the turn's writer (#118, after #104) and
+        # the fold hands its write to the turn's writer and
         # returns at once: the write (send) is the site that held, named while
         # it runs and when it ends; the reader never waits at the fold
         self.assertTrue(_wait(lambda: {s["site"] for s in stalls() if not s.get("ongoing")}

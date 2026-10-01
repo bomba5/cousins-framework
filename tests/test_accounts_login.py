@@ -235,7 +235,7 @@ class TestCapture(LoginCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_a_non_object_capture_file_is_skipped_never_raised(self):
-        # Tracker #84: captures_for runs on every operator message
+        # captures_for runs on every operator message
         # (server/inbound.py divert_login_code); a capture file that
         # holds valid JSON that is not an object (here, a bare list)
         # must never take the whole check down with an AttributeError.

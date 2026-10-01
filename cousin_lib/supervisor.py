@@ -70,7 +70,7 @@ delivery.RUNNER_KINDS gets a runner child, unless `[agent] auto_start = false`
 lists it under `refused` with delivery.lane_refusal (a worker is not
 listed), and `start` answers that line. `status` also names, under
 `config`, every key 2.0.0 removed that a cousin or the install still
-carries (removed_keys, R7): named, never fatal. SIGHUP and `reload`
+carries (removed_keys): named, never fatal. SIGHUP and `reload`
 rescan the registry: a new runner cousin is started, one that is gone
 or left the runner lane is stopped and removed, a `failing` child is
 cleared and started again; nothing healthy is bounced.
@@ -82,7 +82,7 @@ restart, as a stopped tmux cousin stays stopped. `auto_start = false`
 stays the config-level opt-out. A `stop` of the console or the loops
 daemon holds only until `start` or the next supervisor start.
 
-Bridges (#101). A runner cousin whose `[telegram]` passes
+Bridges. A runner cousin whose `[telegram]` passes
 telegram.load_bridge_config (enabled, a token, operators) gets a child
 `telegram:<slug>` (`python3 -m cousin_lib.telegram --home <home>`, the
 entry point the tmux lane's telegram_admin.start_bridge runs), added
@@ -135,7 +135,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import loops
-from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds (M6)
+from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds
 from cousin_lib.runner.main import LOCK_HELD_EXIT, STOP_TIMEOUT_S
 
 STATES = ("running", "backoff", "failing", "stopped")
@@ -143,7 +143,7 @@ SOCKET = "run/supervisor.sock"
 SNAPSHOT = "run/supervisor.json"
 LOCK = "run/supervisor.lock"
 KINDS = ("console", "loops", "plugin", "runner", "telegram")
-# Start order by kind; stop order is its reverse (R5).
+# Start order by kind; stop order is its reverse.
 _KIND_ORDER = {kind: i for i, kind in enumerate(KINDS)}
 
 # Seconds between SIGTERM and SIGKILL. A runner gives its current turn
@@ -166,7 +166,7 @@ RUNNER_BUSY_EXIT = LOCK_HELD_EXIT  # cousin-runner: another runner holds the hom
 LOOPS_BUSY_EXIT = loops.LOCK_HELD_EXIT  # cousin-loops run: another loops daemon holds the root's lock (5)
 CONSOLE_RESTART_EXIT = 75    # cousin-console's restart route (routes_admin.RESTART_EXIT_CODE)
 
-AUTO_START_DEFAULT = True        # R4: a runner cousin starts with the supervisor unless it opts out
+AUTO_START_DEFAULT = True        # a runner cousin starts with the supervisor unless it opts out
 
 REQUEST_LINE_MAX = 1 << 20       # bytes of one request or answer line
 ANSWER_WAIT_S = 60.0             # how long a connection waits for the main loop (a runner's stop: 35 s)
@@ -188,7 +188,7 @@ class SupervisorUnavailable(Exception):
 class SupervisorAbsent(SupervisorUnavailable):
     """No supervisor at all: nothing to connect to (no socket, a stale one,
     refused). A live one that is slow or answers badly is the plain
-    SupervisorUnavailable (#113): a caller whose fallback does the
+    SupervisorUnavailable: a caller whose fallback does the
     supervisor's work itself runs it only for this one."""
 
 
@@ -455,7 +455,7 @@ class Supervisor:
         for spec in specs:
             self._add(spec)
 
-    # ------------------------------------------------------------ output (R8)
+    # ------------------------------------------------------------ output
 
     def say(self, text):
         self._write("supervisor: %s\n" % text)
@@ -589,7 +589,7 @@ class Supervisor:
             self._sync_plugins()
         self._sync_bridges()
 
-    # ------------------------------------------------------------ reaping (R1)
+    # ------------------------------------------------------------ reaping
 
     def reap(self):
         """Every exit status waiting for us, children and orphans alike."""
@@ -616,7 +616,7 @@ class Supervisor:
                 by_pid[child.proc.pid] = child
 
     def _exited(self, child, code):
-        child.proc.returncode = code         # by hand: Popen never waits (R1)
+        child.proc.returncode = code         # by hand: Popen never waits
         child.last_exit = how = describe_exit(code)
         self._clear_pid_file(child)
         now = self.clock()
@@ -733,7 +733,7 @@ class Supervisor:
                 pass
 
     def stop_all(self, reason="supervisor stopping"):
-        """The ordered stop (R5): bridges together, then runners
+        """The ordered stop: bridges together, then runners
         together, then plugin services, then loops, then the console. Each group is signalled,
         then waited for up to each child's stop_timeout (SIGKILL after),
         reaping as we go."""
@@ -858,7 +858,7 @@ class Supervisor:
             pass
         return fd
 
-    # ------------------------------------------------------------ control (R6)
+    # ------------------------------------------------------------ control
 
     def _open_socket(self):
         path = self.root / SOCKET
@@ -984,7 +984,7 @@ class Supervisor:
                 slug = name.split(":", 1)[-1]
                 if name.startswith("runner:") \
                         and (self.root / "cousins" / slug / "cousin.toml").exists():
-                    # a cousin with no runner kind (R2): the one line says why
+                    # a cousin with no runner kind: the one line says why
                     return {"ok": False, "error": lane_refusal(self.root / "cousins" / slug)}
                 return {"ok": False, "error": "%s is not a cousin under %s/cousins"
                         % (slug, self.root)}
@@ -1011,7 +1011,7 @@ class Supervisor:
     def _reap_pane(self, home):
         """A tmux-kind cousin stopped while its runner is down or failing:
         its pane may still be running a turn, and nothing else would kill
-        it (phase 11 R21). The kill is the runner module's (`cousin-runner
+        it. The kill is the runner module's (`cousin-runner
         --reap-pane`), so no tmux call lives here; it holds the runner lock
         while it kills. Bounded; a failure is said, never raised."""
         if (_agent_table(home) or {}).get("runner") != "tmux":
@@ -1056,7 +1056,7 @@ class Supervisor:
             child.waiters.append(pending)
         return None
 
-    # ------------------------------------------------------------ rescan (R9)
+    # ------------------------------------------------------------ rescan
 
     def reload(self):
         """Rescan the registry. Returns (added, removed) child names."""
@@ -1092,7 +1092,7 @@ class Supervisor:
                  % (", ".join(added) or "-", ", ".join(removed) or "-"))
         return added, removed
 
-    # ------------------------------------------------------------ bridges (#101)
+    # ------------------------------------------------------------ bridges
 
     def _sync_bridges(self, slug=None, *, retry_failing=False):
         """Make each runner cousin's `telegram:<slug>` child match its
@@ -1279,7 +1279,7 @@ class Supervisor:
         else:
             self.children.pop(child.name, None)
 
-    # ------------------------------------------------------------ snapshot (R7)
+    # ------------------------------------------------------------ snapshot
 
     def _publish(self):
         """run/supervisor.json, rewritten (tmp + rename) when status changed."""
@@ -1357,7 +1357,7 @@ def held_path(home):
 
 
 def is_held(home):
-    """A runtime `stop` holds this runner cousin down (R4')."""
+    """A runtime `stop` holds this runner cousin down."""
     return held_path(home).exists()
 
 
@@ -1389,7 +1389,7 @@ def release(home):
         pass
 
 
-# ------------------------------------------------------------ the registry (R4)
+# ------------------------------------------------------------ the registry
 
 def _agent_table(home):
     """cousin.toml's [agent] table, or None when the file is missing or
@@ -1437,7 +1437,7 @@ def runner_cousins(root):
 
 
 def registry_findings(root):
-    """{"refused": {slug: line}, "config": [finding]} for `status` (R2, R7):
+    """{"refused": {slug: line}, "config": [finding]} for `status`:
     every cousin under `root`/cousins with no runner kind, refused with
     delivery.lane_refusal (a worker is neither, and is not listed), and
     every key 2.0.0 removed that a cousin or the install still carries

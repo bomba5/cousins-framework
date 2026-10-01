@@ -58,7 +58,7 @@ class _CliCase(unittest.TestCase):
 
 def _reply_rows(home):
     """cousin-reply stores the reply in the cousin's own chat store
-    (chat_api.reply, phase 10a): no request reaches a server."""
+    (chat_api.reply): no request reaches a server."""
     import sqlite3
     with sqlite3.connect(pathlib.Path(home) / "data" / "chat.db") as db:
         return db.execute("SELECT message, reply_to_user FROM messages ORDER BY id").fetchall()

@@ -1,4 +1,4 @@
-"""Config seams added in phase 0: config/harness.toml.
+"""Config seams: config/harness.toml.
 
 The harness (the agent runtime that hosts a cousin) keeps this install's
 session transcripts and its own auto-memory directory somewhere the
@@ -51,11 +51,11 @@ class HarnessSeam(unittest.TestCase):
             self.assertIsNone(cfg["settings_file"])
 
     def test_home_encoded_is_the_harness_encoding_every_non_alphanumeric_is_a_dash(self):
-        """#106: Claude Code names a project dir by its path with every
-        character that is not a letter or a digit turned into '-' (seen on
-        this host: /tmp/tmpxpnoz7t_/cousins/wren is -tmp-tmpxpnoz7t--cousins-wren);
-        only '/' was mapped, so a home with '.', '_' or another character
-        resolved a transcripts dir that does not exist."""
+        """Claude Code names a project dir by its path with every
+        character that is not a letter or a digit turned into '-'
+        (/tmp/tmpxpnoz7t_/cousins/wren is -tmp-tmpxpnoz7t--cousins-wren);
+        mapping only '/' would give a home with '.', '_' or another
+        character a transcripts dir that does not exist."""
         for home, encoded in (("/srv/fw/cousins/testa/files", "-srv-fw-cousins-testa-files"),
                               ("/tmp/tmpxpnoz7t_/cousins/wren", "-tmp-tmpxpnoz7t--cousins-wren"),
                               ("/srv/ana/.cousins/wren.v2", "-srv-ana--cousins-wren-v2"),
@@ -186,7 +186,7 @@ class AgentDefaultsSeam(unittest.TestCase):
 
 class CommitAttributionSeam(unittest.TestCase):
     """config/harness.toml [agent] commit_attribution, overridden by a
-    cousin's own cousin.toml [agent] commit_attribution (tracker #112):
+    cousin's own cousin.toml [agent] commit_attribution:
     whether a commit or PR this cousin makes carries Claude Code's own
     injected attribution. Unset anywhere: True, the CLI's stock
     behaviour - the framework is public and does not impose one
@@ -257,9 +257,9 @@ class CommitAttributionSeam(unittest.TestCase):
 class TestClaudeCodePreset(unittest.TestCase):
     """The shipped Claude Code preset (config/harness.toml.claude-code.example).
 
-    Canaries from the clean-machine install re-test (2026-09-18): the
-    attention flag cleared once the login screen turned into an OAuth
-    error, and a pinned `models` list hid the current model family."""
+    Canaries from a clean-machine install: the attention flag must stay
+    set when the login screen turns into an OAuth error, and a pinned
+    `models` list must not hide the current model family."""
 
     def _preset(self):
         import tomllib
@@ -268,7 +268,7 @@ class TestClaudeCodePreset(unittest.TestCase):
             (here / "config" / "harness.toml.claude-code.example").read_text())
 
     def test_the_presets_carry_no_key_2_0_0_removed(self):
-        # R7: the legacy pane's attention and busy patterns, [input_mode],
+        # the legacy pane's attention and busy patterns, [input_mode],
         # the size guard, [agent.resume] and [auth.api_key] are gone; the
         # tmux kind reads its own screen (tmux_pane.attention_in)
         import tomllib

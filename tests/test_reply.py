@@ -34,7 +34,7 @@ class TestSendReply(unittest.TestCase):
         return CousinConfig.load(home)
 
     def test_stores_the_reply_in_its_own_chat_store(self):
-        """No [chat] port, no server: the reply still lands (phase 10a)."""
+        """No [chat] port, no server: the reply still lands."""
         result = send_reply(self._cfg(), "hello there", user="Sam")
         [row] = _rows(self.home)
         self.assertEqual(result["id"], row["id"])
@@ -67,10 +67,9 @@ class TestReplyImage(TestSendReply):
     copied into <home>/chat/images/ or chat/video/ and the reply row
     names it (attachment kind + path), the convention cousin-image uses
     and both the console and the Telegram bridge read.
-    Canary: the migrated render-preview workflow (a cousin posting its own
-    PNG) had no path in this framework (operator report 2026-09-18);
-    tracker #24: --image rows carried no attachment, so the bridge never
-    relayed the picture."""
+    Canary: a cousin posting its own picture is a real workflow, and an
+    --image row that carried no attachment would leave the bridge with
+    nothing to relay."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

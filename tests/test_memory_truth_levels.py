@@ -1,9 +1,9 @@
 """Truth levels on memory writes.
 
-Canary (2026-09-18): every raw memory in the live install read L3.
-`decide` and the flip miner hardcoded the cousin-conclusion level and
-nothing let a cousin record what the operator said, although the boot
-law asks for exactly that with a cited source. `decide` and the new
+Without them every raw memory read L3: `decide` and the flip miner
+hardcoded the cousin-conclusion level and nothing let a cousin record
+what the operator said, although the boot law asks for exactly that
+with a cited source. `decide` and the new
 `remember` take --level; operator-stated needs --cite; the distiller
 routes the canonical L0 name to operator-calibration.md.
 """

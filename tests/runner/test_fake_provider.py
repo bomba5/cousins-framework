@@ -1,7 +1,7 @@
-"""The fake OpenAI-compatible provider (tests/runner/_fake_provider.py), the
-live proofs' only model endpoint (phase 9 R16): its scripted replies in
-the streaming shape opencode's bundled `@ai-sdk/openai-compatible` reads,
-and what it records. Loopback only; never the opencode binary."""
+"""The fake OpenAI-compatible provider (tests/runner/_fake_provider.py),
+the live tests' only model endpoint: its scripted replies in the streaming
+shape opencode's bundled `@ai-sdk/openai-compatible` reads, and what it
+records. Loopback only; never the opencode binary."""
 import http.client
 import json
 import time

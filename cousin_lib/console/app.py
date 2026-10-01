@@ -3,9 +3,9 @@ that owns two things, browser sessions and the users file, and serves
 everything else as a projection of a store some other component owns
 (docs/reference/console-api.md, docs/reference/console-api.md).
 
-Extension points for the other console tasks:
+Extension points:
 
-- `ROUTE_MODULES` and `PACKAGE_ROUTE_MODULES` (one stub per UI parity
+- `ROUTE_MODULES` and `PACKAGE_ROUTE_MODULES` (one stub per feature
   package, filled by that package only): the module names whose import
   registers routes on `router`. Every name is imported when a `ConsoleServer` is
   constructed and its `register()` called again, so a registry cleared
@@ -14,7 +14,7 @@ Extension points for the other console tasks:
   never at module level.
 - `ConsoleServer.static_handler`: `None` means `static.serve_static`
   over `ConsoleServer.static_dir` (suffix allowlist, traversal check,
-  no-store, index for `/`); a frontend task may assign
+  no-store, index for `/`); a frontend may assign
   `fn(handler, path)` instead.
 - `ConsoleServer.emit(kind, data)`: command handlers announce what
   they did (`cousin-status`, `cousin-flip`, `tracker-change`, the job
@@ -74,19 +74,18 @@ ROUTE_MODULES = [
     "cousin_lib.console.routes_plugins",
 ]
 
-# The seam for the UI parity packages (docs: notes of the console audit,
-# "Work packages"): one route module per package, each owned by that
-# package alone and loaded exactly as ROUTE_MODULES is. A package adds its
-# routes in its own module's register(); it never edits this file. A new
-# package gets its stub here once, in the same change that adds its jsx
-# stub to index.html's package block.
+# The seam for the feature packages: one route module per package, each
+# owned by that package alone and loaded exactly as ROUTE_MODULES is. A
+# package adds its routes in its own module's register(); it never edits
+# this file. A new package gets its stub here once, in the same change
+# that adds its jsx stub to index.html's package block.
 PACKAGE_ROUTE_MODULES = [
-    "cousin_lib.console.routes_agent",      # WP-A: agent and cousin settings
-    "cousin_lib.console.routes_migrate",    # WP-B: kind switch and migration
-    "cousin_lib.console.routes_lifecycle",  # WP-B: reincarnate, transplant
-    "cousin_lib.console.routes_accounts",   # WP-C: accounts and login flows
-    "cousin_lib.console.routes_mcp",        # WP-D: MCP registry and policy
-    "cousin_lib.console.routes_system",     # WP-F: system and install config
+    "cousin_lib.console.routes_agent",      # agent and cousin settings
+    "cousin_lib.console.routes_migrate",    # kind switch and migration
+    "cousin_lib.console.routes_lifecycle",  # reincarnate, transplant
+    "cousin_lib.console.routes_accounts",   # accounts and login flows
+    "cousin_lib.console.routes_mcp",        # MCP registry and policy
+    "cousin_lib.console.routes_system",     # system and install config
 ]
 
 # /api/version is public: the login page may show it, and it says only

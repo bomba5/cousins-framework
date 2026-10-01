@@ -1,8 +1,8 @@
-"""Auth on the SDK lane (Task 16): a login that is missing, expired or
+"""Auth on the SDK lane: a login that is missing, expired or
 revoked, and an account its billing stopped, are detected inside the turn,
 kept apart from a rate limit, said where the operator looks, and picked
 up again without a restart and without a turn spent per retry. The
-credentials are the account's (Task 14); the runner never obtains any."""
+credentials are the account's; the runner never obtains any."""
 import hashlib
 import json
 import re
@@ -46,7 +46,7 @@ def assistant_signal(error, text=""):
         return {"reason": LOGIN, "detail": (text or AUTH_ERROR)[:300]}
     if error == BILLING_ERROR:
         return {"reason": BILLING, "detail": (text or BILLING_ERROR)[:300]}
-    return None      # rate_limit is Task 12's; invalid_request, server_error, unknown: a failed turn
+    return None      # rate_limit is the rate-limit wait's; invalid_request, server_error, unknown: a failed turn
 
 
 def retry_signal(data):
@@ -95,7 +95,7 @@ def credential_mark(account, root):
 
 
 def host_label(root):
-    """R14: config/harness.toml host_label, else the hostname."""
+    """config/harness.toml host_label, else the hostname."""
     from cousin_lib.config import MissingConfigError, harness_config
     try:
         label = (harness_config(root) or {}).get("host_label")

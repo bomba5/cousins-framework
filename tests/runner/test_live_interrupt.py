@@ -1,4 +1,4 @@
-"""Live, opt in with COUSIN_LIVE_SDK=1 (phase 5 review I8): the console's
+"""Live, opt in with COUSIN_LIVE_SDK=1: the console's
 interrupt ends a real SDK turn. A real SdkRunner holds the cousin's lock, as
 cousin-runner does; the turn runs `sleep 60` in Bash; POST
 /api/cousins/<slug>/interrupt on a real ConsoleServer must answer

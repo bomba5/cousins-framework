@@ -1,4 +1,4 @@
-"""cousin-supervisor runs a runner cousin's Telegram bridge (#101, R10):
+"""cousin-supervisor runs a runner cousin's Telegram bridge:
 a `telegram:<slug>` child beside `runner:<slug>` when `[telegram]` is
 enabled and valid (telegram.load_bridge_config's rule), started after
 its runner, stopped and held with it, restarted with the backoff, added

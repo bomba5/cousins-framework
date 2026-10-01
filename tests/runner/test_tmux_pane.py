@@ -1,9 +1,8 @@
-"""The tmux kind's pane (phase 11 Task 2, interfaces I3): how the runner
+"""The tmux kind's pane: how the runner
 drives an interactive Claude Code in a tmux session on the framework's own
 socket. A fake tmux logs every argv and serves a scripted screen; the
-screens are the ones captured from Claude Code 2.1.281 (phase 11
-findings: S0, S3, S4, I6a, Z7, Z8), so the parsing is held to what the CLI
-really shows."""
+screens are the ones captured from Claude Code 2.1.281, so the parsing is
+held to what the CLI really shows."""
 import json
 import os
 import pathlib
@@ -79,7 +78,7 @@ if sub == "capture-pane":
     sys.stdout.write(screen)
 if sub == "load-buffer":
     open(os.environ["FAKE_TMUX_LOG"] + ".buffer", "w").write(sys.stdin.read())
-if sub == "send-keys" and args[-1] == "C-u":       # C-u empties the box (Z8)
+if sub == "send-keys" and args[-1] == "C-u":       # C-u empties the box
     lines = open(os.environ["FAKE_TMUX_SCREEN"]).read().splitlines()
     lines = ["\\u276f " if l.startswith("\\u276f ") and "Press up" not in l else l for l in lines]
     open(os.environ["FAKE_TMUX_SCREEN"], "w").write(chr(10).join(lines))
@@ -210,7 +209,7 @@ class TestScreen(PaneCase):
             self.assertEqual(self.pane.attention(), want, want)
 
     def test_the_models_own_words_in_the_conversation_trigger_nothing(self):
-        """Review I3: the screens are matched outside the conversation; a
+        """The screens are matched outside the conversation; a
         model that writes about a usage limit, or quotes the rewind
         selector's footer, is text above the box."""
         said = "\n".join([
@@ -232,7 +231,7 @@ class TestScreen(PaneCase):
 
 
 ESC = "\x1b"
-# measured on the real CLI 2.1.282 (round 4 live proof): a fresh session's
+# measured on the real CLI 2.1.282: a fresh session's
 # box holds a DIM placeholder suggestion, `capture-pane -p -e` of that line
 PLACEHOLDER = (ESC + "[39m❯ " + ESC + "[2mTry" + ESC + "[0m " + ESC + '[2m"fix' + ESC + "[0m "
                + ESC + "[2mtypecheck" + ESC + "[0m " + ESC + '[2merrors"' + ESC + "[0m")
@@ -243,7 +242,7 @@ def _boxed(line, above="● done"):
 
 
 class TestPlaceholder(PaneCase):
-    """Round 4 live finding: a dim suggestion in the box is not input."""
+    """A dim suggestion in the box is not input."""
 
     def test_the_measured_placeholder_line_is_an_empty_box(self):
         self.assertEqual(tp.box_in(_boxed(PLACEHOLDER)), "")
@@ -318,7 +317,7 @@ class TestTyping(PaneCase):
         os.environ["FAKE_TMUX_FAIL"] = "capture-pane"
         self.assertEqual(self.pane.type_row("[inbox:0123456789ab] x", "y"), tp.Outcome.FAILED)
         self.assertFalse(any("send-keys" in c for c in self.calls()))
-        # review C3: a screen nobody can read is not a clear one
+        # a screen nobody can read is not a clear one
         self.assertEqual((self.pane.box_text(), self.pane.attention(), self.pane.queued()),
                          (None, tp.NO_PANE, False))
 
@@ -346,7 +345,7 @@ class TestTyping(PaneCase):
             pane.start(["claude"], cwd="/h", env_base=())
 
     def test_escape_and_c0_controls_never_reach_the_pane(self):
-        """Review C4: an ESC[201~ in the body ends the bracketed paste early
+        """An ESC[201~ in the body ends the bracketed paste early
         (tmux 3.6a passes it through), then a CR submits and `!echo` runs in
         bash mode. ESC and every C0 control but \\n and \\t are stripped
         from the first line and the body before any key."""
@@ -366,7 +365,7 @@ class TestTyping(PaneCase):
         self.assertEqual(first, "[inbox:0123456789ab] from W")
 
     def test_the_box_is_read_again_after_the_first_line(self):
-        """Review minor (check-then-type): a dialog that takes the box while
+        """Check-then-type: a dialog that takes the box while
         the first line goes in gets nothing more: no paste, no Enter, no C-u."""
         after = self.dir / "after"
         after.write_text(TRUST)
@@ -421,8 +420,8 @@ time.sleep(30)
 @unittest.skipUnless(shutil.which("tmux"), "no tmux on this host")
 class TestRealTmux(unittest.TestCase):
     """Measured on a real tmux server on a scratch socket (`tmux -L`, killed
-    by that socket): what the pane's program receives for the reviewer's
-    payload (review C4). A raw-mode program with bracketed paste on plays
+    by that socket): what the pane's program receives for a body that
+    tries to end the bracketed paste early. A raw-mode program with bracketed paste on plays
     the CLI and records every byte."""
 
     def test_an_end_of_paste_in_the_body_never_ends_the_paste(self):
@@ -455,7 +454,7 @@ class TestRealTmux(unittest.TestCase):
 
 
 class TestProcesses(unittest.TestCase):
-    """What the runner waits on after killing a refused pane (R24): a pid is
+    """What the runner waits on after killing a refused pane: a pid is
     alive until it is gone or a zombie; a SIGKILL ends it. Only this test's
     own children are signalled."""
 

@@ -1,5 +1,5 @@
 """cousin-supervisor: the child table, the reap loop, restarts, output and
-the ordered stop (phase 6 task 1). Stub children are `python3 -c`
+the ordered stop. Stub children are `python3 -c`
 scripts; every wait has a deadline and every process is killed in
 cleanup. Invented cast only."""
 import ctypes
@@ -153,7 +153,7 @@ class TestRestarts(_Case):
         self.assertIn("supervisor: runner:wren failing: configuration (exit 2)", out.getvalue())
 
     def test_a_tmux_runner_that_gave_up_is_failing_with_its_own_reason(self):
-        """Round 4: a tmux runner that gives up on its pane exits 2 and
+        """A tmux runner that gives up on its pane exits 2 and
         leaves data/run/tmux-giving-up.json; the failing row names why."""
         home = self.root / "cousins" / "wren"
         (home / "data" / "run").mkdir(parents=True)
@@ -183,7 +183,7 @@ class TestRestarts(_Case):
                          "login required (exit 4)")
 
     def test_classify_exit_table(self):
-        # N1/N2: a lock-held exit (5) is busy for a runner and for the loops
+        # a lock-held exit (5) is busy for a runner and for the loops
         # daemon alike: waited out after the backoff, never counted, never
         # `failing`; 2 stays configuration for every kind
         self.assertEqual(supervisor.RUNNER_BUSY_EXIT, runner_main.LOCK_HELD_EXIT)
@@ -347,12 +347,12 @@ class TestChildren(_Case):
                                        "--home", "/srv/fw/cousins/wren"])
         self.assertEqual((runner.name, runner.kind, runner.slug, runner.stop_timeout),
                          ("runner:wren", "runner", "wren", 35.0))
-        # R5': one constant; the supervisor's budget is the runner's own + 5 s
+        # one constant; the supervisor's budget is the runner's own + 5 s
         self.assertEqual(runner_main.STOP_TIMEOUT_S, 30.0)
         self.assertEqual(supervisor.STOP_TIMEOUTS["runner"], runner_main.STOP_TIMEOUT_S + 5)
 
     def test_runner_kinds_have_one_source(self):
-        # M6: delivery's list is the one the supervisor and the runner read
+        # delivery's list is the one the supervisor and the runner read
         self.assertEqual(delivery.RUNNER_KINDS, ("sdk", "fake", "opencode", "tmux"))
         self.assertIs(supervisor.RUNNER_KINDS, delivery.RUNNER_KINDS)
         self.assertIs(runner_main.KINDS, delivery.RUNNER_KINDS)
@@ -374,7 +374,7 @@ class _FakeProc:
 
 class TestReap(_Case):
     def test_a_child_restarted_inside_the_reap_loop_is_not_an_orphan(self):
-        # M4: the console's 75 restarts inside reap(); a new child that dies
+        # the console's 75 restarts inside reap(); a new child that dies
         # before the loop drains is still that child, not an orphan
         sup = Supervisor(self.root, [_stub("console", "console", "pass")],
                          out=io.StringIO(), **FAST)
@@ -548,7 +548,7 @@ class TestProcess(_Case):
                         "the orphan %d was left a zombie" % gpid)
         self.assertIsNone(proc.poll())
         proc.send_signal(signal.SIGTERM)
-        self.assertEqual(proc.wait(60), 0)     # a loaded runner: the stop, not its speed (#135)
+        self.assertEqual(proc.wait(60), 0)     # a loaded runner: the stop, not its speed
 
 
 if __name__ == "__main__":

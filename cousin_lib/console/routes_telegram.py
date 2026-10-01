@@ -2,7 +2,7 @@
 "Telegram"): status, the write-only token, the operators, the refused
 senders waiting to be added, the enable switch and a token check. The
 token never leaves the server: every answer says only whether one is
-set. A bridge is the supervisor's child (R10, #101): a change is written
+set. A bridge is the supervisor's child: a change is written
 to cousin.toml and the supervisor is asked to rescan (`reload`), which
 adds, removes or restarts `telegram:<slug>`; the console never starts a
 bridge itself. A cousin with no runner kind has no bridge in 2.0.0: the
@@ -39,7 +39,7 @@ def _supervisor_rescan(req, home):
     outside it when the config no longer runs. Only with no supervisor
     to ask does the console stop a bridge itself (one started outside
     any supervisor), when the config no longer runs; it never starts
-    one. A supervisor that is alive but slow is not a missing one (#113):
+    one. A supervisor that is alive but slow is not a missing one:
     its rescan follows when it answers, so the console stops nothing
     (a second stop would race it). What to report."""
     try:

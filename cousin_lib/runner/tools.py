@@ -44,8 +44,8 @@ class ToolContext:
     policy: object            # a policy.Policy: .outbound_filter
     stream: object = None     # EventStream or None
     registry: object = None   # set by build_tool_server
-    on_handoff: object = None     # callable(summary) (phase 4)
-    session: str = "primary"      # "primary", or the thread kind a side session answers (phase 8)
+    on_handoff: object = None     # callable(summary)
+    session: str = "primary"      # "primary", or the thread kind a side session answers
 
 
 def _str(a, key, default=""):
@@ -494,7 +494,7 @@ def _pick_thread(ctx, thread):
     thread's spelling is used when one matches. The live
     turn decides only the implicit default: one live thread, that one;
     two, refused with the list, never guessed; none, refused. A peer
-    folded into an operator's turn (#118) is a second live thread: a bare
+    folded into an operator's turn is a second live thread: a bare
     reply is refused, never sent to the operator's surface, and the
     refusal says which thread takes thread= and which takes send."""
     turn = ctx.turn
@@ -738,8 +738,8 @@ def handoff(ctx, args):
     loops, the thread list, the memories, and data/handoff.md LAST."""
     from cousin_lib import memory, sync_state
     if getattr(ctx, "session", "primary") != "primary":
-        # the same tool list in every session keeps the cached prefix shared
-        # (phase 4 R1); a side session is refused here instead
+        # the same tool list in every session keeps the cached prefix shared;
+        # a side session is refused here instead
         raise ValueError("handoff belongs to the primary session; this is the %s side"
                          " session: record what matters with the memory tool" % ctx.session)
     args = dict(args or {})

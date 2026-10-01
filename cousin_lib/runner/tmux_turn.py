@@ -1,9 +1,9 @@
 """run/turn.json: the tmux kind's live turn, as the stdio `cousin-mcp` sees
-it (phase 11 I5, R11). The runner writes it when a turn starts in the pane
+it. The runner writes it when a turn starts in the pane
 and clears it at the turn's end; the stdio server reads it to route `reply`
 (the live turn's threads) and `handoff`. It counts only for the pane's own
 CLI session (run/tmux-session.json, written by the SessionStart hook): an
-absent, unreadable, stale or foreign file means no live turn (M7).
+absent, unreadable, stale or foreign file means no live turn.
 
 {"session_id": str, "turn_nonce": str, "threads": [str]}, atomic (tmp +
 rename), 0600."""

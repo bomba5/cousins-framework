@@ -1,8 +1,8 @@
 """spawn.stop_cousin and spawn.dismiss_cousin: the console's stop and
 delete paths, usable with no console running.
 
-Stop refuses a cousin with no runner kind by name (R2) and is a no-op
-that says so for a worker (R14); a runner cousin's stop is the
+Stop refuses a cousin with no runner kind by name and is a no-op that
+says so for a worker; a runner cousin's stop is the
 supervisor's. Dismiss archives the whole home before removing it and
 REFUSES the delete when the archive cannot be written: the archive is
 the only copy of never-tracked notes, so a delete without it is a
@@ -64,7 +64,7 @@ class StopCase(unittest.TestCase):
         return home
 
 class TestLegacyStopRefused(StopCase):
-    """R2, R14: stop_cousin refuses a cousin with no [agent] runner by
+    """stop_cousin refuses a cousin with no [agent] runner by
     name before any tmux call; a worker has no session, so its stop is a
     no-op that says so."""
 
@@ -88,7 +88,7 @@ class TestLegacyStopRefused(StopCase):
 
 
 class TestDismissCousin(StopCase):
-    runner = "fake"   # a runner cousin: its stop is the supervisor's (R2)
+    runner = "fake"   # a runner cousin: its stop is the supervisor's
     def test_archives_the_whole_home_then_removes_it(self):
         home = self._cousin()
         out = dismiss_cousin(self.root, slug="wren", tmux_bin=str(self.tmux))

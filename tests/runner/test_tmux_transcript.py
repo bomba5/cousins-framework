@@ -1,8 +1,7 @@
-"""The tmux kind's transcript reader (phase 11 Task 2, R6, P11-9): which
-entries start a turn, which end one, and how a reader resumes from a byte
-offset without ever passing a partial line. The entry shapes are the ones
-measured on the interactive CLI 2.1.281 (notes: phase-11 findings S1-S4,
-S7, S9); the content is invented."""
+"""The tmux kind's transcript reader: which entries
+start a turn, which end one, and how a reader resumes from a byte offset
+without ever passing a partial line. The entry shapes are the ones
+measured on the interactive CLI 2.1.281; the content is invented."""
 import json
 import pathlib
 import tempfile

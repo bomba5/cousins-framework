@@ -1,5 +1,5 @@
 """Two sessions of one cousin write memory at the same moment and nothing
-is lost (master plan phase 8): one memory writer at a time per home,
+is lost: one memory writer at a time per home,
 across threads and processes, reentrant within one thread.
 
 Each race test holds session A inside the window where an unserialized
@@ -97,7 +97,7 @@ def _decisions(home):
 
 class TestTwoSessionsWriteMemory(RaceCase):
     def test_two_sessions_write_memory_concurrently_without_loss(self):
-        """The master plan's test, through the tool layer: two sessions'
+        """Through the tool layer: two sessions'
         tool contexts decide at once while the log rotates."""
         home = _home(self)
         with open(home / "data" / "decisions.jsonl", "w") as fh:
@@ -172,7 +172,7 @@ class TestTwoSessionsWriteMemory(RaceCase):
 
 class TestWholeSections(RaceCase):
     def test_a_distill_that_read_raw_first_does_not_write_last(self):
-        """Review M7: the read of raw and the write of the views are one
+        """The read of raw and the write of the views are one
         section. A distill that read raw before another session remembered
         and distilled must not overwrite that session's newer views."""
         home = _home(self)
@@ -209,9 +209,9 @@ def _every_raw_line(home):
 
 
 class TestRawFoldAndTrash(RaceCase):
-    """Review P8-5 and the trash: the raw fold and the trash's rewrite are
-    read-then-replace (or read-then-unlink) on a raw file another session
-    appends to; under the lock the append waits and is kept."""
+    """The raw fold and the trash's rewrite are read-then-replace (or
+    read-then-unlink) on a raw file another session appends to; under the
+    lock the append waits and is kept."""
 
     def test_a_backfill_append_racing_the_raw_fold_is_kept(self):
         """The backfill appends a decision to its own (old) day file; the
@@ -352,7 +352,7 @@ class TestTheOtherLockedWriters(RaceCase):
 
 class TestTheLock(HermeticCase):
     def test_a_lock_file_this_user_cannot_write_still_locks(self):
-        """Review M6: flock needs no write access; a lock file another uid
+        """flock needs no write access; a lock file another uid
         created (read-only to the cousin) must not stop a memory write."""
         home = _home(self)
         path = home / "data" / ".memory-write.lock"

@@ -7,9 +7,9 @@ message's usage summed per UTC calendar day, once per message id: the
 harness writes one line per content block, each repeating the usage.
 Absent seam: unavailable, with the reason.
 
-Only the session in use was read before 2026-09-19, and a cousin that
-flips daily starts a new session every day: the 14-day series held
-today alone."""
+Every session is read, not only the one in use: a cousin that flips
+daily starts a new session every day, so the current session alone would
+fill the 14-day series with today only."""
 from __future__ import annotations
 
 import json
@@ -39,7 +39,7 @@ def _seam(root):
 # opencode's answers as the provider reported them), read from it only.
 USAGE_DB_KINDS = ("sdk", "opencode")
 # The kinds whose usage needs no harness seam: those, and the tmux kind's
-# own transcripts under its account's config dir (phase 11 R16).
+# own transcripts under its account's config dir.
 OWN_USAGE_KINDS = USAGE_DB_KINDS + ("tmux",)
 
 
@@ -54,7 +54,7 @@ def _any_sdk(root):
 
 
 def _pane_transcripts_dir(root, home):
-    """Where a tmux-kind cousin's pane CLI keeps its transcripts (R13): its
+    """Where a tmux-kind cousin's pane CLI keeps its transcripts: its
     account's config dir (a named claude-login), else the host's ~/.claude;
     projects/<the home, encoded as the harness names it>. None when the
     account cannot be read."""
@@ -165,7 +165,7 @@ def _day_buckets(server, home, *, days=SERIES_DAYS):
     """{day: {"total", "output", "read", "creation", "input"}} for one
     cousin. A cousin on runner = "sdk" or "opencode" is read from its
     usage.db ONLY: the SDK also writes the harness's local transcript for
-    it (phase 0 finding 2), and scanning that too would count its turns
+    it, and scanning that too would count its turns
     twice; opencode writes none. Every other
     cousin: every transcript touched in the last `days` days, scanning only
     the bytes appended since the last call on this server."""
@@ -179,7 +179,7 @@ def _day_buckets(server, home, *, days=SERIES_DAYS):
     files = state.setdefault(str(home), {})
     base = None
     if _runner_kind(home) == "tmux":
-        # the pane CLI's own transcripts, seam or no seam (phase 11 R16)
+        # the pane CLI's own transcripts, seam or no seam
         base = _pane_transcripts_dir(server.root, home)
         if base is None:
             return {}

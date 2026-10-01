@@ -186,7 +186,7 @@ class SchemaCase(unittest.TestCase):
         self.assertFalse(schema["additionalProperties"])
 
     def test_shipped_send_tool_can_attach_an_image_to_an_operator_reply(self):
-        # Canary: cousin-reply grew --image (2026-09-18); the MCP send
+        # cousin-reply takes --image; the MCP send
         # tool must expose it, optional, and only on the operator path.
         send = self.reg["tools"]["send"]
         self.assertTrue(send["properties"]["image"].get("optional"))
@@ -253,7 +253,7 @@ class CallAssemblyCase(unittest.TestCase):
         self.assertIsNone(stdin)
 
     def test_the_memory_tool_can_mark_a_topic_obsolete(self):
-        # Canary (2026-09-18): L5 had no writer; the tool carries it
+        # L5 needs a writer: the tool carries it
         # with the reason as a flag and --force only when asked.
         argv, stdin = mcp_server.build_call(
             self.tool, "obsolete",
@@ -1291,9 +1291,9 @@ if __name__ == "__main__":
 
 class TestLenientRegistry(unittest.TestCase):
     """Serving is lenient per tool: one broken tool costs that tool, not
-    the whole MCP surface. On 2026-09-20 a [tools.meeting] left without
-    commands by the old `cousin-meeting teach` made cousin-mcp exit before
-    initialize, and four cousins booted with no tools at all."""
+    the whole MCP surface. A [tools.meeting] left without commands by the
+    old `cousin-meeting teach` made cousin-mcp exit before initialize, so
+    a cousin could boot with no tools at all."""
 
     GOOD = ('[tools.memory]\ncommand = "cousin-memory"\n'
             '[tools.memory.commands.search]\nargv = ["search"]\n')

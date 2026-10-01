@@ -25,7 +25,7 @@ cousins/
 /data/
 
 # The root's run directory: a login capture lives here for at most its
-# window (Task 15).
+# window.
 /run/
 
 # The root's shared tier: reviewed shared memory and the hive database,

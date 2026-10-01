@@ -101,7 +101,7 @@ class SetKey(unittest.TestCase):
 
 
 class KeepsWhatIsNotTheKey(unittest.TestCase):
-    """Fix round 1 minors: an inline comment survives a replace; a key's
+    """An inline comment survives a replace; a key's
     name inside a multi-line string or a nested array is never taken for
     the key."""
 
@@ -262,7 +262,7 @@ class RootTable(unittest.TestCase):
 
 class WriteFileKeysText(unittest.TestCase):
     """write_file_keys's text hook, its initial text and mode for a created
-    file, and `fresh` over a broken one (WP-D: a registry, policy.toml)."""
+    file, and `fresh` over a broken one (a registry, policy.toml)."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

@@ -61,7 +61,7 @@ class TestProposeTurn(HermeticCase):
         self.assertIsNone(extract.propose_turn(self.home, "sess-0001", store=self.store))
 
     def test_a_conclusion_without_a_decision_is_mined_not_proposed(self):
-        """R11: extract.py still mines it as an episode: entry; only a
+        """extract.py still mines it as an episode: entry; only a
         sentence carrying a decision word is worth asking about."""
         _turn(self.store, "sess-0001", 1, "The pin floated because the pull-up was missing.")
         self.assertIsNone(extract.propose_turn(self.home, "sess-0001", store=self.store))
@@ -79,7 +79,7 @@ class TestProposeTurn(HermeticCase):
                                                turn_bodies=(body,)))
 
     def test_a_proposal_turn_is_consumed_so_the_next_turn_does_not_reread_it(self):
-        """Review Focus 4: the proposal's own turn restates the conclusion;
+        """The proposal's own turn restates the conclusion;
         the plain turn after it must not be proposed about on that text."""
         mark = extract.PROPOSAL_MARK + " Your last turn reached conclusions ..."
         _turn(self.store, "sess-0001", 1, DECIDED)                   # the proposal's own turn
@@ -108,7 +108,7 @@ class TestProposeTurn(HermeticCase):
     def test_a_broken_store_raises_so_the_caller_can_surface_it(self):
         """None already means "nothing to propose": folding a broken store
         or corrupt state into it would switch proposals off with no
-        trace (P7-8). propose_turn raises; SdkRunner._propose is the
+        trace. propose_turn raises; SdkRunner._propose is the
         layer that must never fail a turn, and it catches this."""
         class Broken:
             def entries_after(self, *a, **k):
@@ -176,7 +176,7 @@ class TestWiring(HermeticCase):
         self.assertEqual(r.inbox.get(rec.inbox_id)["outcome"], "delivered")
 
     def test_a_corrupt_proposals_state_is_a_propose_error_not_a_silent_null(self):
-        """P7-8: proposals.json in a shape this module never writes (an
+        """proposals.json in a shape this module never writes (an
         int where the cap's list belongs) must show up as the `propose`
         event's error, not a quiet {"proposal": null} indistinguishable
         from "nothing to propose". ScriptedClient never writes to the

@@ -1149,7 +1149,7 @@ def hold_loops_lock(root):
     inode) it locked before closing it, and, where /proc/self/fd says,
     at the same path: a deleted lock file's inode can be recycled for a
     new file (a later temporary root, in a test run) that a reused fd
-    number then names, and device and inode alone would close it (#92)."""
+    number then names, and device and inode alone would close it."""
     import fcntl
     import os
     path = Path(root) / "run" / "loops.lock"

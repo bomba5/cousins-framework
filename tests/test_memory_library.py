@@ -124,7 +124,7 @@ class TestCliStillWorks(HermeticCase):
             {"timestamp": "2030-01-01T12:00:00+01:00", "topic": "beta",
              "decision": "three", "reasoning": "unrelated"},
         ]
-        # Recall reads raw memory now (phase 7 task 4): the same three
+        # Recall reads raw memory: the same three
         # decisions as `decide` stores them there. The printed bytes are
         # unchanged, which is what this test pins.
         (home / "memory" / "raw").mkdir(parents=True, exist_ok=True)

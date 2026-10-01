@@ -117,14 +117,14 @@ class TestHandoff(HermeticCase):
         self.assertIn("March open", boot._active_state(ctx.home))
 
     @unittest.skipUnless(hasattr(importlib.util.find_spec("cousin_lib.runner.prompt") and importlib.import_module("cousin_lib.runner.prompt"), "state_digest"),
-                         "needs Task 3: prompt.state_digest")
+                         "needs prompt.state_digest")
     def test_the_next_digest_reflects_the_handoff(self):
         import os
         from cousin_lib.runner import prompt
         ctx = _ctx(self)
         tools.call(ctx, "handoff", dict(ARGS))
         with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"}):
-            text = prompt.state_digest(ctx.home, root=ctx.root, slug="wren")["text"]   # C2
+            text = prompt.state_digest(ctx.home, root=ctx.root, slug="wren")["text"]   # the passed root, never the env's
         self.assertIn("March open", text)
         self.assertIn("ledger audit - March", text)
 

@@ -268,7 +268,7 @@ class TestIsolatedDir(AuthCase):
         self.assertEqual(copy["keyApprovals"], ["accepted"])
 
     def test_a_login_file_without_the_login_key_is_not_a_login(self):
-        # Canary (live, 2026-09-18): the harness itself wrote a
+        # The harness itself can write a
         # .credentials.json into the isolated dir holding only plugin
         # MCP sign-in state; treating mere existence as a login would
         # refuse the cousin's next start. With login_file_keys set, only
@@ -374,7 +374,7 @@ class TestSwitch(AuthCase):
                                  start_chat_server=lambda home: None, **kw)
 
     def test_a_cousin_with_no_runner_is_refused_before_any_tmux_call(self):
-        """R2: the mode switch restarted a legacy session (kill-session,
+        """The mode switch restarted a legacy session (kill-session,
         then a start that 2.0.0 refuses): it is refused by name first, with
         no tmux call, cousin.toml untouched."""
         from cousin_lib.delivery import lane_refusal

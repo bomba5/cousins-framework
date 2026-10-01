@@ -1,8 +1,8 @@
 """Rollover (spec, "Continuous extraction and rollover").
 
 A generation ends on context pressure, or at the operator's daily
-cadence (`max_age`: the loops daemon's `flip_at` today, the supervisor's
-clock from phase 6; review 2a). Either way it is ONE inbox row with
+cadence (`max_age`: the loops daemon's `flip_at` today, later the
+supervisor's clock). Either way it is ONE inbox row with
 source `flip`: priority 0, claimed only at a turn boundary, never folded
 into a live turn, durable (a runner that dies mid-rollover finishes it
 at its next start), and coalesced (one pending per home). The handoff
@@ -29,7 +29,7 @@ BEQUEST_CHARS = 120             # a reason longer than this, or multi-line, is a
 
 
 def is_bequest(reason):
-    """A bequest (R10) is never coalesced away: the same test
+    """A bequest is never coalesced away: the same test
     handoff_request_text uses to quote a reason whole."""
     reason = str(reason or "")
     return "\n" in reason.strip() or len(reason.strip()) > BEQUEST_CHARS
@@ -44,7 +44,7 @@ def threshold(context_usage, percent=ROLLOVER_AT_PERCENT):
 def pressure_due(context_usage, percent=ROLLOVER_AT_PERCENT):
     """Due at `percent`, or earlier when the CLI reports its own
     autocompact threshold: totalTokens compared with it directly, a
-    margin of COMPACT_MARGIN_TOKENS before it (R7)."""
+    margin of COMPACT_MARGIN_TOKENS before it."""
     u = context_usage or {}
     try:
         if float(u["percentage"]) >= threshold(u, percent):
@@ -95,7 +95,7 @@ def handoff_request_text(reason):
            " status, plus active_threads and learned when you have them. The next"
            " generation starts from what you write; nothing else is needed from you"
            " in this turn.")
-    if is_bequest(reason):                       # a bequest (R10): quoted whole, answered in the tool
+    if is_bequest(reason):                       # a bequest: quoted whole, answered in the tool
         return ("Your generation is ending. The framework's request, verbatim:\n\n%s\n\n"
                 "Answer it through the handoff tool (what it asks you to write goes in"
                 " `position`). %s" % (reason, ask))
@@ -166,7 +166,7 @@ def archive_generation(home, generation):
 
 def put_once(inbox, home, reason):
     """(inbox_id, coalesced). A PLAIN reason joins any pending rollover
-    (one per home). A BEQUEST is never coalesced away (R10): it replaces
+    (one per home). A BEQUEST is never coalesced away: it replaces
     the body of a QUEUED plain row, and gets its own row when the pending
     one is already running or is itself a bequest."""
     from cousin_lib import memory

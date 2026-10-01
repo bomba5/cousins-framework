@@ -81,7 +81,7 @@ class TestTheKind(HermeticCase):
                 with self.assertRaises(RunnerError) as err:
                     runner_main.runner_for(home)
                 self.assertIn("subscription login", str(err.exception))
-                self.assertIn("P11-6", str(err.exception))
+                self.assertIn("login-free config dir", str(err.exception))
                 self.assertNotIn("sk-fixture", str(err.exception))
 
 

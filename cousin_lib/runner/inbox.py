@@ -5,7 +5,7 @@ inserts a row here and pokes the runner; nothing needs to be running
 for the insert to succeed, and a row survives any process dying
 between put and claim.
 
-A turn is NOT 1:1 with a row (phase 0 finding 1): a message folded
+A turn is NOT 1:1 with a row: a message folded
 into a running turn is closed by that turn's one result, so the runner
 calls `done` for every row the turn consumed.
 """
@@ -104,7 +104,7 @@ class Inbox:
     def claim(self, *, limit=1, claimant="", kinds=None, exclude_kinds=()):
         """Oldest first within priority. BEGIN IMMEDIATE takes the write
         lock before the select, so two runners (or a runner and a test)
-        never claim the same row. `kinds` (phase 8): only rows whose
+        never claim the same row. `kinds`: only rows whose
         thread is of one of these kinds, `()` claiming nothing;
         `exclude_kinds`: never a row of these kinds. A side session claims
         its kinds, the primary everything but them."""
@@ -209,7 +209,7 @@ class Inbox:
                 (QUEUED, inbox_id))
 
     def requeue_claimant(self, claimant):
-        """Every row still claimed by `claimant` back to queued (phase 8: a
+        """Every row still claimed by `claimant` back to queued (a
         side session that gave up). Returns how many."""
         with self._db() as conn:
             cur = conn.execute(

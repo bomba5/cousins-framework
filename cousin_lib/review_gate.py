@@ -1,4 +1,4 @@
-"""The review gate for bulk memory writes (master plan phase 7 task 10).
+"""The review gate for bulk memory writes.
 
 When more than N new authored raw entries have been written since the
 gate last looked (N is cousin.toml `[memory] review_batch`, default 3),
@@ -108,8 +108,8 @@ def pending(home):
 # ------------------------------------------------------------ the lock and the cursor
 
 def lock(home):
-    """The gate's lock is the home's memory write lock (phase 8's
-    memory_lock.write_lock): a hold (read, decide, write) and a verdict
+    """The gate's lock is the home's memory write lock
+    (memory_lock.write_lock): a hold (read, decide, write) and a verdict
     (check it is held, write) are atomic against every memory writer,
     another gate included. It is reentrant per thread, so the
     `_append_raw` inside re-enters it; it is never held across a model
@@ -257,7 +257,7 @@ def settle(home, rows, verdicts, *, by=None, why="", model=False):
     are a reviewing model's), an operator-level entry may be kept but not
     dropped: a drop is an entry-level mark with no undo, so that one stays
     the operator's (`cousin-memory review --drop`), and the entry stays
-    held (ruling P7b-1). Returns ({id: verdict} applied, {id: error})."""
+    held. Returns ({id: verdict} applied, {id: error})."""
     done, errors = {}, {}
     home = Path(home)
     # One read of what is held, under one hold of the lock: a verdict per

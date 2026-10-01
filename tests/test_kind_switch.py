@@ -1,7 +1,6 @@
-"""Phase 11 Task 11a (R17, I9, P11-11, P11-13): `cousin-migrate --to sdk|tmux`,
-the kind switch between runner kinds. The session id in
-data/runner-session.json is the continuity: the source stops at idle
-keeping it, the target resumes it."""
+"""`cousin-migrate --to sdk|tmux`, the kind switch between runner kinds.
+The session id in data/runner-session.json is the continuity: the source
+stops at idle keeping it, the target resumes it."""
 import json
 import os
 import pathlib
@@ -69,7 +68,7 @@ class SwitchCase(HermeticCase):
 
 class TestPlan(SwitchCase):
     def test_an_sdk_born_home_is_ready_and_told_the_pane_asks_once(self):
-        """Finding 2 (live proofs 09-25): ~/.claude.json is no gate. A live
+        """~/.claude.json is no gate. A live
         CLI rewrites it and may never record the trust for the home, so the
         plan cannot know in advance; the pane asks once and verify waits."""
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
@@ -101,7 +100,7 @@ class TestPlan(SwitchCase):
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
         self.assertEqual(len(p["warnings"]), 1)
         self.assertIn("github", p["warnings"][0])
-        self.assertIn("P11-13", p["warnings"][0])
+        self.assertIn("not in the SDK kind", p["warnings"][0])
         self.assertTrue(p["ready"])                            # a warning, not a refusal
 
     def test_what_cannot_switch_is_refused_by_name(self):
@@ -116,7 +115,7 @@ class TestPlan(SwitchCase):
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
         self.assertFalse(p["ready"]); self.assertIn("session", " ".join(
             c["detail"] for c in p["checks"] if not c["ok"]))
-        # a tmux rollover's new id its CLI has not written yet (I5)
+        # a tmux rollover's new id its CLI has not written yet
         self.kind("tmux")
         (self.home / "data" / "runner-session.json").write_text(
             json.dumps({"session_id": "s-new", "lane": "login", "fresh": True}))
@@ -131,11 +130,11 @@ class TestPlan(SwitchCase):
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
         self.assertFalse(p["ready"])
         self.assertIn(lane_refusal(self.home), [c["detail"] for c in p["checks"]])
-        # a token or key account never reaches the tmux kind (P11-6)
+        # a token or key account never reaches the tmux kind
         (self.root / "config" / "accounts.toml").write_text('[accounts.fleet]\nkind = "claude-token"\n')
         self.kind("sdk", account="fleet")
         p = migrate.switch_plan(self.home, root=self.root, to="tmux", **self.live())
-        self.assertFalse(p["ready"]); self.assertIn("A4", " ".join(c["detail"] for c in p["checks"]))
+        self.assertFalse(p["ready"]); self.assertIn("skippable by seeding", " ".join(c["detail"] for c in p["checks"]))
 
 
 class TestCheckWarns(SwitchCase):
@@ -147,7 +146,7 @@ class TestCheckWarns(SwitchCase):
             {"mcpServers": {"github": {"command": "gh-mcp"}}}))
         c = migrate.check(self.home, root=self.root, cli_version=lambda: "x")
         self.assertEqual(len(c["warnings"]), 1)
-        self.assertIn("P11-13", c["warnings"][0])
+        self.assertIn("not in the SDK kind", c["warnings"][0])
 
 
 class TestApply(SwitchCase):
@@ -166,7 +165,7 @@ class TestApply(SwitchCase):
                          ["trust", "close", "toml", "cursor", "notice", "start", "verify"])
         self.assertEqual(self.agent()["runner"], "tmux")
         self.assertEqual(json.loads(settings_path(self.home).read_text())["editorMode"], "normal")
-        # the cursor before the start (review minor): the target's first
+        # the cursor before the start: the target's first
         # turn end mines from the switch's EOF, never from the other kind's
         self.assertEqual(self.calls, ["close", ("cursor", "s-live", "tmux"), "start",
                                       ("verify", "s-live", "tmux")])
@@ -175,13 +174,13 @@ class TestApply(SwitchCase):
         self.assertEqual((notice[0]["thread_id"], notice[0]["source"]), ("system", "boot"))
         self.assertIn("sdk kind to the tmux kind", notice[0]["body"])
         self.assertEqual(json.loads((self.home / "data" / "extract-cursor.json").read_text()),
-                         {"s-live": 4096})                     # nothing mined twice (P11-9)
+                         {"s-live": 4096})                     # nothing mined twice
         rec2 = migrate.read_switch_record(self.home)
         self.assertEqual((rec2["from"], rec2["to"], rec2["session_id"]), ("sdk", "tmux", "s-live"))
         self.assertIn("prior_toml_b64", rec2)
 
     def test_to_tmux_warns_on_a_policy_gap_deny_tools_cannot_close(self):
-        """I5: deny_bash_patterns and ask never reach the pane; the switch
+        """deny_bash_patterns and ask never reach the pane; the switch
         itself surfaces that, not only a plan run before it."""
         self.trust()
         (self.home / "policy.toml").write_text('ask = ["Bash"]\n')
@@ -210,7 +209,7 @@ class TestApply(SwitchCase):
 
 
 class TestVerifyWaitsForTheTrustDialog(SwitchCase):
-    """Finding 2: the pane shows the trust dialog on a home it never saw;
+    """The pane shows the trust dialog on a home it never saw;
     the tmux runner types nothing, writes data/login-required.json {screen:
     trust} and emits `auth login_required`. Verify then neither fails nor
     rolls back: it says what it waits for, and waits for the operator up to
@@ -296,7 +295,7 @@ class TestVerifyWaitsForTheTrustDialog(SwitchCase):
 
 class TestTrustScreenOnTheRunner(SwitchCase):
     def test_the_runner_types_nothing_and_records_the_trust_screen(self):
-        """What wait_for_turn reads is what the tmux runner writes (P0)."""
+        """What wait_for_turn reads is what the tmux runner writes."""
         import time
         from cousin_lib.delivery import Item
         from cousin_lib.runner.tmux_runner import TmuxRunner
@@ -315,7 +314,7 @@ class TestTrustScreenOnTheRunner(SwitchCase):
         migrate._switch_notice(self.home, "sdk", "tmux")
         # The runner writes login-required.json a moment before it records
         # the `auth` event: both are waited for, under one deadline that a
-        # loaded host does not reach (#130: the event was read in between).
+        # loaded host does not reach (the event could be read in between).
         def trust_event():
             return any(e["kind"] == "auth" and e["payload"].get("screen") == "trust"
                        for e in r.events())
@@ -333,7 +332,7 @@ if __name__ == "__main__":
 
 
 class TestRollback(SwitchCase):
-    """Phase 11 Task 11b (R17): the way back from a kind switch, keeping the
+    """The way back from a kind switch, keeping the
     session: the runner stopped, cousin.toml and the kind's settings as they
     were, the runner started again on the same session id."""
 
@@ -380,11 +379,11 @@ class TestRollback(SwitchCase):
 
 
 class TestTheNoticeGoesFirst(SwitchCase):
-    """Live proofs 09-25, finding 4: the kind-switch notice reached the model
-    after rows queued before the switch, so one question was answered by a
-    model that still believed the old kind. The notice is put before the
-    target starts and ahead of every queued row: the first turn after the
-    switch is the notice."""
+    """A kind-switch notice that reached the model after rows queued before
+    the switch would let a question be answered by a model that still
+    believed the old kind. The notice is put before the target starts and
+    ahead of every queued row: the first turn after the switch is the
+    notice."""
 
     def queue_before_the_switch(self):
         from cousin_lib.delivery import Item
@@ -445,8 +444,8 @@ class TestTheNoticeGoesFirst(SwitchCase):
         self.assertIn("rolled back", row["detail"])
 
 
-class TestReviewFixes(SwitchCase):
-    """Proof-fix review: what a failed trust wait leaves behind, the notice
+class TestSwitchLeftovers(SwitchCase):
+    """What a failed trust wait leaves behind, the notice
     ahead of a flip row, a late acceptance, a claimed notice at rollback."""
 
     def failed_trust_wait(self):
@@ -519,7 +518,7 @@ class TestReviewFixes(SwitchCase):
 
 
 class TestSwitchMidTurn(SwitchCase):
-    """Review C5: tmux -> sdk with a row mid-turn. The close is the
+    """tmux -> sdk with a row mid-turn. The close is the
     supervisor's held stop; the target's start sweeps the claims the source
     left (runner.main._serve). The row is delivered exactly once."""
 

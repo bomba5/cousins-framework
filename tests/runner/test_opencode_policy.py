@@ -1,13 +1,12 @@
-"""The plugin pack and the SSE-side recording on the opencode lane (phase 9
-Task 6; R9, R10; Review Focus 3): the policy the runner renders for
-plugins/opencode/cousin-policy.js, the refusal to start when the plugin is
-not in force, one tool-name form (the SDK lane's) for the policy and the
-recorder, recording with arguments, `task` parts as subagent jobs, the
-checkpoints, and an endpoint account's context limit. The default suite
-drives the fake `opencode serve`; the plugin itself runs under node when a
-`node` binary is on PATH (skipped otherwise); the live proof runs the real
-binary against a loopback fake provider (opt-in: COUSIN_LIVE_OPENCODE=1 and
-OPENCODE_BIN)."""
+"""The plugin pack and the SSE-side recording on the opencode lane: the
+policy the runner renders for plugins/opencode/cousin-policy.js, the
+refusal to start when the plugin is not in force, one tool-name form (the
+SDK lane's) for the policy and the recorder, recording with arguments,
+`task` parts as subagent jobs, the checkpoints, and an endpoint account's
+context limit. The default suite drives the fake `opencode serve`; the
+plugin itself runs under node when a `node` binary is on PATH (skipped
+otherwise); the live test runs the real binary against a loopback fake
+provider (opt-in: COUSIN_LIVE_OPENCODE=1 and OPENCODE_BIN)."""
 import json
 import os
 import re
@@ -96,7 +95,7 @@ class TestRenderedPolicy(OpencodeCase):
         self.assertIsNone(r2.fatal)
 
     def test_the_models_shell_gets_the_cousins_home_and_not_the_servers_secrets(self):
-        """Review Important 4: opencode's bash inherits the server's
+        """opencode's bash inherits the server's
         environment (HOME and XDG in the account's data dir, where auth.json
         and the rendered config with the MCP token live; the server's
         password). opencode merges the plugin's `shell.env` answer over that
@@ -120,7 +119,7 @@ class TestRenderedPolicy(OpencodeCase):
     def test_shell_env_names_what_the_runner_owns_or_a_secret_is_refused(self):
         for bad in ('"HOME"', '"XDG_DATA_HOME"', '"OPENCODE_SERVER_PASSWORD"', '"OPENCODE_X"',
                     '"ANTHROPIC_API_KEY"', '"bad-name"', "3",
-                    # review round 2, minor 6: a secret by its name's shape
+                    # a secret by its name's shape
                     '"DB_PASSWORD"', '"AWS_SECRET_ACCESS_KEY"', '"CLIENT_SECRET"',
                     '"MY_SECRET_THING"', '"SIGNING_KEY"', '"GH_TOKEN"'):
             with self.subTest(bad=bad):
@@ -138,7 +137,7 @@ class TestRenderedPolicy(OpencodeCase):
                           rendered["ask"], rendered["source"]), ([], [], [], "none"))
 
     def test_the_runner_refuses_to_start_when_the_plugin_is_not_loaded(self):
-        """Review Focus 3. opencode lists a configured plugin in GET /config
+        """opencode lists a configured plugin in GET /config
         whether or not it loaded (measured: a missing file, a syntax error
         and a throwing init all listed, and a denied command ran), so the
         runner needs both the listing and the plugin's acknowledgement of
@@ -198,7 +197,7 @@ class TestRenderedPolicy(OpencodeCase):
 
 class TestRecording(OpencodeCase):
     def test_a_tool_call_is_recorded_with_its_arguments(self):
-        """R10: a part's `running` state carries the arguments; the recorder
+        """A part's `running` state carries the arguments; the recorder
         gets the SDK lane's hook payloads, the tool in the SDK form."""
         seen = []
         args = {"command": "ls -la", "description": "list the home"}
@@ -248,7 +247,7 @@ class TestRecording(OpencodeCase):
         self.assertFalse(seen[0]["is_interrupt"])
 
     def test_a_task_tool_part_is_a_subagent_job(self):
-        """R10: opencode's subagent tool is `task`; its part is a jobs row,
+        """opencode's subagent tool is `task`; its part is a jobs row,
         started on running, done or failed on the outcome."""
         from cousin_lib import jobs
         r = self.started(self.runner([[
@@ -296,7 +295,7 @@ class TestCheckpoints(OpencodeCase):
                               in self.payloads(r, "checkpoint")))     # after the file
 
     def test_a_compaction_writes_the_pre_compact_checkpoint_and_asks_for_a_rollover(self):
-        """R10: `session.compacted` -> the pre-compact checkpoint, and (the SDK
+        """`session.compacted` -> the pre-compact checkpoint, and (the SDK
         lane's PreCompact rule) a rollover at the next turn boundary."""
         r = self.started(self.runner([[("text", "long answer"), ("COMPACT",)]]))
         a = r.enqueue(_op("keep going"))
@@ -322,7 +321,7 @@ class TestEndpointContext(AccountsCase):
                                       mcp_url="http://127.0.0.1:9/mcp", mcp_token="t")
 
     def test_endpoint_context_is_rendered_as_the_models_limit(self):
-        """Task 5b: an endpoint model has no limit, so context pressure is off;
+        """An endpoint model has no limit, so context pressure is off;
         `endpoint_context` names it (and opencode's own overflow check sees it)."""
         for extra, limit in (("endpoint_context = 65536\n", {"context": 65536, "output": 16384}),
                              ("endpoint_context = 262144\n", {"context": 262144, "output": 32000}),
@@ -568,7 +567,7 @@ class TestLivePlugin(HermeticCase):
                  provider.chats()[0]["body"].get("max_tokens")))
 
     def test_the_models_shell_on_the_real_binary(self):
-        """Review Important 4, live: what a bash call sees on 1.18.31 with
+        """Live: what a bash call sees on 1.18.31 with
         the plugin's shell.env answer merged over the server's environment."""
         from tests.runner._fake_provider import FakeProvider
         probe = ("env | grep -E '^(HOME|XDG_[A-Z]+_HOME|OPENCODE_SERVER_PASSWORD|"
@@ -607,7 +606,7 @@ class TestLivePlugin(HermeticCase):
         print("\nLIVE shell env: %s" % sorted(seen.items()))
 
     def test_a_detached_process_the_model_started_is_reaped_by_its_marker(self):
-        """Review round 2, minor 1, live on 1.18.31. opencode starts the
+        """Seen live on opencode 1.18.31: opencode starts the
         model's bash in a session of its own, out of the server's process
         group, and a server killed hard (its runner SIGKILLed, the death
         signal SIGKILLs it) leaves the model's command running: the bash, its

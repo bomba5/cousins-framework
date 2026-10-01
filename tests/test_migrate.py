@@ -1,4 +1,4 @@
-"""cousin-migrate (master plan phase 7 tasks 7-8): one cousin from the tmux
+"""cousin-migrate: one cousin from the tmux
 lane to the SDK runner, as explicit operator steps, each reversible.
 `plan` writes nothing; `apply` runs only with --yes, records the prior
 cousin.toml (bytes and mode) before its first step and stops at the first
@@ -150,8 +150,8 @@ class TestPlan(HermeticCase):
         self.assertEqual(_names(live), [])
 
     def test_a_plan_never_tells_the_operator_to_delete_the_tmux_lanes_keys(self):
-        """The tmux lane stays supported (the operator, 2026-09-24): its keys are
-        not deprecated, so the plan carries no 'warn 2.0.0' removal lines."""
+        """The tmux lane stays supported: its keys are not deprecated, so the
+        plan carries no 'warn 2.0.0' removal lines."""
         root, home = _root(self)
         p = migrate.plan(home, root=root, validate=True, account="team", **Live().kw())
         self.assertNotIn("warnings", p)
@@ -229,7 +229,7 @@ class TestApply(HermeticCase):
         rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual(rec["state"], "migrated")
         self.assertEqual(_names(live), ["close", "import", "start", "verify"])
-        # [runtime] model is carried into [agent], where the runner reads it (#96)
+        # [runtime] model is carried into [agent], where the runner reads it
         self.assertEqual(live.calls[-2][1], {"runner": "sdk", "model": "opus", "account": "team"})
         text = (home / "cousin.toml").read_bytes().decode()
         self.assertEqual(tomllib.loads(text)["runtime"]["model"], "opus")
@@ -238,12 +238,12 @@ class TestApply(HermeticCase):
         saved = json.loads((home / migrate.RECORD).read_text())
         self.assertEqual(base64.b64decode(saved["prior_toml_b64"]), TOML.encode())
         self.assertEqual([s["step"] for s in saved["steps"]], list(migrate.STEPS))
-        # the migration day's packet is archived: the runner boots on its digest (review I7)
+        # the migration day's packet is archived: the runner boots on its digest
         self.assertFalse((home / "data" / "pending-boot.json").exists())
         self.assertTrue((home / migrate.PRE_RUNNER_BOOT).exists())
 
     def test_a_tmux_session_that_came_back_stops_apply_before_the_lane_flips(self):
-        """Review M7: a flip or a console start between close and toml."""
+        """A flip or a console start between close and toml."""
         root, home = _root(self)
         live = Live()
         orig = live.import_auto
@@ -275,7 +275,7 @@ class TestApply(HermeticCase):
 
 
 class TestVerify(HermeticCase):
-    """Review I8: a runner that exits at once must not pass."""
+    """A runner that exits at once must not pass."""
 
     def _verify(self, states, alive=True, health=(True, "answers")):
         seq = iter(states)
@@ -333,7 +333,7 @@ class TestRollback(HermeticCase):
         self.assertEqual(live.calls[-2][1], TOML.encode())    # tmux starts on the restored file
 
     def test_a_stop_that_answers_stopping_is_waited_out_before_anything_is_restored(self):
-        """Review I6(a): a stop that returns before the runner is down."""
+        """A stop that returns before the runner is down."""
         root, home = _root(self)
         live = Live(stop_answer="stopping", runner_down_after=3)
         migrate.apply(home, root=root, validate=True, account="team", **live.kw())
@@ -352,7 +352,7 @@ class TestRollback(HermeticCase):
         self.assertNotIn("start_tmux", _names(live))
 
     def test_a_second_rollback_is_refused(self):
-        """Review I6(b): it would stop the live tmux session with no handoff."""
+        """It would stop the live tmux session with no handoff."""
         root, home = _root(self)
         live = Live(start_error="no child")
         migrate.apply(home, root=root, validate=True, account="team", **live.kw())
@@ -363,7 +363,7 @@ class TestRollback(HermeticCase):
         self.assertEqual(len(live.calls), calls)
 
     def test_after_a_failed_close_rollback_touches_no_process(self):
-        """Review I6(c): the refused close left a flip running; nothing to undo."""
+        """The refused close left a flip running; nothing to undo."""
         root, home = _root(self)
         live = Live(close_ok=False)
         migrate.apply(home, root=root, validate=True, account="team", **live.kw())
@@ -373,7 +373,7 @@ class TestRollback(HermeticCase):
         self.assertEqual([c[0] for c in live.calls[calls:]], ["release"])    # idempotent, no process
 
     def test_a_tmux_session_that_came_back_is_not_started_twice(self):
-        """Review round 2 m2: after the M7 refusal the session is up."""
+        """After apply refused a session that came back, the session is up."""
         root, home = _root(self)
         live = Live()
         orig = live.import_auto
@@ -401,7 +401,7 @@ class TestRollback(HermeticCase):
         self.assertEqual(rec["rollback_attempts"][-1]["failed"], "start_tmux")
 
     def test_a_retried_rollback_never_stops_the_tmux_session_it_restored(self):
-        """Execution review I1: a rollback that failed after the file was
+        """A rollback that failed after the file was
         back on tmux is retried; stopping again would take the tmux lane
         and kill the live session with no handoff."""
         root, home = _root(self)
@@ -424,7 +424,7 @@ class TestRollback(HermeticCase):
         self.assertEqual([c[0] for c in live.calls[calls:]], ["start_tmux", "release"])
 
     def test_the_file_is_restored_even_when_the_record_missed_the_toml_step(self):
-        """Review round 2 m2: a Ctrl-C between the write and the record."""
+        """A Ctrl-C between the write and the record."""
         root, home = _root(self)
         live = Live(start_error="no child")
         migrate.apply(home, root=root, validate=True, account="team", **live.kw())
@@ -445,10 +445,10 @@ class TestRollback(HermeticCase):
 
 class TestRollbackForgetsTheRunnerSession(HermeticCase):
     def test_a_rollback_removes_what_the_runner_lane_kept_of_its_session(self):
-        """#107: the runner lane's session record outlived a rollback, so a
-        re-migration resumed the old runner session instead of a fresh
-        start, and #103's handover (a fresh session's first message) came
-        late. The tmux lane reads none of these files."""
+        """The runner lane's session record must not outlive a rollback,
+        or a re-migration resumes the old runner session instead of a
+        fresh start, and the handover (a fresh session's first message)
+        comes late. The tmux lane reads none of these files."""
         root, home = _root(self)
         live = Live()
         migrate.apply(home, root=root, validate=True, account="team", **live.kw())
@@ -469,7 +469,7 @@ class TestRollbackForgetsTheRunnerSession(HermeticCase):
 
 class TestReMigration(HermeticCase):
     def test_what_the_cousin_wrote_on_tmux_between_migrations_is_not_held(self):
-        """Review round 2 N1: apply, rollback, writes on tmux, apply again:
+        """Apply, rollback, writes on tmux, apply again:
         the gate's cursor opens afresh, and the start sweep holds none."""
         from cousin_lib import memory, review_gate
         root, home = _root(self)
@@ -537,7 +537,7 @@ class TestCheck(HermeticCase):
         self.assertTrue(migrate.check(home, since=0.0, health=lambda h: (True, "answers"))["ok"])
 
 
-# ------------------------------------------------------------ #96: [runtime] carried
+# ------------------------------------------------------------ [runtime] carried
 KEY = "sk-ant-fixture-quokka-0123456789"
 CARRY_TOML = ('[cousin]\nslug = "wren"\nname = "Wren"\n\n'
               '[runtime]\nmodel = "opus"\neffort = "high"\nauth = "api_key"\n')
@@ -566,7 +566,7 @@ def _files_holding(root, needle):
 
 
 class TestCarryRuntime(HermeticCase):
-    """#96: the runner reads only [agent]; the tmux lane's [runtime]
+    """The runner reads only [agent]; the tmux lane's [runtime]
     model, effort and auth must be carried or the cousin silently runs
     the CLI's default model and bills the host login."""
 
@@ -724,7 +724,7 @@ class TestCarryRuntime(HermeticCase):
         self.assertIn("moss", json.dumps(back["rollback_steps"]))
 
 class TestCheckConfig(HermeticCase):
-    """#96: check says loudly when the runner would run another model,
+    """check says loudly when the runner would run another model,
     effort or billing than the cousin's [runtime]."""
 
     def _migrated(self, case_toml):
@@ -780,7 +780,7 @@ TOO_NEW = ("API Error: 400 Claude Code 2.1.277 does not support this model; vers
 
 def _too_new_validator(seen):
     """The real sdk.validate_account on a scripted client that answers as
-    the live incident did: an invalid_request 400 in the turn, with a
+    a too-old CLI does: an invalid_request 400 in the turn, with a
     result that is not flagged is_error."""
     from claude_agent_sdk import AssistantMessage, TextBlock
     from cousin_lib.runner import sdk
@@ -795,8 +795,8 @@ def _too_new_validator(seen):
 
 
 class TestValidateTheModel(HermeticCase):
-    """#96, live: a carried model the SDK's bundled CLI is too old for
-    failed every turn. A model the runner's CLI can't run is never written."""
+    """A carried model the SDK's bundled CLI is too old for fails
+    every turn. A model the runner's CLI can't run is never written."""
 
     def test_a_carried_model_without_validate_is_not_ready_and_never_written(self):
         root, home = _key_cousin(self)
@@ -896,7 +896,7 @@ def _secret_at(root, key):
 
 
 class TestAccountLifecycle(HermeticCase):
-    """#96 review: a key account is made, and unmade, exactly: a partial
+    """A key account is made, and unmade, exactly: a partial
     make is rolled back, a secret the migration did not write is neither
     overwritten nor removed, and config/accounts.toml comes back byte for
     byte."""
@@ -1010,7 +1010,7 @@ class TestAccountLifecycle(HermeticCase):
 
 class TestFreshPacket(HermeticCase):
     def test_the_rollback_packet_is_the_cousins_state_now(self):
-        """Review I7: tmux must not boot on the migration day's packet."""
+        """tmux must not boot on the migration day's packet."""
         root, home = _root(self)
         gen = migrate.fresh_packet(home)
         pending = json.loads((home / "data" / "pending-boot.json").read_text())
@@ -1019,9 +1019,9 @@ class TestFreshPacket(HermeticCase):
 
 
 class TestNoLegacyPath(HermeticCase):
-    """Phase 10b row 72: `plan`, `apply` and `rollback` without `--to` exit 2
-    before doing anything: 2.0.0 keeps no conversion from the legacy lane
-    (O3). A cousin with no runner gets delivery.lane_refusal; a runner
+    """`plan`, `apply` and `rollback` without `--to` exit 2 before
+    doing anything: 2.0.0 keeps no conversion from the legacy lane. A
+    cousin with no runner gets delivery.lane_refusal; a runner
     cousin is told to name a kind."""
 
     def _main(self, *argv):
@@ -1069,7 +1069,7 @@ def _transcripts(case, root, home, *, write_last=True, write_before=True):
     (root / "config" / "harness.toml").write_text(
         'transcripts_dir = "%s/{home_encoded}"\n' % base)
     (home / "cousin.toml").write_bytes(TOML.encode() + ('session_id = "%s"\r\n' % SID).encode())
-    tdir = base / re.sub(r"[^A-Za-z0-9]", "-", str(home))    # config's home_encoded (#106)
+    tdir = base / re.sub(r"[^A-Za-z0-9]", "-", str(home))    # config's home_encoded
     tdir.mkdir(parents=True)
     if write_before:
         (tdir / ("%s.jsonl" % OLD_SID)).write_text('{"type": "user"}\n')
@@ -1080,7 +1080,7 @@ def _transcripts(case, root, home, *, write_last=True, write_before=True):
 
 
 class TestHandover(HermeticCase):
-    """#103: the working conversation does not carry across the move; the
+    """The working conversation does not carry across the move; the
     tmux lane's transcript path is recorded for the runner's first session."""
 
     def test_apply_records_the_transcripts_the_framework_resolves(self):
@@ -1164,7 +1164,7 @@ class TestHandover(HermeticCase):
         self.assertFalse((home / "data" / "previous-transcript.json.consumed").exists())
 
 class TestHandoffFreshness(HermeticCase):
-    """#103: the runner starts from the handoff; apply says so when the
+    """The runner starts from the handoff; apply says so when the
     close did not leave one written during it."""
 
     def test_a_handoff_written_during_the_close_is_fresh(self):

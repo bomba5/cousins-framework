@@ -38,7 +38,7 @@ class TestPackageData(unittest.TestCase):
             " a wheel would omit the web console")
 
     def test_the_retired_scripts_are_not_shipped(self):
-        # R10: no per-cousin chat server, so neither it nor its watchdog
+        # no per-cousin chat server, so neither it nor its watchdog
         # ships, and their modules are gone
         scripts = self.pyproject["project"]["scripts"]
         for name in ("cousin-chat-server", "cousin-chat-watchdog"):

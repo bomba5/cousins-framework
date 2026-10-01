@@ -1,4 +1,4 @@
-"""Console routes for WP-D, MCP and policy (docs/reference/console-api.md,
+"""Console routes for MCP and policy (docs/reference/console-api.md,
 "MCP and policy"): the per-cousin and install MCP tool registries,
 a cousin's .mcp.json servers, cousin-mcp's approve / selftest /
 last-connection, and policy.toml.
@@ -204,8 +204,8 @@ def _lane(home):
 
 
 # The lanes whose agent is Claude Code in a pane, reading .mcp.json itself and
-# needing the harness's approval for it: tmux-legacy, and phase 11's `tmux`
-# runner kind (named here already, so it works once that kind lands).
+# needing the harness's approval for it: tmux-legacy and the `tmux` runner
+# kind.
 HARNESS_LANES = ("tmux-legacy", "tmux")
 
 

@@ -1,8 +1,8 @@
-"""The contract's tool names per lane (phase 9 R7, Review Focus 5).
+"""The contract's tool names per lane.
 
 The SDK lane registers the tool server as `cousin`, so the model sees
 `mcp__cousin__<tool>`; opencode prefixes an MCP server's tools with the
-server name and one underscore, `cousin_<tool>` (Survey 5). The contract
+server name and one underscore, `cousin_<tool>`. The contract
 names the tools the model actually has, so it takes a naming function,
 and the SDK lane's bytes, which the prompt cache keys on, do not move."""
 import hashlib
@@ -90,8 +90,8 @@ class TestContractLanes(HermeticCase):
         self.assertTrue(all(re.match(r"- `X-[a-z_]+`: ", l) for l in lines), lines)
 
     def test_the_runner_label_is_passed_never_guessed(self):
-        """Review round 2, minor 5: the section's "You run on ..." is what the
-        caller says, not a guess from the tool names."""
+        """The section's "You run on ..." is what the caller says, not a
+        guess from the tool names."""
         reg = _registry()
         self.assertIn("You run on the SDK runner,", contract.render(reg, "1.12.0"))
         self.assertIn("You run on the SDK runner,",

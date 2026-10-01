@@ -164,7 +164,7 @@ process.stdout.write(JSON.stringify({
         self.assertEqual(got["waits"], ["a", "b", "c"])
 
     def test_a_failing_runner_needs_you_and_says_why(self):
-        """Round 4: a runner the supervisor left down `failing` is not an
+        """A runner the supervisor left down `failing` is not an
         operator's stop: it asks for a person, with the supervisor's reason."""
         got = self.run_node("""
 const rows = [

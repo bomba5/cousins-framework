@@ -62,7 +62,7 @@ BEQUEST_PROMPT = (
 )
 
 # The runner lane's bequest: the same request, answered through the handoff
-# tool (R10). Over 120 characters, so rollover.is_bequest keeps it whole.
+# tool. Over 120 characters, so rollover.is_bequest keeps it whole.
 BEQUEST_PROMPT_RUNNER = (
     "[cousin-reincarnate] You are about to be reincarnated: your role"
     " changes, your memory persists. Before the framework rebuilds"
@@ -302,7 +302,7 @@ def reincarnate(slug, *, new_role, root, timeout=BEQUEST_TIMEOUT_SECONDS,
     home = config.home
     from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal
     if _runner_kind(home) not in RUNNER_KINDS:
-        # R2: 2.0.0 has no legacy tmux lane; refused by name, nothing touched.
+        # 2.0.0 has no legacy tmux lane; refused by name, nothing touched.
         result["error"] = lane_refusal(home)
         return result
     base = {"op": "reincarnate", "slug": slug}

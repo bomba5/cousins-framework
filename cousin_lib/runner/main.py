@@ -24,7 +24,7 @@ restarted; 3 when the runner gave up
 not read its inbox that long), so a supervisor restarts
 it; 4 when `--check-auth`
 found the account not logged in (or `--validate`'s one turn did not
-answer), or `--once` found the runner waiting for a login (R15): a
+answer), or `--once` found the runner waiting for a login: a
 supervisor must NOT restart on 4, a person must log in; 5 when another
 runner holds the home's lock (busy, not broken: a supervisor retries it
 after its backoff, since the holder may be a leftover about to go).
@@ -65,7 +65,7 @@ KINDS = RUNNER_KINDS      # the runners runner_for builds, one list (delivery)
 AUTH_ENV = accounts.AUTH_VARS
 
 # `--once` gives up on a runner that stays `errored` this long, past the
-# runner's own drain_timeout_s when it has one (_errored_budget, #68).
+# runner's own drain_timeout_s when it has one (_errored_budget).
 ERRORED_GIVE_UP_S = 10.0
 
 # How long a stopping runner gives its current turn (runner.stop's
@@ -74,7 +74,7 @@ ERRORED_GIVE_UP_S = 10.0
 STOP_TIMEOUT_S = 30.0
 
 LOCK_HELD_EXIT = 5    # another runner holds <home>/run/runner.lock
-LOCK_TAKE_S = 1.0     # hold_lock retries this long: a pre-#79 probe (flock) holds the lock for microseconds
+LOCK_TAKE_S = 1.0     # hold_lock retries this long: an older probe (flock) holds the lock for microseconds
 
 # struct flock (fcntl(2)) for the open-file-description lock on
 # runner.lock: l_type, l_whence, l_start, l_len, l_pid, native layout
@@ -110,7 +110,7 @@ def effort_of(agent):
 
 
 def commit_attribution_of(agent, root):
-    """config.commit_attribution (tracker #112), checked eagerly at
+    """config.commit_attribution, checked eagerly at
     runner start like effort_of: a cousin.toml or config/harness.toml
     value that is not a real boolean is configuration (RunnerError,
     exit 2), never something that reaches a live turn or the head
@@ -130,7 +130,7 @@ def account_for(home):
     dir is a RunnerError (exit 2). runner_main calls it BEFORE the lock;
     runner_for calls it again to build the runner. A missing secret file
     is let through: a login to do, which the runner waits for in
-    `login_required` (Task 16), never a configuration error."""
+    `login_required`, never a configuration error."""
     from cousin_lib.config import FrameworkConfig
     if _agent_table(home).get("api_key_file") \
             and FrameworkConfig.root_from_home(Path(home)) is None:
@@ -143,7 +143,7 @@ def account_for(home):
         try:
             accounts.preflight(account, root)
         except accounts.SecretMissing:
-            pass    # a secret not written yet is a login to do: the runner waits (Task 16)
+            pass    # a secret not written yet is a login to do: the runner waits
     except accounts.AccountsError as err:
         raise RunnerError(str(err))
     return account
@@ -188,14 +188,14 @@ def runner_for(home, *, kind=None):
     if kind not in KINDS:
         raise RunnerError("cousin.toml [agent] runner must be one of %s, got %r"
                           % (", ".join(KINDS), kind))
-    # tracker #112: checked eagerly, for every kind, so a value neither
+    # checked eagerly, for every kind, so a value neither
     # true nor false is exit 2 at runner start, like effort_of - never
     # a MissingConfigError that reaches a live turn or the head event.
     commit_attribution = commit_attribution_of(agent, root_for(home))
     from cousin_lib.runner import sessions
     from cousin_lib.runner.policy import Policy
     policy = Policy.load(home)
-    # [agent.sessions] (phase 8): a SessionsError is a RunnerError, exit 2
+    # [agent.sessions]: a SessionsError is a RunnerError, exit 2
     side = sessions.side_kinds(home)
     if kind == "fake":
         if side:
@@ -213,7 +213,7 @@ def runner_for(home, *, kind=None):
     tools.validate_registry(Path(home), root_for(home))
     account = account_for(home)
     try:
-        # R12: the Claude kinds never reach opencode, opencode's never the SDK
+        # the Claude kinds never reach opencode, opencode's never the SDK
         accounts.check_lane(account, kind)
     except accounts.AccountsError as err:
         raise RunnerError(str(err))
@@ -233,7 +233,7 @@ def runner_for(home, *, kind=None):
             raise RunnerError("the tmux kind runs on a subscription login (host or a"
                               " claude-login account); %s accounts are refused until a"
                               " login-free config dir is shown to start with no menu"
-                              " (phase 11 P11-6; A4: onboarding is skippable by seeding,"
+                              " (onboarding is skippable by seeding,"
                               " but a token's login screen is not measured)" % account.kind)
         from cousin_lib.runner.tmux_launch import env_allow_of
         from cousin_lib.runner.tmux_runner import TmuxRunner
@@ -247,7 +247,7 @@ def runner_for(home, *, kind=None):
         if side:
             raise RunnerError("[agent.sessions] maps %s to \"own\", but side sessions need"
                               " runner = \"sdk\"" % ", ".join(side))
-        # R6 (the model named), R13 (the bridge guard) and the models'
+        # the model named, the bridge guard and the models'
         # provider check are the constructor's: each a RunnerError, exit 2
         from cousin_lib.runner.opencode import OpencodeRunner
         return OpencodeRunner(home, account=account, policy=policy)
@@ -265,7 +265,7 @@ def hold_lock(home):
     SIGKILL). Taken before anything else, because a second runner's
     `requeue_stale` would steal the first one's live claims.
 
-    Two locks on one descriptor (#79). An exclusive flock excludes a
+    Two locks on one descriptor. An exclusive flock excludes a
     second runner, a runner of an older framework version included; an
     open-file-description write lock (F_OFD_SETLK) is what is_running()
     reads with F_OFD_GETLK, a query that takes nothing, so a probe never
@@ -311,7 +311,7 @@ def hold_lock(home):
 
 def is_running(home):
     """True when a runner holds `<home>/run/runner.lock`. An F_OFD_GETLK
-    query on a fresh descriptor (#79): it asks whether a write lock
+    query on a fresh descriptor: it asks whether a write lock
     could be placed and takes nothing, so a runner starting during the
     probe is never refused. The holder's OFD lock is visible from any
     process, this one included. A missing lock file is False, nothing
@@ -342,7 +342,7 @@ def _gone(runner):
 
 
 def _errored_budget(runner):
-    """How long `--once` lets a runner stay `errored` (#68): a failed SDK
+    """How long `--once` lets a runner stay `errored`: a failed SDK
     turn is `errored` through its resync, which drains for up to the
     runner's drain_timeout_s before it recovers, so the drain comes on top
     of ERRORED_GIVE_UP_S. A runner with no drain (the fake, opencode, a
@@ -358,7 +358,7 @@ def _once(runner, stop):
     """Until the inbox is drained (0), a signal (0), or the runner gives
     up (3): its worker ended, or it stayed `errored` too long, or its
     inbox could not be read for ERRORED_GIVE_UP_S; 4 when it stayed
-    `errored` waiting for a login (R15: a restart cannot log in)."""
+    `errored` waiting for a login (a restart cannot log in)."""
     errored_since = None
     unreadable_since = None
     while not stop.is_set():
@@ -380,10 +380,10 @@ def _once(runner, stop):
         unreadable_since = None
         if unfinished == 0 and state != "running":
             return 0
-        # a login is looked at on its own: with side sessions (phase 8) the
+        # a login is looked at on its own: with side sessions the
         # session waiting for one may not be the one state() reports
         login = getattr(runner, "login_required", lambda: False)()
-        # a side session that gave up and waits for its rebuild (phase 8):
+        # a side session that gave up and waits for its rebuild:
         # the batch mode gives up on it as on an errored runner
         stalled = getattr(runner, "side_stalled", lambda: False)()
         if state == "errored" or login or stalled:
@@ -394,7 +394,7 @@ def _once(runner, stop):
                 if login:
                     print("cousin-runner: the account needs a login (see"
                           " data/login-required.json)", file=sys.stderr)
-                    return 4                     # R15: never 3, a restart cannot log in
+                    return 4                     # never 3: a restart cannot log in
                 if stalled:
                     print("cousin-runner: a side session could not start for %.0fs"
                           % ERRORED_GIVE_UP_S, file=sys.stderr)
@@ -522,7 +522,7 @@ def _check_auth(home, *, validate=False):
 
 
 def _name_removed_keys(runner):
-    """R7: the keys 2.0.0 removed that this cousin or its install still
+    """The keys 2.0.0 removed that this cousin or its install still
     carries, named and never fatal: one `system` `config` event per
     finding (after the head event) and one stderr line. A scan that
     cannot run says nothing: it never stops a start."""
@@ -552,7 +552,7 @@ def _serve(runner, once):
             return                  # the stop is under way (the finally set it)
         stop.set()
         # at once, not when _forever next polls: a runner asked to stop
-        # claims nothing new (live proofs 09-25, finding 3)
+        # claims nothing new
         begin = getattr(runner, "begin_stop", None)
         if begin is not None:
             begin()
@@ -563,11 +563,11 @@ def _serve(runner, once):
         previous_int = signal.signal(signal.SIGINT, _signal)
         # a claim from a runner that died is ours now (the lock says no
         # other runner is alive on this home). That runner died in a turn:
-        # the resumed session is told so (#98, restart_note). A mark a
+        # the resumed session is told so (restart_note). A mark a
         # requested stop left for the same turn keeps its hold: that stop
         # was asked for, whatever the sweep finds after it.
         # A kind whose claims can be live in a pane that outlived its runner
-        # (tmux, recovers_claims) recovers them itself in start() (P11-9),
+        # (tmux, recovers_claims) recovers them itself in start(),
         # and closes a turn the restart cut there; it takes no restart note.
         if not getattr(runner, "recovers_claims", False) \
                 and runner.inbox.requeue_stale(older_than_s=0.0):
@@ -579,7 +579,7 @@ def _serve(runner, once):
                 pass
         # Before start: the head of this process's stream says what runs
         # here, for a reader with no runner object (runner/status.py).
-        # commit_attribution (tracker #112) rides along so a reader can
+        # commit_attribution rides along so a reader can
         # see whether this cousin's commits carry the CLI's own injected
         # attribution without reading cousin.toml or config/harness.toml
         # itself. runner_for already validated it (exit 2 before this

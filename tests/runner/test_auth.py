@@ -134,7 +134,7 @@ def _result_401():
 
 def _result_append_fails_once(r):
     """The runner's first `result` append raises (a full disk, say): the
-    rows it names must still close as its branch closes them (#87 review)."""
+    rows it names must still close as its branch closes them."""
     real, said = r.stream.append, []
 
     def append(kind, payload):
@@ -269,7 +269,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         rec = self.op(r)
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None, 5))
         self.assertGreaterEqual(self.clients[0].interrupts, 1)     # the runner cut the retries
-        # the result is appended, then the row goes back to the queue (#87, #102)
+        # the result is appended, then the row goes back to the queue
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "queued"
                               and any(e.get("requeued") for e in self.events(r, "result"))))
         requeued = [e for e in self.events(r, "result") if e.get("requeued")]
@@ -280,7 +280,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
 
     def test_a_login_result_closes_the_writer_before_the_after_turn_work(self):
-        """#118 review item 3: the login branch requeued every open row, so
+        """The login branch requeues every open row, so
         no fold may still be written while _after_turn runs."""
         from tests.runner.test_sdk import init_msg
         r = self.build(first_turn=[init_msg(), _result_401()])
@@ -350,7 +350,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         r = self.build(first_turn=[init_msg(), _said("authentication_failed", LOGGED_OUT), "END"])
         r.start()
         rec = self.op(r)
-        # the login file is written, then its `auth` event appended (#102)
+        # the login file is written, then its `auth` event appended
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None
                               and self.events(r, "auth")))
         self.assertEqual(r.inbox.get(rec.inbox_id)["state"], "queued")   # never failed
@@ -360,7 +360,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
 
     def test_a_login_accounts_401_retry_is_left_to_the_clis_own_refresh(self):
-        # W11-1: a claude-login account refreshes its token at the next attempt;
+        # a claude-login account refreshes its token at the next attempt;
         # an interrupt at the first 401 would cancel a refresh that works
         from tests.runner.test_sdk import assistant, init_msg, result
         r = self.build(first_turn=[init_msg(), _retry_401(), assistant(text="refreshed"),
@@ -553,7 +553,7 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["state"] == "done"))
         r._request_rollover("max_age")
         self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
-        # the flip row is requeued before the postponed phase is appended (#102)
+        # the flip row is requeued before the postponed phase is appended
         self.assertTrue(_wait(lambda: ("postponed", auth.LOGIN) in [
             (e.get("phase"), e.get("why")) for e in self.events(r, "rollover")]))
         phases = [(e.get("phase"), e.get("why")) for e in self.events(r, "rollover")]
@@ -704,7 +704,7 @@ class TestValidate(HermeticCase):
         return rc, line, seen
 
     def test_a_typed_turn_error_fails_validate_with_its_words(self):
-        """#96: a model the bundled CLI is too old for answers with an
+        """A model the bundled CLI is too old for answers with an
         invalid_request 400 in the turn, and a result not flagged is_error."""
         from claude_agent_sdk import TextBlock
         from tests.runner.test_sdk import init_msg, result
@@ -738,7 +738,7 @@ class TestValidate(HermeticCase):
         self.assertEqual((seen[0][0].model, seen[0][0].effort), ("opus", "max"))
 
     def test_validate_never_inherits_the_shells_credentials(self):
-        """#96 review I1: the SDK starts the CLI with {**os.environ,
+        """The SDK starts the CLI with {**os.environ,
         **options.env}; an inherited key, token or config dir would bill
         the wrong account, for every caller (cousin-migrate included)."""
         from tests.runner.test_sdk import assistant, init_msg, result
@@ -764,7 +764,7 @@ class TestValidate(HermeticCase):
         self.assertEqual({k: os.environ.get(k) for k in shell}, shell)
 
     def test_a_login_accounts_401_retry_waits_for_the_refresh(self):
-        # W11-1: the CLI refreshes a login's token at its next attempt
+        # the CLI refreshes a login's token at its next attempt
         from cousin_lib.runner.sdk import validate_account
         from tests.runner.test_sdk import ScriptedClient, assistant, init_msg, result
         home = temp_home(self)
@@ -777,7 +777,7 @@ class TestValidate(HermeticCase):
 
 @unittest.skipIf(AssistantMessage is None, "claude-agent-sdk not installed")
 class TestValidateAttribution(HermeticCase):
-    """Tracker #112: validate_account's own throwaway client composes the
+    """validate_account's own throwaway client composes the
     same --settings, for consistency with the cousin's own runner."""
 
     def test_default_carries_no_settings(self):

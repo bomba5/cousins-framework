@@ -1,4 +1,4 @@
-"""The memory explorer's operator actions (WP-E): search with its legs,
+"""The memory explorer's operator actions: search with its legs,
 the write forms (remember, decide) with a cite the console fills,
 history, the review gate's keep/drop queue, the maintenance runs as a
 long operation, the self-portrait gate, and the read-only callbacks and

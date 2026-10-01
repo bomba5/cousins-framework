@@ -1,4 +1,4 @@
-"""WP-D console routes: the MCP registries, .mcp.json, cousin-mcp's
+"""The MCP console routes: the MCP registries, .mcp.json, cousin-mcp's
 diagnostics and policy.toml. Every edit is validated with the parser the
 runner reads the file with, a literal secret never reaches .mcp.json or
 an answer, and nothing here touches a real home, harness file or model.
@@ -352,7 +352,7 @@ class TestMcpJson(McpCase):
         self.assertIn("a", json.loads((home / ".mcp.json").read_text())["mcpServers"])
 
 
-class TestMcpJsonRound1(McpCase):
+class TestMcpJsonReplace(McpCase):
     def test_replacing_a_broken_file_on_the_tmux_lane_keeps_the_cousin_entry(self):
         home = self.wren()
         (home / ".mcp.json").write_text("{broken")
@@ -408,7 +408,7 @@ class TestMcpJsonRound1(McpCase):
         self.assertEqual(got, {"headersHelper": "/h", "type": "http", "url": "https://x"})
 
 
-class TestRound1Misc(McpCase):
+class TestRefusalsAndEncodings(McpCase):
     def test_an_exists_refusal_is_not_a_stale_etag(self):
         self.wren()
         self.serve()
@@ -508,7 +508,7 @@ class TestApproveLanes(McpCase):
         self.assertEqual(status, 409, body)
         self.assertIn("runner", body["error"])
         self.assertEqual(settings.read_text(), "{}")
-        # the phase 11 tmux kind approves like the legacy lane
+        # the tmux runner kind approves like the legacy lane
         text = (home / "cousin.toml").read_text().replace('runner = "fake"', 'runner = "tmux"')
         (home / "cousin.toml").write_text(text)
         status, body = self.post("/api/cousins/wren/mcp/approve", {})

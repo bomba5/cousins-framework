@@ -1,8 +1,7 @@
-"""A fake interactive Claude Code in a fake pane, for the tmux kind's tests
-(phase 11 Task 4). It writes the transcript entries the real CLI writes,
-in the shapes measured on 2.1.281 (phase 11 findings S1-S4): a typed
-prompt's `user` entry (promptSource "typed", its own promptId) when it
-takes the prompt, an assistant entry with a tool call, then
+"""A fake interactive Claude Code in a fake pane, for the tmux kind's tests.
+It writes the transcript entries the real CLI writes, in the shapes
+measured on 2.1.281: a typed prompt's `user` entry (promptSource
+"typed", its own promptId) when it takes the prompt, an assistant entry with a tool call, then
 `system`/`turn_duration`. Escape during a turn writes the interrupt entry
 and no `turn_duration`. `slow` holds the FIRST turn about 3 s;
 `fail_first` ends the FIRST turn with an API-error entry. `/exit` ends
@@ -27,8 +26,8 @@ class FakePane:
     def quiesce_all(cls, timeout=60.0):
         """End every fake CLI and wait for its turn threads: a turn still
         writing its transcript while a test removes its home fails the
-        removal ("Directory not empty"), which a loaded host made happen
-        (#130). A test's cleanup calls this before the home goes."""
+        removal ("Directory not empty"), which a loaded host made happen.
+        A test's cleanup calls this before the home goes."""
         panes = list(cls._made)
         for pane in panes:
             pane.die()

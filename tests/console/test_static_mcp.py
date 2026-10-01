@@ -1,4 +1,4 @@
-"""mcp.jsx (WP-D): the MCP and policy panels. Pinned by text where the
+"""mcp.jsx: the MCP and policy panels. Pinned by text where the
 contract is a string (the slots, the routes, the words that explain a
 refusal), and the pure helpers run under node."""
 import json

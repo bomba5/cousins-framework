@@ -101,7 +101,7 @@ class Describe(_Case):
             self.assertIn("bogus", d["kinds"])
 
     def test_the_tmux_kind_reads_model_effort_and_env_allow(self):
-        """Phase 11: `tmux` is a runner kind; its pane takes --model and
+        """`tmux` is a runner kind; its pane takes --model and
         --effort, and its environment allowlist is its own key."""
         home = self.cousin('runner = "tmux"\nenv_allow = ["LANG"]\neffort = "high"\n')
         d = agent_settings.describe(home, self.root)
@@ -132,7 +132,7 @@ class Describe(_Case):
 
 
 class CommitAttribution(_Case):
-    """tracker #112: every kind reads [agent] commit_attribution (runner/main
+    """Every kind reads [agent] commit_attribution (runner/main
     commit_attribution_of), so every lane lists it, a bool or unset."""
 
     def test_every_lane_lists_it_and_refuses_a_non_bool(self):
@@ -202,7 +202,7 @@ class Validate(_Case):
         home = self.cousin('runner = "opencode"\naccount = "oc"\nmodel = "openai/gpt-5"\n')
         agent_settings.validate(home, self.root, {"model": "openai/gpt-4o",
                                                    "shell_env": ["LANG", "TZ"]})
-        self.assertIn("ruling P9-1", self.refused(home, {"model": "openai/claude-proxy"},
+        self.assertIn("SDK and nowhere else", self.refused(home, {"model": "openai/claude-proxy"},
                                                   "model"))
         self.assertIn("keys for", self.refused(home, {"small_model": "mistral/large"},
                                                "small_model"))
@@ -217,7 +217,7 @@ class Validate(_Case):
         self.assertIn("opencode", self.refused(home, {"account": "fleet"}, "account"))
 
     def test_the_tmux_kinds_env_allow_refuses_what_the_hard_deny_takes(self):
-        """Review minor: the console's check is the runner's (env_allow_of),
+        """The console's check is the runner's (env_allow_of),
         so a name the pane would never get is refused where it is set."""
         home = self.cousin('runner = "tmux"\n')
         for name in ("GH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_ENTRYPOINT"):
@@ -235,7 +235,7 @@ class Validate(_Case):
 
 
 class RunnerStartChecks(_Case):
-    """Fix round 1, Important 1: what validate lets through, the runner's
+    """What validate lets through, the runner's
     start must not refuse: the opencode bridge guard on the rendered config,
     and the account's preflight (a missing secret is a login to do, allowed)."""
 

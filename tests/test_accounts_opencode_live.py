@@ -1,6 +1,5 @@
-"""cousin-account login --provider against the real opencode binary (phase 9
-R12'). Opt in: COUSIN_LIVE_OPENCODE=1 and OPENCODE_BIN=<absolute path>. No
-credentials and no login completes: a dummy key is stored and read back by
+"""cousin-account login --provider against the real opencode binary. Opt in:
+COUSIN_LIVE_OPENCODE=1 and OPENCODE_BIN=<absolute path>. No credentials and no login completes: a dummy key is stored and read back by
 `opencode auth list`, and the OAuth flow stops once the URL is relayed (the
 browser method builds its URL locally; nothing is sent to the provider)."""
 import json

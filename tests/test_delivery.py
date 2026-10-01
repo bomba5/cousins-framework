@@ -301,7 +301,7 @@ class TestProducerContracts(HermeticCase):
 
 
 class TestRefusedLane(HermeticCase):
-    """R2, R3, R14: a cousin with no runner kind is refused by name, and a
+    """A cousin with no runner kind is refused by name, and a
     delivery to it is `failed`, never typed anywhere."""
 
     def _home(self, text, slug="wren"):

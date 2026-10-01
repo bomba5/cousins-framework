@@ -148,7 +148,7 @@ def _doc_files():
 
 
 class TestOneModelAndEffortList(unittest.TestCase):
-    """#41: the model catalogue and the effort levels live once, in
+    """The model catalogue and the effort levels live once, in
     cousin_lib/config.py (DEFAULT_MODELS, EFFORT_LEVELS). Code imports them;
     a doc or example that lists them is checked against them here."""
 
@@ -255,19 +255,19 @@ class TestRuntimeModelAndEffort(unittest.TestCase):
     def test_xhigh_is_a_level(self):
         # Canary: the agent CLI's --effort takes low, medium, high,
         # xhigh, max. A catalogue without xhigh hides a level the
-        # harness accepts, which the console user found 2026-09-18.
+        # harness accepts.
         cfg = CousinConfig.load(self._home(
             '[cousin]\nslug = "wren"\n[chat]\nport = 8100\n'
             '[runtime]\neffort = "xhigh"\n'))
         self.assertEqual(cfg.effort, "xhigh")
 
     def test_default_model_catalogue_covers_the_current_family(self):
-        # Canary: the spawn dialog offered three models while the
-        # harness accepted six (2026-09-18). Every id here was probed
+        # Canary: a catalogue that falls behind offers fewer models
+        # than the harness accepts. Every id here was probed
         # against the CLI; a fable [1m] id is absent on purpose because
         # the CLI silently served plain fable for it.
         from cousin_lib.config import DEFAULT_MODELS
-        # claude-opus-5-5 probed live on five running cousins (2026-09-23).
+        # claude-opus-5-5 probed live on running cousins.
         for model in ("claude-opus-5-5", "claude-fable-5-1", "claude-opus-5",
                       "claude-opus-5[1m]", "claude-sonnet-5",
                       "claude-sonnet-5[1m]", "claude-haiku-4-5-20251001"):

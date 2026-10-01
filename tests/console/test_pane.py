@@ -231,7 +231,7 @@ class TestResize(PaneCase):
 
 
 class TestTmuxKind(PaneCase):
-    """A tmux-kind runner cousin (phase 11): its pane is on the framework's
+    """A tmux-kind runner cousin: its pane is on the framework's
     own socket under the runner's session name, not the legacy address.
     A person may type into it only while it waits on a person (the trust,
     login, onboarding, bypass or MCP dialog), where the runner never
@@ -287,7 +287,7 @@ class TestTmuxKind(PaneCase):
             self.assertEqual(status, 200, (data, body))
 
     def test_a_request_ends_at_its_first_enter(self):
-        """The reviewer's case: one POST of "\\rhello\\r" answered the trust
+        """The failure case: one POST of "\\rhello\\r" answered the trust
         screen, then typed and submitted `hello` into the prompt."""
         self.pane_file.write_text(self.TRUST)
         status, body = self._post("/api/pane/input", cousin="testa", data="\rhello\r")
@@ -376,7 +376,7 @@ while True:
 
 @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
 class TestTmuxKindOnARealServer(unittest.TestCase):
-    """The reviewer's reproduction on a scratch tmux server: one POST of
+    """The same case on a scratch tmux server: one POST of
     "\\rhello\\r" must answer the trust screen and type nothing into the
     prompt that follows it."""
 

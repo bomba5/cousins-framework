@@ -173,7 +173,7 @@ class TestReply(HermeticCase):
         self.assertEqual(self._rows(ctx.home)[0][0], "sam")
 
     def test_with_a_peer_folded_an_unnamed_reply_is_refused_never_guessed(self):
-        """#118: operator:priya with peer:testa folded in is two live
+        """operator:priya with peer:testa folded in is two live
         threads. A bare reply is refused (a model answering the peer must
         never land on the operator's surface); the refusal names the
         thread= for the operator and send for the peer. Named, the peer
@@ -230,7 +230,7 @@ class TestReply(HermeticCase):
 
 class TestNamedThread(HermeticCase):
     """An explicitly named operator: or person: thread is always accepted;
-    the live-thread rule binds only the implicit default (ruling P12)."""
+    the live-thread rule binds only the implicit default."""
 
     _rows = TestReply._rows
 
@@ -379,7 +379,7 @@ class TestJobRun(HermeticCase):
 
     # Deadlines, not delays: each returns as soon as its condition holds. A
     # loaded host held the launcher's fresh interpreter past the shipped
-    # 15 s handshake bound (#130); the bound itself is checked by
+    # 15 s handshake bound; the bound itself is checked by
     # TestJobLaunchBound, the jobs here only need the launch to finish.
     LAUNCH_S, WAIT_S = 120, 120
 
@@ -444,7 +444,7 @@ class TestJobRun(HermeticCase):
         ctx = self._ctx()
         # The command sleeps far past any launch: the call has returned
         # while it still runs (was a wall-clock "< 10 s", which a loaded
-        # host broke without the call ever waiting for the command, #130).
+        # host broke without the call ever waiting for the command).
         out = self._run(ctx, title="sleeper", argv=[sys.executable, "-c", "import time; time.sleep(600)"])
         job = jobs.get_job(out["job_id"])
         self.assertEqual(job["status"], "running")

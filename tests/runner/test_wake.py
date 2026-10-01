@@ -65,7 +65,7 @@ class TestWake(HermeticCase):
 
 @unittest.skipUnless(hasattr(socket, "SO_PASSCRED"), "SCM_CREDENTIALS is Linux's")
 class TestPeerUid(HermeticCase):
-    """R19: the boundary is the uid; a datagram from another uid wakes nothing."""
+    """The boundary is the uid; a datagram from another uid wakes nothing."""
 
     def creds(self, uid):
         return [(socket.SOL_SOCKET, socket.SCM_CREDENTIALS,

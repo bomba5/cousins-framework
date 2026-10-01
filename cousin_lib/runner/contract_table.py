@@ -1,4 +1,4 @@
-"""The per-runner contract table (phase 9, R19): one row per item of the
+"""The per-runner contract table: one row per item of the
 runner contract suite (`tests/runner/contract/suite.py`), one column per
 runner kind (`delivery.RUNNER_KINDS`), each cell IMPLEMENTED, PLUGIN or
 DECLARED, rendered into `docs/reference/runners.md` between the markers.

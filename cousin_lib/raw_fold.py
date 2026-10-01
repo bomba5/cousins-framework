@@ -143,7 +143,7 @@ def fold_raw(home, *, keep_days=DEFAULT_KEEP_DAYS):
         # One month's read, archive, digest and unlink are one section under
         # the home's memory write lock: the decisions backfill appends to a
         # decision's own (often old) day file, and an append between this
-        # read and the unlink would be lost for good (review P8-5).
+        # read and the unlink would be lost for good.
         with memory_lock.write_lock(home):
             files = [p for p in files if p.exists()]   # a concurrent fold took it
             if not files:

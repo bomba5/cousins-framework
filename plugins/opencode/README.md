@@ -59,6 +59,6 @@ opencode has (`apply_patch`, `question`) keeps its own name.
 
 `tests/runner/test_opencode_policy.py`: the plugin runs under `node` when
 one is on `PATH` (its decisions checked against `Policy.decide` on the same
-policy; skipped without node), and the opt-in live proof
+policy; skipped without node), and the opt-in live test
 (`COUSIN_LIVE_OPENCODE=1`, `OPENCODE_BIN`) loads it into the real
 `opencode serve` against a loopback fake provider.

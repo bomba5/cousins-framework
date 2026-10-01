@@ -70,7 +70,7 @@ def _resume(req):
 
 def runner_frame(event, session):
     """One event of the stream as an SSE frame; its id names the session
-    too, so a reconnect after a runner restart is recognised (review I3)."""
+    too, so a reconnect after a runner restart is recognised."""
     return ("id: %s:%d\nevent: runner-event\ndata: %s\n\n"
             % (session, int(event.get("seq") or 0), json.dumps(event))).encode()
 
@@ -132,7 +132,7 @@ def register():
         operator = cousin.operator_name
         if not operator:
             raise RouteError(409, {"ok": False, "error": "the cousin has no operator configured"})
-        # R18 (phase 4): every operator send path diverts a login code first
+        # every operator send path diverts a login code first
         from cousin_lib.server.inbound import divert_login_code
         if divert_login_code(cousin, operator, text) is not None:
             return 200, {"ok": True, "outcome": "diverted"}

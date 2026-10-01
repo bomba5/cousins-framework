@@ -29,7 +29,7 @@ SOURCES = ("chat", "reaction", "hook", "loop", "schedule", "meeting",
 # The sender names the framework writes itself: chat_hooks.HOOK_SENDER
 # (threaded on `system` as a hook), the runner's own items, the fallback
 # for a missing sender and the bare thread kinds. peer_inbound refuses
-# them for a sender from outside the install (review round 2, N1).
+# them for a sender from outside the install.
 FRAMEWORK_SENDERS = ("fw-hook", "runner", "framework", "unknown") + _BARE_KINDS
 DELIVERED, QUEUED, FAILED = "delivered", "queued", "failed"
 

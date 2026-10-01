@@ -202,7 +202,7 @@ def _store_and_deliver(cfg, *, user, message, attachment=None):
     <home>/chat/images/ and the row carries its path, the one
     convention the console and the outbound relay both read."""
     config = CousinConfig.load(cfg.home)
-    # R18: a login code is stored redacted and delivered to nobody.
+    # A login code is stored redacted and delivered to nobody.
     diverted = divert_login_code(config, user, message)
     if diverted is not None:
         store = ChatStore(cfg.home / "data" / "chat.db")

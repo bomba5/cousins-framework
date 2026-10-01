@@ -1,8 +1,8 @@
 """peer_inbound.accept: the one gate every message from outside this
-install's process tree passes (phase 10a): a hive node's tell-home and an
-external peer's send. The identity is the caller's (the route resolved it
-from a token), never the body's; a message carries an id and a send time,
-a replay inside the window is refused, a stale one too; a failed delivery
+install's process tree passes: a hive node's tell-home and an external
+peer's send. The identity is the caller's (the route resolved it from a
+token), never the body's; a message carries an id and a send time, a
+replay inside the window is refused, a stale one too; a failed delivery
 frees the id so the sender can retry; the size and the rate are bounded;
 the destination is a local, peer-visible cousin the route allows."""
 import os
@@ -83,7 +83,7 @@ class TestAccept(InboundCase):
 
     def test_the_destination_must_be_allowed_local_and_peer_visible(self):
         """Outside the route's reach, absent, or not peer-visible: the same
-        404, so a sender cannot tell them apart (ruling P10a-3)."""
+        404, so a sender cannot tell them apart."""
         answers = set()
         for i, kw in enumerate(({"to": "nobody"}, {"to": "testa"},
                                 {"allowed": lambda slug: False})):
@@ -103,7 +103,7 @@ class TestAccept(InboundCase):
         self.assertEqual(len(_messages(self.root / "cousins" / "wren")), 1)
 
     def test_a_timed_out_delivery_keeps_the_id(self):
-        """Review M5: it may have landed; a retry must not deliver twice."""
+        """It may have landed; a retry must not deliver twice."""
         with mock.patch("cousin_lib.chat.deliver_to", side_effect=TimeoutError("read timed out")):
             with self.assertRaises(peer_inbound.Refused) as cm:
                 self.accept()
@@ -122,14 +122,14 @@ class TestAccept(InboundCase):
         self.accept(identity="toki-node", msg_id="m-rate-9999")  # another identity is not limited
 
     def test_a_non_finite_or_overflowing_send_time_is_refused(self):
-        """Review M1: NaN passed the window; a huge integer overflowed."""
+        """NaN would pass the window; a huge integer would overflow."""
         for i, sent_at in enumerate((float("nan"), float("inf"), 10 ** 400)):
             with self.assertRaises(peer_inbound.Refused) as cm:
                 self.accept(sent_at=sent_at, msg_id="m-nan-%04d" % i)
             self.assertEqual(cm.exception.status, 400)
 
     def test_control_characters_never_reach_the_cousin(self):
-        """Review I5: Ctrl-C, Ctrl-D and ESC would be keystrokes in a pane."""
+        """Ctrl-C, Ctrl-D and ESC would be keystrokes in a pane."""
         self.accept(message="hi\x03\x03 there\x1b\x04\tok\nline two")
         [(user, text)] = _messages(self.root / "cousins" / "wren")
         self.assertEqual(text, "hi there\tok\nline two")
@@ -162,7 +162,7 @@ class TestAccept(InboundCase):
 
 
 class TestTheSenderIsNeverTheOperatorOrACousin(InboundCase):
-    """Ruling P10a-1: a sender is never shown, threaded or treated as the
+    """A sender is never shown, threaded or treated as the
     target's operator or a local cousin, and its name is a plain name."""
 
     def setUp(self):
@@ -182,7 +182,7 @@ class TestTheSenderIsNeverTheOperatorOrACousin(InboundCase):
 
 
 class TestTheSenderIsNeverTheFramework(InboundCase):
-    """Review round 2, N1: a sender named like the framework's own senders
+    """A sender named like the framework's own senders
     ("fw-hook" is threaded on `system` as a hook; "runner" and "framework"
     head the runner's boot, flip and proposal items) is refused."""
 

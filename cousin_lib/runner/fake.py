@@ -27,7 +27,7 @@ from cousin_lib.runner.turn import Turn
 class FakeRunner:
     kind = "fake"          # what runner/status.py reports (the `runner` event)
     # The contract items this runner DECLARES unsupported, and those a
-    # plugin meets; read at class level by runner/contract_table.py (R19)
+    # plugin meets; read at class level by runner/contract_table.py
     UNSUPPORTED = ()
     PLUGIN_ITEMS = ()
     def __init__(self, home, *, turn_seconds=0.0, script=None, policy=None):
@@ -45,7 +45,7 @@ class FakeRunner:
         self._thread = None
         self._lock = threading.Lock()
         self._failed_once = False
-        # the runner's own root, never the environment's (review C2): nothing
+        # the runner's own root, never the environment's: nothing
         # exports FRAMEWORK_ROOT for a reference runner
         from cousin_lib.config import FrameworkConfig
         self.root = FrameworkConfig.root_from_home(Path(home)) or Path(home).parent.parent
@@ -143,7 +143,7 @@ class FakeRunner:
 
     def _fold_midturn(self, consumed):
         """Claim operator/person/peer chat rows that arrived during the turn
-        (finding 1: they are folded into it and closed by its result).
+        (they are folded into it and closed by its result).
         The caller folds only while the turn is live: never once an
         interrupt is asked (`base.folds_into_turn`)."""
         with self._lock:
@@ -159,7 +159,7 @@ class FakeRunner:
                 self.inbox.requeue(row["id"])
 
     def _take_interrupts(self):
-        """Interrupt rows (phase 5) on their own path, every poll of the
+        """Interrupt rows on their own path, every poll of the
         live turn, as SdkRunner takes them: the first interrupts, and every
         one closes `delivered`."""
         for row in self.inbox.open_rows(INTERRUPT):
@@ -197,7 +197,7 @@ class FakeRunner:
                 self.machine.to("errored", message)
         self.turn.end()
         self.stream.append("error", {"error": message})
-        # the result first (#87): whoever reads a row closed finds its result;
+        # the result first: whoever reads a row closed finds its result;
         # the rows close even when the append raises
         try:
             self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
@@ -244,12 +244,12 @@ class FakeRunner:
             return
 
         # Success tail: reached only when the body above did not raise, so
-        # a failure here (finding: it can still raise) must NOT route back
+        # a failure here (it can still raise) must NOT route back
         # through `_fail_turn(consumed, ...)` - these rows may already be
         # closed by the loop just below. It propagates to `_loop`'s outer
         # guard instead, which calls `_fail_turn([], exc)`.
         outcome = DELIVERED
-        # the result first (#87), then the rows it names, closed even when
+        # the result first, then the rows it names, closed even when
         # the append raises (the turn did its work)
         try:
             self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
@@ -267,8 +267,8 @@ class FakeRunner:
         """The reference rollover: no model, so the handoff is simulated
         clean; everything else is the SDK runner's sequence, including the
         generation moving only once the new session exists, the degraded
-        digest, the failure path before that point (C1), the degrade-never-
-        fail tail after it, and the bequest rule (R10)."""
+        digest, the failure path before that point, the degrade-never-
+        fail tail after it, and the bequest rule."""
         import json
         from cousin_lib import boot, session
         from cousin_lib.runner import prompt

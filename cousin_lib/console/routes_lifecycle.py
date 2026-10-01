@@ -1,4 +1,4 @@
-"""Console routes for WP-B, lifecycle (docs/reference/console-api.md,
+"""Console routes for lifecycle (docs/reference/console-api.md,
 "Lifecycle"): reincarnate and transplant through cousin_lib.lifecycle,
 each a long operation (console/longop.py).
 

@@ -1,5 +1,5 @@
 """opencode_http: the `opencode serve` child, the v1 HTTP client and the
-SSE reader (R1, R3), against the fake server (R15). The real binary is
+SSE reader, against the fake server. The real binary is
 opt-in: COUSIN_LIVE_OPENCODE=1 with OPENCODE_BIN=<path>."""
 import json
 import os
@@ -206,9 +206,9 @@ class TestOpencodeServer(ServerCase):
 
 
 class TestOrphans(ServerCase):
-    """Review Important 2: `opencode serve` runs in its own session, so the
-    supervisor's SIGKILL of the runner's process group missed it and it
-    kept running (a turn, provider calls, bash) after the runner died."""
+    """`opencode serve` runs in its own session, so the supervisor's
+    SIGKILL of the runner's process group alone would miss it and it would
+    keep running (a turn, provider calls, bash) after the runner died."""
 
     def killpg_later(self, pid):
         def kill():
@@ -267,7 +267,7 @@ class TestOrphans(ServerCase):
         return child
 
     def test_stop_kills_what_the_server_started_in_a_session_of_its_own(self):
-        """Review round 2, minor 1: opencode starts the model's bash in a
+        """Opencode starts the model's bash in a
         session of its own (measured on 1.18.31), which the server's process
         group never held. Every process carrying this start's marker goes."""
         srv = self.server(FAKE_OPENCODE_DETACH=str(self.dir / "detached.pid")).start()
@@ -292,7 +292,7 @@ class TestOrphans(ServerCase):
         self.assertTrue(_wait(lambda: _gone(child) or _zombie(child)))
 
     def test_the_marker_sweep_repeats_until_a_pass_kills_nothing_bounded(self):
-        """Review round 3, minor 1: a marked process can start another while
+        """A marked process can start another while
         the pass runs; the sweep repeats until a pass kills nothing, at most
         MARK_PASSES times."""
         passes = iter([[101], [102, 103], [], [104]])
@@ -305,7 +305,7 @@ class TestOrphans(ServerCase):
             self.assertEqual(len(opencode_http.kill_marked("m")), opencode_http.MARK_PASSES)
 
     def test_the_pidfile_checks_the_boot_and_the_command_too(self):
-        """Review round 2, minor 2: a pidfile from another boot, or naming a
+        """A pidfile from another boot, or naming a
         live process that is not `opencode serve`, kills nothing."""
         srv = self.server().start()
         self.killpg_later(srv.pid)

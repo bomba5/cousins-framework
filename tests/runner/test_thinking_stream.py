@@ -1,8 +1,8 @@
 """The reasoning stream carries the cousin's thinking (spec, "Features as
 in-process tools": "The cousin's plain text, thinking and tool calls go to
-the reasoning stream"; master plan phase 5 exit: thinking visible live in
-the console and in cousin-watch). Recorded since phase 2 as its length
-only; the text, bounded like a tool result's, is what a viewer can show."""
+the reasoning stream"), so thinking is visible live in the console and in
+cousin-watch. Its text is recorded, bounded like a tool result's, not
+just its length, so a viewer can show it."""
 import unittest
 
 try:

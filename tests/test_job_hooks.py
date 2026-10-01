@@ -208,8 +208,7 @@ class TestBackgroundShellClosesItself(HookCase):
     The harness sends hooks no event when a backgrounded command ends,
     so PreToolUse rewrites the command (updatedInput) to carry an exit
     trap that closes the row with the command's real exit code. Canary:
-    before this, the row stayed running until the 24h reap (operator
-    report 2026-09-18)."""
+    without it, the row stays running until the 24h reap."""
 
     def _pre_out(self, command="sleep 100", home=None):
         payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",

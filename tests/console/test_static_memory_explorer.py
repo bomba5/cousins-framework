@@ -1,6 +1,6 @@
 """The memory explorer, pinned by text (the console compiles its JSX in
 the browser; the headless check lives outside the suite). Each pin is a
-canary for a defect the operator saw."""
+canary for a defect seen in use."""
 import json
 import pathlib
 import re
@@ -56,7 +56,7 @@ class ExplorerLayersAndRemoval(unittest.TestCase):
         for param in ('"level"', '"topic"', '"q"', '"since"', '"until"'):
             self.assertIn("p.set(%s" % param, src)
         # the level filter moved from chips over the list to the rail,
-        # which lists every level with its count (design A, 2026-09-22)
+        # which lists every level with its count
         explorer = _component(self.src, "MemoryExplorer")
         self.assertIn("TRUTH_LEVELS.map", explorer)
         self.assertIn("data-level-rail", explorer)
@@ -73,7 +73,7 @@ class ExplorerLayersAndRemoval(unittest.TestCase):
         self.assertIn("undo", explorer)
 
     def test_raw_entries_offer_mark_obsolete_with_a_reason(self):
-        # Canary (2026-09-18): the explorer's L5 writer.
+        # The explorer's L5 writer.
         raw = _component(self.src, "RawEntries")
         self.assertIn("onObsolete(e.topic)", raw)
         self.assertIn("mark obsolete", raw)

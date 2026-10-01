@@ -76,7 +76,7 @@ class TestWiring(HermeticCase):
         self.assertEqual(opts.permission_mode, "bypassPermissions")
         self.assertIn("replay-user-messages", opts.extra_args)
 
-    # -- cache-bust guards (A2, A3) --------------------------------------------
+    # -- cache-bust guards -----------------------------------------------------
     def test_tool_definitions_are_byte_stable_across_connects(self):
         # The raw bytes the CLI gets, no sort_keys: a dict built in a
         # different order is a different prompt prefix, a cache miss.
@@ -114,7 +114,7 @@ class TestWiring(HermeticCase):
     def test_options_system_prompt_is_unchanged_across_calls(self):
         r = self._runner()
         o1, o2 = r.options(), r.options()
-        # phase 4: the composed preset replaces None; the guard is that
+        # the composed preset replaces None; the guard is that
         # two calls compose the same bytes (the cache depends on it)
         self.assertEqual(o1.system_prompt, o2.system_prompt)
 
@@ -287,7 +287,7 @@ class TestPromptAndStoreWiring(HermeticCase):
         root = home.parent.parent
         (root / "config").mkdir(exist_ok=True)
         (root / "config" / "law.md").write_text("1. The law.\n")
-        # the runner's own root, never the environment's (review C2)
+        # the runner's own root, never the environment's
         p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"})
         p.start(); self.addCleanup(p.stop)
         r = SdkRunner(home, client_factory=lambda o: ScriptedClient(o, []))

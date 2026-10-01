@@ -1,4 +1,4 @@
-// WP-F, system and install config: this package's own file (index.html's package block).
+// System and install config: this package's own file (index.html's package block).
 // Its routes are cousin_lib/console/routes_system.py.
 //
 // The System view (registerView "system"): the supervisor's children,

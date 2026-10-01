@@ -108,7 +108,7 @@ class TestReady(AdminCase):
         self.assertIsNone(ta.ready(self.home, self.root))
 
     def test_the_legacy_launcher_is_gone(self):
-        # a bridge runs only as a cousin-supervisor child (R10); the
+        # a bridge runs only as a cousin-supervisor child; the
         # console still stops one left running outside any supervisor
         self.assertFalse(hasattr(ta, "start_bridge"))
         self.assertEqual(ta.stop_bridge(self.home), "not running")

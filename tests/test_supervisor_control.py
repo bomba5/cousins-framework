@@ -1,6 +1,6 @@
-"""cousin-supervisor's control surface (phase 6 task 1, second half): the
-unix socket, the CLI, the state snapshot, one supervisor per root, and
-the rescan on SIGHUP or `reload`. The supervisor runs as a real process
+"""cousin-supervisor's control surface: the unix socket, the CLI, the
+state snapshot, one supervisor per root, and the rescan on SIGHUP or
+`reload`. The supervisor runs as a real process
 (`python3 -m cousin_lib.supervisor run --no-console --no-loops`) over
 `fake` runner cousins. Invented cast only; every wait has a deadline."""
 import contextlib
@@ -165,7 +165,7 @@ class TestSocket(_Case):
         self.assertIn("mallory is not a cousin", err)
 
     def test_stop_without_wait_answers_at_once(self):
-        # R6': `wait: false` is answered once signalled; the table (and the
+        # `wait: false` is answered once signalled; the table (and the
         # console's fleet row) shows when it is down
         _cousin(self.root, "wren", "fake")
         self.supervise()
@@ -206,7 +206,7 @@ class TestSocket(_Case):
         self.assertNotEqual(again, first)
 
     def test_a_stop_is_held_across_a_supervisor_restart(self):
-        # R4': the stop writes <home>/run/held; a new supervisor does not
+        # the stop writes <home>/run/held; a new supervisor does not
         # start a held cousin; `start` removes the marker
         wren = _cousin(self.root, "wren", "fake")
         _cousin(self.root, "sam", "fake")
@@ -244,7 +244,7 @@ class TestSocket(_Case):
             request(self.root, "status")
 
     def test_a_slow_supervisor_is_unavailable_but_not_absent(self):
-        """#113: a caller whose fallback does the supervisor's work itself
+        """A caller whose fallback does the supervisor's work itself
         must run it only when there is no supervisor (nothing to connect
         to), never for one that is alive but slower than the timeout."""
         with self.assertRaises(supervisor.SupervisorAbsent):
@@ -276,7 +276,7 @@ class TestSocket(_Case):
 
 
 class TestRefusedAndRemoved(_Case):
-    """R2, R7: `status` lists every cousin it refuses (no runner kind; a
+    """`status` lists every cousin it refuses (no runner kind; a
     worker is not one) with the one line, and every removed key it finds
     in a cousin or the install, named, not fatal."""
 
@@ -318,7 +318,7 @@ class TestRefusedAndRemoved(_Case):
 
 class TestTargets(_Case):
     def test_a_cousin_slugged_loops_is_never_the_loops_daemon(self):
-        # M2: `slug` is only ever runner:<slug>, `name` only console or loops
+        # `slug` is only ever runner:<slug>, `name` only console or loops
         home = _cousin(self.root, "loops", "fake")
         sleep = [sys.executable, "-c", "import time; time.sleep(30)"]
         sup = supervisor.Supervisor(
@@ -369,7 +369,7 @@ class TestSnapshot(_Case):
         self.assertIsNone(snapshot(self.root))
 
     def test_a_stale_snapshot_reads_as_none(self):
-        # M3: liveness is the lock, not the pid: a live pid (a reused one, a
+        # liveness is the lock, not the pid: a live pid (a reused one, a
         # PID 1 of an earlier container) with nobody holding the lock is stale
         self.assertIsNone(snapshot(self.root))              # missing
         path = self.root / supervisor.SNAPSHOT
@@ -436,7 +436,7 @@ class TestRescan(_Case):
         (broken / "cousin.toml").write_text("[agent\n")              # does not parse
         self.assertEqual([c.slug for c in runner_cousins(self.root)], ["sam", "wren"])
         self.assertEqual(runner_cousins(self.dir / "nowhere"), [])
-        supervisor.hold(self.root / "cousins" / "sam", "Priya")        # R4': held is skipped
+        supervisor.hold(self.root / "cousins" / "sam", "Priya")        # held is skipped
         self.assertEqual([c.slug for c in runner_cousins(self.root)], ["wren"])
         supervisor.release(self.root / "cousins" / "sam")
         self.assertEqual([c.slug for c in runner_cousins(self.root)], ["sam", "wren"])

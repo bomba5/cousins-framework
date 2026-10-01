@@ -131,11 +131,10 @@ class TestDigestOwnRules(DigestCase):
 
 
 class TestOpenLoopsReadAsTheWriterWritesThem(DigestCase):
-    """Task 8's handoff finds STATUS.md's open loops as a whole heading line
+    """The handoff finds STATUS.md's open loops as a whole heading line
     and ends the section at the next level-1 or level-2 heading; the
     digest's active-state layer reads it the same way. The boot packet's
-    own reader is left as it is (the tmux lane's behaviour does not change
-    in this phase)."""
+    own reader is left as it is."""
     ARCHIVE = ("# Wren\n\n### Open loops archive\n\nold archived loop\n\n"
                "## Open loops\n\n- live loop\n")
 

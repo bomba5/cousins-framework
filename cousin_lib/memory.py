@@ -239,7 +239,7 @@ class ObsoleteRefused(ValueError):
     pass
 
 
-# ---- valid time (master plan phase 7 task 9) --------------------------
+# ---- valid time ------------------------------------------------------
 # raw is append-only; validity is derived from it, never written back.
 # An entry is valid from its own `valid_from`, else when it was written;
 # it is valid to its own `valid_to`, else the time of the first later
@@ -727,15 +727,15 @@ def _relevant(home, keyword, hits, top, root):
 
 
 def recall_entries(home, keyword="", last=10, *, root=None):
-    """Recall over the one store (master plan phase 7 task 4): raw
+    """Recall over the one store: raw
     memory, through the index `search` reads, so a fact written by
     `remember` is as recallable as a decision. With a keyword: the
     `last` best-ranked raw entries. Without one: the newest `last`
     authored entries (distill.MACHINE_PREFIXES topics are the log, not
     memory). Either way oldest first, so the reading order stays
     chronological. data/decisions.jsonl is not read here: the first recall
-    in a home backfills the decisions only it holds into raw (R2), and
-    `decide` keeps appending it for its other readers, until phase 10.
+    in a home backfills the decisions only it holds into raw, and
+    `decide` keeps appending it for its other readers.
     Recall is not a search the cousin made: it records nothing in the
     recall log. `root` as in memory_search.search: None discovers it, the
     runner passes its own."""

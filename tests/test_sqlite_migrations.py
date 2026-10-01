@@ -5,7 +5,7 @@ Every one of them read `PRAGMA table_info` and then issued `ALTER TABLE
 ADD COLUMN` if the column was missing. That is check-then-act across
 connections: two openers both see it missing, both alter, and the loser
 gets `OperationalError: duplicate column name`. It reached us as a flaky
-console test (tracker #33, `duplicate column name: vec_model`), but the
+console test (`duplicate column name: vec_model`), but the
 same shape sits in the jobs database that every cousin's hooks open and
 in each chat server's message store.
 """

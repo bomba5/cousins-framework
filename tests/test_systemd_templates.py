@@ -21,8 +21,8 @@ REQUIRED_UNITS = {
     "cousin-tool-surface.service", "cousin-tool-surface.timer",
     "cousin-console.service",
 }
-# R10: no per-cousin chat server, so neither its unit nor its watchdog's;
-# row 70: no legacy session to start at boot (the supervisor starts runner
+# no per-cousin chat server, so neither its unit nor its watchdog's;
+# no legacy session to start at boot (the supervisor starts runner
 # cousins itself)
 RETIRED_UNITS = {
     "cousin-chat-server@.service",

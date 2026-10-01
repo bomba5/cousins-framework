@@ -1,10 +1,9 @@
-"""A fake `opencode serve` (1.18.31) for the default suite (R15): no node,
+"""A fake `opencode serve` (1.18.31) for the default suite: no node,
 no binary, no network.
 
-It implements exactly the v1 routes the runner uses (R1), behind the same
+It implements exactly the v1 routes the runner uses, behind the same
 basic auth (user `opencode`), and emits the event shapes and orders
-measured on the real server (the phase 9 survey, section 3, and the
-queue and abort measurements recorded with Task 2):
+measured on the real server (including its queue and abort behaviour):
 
   GET  /global/health            {"healthy": true, "version": "1.18.31"}
   POST /session                  a Session, `id` "ses_..."; session.created
@@ -41,7 +40,7 @@ run out a turn says "ok". Steps:
   ("AUTH_401",)                       the measured APIError 401
   ("COMPACT",)                        session.compacted for the session
 
-The policy plugin (Task 6): opencode lists a configured plugin in GET
+The policy plugin: opencode lists a configured plugin in GET
 /config whether or not it loaded, so the runner waits for the plugin's own
 acknowledgement file. Given `plugin_env` (the server's environment), the
 fake stands in for the plugin at start, as `load_plugin` describes;
@@ -54,7 +53,7 @@ Measured semantics it keeps: a tool call ends the assistant message
 session.error first and the idle pair twice; a prompt sent while the
 session is busy is stored at once and answered by the SAME run after the
 current one (one session.idle for both); an abort drops a queued prompt.
-Measured by Task 7's live proof (the real binary, a fake provider): an
+Measured on the real binary with a fake provider: an
 abort mid-text closes the open text part after the first idle pair; an
 abort before the model call emits only `session.status idle` and
 `session.idle`. Not reproduced (the runner reads neither): the real

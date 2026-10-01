@@ -2,8 +2,8 @@
 
 The only module in the framework that imports claude_agent_sdk, and it
 does so lazily so the core stays importable without the extra. The
-client lives for the runner's life (phase 0 finding 4: it survives a
-ten-minute idle on both auth lanes). The credentials are the cousin's
+client lives for the runner's life (it survives a ten-minute idle on
+both auth lanes). The credentials are the cousin's
 account (accounts.py), rendered into `options.env` and nothing else;
 `apiKeySource` from every init message goes to the event stream so a
 cousin whose account did not take effect is visible.
@@ -14,7 +14,7 @@ one turn, fold operator/person/peer chat that lands mid-turn into it, close
 every consumed row with a result, and route every failure through
 `_fail_turn` so nothing dies silently.
 
-A turn is not 1:1 with a CLI turn (phase 0 finding 1). The CLI is
+A turn is not 1:1 with a CLI turn. The CLI is
 started with `--replay-user-messages`, so it echoes every user message
 it CONSUMES as a UserMessage in the stream, and the echo is the only
 proof a row reached the model: a row is closed by the first
@@ -57,11 +57,11 @@ def _sdk():
 
 
 _END = object()
-# #66: _next's answers when the turn stops waiting on a carried row: a stop
+# _next's answers when the turn stops waiting on a carried row: a stop
 # came (after its grace), or an interrupt's bound passed with no echo
 _CARRY_STOPPED = object()
 _CARRY_DROPPED = object()
-# #66: how long a stop still waits for a carried row's echo; stop()'s own
+# How long a stop still waits for a carried row's echo; stop()'s own
 # interrupt can be what makes the CLI take the row (capped by drain_timeout_s)
 CARRY_STOP_GRACE_S = 2.0
 # A turn is live while the model runs it, including while it waits on a
@@ -72,9 +72,9 @@ LIVE_STATES = ("running", "waiting_permission")
 # The bundled CLI reads this variable (and the setting autoMemoryEnabled:
 # false) and logs which one disabled it. Set after the account's env so
 # no account kind can drop it; proven by effect in
-# tests/runner/test_live_prompt.py, with a control run (phase 7).
+# tests/runner/test_live_prompt.py, with a control run.
 AUTO_MEMORY_OFF = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
-# Tracker #112: config.commit_attribution decides whether the CLI's own
+# config.commit_attribution decides whether the CLI's own
 # injected attribution (a Co-Authored-By trailer, a "Generated with
 # Claude Code" line) reaches a commit or PR this cousin makes. False
 # composes into options.settings, the CLI's --settings (the highest-
@@ -87,7 +87,7 @@ ATTRIBUTION_OFF_SETTINGS = json.dumps({"includeCoAuthoredBy": False,
 
 def _attribution_settings(commit_attribution):
     return None if commit_attribution else ATTRIBUTION_OFF_SETTINGS
-# The session a runner is (phase 8, runner/sessions.py): the primary holds
+# The session a runner is (runner/sessions.py): the primary holds
 # the generation; a side session is named by the thread kind it answers.
 PRIMARY = "primary"
 
@@ -155,13 +155,13 @@ class _Job:
 
 
 class _Writer:
-    """The one task that writes into the client while a turn runs (#118,
-    after #104). The turn's reader must never await a write: once the
+    """The one task that writes into the client while a turn runs. The
+    turn's reader must never await a write: once the
     CLI's stdout is full and unread (the SDK's 100-message buffer, then
     the pipe), the CLI stops reading its stdin, the write blocks, the
     reader waiting on it never drains the stdout, and every hook reply
-    queued behind the transport's one write lock times out: the measured
-    18-39 minute stalls. So a mid-turn write (a fold, an interrupt) is
+    queued behind the transport's one write lock times out: measured
+    stalls of 18 to 39 minutes. So a mid-turn write (a fold, an interrupt) is
     handed to this task and the reader goes on reading. One task, one
     FIFO queue: writes reach the CLI in the order they were handed over,
     so a fold taken before an interrupt is written before it. `close()`
@@ -284,7 +284,7 @@ def _default_factory(options):
     return _sdk().ClaudeSDKClient(options=options)
 
 
-# #129: a background task's lifecycle (the SDK's TaskStarted/Progress/
+# A background task's lifecycle (the SDK's TaskStarted/Progress/
 # Updated/NotificationMessage) on the stream, kept to what the pane's task
 # list shows: never its prompt, output file or output.
 TASK_SUBTYPES = ("task_started", "task_progress", "task_updated", "task_notification")
@@ -323,13 +323,13 @@ def _task_payload(subtype, data):
 
 # A thinking block in the reasoning stream: its text, bounded as a tool
 # result's is (the whole block stays in the session store's transcript).
-# the block helpers are shared with the tmux kind (phase 11, R7)
+# the block helpers are shared with the tmux kind
 from cousin_lib.runner.blocks import THINKING_CHARS  # noqa: E402,F401 - re-exported
 from cousin_lib.runner.blocks import thinking_payload as _thinking_payload  # noqa: E402
 from cousin_lib.runner.blocks import tool_result_text as _tool_result_text  # noqa: E402
 
 
-# #104 (b): a turn's fold, interrupt-row control or query write that runs
+# A turn's fold, interrupt-row control or query write that runs
 # longer than this is named on the stream (`system` `stall`, its site and
 # duration): the SDK buffers 100 messages from the CLI, and a consumer held
 # that long lets it fill, after which its reader answers no hook.
@@ -339,19 +339,19 @@ STALL_CHECK_S = 5.0
 class SdkRunner:
     kind = "sdk"          # what runner/status.py reports (the `runner` event)
     # The contract items this runner DECLARES unsupported, and those a
-    # plugin meets; read at class level by runner/contract_table.py (R19)
+    # plugin meets; read at class level by runner/contract_table.py
     UNSUPPORTED = ()
     PLUGIN_ITEMS = ()
     # The console's interrupt row (thread `system`) targets the primary
-    # session's live turn (phase 5 ruling P5-2). A session class that must
-    # never take it (phase 8's SideSession) sets this False.
+    # session's live turn. A session class that must never take it
+    # (SideSession) sets this False.
     takes_interrupts = True
     # Whether this session runs the review gate's start-up sweep: every held
     # entry a reviewer has tried fewer than MAX_ATTEMPTS times. One session
-    # per home does, or each would review the same rows (phase 8's
-    # SideSession sets it False; phase 7b review round 2, N2).
+    # per home does, or each would review the same rows (SideSession
+    # sets it False).
     sweeps_at_start = True
-    # #98: the primary takes the restart mark and says so to its resumed
+    # The primary takes the restart mark and says so to its resumed
     # session; a side session (SideSession) leaves it to the primary
     takes_restart_note = True
     # After this many consecutive failed turns the loop waits before its
@@ -370,7 +370,7 @@ class SdkRunner:
     poll_s = 0.2
     # The idle bound while a tool call is open (its tool_use seen, its
     # tool_result not yet): a tool is silent while it runs, and a long one
-    # is no stalled stream (#68). The idle_timeout_s bounds every other wait.
+    # is no stalled stream. The idle_timeout_s bounds every other wait.
     tool_idle_timeout_s = 3600.0
 
     def __init__(self, home, *, client_factory=None, account=None, api_key=None, model=None,
@@ -379,7 +379,7 @@ class SdkRunner:
                  session=PRIMARY, claim_kinds=None, exclude_kinds=(), memory_reviewer=None,
                  commit_attribution=None):
         self.home = Path(home)
-        # Which rows this session claims (phase 8): claim_kinds None is every
+        # Which rows this session claims: claim_kinds None is every
         # kind but exclude_kinds; a side session names its own kind.
         self.session = session
         self.claim_kinds = None if claim_kinds is None else tuple(claim_kinds)
@@ -424,18 +424,18 @@ class SdkRunner:
         self._interrupt_requested = False
         self._interrupt_sent = False    # an interrupt reached the client this turn (_close)
         self._live = False       # the CLI is generating for this turn (see _interrupt_turn)
-        # #66: the turn waits on a carried row (written, its echo not come when
+        # The turn waits on a carried row (written, its echo not come when
         # the CLI's result did); interrupts are taken, and stop and an
         # interrupt bound the wait (_carried_wait)
         self._carrying = False
         self._carry_until = None
         self._carry_stop_at = None    # a stop's grace for the echo (CARRY_STOP_GRACE_S)
-        # an interrupt written while the CLI was between turns (#66): it may
+        # an interrupt written while the CLI was between turns: it may
         # have cut nothing, so the echo sends it again to the live turn;
         # cleared once an interrupt reaches a live turn
         self._interrupt_idle = False
         self._reinterrupting = False
-        # #134: the reader of the CLI's stream between turns (_pump_run),
+        # The reader of the CLI's stream between turns (_pump_run),
         # and whether a CLI turn of its own (a task notification) is open
         self._pump = None
         self._pump_turn_open = False
@@ -447,7 +447,7 @@ class SdkRunner:
         self._backed_off = 0     # the failure count the last backoff was for
         self._last_fold = 0.0    # when the live turn last looked for rows to fold
         self._open_tools = set()  # the live turn's tool_use ids with no tool_result yet
-        self._waits = []         # the turn's long waits in progress (#104 b)
+        self._waits = []         # the turn's long waits in progress
         # The live turn's writer (_Writer): every mid-turn write goes through
         # it, never awaited by the reader. None between turns.
         self._writer = None
@@ -458,7 +458,7 @@ class SdkRunner:
         # (_wait_rate_limit); None when no limit holds.
         self._limited_until = None
         self.fatal = None        # why the worker gave up (a connect failure), else None
-        # A dying login (Task 16, auth.py): the runner waits for the
+        # A dying login (auth.py): the runner waits for the
         # operator's fix, claims nothing meanwhile, and never sets `fatal`.
         self._login_blocked = False   # waiting for a login (or billing): claim nothing
         self._login_attempt = 0
@@ -469,7 +469,7 @@ class SdkRunner:
         self._login_file_seen = False # the file was written (a manual retry is its deletion)
         self._retry_failures = 0      # login retries that failed for another reason, in a row
         self._last_connect_error = None
-        # R19: the file clears on the next GOOD result. A file left by an
+        # The login-required file clears on the next GOOD result. A file left by an
         # earlier runner (a restart after the fix) is armed too, or the
         # console would say "login required" until the next failure.
         self._restore_pending = auth.read_login_required(self.home) is not None
@@ -484,7 +484,7 @@ class SdkRunner:
         self._user_mcp = None
         # Restart with resume (data/runner-session.json): the id on file
         # (cached), a write the loop owes the file, and the id the first
-        # init after a resume must name (R12).
+        # init after a resume must name.
         self._saved = None
         self._saved_lane = "unknown"  # the lane on file (cached: options() reads no file)
         self._pending_save = None
@@ -498,7 +498,7 @@ class SdkRunner:
         slug, name = self._identity()
         from cousin_lib.runner.main import root_for
         self.root = root_for(self.home)
-        # [agent] commit_attribution (tracker #112; runner_for checked it,
+        # [agent] commit_attribution (runner_for checked it,
         # like effort): resolved once here, not per options() call, so a
         # cousin.toml edited mid-session never changes it mid-turn. A
         # caller that builds a runner directly (most tests) leaves it
@@ -552,10 +552,9 @@ class SdkRunner:
         return self._agent_table().get(key, default)
 
     def _commit_attribution(self):
-        """config.commit_attribution (tracker #112), resolved for this
-        cousin: its own cousin.toml [agent] commit_attribution wins,
-        else the install's config/harness.toml [agent] commit_attribution,
-        else True."""
+        """config.commit_attribution, resolved for this cousin: its own
+        cousin.toml [agent] commit_attribution wins, else the install's
+        config/harness.toml [agent] commit_attribution, else True."""
         from cousin_lib.config import commit_attribution as resolve_commit_attribution
         return resolve_commit_attribution(self.root, self._agent_table())
 
@@ -565,7 +564,7 @@ class SdkRunner:
         # The account's variables to SET (cousin-runner scrubbed every auth
         # variable from its own environment). account_for refused everything
         # but a missing secret before the lock, so what can raise here is
-        # SecretMissing (a login to do: _connect waits for it, Task 16), or a
+        # SecretMissing (a login to do: _connect waits for it), or a
         # secret broken after the start: a connect failure with its message,
         # never the secret.
         env = dict(accounts.account_env(self.account, self.root), **AUTO_MEMORY_OFF)
@@ -580,7 +579,7 @@ class SdkRunner:
                                        body_for_prompt=self._body_for_prompt,
                                        request_rollover=self._request_rollover)
         # The composed prompt (prompt.py): byte-stable across generations,
-        # so a rollover and a restart keep the cache (phase 0 finding 3).
+        # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first
         # recorded, so an edit to identity files lands at the next rollover.
         from cousin_lib.runner import prompt
@@ -591,7 +590,7 @@ class SdkRunner:
         extra = {"replay-user-messages": None}
         store_resume = resume
         if resume and self._resume_via_cli():
-            # A login account, or a lane never recorded (R12): the CLI's own --resume.
+            # A login account, or a lane never recorded: the CLI's own --resume.
             # The SDK's store-backed resume would run the CLI under a temporary
             # config dir with the OAuth refresh token stripped. options.resume
             # stays unset so nothing is materialized; session_store stays set,
@@ -614,7 +613,7 @@ class SdkRunner:
         the servers of the plugins the cousin enables (mcp_config.add_plugins).
         alwaysLoad is the cousin's alone: the CLI would defer its tools
         behind its tool search, so a cousin's first memory, send or reply
-        call would need a search first (#94). A user server's tools stay
+        call would need a search first. A user server's tools stay
         deferred: a server with many tools (or one whose list changes
         between starts) then costs no prompt bytes until the model looks
         one up, and the cached prefix does not move with it."""
@@ -633,7 +632,7 @@ class SdkRunner:
     # -- the session on file (restart with resume) -----------------------
     def _session_path(self):
         """data/runner-session.json for the primary; a side session keeps its
-        own, data/runner-session-<kind>.json (phase 8)."""
+        own, data/runner-session-<kind>.json."""
         if self.session == PRIMARY:
             return self.home / "data" / "runner-session.json"
         return self.home / "data" / ("runner-session-%s.json" % self.session)
@@ -660,7 +659,7 @@ class SdkRunner:
         return self._lane if self._lane != "unknown" else self._saved_lane
 
     def _resume_via_cli(self):
-        """Resume per KIND (R12 folded into accounts): a claude-login account
+        """Resume per KIND: a claude-login account
         refreshes its own token, so it resumes through the CLI's --resume;
         a token or key account never refreshes, so it resumes store-backed.
         Every runner has an account (the host's login when none was given),
@@ -700,7 +699,7 @@ class SdkRunner:
     def _note_session(self, session_id):
         """Every init and every result names the session; this runs on the
         loop, so it only records (the write is _flush_session's). The first
-        name after a resume proves the resume (R12): a different id means the
+        name after a resume proves the resume: a different id means the
         CLI started a new session, and the start is then a fresh one."""
         if not session_id:
             return
@@ -713,7 +712,7 @@ class SdkRunner:
                                               "got": session_id,
                                               "error": "the CLI started a new session"})
         # a new id, or the same id on another lane than the file says: a
-        # stale lane would pick the wrong resume path at the next start (R12)
+        # stale lane would pick the wrong resume path at the next start
         lane_moved = self._lane != "unknown" and self._lane != self._saved_lane
         if session_id != self._saved or lane_moved:
             self._pending_save = session_id
@@ -826,7 +825,7 @@ class SdkRunner:
         # A running turn is interrupted first, so the join below does not
         # wait on a turn nobody will end (FakeRunner does the same). The CLI
         # records that as the user's stop: leave the mark the next resume
-        # answers (#98). A requested stop wrote run/held before its signal:
+        # answers. A requested stop wrote run/held before its signal:
         # the mark then names that stop, never "not the operator".
         if self.interrupt() and self.takes_restart_note:
             try:
@@ -881,8 +880,8 @@ class SdkRunner:
         is cleared at every ResultMessage: an interrupt that arrives after
         the result, while the CLI is between turns, is dropped too, so it
         never marks a finished turn interrupted or reaches an idle CLI;
-        unless the turn still waits on a row carried past that result
-        (#66): written before the interrupt, the row starts the CLI turn
+        unless the turn still waits on a row carried past that result:
+        written before the interrupt, the row starts the CLI turn
         the interrupt then ends."""
         if not self._interrupt_may_go(seq):
             return False
@@ -901,10 +900,10 @@ class SdkRunner:
         if not self._interrupt_may_go(seq):
             return False
         self._interrupt_sent = True     # what _close reads: an interrupt that reached the client
-        # written while the CLI is between turns (a carried read, #66) it may
+        # written while the CLI is between turns (a carried read) it may
         # cut nothing: the echo sends it again. One to the live turn clears it.
         self._interrupt_idle = not self._live
-        with self._waiting_at("interrupt"):     # the stall probe (#104 b) sees the writer too
+        with self._waiting_at("interrupt"):     # the stall probe sees the writer too
             await self._client.interrupt()
         return True
 
@@ -943,8 +942,8 @@ class SdkRunner:
         return self.stream.tail(after=after)
 
     def activity(self):
-        """What this session is doing now, for another session's digest
-        (phase 8): the machine state, the KINDS of the threads its live
+        """What this session is doing now, for another session's digest:
+        the machine state, the KINDS of the threads its live
         turn answers (never a key, a sender or a body) and when that turn
         started (epoch seconds), None when no turn is live."""
         active, threads = self.turn.snapshot()
@@ -957,8 +956,8 @@ class SdkRunner:
                 "since": self._turn_started_at if active else None}
 
     def _claim(self, limit):
-        """The rows this session may take (phase 8): its kinds only. None
-        once a stop was asked for (live proofs 09-25, finding 3): a claim
+        """The rows this session may take: its kinds only. None
+        once a stop was asked for: a claim
         the stop raced goes straight back to the queue."""
         if self._stopping.is_set():
             return []
@@ -995,10 +994,10 @@ class SdkRunner:
         exit 3 when the worker gave up (a fatal connect failure)."""
         return self._thread is not None and self._thread.is_alive()
 
-    # -- a dying login (Task 16, auth.py) -------------------------------------
+    # -- a dying login (auth.py) ---------------------------------------------
     def login_required(self):
         """True while the runner waits for its account's login (or billing)
-        to be fixed: `errored`, nothing claimed, never `fatal` (R15)."""
+        to be fixed: `errored`, nothing claimed, never `fatal`."""
         return self._login_blocked
 
     def _login_action(self, reason):
@@ -1086,7 +1085,7 @@ class SdkRunner:
         waits for the login, and the client is replaced by the retry."""
         self.turn.end()
         try:
-            # the result first (#87), then the rows it names go back, even
+            # the result first, then the rows it names go back, even
             # when the append raises
             try:
                 self.stream.append("result", {"inbox_ids": [],
@@ -1107,7 +1106,7 @@ class SdkRunner:
         self._login_required(signal["detail"], reason=signal["reason"])
 
     def _note_good_result(self):
-        """R19: the first SUCCESSFUL result after a login failure proves the
+        """The first SUCCESSFUL result after a login failure proves the
         login (an init cannot: a live login and a revoked one both read
         "none"), so the file clears here and nowhere else."""
         if not self._restore_pending:
@@ -1135,7 +1134,7 @@ class SdkRunner:
         manual retry; the way out of a billing stop). A revoked login still
         reads logged in (status proves presence): only a new credential
         moves it. Back to idle on a connect; the next good result clears
-        the file (R19). The mark and the status it compares against were
+        the file. The mark and the status it compares against were
         read at the failure (_login_required), each look moves the status.
         Between two looks the cheap signals (the mark, the file) are read
         every login_poll_s: a change since the last look ends the wait at
@@ -1222,7 +1221,7 @@ class SdkRunner:
         return False
 
     def _restart_line(self, resumed):
-        """#98: a resumed session whose last turn a restart cut gets one
+        """A resumed session whose last turn a restart cut gets one
         runner line first (the restart_note row); a fresh one only drops the
         mark. The primary's alone."""
         if not self.takes_restart_note:
@@ -1256,9 +1255,8 @@ class SdkRunner:
         try:
             # the start-up sweep first, before a resume or a fresh start: what
             # a dead runner wrote and never held is held before this session's
-            # digest is built (execution review). It is the primary's alone
-            # (review round 2, N2): a side session only holds, and reviews
-            # what its own gate held.
+            # digest is built. It is the primary's alone: a side session only
+            # holds, and reviews what its own gate held.
             await self._gate_hold(sweep=self.sweeps_at_start)
             on_file = await asyncio.to_thread(self._read_session_file)
             saved = on_file.get("session_id") or None
@@ -1270,7 +1268,7 @@ class SdkRunner:
                     # a resume refused for the login leaves the saved session the
                     # session: the login retry resumes it (_login_retry)
                     self._resume_id = saved
-                    self._expect_session = saved    # the first init must name it (R12)
+                    self._expect_session = saved    # the first init must name it
                 if resumed:
                     self.stream.append("system", {"subtype": "resumed", "session_id": saved})
             await asyncio.to_thread(self._restart_line, resumed)
@@ -1300,7 +1298,7 @@ class SdkRunner:
                         await asyncio.sleep(0.2)  # a wedged store must not spin the loop
                         continue
                     if not rows:
-                        self._pump_start()            # #134: the CLI is not always quiet
+                        self._pump_start()            # the CLI is not always quiet
                         await asyncio.get_running_loop().run_in_executor(
                             None, listener.wait, self.poll_s)
                         continue
@@ -1323,7 +1321,7 @@ class SdkRunner:
                     await self._gate_hold()          # after every turn, a result or an error
                     self._failures = 0 if ok else self._failures + 1
                     if self._resume_lost:
-                        # The resume came back as a new session (R12). Known only
+                        # The resume came back as a new session. Known only
                         # from the first init, inside that turn, so the fresh
                         # start runs here, at the boundary after it: that turn's
                         # row ran on the new session and is not lost. A login the
@@ -1349,7 +1347,7 @@ class SdkRunner:
 
     @contextlib.contextmanager
     def _waiting_at(self, site):
-        """A turn waits at `site` (#104 b): the watchdog names it while it
+        """A turn waits at `site`: the watchdog names it while it
         runs past STALL_REPORT_S, and its end is named with its duration."""
         mark = {"site": site, "since": time.monotonic(), "said": False}
         self._waits.append(mark)
@@ -1395,13 +1393,13 @@ class SdkRunner:
         """Every RateLimitEvent is a `rate_limit` event (a warning too: the
         operator sees it coming). A rejection sets the window; a running
         turn becomes `rate_limited`. A rejection the overage absorbs does
-        not block (R9): the request goes through, and the event says so."""
+        not block: the request goes through, and the event says so."""
         overage = info.status == "rejected" and info.overage_status == "allowed"
         self.stream.append("rate_limit", {"status": info.status, "resets_at": info.resets_at,
                                           "type": info.rate_limit_type,
                                           "utilization": info.utilization, "overage": overage})
         if info.status != "rejected" or overage:
-            return          # a warning, or a rejection the overage absorbs (R9)
+            return          # a warning, or a rejection the overage absorbs
         self._limited_until = float(info.resets_at or (time.time() + 60))
         with self._lock:
             if self.machine.state == "running":
@@ -1441,7 +1439,7 @@ class SdkRunner:
             self._last_connect_error = message
             if isinstance(exc, accounts.SecretMissing) or auth.is_auth_text(message):
                 # the fallback signal (a logged-out connect usually SUCCEEDS and
-                # says it in the turn): a login to do, never self.fatal (R15)
+                # says it in the turn): a login to do, never self.fatal
                 self._client = None
                 self._login_required(message)
                 return False
@@ -1570,7 +1568,7 @@ class SdkRunner:
 
     async def _fold(self, sdk, open_rows):
         """Operator, person and peer chat that arrived during the live
-        turn is handed to the turn's writer (finding 1, #118), each through
+        turn is handed to the turn's writer, each through
         `_send_later`, never awaited here; a row that cannot be rendered is
         failed and the rest of the claim folds on; anything else goes back
         to the queue (`base.FOLDED_KINDS` says why)."""
@@ -1606,11 +1604,11 @@ class SdkRunner:
                 raise
 
     async def _take_interrupts(self):
-        """Interrupt rows (phase 5), taken on every poll of a live turn
+        """Interrupt rows, taken on every poll of a live turn
         whatever the fold's gates: after the first result a folded
         follow-up can start a CLI turn of its own, and only this path can
         stop it. Taken only while the CLI is generating (`_live`) or the
-        turn waits on a carried row (#66): one that lands between a result
+        turn waits on a carried row: one that lands between a result
         and the next turn waits queued, and one no live turn takes is
         closed NO_TURN at the turn boundary. A refused
         interrupt (the CLI raised) fails its own row and never the turn,
@@ -1619,7 +1617,7 @@ class SdkRunner:
         if not self.takes_interrupts or not (self._live or self._carrying) \
                 or self.machine.state not in LIVE_STATES:
             return
-        # read off the loop (#68): at poll_s for the whole turn, and a busy
+        # read off the loop: at poll_s for the whole turn, and a busy
         # inbox waits up to sqlite's lock timeout, which must not freeze the
         # reader, the hooks and the stall watch with it
         rows = await asyncio.to_thread(self.inbox.open_rows, INTERRUPT)
@@ -1688,7 +1686,7 @@ class SdkRunner:
     async def _next(self, it, started, fold, control=None):
         """The next message, or `_END` when the stream stops. The idle
         timeout bounds the wait for THIS message (a stream gone silent),
-        tool_idle_timeout_s while a tool call is open (#68);
+        tool_idle_timeout_s while a tool call is open;
         the optional turn timeout bounds the whole turn. `control` (the
         interrupt rows) runs once immediately on every call, i.e. on every
         message received (its throttle, `last_control`, is local to this
@@ -1702,7 +1700,7 @@ class SdkRunner:
         generation is acted on when it lands, not when the next message
         happens to arrive."""
         task = asyncio.ensure_future(it.__anext__())
-        # a tool call open is silent while it runs: its own bound (#68)
+        # a tool call open is silent while it runs: its own bound
         idle_s = self.tool_idle_timeout_s if self._open_tools else self.idle_timeout_s
         idle_deadline = time.monotonic() + idle_s
         last_control = 0.0
@@ -1753,7 +1751,7 @@ class SdkRunner:
                     pass
 
     def _carried_wait(self):
-        """#66: the bounds of a carried read; None while it waits on. A
+        """The bounds of a carried read; None while it waits on. A
         stop gives the echo min(drain_timeout_s, CARRY_STOP_GRACE_S) (its
         own interrupt may be what makes the CLI take the row), then
         `_CARRY_STOPPED`. An interrupt taken meanwhile gives it
@@ -1771,7 +1769,7 @@ class SdkRunner:
         return None
 
     async def _end_carry(self, end, rows):
-        """#66: the turn stopped waiting on carried `rows` the CLI never took
+        """The turn stopped waiting on carried `rows` the CLI never took
         up (no echo): back to the queue, as the tmux kind's stop requeues an
         untaken row. Not a failure: a stop or the user's interrupt, so no
         `errored`, no failure count, and the result cut nothing. After an
@@ -1790,7 +1788,7 @@ class SdkRunner:
                                                   "resumed": resume})
         finally:
             try:
-                # the result first (#87), then the rows go back
+                # the result first, then the rows go back
                 self.stream.append("result", {"inbox_ids": [],
                                               "requeued": [r["id"] for r in rows],
                                               "interrupted": False, "is_error": False,
@@ -1802,7 +1800,7 @@ class SdkRunner:
                     self.inbox.requeue(row["id"])
 
     def _reinterrupt(self):
-        """#66: the carried row's echo came after an interrupt written while
+        """The carried row's echo came after an interrupt written while
         the CLI was between turns, which may have cut nothing: the same
         interrupt again, to the turn that is now live, on the writer."""
         if self._reinterrupting or self._writer is None:
@@ -1832,7 +1830,7 @@ class SdkRunner:
             await writer.close()
 
     def _note_tools(self, sdk, msg):
-        """The turn's open tool calls (#68): a tool_use opens one, its
+        """The turn's open tool calls: a tool_use opens one, its
         tool_result closes it, a result closes them all (the CLI's turn is
         over)."""
         if isinstance(msg, sdk.ResultMessage):
@@ -1874,7 +1872,7 @@ class SdkRunner:
         self.turn.end()
         self.stream.append("error", {"error": message})
         try:
-            # the result first (#87), then the rows it names, closed even
+            # the result first, then the rows it names, closed even
             # when the append raises
             try:
                 self.stream.append("result", {"inbox_ids": [r["id"] for r in consumed],
@@ -1902,7 +1900,7 @@ class SdkRunner:
                 self.machine.to("idle", "recovered")
 
     def _pump_start(self):
-        """#134: read the CLI's stream between turns. The CLI is not quiet
+        """Read the CLI's stream between turns. The CLI is not quiet
         there: a background task (a subagent, a background shell) streams
         its progress, and each completion starts a CLI turn of its own (a
         task notification). Unread, the SDK's message buffer (100) fills,
@@ -1917,7 +1915,7 @@ class SdkRunner:
         """Stop the pump before anything else reads or replaces the client.
         A CLI turn of its own still open is left to the next reader: the
         row written next is folded into it or queued after it, and `_turn`
-        closes the row on the result its echo precedes (#66). A read cut at
+        closes the row on the result its echo precedes. A read cut at
         the instant a message arrived can lose that message, as any
         cancelled read of the SDK's stream can (`_next`)."""
         task, self._pump = self._pump, None
@@ -2046,7 +2044,7 @@ class SdkRunner:
         self._auth_turn = None
         self._sent = []
         self._open_tools = set()
-        carried = []      # rows the turn stopped waiting on (#66): _end_carry's
+        carried = []      # rows the turn stopped waiting on: _end_carry's
         carry_end = None
         open_rows = []    # (row, envelope text): written, not yet closed
         closing = []      # rows a result is closing right now
@@ -2065,7 +2063,7 @@ class SdkRunner:
                                               "thread_id": first["thread_id"]})
             sending = True
             # written and awaited before anything is read: the pump read
-            # the stream up to here (#134), and the SDK buffers what comes
+            # the stream up to here, and the SDK buffers what comes
             # while the write is awaited
             await self._send(sdk, first, open_rows)
             self._write_error = None
@@ -2123,7 +2121,7 @@ class SdkRunner:
                         self._record(sdk, msg, echo_of=echo_of)
                         if self._pending_save is not None and not self._resume_lost \
                                 and isinstance(msg, sdk.SystemMessage) and msg.subtype == "init":
-                            # #119: the id an init named goes on file now, not at the
+                            # The id an init named goes on file now, not at the
                             # result: a runner killed inside a new session's first turn
                             # resumes it. At the init only: a write that fails is
                             # retried at the result, never once per message. A lost
@@ -2139,7 +2137,7 @@ class SdkRunner:
                             if cut and open_rows:
                                 # an interrupt ended this CLI turn with rows still
                                 # carried: the CLI may have dropped them, so the
-                                # wait for their echo is bounded (#66)
+                                # wait for their echo is bounded
                                 self._carry_until = time.monotonic() + self.drain_timeout_s
                             if self._drop_writes:
                                 # a login's result requeued every open row: none of
@@ -2166,7 +2164,7 @@ class SdkRunner:
             if isinstance(exc, _NotWritten) and all(r["id"] != exc.row["id"] for r in requeued):
                 requeued.append(exc.row)
             cause = exc.cause if isinstance(exc, _NotWritten) else exc
-            # carried rows the turn stopped waiting on, not yet handed back (#66)
+            # carried rows the turn stopped waiting on, not yet handed back
             requeued += [row for row in carried if all(r["id"] != row["id"] for r in requeued)]
             # A raise before the send (the move to `running` refused, say) leaves
             # `first` claimed and in no list: back to the queue, the client untouched.
@@ -2204,12 +2202,12 @@ class SdkRunner:
         rows written but not echoed stay open for the next CLI turn."""
         # sent, not asked: one still queued behind a fold when the result
         # came never reached the CLI, and this turn was not interrupted; nor
-        # was it when the only one reached the CLI between turns (#66)
+        # was it when the only one reached the CLI between turns
         interrupted = self._interrupt_sent and not self._interrupt_idle
         is_error = bool(msg.is_error)
         closing[:] = [row for row, _ in open_rows if row["id"] in echoed]
         open_rows[:] = [(row, text) for row, text in open_rows if row["id"] not in echoed]
-        # A dying login (Task 16), before the rate limit: the typed signal
+        # A dying login, before the rate limit: the typed signal
         # seen in the turn decides, not the flag (an interrupted auth turn
         # reads is_error false), else the result's 401 or the CLI's wording.
         signal = self._auth_turn or auth.result_signal(
@@ -2217,12 +2215,12 @@ class SdkRunner:
             getattr(msg, "errors", None))
         self._auth_turn = None
         if signal:
-            # Not the items' fault: back to the queue, rerun after the fix (R9's
-            # repeat). A row written but not echoed goes back too: the client
-            # holding it is replaced (_login_retry) before anything runs again.
+            # Not the items' fault: back to the queue, rerun after the fix (the
+            # row's text repeats). A row written but not echoed goes back too:
+            # the client holding it is replaced (_login_retry) before anything runs again.
             rows = closing + [row for row, _ in open_rows]
             ids = [row["id"] for row in rows]
-            # the result first (#87), then the rows it names go back and the
+            # the result first, then the rows it names go back and the
             # runner waits for the login, even when the append raises
             try:
                 self.stream.append("result", {"inbox_ids": [], "requeued": ids,
@@ -2241,15 +2239,15 @@ class SdkRunner:
                 self._login_required(signal["detail"], reason=signal["reason"])
             return True     # the failure counter must not back off on top of the wait
         if not is_error:
-            self._note_good_result()        # R19: a good RESULT, never an init
+            self._note_good_result()        # a good RESULT, never an init
         if is_error and self._limited_until is not None:
-            # A rejected request is not the item's fault (R9): back to the queue,
+            # A rejected request is not the item's fault: back to the queue,
             # claimed again when the window reopens. The result closing it
             # returns True: the failure counter must not back off on top.
             ids = [row["id"] for row in closing]
-            # R9: the row's text is in the transcript once already; its rerun
+            # The row's text is in the transcript once already; its rerun
             # writes it a second time. Said here, so the repeat surprises nobody.
-            # The result first (#87), then the rows it names go back, even
+            # The result first, then the rows it names go back, even
             # when the append raises.
             try:
                 self.stream.append("result", {"inbox_ids": [], "requeued": ids,
@@ -2266,7 +2264,7 @@ class SdkRunner:
             return True
         outcome = FAILED if (is_error and not interrupted) else DELIVERED
         ids = [row["id"] for row in closing]
-        # the result first (#87): whoever reads a row closed finds the result
+        # the result first: whoever reads a row closed finds the result
         # that closed it. The rows close even when the append raises; a row
         # whose close raises stays in `closing`, and the failure path fails it.
         try:
@@ -2520,7 +2518,7 @@ class SdkRunner:
                 if isinstance(msg, sdk.ResultMessage):
                     await self._record_usage(msg)      # the handoff turn costs too
                     if not msg.is_error:
-                        self._note_good_result()       # R19: a good result proves the login
+                        self._note_good_result()       # a good result proves the login
                     break
         finally:
             await _aclose(responses)
@@ -2579,7 +2577,7 @@ class SdkRunner:
     def _close_duplicates(self, row, outcome, detail):
         """A PLAIN duplicate `flip` row that slipped past put_once (two
         processes between check and put) gets this rollover's answer, not a
-        second rollover. A bequest row is never closed here (R10): it is an
+        second rollover. A bequest row is never closed here: it is an
         operator act and runs as its own rollover. The close is guarded on
         the body read here: a bequest that replaced it since is left open."""
         for other in self.inbox.open_rows("flip"):
@@ -2599,7 +2597,7 @@ class SdkRunner:
         Before the new session exists, any failure is errored -> idle with
         the row failed, the old session kept (a client resumed on it, or at
         least `_resume_id` naming it for the next reconnect), and the detail
-        saying where it stopped: never a wedged machine (C1). Once the new
+        saying where it stopped: never a wedged machine. Once the new
         session exists (the point of no return) nothing fails the rollover:
         a failed step degrades it, is named in the row's detail, and the row
         still closes delivered, because running it again would move the
@@ -2735,7 +2733,7 @@ class SdkRunner:
     def _handover(self, digest):
         """(digest, handed): the digest with the previous-transcript
         paragraph appended when a move from the tmux lane left its record
-        (handover.py, #103). The caller consumes the record once the row
+        (handover.py). The caller consumes the record once the row
         holding the paragraph is stored. Never raises."""
         try:
             extra = handover.note(self.home)
@@ -2777,7 +2775,7 @@ class SdkRunner:
                                                     "tools": list(d.get("tools") or []),
                                                     "mcp_servers": list(d.get("mcp_servers") or [])})
                 self._note_session(d.get("session_id"))   # after the lane: it is saved with it
-                # the account did not take effect (Task 16): said, nothing more;
+                # the account did not take effect: said, nothing more;
                 # it can only catch the key kind (a login, a token and a
                 # logged-out session all read "none")
                 got, want = d.get("apiKeySource"), accounts.expected_source(self.account)
@@ -2799,7 +2797,7 @@ class SdkRunner:
                     payload.update(error_status=d.get("error_status"), error=d.get("error"),
                                    attempt=d.get("attempt"))
                     signal = auth.retry_signal(d)
-                    # W11-1: a key or a token cannot refresh, so its first 401 is
+                    # A key or a token cannot refresh, so its first 401 is
                     # final; a claude-login account refreshes at the CLI's next
                     # attempt, so it is left to finish (a refresh that fails ends
                     # in a 401 result, the second signal)
@@ -2880,7 +2878,7 @@ class _ScrubbedAuthEnv:
 
 def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
                      client_factory=None, commit_attribution=True):
-    """`cousin-runner --check-auth --validate` (R13): ONE smallest model
+    """`cousin-runner --check-auth --validate`: ONE smallest model
     turn on a bare, throwaway client under the account's environment:
     setting_sources=[], no session store, no tools, no MCP server, no
     hooks, max_turns=1, a temporary cwd, a timeout. Never the cousin's own
@@ -2919,13 +2917,13 @@ def validate_account(account, root, *, model=None, effort=None, timeout=90.0,
                     signal = signal or auth.assistant_signal(error)
                     if error and failed is None:
                         # any typed error fails the turn, not only auth: a model
-                        # the CLI cannot run is an invalid_request 400 (#96)
+                        # the CLI cannot run is an invalid_request 400
                         said = " ".join(getattr(b, "text", "") for b in msg.content or ()).strip()
                         failed = "%s: %s" % (error, said[:300] or error)
                 elif isinstance(msg, sdk.SystemMessage) and msg.subtype == "api_retry":
                     retry = auth.retry_signal(msg.data)
                     # a key or token's 401 now is a 401 in 3 minutes; a login
-                    # refreshes at the next attempt (W11-1): read on to the result
+                    # refreshes at the next attempt: read on to the result
                     if retry and not accounts.resume_via_cli(account):
                         return 4, "validate: %s" % retry["detail"]
                 elif isinstance(msg, sdk.ResultMessage):

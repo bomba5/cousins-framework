@@ -1,6 +1,6 @@
 """The console's plugin UI (plugins.jsx, the pane tabs and the chat strips
 in chat.jsx). Pinned
-by text, and the pure helpers run under node. The operator's rule: an
+by text, and the pure helpers run under node. The rule: an
 install with no plugin shows no plugin UI at all, no tab, no empty strip,
 no empty "plugins" section; a tab only for a plugin that is installed,
 valid, enabled in config/plugins.toml, enabled on the cousin, and has a
@@ -87,7 +87,7 @@ class NoPluginsNoUi(unittest.TestCase):
         view = _component(_read("chat.jsx"), "ChatView")
         col = view[view.index('<div className="chat-col"'):view.index("{paneShown && !chatHidden && (")]
         # less what the chat layout adds since: the column's measuring ref and collapse
-        # (the compact header, #126) and the narrow flag it hands the header
+        # (the compact header) and the narrow flag it hands the header
         col = col.replace(' ref={chatColRef} aria-hidden={chatHidden || undefined}', '', 1)
         col = col.replace(' narrow={narrowCol} />', ' />', 1)
         strip = re.search(r"\{chatStrips\.length > 0 && window\.PluginChatStrips && \(\s*"

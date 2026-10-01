@@ -1,5 +1,5 @@
-"""cousin-account login <name> --provider <id> for an opencode account (phase 9
-R12'): an API key never travels through chat. It comes from stdin (hidden on a
+"""cousin-account login <name> --provider <id> for an opencode account: an
+API key never travels through chat. It comes from stdin (hidden on a
 terminal) or a strict key file and is written straight into the account's
 opencode auth.json, merged, 0600 in a 0700 dir. An OAuth method goes through
 the pty driver: opencode 1.18.31's every OAuth method is "auto" (a URL and an
@@ -188,7 +188,7 @@ class TestApiKey(OcLoginCase):
             self.assertNotIn(KEY, out + err)
 
     def test_anthropic_is_refused_on_this_lane_even_by_key(self):
-        """Ruling P9-1: Claude cousins run on the Agent SDK and nowhere else,
+        """Claude cousins run on the Agent SDK and nowhere else,
         so no Anthropic key is written for the opencode lane either."""
         stdin = io.StringIO("sk-ant-api03-fake\n")
         rc, out, err = self.cli("login", "metered", "--provider", "anthropic", stdin=stdin)

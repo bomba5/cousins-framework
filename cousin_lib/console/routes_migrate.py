@@ -1,7 +1,7 @@
-"""Console routes for WP-B, kind switch and migration (docs/reference/console-api.md,
+"""Console routes for the kind switch and migration (docs/reference/console-api.md,
 "Kind switch and migration"): cousin-migrate's plan, apply, check and
-rollback, and the phase 11 kind switch (`--to sdk|tmux`), through the
-migrate library only. migrate.py is phase 11's: nothing here changes how
+rollback, and the kind switch (`--to sdk|tmux`), through the
+migrate library only. migrate.py owns the steps: nothing here changes how
 a step runs, it only watches the steps go by.
 
 apply and rollback change a live cousin, so each is a long operation
@@ -19,7 +19,7 @@ pane shows a screen that waits on a person (the trust dialog above all,
 data/login-required.json `screen`), the verify stage says so, and the
 browser offers the pane to answer it in.
 
-Not built yet, because phase 11 defers them: adopt, and `--all
+Not built yet: adopt, and `--all
 --keep-going` (a fleet action). GET .../migrate says so in `deferred`.
 
 Test seams on req.server.state (never set by a request):
@@ -53,9 +53,9 @@ RECORD_KEYS = ("slug", "state", "from", "to", "account", "session_id", "started_
                "waiting_at_rollback", "cli")
 DEFERRED = (
     {"id": "adopt", "label": "adopt a live pane",
-     "why": "not yet: phase 11 defers adopt; a tmux-kind start adopts a pane on its own"},
+     "why": "not yet: adopt is not built; a tmux-kind start adopts a pane on its own"},
     {"id": "all", "label": "switch every cousin (--all --keep-going)",
-     "why": "not yet: phase 11 defers the fleet switch; switch one cousin at a time"},
+     "why": "not yet: the fleet switch is not built; switch one cousin at a time"},
 )
 _ISO = re.compile(r"^\d{4}-\d\d-\d\d([T ]\d\d:\d\d(:\d\d(\.\d+)?)?([+-]\d\d:?\d\d|Z)?)?$")
 
@@ -115,9 +115,9 @@ def _lane(home):
 
 
 def _no_kind(home):
-    """Row 72/79: a plan, apply or rollback of the migration (no `to`) is
+    """A plan, apply or rollback of the migration (no `to`) is
     refused before anything runs: 2.0.0 keeps no conversion from the legacy
-    lane (O3). 409 with delivery.lane_refusal for a cousin with no runner;
+    lane. 409 with delivery.lane_refusal for a cousin with no runner;
     400 telling a runner cousin to name a kind."""
     from cousin_lib.delivery import RUNNER_KINDS, _runner_kind
     raise HttpError(400 if _runner_kind(home) in RUNNER_KINDS else 409,

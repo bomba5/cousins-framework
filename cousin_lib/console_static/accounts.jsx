@@ -1,4 +1,4 @@
-// WP-C, accounts: this package's own file (index.html's package block).
+// Accounts: this package's own file (index.html's package block).
 // Its routes are cousin_lib/console/routes_accounts.py.
 //
 // The Accounts view (a NAV entry): config/accounts.toml's entries and the

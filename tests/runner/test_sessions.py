@@ -1,4 +1,4 @@
-"""Sessions (phase 8): a primary and its side sessions in one runner. The
+"""Sessions: a primary and its side sessions in one runner. The
 exit criterion (one cousin answers a peer while its primary session runs a
 long task), a reply routed to the side session's own thread, the Runner
 contract answered for the primary, and cousin-runner building it from
@@ -153,7 +153,7 @@ class TestSessionsAsARunner(SessionsCase):
         self.assertEqual(set(s.states().values()), {"stopped"})
 
     def test_a_side_session_that_gives_up_is_restarted_and_the_primary_runs_on(self):
-        """Ruling P8-1 (review I3): a side session's failure never ends the
+        """A side session's failure never ends the
         process and never touches the primary's running turn; the side is
         rebuilt after a backoff and answers once its CLI starts."""
         home = _install(self)
@@ -182,7 +182,7 @@ class TestSessionsAsARunner(SessionsCase):
             self.assertTrue(_wait(lambda: s.inbox.get(peer.inbox_id)["state"] == "done",
                                   timeout=10))
             # the rebuilt side starts, then its `side_restarted` is appended: it
-            # may take and close the row first (#102)
+            # may take and close the row first
             self.assertTrue(_wait(lambda: len([e for e in s.events() if e["kind"] == "system"
                                                and e["payload"].get("subtype")
                                                == "side_restarted"]) >= 2))
@@ -203,7 +203,7 @@ class TestSessionsAsARunner(SessionsCase):
         self.assertTrue(_wait(lambda: s.inbox.get(op.inbox_id)["state"] == "done"))
 
     def test_stop_keeps_the_whole_stop_within_its_timeout(self):
-        """Phase 6's stop budget: `cousin-runner` gives `stop` STOP_TIMEOUT_S
+        """The stop budget: `cousin-runner` gives `stop` STOP_TIMEOUT_S
         and the supervisor kills the child soon after, so the budget is the
         TOTAL, never per session: three sessions that each take 3 s to stop
         still return within a 1 s budget."""
@@ -237,7 +237,7 @@ class TestSessionsAsARunner(SessionsCase):
         self.assertEqual(s.inbox.get(b.inbox_id)["state"], "claimed")
 
     def test_sessions_reports_kind_sdk(self):
-        """Phase 5's `runner` head event reports `runner.kind`."""
+        """The `runner` head event reports `runner.kind`."""
         self.assertEqual(sessions.Sessions.kind, "sdk")
 
     def test_sessions_names_the_primary_first_then_each_side(self):
@@ -249,7 +249,7 @@ class TestSessionsAsARunner(SessionsCase):
 
 
 class TestStopRacesTheWatcher(SessionsCase):
-    """Final review: stop() snapshots sessions() after its capped join of the
+    """stop() snapshots sessions() after its capped join of the
     watcher; a rebuild still in flight then must not leave a side session
     (a CLI process) running after the stop."""
 
@@ -310,7 +310,7 @@ class TestStopRacesTheWatcher(SessionsCase):
         self.assertIs(s.sides["peer"], side)
 
     def test_a_side_rebuilt_while_stopping_begins_its_stop_before_it_starts(self):
-        """Proof-fix review M3: a rebuild that lands after the stop began
+        """A rebuild that lands after the stop began
         claims nothing for the moment it runs."""
         home = _install(self)
         s = self.build(home, ("peer",), [], primary_scripts=[])
@@ -361,7 +361,7 @@ class TestStopRacesTheWatcher(SessionsCase):
 
 class TestOnceSeesASideLogin(HermeticCase):
     def test_once_exits_4_when_only_a_side_session_waits_for_a_login(self):
-        """Review I4: the primary idle, a side session's rows queued behind a
+        """The primary idle, a side session's rows queued behind a
         dead login: `--once` must say 4, not spin."""
         class Stub:
             fatal = None
@@ -394,7 +394,7 @@ class TestOnceSeesASideLogin(HermeticCase):
 
 class TestOnceGivesUpOnASideThatNeverStarts(HermeticCase):
     def test_once_exits_3_when_a_side_sessions_cli_never_starts(self):
-        """Round 2 review N2: P8-1 keeps rebuilding a side session, so its
+        """A side session that gives up keeps being rebuilt, so its
         rows never drain; the batch mode must end, not spin."""
         home = _install(self)
 
@@ -429,10 +429,10 @@ class TestOnceGivesUpOnASideThatNeverStarts(HermeticCase):
 
 class TestOnceStallClockUnderTheRealBackoff(HermeticCase):
     def test_once_exits_3_about_the_give_up_time_after_a_side_first_gives_up(self):
-        """Final review: under the real backoff (1 s, doubling) each rebuild
-        ended the stall for a moment and restarted `--once`'s clock, so exit
-        3 came after about 26 s, not the documented 10. The clock now runs
-        on across rebuilds until one connects."""
+        """Under the real backoff (1 s, doubling) each rebuild ends the
+        stall for a moment; restarting `--once`'s clock there would put exit
+        3 at about 26 s, not the documented 10. The clock runs on across
+        rebuilds until one connects."""
         home = _install(self)
 
         def refuse(options):
@@ -469,9 +469,9 @@ class TestOnceStallClockUnderTheRealBackoff(HermeticCase):
 
 class TestOnceDrainsARebuiltSide(HermeticCase):
     def test_once_exits_0_when_a_rebuilt_side_connects_and_serves_a_slow_row(self):
-        """Re-review: a side that gave up once and was rebuilt, connected and
+        """A side that gave up once and was rebuilt, connected and
         serving is not stalled. Counting it stalled until it had been up
-        RESTART_RESET_S made `--once` exit 3 on a healthy cousin whenever a
+        RESTART_RESET_S would make `--once` exit 3 on a healthy cousin whenever a
         turn outlasted the give-up time."""
         home = _install(self)
         made = []
@@ -510,7 +510,7 @@ class TestOnceDrainsARebuiltSide(HermeticCase):
 
 
 class TestOneCachedPrefix(SessionsCase):
-    """Review I2 (a): every input to the cached prefix is the same bytes in
+    """Every input to the cached prefix is the same bytes in
     the primary and a side session: the preset prompt, the tools, the cwd,
     the model, the permission mode, the setting sources and the env."""
 

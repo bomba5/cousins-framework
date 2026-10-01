@@ -1,10 +1,10 @@
-"""The tmux kind's pane (phase 11 Task 2, interfaces I3): an interactive
+"""The tmux kind's pane: an interactive
 Claude Code in a tmux session on the framework's own socket.
 
 What it may do is narrow on purpose. It starts the CLI with an
 allowlisted environment set INSIDE the pane (`exec env -i ...`), because
 tmux runs a command through the login shell, which rebuilds the
-environment (phase 11 findings S0+). Only variable NAMES reach tmux: each
+environment. Only variable NAMES reach tmux: each
 is expanded by that login shell (`${NAME+"NAME=$NAME"}`), so no value, and
 no secret, is ever on a tmux command line (`#{pane_start_command}` keeps it
 for the pane's life); a denied name (DENY_PREFIXES, accounts.AUTH_VARS) is
@@ -14,7 +14,7 @@ refused. The framework's server starts with `-f /dev/null`, so no
 paste of the body, and never into a screen that is waiting on a person:
 the trust dialog, onboarding, the login menu (whose option 2 is API
 billing), the bypass and MCP dialogs, a usage-limit screen, or the rewind
-selector a double Escape opens (findings S0, I6a, Z7). Its keys are an
+selector a double Escape opens. Its keys are an
 allowlist (Escape, C-u, Enter). It reads the screen at a fixed window size,
 so an attached terminal cannot change what it parses.
 
@@ -33,13 +33,13 @@ WIDTH, HEIGHT = 200, 50
 KEYS = ("Escape", "C-u", "Enter")
 QUEUED_HINT = "Press up to edit queued messages"
 PROMPT = "❯ "
-# The hard deny (R3, P11-12), in ONE place: tmux_launch imports it. A name
+# The hard deny, in ONE place: tmux_launch imports it. A name
 # with one of these prefixes, an auth variable or a credential-shaped name
 # (accounts.credential_name, opencode's rule too) never enters the pane's
 # environment from the shell; the launcher adds only the account's own.
 DENY_PREFIXES = ("CLAUDE", "ANTHROPIC")      # CLAUDECODE, CLAUDE_AGENT_SDK_* included
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-# What never reaches the pane as a key or inside a paste (review C4): ESC
+# What never reaches the pane as a key or inside a paste: ESC
 # and every other C0 control but \n and \t, DEL, and the C1 controls. An
 # ESC[201~ in a paste ends the bracketed paste early (tmux 3.6a passes it
 # through, measured), and a CR after it submits the rest as typed input
@@ -78,7 +78,7 @@ def env_command(names, argv):
         if not _NAME.match(n):
             raise ValueError("not a variable name: %r" % (n,))
         if denied(n):
-            raise ValueError("%s is denied in the pane's environment (R3)" % n)
+            raise ValueError("%s is denied in the pane's environment" % n)
     words = ['${%s+"%s=$%s"}' % (n, n, n) for n in names + ["TERM"]]
     return "exec env -i " + " ".join(words + [shlex.quote(a) for a in argv])
 
@@ -197,12 +197,12 @@ def _box_at(lines):
 
 
 def attention_in(screen):
-    """The attention screen showing (a plain or an escaped capture), matched OUTSIDE the conversation
-    (review I3): from the input box's top rule down when a box shows (the
+    """The attention screen showing (a plain or an escaped capture), matched OUTSIDE the conversation:
+    from the input box's top rule down when a box shows (the
     box, and what the CLI draws under it), the whole screen when none does
     (a dialog replaces the box). The model's own words above the box, a
     usage limit or the rewind selector's footer quoted, never match: a limit
-    inside a turn is the transcript's to say (R6)."""
+    inside a turn is the transcript's to say."""
     screen = plain(screen)
     lines = screen.splitlines()
     top = _box_at(lines)
@@ -259,7 +259,7 @@ class TmuxPane:
         """A pane or window target: the exact session, its current window.
         tmux 3.6a answers `-t =name` with nothing for pane commands
         (display-message prints an empty line, capture-pane fails);
-        `=name:` keeps the exact match and works (measured, phase 11)."""
+        `=name:` keeps the exact match and works (measured)."""
         return "=" + self.name + ":"
 
     def alive(self):
@@ -283,7 +283,7 @@ class TmuxPane:
                      ("set-option", "-t", self._target(), "window-size", "manual"),
                      ("resize-window", "-t", self._target(), "-x", str(self.width), "-y", str(self.height))):
             r = self._tmux(*args)
-            if r.returncode != 0:     # the fixed size is what the screen parsers rely on (R25)
+            if r.returncode != 0:     # the fixed size is what the screen parsers rely on
                 raise OSError("tmux %s failed (rc=%d): %s" % (args[0], r.returncode,
                                                              (r.stderr or "").strip()[:200]))
 

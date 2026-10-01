@@ -1,4 +1,4 @@
-"""The hive and a runner cousin (phase 6, task 9).
+"""The hive and a runner cousin.
 
 A hive node is not a framework install: it runs the standalone
 templates/hive-node/cousin_node.py. `cousin-hive recall` is answered by

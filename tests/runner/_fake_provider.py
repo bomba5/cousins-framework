@@ -1,7 +1,6 @@
-"""A fake OpenAI-compatible provider on loopback (phase 9 R16): what the
-real `opencode serve` talks to in the live proofs, so no credential and no
-network is ever needed. The phase 9 survey's approach (section 3), as a
-reusable module.
+"""A fake OpenAI-compatible provider on loopback: what the real
+`opencode serve` talks to in the live tests, so no credential and no
+network is ever needed. A reusable module.
 
 It answers `POST /v1/chat/completions` (streaming, as opencode's bundled
 `@ai-sdk/openai-compatible` asks, or one JSON object when `stream` is
@@ -15,7 +14,7 @@ false) from a script of replies, one reply per request:
                               comments every 0.2 s, which notice a client
                               that went away) for `seconds`, then the rest
   ("status", code, message)   an HTTP error with OpenAI's error body (401:
-                              `invalid_api_key`, as the survey measured)
+                              `invalid_api_key`, as opencode sees it)
 
 When the script runs out a request is answered ("text", "ok").
 A request with no tools is opencode's own auxiliary call (the session

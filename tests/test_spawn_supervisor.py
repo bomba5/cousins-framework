@@ -1,5 +1,5 @@
-"""The runner lane's start and stop go through cousin-supervisor (phase 6
-task 2, R10): `spawn.start_cousin`/`stop_cousin` on a cousin whose
+"""The runner lane's start and stop go through cousin-supervisor:
+`spawn.start_cousin`/`stop_cousin` on a cousin whose
 `[agent] runner` is sdk or fake ask the supervisor over its socket and
 never touch tmux; the tmux lane is unchanged. A stub supervisor answers
 the protocol; one test runs the real one over a `fake` runner. Invented
@@ -93,7 +93,7 @@ class TestRunnerLaneStart(_Case):
         self.assertIn("runner:wren is still stopping", str(caught.exception))
 
     def test_still_stopping_is_its_own_refusal(self):
-        # #92: transient, so the console answers 409, not 500
+        # transient, so the console answers 409, not 500
         home = runner_home(self.root, "wren")
         self.stub(start={"ok": False, "name": "runner:wren",
                          "error": "runner:wren is still stopping; start it once it is down"})
@@ -108,7 +108,7 @@ class TestRunnerLaneStart(_Case):
         self.assertNotIsInstance(caught.exception, (spawn.StillStopping, spawn.ForeignRunner))
 
     def test_a_runner_the_supervisor_did_not_start_is_not_joined_by_a_second(self):
-        # #92: held (a stop with no supervisor), a runner started by hand
+        # held (a stop with no supervisor), a runner started by hand
         # still holds the lock, and the supervisor that came up since has
         # no child of its own running: its start answered "running" for a
         # second runner that only waited for the lock, in backoff
@@ -156,10 +156,10 @@ class TestRunnerLaneStop(_Case):
 
     def test_the_runner_kinds_are_delivery_s(self):
         from cousin_lib import delivery
-        self.assertIs(spawn.RUNNER_KINDS, delivery.RUNNER_KINDS)     # M6
+        self.assertIs(spawn.RUNNER_KINDS, delivery.RUNNER_KINDS)
 
     def test_no_supervisor_is_not_running_on_both_halves_and_still_holds(self):
-        # O9: the stop is the operator's decision whether or not a
+        # the stop is the operator's decision whether or not a
         # supervisor happens to be up: the hold is written here, so the
         # next supervisor does not start the cousin until `start`
         home = runner_home(self.root, "wren")
@@ -236,7 +236,7 @@ class TestRealSupervisor(_Case):
         out = spawn.stop_cousin(home)
         self.assertEqual(out, {"runner": "stopped", "supervisor": "running"})
         self.assertFalse(is_running(home))
-        # R4': the stop went through the socket, so it holds the cousin down
+        # the stop went through the socket, so it holds the cousin down
         # past a supervisor restart; the next start lifts it
         held = home / "run" / "held"
         self.assertTrue(held.read_text().endswith(" spawn.stop_cousin\n"))
@@ -249,7 +249,7 @@ class TestRealSupervisor(_Case):
         self.assertTrue(held.exists())
 
 
-# ---- phase 6 task 2, second half: a new cousin is a runner cousin where the install says so
+# ---- a new cousin is a runner cousin where the install says so
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASE_TOML = '[cousin]\nslug = "wren"\nname = "Wren"\nrole = "example cousin"\n'
@@ -292,7 +292,7 @@ class _CreateCase(_Case):
 
 class TestCreateOnTheRunnerLane(_CreateCase):
     def test_with_no_default_a_new_cousin_is_sdk(self):
-        """R4: no runner named and COUSIN_DEFAULT_RUNNER unset or empty is
+        """No runner named and COUSIN_DEFAULT_RUNNER unset or empty is
         `sdk`; 2.0.0 has no legacy tmux lane to default to."""
         os.environ.pop("COUSIN_DEFAULT_RUNNER", None)
         os.environ.pop("COUSIN_DEFAULT_ACCOUNT", None)
@@ -312,7 +312,7 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertEqual(self.toml(), BASE_TOML + '\n[agent]\nrunner = "sdk"\n')
 
     def test_tmux_legacy_is_not_a_lane(self):
-        """R4: the legacy lane asked for by name is refused, the line naming
+        """The legacy lane asked for by name is refused, the line naming
         the kinds, before anything is written."""
         for kw in ({}, {"account": "metered"}):
             with self.assertRaises(spawn.SpawnError) as caught:
@@ -377,10 +377,9 @@ class TestCreateOnTheRunnerLane(_CreateCase):
         self.assertEqual([c.slug for c in supervisor.runner_cousins(self.root)], ["wren"])
 
     def test_a_runner_that_is_not_a_runner_kind_is_not_the_runner_lane(self):
-        """#100 review: a second runner_lane returned the raw string, so
-        `runner = "tmux"` read as the runner lane everywhere. Since phase 11
-        "tmux" names the tmux kind, a runner kind; a value outside the kinds
-        is still not the runner lane."""
+        """runner_lane never answers with the raw string, which would read
+        any `runner` value as the runner lane. "tmux" names the tmux kind, a
+        runner kind; a value outside the kinds is not the runner lane."""
         self.create()
         text = BASE_TOML   # the hand-written home: its own [agent] below
         for runner, lane in (("tmux-legacy", False), ("bogus", False), ("", False),
@@ -405,7 +404,7 @@ class TestCreateARunnerCousinsModel(_CreateCase):
                                          "model": "claude-x", "effort": "high"})
 
     def test_the_default_sdk_cousins_model_goes_to_agent(self):
-        # R4: no runner named is sdk, so model and effort are [agent]'s
+        # no runner named is sdk, so model and effort are [agent]'s
         self.create(model="claude-x", effort="low")
         data = tomllib.loads(self.toml())
         self.assertNotIn("runtime", data)
@@ -420,7 +419,7 @@ class TestCreateARunnerCousinsModel(_CreateCase):
         (self.root / "config" / "accounts.toml").write_text(
             ACCOUNTS + '\n[accounts.oc]\nkind = "opencode"\nproviders = ["openai"]\n')
         self.assertIn("kind opencode", self.refused(runner="sdk", account="oc"))
-        self.assertIn("P9-1", self.refused(runner="opencode", account="oc",
+        self.assertIn("SDK and nowhere else", self.refused(runner="opencode", account="oc",
                                            model="openai/claude-x"))
         os.environ["COUSIN_OPENCODE_BIN"] = self.fake_opencode()
         self.create(runner="opencode", account="oc", model="openai/gpt-5")

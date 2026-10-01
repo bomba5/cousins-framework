@@ -203,7 +203,7 @@ class TestBackgroundCommand(JobsCase):
         self.assertIn("into-home", pathlib.Path(job["log_path"]).read_text())
 
     def test_an_empty_program_is_refused_before_any_row(self):
-        """#115: an empty argv[0] registered a job that died 127 (the runner
+        """An empty argv[0] registered a job that died 127 (the runner
         lane already refuses it)."""
         for program in ("", " ", "\t"):
             with self.subTest(program=program):
@@ -213,8 +213,8 @@ class TestBackgroundCommand(JobsCase):
         self.assertEqual(list_jobs(), [])
 
     def test_a_program_with_surrounding_whitespace_is_refused_like_a_blank_one(self):
-        """#115 review: " echo" or "echo " is no program on PATH either; it
-        registered a job that died 127."""
+        """A program with surrounding whitespace (" echo", "echo ") is no
+        program on PATH either; it registered a job that died 127."""
         for program in (" echo", "echo ", "\techo", "echo\n"):
             with self.subTest(program=program):
                 rc, _, err = self._main(["start", "shell", "--", "t", program, "x"])
@@ -223,7 +223,7 @@ class TestBackgroundCommand(JobsCase):
         self.assertEqual(list_jobs(), [])
 
     def test_one_option_set_serves_every_start_parser(self):
-        """#115: the separated shape's check and the title-first re-parse
+        """The separated shape's check and the title-first re-parse
         read the start options from the same builder as the start parser,
         so an option added there cannot drift from them."""
         import argparse
@@ -310,7 +310,7 @@ class TestBackgroundCommand(JobsCase):
 class TestProcessGroup(TestBackgroundCommand):
     """A job's command runs in its own process group; closing the job
     ends the whole group, and a finished job whose group still runs is
-    shown as a leak (tracker #3)."""
+    shown as a leak."""
 
     def _alive(self, pid):
         try:

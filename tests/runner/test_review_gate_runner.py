@@ -1,10 +1,9 @@
-"""The review gate on the runner lane (master plan phase 7 task 10): after
-every turn (a result or an error) and once at start, the entries written
-on authored topics since the per-home cursor go through
-review_gate.hold_new; over `[memory] review_batch` they are held and a
-second model reviews them in one background task on the runner's loop,
-never holding the next turn. The outcome is a `review_gate` event, never
-a failed turn."""
+"""The review gate on the runner lane: after every turn (a result or an
+error) and once at start, the entries written on authored topics since the
+per-home cursor go through review_gate.hold_new; over `[memory]
+review_batch` they are held and a second model reviews them in one
+background task on the runner's loop, never holding the next turn. The
+outcome is a `review_gate` event, never a failed turn."""
 import asyncio
 import json
 import os
@@ -107,7 +106,7 @@ class TestRunnerGate(_Base):
 
 class TestBatches(_Base):
     def test_a_large_hold_is_reviewed_in_bounded_batches(self):
-        """Review m6: one prompt never carries more than REVIEW_BATCH_MAX rows."""
+        """One prompt never carries more than REVIEW_BATCH_MAX rows."""
         sizes = []
         r = self._runner([self._turn_script(45)],
                          memory_reviewer=lambda rows: sizes.append(len(rows)) or {})
@@ -118,7 +117,7 @@ class TestBatches(_Base):
 
 
 class TestTheReviewNeverHoldsTheLoop(_Base):
-    """Review I1: the review runs beside the loop, not inside the turn."""
+    """The review runs beside the loop, not inside the turn."""
 
     def test_the_next_row_runs_while_the_review_is_still_out(self):
         release = threading.Event()
@@ -155,7 +154,7 @@ class TestTheReviewNeverHoldsTheLoop(_Base):
 
 
 class TestTheGateFailsSafe(_Base):
-    """Review I2: a turn that dies after its writes, and a runner that
+    """A turn that dies after its writes, and a runner that
     died before its gate, still have them held."""
 
     def test_a_turn_that_ends_in_an_error_after_its_writes_is_gated(self):
@@ -182,7 +181,7 @@ class TestTheGateFailsSafe(_Base):
 
 
 class TestTheSweepComesBeforeTheDigest(_Base):
-    """Execution review: entries a crash left un-held are held before the
+    """Entries a crash left un-held are held before the
     new session's state digest is built (the sweep runs before the
     resume or the fresh start)."""
 
@@ -203,9 +202,9 @@ class TestTheSweepComesBeforeTheDigest(_Base):
 
 
 class TestOneReviewerPerHome(_Base):
-    """Phase 7b review round 2, N2: a side session (phase 8) runs `_main`
-    too; only the primary sweeps the held entries at start, or each
-    session would review the same rows and use up their attempts."""
+    """A side session runs `_main` too; only the primary sweeps the held
+    entries at start, or each session would review the same rows and use
+    up their attempts."""
 
     def test_a_primary_and_a_side_session_review_a_held_batch_once(self):
         from cousin_lib.runner import sessions
@@ -233,8 +232,8 @@ class TestOneReviewerPerHome(_Base):
 class TestTheDefaultReviewer(_Base):
     def test_one_tool_less_call_on_the_configured_model_with_its_usage_recorded(self):
         """No `memory_reviewer`: a fresh client, no tools, no MCP servers,
-        one turn, a fixed cwd under data/, `[memory] review_model` (review
-        M6), and its usage in the usage store."""
+        one turn, a fixed cwd under data/, `[memory] review_model`, and its
+        usage in the usage store."""
         with open(self.home / "cousin.toml", "a") as fh:
             fh.write('\n[memory]\nreview_model = "claude-haiku-4-5-20251001"\n')
         made = []

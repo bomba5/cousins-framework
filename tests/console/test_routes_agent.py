@@ -1,4 +1,4 @@
-"""routes_agent (WP-A): a cousin's [agent] settings per lane and its other
+"""routes_agent: a cousin's [agent] settings per lane and its other
 cousin.toml settings, each through its one path: [agent] through
 spawn.persist_agent_values (agent_settings.validate, the sdk model's
 validating turn as a long operation, agent_settings.apply), the rest
@@ -243,7 +243,7 @@ class CousinSettings(AgentCase):
         self.assertEqual(ca["install"], {"value": False, "source": "config/harness.toml [agent]"})
         self.assertFalse(ca["effective"])
         ro = body["readonly"]
-        self.assertNotIn("chat.port", ro)       # no per-cousin chat server (R10)
+        self.assertNotIn("chat.port", ro)       # no per-cousin chat server
         self.assertEqual(ro["session.start_hooks"], ["echo hi"])
         self.assertEqual(ro["session.end_hooks"], [])
 
@@ -353,8 +353,8 @@ class SpawnOptionsLanes(AgentCase):
         self.assertNotIn("models", rows["fleet"])
 
 
-class Round1(AgentCase):
-    """Review round 1 of WP-A."""
+class AgentEdgeCases(AgentCase):
+    """Edge cases of the [agent] and settings routes."""
 
     def test_model_and_account_together_run_the_turn_on_the_new_account(self):
         home = self.cousin("wren", extra='\n[agent]\nrunner = "sdk"\n')
@@ -461,8 +461,8 @@ class Round1(AgentCase):
         self.assertEqual(body["changed"], [])
 
 
-class Round2(AgentCase):
-    """Review round 2: the settings route checks the [agent] table only when
+class BrokenTablesBlockOnlyTheirWrites(AgentCase):
+    """The settings route checks the [agent] table only when
     it writes an [agent] key; a stale [agent] never blocks a rename."""
 
     def test_a_broken_agent_table_blocks_only_an_agent_write(self):

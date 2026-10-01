@@ -255,7 +255,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     """Run the flip for one cousin. Returns a structured result whose
     ok reflects the verified identity write. On a runner cousin it is the
     rollover (_flip_runner); a cousin with no runner kind is refused with
-    delivery.lane_refusal before any tmux call (R2)."""
+    delivery.lane_refusal before any tmux call."""
     result = {"slug": slug, "ok": False, "stages": []}
     root = FrameworkConfig.from_env().root
     home = root / "cousins" / slug
@@ -272,7 +272,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
             return result
         return _flip_runner(slug, home, reason=reason, deadline=handoff_deadline,
                             queue_if_stopped=queue_if_stopped)
-    # R2: 2.0.0 has no legacy tmux lane; refused by name, before any tmux call.
+    # 2.0.0 has no legacy tmux lane; refused by name, before any tmux call.
     from cousin_lib.delivery import lane_refusal
     result["error"] = lane_refusal(home)
     return result
@@ -407,8 +407,7 @@ def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
     # boot._mcp_warning reads that id to scope its MCP warning to the
     # generation that just died. Persist earlier and the warning
     # scopes to a session with no log yet, returns None and goes
-    # silent forever - a diagnostic that dies quietly, which is the
-    # defect #54 existed to remove. Guarded by
+    # silent forever: a diagnostic that dies quietly. Guarded by
     # tests.test_flip.TestAssembleSeesTheDyingSessionId.
     session_id = _mint_session_id()
     agent_cmd = agent_cmd_template.replace("{session_id}", session_id)

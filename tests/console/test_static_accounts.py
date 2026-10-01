@@ -1,5 +1,5 @@
 """Static contract for the Accounts view and the Inspector's account panel
-(accounts.jsx, WP-C): registered through the seams only, every secret box
+(accounts.jsx): registered through the seams only, every secret box
 a write-only SecretField, the code posted to its own route and never to a
 chat, the sign-in URL opened without a referrer, remove behind the typed
 name, validate saying it spends one model turn, and every route it calls

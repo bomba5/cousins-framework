@@ -1,4 +1,4 @@
-"""#66: the carried read (a row written into the live turn whose echo had not
+"""The carried read (a row written into the live turn whose echo had not
 come when the CLI's result did) honours stop() and an interrupt, even when
 the CLI never takes the row up."""
 import asyncio
@@ -21,7 +21,7 @@ from tests.runner.test_sdk import (ScriptedClient, _compile, _errors, _results, 
 
 class DroppingClient(ScriptedClient):
     """A CLI that takes the write of its `drop`-th message and never takes it
-    up: no echo and no turn for it, ever (the case #66 names)."""
+    up: no echo and no turn for it, ever."""
 
     def __init__(self, options, scripts, drop):
         super().__init__(options, scripts)
@@ -158,7 +158,7 @@ class TestCarriedRead(HermeticCase):
         self.assertLess(time.monotonic() - t, 10.0)
         self.assertNotIn("interrupt_dropped", [e["payload"].get("subtype") for e in r.events()
                                                if e["kind"] == "system"])
-        # an interrupt the user asked for is not a failure (review round 2, 7):
+        # an interrupt the user asked for is not a failure:
         # no errored state, no error event, no failure count, and the result
         # that sends b back cut nothing
         self.assertTrue(_wait(lambda: r.state() == "idle"))
@@ -168,12 +168,12 @@ class TestCarriedRead(HermeticCase):
         back = [x for x in _results(r) if x.get("requeued") == [b.inbox_id]]
         self.assertEqual([(x["is_error"], x["interrupted"]) for x in back], [(False, False)])
         # the failure count is set after the idle move and the review gate:
-        # read once the loop has stopped, when nothing can still set it (#102)
+        # read once the loop has stopped, when nothing can still set it
         r.stop(timeout=5)
         self.assertEqual(r._failures, 0)
 
     def test_a_late_echo_after_the_bound_never_runs_the_row_twice(self):
-        # review round 2, 1: the CLI takes b 1.5 s after the interrupt, past
+        # the CLI takes b 1.5 s after the interrupt, past
         # the 1.0 s bound. The client that holds b is gone before b goes back
         # to the queue: b reaches the old CLI once, and runs once more, on
         # the new client, as a turn of its own
@@ -190,7 +190,7 @@ class TestCarriedRead(HermeticCase):
         self.assertEqual(sum(b.inbox_id in x["inbox_ids"] for x in _results(r)), 1)
 
     def test_stop_gives_the_echo_its_interrupt_brings_a_grace(self):
-        # review round 2, 2: stop()'s interrupt is what makes the CLI take b,
+        # stop()'s interrupt is what makes the CLI take b,
         # 0.3 s later: b was consumed, so it is closed, never requeued
         r = self.runner([init_msg(), "PAUSE", result()],
                         late=(0.3, [assistant(text="late"), result()]))
@@ -202,7 +202,7 @@ class TestCarriedRead(HermeticCase):
         self.assertEqual(len(self.clients), 1)
 
     def test_an_interrupt_the_idle_cli_ignored_is_sent_again_to_the_carried_turn(self):
-        # review round 2, 3: the interrupt reached the CLI while it was idle
+        # the interrupt reached the CLI while it was idle
         # and cut nothing; the CLI then takes b and would run it in full. The
         # echo sends the interrupt again, to the turn that is now live.
         r = self.runner([init_msg(), "PAUSE", result()],

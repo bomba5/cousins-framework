@@ -1,10 +1,10 @@
-// WP-B, kind switch and lifecycle: this package's own file (index.html's package block).
+// The kind switch and lifecycle: this package's own file (index.html's package block).
 // Its routes are cousin_lib/console/routes_migrate.py and routes_lifecycle.py.
 //
 // The kind switch dialog: cousin-migrate for a tmux-lane cousin (plan with
-// --account and --validate, then apply) and the phase 11 kind switch for a
+// --account and --validate, then apply) and the kind switch for a
 // runner cousin (--to sdk|tmux), in one dialog. It opens on the window event
-// `fw-open-kind-switch` {slug}, which the agent panel (WP-A) and this file's
+// `fw-open-kind-switch` {slug}, which the agent panel (agent.jsx) and this file's
 // own inspector button send, so it is mounted once, outside the inspector.
 // apply and rollback are the cousin's long operation (console/longop.py):
 // their steps show as they happen, and when the pane waits on a person

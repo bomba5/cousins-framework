@@ -107,8 +107,8 @@ class TestGenerator(HomeCase):
 
 
 class TestResumeAndTail(HomeCase):
-    """Review I3 (a reconnect after a runner restart) and I4 (a fresh
-    connect is a bounded tail, not the whole file)."""
+    """A reconnect after a runner restart, and a fresh connect as a
+    bounded tail, not the whole file."""
 
     def _file(self, session, n):
         s = EventStream(self.home, session)
@@ -131,7 +131,7 @@ class TestResumeAndTail(HomeCase):
         self.assertTrue(frames[0].startswith(b"id: fake-new:1\n"))
 
     def test_a_pane_opened_before_the_runner_wrote_anything_is_told_its_session(self):
-        """Phase 5 execution review (Task 5): the pane is opened while the
+        """The pane is opened while the
         runner starts, before its stream exists. When the first file
         appears, a `session` frame names it and every id carries it; a
         reconnect then resumes instead of re-receiving a tail."""
@@ -265,8 +265,8 @@ class TestRoutes(RouteCase):
         self.assertFalse((self.home / "data" / "chat.db").exists())
 
     def test_a_login_code_said_into_the_pane_is_diverted_never_delivered(self):
-        """R18 (phase 4): every operator send path diverts a login code first
-        (review I2); the pane's box is one."""
+        """Every operator send path diverts a login code first; the pane's
+        box is one."""
         from cousin_lib import accounts
         accounts.arm_capture(self.root, via="wren", operator="Priya", account_name="fleet",
                              ttl=60)
@@ -292,7 +292,7 @@ class TestTmuxCousin(RouteCase):
 
 
 class TestNeedsLogin(ConsoleCase):
-    """Review M13: the three routes sit behind the console's session like
+    """The three routes sit behind the console's session like
     every non-exempt route (console/app.py AUTH_EXEMPT); pinned so an edit
     to that list cannot open them."""
 

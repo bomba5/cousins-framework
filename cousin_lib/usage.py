@@ -1,11 +1,10 @@
-"""Per-turn usage on the SDK and opencode lanes (master plan, phase 4
-task 4).
+"""Per-turn usage on the SDK and opencode lanes.
 
 One row per result in <home>/data/usage.db. `total_cost_usd` is
-cumulative per CLIENT (phase 0 finding 4: 0.0088 then 0.0136 on one
-client), so a row stores the DIFFERENCE from the same client's previous
-row. A client is identified by a string unique to one connect of one
-process (the runner mints a uuid), so neither a reconnect nor a restart
+cumulative per CLIENT (measured: 0.0088 then 0.0136 on one client), so
+a row stores the DIFFERENCE from the same client's previous row. A
+client is identified by a string unique to one connect of one process
+(the runner mints a uuid), so neither a reconnect nor a restart
 diffs against a client that no longer exists. On the login lane the
 figure is the SDK's own estimate, not a bill, and the row says so; on the
 opencode lane it is opencode's figure (the model's list price times the

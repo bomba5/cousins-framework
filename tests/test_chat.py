@@ -65,7 +65,7 @@ class _ChatCase(unittest.TestCase):
 
 class TestSendMessage(_ChatCase):
     def test_deliver_to_a_cousin_with_no_runner_fails_with_the_line_and_opens_no_socket(self):
-        # R10: no per-cousin chat server to post to; the target is refused
+        # no per-cousin chat server to post to; the target is refused
         # by name (delivery.lane_refusal), nothing is opened or stored
         import contextlib
         import io
@@ -120,7 +120,7 @@ class TestListPeers(_ChatCase):
         self.assertEqual(list_peers(fw, "quiet"), [])
 
     def test_list_prints_the_kind(self):
-        # a cousin has no chat port any more (R10): the list names its kind
+        # a cousin has no chat port any more: the list names its kind
         import contextlib
         import io
         import os

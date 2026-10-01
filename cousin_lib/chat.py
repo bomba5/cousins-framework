@@ -42,7 +42,7 @@ PEER_SEND_PATH = "/peer/send"
 
 def peer_signature(secret, sender, to, sent_at, msg_id, message):
     """HMAC-SHA256, hex, of one /peer/send message with the secret the two
-    installs share (ruling P10a-2): over the sender's name, the target,
+    installs share: over the sender's name, the target,
     the send time to the millisecond, the id and the message's sha256, so
     a captured request can be neither altered nor sent from anyone else,
     and the secret itself never crosses the wire."""
@@ -73,11 +73,11 @@ class ExternalPeer:
     `send_path`, and, for a peer whose console takes POST /peer/send,
     `token_file` (the secret that peer's install shares with this one) and
     `sender` (the name that peer knows this install by): each message is
-    signed with the secret, which never travels (ruling P10a-2). Inbound
-    (phase 10a): `inbound_token_file`, the secret shared with that peer,
+    signed with the secret, which never travels. Inbound:
+    `inbound_token_file`, the secret shared with that peer,
     which our POST /peer/send checks its signatures with; `name`, how its
     messages are shown here; `reach`, the local cousins it may write to,
-    required (ruling P10a-3: no reach, no entry)."""
+    required (no reach, no entry)."""
     slug: str
     url: str
     send_path: str = DEFAULT_SEND_PATH
@@ -120,7 +120,7 @@ def load_external_peers(root):
             raise MissingConfigError(
                 "%s url must be an http(s) base URL such as"
                 " http://127.0.0.1:8085, got %r" % (where, url))
-        # a peer we sign for takes /peer/send, not the legacy chat route (M6)
+        # a peer we sign for takes /peer/send, not the legacy chat route
         send_path = entry.get("send_path", PEER_SEND_PATH if entry.get("token_file")
                               else DEFAULT_SEND_PATH)
         if not isinstance(send_path, str) or not send_path.startswith("/"):

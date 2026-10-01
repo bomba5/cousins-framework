@@ -183,7 +183,7 @@ def _fire_shell(script, *, user, message, slug, home, pattern):
         return
     if not resolved.is_file():
         return
-    # the server's env minus every credential (#88): the runner strips
+    # the server's env minus every credential: the runner strips
     # the auth variables from the cousin's own tools, and a hook the
     # cousin's data names must not see more than those tools do
     env = {name: value for name, value in os.environ.items()

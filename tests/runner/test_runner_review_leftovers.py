@@ -1,8 +1,7 @@
-"""The runner's phase 2 review leftovers (#68), each pinned on its own:
-`--once` against a runner that drains, an inbox read that raises in
-`--once`, the echo of a row with attachments, a silent long tool call
-against the idle timeout, and the interrupt poll's sqlite read off the
-event loop."""
+"""Runner edge cases, each pinned on its own: `--once` against a runner
+that drains, an inbox read that raises in `--once`, the echo of a row with
+attachments, a silent long tool call against the idle timeout, and the
+interrupt poll's sqlite read off the event loop."""
 import contextlib
 import io
 import sqlite3

@@ -1,6 +1,6 @@
-"""The fake `opencode serve` the default suite drives (R15): its routes,
-its basic auth, and the event shapes and orders measured on opencode
-1.18.31 (notes: the survey's section 3 and the queue/abort run)."""
+"""The fake `opencode serve` the default suite drives: its routes, its
+basic auth, and the event shapes and orders measured on opencode 1.18.31
+(including its queue and abort behaviour)."""
 import base64
 import http.client
 import json

@@ -64,8 +64,8 @@ if __name__ == "__main__":
 
 class TestRestartExitCode(unittest.TestCase):
     def test_the_restart_exit_is_a_failure_so_systemd_restarts_it(self):
-        # Canary (2026-09-18): the button exited 0 and the unit only
-        # restarts on failure, so pressing restart stopped the console.
+        # Canary: a restart button that exits 0 under a unit that only
+        # restarts on failure would stop the console instead.
         from cousin_lib.console import routes_admin
         self.assertNotEqual(routes_admin.RESTART_EXIT_CODE, 0)
         unit = (pathlib.Path(__file__).resolve().parents[2] / "systemd"

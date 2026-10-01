@@ -1,4 +1,5 @@
-"""Phase 3 exit criteria, as tests."""
+"""The SDK lane's tool calls: in process, no subprocess per call, no
+settings-file hooks, and each call recorded once."""
 import asyncio
 import subprocess
 import unittest

@@ -145,7 +145,7 @@ class TestCli(MediaCase):
 
     def test_chat_generates_and_posts_with_the_attachment(self):
         """The reply is stored in the cousin's own chat.db, in this
-        process: no chat server runs here (phase 10a)."""
+        process: no chat server runs here."""
         import sqlite3
         self._configure(self._serve())
         rc, _, err = self._main(["chat", "a cat", "--user", "Sam"])

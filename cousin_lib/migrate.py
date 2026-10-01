@@ -1,5 +1,5 @@
 """cousin-migrate: move one cousin from the legacy tmux lane to the SDK runner
-(master plan phase 7 tasks 7-8; the runbook is docs/migrating.md).
+(the runbook is docs/migrating.md).
 
 Nothing here runs on its own. A merge, an upgrade or a boot never
 migrates a cousin: only the operator's `cousin-migrate apply <slug>
@@ -18,14 +18,14 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
                        a handoff not written during the close is a warning
                        with its age (handoff_freshness)
               handover the tmux lane's transcript path(s) recorded in
-                       data/previous-transcript.json (handover.py, #103): the
+                       data/previous-transcript.json (handover.py): the
                        working conversation does not carry, and the runner's
                        first fresh session is handed the path. Never fails:
                        a transcript that cannot be found is recorded missing
               import   the agent CLI's own auto-memory folded in
                        (memory_import.apply: idempotent, a baseline first)
               toml     cousin.toml [agent] runner = "sdk", the account, and
-                       what the tmux lane's [runtime] carries (#96: the
+                       what the tmux lane's [runtime] carries (the
                        runner reads only [agent]): model and effort, and
                        for the key mode (agent_auth.MODE_API_KEY) an
                        anthropic-key account <slug>-key made from the
@@ -67,7 +67,7 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             the runner's model, effort and account against the cousin's
             [runtime] (a MISMATCH is not ok), and whether the chat server
             answers
-  tidy      (2.0.0, R7) the keys 2.0.0 no longer reads (removed_keys),
+  tidy      (2.0.0) the keys 2.0.0 no longer reads (removed_keys),
             removed from one cousin's cousin.toml (`tidy <slug>`) or from
             every cousin's and the install's config/harness.toml,
             config/hive.toml and config/agent-cmd (`tidy --all`). A plan
@@ -82,8 +82,7 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             server for this home; the pid file is removed. A cousin with
             no runner kind is refused: tidy is not a conversion.
 
-The supervisor interface assumed (phase 6, round 2 as its drafter stated
-it, 9fcf52a): a stop through spawn.stop_cousin waits until the child is
+The supervisor interface assumed: a stop through spawn.stop_cousin waits until the child is
 down (up to 35 s) unless told otherwise; `start {slug}` clears the stop's
 hold marker; `reload` never restarts a stopped child; snapshot()'s
 children rows carry `state` (running, backoff, failing, stopped); a
@@ -106,7 +105,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import removed_keys
-from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds (M6)
+from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds
 
 RECORD = "data/migration.json"
 STEPS = ("close", "handover", "import", "toml", "start", "verify")
@@ -213,7 +212,7 @@ def handoff_freshness(home, before_ns, stages=()):
     return True, "handoff written during the close%s" % (" (clean)" if clean else ""), None
 
 
-# ------------------------------------------------------------ what [runtime] carries (#96)
+# ------------------------------------------------------------ what [runtime] carries
 
 CARRIED = ("model", "effort")      # [runtime] key -> the same [agent] key
 KEY_SUFFIX = "-key"                # the per-cousin key account: <slug>-key
@@ -543,7 +542,7 @@ NEVER_UNRUN = "a model the runner's CLI can't run is never written"
 def runner_cli():
     """The CLI the runner's SDK starts, read without running anything: the
     SDK prefers its bundled binary, whose version it records. A model the
-    bundled CLI is too old for fails every turn with an API 400 (#96)."""
+    bundled CLI is too old for fails every turn with an API 400."""
     spec = importlib.util.find_spec("claude_agent_sdk")
     if spec is None or not spec.origin:
         return "no claude-agent-sdk installed: the runner has no CLI"
@@ -615,8 +614,7 @@ def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_al
         lane_detail = "on the tmux lane"
     elif runner == "tmux":
         lane_detail = ("[agent] runner = \"tmux\" is the tmux runner kind, not the legacy tmux"
-                       " lane: it is already on the runner lane; switch kinds with --to sdk"
-                       " (phase 11)")
+                       " lane: it is already on the runner lane; switch kinds with --to sdk")
     else:
         lane_detail = "already on the runner lane ([agent] runner = %r)" % runner
     checks.append(_check("lane", lane_ok, lane_detail))
@@ -762,7 +760,7 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
                              None)}
     _write_record(home, rec)
     values = {"runner": "sdk"}
-    # [runtime] model/effort/auth, carried (#96): the runner reads only [agent]
+    # [runtime] model/effort/auth, carried: the runner reads only [agent]
     for key in CARRIED:
         if key in p["carry"]["values"]:
             values[key] = p["carry"]["values"][key]
@@ -1011,7 +1009,7 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
     if any((home / rel).exists() for rel in (handover.RECORD, handover.CONSUMED)):
         step("handover", lambda: handover.remove(home),
              lambda gone: "removed %s" % ", ".join(gone), once=False)
-    # #107: what the runner lane kept of its session (the primary's and the
+    # What the runner lane kept of its session (the primary's and the
     # side sessions' records, the restart mark) goes with it: a
     # re-migration after this rollback starts a fresh session, with the
     # handover first, instead of resuming the old runner session
@@ -1156,9 +1154,9 @@ def check(home, *, since=None, now=None, health=None, root=None, validate=False,
     account, _err = _account(home, root) if tmux_kind else (None, None)
     if account is not None and account_mcp_servers(account):
         out["warnings"].append("the account's config holds MCP servers (%s): they load in"
-                               " the pane and not in the SDK kind (P11-13)"
+                               " the pane and not in the SDK kind"
                                % ", ".join(account_mcp_servers(account)))
-    out["removed"] = removed_keys.scan(root, home)   # named, never a reason for NOT ok (R7)
+    out["removed"] = removed_keys.scan(root, home)   # named, never a reason for NOT ok
     switch = read_switch_record(home)       # a late acceptance reads `switched` here
     if switch is not None:
         out["switch"] = {k: switch.get(k) for k in ("state", "from", "to", "late")}
@@ -1184,7 +1182,7 @@ def check(home, *, since=None, now=None, health=None, root=None, validate=False,
 # ------------------------------------------------------------ the live actions
 
 def chat_health(home):
-    """(ok, detail): 2.0.0 runs no per-cousin chat server (R10): the
+    """(ok, detail): 2.0.0 runs no per-cousin chat server: the
     console and the runner's inbox carry chat, so there is nothing to
     probe and nothing to fail."""
     return True, "none in 2.0.0 (the console and the inbox carry chat)"
@@ -1242,7 +1240,7 @@ def _live():
 
 
 # ------------------------------------------------------------ the kind switch
-# Phase 11 (R17, I9, P11-11, P11-13): `--to sdk|tmux` moves a runner cousin
+# `--to sdk|tmux` moves a runner cousin
 # between the two Claude kinds. The session id in data/runner-session.json is
 # the continuity: the source stops at idle keeping it, the target resumes it.
 
@@ -1290,17 +1288,17 @@ def _claude_json(account):
 
 
 def trust_recorded(home, account):
-    """P11-11's fast path, never a gate: the config dir has recorded the
-    trust dialog for this home (projects[<home>].hasTrustDialogAccepted,
-    Z9). False proves nothing: every live CLI rewrites that file, and CLI
-    2.1.282 recorded no entry for a home even after a hand-accepted dialog
-    (the live proofs, 2026-09-25, finding 2)."""
+    """A fast path, never a gate: the config dir has recorded the
+    trust dialog for this home (projects[<home>].hasTrustDialogAccepted).
+    False proves nothing: every live CLI rewrites that file, and CLI
+    2.1.282 recorded no entry for a home even after a hand-accepted
+    dialog."""
     projects = _claude_json(account).get("projects")
     entry = projects.get(str(Path(home))) if isinstance(projects, dict) else None
     return isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True
 
 
-# The pane's one-time dialogs an operator answers (P11-11). The tmux runner
+# The pane's one-time dialogs an operator answers. The tmux runner
 # types nothing into them; it writes data/login-required.json {kind: tmux,
 # screen, ts} and emits `auth login_required` (TmuxRunner._screen_allows).
 OPERATOR_DIALOGS = ("trust", "bypass")
@@ -1346,7 +1344,7 @@ def wait_for_turn(home, started, *, root, since, what, timeout=VERIFY_S,
                   trust_timeout=TRUST_WAIT_S, say=None, clock=time.monotonic, sleep=time.sleep):
     """A kind switch's verify for the tmux kind: poll `started()` until it is
     true, for `timeout`. While the pane shows an operator dialog (the trust
-    dialog on a home the account's CLI never trusted, P11-11) the wait is
+    dialog on a home the account's CLI never trusted) the wait is
     neither a failure nor a rollback: it is said once through `say`, and the
     deadline moves out to `trust_timeout` from the start. (ok, detail)."""
     begun = clock()
@@ -1375,7 +1373,7 @@ def wait_for_turn(home, started, *, root, since, what, timeout=VERIFY_S,
 
 def account_mcp_servers(account):
     """The account-level MCP servers (.claude.json mcpServers): they load in
-    a tmux-kind pane and not in the SDK kind (P11-13)."""
+    a tmux-kind pane and not in the SDK kind."""
     servers = _claude_json(account).get("mcpServers")
     return sorted(servers) if isinstance(servers, dict) else []
 
@@ -1423,12 +1421,12 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
     elif to == "tmux" and account.kind in ("claude-token", "anthropic-key"):
         checks.append(_check("account", False, "the tmux kind runs on a subscription login;"
                              " %s accounts are refused until a login-free config dir is shown"
-                             " to start with no menu (P11-6; A4: onboarding is skippable by"
+                             " to start with no menu (onboarding is skippable by"
                              " seeding, but a token's login screen is not measured)" % account.kind))
     else:
         checks.append(_check("account", True, "%s (%s)" % (account.name, account.kind)))
     sid = _recorded_session(home)
-    # I5: "fresh" is a tmux rollover's new id whose CLI has not written the
+    # "fresh" is a tmux rollover's new id whose CLI has not written the
     # session yet; the other kind would resume a session nothing holds
     fresh = sid is not None and _session_record(home).get("fresh") is True
     checks.append(_check("session", sid is not None and not fresh,
@@ -1442,14 +1440,15 @@ def switch_plan(home, *, root, to, supervisor_up, **_unused):
                          "the supervisor runs" if supervisor_up(root) else
                          "no cousin-supervisor: the switch stops and starts through it"))
     if to == "tmux" and account is not None:
-        # never a gate (finding 2): the pane asks, the runner types nothing
-        # into it, and verify waits for the operator (wait_for_turn)
+        # never a gate (the CLI may not record a trust it was given): the pane
+        # asks, the runner types nothing into it, and verify waits for the
+        # operator (wait_for_turn)
         checks.append(_check("trust", True, _trust_detail(home, root, account)))
     if account is not None:
         servers = account_mcp_servers(account)
         if servers and to == "tmux":
             warnings.append("the account's config holds MCP servers (%s): they load in the"
-                            " pane and not in the SDK kind (P11-13)" % ", ".join(servers))
+                            " pane and not in the SDK kind" % ", ".join(servers))
     return {"slug": home.name, "from": current, "to": to, "steps": list(SWITCH_STEPS[to]),
             "checks": checks, "warnings": warnings, "ready": all(c["ok"] for c in checks),
             "removed": removed_keys.scan(root, home)}
@@ -1466,12 +1465,12 @@ NOTICE_RANK = -1         # ahead of every queued row, a flip or an interrupt (0)
 
 
 def _switch_notice(home, old, new):
-    """R10's notice: one runner line, as the framework's start-up line (a
+    """The switch notice: one runner line, as the framework's start-up line (a
     system `boot` row), which is also the turn verify reads. Put before the
     target starts and ranked ahead of every queued row, so it is the first
     turn after the switch: a row queued before the switch is answered by a
-    model that already knows its kind (live proofs 09-25, finding 4). The
-    row's id."""
+    model that already knows its kind, instead of following the old
+    kind's instructions. The row's id."""
     from cousin_lib.delivery import Item
     from cousin_lib.runner.inbox import Inbox
     return Inbox(home).put(Item(thread_id="system", source="boot", sender="runner", body=(
@@ -1571,7 +1570,7 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
         harness_settings.remove_kind_settings(home)
     step("toml", "[agent] runner = %r, the kind's settings %s"
          % (to, "written" if to == "tmux" else "removed"))
-    # the mining cursor BEFORE the start (P11-9): the target's first turn end
+    # the mining cursor BEFORE the start: the target's first turn end
     # mines from here, never from an offset in the other kind's record
     extract.set_cursor(home, sid, cursor_end(home, root, sid, to))
     step("cursor", "the mining cursor at the end of the %s kind's record" % to)
@@ -1594,7 +1593,7 @@ def switch_apply(home, *, root, to, close, start, verify, cursor_end, supervisor
 
 
 def switch_rollback(home, *, root, to, close, start, cursor_end, **_unused):
-    """Back from a kind switch (R17, Task 11b), switched or failed: the
+    """Back from a kind switch, switched or failed: the
     runner stopped, cousin.toml restored byte for byte, the kind's settings
     as the restored kind wants them, the runner started again; the session
     id is never touched, so the restored kind resumes it. `to` must name
@@ -1712,7 +1711,7 @@ def _switch_live():
                 supervisor_up=lambda root: supervisor.snapshot(root) is not None)
 
 
-# ------------------------------------------------------------ tidy (2.0.0, R7)
+# ------------------------------------------------------------ tidy (2.0.0)
 # The keys 2.0.0 no longer reads are named everywhere an operator looks
 # (removed_keys); `tidy` removes them. A line-based remover inside the
 # named table, as set_agent_keys writes: comments, order and line endings
@@ -1998,7 +1997,7 @@ def _tidy_home(home, *, yes, seams):
     kind = ((data or {}).get("agent") or {}).get("runner") if isinstance(data, dict) else None
     worker = isinstance(data, dict) and (data.get("cousin") or {}).get("type") == "worker"
     if data is None or (kind not in RUNNER_KINDS and not worker):
-        target["refused"] = lane_refusal(home)       # tidy is not a conversion (R2)
+        target["refused"] = lane_refusal(home)       # tidy is not a conversion
         return target
     _tidy_chat_server(home, data, yes, target, **seams)
     _tidy_file(home / "cousin.toml", removed_keys.COUSIN_KEYS, "cousin.toml", home / "data",
@@ -2098,7 +2097,7 @@ def _tidy_cli(args, root):
 # ------------------------------------------------------------ the CLI
 
 def _print_removed(found, indent):
-    """R7: one `warn 2.0.0` line per key 2.0.0 no longer reads."""
+    """One `warn 2.0.0` line per key 2.0.0 no longer reads."""
     for f in found or ():
         print("%swarn 2.0.0 %s: %s" % (indent, f["key"] if f["key"] == f["where"] else
                                        "%s %s" % (f["where"], f["key"]), f["line"]))
@@ -2183,14 +2182,14 @@ def migrate_main(argv=None):
                        help="one smallest model turn with the model, effort and account the"
                             " runner will run (needed when a model is carried: %s)" % NEVER_UNRUN)
         p.add_argument("--to", choices=SWITCH_KINDS, default=None,
-                       help="switch a runner cousin between the sdk and tmux kinds (phase 11)")
+                       help="switch a runner cousin between the sdk and tmux kinds")
         if name == "apply":
             p.add_argument("--yes", action="store_true", help="really run the steps")
     p = sub.add_parser("rollback")
     p.add_argument("slug")
     p.add_argument("--yes", action="store_true")
     p.add_argument("--to", choices=SWITCH_KINDS, default=None,
-                   help="roll a kind switch back to the kind it came from (phase 11)")
+                   help="roll a kind switch back to the kind it came from")
     p.add_argument("--force", action="store_true",
                    help="roll back with inbox rows waiting, or an inbox that cannot be read")
     p = sub.add_parser("check")
@@ -2252,7 +2251,7 @@ def migrate_main(argv=None):
             print("ok" if c["ok"] else "NOT ok")
         return 0 if c["ok"] else 1
     if not getattr(args, "to", None):
-        # Row 72: 2.0.0 keeps no conversion from the legacy lane (O3), so a
+        # 2.0.0 keeps no conversion from the legacy lane, so a
         # plan, apply or rollback names a kind; the legacy migration below
         # is not reached.
         print("error: %s" % no_kind_line(home), file=sys.stderr)

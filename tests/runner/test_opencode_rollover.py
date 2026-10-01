@@ -1,5 +1,5 @@
-"""OpencodeRunner: rollover (R11), context pressure (R11) and the wiring
-(delivery.RUNNER_KINDS, runner.main.runner_for, R6, R12, R13), against
+"""OpencodeRunner: rollover, context pressure and the wiring
+(delivery.RUNNER_KINDS, runner.main.runner_for), against
 the fake `opencode serve`. Never the opencode binary."""
 import contextlib
 import http.client
@@ -90,7 +90,7 @@ class TestRollover(OpencodeCase):
         self.assertIn(r.opencode_session, self.prompts()[-1]["path"])
 
     def test_the_digest_turn_after_a_rollover_is_guarded_too(self):
-        """Review round 3, minor 3: the rollover runs the new session's digest
+        """The rollover runs the new session's digest
         turn itself, so it gets the per-turn check: a config source written
         during the handoff turn stops it before its prompt."""
         r = self.started(self.runner([[("SLOW", 1.0), ("text", "no handoff")],
@@ -159,7 +159,7 @@ class TestRollover(OpencodeCase):
 
 class TestPressure(OpencodeCase):
     def test_context_pressure_requests_a_rollover(self):
-        """R11: the last answer's tokens against the model's limit.context
+        """The last answer's tokens against the model's limit.context
         (GET /config/providers); 14 of 16 is over the 80% default."""
         r = self.started(self.runner(factory=Factory([[("text", "big")]], providers=LIMITED)))
         g0 = boot.read_generation(r.home)
@@ -208,7 +208,7 @@ class TestWiring(OpencodeCase):
     LAB = '[accounts.lab]\nkind = "opencode"\nendpoint = "%s"\nendpoint_model = "m1"\n' % ENDPOINT
 
     def test_opencode_is_a_runner_kind_with_one_source(self):
-        self.assertIn("opencode", delivery.RUNNER_KINDS)     # phase 11 added tmux after it
+        self.assertIn("opencode", delivery.RUNNER_KINDS)
         self.assertIs(runner_main.KINDS, delivery.RUNNER_KINDS)
 
     def test_runner_for_builds_the_opencode_runner_on_its_account(self):
@@ -233,7 +233,7 @@ class TestWiring(OpencodeCase):
         with self.assertRaises(RunnerError) as err:
             runner_main.runner_for(sdk_home)
         self.assertIn('runs with runner = "opencode" only', str(err.exception))
-        # review minor: a fake cousin too (runners.md says so; it returned
+        # a fake cousin too (runners.md says so; it returned
         # before the lane check)
         fake_home = self.home(extra='account = "lab"\n')
         (fake_home / "cousin.toml").write_text((fake_home / "cousin.toml").read_text()

@@ -1,4 +1,4 @@
-"""The console's accounts routes (WP-C): the list and the per-row status
+"""The console's accounts routes: the list and the per-row status
 (no model call), the validated accounts.toml writer, the write-only keys,
 the claude-login / claude-token flows through the relay and await_code
 hooks (the URL to the operator, the code to its own write-only route, one
@@ -608,7 +608,7 @@ class NoConsoleUsers(ConsoleCase):
         self.assertEqual(self.get("/api/accounts")[0], 200)          # reading stays open
 
 
-class Round1(AccountsCase):
+class TestLoginSessionsAndSecrets(AccountsCase):
     def start_login(self, name="fleet", screens=LOGIN_SCREENS, route="login"):
         self.fake = FakePty(screens)
         self.server.state["accounts.pty"] = self.fake

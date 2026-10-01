@@ -1,4 +1,4 @@
-"""A side session (phase 8): one thread kind's session of its own. It
+"""A side session: one thread kind's session of its own. It
 claims only its kind, tells its first turn who it is and what the primary
 is doing, never proposes, and starts over (never rolls the generation)
 on pressure or when the primary's generation moves."""
@@ -69,9 +69,9 @@ class SideCase(HermeticCase):
         return r
 
     def done(self, r, receipt, timeout=5.0):
-        # the runner appends a turn's result, then closes its rows (#87), runs its
+        # the runner appends a turn's result, then closes its rows, runs its
         # post-turn work (the session file, usage, mining, the proposal), then goes
-        # idle (#102)
+        # idle
         return _wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"
                      and r.state() == "idle", timeout)
 
@@ -103,7 +103,7 @@ class TestClaims(SideCase):
 
 
 class TestCommitAttribution(SideCase):
-    """Tracker #112: a side session shares SdkRunner.options() (no
+    """A side session shares SdkRunner.options() (no
     override in sessions.py), so it must resolve commit_attribution the
     same way, from the same home, as the primary."""
 
@@ -261,7 +261,7 @@ class TestReset(SideCase):
 
 
     def test_a_fallback_refused_for_the_login_waits_for_it_never_fatal(self):
-        """R15: a login is never fatal. The new session fails for another
+        """A login is never fatal. The new session fails for another
         reason, the fallback to the old one is refused for the login: the
         side session waits for the login, back on the old session, and its
         worker lives on."""
@@ -289,12 +289,12 @@ class TestReset(SideCase):
         self.assertTrue(r.login_required())
         self.assertEqual(r.state(), "errored")
         self.assertEqual(r._resume_id, "s-1")        # the login retry resumes it
-        self.assertEqual(r._expect_session, "s-1")   # R12: a different session is resume-lost
+        self.assertEqual(r._expect_session, "s-1")   # a different session is resume-lost
         self.assertTrue(r.worker_alive())
         self.assertTrue(_wait(lambda: r.inbox.get(b.inbox_id)["state"] == "queued"))
 
     def test_a_generation_read_error_in_a_fresh_start_keeps_the_digest_due(self):
-        """R6: the side digest is due from the moment a fresh session exists.
+        """The side digest is due from the moment a fresh session exists.
         A transient error reading the generation in _start_fresh must not
         leave the new session's first turn without it."""
         r = self.side([[_turn("s-1")], [_turn("s-2")]])
@@ -328,7 +328,7 @@ class TestReset(SideCase):
         self.assertEqual(r.inbox.get(b.inbox_id)["outcome"], "delivered")
 
 class TestStreamHead(SideCase):
-    """The P8-2 rule: a side session's stream is headed `side_session`, never
+    """A side session's stream is headed `side_session`, never
     `runner`, so a reader of the primary's stream never takes it."""
 
     def test_the_first_event_of_a_side_stream_is_side_session(self):
@@ -358,7 +358,7 @@ class TestStreamHead(SideCase):
 
 
 class TestBoundaryNeverStrandsARow(SideCase):
-    """Review I1: a claimed row the boundary cannot run goes back to the queue."""
+    """A claimed row the boundary cannot run goes back to the queue."""
 
     def test_an_unreadable_generation_file_requeues_the_row_and_says_why(self):
         r = self.side()
@@ -399,7 +399,7 @@ class TestBoundaryNeverStrandsARow(SideCase):
 
 
 class TestInterruptRowIsThePrimarys(SideCase):
-    """Round 2 review N1: the console's interrupt row rides `system`, the
+    """The console's interrupt row rides `system`, the
     primary's. A side session in a live turn must leave it for the primary,
     however long the primary is held off (a backoff, a rate-limit or login
     wait, a rollover)."""
@@ -455,7 +455,7 @@ class TestInterruptRowIsThePrimarys(SideCase):
 
 
     def test_a_side_boundary_and_fold_never_claim_the_primarys_interrupt_row(self):
-        """Phase 5's Task 3 review: `takes_interrupts` gates only the live-turn
+        """`takes_interrupts` gates only the live-turn
         path. The turn BOUNDARY claim (it closes an interrupt row failed, "no
         turn was running") and the FOLD claim (it requeues one) take whatever
         the claim filter lets through; a side session's filter is its own
@@ -507,7 +507,7 @@ class TestInterruptRowIsThePrimarys(SideCase):
 
 class TestGenerationOnFile(SideCase):
     def test_a_fallback_to_the_old_session_records_the_old_generation(self):
-        """Review M3: the file says which generation the session belongs to,
+        """The file says which generation the session belongs to,
         so a restart still resets a session the fallback kept."""
         r = self.side([[_turn("s-1")], [], [_turn("s-1")]], fail=(1,))
         r.start()
@@ -522,7 +522,7 @@ class TestGenerationOnFile(SideCase):
         self.assertEqual((saved["session_id"], saved["generation"]), ("s-1", 0))
 
     def test_bump_generation_never_writes_the_file_in_place(self):
-        """Review M2: a side boundary reading mid-bump must not see an empty
+        """A side boundary reading mid-bump must not see an empty
         file (read as generation 0)."""
         real = pathlib.Path.write_text
 

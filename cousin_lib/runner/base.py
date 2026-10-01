@@ -1,7 +1,7 @@
 """The runner contract every runner is written against.
 
 docs/design/agent-loop-runner.md, "The runner". The Protocol below is
-the locked interface from the master plan; every runner kind implements
+the locked interface; every runner kind implements
 it (`FakeRunner`, `SdkRunner`, `OpencodeRunner`, `TmuxRunner`) and one
 contract suite tests them.
 """
@@ -28,7 +28,7 @@ class Receipt:
 # turn is FOLDED_KINDS below.
 SOURCE_PRIORITY = {
     "flip": 0,
-    "interrupt": 0,   # phase 5: the out-of-process interrupt, ahead of everything
+    "interrupt": 0,   # the out-of-process interrupt, ahead of everything
     "chat": 3,        # the peer case; operator/person chat is 1, below
     "reaction": 1,
     "hook": 1,
@@ -45,7 +45,7 @@ SOURCE_PRIORITY = {
 SURFACE_KINDS = ("operator", "person")
 
 # The chat a runner writes into the turn already running. A peer folds
-# like an operator (#118): a turn has no length bound, and a coordinator's
+# like an operator: a turn has no length bound, and a coordinator's
 # STOP that waits for the turn to end arrives after the work it meant to
 # stop. What does NOT fold, and why:
 # - meeting rows: a meeting line is the cousin's turn in a round, answered
@@ -59,7 +59,7 @@ SURFACE_KINDS = ("operator", "person")
 # Only `source == "chat"` folds, so a reaction on an operator thread waits.
 FOLDED_KINDS = SURFACE_KINDS + ("peer",)
 
-# Phase 5: the interrupt a process without the runner object asks for
+# The interrupt a process without the runner object asks for
 # (the console's interrupt route, and any process that enqueues one; not
 # cousin-watch): an inbox row the fold hands back (requeue) rather than
 # folding, and that SdkRunner._take_interrupts() takes during a live turn
@@ -96,7 +96,7 @@ class Runner(Protocol):
     def rollover(self, reason: str) -> dict: ...
     def events(self, after: int | None = None) -> Iterator[dict]: ...
     def unsupported(self) -> list[str]: ...
-    # Optional (P9, R19): plugin_items() -> list[str], the contract items a
+    # Optional: plugin_items() -> list[str], the contract items a
     # plugin meets. Each shipped runner answers both from class attributes
     # UNSUPPORTED and PLUGIN_ITEMS, which runner/contract_table.py reads
     # without building a runner.

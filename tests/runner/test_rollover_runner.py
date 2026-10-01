@@ -39,7 +39,7 @@ class RolloverCase(HermeticCase):
         root = self.home.parent.parent
         (root / "config").mkdir(exist_ok=True)
         (root / "config" / "law.md").write_text("1. The law.\n")
-        # the runner's own root, never the environment's (review C2)
+        # the runner's own root, never the environment's
         p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": "/nonexistent/framework-root"})
         p.start(); self.addCleanup(p.stop)
         if hooks:
@@ -232,7 +232,7 @@ class TestRollover(RolloverCase):
 
 
 class TestRolloverFailureModes(RolloverCase):
-    """Fix round 1: what a rollover does when a step fails on either side
+    """What a rollover does when a step fails on either side
     of the point of no return (the new session existing)."""
 
     def failing_connects(self, r, fail_calls):
@@ -254,7 +254,7 @@ class TestRolloverFailureModes(RolloverCase):
         self.assertEqual((out["generation"], out["new_session"]), (0, None))
         self.assertEqual([asked_resume(o) for o in self.asked], [None, None, "s-1"])
         self.assertEqual(r._resume_id, "s-1")     # the old session, not None, until the next init
-        self.assertEqual(r.saved_session(), "s-1")   # on file too: a restart resumes it (Task 11)
+        self.assertEqual(r.saved_session(), "s-1")   # on file too: a restart resumes it
         self.assertTrue(any(e["kind"] == "system" and e["payload"].get("subtype") == "connect_failed"
                             for e in r.events()))
         rec = self.work(r, "still alive")
@@ -372,7 +372,7 @@ class TestPressureTrigger(RolloverCase):
             for i in range(3):                     # three more turns at 91%: no second rollover
                 self.work(r, "turn %d" % i)
             # the pressure check runs after the row closes, then the turn goes
-            # idle: wait for it under the patch, or the last turn checks nothing (#102)
+            # idle: wait for it under the patch, or the last turn checks nothing
             self.assertTrue(_wait(lambda: r.state() == "idle"))
         self.assertEqual(len(self.clients), 2)
         events = [e["payload"] for e in r.events()

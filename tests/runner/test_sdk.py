@@ -1719,9 +1719,17 @@ class TestIdlePump(HermeticCase):
     its completion starts a CLI turn of its own; unread, the SDK's buffer
     fills and every hook of the background task times out."""
 
+    # Deadlines, not delays: each wait is for the condition it asserts,
+    # under a bound a loaded host does not reach (passed alone, failed
+    # beside a concurrent suite at the 5 s default).
+    WAIT_S = 60
+
     def setUp(self):
         super().setUp()
         self.home = temp_home(self)
+
+    def _wait(self, pred):
+        return _wait(pred, timeout=self.WAIT_S)
 
     def _runner(self, scripts):
         made = {}
@@ -1736,8 +1744,8 @@ class TestIdlePump(HermeticCase):
     def _idle_after_one_turn(self, r):
         r.start()
         receipt = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
-        self.assertTrue(_wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
-        self.assertTrue(_wait(lambda: r.machine.state == "idle"))
+        self.assertTrue(self._wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
+        self.assertTrue(self._wait(lambda: r.machine.state == "idle"))
 
     def _progress(self, n):
         from claude_agent_sdk._internal.message_parser import parse_message
@@ -1756,8 +1764,8 @@ class TestIdlePump(HermeticCase):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
         self._idle_after_one_turn(r)
         made["client"].stream.extend(self._progress(150))
-        self.assertTrue(_wait(lambda: not made["client"].stream))
-        self.assertTrue(_wait(lambda: len(self._subtypes(r, "task_progress")) == 150))
+        self.assertTrue(self._wait(lambda: not made["client"].stream))
+        self.assertTrue(self._wait(lambda: len(self._subtypes(r, "task_progress")) == 150))
         self.assertEqual(self._subtypes(r, "background_turn"), [])   # progress is no turn
         self.assertEqual(r.machine.state, "idle")
 
@@ -1766,7 +1774,7 @@ class TestIdlePump(HermeticCase):
         self._idle_after_one_turn(r)
         made["client"].stream.extend([echo("<task-notification>done</task-notification>"),
                                       assistant(text="noted"), result(cost=0.02)])
-        self.assertTrue(_wait(lambda: any(p.get("background") for p in _results(r))))
+        self.assertTrue(self._wait(lambda: any(p.get("background") for p in _results(r))))
         bg = [p for p in _results(r) if p.get("background")]
         self.assertEqual(len(bg), 1)
         self.assertEqual(bg[0]["inbox_ids"], [])
@@ -1775,7 +1783,7 @@ class TestIdlePump(HermeticCase):
                                                                  "phase": "start"}])
         texts = [e["payload"]["text"] for e in r.events() if e["kind"] == "text"]
         self.assertIn("noted", texts)
-        self.assertTrue(_wait(lambda: len([e for e in r.events() if e["kind"] == "usage"]) == 2))
+        self.assertTrue(self._wait(lambda: len([e for e in r.events() if e["kind"] == "usage"]) == 2))
 
     def test_a_subagents_messages_open_no_background_turn(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
@@ -1784,7 +1792,7 @@ class TestIdlePump(HermeticCase):
                                                      input={"command": "true"})],
                                model="m", parent_tool_use_id="tu-agent")
         made["client"].stream.extend(self._progress(2) + [sub] + self._progress(1))
-        self.assertTrue(_wait(lambda: len(self._subtypes(r, "task_progress")) == 3))
+        self.assertTrue(self._wait(lambda: len(self._subtypes(r, "task_progress")) == 3))
         self.assertEqual(self._subtypes(r, "background_turn"), [])
         self.assertIn("tu-s", [e["payload"].get("id") for e in r.events() if e["kind"] == "tool"])
 
@@ -1793,9 +1801,9 @@ class TestIdlePump(HermeticCase):
                                 [assistant(text="second"), result()]])
         self._idle_after_one_turn(r)
         made["client"].stream.extend([assistant(text="noted"), result()])
-        self.assertTrue(_wait(lambda: any(p.get("background") for p in _results(r))))
+        self.assertTrue(self._wait(lambda: any(p.get("background") for p in _results(r))))
         receipt = r.enqueue(Item("operator:priya", "chat", "again", sender="Priya"))
-        self.assertTrue(_wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
+        self.assertTrue(self._wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "delivered")
         mine = [p for p in _results(r) if receipt.inbox_id in p["inbox_ids"]]
         self.assertEqual(len(mine), 1)
@@ -1804,11 +1812,15 @@ class TestIdlePump(HermeticCase):
     def test_a_row_landing_mid_background_turn_is_handed_over_and_delivered(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
         self._idle_after_one_turn(r)
-        made["client"].stream.extend(_compile([assistant(text="bg"), ("SLOW", 1.0),
+        # The background turn holds at PAUSE until the row has landed in it
+        # (a timed SLOW raced the row on a loaded host), then goes on.
+        made["client"].stream.extend(_compile([assistant(text="bg"), "PAUSE",
                                                assistant(text="bg done"), result()]))
-        self.assertTrue(_wait(lambda: self._subtypes(r, "background_turn")))
+        self.assertTrue(self._wait(lambda: self._subtypes(r, "background_turn")))
         receipt = r.enqueue(Item("operator:priya", "chat", "now", sender="Priya"))
-        self.assertTrue(_wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
+        self.assertTrue(self._wait(lambda: len(made["client"].queries) == 2))
+        made["client"].resume()
+        self.assertTrue(self._wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
         self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "delivered")
         self.assertIn({"subtype": "background_turn", "phase": "handed_over"},
                       self._subtypes(r, "background_turn"))
@@ -1819,7 +1831,7 @@ class TestIdlePump(HermeticCase):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
         self._idle_after_one_turn(r)
         made["client"].stream.extend(_compile(["END"]))
-        self.assertTrue(_wait(lambda: self._subtypes(r, "background_end")))
+        self.assertTrue(self._wait(lambda: self._subtypes(r, "background_end")))
         time.sleep(0.5)     # several idle polls: the ended pump is not restarted
         self.assertEqual(len(self._subtypes(r, "background_end")), 1)
         self.assertIsNone(r.fatal)

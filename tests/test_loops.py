@@ -879,3 +879,30 @@ class TestCronIsCheckedAndIsolated(LoopsCase):
         self.assertIn("every minute", text)
         self.assertTrue(any("weekly" in e and "cron" in e for e in report["errors"]),
                         report["errors"])
+
+
+class TestNeverFiresLate(LoopsCase):
+    """docs/reference/loops.md: a request still pending after its TTL is
+    expired and never fires late. The first tick after downtime expires
+    first, then fires what is left."""
+
+    def test_an_over_age_timed_flip_expires_instead_of_firing(self):
+        self._cousin("wren")
+        flips = []
+        base = time.time()
+        submit_request("flip", cousin="wren", payload={"fire_at": base + 60},
+                       ttl_seconds=660)
+        # the daemon was down for an hour: the flip's window is long gone
+        self._tick(now=base + 3600, do_flip=lambda slug: flips.append(slug) or {"ok": True})
+        self.assertEqual(flips, [])
+        row = list_requests()[0]
+        self.assertEqual(row["status"], "expired")
+
+    def test_an_over_age_manual_fire_expires_instead_of_delivering(self):
+        self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "digest"\ninterval_seconds = 86400\nprompt = "digest now"\n\n'))
+        base = time.time()
+        submit_request("fire", cousin="wren", payload={"loop": "digest"})
+        self._tick(now=base + 3600)
+        self.assertFalse([t for _, t in self.delivered if "manual fire" in t], self.delivered)
+        self.assertEqual(list_requests()[0]["status"], "expired")

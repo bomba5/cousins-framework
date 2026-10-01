@@ -942,6 +942,9 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
               "ready": [], "scheduled": 0, "distilled": []}
+    # Expire first: the first tick after downtime must not fire a timed
+    # flip or a manual fire that outlived its TTL (it never fires late).
+    expire_stale_requests(now=now)
     _walk_timed_flips(state, deliver, timed_flip(do_flip), now, report)
     _fire_daily_flips(state, daily_flip(do_flip), is_alive, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
@@ -1031,7 +1034,6 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     except Exception as err:
         # A broken meetings store never costs the loops their tick.
         report["errors"].append("meetings: %s" % err)
-    expire_stale_requests(now=now)
     state["last_tick"] = now
     _save_state(state)
     return report

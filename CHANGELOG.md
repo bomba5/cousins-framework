@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 2.3.3 - 2026-10-01
 
 ### Fixed
 - The between-turns reader (#134, 2.3.2) opened a `background_turn` for a

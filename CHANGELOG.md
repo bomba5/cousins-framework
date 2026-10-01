@@ -3,7 +3,12 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 3.0.0 - 2026-10-01
+
+The first public release. It removes the commands, flags and routes the
+retired legacy lane left behind (see Removed), ships an example plugin and
+a set of house rules, and fixes the bugs a full audit of the docs against
+the code turned up.
 
 ### Added
 

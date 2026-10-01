@@ -107,6 +107,8 @@ entrypoint: first start on an empty volume ($root). What to edit
   (the image has no editor: pipe a heredoc from the host into
   docker compose exec -T framework sh -c 'cat >> config/<file>'):
   - config/harness.toml: created from its example; install-wide defaults.
+  - config/law.md and shared/*.md: the Framework Law and the house rules,
+    written once by the supervisor; yours to edit or delete.
   - config/accounts.toml: how cousins authenticate. The API key lane is the
     compose secret anthropic_api_key (declared here as [accounts.api-key]);
     the login lane is a claude-login account, then:

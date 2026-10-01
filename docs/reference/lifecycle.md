@@ -29,7 +29,7 @@ DEGRADED layers: task_packet
 
 | layer | where | built from | when it's empty |
 |---|---|---|---|
-| Framework Law | system prompt | `<root>/config/law.md`, the same for every cousin | left out. Not marked degraded: it's an install problem, not the cousin's |
+| Framework Law | system prompt | `<root>/config/law.md`, the same for every cousin; seeded from `templates/law.md` on the [supervisor](../glossary.md#supervisor)'s first start | left out. Not marked degraded: it's an install choice, not the cousin's |
 | Operator rules | system prompt | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule`, in full. Never pending proposals | left out, fine: a fresh install has no [shared tier](../glossary.md#shared-tier) |
 | Identity | system prompt | the authored parts of `CLAUDE.md` (the title line, `## Identity`, `## Voice` and what's below the template marker, minus the template's own text), then `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | a fixed note that no identity is on disk and none should be invented, **degraded** (`identity`) |
 | Operator Calibration | digest | `memory/distilled/operator-calibration.md`, then the last 15 corrections from `data/corrections.jsonl`, newest first. The portrait's own calibration section is in the identity already | left out |

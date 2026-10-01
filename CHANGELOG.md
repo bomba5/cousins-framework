@@ -12,6 +12,10 @@ the code turned up.
 
 ### Added
 
+- **The Framework Law ships with the framework** (`templates/law.md`) and is
+  written to `config/law.md` on the supervisor's first start, once, like the
+  house rules: an existing law is never overwritten and a deleted one stays
+  deleted. Until now a fresh install booted its cousins with no law at all.
 - **House rules.** A fresh install comes with seven generic `kind: rule`
   files every cousin follows (first principles, RFC 2119 wording, SemVer,
   verify it fires, keep what a boundary discards, state hygiene, process

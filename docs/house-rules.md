@@ -28,9 +28,19 @@ for rules of your own.
 
 The source files are in the checkout under `templates/shared/`.
 
+## The Framework Law
+
+Beside the house rules ships the Framework Law, the contract every cousin
+boots with: who it is when a session ends, how to treat memory by its truth
+level, what to leave behind before a session ends, and what never to
+improvise. It is `templates/law.md` in the checkout and `config/law.md` in
+an install, written by the [supervisor](glossary.md#supervisor) on its first start under the same
+rule as the house rules (once, never over an existing file, gone for good
+if you delete it). See [law.md](configuration.md#lawmd).
+
 ## How they arrive
 
-When the [supervisor](glossary.md#supervisor) starts (the container's
+When the supervisor starts (the container's
 command, a bare host's unit), it copies every `templates/shared/*.md` into
 `<root>/shared/` before any cousin boots. The supervisor is the one start
 every install has, and no cousin runs without it. Each copy is a `seed` row

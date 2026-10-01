@@ -625,10 +625,14 @@ filter off for that command.
 
 ## law.md
 
-Markdown that every cousin gets at the top of its boot packet, as the
-"Framework Law" section. It's never cut for length. Missing: no law section.
-That's an install choice, so it doesn't mark a boot as degraded. See
-[lifecycle](reference/lifecycle.md).
+Markdown that every cousin gets at the top of its system prompt, as the
+"Framework Law" section. It's never cut for length. The framework ships a
+law (`templates/law.md`) and the supervisor writes it here on its first
+start, once: an existing file is never overwritten, and a law you delete
+stays deleted (the seed is recorded in `shared/audit.jsonl`, as the
+[house rules](house-rules.md) are). Edit it to fit your install. Missing:
+no law section; that's an install choice, so it doesn't mark a boot as
+degraded. See [lifecycle](reference/lifecycle.md).
 
 ## worker-cmd
 

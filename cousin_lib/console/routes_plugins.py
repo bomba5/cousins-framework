@@ -39,7 +39,7 @@ HOP_BY_HOP = frozenset({"connection", "keep-alive", "proxy-authenticate",
                         "trailers", "transfer-encoding", "upgrade", "host", "content-length"})
 DROP_IN = frozenset({"cookie", "authorization"})
 TMUX_GAP = ("the tmux kind reads .mcp.json itself: plugin MCP servers do not reach a tmux"
-            " cousin in 2.1.0 (its console tab and service still work)")
+            " cousin (its console tab and service still work)")
 
 
 def is_proxy_path(path):

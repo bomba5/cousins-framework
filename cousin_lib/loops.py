@@ -224,6 +224,10 @@ def load_cousin_loops(home, *, include_disabled=False):
             errors.append("loop %r in %s has an empty prompt"
                           % (name, home))
             continue
+        if forms[0] == "cron" and cron_error(entry["cron"]):
+            errors.append("loop %r in %s: cron %r: %s"
+                          % (name, home, entry["cron"], cron_error(entry["cron"])))
+            continue
         if not entry.get("enabled", True) and not include_disabled:
             continue  # truthiness, by spec
         loops.append(entry)
@@ -264,6 +268,9 @@ def validate_loops(entries):
         elif not isinstance(entry[forms[0]], str) or not entry[forms[0]]:
             errors.append("%s: %s must be a non-empty string"
                           % (tag, forms[0]))
+        elif forms[0] == "cron" and cron_error(entry["cron"]):
+            errors.append("%s: cron %r: %s" % (tag, entry["cron"],
+                                               cron_error(entry["cron"])))
         prompt = entry.get("prompt")
         if not isinstance(prompt, str) or not prompt.strip():
             errors.append("%s: empty prompt" % tag)
@@ -359,13 +366,23 @@ def save_cousin_loops(home, entries):
     return wanted
 
 
+# (name, minimum, maximum) of the five cron fields, in order
+_CRON_FIELDS = (("minute", 0, 59), ("hour", 0, 23), ("day of month", 1, 31),
+                ("month", 1, 12), ("day of week", 0, 7))
+
+
 def _parse_cron_field(field, minimum, maximum):
+    """The values one cron field names. ValueError for anything else: a
+    word (names like `mon` are not understood), a value outside
+    minimum..maximum, a step below 1, an empty part."""
     values = set()
     for part in field.split(","):
         step = 1
         if "/" in part:
             part, step_s = part.split("/", 1)
             step = int(step_s)
+            if step < 1:
+                raise ValueError("step %d is below 1" % step)
         if part == "*":
             lo, hi = minimum, maximum
         elif "-" in part:
@@ -373,8 +390,27 @@ def _parse_cron_field(field, minimum, maximum):
             lo, hi = int(lo_s), int(hi_s)
         else:
             lo = hi = int(part)
+        if not minimum <= lo <= hi <= maximum:
+            raise ValueError("%s is outside %d-%d" % (part, minimum, maximum))
         values.update(range(lo, hi + 1, step))
     return values
+
+
+def cron_error(expr):
+    """Why the five-field cron `expr` cannot be read, or None. The daemon
+    matches with the same parser, so an expression this passes never
+    raises in a tick."""
+    if not isinstance(expr, str):
+        return "not a string"
+    fields = expr.split()
+    if len(fields) != len(_CRON_FIELDS):
+        return "%d fields, cron has 5" % len(fields)
+    for text, (name, lo, hi) in zip(fields, _CRON_FIELDS):
+        try:
+            _parse_cron_field(text, lo, hi)
+        except ValueError as err:
+            return "%s %r: %s" % (name, text, err)
+    return None
 
 
 def cron_matches(expr, when):
@@ -936,8 +972,12 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             due = []
             for loop in loops:
                 key = "%s|%s" % (slug, loop["name"])
-                if _loop_due(loop, state["last_fires"].get(key, 0),
-                             now):
+                try:
+                    is_due = _loop_due(loop, state["last_fires"].get(key, 0), now)
+                except Exception as err:  # noqa: BLE001 - one loop never stops the rest
+                    report["errors"].append("loop %s: %s" % (key, err))
+                    continue
+                if is_due:
                     due.append(loop)
                     sections.append((loop["name"], loop["prompt"]))
             if not sections:

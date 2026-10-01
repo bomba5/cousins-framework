@@ -33,7 +33,7 @@ prompt = "Check notes/inbox.md and triage anything new."
 
 [[loops]]
 name = "weekly-review"
-cron = "0 17 * * fri"
+cron = "0 17 * * 5"
 prompt = "Review the week in memory/raw and update STATUS.md."
 ```
 
@@ -64,7 +64,7 @@ Saving loops from the console (or `loops.save_cousin_loops`) validates the whole
 
 Missed time is caught up late rather than skipped, but only once. A `daily_at` loop whose cousin was down at 07:30 fires when the cousin comes back that day. An interval loop that missed five intervals fires once, not five times. A cron loop has no catch-up: if the daemon wasn't ticking during the matching minute, that run is gone.
 
-Cron fields take `*`, numbers, `a-b` ranges, `,` lists and `/step`. Day of week is 0 to 7 with both 0 and 7 meaning Sunday. Names like `mon` or `jan` aren't understood. When both day of month and day of week are restricted, either one matching is enough, like real cron: `0 9 1 * mon` fires on the 1st and on every Monday.
+Cron fields take `*`, numbers, `a-b` ranges, `,` lists and `/step`. Day of week is 0 to 7 with both 0 and 7 meaning Sunday. Names like `mon` or `jan` aren't understood. When both day of month and day of week are restricted, either one matching is enough, like real cron: `0 9 1 * 1` fires on the 1st and on every Monday.
 
 ## The tick
 

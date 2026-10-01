@@ -836,3 +836,46 @@ class TestLeftoverChatHostIsInert(LoopsCase):
                                side_effect=lambda now, report, homes: seen.extend(homes)):
             self._tick(index_refresh=True)
         self.assertEqual(sorted(slug for slug, _home in seen), ["far", "wren"])
+
+
+class TestCronIsCheckedAndIsolated(LoopsCase):
+    """A cron field the parser cannot read is refused when the loops are
+    saved, and a bad one written by hand costs only its own loop: the
+    cousin's other loops and its heartbeat still fire, and the error
+    names the loop."""
+
+    BAD = ("0 9 * * mon", "61 * * * *", "* 24 * * *", "*/0 * * * *", "* * * *",
+           "1-x * * * *", "* * 0 * *", "* * * 13 *", "* * * * 8")
+
+    def test_save_refuses_each_bad_cron_naming_the_entry(self):
+        from cousin_lib.loops import save_cousin_loops, validate_loops
+        home = self._cousin()
+        before = (home / "cousin.toml").read_text()
+        for expr in self.BAD:
+            entries = [{"name": "ok", "interval_seconds": 60, "prompt": "x"},
+                       {"name": "weekly", "cron": expr, "prompt": "x"}]
+            errors = validate_loops(entries)
+            self.assertEqual(len(errors), 1, (expr, errors))
+            self.assertIn("loops[1]", errors[0])
+            self.assertIn("cron", errors[0])
+            with self.assertRaises(ValueError):
+                save_cousin_loops(home, entries)
+            self.assertEqual((home / "cousin.toml").read_text(), before)
+        for expr in ("0 9 * * 1", "*/15 8-18 * * 1-5", "0 0 1,15 * 0", "30 6 * * 7"):
+            self.assertEqual(validate_loops([{"name": "w", "cron": expr, "prompt": "x"}]), [],
+                             expr)
+
+    def test_a_bad_cron_written_by_hand_stops_only_its_own_loop(self):
+        home = self._cousin("wren", loops_toml=(
+            '[[loops]]\nname = "weekly"\ncron = "* * * * mon"\nprompt = "never"\n\n'
+            '[[loops]]\nname = "often"\ninterval_seconds = 60\nprompt = "every minute"\n\n'),
+            extra='[heartbeat]\ncontext_beat_seconds = 60\n[lifecycle]\nflip_at = "never"\n')
+        (home / "STATUS.md").write_text("# Wren - STATUS\n")
+        report = self._tick()
+        self.assertEqual(report["fired"], ["wren|often"])
+        self.assertEqual(len(self.delivered), 1)
+        text = self.delivered[0][1]
+        self.assertIn("Context heartbeat", text)
+        self.assertIn("every minute", text)
+        self.assertTrue(any("weekly" in e and "cron" in e for e in report["errors"]),
+                        report["errors"])

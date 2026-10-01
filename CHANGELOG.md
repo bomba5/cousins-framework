@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 2.3.6 - 2026-10-01
+
+### Fixed
+
+- **Two timing tests that failed on a slow or loaded runner.** The runner
+  pane's render-cost test took one sample per input against a 100 ms bound
+  and failed on GitHub's runner at 126 ms; it now takes the best of three
+  against 500 ms (1500 ms for the bare inline renderer), still far below
+  the quadratic case it guards against (about 5 s on 80 KB). The
+  supervisor's orphan-reaping test waits up to 60 s for the supervisor to
+  stop instead of 20 s (#135). What each test checks is unchanged.
+
 ## 2.3.5 - 2026-10-01
 
 ### Fixed

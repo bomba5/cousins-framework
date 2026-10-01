@@ -548,7 +548,7 @@ class TestProcess(_Case):
                         "the orphan %d was left a zombie" % gpid)
         self.assertIsNone(proc.poll())
         proc.send_signal(signal.SIGTERM)
-        self.assertEqual(proc.wait(20), 0)
+        self.assertEqual(proc.wait(60), 0)     # a loaded runner: the stop, not its speed (#135)
 
 
 if __name__ == "__main__":

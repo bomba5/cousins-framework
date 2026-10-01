@@ -382,7 +382,11 @@ class TestRunnerPaneHighlightingCost(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_adversarial_markdown_renders_in_linear_time(self):
         got = self.run_node(r"""
-const ms = (f) => { const t = process.hrtime.bigint(); f(); return Number(process.hrtime.bigint() - t) / 1e6; };
+// the best of three: one sample on a shared CI runner can carry a GC or JIT
+// pause; a quadratic input costs seconds on every run, so the minimum still
+// catches it
+const once = (f) => { const t = process.hrtime.bigint(); f(); return Number(process.hrtime.bigint() - t) / 1e6; };
+const ms = (f) => Math.min(once(f), once(f), once(f));
 const mixed = ["[`*a**b](x [*`", "[a](b", "**a*b`c[d", "`[**a [b](", "*a [b *c](d"]
   .map(u => u.repeat(Math.ceil(50000 / u.length)).slice(0, 50000));
 process.stdout.write(JSON.stringify({
@@ -394,12 +398,14 @@ process.stdout.write(JSON.stringify({
   inlineLinks: ms(() => mdInline("[a](b".repeat(16000))),
 }));
 """)
-        self.assertLess(got["brackets"], 100, got)
-        self.assertLess(got["textEvent"], 100, got)
+        # bounds with room for a slow runner: the quadratic case this guards
+        # against took about 5 s on 80 KB (about 2 s at these sizes)
+        self.assertLess(got["brackets"], 500, got)
+        self.assertLess(got["textEvent"], 500, got)
         for t in got["mixed"]:
-            self.assertLess(t, 100, got)
-        self.assertLess(got["inlineBrackets"], 300, got)
-        self.assertLess(got["inlineLinks"], 300, got)
+            self.assertLess(t, 500, got)
+        self.assertLess(got["inlineBrackets"], 1500, got)
+        self.assertLess(got["inlineLinks"], 1500, got)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_long_text_is_parsed_up_to_the_cap_and_kept_after_it(self):

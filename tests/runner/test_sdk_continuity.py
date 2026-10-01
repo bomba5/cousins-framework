@@ -1,4 +1,6 @@
-"""Phase 4's exit criteria, in the default suite."""
+"""The SDK runner's continuity, end to end: a rollover carries an open
+thread into the new session without pasting a packet, and a restart
+resumes the same session."""
 import os
 import subprocess
 import time
@@ -29,7 +31,7 @@ def _wait(pred, timeout=10.0):
     return False
 
 
-class TestPhase4Exit(HermeticCase):
+class TestContinuity(HermeticCase):
     def setUp(self):
         super().setUp()
         self.home = temp_home(self)
@@ -82,8 +84,8 @@ class TestPhase4Exit(HermeticCase):
         r2.start()
         self.assertTrue(_wait(lambda: seen))
         # no account named: the host's claude-login account, which resumes
-        # through the CLI's own --resume (Task 14: the account KIND decides,
-        # R12 folded in), so options.resume stays unset
+        # through the CLI's own --resume (the account KIND decides), so
+        # options.resume stays unset
         self.assertIsNone(seen[0].resume)
         self.assertEqual(seen[0].extra_args["resume"], "s-keep")
 

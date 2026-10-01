@@ -1,7 +1,7 @@
-"""Phase 11 Task 1: the `tmux` runner kind and the lane branches around it.
-(The kind's runner is TmuxRunner, Tasks 2-4; here: the kind itself, what
-runner_for refuses for it, the serve loop's claim recovery, spawn, and the
-migrate plan's lane check.)"""
+"""The `tmux` runner kind and the lane branches around it. (The kind's
+runner, TmuxRunner, has its own tests in tests/runner/test_tmux_*.py;
+here: the kind itself, what runner_for refuses for it, the serve loop's
+claim recovery, spawn, and the migrate plan's lane check.)"""
 import os
 import pathlib
 import tempfile
@@ -64,8 +64,8 @@ class TestTheKind(HermeticCase):
         self.assertIn("side sessions need", str(err.exception))
 
     def test_the_tmux_kind_runs_on_a_subscription_login_only(self):
-        """P11-6: a token or key account is refused until a login-free
-        config dir is shown to start with no menu."""
+        """A token or key account is refused until a login-free config dir
+        is shown to start with no menu."""
         root_kinds = (("fleet", 'kind = "claude-token"\n'), ("metered", 'kind = "anthropic-key"\n'))
         for name, body in root_kinds:
             with self.subTest(account=name):
@@ -87,7 +87,7 @@ class TestTheKind(HermeticCase):
 
 class TestServeRecovery(HermeticCase):
     def test_a_runner_that_recovers_its_claims_is_not_swept_by_serve(self):
-        """P11-9: the tmux kind's claims can be live in a pane that outlived
+        """The tmux kind's claims can be live in a pane that outlived
         its runner; it recovers them itself in start(), so _serve must not
         requeue them first."""
         home = temp_home(self, runner="fake")
@@ -102,8 +102,8 @@ class TestServeRecovery(HermeticCase):
         sweep.assert_called_once_with(older_than_s=0.0)
 
     def test_serve_runs_a_real_tmux_runner(self):
-        """Review C1: _serve's head event reads runner.root, so a real
-        TmuxRunner (a fake pane only) must have one; --once drains a row."""
+        """_serve's head event reads runner.root, so a real TmuxRunner (a
+        fake pane only) must have one; --once drains a row."""
         from cousin_lib.runner.tmux_runner import TmuxRunner
         from tests.runner._fake_pane import FakePane
         home = temp_home(self, runner="tmux")

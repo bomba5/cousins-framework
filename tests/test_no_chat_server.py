@@ -1,4 +1,4 @@
-"""Phase 10a exit (one inbound surface): a runner cousin with no chat
+"""One inbound surface: a runner cousin with no chat
 server and no [chat] port is reachable on every inbound path, and its
 replies leave on every outbound one. Each path's own tests are in
 test_reply, test_media, test_chat_local_runner, test_telegram_no_server,
@@ -40,8 +40,8 @@ class TestNoChatServer(HermeticCase):
         self.home = self.root / "cousins" / "wren"
 
     def test_every_path_works_with_no_network_at_all(self):
-        """No inet connection is made (review M8): refused at the socket,
-        not only at urlopen; the CLI's own entry is walked too."""
+        """No inet connection is made: refused at the socket, not only at
+        urlopen; the CLI's own entry is walked too."""
         import contextlib
         import io
         import socket

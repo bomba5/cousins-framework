@@ -1,7 +1,7 @@
-"""Phase 7 tasks 9-10, the master plan's own test sentences, through the
-commands a person runs. Tasks 7-8 (the runbook, the migration) are proven
-by tests/test_migrate.py and tests/test_migrating_doc.py; the fleet's week
-on the SDK lane is measured by `cousin-migrate check`, not here."""
+"""Memory's validity and review gate, through the commands a person runs:
+an obsoleted entry leaves the live set, opposite claims show as a tension
+until one is settled, and a turn that writes more than [memory]
+review_batch entries is held until reviewed."""
 import contextlib
 import io
 import os
@@ -37,7 +37,7 @@ def _views(home):
     return "".join(p.read_text() for p in memory.distilled_dir(home).glob("*.md"))
 
 
-class TestTask9(HermeticCase):
+class TestValidity(HermeticCase):
     def test_obsolete_sets_valid_to_and_the_entry_leaves_the_live_set(self):
         home = _home(self)
         _cli(home, "remember", "boiler", "Mallory services the boiler in March.")
@@ -57,7 +57,7 @@ class TestTask9(HermeticCase):
         self.assertEqual(_cli(home, "tensions")[1].strip(), "no tensions")
 
 
-class TestTask10(HermeticCase):
+class TestReviewGate(HermeticCase):
     def _turn(self, home, n):
         review_gate.begin(home, now=time.time() - 1)          # the runner opens it at start
         for i in range(n):

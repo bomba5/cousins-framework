@@ -1,6 +1,6 @@
-"""Phase 7 tasks 3-6: the exit criteria this slice can prove in the
-default suite. The two that need the fleet (the largest cousin's real
-replay, a week on the SDK lane) belong to master tasks 7-8."""
+"""Recall end to end, on the runner's own prompt hook: a raw entry is
+found the day after it was written without a distill, and an imported
+harness memory replaces its source in recall."""
 import asyncio
 import os
 import pathlib
@@ -25,7 +25,7 @@ class _Yesterday(datetime):
         return datetime.now(tz) - timedelta(days=1)
 
 
-class TestExit(HermeticCase):
+class TestRecall(HermeticCase):
     def setUp(self):
         super().setUp()
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
@@ -49,7 +49,7 @@ class TestExit(HermeticCase):
         return out.get("hookSpecificOutput", {}).get("additionalContext", "")
 
     def test_a_raw_entry_written_yesterday_is_found_today_without_distill(self):
-        """Exit criterion 2: written one day, found the next, never distilled."""
+        """Written one day, found the next, never distilled."""
         with mock.patch.object(memory, "datetime", _Yesterday):
             memory.remember(self.home, "boiler service", "Mallory services the boiler every March.")
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")

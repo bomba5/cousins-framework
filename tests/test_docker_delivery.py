@@ -1,13 +1,13 @@
-"""Phase 6's exit criteria, run for real against the image and compose.
+"""Docker delivery, run for real against the image and compose.
 
 On a machine with only git and docker: `docker compose up`, the console
 answers, the supervisor runs it and the loops daemon; a cousin spawned
 from the console answers a message sent through the console; `docker
 compose down` then `up` loses no message and no session, and a cousin
 the operator stopped stays stopped; the compressed image is within its
-budget. These compose the work of the whole phase (the supervisor, its
-holds, the runner lane's start, the image, compose): each is a guard of
-that composition, not of one function.
+budget. These compose the supervisor, its holds, the runner lane's
+start, the image and compose: each is a guard of that composition, not of
+one function.
 
 The compose classes are opt-in, as every docker test is: COUSIN_DOCKER=1
 and a docker binary on PATH. COUSIN_DOCKER_IMAGE names an image already
@@ -15,7 +15,7 @@ built; without it one is built from this checkout and removed at the end.
 Each stack is a copy of compose.yml plus a compose.override.yml (the
 file an operator writes the same way) that points it at that image and
 publishes the console on a free loopback port. The project is named
-COUSIN_DOCKER_PROJECT (default "cfp6exit") plus a random suffix, and is
+COUSIN_DOCKER_PROJECT (default "cfdelivery") plus a random suffix, and is
 removed with its volume at the end, whatever happened. Every wait has a
 deadline. The doc checks at the end run everywhere.
 """
@@ -38,24 +38,6 @@ _REPO = pathlib.Path(__file__).resolve().parents[1]
 _COMPOSE = _REPO / "compose.yml"
 _SIZE = _REPO / "docker" / "image-size.sh"
 _VERSION = tomllib.loads((_REPO / "pyproject.toml").read_text())["project"]["version"]
-# Phase 6's CHANGELOG entry is found by what it says, never by its
-# number or its place: a release landing before or after it renumbers it
-# and moves the top of the file, never what phase 6 shipped.
-_PHASE6_NEEDLE = "cousin-supervisor"
-
-
-def _phase6_entry(text):
-    """(version, body, the version of the entry right below it) of the
-    OLDEST CHANGELOG entry whose body names cousin-supervisor: the one phase
-    6 introduced it in. Later entries may name it too (1.21.0 does)."""
-    heads = list(re.finditer(r"^## (\d+\.\d+\.\d+) - .*$", text, re.M))
-    for i, head in reversed(list(enumerate(heads))):
-        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-        body = text[head.end():end]
-        if _PHASE6_NEEDLE in body:
-            below = heads[i + 1].group(1) if i + 1 < len(heads) else None
-            return head.group(1), body, below
-    raise AssertionError("no CHANGELOG entry names %s" % _PHASE6_NEEDLE)
 _UP_S = 120          # compose up until the console answers /api/version
 _ANSWER_S = 90       # a delivered row until the fake runner closes it
 _DOWN_S = 120        # compose down: the ordered stop is at most 45 s
@@ -99,7 +81,7 @@ def tearDownModule():
     if _IMAGE["built"]:
         _docker("image", "rm", "-f", _IMAGE["name"], check=False)
     if MEASURED:
-        print("\nphase 6 exit criteria, measured:")
+        print("\ndocker delivery, measured:")
         for key, value in MEASURED.items():
             print("  %s: %s" % (key, value))
 
@@ -205,7 +187,7 @@ class _Stack:
     that uses the test image and a free loopback port."""
 
     def __init__(self, image):
-        prefix = os.environ.get("COUSIN_DOCKER_PROJECT", "cfp6exit")
+        prefix = os.environ.get("COUSIN_DOCKER_PROJECT", "cfdelivery")
         self.project = "%s%s" % (prefix, uuid.uuid4().hex[:8])
         self.image = image
         self.port = _free_port()
@@ -289,7 +271,7 @@ class _Stack:
 
     def send(self, slug, user, message):
         """The operator's message through the console, as the page sends
-        it (phase 5's chat route); the sent message is in the thread."""
+        it (the chat page's send route); the sent message is in the thread."""
         status, sent = self.post("/api/chat/send",
                                  {"cousin": slug, "user": user, "message": message})
         assert status == 200 and sent.get("ok"), (status, sent)
@@ -432,7 +414,7 @@ class TestComposeDelivery(unittest.TestCase):
 
         started = time.monotonic()
         MEASURED["compose up again until /api/version answers (s)"] = round(stack.up(), 1)
-        # R4: toki has no auto_start = false and no hold, so the new
+        # toki has no auto_start = false and no hold, so the new
         # supervisor starts it, and it answers the row that waited.
         self.assertTrue(stack.wait_running("runner:toki"), stack.status())
         mine = stack.wait_done("toki", waiting)
@@ -441,7 +423,7 @@ class TestComposeDelivery(unittest.TestCase):
         self.assertIsNotNone(mine, "the waiting row was not answered after up")
         self.assertEqual(mine["outcome"], "delivered")
 
-        # R4': sam's hold outlived the supervisor and the container. It was
+        # sam's hold outlived the supervisor and the container. It was
         # not started; its marker and its rows are exactly as they were.
         self.assertNotEqual(stack.status().get("runner:sam"), "running", stack.status())
         sam_up = stack.state("sam")
@@ -550,12 +532,8 @@ def _flat(text):
     return " ".join(text.split())
 
 
-def _semver(text):
-    return tuple(int(part) for part in text.split("."))
-
-
 class TestDeliveryDocs(unittest.TestCase):
-    """The close-out's docs say what the exit criteria and the code do."""
+    """The user docs say what the delivery does."""
 
     def read(self, rel):
         return (_REPO / rel).read_text()
@@ -586,13 +564,13 @@ class TestDeliveryDocs(unittest.TestCase):
         for needle in ("cousin-supervisor status", "docker compose logs -f", "/data",
                        "HOME=/data/home", "cousin-backup", "docker compose build",
                        "FROM ", "terms risk", "cousin-supervisor.service",
-                       # the hold (R4'), the stop that does not wait (R6'), names (M2)
+                       # the hold, the stop that does not wait, child names
                        "run/held", "until `start`", "stop --no-wait", "202 `stopping`",
                        "start --name loops", "exits 5",
                        # why never beside the old units: the clock and the address
                        "run/loops.lock", "`--host` and `--port`",
                        "pip is removed from the image", "at least once",
-                       # round 2 N1: a second clock is busy, waited out
+                       # a second clock is busy, waited out
                        "exits 5 (busy)", "waits in `backoff`"):
             self.has(needle, section, "operations.md, The container")
         self.hasnt("two consoles cannot share the port", section, "operations.md")
@@ -604,8 +582,8 @@ class TestDeliveryDocs(unittest.TestCase):
         self.has("`inbox.db` first", section, "operations.md, Backups")
 
     def test_the_console_spawn_dialog_says_the_environment_only_preselects(self):
-        # 1.24.0 (WP-A): the dialog has kind and account fields; the
-        # environment preselects them and never decides
+        # the dialog has kind and account fields; the environment
+        # preselects them and never decides
         section = _section(self.read("docs/console.md"), "### Spawning a cousin")
         for needle in ("COUSIN_DEFAULT_RUNNER", "COUSIN_DEFAULT_ACCOUNT", "only preselects"):
             self.has(needle, section, "console.md, Spawning a cousin")
@@ -615,50 +593,6 @@ class TestDeliveryDocs(unittest.TestCase):
                            "### `POST /api/admin/restart/framework`")
         self.has("exits 75", section, "the restart route")
         self.assertNotIn("exits 0", section)
-
-    def test_the_changelog_top_entry_is_one_minor_above_the_last(self):
-        """Phase 6's entry (found by content: the top one when it closed) is
-        one MINOR above the entry right below it and says what phase 6
-        shipped."""
-        text = self.read("CHANGELOG.md")
-        version, entry, below = _phase6_entry(text)
-        self.assertGreaterEqual(_semver(_VERSION), _semver(version))
-        top, last = _semver(version), _semver(below)
-        # SemVer: the next MINOR resets PATCH; MAJOR stays.
-        self.assertEqual(top, (last[0], last[1] + 1, 0),
-                         "%s is not one MINOR above %s" % (version, below))
-        for needle in ("cousin-supervisor", "run/held", "exits 5", "run/loops.lock",
-                       "202 `stopping`", "--no-wait", "--name", "at least once",
-                       "pip removed from the image", "200 with `\"runner\": \"not running\"",
-                       # round 2: N1 busy uncounted, O9 the hold, #79 the retry, N7 the 502
-                       "never counted toward `failing`", "for a runner and for the loops daemon",
-                       "`\"held\": true`", "#79", "is_running", "502"):
-            self.has(needle, entry, "the top CHANGELOG entry")
-        self.hasnt("answers the row once", entry, "the top CHANGELOG entry")
-        self.hasnt("exits 2 with \"another loops", entry, "the top CHANGELOG entry")
-
-    def test_the_master_plan_locks_the_supervisor_interfaces(self):
-        section = _section(self.read("docs/design/plans/agent-loop-runner-plan.md"),
-                           "## Interfaces locked across phases")
-        for needle in ("# cousin_lib/supervisor.py (P6)",
-                       "def request(root, op, *, timeout=10.0, **args)",
-                       'HELD = "run/held"', "LOCK_HELD_EXIT = 5", "def hold_loops_lock(root)",
-                       "`run` exits 5 (busy) if held", "LOCK_TAKE_S = 1.0"):
-            self.has(needle, section, "the locked interfaces")
-
-    def test_the_master_plan_marks_phase_6_done_at_this_version(self):
-        text = self.read("docs/design/plans/agent-loop-runner-plan.md")
-        row = next(line for line in text.splitlines()
-                   if line.startswith("| 6 | Supervisor and docker delivery |"))
-        self.has("**DONE**", row, "the phase 6 row")
-        self.has("v%s," % _phase6_entry(self.read("CHANGELOG.md"))[0], row, "the phase 6 row")
-        self.assertRegex(row, r"v[0-9.]+, [0-9]+ tests")
-        phase6 = text.index("\n## Phase 6")
-        criteria = text[text.index("**Exit criteria**", phase6):
-                        text.index("\n## Phase 7", phase6)]
-        self.assertEqual(criteria.count("- [x]"), 3, criteria)
-        self.has("more than git and docker", criteria, "the phase 6 exit criteria")
-        self.has("by construction", criteria, "the phase 6 exit criteria")
 
 
 if __name__ == "__main__":

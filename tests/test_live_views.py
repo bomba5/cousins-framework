@@ -1,5 +1,5 @@
-"""Phase 5 exit criteria (master plan, "Phase 5: Views"), through a real
-ConsoleServer over HTTP: a runner cousin's thinking, tool calls and results
+"""The live views end to end, through a real ConsoleServer over HTTP: a
+runner cousin's thinking, tool calls and results
 are visible live in the console and in cousin-watch, and the interrupt ends
 a running turn. The runner is the reference FakeRunner holding the cousin's
 lock, as cousin-runner does; the operator's message arrives through the chat
@@ -17,7 +17,7 @@ from cousin_lib.runner.fake import FakeRunner
 from tests.console._harness import ConsoleCase
 
 
-class TestViewsExit(ConsoleCase):
+class TestLiveViews(ConsoleCase):
     def _runner(self, home):
         runner = FakeRunner(home, turn_seconds=4.0)
         held, release = threading.Event(), threading.Event()

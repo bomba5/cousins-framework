@@ -113,7 +113,7 @@ process.stdout.write(JSON.stringify([
     def test_attention_and_state_words(self):
         got = self.run_node("""
 const rows = [
-  {status: "running", attention: "Do you want to proceed?", tmuxSession: "a"},
+  {status: "running", loginRequired: {reason: "login_required", action: "x"}, tmuxSession: "a"},
   {status: "running", runner: {alive: true, state: "waiting_permission"}},
   {status: "running", runner: {alive: true, state: "errored"}},
   {status: "running", runner: {alive: true, state: "rate_limited"}},
@@ -121,7 +121,7 @@ const rows = [
   {status: "running", runner: {alive: true, state: "idle"}},
   {status: "running", chat: "down", tmuxSession: "b"},
   {status: "running", active: true, tmuxSession: "c"},
-  {status: "stopped", attention: "x", chat: "down"},
+  {status: "stopped", chat: "down"},
   {status: "running", type: "worker"},
 ];
 process.stdout.write(JSON.stringify(rows.map(r => [
@@ -184,7 +184,7 @@ const rows = [
   {slug: "a", status: "stopped"},
   {slug: "b", status: "running"},
   {slug: "c", status: "running", chat: "down"},
-  {slug: "d", status: "running", attention: "menu"},
+  {slug: "d", status: "running", runner: {alive: true, state: "waiting_permission"}},
   {slug: "e", status: "running"},
 ];
 process.stdout.write(JSON.stringify(fleetOrder(rows).map(r => r.slug)));""")
@@ -212,7 +212,7 @@ process.stdout.write(JSON.stringify({
 const now = new Date(2026, 8, 24, 19, 30, 0).getTime();
 const rows = [
   {slug: "a", status: "running", flipAt: "04:10", tmuxSession: "a"},
-  {slug: "b", status: "running", flipAt: "04:00", attention: "menu", tmuxSession: "b"},
+  {slug: "b", status: "running", flipAt: "04:00", runner: {alive: true, state: "waiting_permission"}},
   {slug: "c", status: "running", flipAt: null, tmuxSession: "c"},
   {slug: "d", status: "stopped", flipAt: "03:00", tmuxSession: "d"},
   {slug: "e", status: "running", type: "worker"},

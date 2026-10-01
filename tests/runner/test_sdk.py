@@ -1775,6 +1775,17 @@ class TestIdlePump(HermeticCase):
         self.assertIn("noted", texts)
         self.assertTrue(_wait(lambda: len([e for e in r.events() if e["kind"] == "usage"]) == 2))
 
+    def test_a_subagents_messages_open_no_background_turn(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        sub = AssistantMessage(content=[ToolUseBlock(id="tu-s", name="Bash",
+                                                     input={"command": "true"})],
+                               model="m", parent_tool_use_id="tu-agent")
+        made["client"].stream.extend(self._progress(2) + [sub] + self._progress(1))
+        self.assertTrue(_wait(lambda: len(self._subtypes(r, "task_progress")) == 3))
+        self.assertEqual(self._subtypes(r, "background_turn"), [])
+        self.assertIn("tu-s", [e["payload"].get("id") for e in r.events() if e["kind"] == "tool"])
+
     def test_a_row_after_a_background_turn_closes_on_its_own_result(self):
         r, made = self._runner([[init_msg(), assistant(text="ok"), result()],
                                 [assistant(text="second"), result()]])

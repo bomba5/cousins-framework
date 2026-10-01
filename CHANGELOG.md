@@ -6,6 +6,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 ## Unreleased
 
 ### Fixed
+- The between-turns reader (#134, 2.3.2) opened a `background_turn` for a
+  subagent's own messages, which the CLI forwards to the parent's stream
+  (seen live: a "turn" that never ended, handed over at the next row). A
+  background turn is now opened only by the model's own message (no
+  `parent_tool_use_id`); task progress and subagent messages open none.
 - An opencode account whose `providers` names `opencode` (opencode's own
   hosted service, OpenCode Zen) no longer reads as logged out without a
   key. 1.26.0 said Zen needs its own API key; its free models need none

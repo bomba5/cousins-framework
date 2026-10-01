@@ -1912,10 +1912,12 @@ class SdkRunner:
                 responses = self._client.receive_response()
                 try:
                     async for msg in responses:
-                        background = isinstance(msg, sdk.SystemMessage) \
-                            and msg.subtype in TASK_SUBTYPES
-                        if not background and not self._pump_turn_open \
-                                and not isinstance(msg, sdk.ResultMessage):
+                        # the model's own message opens a CLI turn of its own;
+                        # a subagent's (parent_tool_use_id set) or a system
+                        # message (task progress) opens none
+                        own = isinstance(msg, (sdk.AssistantMessage, sdk.UserMessage)) \
+                            and getattr(msg, "parent_tool_use_id", None) is None
+                        if own and not self._pump_turn_open:
                             self._pump_turn_open = True
                             self.stream.append("system", {"subtype": "background_turn",
                                                           "phase": "start"})

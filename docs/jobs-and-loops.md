@@ -95,9 +95,10 @@ kept, together with their logs in `data/job-logs/`.
 
 ### Automatic tracking from Claude Code
 
-Every cousin spawned by the framework has hooks in its
-`.claude/settings.json` that record jobs on their own, so a cousin
-doesn't have to remember:
+Every cousin records jobs on its own, so it doesn't have to remember. On
+the `sdk` kind the [runner](glossary.md#runner)'s in-process hooks do it; on the `tmux` kind,
+the hooks spawn writes into the home's `.claude/settings.json`; on the
+`opencode` kind, the runner reads them from the event [stream](glossary.md#stream):
 
 - **Subagents.** A call to the `Agent` tool (`Task` in older Claude Code)
   becomes a `subagent` job titled by its description. It closes `done`

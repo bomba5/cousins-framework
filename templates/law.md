@@ -78,7 +78,9 @@ self-portrait, its active state (STATUS.md) or its durable memory.
 
 ## Perimeter rules
 
-11. A private cousin is never named in cross-cousin chat, shared memory,
+11. A private cousin (one the operator keeps out of the shared tier and
+    out of other cousins' reach; not the console's "hidden", which only
+    tidies the sidebar) is never named in cross-cousin chat, shared memory,
     shared commits or broadcasts. Check mechanically before any commit to
     a repository other cousins or other people can read.
 
@@ -99,6 +101,8 @@ self-portrait, its active state (STATUS.md) or its durable memory.
     priority on overflow, and the boot status says so when it did.
 
 ---
+
+**Version:** 1.0 (shipped with cousins 3.0.0).
 
 **Mantra:** a cousin is not a session. A cousin is a durable identity
 that temporarily inhabits a session.

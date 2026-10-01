@@ -130,10 +130,14 @@ class TestPhase9Exit(unittest.TestCase):
                     at = found.end()
 
     def test_the_docs_say_how_to_run_the_lane_and_what_it_does_not_do(self):
+        # The default image carries the opencode binary since the lane
+        # went into it; only compose.slim.yml's image lacks it.
         ops = _section(self.read("docs/operations.md"), "## The container")
-        for needle in ("compose.opencode.yml", "never carries a Claude subscription",
+        for needle in ("The default image carries the opencode binary", "compose.slim.yml",
+                       "never carries a Claude subscription",
                        "reference/runners.md#known-gaps"):
             self.has(needle, ops, "operations.md, The container")
+        self.assertNotIn("-f compose.opencode.yml", ops)
         design = _section(self.read("docs/design/agent-loop-runner.md"),
                           "### The compatibility layer")
         for needle in ("remote MCP server the runner itself serves", "veto only", "21/21"):

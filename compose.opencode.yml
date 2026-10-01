@@ -1,14 +1,11 @@
-# The opencode variant, as a compose override: the one framework service
-# builds and runs the image's `opencode` target, the default image plus
-# the pinned opencode binary (no node, no bun). Everything else (the
-# volume, the port, the environment) is compose.yml's. Use it with:
-#
-#   docker compose -f compose.yml -f compose.opencode.yml up -d --build
-#
-# (add -f compose.api-key.yml before it for the key lane too), or copy it
-# to compose.override.yml when it is your only override. It is an
-# override, not a profile: a profile adds a service, and a second
-# supervisor on the same volume is refused by the root's lock.
+# This override is no longer needed: the default image (compose.yml with
+# no override) carries the pinned opencode binary. It is kept so a setup
+# that passes it still works: the one framework service builds the
+# image's `opencode` target, the old name of that same default image (no
+# node, no bun), tagged cousins-framework:opencode. Everything else (the
+# volume, the port, the environment) is compose.yml's. To stop using it,
+# drop it from your -f files (or delete compose.override.yml if it is a
+# copy of this file) and run `docker compose up -d --build`.
 services:
   framework:
     build:

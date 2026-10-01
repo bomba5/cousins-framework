@@ -1,0 +1,19 @@
+# The slim image, as a compose override: the one framework service builds
+# and runs the image's `slim` target, the default image without the
+# opencode binary, for a Claude-only install that wants the smaller image
+# (an opencode cousin on it is refused). Everything else (the volume, the
+# port, the environment) is compose.yml's. Use it with:
+#
+#   cp compose.slim.yml compose.override.yml
+#   docker compose up -d --build
+#
+# or, beside another override, name every file on every command:
+#   docker compose -f compose.yml -f compose.api-key.yml -f compose.slim.yml up -d --build
+# It is an override, not a profile: a profile adds a service, and a
+# second supervisor on the same volume is refused by the root's lock.
+services:
+  framework:
+    build:
+      context: .
+      target: slim
+    image: cousins-framework:slim

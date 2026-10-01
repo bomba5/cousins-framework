@@ -136,7 +136,7 @@ class TestNoBridge(unittest.TestCase):
         paths = list(_ROOTS) + list(_IMAGE_FILES) + _compose_files(_REPO)
         seen = _visible(_REPO, paths)
         for name in ("Dockerfile", ".dockerignore", "compose.yml", "compose.api-key.yml",
-                     "compose.opencode.yml", "docker/entrypoint.sh",
+                     "compose.opencode.yml", "compose.slim.yml", "docker/entrypoint.sh",
                      "cousin_lib/accounts.py", "config/harness.toml.example",
                      "docs/install.md", "docs/migrating.md"):
             self.assertIn(name, seen)

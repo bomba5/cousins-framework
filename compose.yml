@@ -7,10 +7,11 @@
 #   docker compose logs -f framework    every child's lines, prefixed
 #
 # Auth, one of three lanes:
-#   - opencode, no Claude account: the opencode variant (at the end of this
-#     file) and an opencode account in config/accounts.toml. Its free models
-#     need no key (providers = ["opencode"]); it also takes a provider key
-#     you hold, or a local endpoint. Worked example: docs/install.md.
+#   - opencode, no Claude account: an opencode account in
+#     config/accounts.toml (the default image carries the opencode binary).
+#     Its free models need no key (providers = ["opencode"]); it also takes
+#     a provider key you hold, or a local endpoint. Worked example:
+#     docs/install.md.
 #   - API key: put the key in secrets/anthropic_api_key (chmod 700 secrets,
 #     chmod 644 the file: the container's user, uid 10001, must read it),
 #     then: cp compose.api-key.yml compose.override.yml
@@ -62,10 +63,12 @@ services:
     volumes:
       - embeddings-models:/root/.ollama
 
-  # The opencode lane is not a profile but an override of the framework
-  # service's image (compose.opencode.yml, the image's `opencode` target):
-  #   docker compose -f compose.yml -f compose.opencode.yml up -d --build
-  # The default image stays free of opencode, node and bun.
+  # The image is the Dockerfile's default target, which carries the pinned
+  # opencode binary (no node, no bun). For a Claude-only install that wants
+  # the smaller image without it, the slim override (not a profile: it
+  # changes the framework service's image, the `slim` target):
+  #   cp compose.slim.yml compose.override.yml
+  #   docker compose up -d --build
 
 volumes:
   framework-data:

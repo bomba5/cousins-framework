@@ -164,13 +164,17 @@ anywhere else, is yours.
 
 **Cousins on opencode.** A cousin with `[agent] runner = "opencode"` runs its
 turns through `opencode serve` on another provider's API key or a local
-OpenAI-compatible model ([runners](reference/runners.md)). The default image
-has no opencode binary; run the framework service on the image's opencode
-variant with the override file, not a profile (a second service on the same
-volume would be a second supervisor, which the root's lock refuses):
+OpenAI-compatible model ([runners](reference/runners.md)).
+The default image carries the opencode binary, so the plain
+`docker compose up -d --build` runs it; only the slim image
+(`compose.slim.yml`, for a Claude-only install) has none, and an opencode
+cousin on it is refused. An image choice is an override of the framework
+service, not a profile (a second service on the same volume would be a
+second supervisor, which the root's lock refuses). `compose.opencode.yml`
+is no longer needed; a setup that passes it gets the same default image.
 
 ```
-docker compose -f compose.yml -f compose.opencode.yml up -d --build
+docker compose up -d --build
 docker compose exec -T framework cousin-account login keyed --provider openai < openai.key
 ```
 

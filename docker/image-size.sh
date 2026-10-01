@@ -2,9 +2,11 @@
 # docker/image-size.sh <image> [budget_bytes]
 #
 # The image's compressed size, measured as `docker save | gzip -6 | wc -c`
-# over the whole image, against a budget in bytes (default 180000000: the
-# 180 MB of phase 0 finding 6, decimal). Prints one line,
-#   compressed: 162.2 MB (budget 180.0 MB)
+# over the whole image, against a budget in bytes (default 240000000, 240 MB
+# decimal: phase 0 finding 6's 180 MB plus the opencode binary the default
+# image carries, a 60.2 MB tarball; the slim image keeps 180000000). Prints
+# one line,
+#   compressed: 224.8 MB (budget 240.0 MB)
 # and exits 0 within the budget, 1 over it, 2 on a usage error or an image
 # that cannot be saved (never read as a small image).
 set -eu
@@ -16,7 +18,7 @@ usage() {
 
 [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
 image=$1
-budget=${2-180000000}
+budget=${2-240000000}
 case $budget in
     '' | *[!0-9]*) usage ;;
 esac

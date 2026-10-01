@@ -521,7 +521,7 @@ class TestImageBudget(unittest.TestCase):
                            text=True, timeout=900)
         MEASURED["image-size.sh (s)"] = round(time.monotonic() - started, 1)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertRegex(r.stdout, r"^compressed: [0-9.]+ MB \(budget 180\.0 MB\)$")
+        self.assertRegex(r.stdout, r"^compressed: [0-9.]+ MB \(budget 240\.0 MB\)$")
         MEASURED["compressed (gzip -6)"] = r.stdout.strip()
         size = _docker("image", "inspect", "-f", "{{.Size}}", _IMAGE["name"]).stdout.strip()
         MEASURED["on disk (MB)"] = round(int(size) / 1e6, 1)

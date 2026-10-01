@@ -3,9 +3,12 @@
 # sdk extra in /opt/venv, pip removed from the image (the venv's and the base
 # image's own), and all state on one volume at /data.
 # Build: docker build -t cousins-framework .   Run: docker compose up
-# The opencode variant is the target of that name (at the end); a build
-# without --target is the default image, which carries no opencode, node
-# or bun.
+# A build without --target is the default image (the last stage): the
+# framework plus the pinned opencode binary, so an opencode cousin runs
+# with no extra step; still no node and no bun. `--target opencode` names
+# the same image (its name before it became the default). `--target slim`
+# is the image without opencode, for a Claude-only install that wants the
+# smaller image (compose.slim.yml).
 #
 # The inputs are pinned: the base image by its multi-arch index digest (the
 # tag is kept for the reader; a build resolves the digest only), the Python
@@ -59,14 +62,18 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 ENTRYPOINT ["/opt/framework/docker/entrypoint.sh"]
 CMD ["cousin-supervisor", "run", "--console-host", "0.0.0.0"]
 
-# The opencode variant: docker build --target opencode (compose.opencode.yml).
-# The pinned opencode release is one self-contained binary (a compiled Bun
-# executable: no node, no bun, no npm at run time). It comes from the npm
-# registry's platform package, downloaded by this throwaway stage and
-# checked twice: the tarball's sha256, then the binary's. The pins were
-# computed once from the registry's file, whose sha512 matched the
-# registry's dist.integrity. Only amd64 is pinned; another architecture
-# needs its own package name and shas here.
+# The slim image: final alone, without opencode (docker build --target
+# slim, compose.slim.yml). No later stage builds from it; it is a name.
+FROM final AS slim
+
+# The opencode binary, for the default image. The pinned opencode release
+# is one self-contained binary (a compiled Bun executable: no node, no bun,
+# no npm at run time). It comes from the npm registry's platform package,
+# downloaded by this throwaway stage and checked twice: the tarball's
+# sha256, then the binary's. The pins were computed once from the
+# registry's file, whose sha512 matched the registry's dist.integrity.
+# Only amd64 is pinned; another architecture needs its own package name
+# and shas here.
 FROM ${PYTHON_IMAGE} AS opencode-fetch
 ARG TARGETARCH
 RUN set -eu; \
@@ -87,12 +94,12 @@ RUN set -eu; \
     install -D -m 0755 /tmp/package/bin/opencode /opt/opencode/bin/opencode; \
     rm -rf /tmp/opencode.tgz /tmp/package
 
-# The default image plus the binary, owned by root (the cousin user cannot
+# The slim image plus the binary, owned by root (the cousin user cannot
 # replace it). The runner finds it on PATH or through COUSIN_OPENCODE_BIN.
 FROM final AS opencode
 COPY --from=opencode-fetch /opt/opencode /opt/opencode
 ENV COUSIN_OPENCODE_BIN=/opt/opencode/bin/opencode PATH=/opt/opencode/bin:$PATH
 
 # The default target: docker build (no --target) builds the last stage,
-# and this one is final, unchanged.
-FROM final AS default
+# and this one is the opencode stage, unchanged.
+FROM opencode AS default

@@ -3,6 +3,29 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Changed
+
+- **The default Docker image carries opencode.** A plain
+  `docker compose up -d --build` now runs an opencode cousin on a free
+  model with no extra step: the Dockerfile's default (last) stage is the
+  one that adds the pinned opencode binary (the same pins and checks; still
+  no node, no bun, no npm). The `opencode` target still builds, as a name
+  for that same image, and `compose.opencode.yml` still works but is no
+  longer needed. A new `slim` target, picked by the new `compose.slim.yml`
+  override (`cp compose.slim.yml compose.override.yml`), is the image
+  without opencode, for a Claude-only install that wants the smaller image.
+  The compressed size budget is now 240 MB (`docker/image-size.sh`'s
+  default and the image job), up from 180 MB, to cover the binary:
+  measured 224.8 MB for the default image, 164.2 MB for the slim one,
+  which the image tests still hold to 180 MB. Inside the image, an
+  opencode cousin whose binary is missing is now only possible on the slim
+  image, and the refusal says so: run the default image (drop
+  `compose.slim.yml`, then `docker compose up -d --build`). The install
+  page's quick start and first-cousin example lose their
+  `cp compose.opencode.yml compose.override.yml` step.
+
 ## 2.3.6 - 2026-10-01
 
 ### Fixed

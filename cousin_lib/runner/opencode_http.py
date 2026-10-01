@@ -75,11 +75,12 @@ class OpencodeError(Exception):
         self.body = body
 
 
-# The default image has no opencode binary; compose.opencode.yml runs the
-# one that has (docs/install.md, "Install with Docker").
-IMAGE_HINT = ("this image has no opencode: run the opencode image instead, on the Docker"
-              " host: `cp compose.opencode.yml compose.override.yml && docker compose up -d"
-              " --build` (with -f files, add -f compose.opencode.yml to every compose command)")
+# The default image carries the opencode binary; only the slim image
+# (compose.slim.yml) has none (docs/install.md, "Install with Docker").
+IMAGE_HINT = ("this is the slim image, without opencode: run the default image instead, on"
+              " the Docker host: drop compose.slim.yml (from your -f files, or delete"
+              " compose.override.yml if it is a copy of it), then `docker compose up -d"
+              " --build`")
 HOST_HINT = ("install opencode and put it on PATH, or name the binary in COUSIN_OPENCODE_BIN"
              " or the cousin's [agent] opencode_bin")
 

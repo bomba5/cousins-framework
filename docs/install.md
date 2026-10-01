@@ -18,11 +18,14 @@ key and no account of any kind; the Docker section starts with that one.
 You need git and Docker with the compose plugin. I tested with Docker 29 and
 compose 5 on Linux.
 
-The default image is 162 MB compressed and about 400 MB on disk. The first
-`up` builds it from the checkout: it pulls the `python:3.13-slim` base and
-downloads the Agent SDK, whose bundled Claude Code CLI is most of the size.
-Nothing else is pulled unless you turn on a profile or the opencode variant
-(below). The build's inputs are pinned: the base image by its multi-arch
+The default image is 225 MB compressed and about 590 MB on disk. The first
+`up` builds it from the checkout: it pulls the `python:3.13-slim` base,
+downloads the Agent SDK, whose bundled Claude Code CLI is most of the size,
+and the opencode binary, so a cousin on opencode runs with no extra step.
+Nothing else is pulled unless you turn on a profile. A Claude-only install
+can build the smaller image without opencode instead, with
+`compose.slim.yml` ([below](#running-the-container)). The build's inputs
+are pinned: the base image by its multi-arch
 digest (`python:3.13-slim@sha256:...`, so an arm64 host builds the same
 release), every Python package by exact version and sha256
 (`docker/requirements.txt`, installed with `--require-hashes`), and the
@@ -40,8 +43,8 @@ cd cousins-framework
 **Pick one lane before the first start.** A cousin needs a way to reach a
 model:
 
-- **opencode, with no key and no Claude account.** The opencode variant of
-  the image and an `opencode` account. Its free models (OpenCode Zen's, named
+- **opencode, with no key and no Claude account.** The default image and an
+  `opencode` account. Its free models (OpenCode Zen's, named
   `opencode/<model>`) need no key. The same account kind also takes the key
   of a provider you hold, or a local OpenAI-compatible endpoint (see
   [accounts.toml](configuration.md#accountstoml)). The worked example is
@@ -55,24 +58,17 @@ model:
 and, when it exists, `compose.override.yml` by itself, but only when you
 give no `-f`. Once you start with `-f` files, give the same `-f` files to
 every later command (`up`, `down`, `exec`, `logs`): a plain
-`docker compose up -d` after a `-f compose.opencode.yml` start recreates the
-container on the default image, which has no opencode binary, and every
-opencode cousin then fails to start and keeps failing. The simplest way
-out is to put your one override in `compose.override.yml` and never use
-`-f` at all, which is what the next section does.
+`docker compose up -d` after a `-f compose.yml -f compose.api-key.yml`
+start recreates the container without the key override: the secret is no
+longer mounted (a rotated key is not picked up) and new cousins no longer
+default to the `api-key` account. The
+simplest way out is to put your one override in `compose.override.yml` and
+never use `-f` at all, which is what the sections below do.
 
 ### A first cousin on opencode's free model
 
-From the checkout, with nothing else set up. First, before the first
-start, switch to the opencode image: the default image has no opencode
-binary, and an opencode cousin on it is refused (`opencode binary not
-found or not executable`):
-
-```
-cp compose.opencode.yml compose.override.yml
-```
-
-Then start it:
+From the checkout, with nothing else set up: the default image carries the
+opencode binary, so no override is needed. Start it:
 
 ```
 docker compose up -d --build
@@ -156,9 +152,11 @@ inside a 700 directory because the container's user (uid 10001) must read
 it; on every start the entrypoint copies it to a private file on the volume
 and declares an `api-key` account, and new cousins use it. A rotated key is
 picked up at the next start. Both `secrets/` and `compose.override.yml` are
-in `.gitignore`. To have the opencode variant as well, there are now two
-overrides: name all three files on every command,
-`docker compose -f compose.yml -f compose.api-key.yml -f compose.opencode.yml ...`.
+in `.gitignore`. The default image carries opencode, so opencode cousins
+run beside the key lane with no other file. For the key lane on the slim
+image (below), there are two overrides: name all three files on every
+command,
+`docker compose -f compose.yml -f compose.api-key.yml -f compose.slim.yml ...`.
 
 For the login lane, skip the key and log in inside the container after the
 first start (below).
@@ -246,23 +244,31 @@ embeddings up -d`, then the steps in the comment in `compose.yml` (pull the
 model once, write `config/embedding.toml`). It pulls the Ollama image, several
 GB.
 
-**The opencode variant** is the image with the opencode binary added, for
-cousins on the opencode runner. It is the Dockerfile's `--target opencode`:
-the default image plus opencode 1.18.31, one self-contained binary at
+**opencode in the image.** The default image (a build with no `--target`)
+carries opencode 1.18.31, one self-contained binary at
 `/opt/opencode/bin/opencode` (on `PATH`, and in `COUSIN_OPENCODE_BIN`), with
 no node, no bun and no npm. The build downloads the pinned package from the
-npm registry and checks its sha256; only x86-64 is pinned. The image is
-223 MB compressed and about 580 MB on disk. The default image never carries
-it. Run the framework service on it with the override file:
+npm registry and checks its sha256; only x86-64 is pinned. SDK cousins run
+on it unchanged. `compose.opencode.yml`, which picked this image when the
+default had no opencode, is no longer needed; a setup that still passes it
+keeps working (it builds the same image under its old target name,
+`opencode`).
+
+**The slim image** is the default image without opencode, for a
+Claude-only install that wants the smaller image: the Dockerfile's
+`--target slim`, 164 MB compressed and about 400 MB on disk. An opencode
+cousin on it is refused (`opencode binary not found or not executable`).
+Run the framework service on it with its override file, before the first
+start or followed by a rebuild:
 
 ```
-docker compose -f compose.yml -f compose.opencode.yml up -d --build
+cp compose.slim.yml compose.override.yml
+docker compose up -d --build
 ```
 
-and the same two `-f` files on every later command. Add
-`-f compose.api-key.yml` before the last file to keep the key lane, or copy
-`compose.opencode.yml` to `compose.override.yml` when it is your only
-override (then no `-f` at all). SDK cousins run on it unchanged.
+Beside the key override, name the files on every command instead (above).
+Back to the default image: delete `compose.override.yml` (or drop
+`-f compose.slim.yml`) and `docker compose up -d --build`.
 
 Stop and start with `docker compose down` and `docker compose up -d` (with
 your `-f` files, if you use any): every cousin, message and session is on

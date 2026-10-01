@@ -105,7 +105,7 @@ the image is locked.
   sees the image's Python and platform), reads the checkout read-only and
   writes only `docker/requirements.txt`. Run it after changing a range in
   pyproject.toml or the base digest, rebuild both targets
-  (`docker build .` and `docker build --target opencode .`), and commit the
+  (`docker build .` and `docker build --target slim .`), and commit the
   lock with the change. `tests.test_docker_files` checks the lock pins the
   sdk extra and the backend, every pin hashed.
 - **The opencode binary**: its version and two sha256s in the

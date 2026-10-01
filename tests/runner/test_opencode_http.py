@@ -188,17 +188,20 @@ class TestOpencodeServer(ServerCase):
             self.assertIn(part, text)
         self.assertNotIn("compose", text)
 
-    def test_a_missing_binary_in_the_image_names_the_opencode_image(self):
-        """The default image has no opencode: the error says which image to
-        run instead and the command that does it, on the Docker host."""
+    def test_a_missing_binary_in_the_image_names_the_default_image(self):
+        """Only the slim image has no opencode: the error says so, which
+        image to run instead and the command that does it, on the Docker
+        host."""
         os.environ["COUSIN_IN_CONTAINER"] = "1"
         text = self.missing()
         self.assertEqual(text, opencode_http.missing_binary("opencode"))
         self.assertTrue(text.startswith("opencode binary not found or not executable: opencode"))
-        self.assertIn("this image has no opencode", text)
+        self.assertIn("this is the slim image, without opencode", text)
+        self.assertIn("run the default image", text)
         self.assertIn("on the Docker host", text)
-        self.assertIn("`cp compose.opencode.yml compose.override.yml"
-                      " && docker compose up -d --build`", text)
+        self.assertIn("drop compose.slim.yml", text)
+        self.assertIn("`docker compose up -d --build`", text)
+        self.assertNotIn("compose.opencode.yml", text)
         self.assertNotIn("COUSIN_OPENCODE_BIN", text)
 
 

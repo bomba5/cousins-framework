@@ -208,7 +208,7 @@ def _check_opencode_binary():
     """A new opencode cousin's binary, as its runner will look for it (no
     [agent] opencode_bin yet: COUSIN_OPENCODE_BIN, else `opencode` on
     PATH): SpawnError with what to do when it is missing, before any write,
-    so the default image refuses here and not at every start."""
+    so the slim image refuses here and not at every start."""
     from cousin_lib.runner import opencode, opencode_http
     argv0 = opencode.opencode_bin({})
     if not opencode_http.find_binary(argv0, os.environ.get("PATH", os.defpath)):

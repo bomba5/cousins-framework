@@ -452,8 +452,8 @@ class TestCreateARunnerCousinsModel(_CreateCase):
         self.no_opencode()
         os.environ["COUSIN_IN_CONTAINER"] = "1"
         why = self.refused(runner="opencode", account="oc", model="openai/gpt-5")
-        self.assertIn("this image has no opencode", why)
-        self.assertIn("cp compose.opencode.yml compose.override.yml", why)
+        self.assertIn("this is the slim image, without opencode", why)
+        self.assertIn("drop compose.slim.yml", why)
 
     def test_the_binary_named_by_the_env_is_the_one_checked(self):
         self.no_opencode()
@@ -492,7 +492,8 @@ class TestSpawnCliOnTheRunnerLane(_CreateCase):
                                 "--model", "openai/gpt-5", "--start")
         self.assertEqual(rc, 2, out)
         self.assertIn("opencode binary not found or not executable: opencode", err)
-        self.assertIn("cp compose.opencode.yml compose.override.yml", err)
+        self.assertIn("this is the slim image, without opencode", err)
+        self.assertIn("drop compose.slim.yml", err)
         self.assertEqual(stub.ops(), [])
         self.assertFalse(self.home.exists())
 

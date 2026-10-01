@@ -116,8 +116,8 @@ all.
   "opencode"` with a `kind = "opencode"` account (`providers` or `endpoint`)
   and `[agent] model = "<provider>/<model>"`, which is required. The keys are
   in [the opencode lane](../configuration.md#agent-on-the-opencode-lane). In
-  Docker, run the image's opencode variant (`compose.opencode.yml`, see
-  [install](../install.md)); on a bare host, put the `opencode` binary on
+  Docker, the default image carries the `opencode` binary (the slim image,
+  `compose.slim.yml`, does not; see [install](../install.md)); on a bare host, put the `opencode` binary on
   `PATH` or name it in `[agent] opencode_bin`.
 - `runner = "fake"` only to exercise the lane itself.
 
@@ -250,7 +250,7 @@ none is a contract item:
 - **Log in while the cousin is stopped.** `cousin-account login --provider`
   writes `auth.json` atomically but takes no lock against a running
   `opencode serve` refreshing an OAuth token in the same file.
-- **Only x86-64 is pinned** in the image's opencode variant.
+- **Only x86-64 is pinned** for the opencode binary in the default image.
 - **The guard binds opencode's configuration, not the model's shell.** The
   model's shell runs as the same user as the runner and the server. From it
   the model can read the server's environment (`/proc/$PPID/environ`, the

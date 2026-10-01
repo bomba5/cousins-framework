@@ -92,7 +92,8 @@ class SpawnARunnerCousin(ConsoleCase):
             "runner": "opencode", "account": "oc", "model": "openai/gpt-5"})
         self.assertEqual(status, 400, body)
         self.assertIn("opencode binary not found or not executable", body["error"])
-        self.assertIn("cp compose.opencode.yml compose.override.yml", body["error"])
+        self.assertIn("this is the slim image, without opencode", body["error"])
+        self.assertIn("drop compose.slim.yml", body["error"])
         self.assertFalse((self.root / "cousins" / "toki").exists())
 
 

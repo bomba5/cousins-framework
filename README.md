@@ -54,8 +54,7 @@ shell on your box, continuously, this is not for you.
 ```
 git clone https://github.com/bomba5/cousins-framework.git
 cd cousins-framework
-cp compose.opencode.yml compose.override.yml     # the image with opencode
-docker compose up -d --build
+docker compose up -d --build                     # the image carries opencode
 docker compose exec framework cousin-console adduser ana
 
 # an opencode account on its free models: no key

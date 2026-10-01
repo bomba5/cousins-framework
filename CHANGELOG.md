@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- **A `host` cousin's login line in the container names the way in the
+  container.** A cousin on `host` with no login said "run `claude auth
+  login` as the host user on <container id>": inside the image there is no
+  host user, no `claude` on `PATH`, and the hostname is the container's id.
+  The image now sets `COUSIN_IN_CONTAINER=1`, and there the line (the
+  runner's login-required file and `auth` event, `cousin-account status`,
+  the console's account status) says to run `docker compose exec framework
+  cousin-account login host --via <slug>` on the Docker host, with no host
+  named. The login lands in the image user's `~/.claude`, on the volume
+  (`HOME=/data/home`), so it stays across a restart. Outside the image the
+  line is unchanged.
+
 ## 2.3.3 - 2026-10-01
 
 ### Fixed

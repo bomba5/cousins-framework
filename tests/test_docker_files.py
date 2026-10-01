@@ -343,6 +343,13 @@ class TestDockerfile(unittest.TestCase):
         self.assertNotIn(users[0].split(":")[0], ("root", "0"))
         self.assertEqual(users[0], "10001:10001")
 
+    def test_the_image_says_it_is_the_frameworks_container(self):
+        """accounts.in_container() reads this marker: a login line in the
+        image names the compose exec, not a host user on the container's id."""
+        from cousin_lib import accounts
+        env = " ".join(self._args("ENV")).split()
+        self.assertIn("%s=1" % accounts.CONTAINER_VAR, env)
+
     def test_healthcheck_asks_the_version_route_without_curl(self):
         check = " ".join(self._args("HEALTHCHECK"))
         self.assertIn("http://127.0.0.1:8600/api/version", check)

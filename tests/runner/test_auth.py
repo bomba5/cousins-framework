@@ -230,6 +230,23 @@ class TestRunnerWaitsForALogin(HermeticCase):
         self.assertTrue(any(e.get("restored") for e in self.events(r, "auth")))
         self.assertIsNone(auth.read_login_required(self.home))   # cleared by a good result
 
+    def test_the_host_login_line_names_the_host_outside_the_container(self):
+        r = self.build()
+        self.assertEqual(r._login_action(auth.LOGIN),
+                         "run `claude auth login` as the host user on %s"
+                         % auth.host_label(self.root))
+
+    def test_in_the_container_the_line_names_no_container_id(self):
+        """The hostname inside the image is the container's id, and there is
+        no host user there: the line is the compose exec, said once."""
+        r = self.build()
+        with mock.patch.dict(os.environ, {"COUSIN_IN_CONTAINER": "1"}):
+            action = r._login_action(auth.LOGIN)
+        self.assertTrue(action.startswith(
+            "run `docker compose exec framework cousin-account login host"), action)
+        self.assertNotIn(" on %s" % auth.host_label(self.root), action)
+        self.assertNotIn("host user", action)
+
     def test_a_login_file_left_by_an_earlier_runner_clears_on_the_first_good_result(self):
         """A restart after the login was fixed: the file on disk is armed at
         start, so the first good result clears it (it stayed forever)."""

@@ -22,11 +22,13 @@ import os
 import unittest
 
 # Every variable the framework reads to find an install, a cousin, a
-# tmux server, a filter override, a supervisor or a new cousin's lane.
+# tmux server, a filter override, a supervisor or a new cousin's lane,
+# and the framework image's marker (a login line differs inside it).
 HERMETIC_VARS = ("FRAMEWORK_ROOT", "COUSIN_HOME", "COUSIN_SLUG",
                  "COUSIN_TMUX_SOCKET", "COUSIN_FILTER_OVERRIDE",
                  "INVOCATION_ID", "COUSIN_SUPERVISED",
-                 "COUSIN_DEFAULT_RUNNER", "COUSIN_DEFAULT_ACCOUNT")
+                 "COUSIN_DEFAULT_RUNNER", "COUSIN_DEFAULT_ACCOUNT",
+                 "COUSIN_IN_CONTAINER")
 
 _MARK = "_cousin_hermetic"
 

@@ -26,7 +26,11 @@ RUN groupadd --gid 10001 cousin \
  && PYTHONDONTWRITEBYTECODE=1 python3 -m pip uninstall -y pip
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/framework /opt/framework
-ENV FRAMEWORK_ROOT=/data HOME=/data/home PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1
+# COUSIN_IN_CONTAINER=1 tells the framework it runs in this image: a
+# login line for `host` then names the compose exec on the Docker host,
+# not a host user on the container's id.
+ENV FRAMEWORK_ROOT=/data HOME=/data/home PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 \
+    COUSIN_IN_CONTAINER=1
 USER 10001:10001
 WORKDIR /data
 VOLUME /data

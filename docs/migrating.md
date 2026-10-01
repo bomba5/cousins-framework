@@ -225,10 +225,11 @@ Existing cousins keep working with no change: a cousin that names no account run
 Moving a cousin from `host` to a named login account moves where the CLI
 keeps its local transcripts (they live under the account's config dir), so
 the first resume after the move is `resume_failed`, then a fresh session
-with the digest: expected, and it costs a conversation, never state. In a
-phase 6 container, `host` (the host's `~/.claude`) lives outside the volume;
-a containerised cousin runs on a named account whose config dir is inside
-it.
+with the digest: expected, and it costs a conversation, never state. In the
+container, the host's `~/.claude` is not visible: `host` there is the
+image user's own `~/.claude` (`/data/home/.claude`, on the volume), empty
+until `docker compose exec framework cousin-account login host`; a named
+account, whose config dir is on the volume too, is the usual choice.
 
 See [configuration](configuration.md) for the accounts file.
 

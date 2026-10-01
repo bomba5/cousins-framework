@@ -196,9 +196,19 @@ account a blank account field gets. "create cousin" creates it and starts
 it through the [supervisor](glossary.md#supervisor). Send it a message.
 
 A cousin on `host` (no account named, and no `COUSIN_DEFAULT_ACCOUNT`) has
-no login in the container: give it the key or the login account. Its
-"login required" line names `claude auth login` on the container's id,
-which is not the way in the container.
+no login in the container: give it the key or the login account. Or log
+`host` itself in, from the directory of `compose.yml`, which is what its
+"login required" line says to run:
+
+```
+docker compose exec framework cousin-account login host
+```
+
+`host` in the container is the image user's own `~/.claude`, on the volume
+(`HOME=/data/home`), so the login stays across `down` and `up` and every
+cousin on `host` uses it. The line names no host: the image sets
+`COUSIN_IN_CONTAINER=1`, and the framework leaves out the hostname, which
+in the container is its id.
 
 ### Running the container
 

@@ -27,6 +27,9 @@ from cousin_lib.trace import traced_cli
 KINDS = ("claude-login", "claude-token", "anthropic-key", "opencode")
 RESERVED_KINDS = ()
 HOST = "host"
+# "1" in the framework's image (the Dockerfile's ENV): there, `host` has no
+# host user to log in as and the hostname is the container's id.
+CONTAINER_VAR = "COUSIN_IN_CONTAINER"
 # Every variable that can pick the credentials or the provider the CLI
 # uses: the CLI's own list of auth variables, the base URL, the config dir
 # and the provider switches. cousin-runner removes them all from its own
@@ -722,12 +725,21 @@ def _missing_hint(account):
     return "write the key to it: mode 0600, directory 0700"
 
 
+def in_container():
+    """True inside the framework's image: CONTAINER_VAR is exactly "1"."""
+    return os.environ.get(CONTAINER_VAR) == "1"
+
+
 def login_action(account, via=None, provider=None):
     """What the operator runs to fix this account's login. opencode: the
     provider to log in (the first named when none is given), or the
     endpoint to check. An API key never travels through chat (R12'): it
     goes on stdin or in a key file, and `--via` is named only with an
-    OAuth `--method`."""
+    OAuth `--method`. `host` inside the framework's image: there is no
+    host user there and `claude` is not on PATH, but the image's HOME is
+    on the volume, so `cousin-account login host` run through `docker
+    compose exec` writes the ~/.claude every `host` cousin there reads,
+    and it stays across a restart."""
     tail = " --via %s" % via if via else ""
     if account.kind == "opencode":
         if account.endpoint:
@@ -737,6 +749,9 @@ def login_action(account, via=None, provider=None):
                 " --key-file; an OAuth method: add --method <label>%s)"
                 % (account.name, provider or account.providers[0], tail))
     if account.kind == "claude-login":
+        if account.config_dir is None and in_container():
+            return ("`docker compose exec framework cousin-account login %s%s` on the Docker"
+                    " host (the login lands in ~/.claude on the volume)" % (account.name, tail))
         return ("`claude auth login` as the host user" if account.config_dir is None
                 else "`cousin-account login %s%s`" % (account.name, tail))
     if account.kind == "claude-token":

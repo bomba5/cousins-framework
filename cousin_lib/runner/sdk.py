@@ -1003,7 +1003,9 @@ class SdkRunner:
         action = accounts.login_action(self.account, via=self.tool_context.slug)
         if self.account.kind != "anthropic-key":
             action = "run " + action
-        if self.account.name == accounts.HOST:
+        if self.account.name == accounts.HOST and not accounts.in_container():
+            # in the image the hostname is the container's id, and the
+            # action already says where to run it (the Docker host)
             action += " on %s" % auth.host_label(self.root)
         return action
 

@@ -280,6 +280,49 @@ class TestWritePrivate(AccountsCase):
         self.assertEqual(os.stat(path.parent).st_mode & 0o777, 0o700)
 
 
+class TestLoginActionInTheContainer(AccountsCase):
+    """`host` outside the image is the host user's own `claude auth login`;
+    inside the framework's image (COUSIN_IN_CONTAINER=1, set by the
+    Dockerfile) there is no host user to log in as: the login is a
+    `docker compose exec` on the Docker host, landing in ~/.claude on the
+    volume."""
+    HOST = accounts.Account(accounts.HOST, "claude-login", None, None, implicit=True)
+
+    def test_outside_the_container_the_host_user_logs_in(self):
+        self.assertFalse(accounts.in_container())
+        self.assertEqual(accounts.login_action(self.HOST, "wren"),
+                         "`claude auth login` as the host user")
+
+    def test_inside_the_container_the_login_is_a_compose_exec(self):
+        with mock.patch.dict(os.environ, {"COUSIN_IN_CONTAINER": "1"}):
+            self.assertTrue(accounts.in_container())
+            action = accounts.login_action(self.HOST, "wren")
+        self.assertIn("`docker compose exec framework cousin-account login host --via wren`",
+                      action)
+        self.assertIn("on the Docker host", action)
+        self.assertNotIn("host user", action)
+
+    def test_only_the_exact_marker_counts(self):
+        for value in ("", "0", "yes"):
+            with mock.patch.dict(os.environ, {"COUSIN_IN_CONTAINER": value}):
+                self.assertFalse(accounts.in_container(), value)
+
+    def test_a_named_login_account_is_unchanged_in_the_container(self):
+        self.write()
+        with mock.patch.dict(os.environ, {"COUSIN_IN_CONTAINER": "1"}):
+            self.assertEqual(accounts.login_action(accounts.load(self.root)["fleet"], "wren"),
+                             "`cousin-account login fleet --via wren`")
+
+    def test_the_check_line_of_a_host_cousin_in_the_container(self):
+        def run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, stderr="", stdout=json.dumps(
+                {"loggedIn": False, "authMethod": "none"}))
+        with mock.patch.dict(os.environ, {"COUSIN_IN_CONTAINER": "1"}):
+            rc, line = accounts.check(self.home, self.root, run=run)
+        self.assertEqual(rc, 4)
+        self.assertIn("-> run `docker compose exec framework cousin-account login host", line)
+
+
 class TestCli(AccountsCase):
     def test_list_names_kinds_and_places_never_secrets(self):
         import io

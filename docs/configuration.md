@@ -296,7 +296,7 @@ rows back in the queue, emits an `auth` event and writes
 | `reason` | `login_required` or `billing` |
 | `detail` | what the CLI said, cut to 300 characters, never a secret |
 | `since` | when this stop began (UTC); a new stop gets a new one |
-| `action` | what to run: `cousin-account login <name> --via <slug>`, `cousin-account token <name> --via <slug>`, `cousin-account login <name> --provider <id>` for an `opencode` account (the key on stdin or with `--key-file`; `--method <label> --via <slug>` for an OAuth method), "write the key to <file>", `claude auth login` as the host user on the host, or for billing a check of the plan or credits |
+| `action` | what to run: `cousin-account login <name> --via <slug>`, `cousin-account token <name> --via <slug>`, `cousin-account login <name> --provider <id>` for an `opencode` account (the key on stdin or with `--key-file`; `--method <label> --via <slug>` for an OAuth method), "write the key to <file>", `claude auth login` as the host user on the host (inside the framework's image, where `COUSIN_IN_CONTAINER=1`: `docker compose exec framework cousin-account login host --via <slug>` on the Docker host, with no host named), or for billing a check of the plan or credits |
 
 `cousin-chat list` marks the cousin `LOGIN REQUIRED (account <name> on
 <host>)` or `BILLING (account <name> on <host>)` while the file exists, and a
@@ -637,6 +637,7 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_DEFAULT_RUNNER` | `sdk`, `tmux`, `opencode` or `fake`: the runner kind a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: `sdk`. Any other value is refused before anything is created |
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 | `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The image's `opencode` target sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the default image, a bare host): `opencode` on `PATH` |
+| `COUSIN_IN_CONTAINER` | `1` in the framework's image (its Dockerfile sets it), not set by you. Only exactly `1` counts. Read by the login lines for `host`: inside the image there is no host user to log in as and the hostname is the container's id, so the line names `docker compose exec framework cousin-account login host` on the Docker host instead of `claude auth login` on the host |
 | `COUSIN_POLICY_FILE` | set by an opencode cousin's runner for its `opencode serve`, not by you: the rendered policy file the plugin pack reads (`<data_dir>/cousin-policy.json`) |
 
 ## cousin.toml

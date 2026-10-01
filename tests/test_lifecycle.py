@@ -304,6 +304,32 @@ class TestTransplantRefusals(LifecycleCase):
         self.assertFalse(out["ok"])
         self.assertIn("differ", out["error"])
 
+    def test_a_cousin_with_no_runner_is_refused_before_anything_is_touched(self):
+        from cousin_lib.delivery import lane_refusal
+        home = self._cousin("testc", "Testc", "keeper of the gate", runner=None)
+        for donor, recipient in (("testc", "testb"), ("testa", "testc")):
+            before = {h: {p: p.read_bytes() for p in sorted(h.rglob("*")) if p.is_file()}
+                      for h in (self.a, self.b, home)}
+            out = transplant(donor=donor, recipient=recipient, mode="body-swap",
+                             root=self.root, do_flip=self._fake_flip)
+            self.assertFalse(out["ok"])
+            self.assertEqual(out["error"], lane_refusal(home))
+            self.assertEqual(out["steps"], [])
+            self.assertEqual(self.flips, [])
+            self.assertFalse((self.root / "data" / "lifecycle").exists())
+            for h, files in before.items():
+                self.assertEqual({p: p.read_bytes() for p in sorted(h.rglob("*"))
+                                  if p.is_file()}, files)
+
+    def test_cli_a_cousin_with_no_runner_exits_2(self):
+        self._cousin("testc", "Testc", "keeper of the gate", runner=None)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = transplant_main(["--donor", "testa", "--recipient", "testc",
+                                  "--mode", "merge", "--root", str(self.root)])
+        self.assertEqual(rc, 2)
+        self.assertIn("testc", err.getvalue())
+
     def test_cli_unknown_mode_exits_2(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:

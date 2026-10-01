@@ -452,8 +452,8 @@ def _merge_memory(donor, recipient):
 def transplant(*, donor, recipient, mode, root, do_flip=None):
     """Snapshot both, apply the mode, flip both (donor first, so the
     recipient boots last into its new interior). Refusals - unknown
-    slug, unknown mode, same slug twice - come back as a result with
-    an error and touch nothing."""
+    slug, unknown mode, same slug twice, a cousin with no runner kind -
+    come back as a result with an error and touch nothing."""
     root = Path(root)
     result = {"op": "transplant", "donor": donor, "recipient": recipient,
               "mode": mode, "ok": False, "steps": [], "snapshots": {}}
@@ -471,6 +471,13 @@ def transplant(*, donor, recipient, mode, root, do_flip=None):
     except LifecycleError as err:
         result["error"] = str(err)
         return result
+    from cousin_lib.delivery import RUNNER_KINDS, _runner_kind, lane_refusal
+    for cfg in (d, r):
+        if _runner_kind(cfg.home) not in RUNNER_KINDS:
+            # 2.0.0 has no legacy tmux lane: refused by name before the
+            # snapshot, so no file of either cousin changes.
+            result["error"] = lane_refusal(cfg.home)
+            return result
     base = {"op": "transplant", "donor": donor, "recipient": recipient,
             "mode": mode}
     do_flip = do_flip or _default_do_flip(root)

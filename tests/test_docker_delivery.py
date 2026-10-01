@@ -568,7 +568,7 @@ class TestDeliveryDocs(unittest.TestCase):
                        "run/held", "until `start`", "stop --no-wait", "202 `stopping`",
                        "start --name loops", "exits 5",
                        # why never beside the old units: the clock and the address
-                       "run/loops.lock", "`--host` and `--port`",
+                       "run/loops.lock", "`--console-host`", "`--console-port`",
                        "pip is removed from the image", "at least once",
                        # a second clock is busy, waited out
                        "exits 5 (busy)", "waits in `backoff`"):

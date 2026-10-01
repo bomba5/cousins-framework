@@ -79,6 +79,38 @@ That's all it does. The gate's generic checks run inside the suite (see
 below), so CI gates every commit. Your denylist of real names is never
 in CI, since it can't be in the repo.
 
+## The image's pins
+
+The Dockerfile's inputs are pinned, so a build of one checkout installs the
+same packages on any day. pyproject.toml keeps its ranges for pip users; only
+the image is locked.
+
+- **The base image**: one global `ARG PYTHON_IMAGE`, every `FROM` names it.
+  Its default is the tag with its multi-arch index digest (not a
+  single-platform manifest's, so arm64 still builds). To move it to a newer
+  release (a security update), take the `Digest:` line of
+  `docker buildx imagetools inspect python:3.13-slim` and put it there.
+- **The Python packages**: `docker/requirements.txt`, the sdk extra, what it
+  pulls and the build backend, each at one exact version with the sha256 of
+  every file PyPI has for it. The builder installs it with
+  `--require-hashes` (a missing package or a changed file stops the build),
+  then the framework in place with `--no-deps --no-build-isolation`, then
+  `pip check`. Never edit it by hand; re-resolve it:
+
+  ```sh
+  sh docker/lock.sh
+  ```
+
+  It runs pip-tools in the Dockerfile's pinned base image (so the resolve
+  sees the image's Python and platform), reads the checkout read-only and
+  writes only `docker/requirements.txt`. Run it after changing a range in
+  pyproject.toml or the base digest, rebuild both targets
+  (`docker build .` and `docker build --target opencode .`), and commit the
+  lock with the change. `tests.test_docker_files` checks the lock pins the
+  sdk extra and the backend, every pin hashed.
+- **The opencode binary**: its version and two sha256s in the
+  `opencode-fetch` stage (see the comment there).
+
 ## The contamination gate
 
 The gate stops private stuff from getting into the tree: real names,

@@ -27,6 +27,23 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   said the slug, a session that does not exist). `tmux-legacy` rows are
   unchanged. The inspector shows "none" for a null session.
 
+### Changed
+- **The image build is pinned.** The base image is
+  `python:3.13-slim@sha256:...` (its multi-arch index digest, so arm64
+  still builds), named by one `ARG PYTHON_IMAGE` that every `FROM` uses.
+  The Python packages come from `docker/requirements.txt`: the sdk extra,
+  what it pulls and the build backend, at exact versions with the sha256
+  of every file, installed with `--require-hashes` before the framework
+  goes in place with `--no-deps --no-build-isolation` and `pip check`
+  (the build backend leaves the venv with pip). Before, the tag floated
+  and pip resolved pyproject.toml's ranges on the day of the build.
+  pyproject.toml keeps its ranges for pip users. `sh docker/lock.sh`
+  re-resolves the lock in the pinned base image;
+  `docs/development.md` says when and how. `docs/install.md` no longer
+  calls the build not reproducible: nothing in it floats (no stage
+  installs a system package); only the optional embeddings service's
+  ollama image is pinned by tag alone.
+
 ## 2.3.3 - 2026-10-01
 
 ### Fixed

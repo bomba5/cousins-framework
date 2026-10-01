@@ -16,5 +16,6 @@
 !plugins
 !config/*.example
 !docker/entrypoint.sh
+!docker/requirements.txt
 **/__pycache__
 **/*.pyc

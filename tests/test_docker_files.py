@@ -36,6 +36,12 @@ _UNIT = _REPO / "systemd" / "cousin-supervisor.service"
 _SIZE = _REPO / "docker" / "image-size.sh"
 _WORKFLOW = _REPO / ".github" / "workflows" / "image.yml"
 _COMPOSE_OPENCODE = _REPO / "compose.opencode.yml"
+_LOCK = _REPO / "docker" / "requirements.txt"
+_LOCK_SCRIPT = _REPO / "docker" / "lock.sh"
+# Every stage on the slim base names it through one global ARG, whose
+# default is the tag pinned by a multi-arch index digest.
+_BASE = "${PYTHON_IMAGE}"
+_PINNED_BASE = re.compile(r"^python:3\.13-slim@sha256:[0-9a-f]{64}$")
 # The opencode variant (phase 9 R17): the npm registry's platform package
 # of the pinned release, checked twice (the tarball the build downloads,
 # then the binary it copies). The binary's sha256 is the live install's
@@ -310,13 +316,24 @@ class TestDockerfile(unittest.TestCase):
         # are the opencode variant's and the default alias (below).
         stages = _stages(self.ins)
         self.assertEqual([(b, n) for b, n, _ in stages[:2]],
-                         [("python:3.13-slim", "builder"), ("python:3.13-slim", "final")])
-        self.assertTrue(all(b.startswith("python:3.13-slim") or b == "final"
-                            for b, _, _ in stages), stages)
+                         [(_BASE, "builder"), (_BASE, "final")])
+        self.assertTrue(all(b in (_BASE, "final") for b, _, _ in stages), stages)
+
+    def test_the_base_is_pinned_by_digest_in_one_global_arg(self):
+        # Before the first FROM, so every FROM can name it; the tag stays
+        # for the reader, the digest is what a build resolves.
+        first_from = [w for w, _ in self.ins].index("FROM")
+        globals_ = [a for w, a in self.ins[:first_from] if w == "ARG"]
+        self.assertEqual(len(globals_), 1, globals_)
+        name, _, default = globals_[0].partition("=")
+        self.assertEqual(name, "PYTHON_IMAGE")
+        self.assertRegex(default, _PINNED_BASE)
+        self.assertNotIn("python:", " ".join(self._args("FROM")))
 
     def test_the_source_is_installed_in_place_with_the_sdk_extra(self):
-        run = " ".join(self._args("RUN"))
-        self.assertIn('pip install --no-cache-dir -e "/opt/framework[sdk]"', run)
+        run = " ".join(" ".join(self._args("RUN")).split())
+        self.assertIn("pip install --no-cache-dir --no-deps --no-build-isolation"
+                      ' -e "/opt/framework[sdk]"', run)
         copies = self._args("COPY")
         self.assertIn("--from=builder /opt/venv /opt/venv", copies)
         self.assertIn("--from=builder /opt/framework /opt/framework", copies)
@@ -325,7 +342,7 @@ class TestDockerfile(unittest.TestCase):
         # The venv's pip in the builder, the base image's own in the final
         # stage, as root: before the one USER line.
         builder = " ".join(a for w, a in self._stage("builder")[2] if w == "RUN")
-        self.assertIn("/opt/venv/bin/pip uninstall -y pip", builder)
+        self.assertIn("/opt/venv/bin/pip uninstall -y setuptools pip", builder)
         final = self._stage("final")[2]
         user_at = [i for i, (w, _) in enumerate(final) if w == "USER"][0]
         before_user = " ".join(a for w, a in final[:user_at] if w == "RUN")
@@ -373,8 +390,8 @@ class TestDockerfileOpencode(unittest.TestCase):
 
     def test_the_stages_in_order(self):
         self.assertEqual([(b, n) for b, n, _ in self.stages],
-                         [("python:3.13-slim", "builder"), ("python:3.13-slim", "final"),
-                          ("python:3.13-slim", "opencode-fetch"), ("final", "opencode"),
+                         [(_BASE, "builder"), (_BASE, "final"),
+                          (_BASE, "opencode-fetch"), ("final", "opencode"),
                           ("final", "default")])
 
     def test_a_build_without_a_target_is_the_default_image(self):
@@ -440,6 +457,80 @@ class TestDockerfileOpencode(unittest.TestCase):
                         self.assertIsNone(_JS_TOOLS.search(arg), arg)
 
 
+def _lock_pins():
+    """{name: (version, [sha256, ...])} per requirement in the lock."""
+    joined = re.sub(r"\\\n", " ", _LOCK.read_text())
+    pins = {}
+    for line in joined.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            req, _, rest = line.partition(" ")
+            name, sep, version = req.partition("==")
+            pins[name.lower()] = (version if sep else None,
+                                  re.findall(r"--hash=sha256:(\S+)", rest))
+    return pins
+
+
+def _names(requirements):
+    return [re.split(r"[<>=!~;\[ ]", r, maxsplit=1)[0].lower() for r in requirements]
+
+
+class TestImageLock(unittest.TestCase):
+    """The image's Python packages: one exact version and the sha256 of
+    each file, installed with --require-hashes before the framework."""
+
+    def setUp(self):
+        self.pins = _lock_pins()
+        self.project = tomllib.loads((_REPO / "pyproject.toml").read_text())
+
+    def test_every_pin_is_exact_and_hashed(self):
+        self.assertTrue(self.pins)
+        for name, (version, hashes) in self.pins.items():
+            with self.subTest(name=name):
+                self.assertRegex(version or "", r"^[0-9][0-9A-Za-z.+!-]*$")
+                self.assertTrue(hashes)
+                for sha in hashes:
+                    self.assertRegex(sha, r"^[0-9a-f]{64}$")
+
+    def test_it_pins_the_sdk_extra_and_the_build_backend(self):
+        # What the builder's two pip installs need: the extra the image
+        # installs and the backend the editable install runs in place.
+        wanted = (_names(self.project["project"]["optional-dependencies"]["sdk"])
+                  + _names(self.project["build-system"]["requires"]))
+        for name in wanted:
+            self.assertIn(name, self.pins)
+        self.assertNotIn("cousins-framework", self.pins)
+
+    def test_it_names_the_base_it_was_resolved_in(self):
+        base = [a for w, a in _instructions(_DOCKERFILE.read_text())
+                if w == "ARG" and a.startswith("PYTHON_IMAGE=")][0].partition("=")[2]
+        self.assertIn("# Resolved in %s\n" % base, _LOCK.read_text())
+
+    def test_the_builder_installs_it_with_hashes_before_the_framework(self):
+        stage = [s for s in _stages(_instructions(_DOCKERFILE.read_text()))
+                 if s[1] == "builder"][0]
+        run = " ".join(" ".join(a for w, a in stage[2] if w == "RUN").split())
+        lock = run.index("pip install --no-cache-dir --require-hashes"
+                         " -r /opt/framework/docker/requirements.txt")
+        self.assertLess(lock, run.index("--no-deps --no-build-isolation"))
+        self.assertLess(run.index("--no-build-isolation"), run.index("pip check"))
+        self.assertLess(run.index("pip check"), run.index("uninstall -y setuptools pip"))
+
+    def test_the_lock_script_resolves_in_the_pinned_base_read_only(self):
+        text = _LOCK_SCRIPT.read_text()
+        self.assertTrue(text.startswith("#!/bin/sh\n"))
+        self.assertTrue(os.access(_LOCK_SCRIPT, os.X_OK))
+        self.assertIn("s/^ARG PYTHON_IMAGE=//p", text)
+        self.assertIn(':/src:ro" "$image"', text)
+        self.assertIn("--generate-hashes", text)
+        self.assertIn("--extra sdk", text)
+        self.assertIn("--all-build-deps", text)
+        self.assertRegex(text, r"\nPIP_TOOLS=[0-9][0-9.]*\n")
+        self.assertNotIn("/home/", text)
+        for bashism in ("[[ ", "function ", "pipefail", "$'", "<<<", "local "):
+            self.assertFalse(bashism in text, "bashism %r" % bashism)
+
+
 def _dockerignored(path, patterns):
     """Docker's rule, enough for this file: the last pattern that matches
     the path or one of its parent directories wins; `!` re-includes."""
@@ -471,7 +562,8 @@ class TestDockerignore(unittest.TestCase):
                      "secrets/anthropic_api_key", "examples/wren/CLAUDE.md",
                      "wren-node.tar.gz", ".env", ".venv/bin/python3",
                      "cousin_lib/__pycache__/spawn.cpython-313.pyc",
-                     "compose.override.yml", "Dockerfile", ".github/workflows/ci.yml"):
+                     "compose.override.yml", "Dockerfile", ".github/workflows/ci.yml",
+                     "docker/lock.sh"):
             self.assertTrue(_dockerignored(path, self.patterns), path)
 
     def test_the_build_context_keeps_the_code_and_what_it_finds_beside_it(self):
@@ -479,7 +571,8 @@ class TestDockerignore(unittest.TestCase):
                      "cousin_lib/spawn.py", "cousin_lib/console_static/index.html",
                      "templates/cousin-CLAUDE.template.md", "templates/hive-node/README.md",
                      "hooks/pre_compact.sh", "config/harness.toml.example",
-                     "config/mcp-registry.toml.example", "docker/entrypoint.sh"):
+                     "config/mcp-registry.toml.example", "docker/entrypoint.sh",
+                     "docker/requirements.txt"):
             self.assertFalse(_dockerignored(path, self.patterns), path)
 
 
@@ -583,7 +676,7 @@ class TestImage(unittest.TestCase):
             self.assertIn(present, top)
         self.assertTrue(ast.literal_eval(lines[1]))
         self.assertTrue(all(n.endswith(".example") for n in ast.literal_eval(lines[1])), lines[1])
-        self.assertEqual(ast.literal_eval(lines[2]), ["entrypoint.sh"])
+        self.assertEqual(ast.literal_eval(lines[2]), ["entrypoint.sh", "requirements.txt"])
 
     def test_the_entrypoint_runs_under_the_image_shell(self):
         # The image's /bin/sh (dash on Debian) runs every branch twice:

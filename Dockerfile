@@ -6,14 +6,32 @@
 # The opencode variant is the target of that name (at the end); a build
 # without --target is the default image, which carries no opencode, node
 # or bun.
+#
+# The inputs are pinned: the base image by its multi-arch index digest (the
+# tag is kept for the reader; a build resolves the digest only), the Python
+# packages by docker/requirements.txt, exact versions with their sha256
+# (docker/lock.sh re-resolves it), the opencode binary by its sha256 below.
+# No stage installs a system package. Refreshing the base: put the index
+# digest of `docker buildx imagetools inspect python:3.13-slim` here, then
+# run docker/lock.sh.
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:7c61056e61ac89e852de05f3dc6fa51a6dd2181797bceed46aa725dd7cb2cd3b
 
-FROM python:3.13-slim AS builder
+# The lock first, with hashes required (a package missing from it, or a
+# file whose hash differs, stops the build), then the framework itself in
+# place with no dependency resolution and the locked build backend instead
+# of a freshly downloaded one; pip check holds the result together. The
+# backend and pip leave the venv after: nothing at run time needs them.
+FROM ${PYTHON_IMAGE} AS builder
 COPY . /opt/framework
 RUN python -m venv /opt/venv \
- && /opt/venv/bin/pip install --no-cache-dir -e "/opt/framework[sdk]" \
- && /opt/venv/bin/pip uninstall -y pip
+ && /opt/venv/bin/pip install --no-cache-dir --require-hashes \
+      -r /opt/framework/docker/requirements.txt \
+ && /opt/venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation \
+      -e "/opt/framework[sdk]" \
+ && /opt/venv/bin/pip check \
+ && /opt/venv/bin/pip uninstall -y setuptools pip
 
-FROM python:3.13-slim AS final
+FROM ${PYTHON_IMAGE} AS final
 # One unprivileged user; its home is on the volume, where a fresh agent
 # session writes its transcript (a cache the framework never reads). The
 # base image's own pip goes too: nothing at run time installs packages
@@ -49,7 +67,7 @@ CMD ["cousin-supervisor", "run", "--console-host", "0.0.0.0"]
 # computed once from the registry's file, whose sha512 matched the
 # registry's dist.integrity. Only amd64 is pinned; another architecture
 # needs its own package name and shas here.
-FROM python:3.13-slim AS opencode-fetch
+FROM ${PYTHON_IMAGE} AS opencode-fetch
 ARG TARGETARCH
 RUN set -eu; \
     version=1.18.31; \

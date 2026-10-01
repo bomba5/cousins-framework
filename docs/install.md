@@ -22,8 +22,15 @@ The default image is 162 MB compressed and about 400 MB on disk. The first
 `up` builds it from the checkout: it pulls the `python:3.13-slim` base and
 downloads the Agent SDK, whose bundled Claude Code CLI is most of the size.
 Nothing else is pulled unless you turn on a profile or the opencode variant
-(below). The build is not reproducible: the base image tag and the Python
-dependencies are not pinned, only the opencode binary is (by its sha256).
+(below). The build's inputs are pinned: the base image by its multi-arch
+digest (`python:3.13-slim@sha256:...`, so an arm64 host builds the same
+release), every Python package by exact version and sha256
+(`docker/requirements.txt`, installed with `--require-hashes`), and the
+opencode binary by its sha256. No stage installs a system package, so
+nothing is left to float; two builds of one checkout install the same
+packages, though the image's own digest differs (timestamps). The
+optional `embeddings` service's `ollama/ollama` image is pinned by tag
+only. Refreshing the pins: [development](development.md#the-images-pins).
 
 ```
 git clone https://github.com/bomba5/cousins-framework.git

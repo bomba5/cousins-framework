@@ -1,10 +1,11 @@
 """The two checkpoint files in-process: Python equivalents of the harness
 hooks `hooks/session_checkpoint.sh` (Stop) and `hooks/pre_compact.sh`
 (PreCompact), same files and headings. Open work comes from
-`data/state.json` when present, else STATUS.md's current `## Open loops`
-block, else its open checkboxes; the pre-compact file adds the tail of
-the calling session's event stream (the newest one when no session names
-its own), the SDK lane's terminal capture. Writes only under
+`data/state.json` when present, else STATUS.md's live `## Open loops`
+block (cousin_lib.status_sections), else its open checkboxes; the
+pre-compact file adds the tail of the calling session's event stream (the
+newest one when no session names its own), the SDK lane's terminal
+capture. Writes only under
 <home>/data/; an empty home gets a file naming what was missing."""
 import json
 import os
@@ -12,13 +13,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import status_sections
+
 DECISIONS = 5
 STATUS_LINES = 20
 STREAM_EVENTS = 20
 STREAM_TAIL_BYTES = 64 * 1024
 EVENT_CHARS = 160
 DISK_FILES = ("CLAUDE.md", "MEMORY.md", "STATUS.md", "PROFILE.md")
-_OPEN_LOOPS = re.compile(r"^## Open loops[^\n]*\n(.*?)(?=^## |\Z)", re.M | re.S)
 _OPEN_BOX = re.compile(r"^- \[[ ~]\]")
 
 
@@ -61,9 +63,9 @@ def _open_work(home):
     status = _read(home / "STATUS.md")
     if status is None:
         return "No STATUS.md."
-    m = _OPEN_LOOPS.search(status)
-    if m and m.group(1).strip():
-        lines = m.group(1).strip("\n").splitlines()
+    body = status_sections.open_loops_body(status)
+    if body.strip():
+        lines = body.strip("\r\n").splitlines()
     else:
         lines = [ln for ln in status.splitlines() if _OPEN_BOX.match(ln)]
     return "\n".join(lines[:STATUS_LINES]) or "No open loops in STATUS.md."

@@ -2,13 +2,15 @@
 form, for a cold session that wants instant context without parsing
 markdown.
 
-Two lessons from the source shape the parser. A STATUS.md accumulates
-one `## Open loops (...)` heading per generation, newest first, and
-never deletes the old ones, so the FIRST section of each kind is the
-current one and every later copy is history. And bullets are plain
-`- **text**` far more often than checkboxes; a parser that counts only
-checkboxes reports a full section as empty, which is indistinguishable
-from "no open loops".
+The open loops are the live section the handoff writes, read with the
+one shared definition (cousin_lib.status_sections): the first bare
+`## Open loops` heading; a suffixed `## Open loops (...)` heading is
+history. The other sections keep the source's rule: a STATUS.md
+accumulates copies of a section and never deletes the old ones, so the
+FIRST `## ` heading starting with the section's name is the current one
+and every later copy is history. And bullets are plain `- **text**` far
+more often than checkboxes; a parser that counts only checkboxes reports
+a full section as empty, which is indistinguishable from "no open loops".
 """
 import argparse
 import json
@@ -18,15 +20,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import status_sections
 from cousin_lib.trace import traced_cli
 
 TEXT_MAX = 200
-# (heading prefix, lowercase, matched after "## ") -> state key.
+# (heading prefix, lowercase, matched after "## ") -> state key. The open
+# loops are not matched by prefix: status_sections reads the live section.
 SECTIONS = (
     ("open loops", "open_loops"),
     ("parked", "parked"),
     ("recently closed", "recently_closed"),
 )
+_BY_PREFIX = SECTIONS[1:]
 # `- [x] text`, `* [ ] text`, `+ [~] text`, or a plain bullet of any
 # marker. Top level only: an indented bullet is a sub-point of a loop,
 # not a loop.
@@ -49,14 +54,25 @@ def _home(args):
 def _section_for(heading):
     """State key a `## ` heading opens, or None for any other heading."""
     title = heading[3:].strip().lower()
-    for prefix, key in SECTIONS:
+    for prefix, key in _BY_PREFIX:
         if title.startswith(prefix):
             return key
     return None
 
 
+def _item(line):
+    """A top-level bullet as a state item, or None."""
+    m = _BULLET.match(line.rstrip("\r"))
+    if not m:
+        return None
+    mark, body = m.group(1), m.group(2).strip()
+    return {"text": body[:TEXT_MAX], "done": mark == "x", "partial": mark == "~"}
+
+
 def parse_status(text):
     state = {key: [] for _, key in SECTIONS}
+    state["open_loops"] = [item for item in map(
+        _item, status_sections.open_loops_body(text).split("\n")) if item]
     section = None
     seen = set()
     for line in text.split("\n"):
@@ -73,15 +89,9 @@ def parse_status(text):
             continue
         if section is None:
             continue
-        m = _BULLET.match(line)
-        if not m:
-            continue
-        mark, body = m.group(1), m.group(2).strip()
-        state[section].append({
-            "text": body[:TEXT_MAX],
-            "done": mark == "x",
-            "partial": mark == "~",
-        })
+        item = _item(line)
+        if item:
+            state[section].append(item)
     return state
 
 

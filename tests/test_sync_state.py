@@ -1,12 +1,14 @@
 """STATUS.md to data/state.json: the machine-readable open loops.
 
-A STATUS.md accumulates one `## Open loops (...)` heading per
-generation, newest first, and never deletes the old ones, so "the open
-loops" is the FIRST section of each kind, not the union. The source
-learned this the hard way: its parser walked the whole file and the
-boot fuel was months stale. Second half of the same lesson: bullets
-are plain `- **text**` far more often than checkboxes, and a parser
-that only counts checkboxes reports an empty section as "no loops".
+The open loops are the live section the handoff writes: the first bare
+`## Open loops` heading. A STATUS.md keeps older copies under suffixed
+headings (`## Open loops (current as of gen 11 close)`) and never
+deletes them; those are history, never the union. The source learned
+this the hard way: its parser walked the whole file and the boot fuel
+was months stale. The other sections keep the first-copy rule. Second
+half of the same lesson: bullets are plain `- **text**` far more often
+than checkboxes, and a parser that only counts checkboxes reports an
+empty section as "no loops".
 """
 import contextlib
 import io
@@ -27,7 +29,7 @@ REAL_SHAPE = (
     "## SESSION CLOSE gen 12\n"
     "- narrative bullet that is not an open loop\n"
     "\n"
-    "## Open loops (current as of gen 12 close)\n"
+    "## Open loops\n"
     "- **current thing one**\n"
     "- **current thing two**\n"
     "\n"
@@ -93,10 +95,20 @@ class TestParseStatus(unittest.TestCase):
         self.assertTrue(by["thing two done"]["done"])
         self.assertTrue(by["thing three partial"]["partial"])
 
-    def test_heading_match_is_case_insensitive_prefix(self):
-        st = parse_status("## OPEN LOOPS - week 3\n- a\n## recently closed\n- b\n")
-        self.assertEqual(_texts(st["open_loops"]), ["a"])
+    def test_other_sections_match_a_case_insensitive_prefix(self):
+        st = parse_status("## PARKED - week 3\n- a\n## recently closed\n- b\n")
+        self.assertEqual(_texts(st["parked"]), ["a"])
         self.assertEqual(_texts(st["recently_closed"]), ["b"])
+
+    def test_a_suffixed_open_loops_heading_is_history(self):
+        st = parse_status("## OPEN LOOPS - week 3\n- a\n"
+                          "## Open loops (current as of gen 4)\n- b\n## Parked\n- c\n")
+        self.assertEqual(st["open_loops"], [])
+        self.assertEqual(_texts(st["parked"]), ["c"])
+
+    def test_an_open_loops_heading_ends_another_section(self):
+        st = parse_status("## Parked\n- a\n## Open loops (gen 3)\n- old\n")
+        self.assertEqual(_texts(st["parked"]), ["a"])
 
     def test_non_bullet_lines_inside_a_section_are_skipped(self):
         st = parse_status("## Open loops\nsome prose\n- a loop\n  - a sub-point\n")

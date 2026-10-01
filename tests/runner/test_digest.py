@@ -168,7 +168,7 @@ class TestOpenLoopsReadAsTheWriterWritesThem(DigestCase):
         self.assertNotIn("- live loop", text)
         self.assertNotIn("old archived loop", text)
 
-    def test_the_boot_packets_reader_is_untouched(self):
+    def test_the_boot_packet_reads_the_same_section(self):
         (self.home / "STATUS.md").write_text("# Wren\n\n## Open loops\n\n- live loop\n\n## Done\n")
         self.assertEqual(boot._active_state(self.home),
                          "### STATUS.md (open loops)\n\n## Open loops\n\n- live loop")

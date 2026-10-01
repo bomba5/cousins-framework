@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from cousin_lib import status_sections
 from cousin_lib.config import FrameworkConfig
 
 
@@ -157,36 +158,19 @@ _BASELINE_MARK = (
 
 
 def _extract_open_loops(status_text):
-    """Bodies of every '## Open loops' section. A section runs to the
-    next '## ' header or a '---' rule."""
-    bodies = []
-    in_section = False
-    current = []
-    for line in status_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            if in_section and current:
-                bodies.append("\n".join(current).rstrip())
-            current = []
-            in_section = "open loops" in stripped[3:].lower()
-            continue
-        if stripped == "---":
-            if in_section and current:
-                bodies.append("\n".join(current).rstrip())
-            current = []
-            in_section = False
-            continue
-        if in_section:
-            current.append(line)
-    if in_section and current:
-        bodies.append("\n".join(current).rstrip())
-    return [b for b in bodies if b.strip()]
+    """The body of STATUS.md's live open-loops section, as a one-item list
+    ([] when it is missing or empty): the section the handoff writes, read
+    with the one shared definition (cousin_lib.status_sections). A
+    suffixed '## Open loops (...)' heading is history, not a loop."""
+    body = "\n".join(status_sections.open_loops_body(status_text).splitlines())
+    body = body.strip("\n").rstrip()
+    return [body] if body.strip() else []
 
 
 def derive_active_threads_baseline(home):
     """Baseline data/active-threads.md body from STATUS.md, marked so a
     reader can tell auto-derived from hand-curated. Empty string when
-    STATUS.md is missing or has no Open-loops section."""
+    STATUS.md is missing or its live Open-loops section is empty."""
     try:
         status_text = (Path(home) / "STATUS.md").read_text()
     except FileNotFoundError:
@@ -201,7 +185,7 @@ def derive_active_threads_baseline(home):
         "",
         _BASELINE_MARK,
         "",
-        "Synced from STATUS.md '## Open loops' sections at session-end."
+        "Synced from STATUS.md's '## Open loops' section at session-end."
         " Hand-curate this file during the session to replace the"
         " baseline; do not delete this header.",
         "",

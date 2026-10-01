@@ -42,7 +42,7 @@ class TestSessionCheckpoint(CheckpointCase):
         self.assertIn("wiring the kettle sensor", text)
 
     def test_open_work_comes_from_state_json_else_the_status_open_loops_block(self):
-        self._write("STATUS.md", "# Wren - STATUS\n\n## Open loops (gen 4)\n"
+        self._write("STATUS.md", "# Wren - STATUS\n\n## Open loops\n"
                     "- **Toki's printer queue** stalls on job 3\n- [x] closed item\n\n"
                     "## Parked\n- nothing here\n\n## Open loops (gen 3)\n- old history\n")
         text = checkpoints.write_session_checkpoint(self.home, slug="wren", now=NOW).read_text()

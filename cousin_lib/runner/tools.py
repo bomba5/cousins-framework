@@ -30,6 +30,8 @@ from pathlib import Path
 from cousin_lib import mcp_server
 from cousin_lib.delivery import parse_thread, thread_for_chat
 from cousin_lib.runner.base import SURFACE_KINDS, RunnerError
+from cousin_lib.status_sections import (NEXT_SECTION, OPEN_LOOPS, OPEN_LOOPS_LINE,
+                                       open_loops_span)
 
 
 @dataclass
@@ -670,8 +672,10 @@ HANDOFF_SCHEMA = {
         "next_action": {"type": "string",
                         "description": "The first thing the next generation should do."},
         "status": {"type": "string",
-                   "description": "The open loops, markdown. Replaces STATUS.md's"
-                                  " '## Open loops' section; the rest of the file is kept."},
+                   "description": "The open loops, markdown: the section's body only."
+                                  " Replaces STATUS.md's '## Open loops' section; the"
+                                  " framework writes the heading, so no '#' or '##'"
+                                  " headings inside. The rest of the file is kept."},
         "active_threads": {"type": "array", "items": {"type": "string"},
                            "description": "One line per in-flight thread."},
         "learned": {"type": "array", "description": "What this generation learned that is"
@@ -684,18 +688,28 @@ HANDOFF_SCHEMA = {
     "additionalProperties": False,
 }
 
-OPEN_LOOPS = "## Open loops"
-# The section is the heading on a line of its own: a substring search would
-# take "### Open loops archive" or prose that quotes the heading, and
-# overwrite the cousin's own text there (STATUS.md is the cousin's file).
-# A CRLF file ends the heading with "\r", which "$" alone does not consume.
-OPEN_LOOPS_LINE = re.compile(r"^## Open loops[ \t]*\r?$", re.M)
-# It ends at the next heading of level 1 or 2; a "###" inside it is its own.
-NEXT_SECTION = re.compile(r"^#{1,2} ", re.M)
-# Public: the digest (prompt.py) reads the section with these same two
-# patterns, so writer and reader cannot drift. The underscore names stay as
-# the aliases the rest of this module uses.
+# The section's one definition lives in cousin_lib.status_sections, shared
+# with every reader (the digest, the boot packet, state.json, the baseline,
+# the checkpoints), so writer and readers cannot drift. The public names stay
+# here for the code and tests that import them; the underscore names are the
+# aliases the rest of this module uses.
 _OPEN_LOOPS_LINE, _NEXT_SECTION = OPEN_LOOPS_LINE, NEXT_SECTION
+# A heading the model wrote into `status` itself: its own "Open loops" title
+# (any level, any suffix) is dropped, and a level-1 or level-2 heading inside
+# is demoted to "###" so it cannot end the live section under the bare one.
+_STATUS_TITLE = re.compile(r"^#{1,6}[ \t]+open loops\b", re.I)
+_SECTION_BREAK = re.compile(r"^#{1,2}(?= )")
+
+
+def _status_body(status):
+    """The lines of `status` as the live section's body: a leading "Open
+    loops" heading dropped, `#`/`##` headings demoted to `###`."""
+    lines = status.strip().splitlines()
+    if lines and _STATUS_TITLE.match(lines[0]):
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+    return [_SECTION_BREAK.sub("###", line) for line in lines]
 
 
 def _with_open_loops(text, name, status):
@@ -703,21 +717,20 @@ def _with_open_loops(text, name, status):
     everything else byte for byte, line endings included (the new block is
     written in the file's own: CRLF when the file uses CRLF). Absent
     section: inserted after the title line, where boot._active_state and
-    the digest read it."""
+    the digest read it. `status` is the body: see _status_body."""
     eol = "\r\n" if "\r\n" in text else "\n"
-    block = OPEN_LOOPS + eol + eol + eol.join(status.strip().splitlines()) + eol
+    block = OPEN_LOOPS + eol + eol + eol.join(_status_body(status)) + eol
     if not text.strip():
         return "# Status - %s%s%s%s" % (name, eol, eol, block)
-    found = _OPEN_LOOPS_LINE.search(text)
-    if found is None:
+    span = open_loops_span(text)
+    if span is None:
         cut = text.find("\n")
         if cut < 0:
             return text + eol + eol + block
         head, rest = text[:cut + 1], text[cut + 1:]
         return head + eol + block + (eol + rest.lstrip("\r\n") if rest.strip() else "")
-    after = _NEXT_SECTION.search(text, found.end())
-    tail = text[after.start():] if after else ""
-    return text[:found.start()] + block + (eol + tail if tail else "")
+    tail = text[span[1]:]
+    return text[:span[0]] + block + (eol + tail if tail else "")
 
 
 def handoff(ctx, args):

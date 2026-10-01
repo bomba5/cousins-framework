@@ -59,15 +59,28 @@ Everything below is relative to the cousin home.
 A few notes on the ones that aren't obvious.
 
 **Active state** is what the cousin is doing right now. `STATUS.md`
-holds the open loops (the boot packet quotes the newest `## Open loops`
-section), `data/handoff.md` is what the last generation told the next
-one, and `data/active-threads.md` is one bullet per thread in flight.
+holds the open loops, `data/handoff.md` is what the last generation
+told the next one, and `data/active-threads.md` is one bullet per thread in flight.
 The flip asks the cousin to write all three before it ends a session.
 `data/handoff-manual.md` is for a handoff written by hand; the
 framework never writes it. The two checkpoint files come from the
 Claude Code hooks in `hooks/` (see [cousins](cousins.md)).
 If decisions were logged after `STATUS.md` last changed, the boot
 packet warns the cousin that STATUS may be stale.
+
+**The open loops are one section.** The live section is the first bare
+`## Open loops` heading on a line of its own, up to the next `#` or `##`
+heading: the section the handoff writes (its `status` is the body; the
+framework writes the heading, drops a leading "Open loops" heading the
+model wrote itself and demotes a `#` or `##` heading inside to `###`).
+The digest, the boot packet, `data/state.json`, the session-end baseline
+and the checkpoints all read that section and nothing else. A suffixed
+heading (`## Open loops (current as of gen 4)`) is history the cousin
+kept, never the live section, and so is `### Open loops archive`. One
+exception reads homes written before the handoff normalised its
+`status`: when the bare section is empty and the very next heading is a
+suffixed open-loops heading, that section is read as the live one, until
+the next handoff writes the bare section.
 
 **`MEMORY.md`** is an index: one line per topic file, like
 `- [Upkeep](upkeep.md) - descaling schedule, 2026-09-17`. It loads every
@@ -765,8 +778,8 @@ removing the wrong one.
 - `cousin-callback tag "ana named the espresso machine Gustav" --cycle 3 --category banter`
   keeps moments worth calling back to in `memory/callbacks.md`;
   `cousin-callback search gustav` finds them.
-- `cousin-sync-state` renders the newest `## Open loops` section of
-  `STATUS.md` into `data/state.json` for scripts that don't want to
+- `cousin-sync-state` renders the live `## Open loops` section of
+  `STATUS.md` (the bare heading; a suffixed one is history) into `data/state.json` for scripts that don't want to
   parse Markdown.
 - `cousin-backup --dest DIR` snapshots each cousin's databases, `memory/`
   and core Markdown files ([operations](operations.md)).

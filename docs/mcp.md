@@ -140,8 +140,11 @@ runner itself could hang the child.
 [agent-loop-runner](design/agent-loop-runner.md#continuous-extraction-and-rollover)),
 and it is called exactly once, with five fields: `position` (a paragraph,
 where the work stands), `next_action` (the first thing the next generation
-should do) and `status` (markdown; replaces `STATUS.md`'s `## Open loops`
-section, the rest of the file kept) are required, `active_threads` (one
+should do) and `status` (markdown, the section's body: replaces
+`STATUS.md`'s bare `## Open loops` section, the live one every reader
+reads, and the rest of the file is kept; the framework writes the heading,
+so a leading "Open loops" heading in `status` is dropped and a `#` or `##`
+heading inside becomes `###`) are required, `active_threads` (one
 string per in-flight thread, written to `data/active-threads.md`) and
 `learned` (facts not yet in memory, each `{topic, fact, level, cite}`,
 remembered through the same path `cousin-memory remember` uses) are taken

@@ -111,11 +111,12 @@ class TestActiveThreadsBaseline(AuditsCase):
         "## Open loops (next week)\n\n- plan the migration\n"
     )
 
-    def test_derives_every_open_loops_section(self):
+    def test_derives_the_live_open_loops_section_only(self):
+        # the bare heading is the live section; a suffixed one is history
         (self.home / "STATUS.md").write_text(self._STATUS)
         body = derive_active_threads_baseline(str(self.home))
         self.assertIn("finish the report", body)
-        self.assertIn("plan the migration", body)
+        self.assertNotIn("plan the migration", body)
         self.assertNotIn("shipped a thing", body)
         self.assertIn("baseline derived", body)  # the tell-apart marker
 

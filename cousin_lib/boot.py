@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cousin_lib import (capsule, corrections, distill, memory,
-                        self_portrait, trace)
+                        self_portrait, status_sections, trace)
 from cousin_lib.config import FrameworkConfig
 
 CHARS_PER_TOKEN = 4
@@ -309,14 +309,11 @@ def _staleness_header(home):
 
 
 def _open_loops_section(status):
-    """The boot packet's reading of STATUS.md's open loops, unchanged: from
-    the first "## Open loops" anywhere in the text (a substring, so also
-    inside "### Open loops ..." or prose) to the next "## " heading that
-    starts a line. The runner's digest passes its own, whole-heading reader
-    instead; this one stays because the tmux lane's behaviour does not
-    change in this phase."""
-    m = re.search(r"## Open loops.*?(?=\n## |\Z)", status, re.DOTALL)
-    return m.group(0) if m else None
+    """STATUS.md's live open loops, read the way the handoff writes them
+    (cousin_lib.status_sections): the first bare "## Open loops" heading
+    up to the next level-1 or level-2 heading; None when there is none.
+    The digest and the boot packet read the same section."""
+    return status_sections.open_loops_section(status)
 
 
 def _active_state(home, *, open_loops=_open_loops_section):

@@ -55,6 +55,31 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   kinds; a home from before it falls back to `data/generation.txt`'s last
   change.
 
+### Fixed
+
+- **STATUS.md's open loops read the same everywhere, and the handoff no
+  longer strands them** (#137). The handoff writes the bare `## Open loops`
+  section, but the boot packet took the first "## Open loops" substring
+  anywhere (also a "### Open loops archive" or prose quoting it),
+  `data/state.json` took the first heading starting with "open loops", the
+  session-end baseline took every heading containing it and stopped at a
+  `---`, and the checkpoints took any suffixed heading; a file with an
+  empty bare stub above a suffixed `## Open loops (...)` section parsed
+  differently in each. Every reader now uses the writer's own definition,
+  in one new module, `cousin_lib/status_sections.py`: the first bare
+  `## Open loops` heading on a line of its own, up to the next `#` or `##`
+  heading, is the live section; a suffixed heading is history. The writer
+  half: a handoff `status` that began with its own heading
+  (`## Open loops (reconciled ...)`) left the bare section empty and the
+  loops under that heading right below it, so they read as zero. The
+  handoff now drops a leading "Open loops" heading of any level from
+  `status` and turns a `#` or `##` heading inside it into `###`, and the
+  tool's `status` description says the body only, no `#` or `##` headings.
+  Homes written before the fix are read through one narrow rule: when the
+  bare section is empty and the very next heading is a suffixed open-loops
+  heading, that section is read as the live one; STATUS.md is not edited,
+  and the next handoff writes a proper bare section above it.
+
 ### Documentation
 
 - **Claude logins and Anthropic's terms** (#52): a new page,

@@ -452,8 +452,9 @@ cousin-reason capsule --conclusion "keep backups for 30 days" \
     --evidence "audits need a month" --rejected "7 days" --confidence high
 ```
 
-`cousin-sync-state` renders the newest `## Open loops` section of STATUS.md
-into `data/state.json`.
+`cousin-sync-state` renders the live `## Open loops` section of STATUS.md
+into `data/state.json`: the bare heading the handoff writes; a suffixed
+`## Open loops (...)` heading is history and is not read.
 
 ```
 cousin-sync-state --home cousins/wren

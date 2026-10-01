@@ -10,9 +10,9 @@ Two things apply to almost all of them:
   `FRAMEWORK_ROOT`. Run inside the checkout and most of them find it anyway.
 - Commands that work on one [cousin](glossary.md#cousin) read `COUSIN_HOME` (the cousin's home,
   `cousins/<slug>/`) or take `--home`. Inside a running cousin, whatever its
-  kind, `COUSIN_HOME` is already set (in its tmux session, or exported into
-  the [runner](glossary.md#runner)'s own process for an `sdk`, `opencode`, `tmux` or `fake` runner
-  cousin), so a cousin calls them bare.
+  kind, `COUSIN_HOME` is already set (exported into the
+  [runner](glossary.md#runner)'s own process, and from there into what the
+  model runs), so a cousin calls them bare.
 
 The examples use an invented cousin, Wren, and an operator called ana.
 
@@ -25,18 +25,20 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 
 `cousin-spawn` creates a cousin from the template (home, `cousin.toml`,
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
-alone on an existing cousin it starts it, and `--start --resume` resumes its
-last session instead of opening a new one; `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
+alone on an existing cousin it starts it; `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
 and account (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER`,
 else `sdk`, and `COUSIN_DEFAULT_ACCOUNT`; its `--model` and `--effort` go to `[agent]`
 too, where the runner reads them, and only on a [lane](glossary.md#lane) that reads them; `--runner opencode` is refused before anything is written when the opencode binary is not found); `--start`
-starts it through `cousin-supervisor`;
+starts it through `cousin-supervisor`; `--role-paragraph` is the longer role
+text in `CLAUDE.md` (else the `--role` line); `--heartbeat SECONDS` sets
+`[heartbeat] context_beat_seconds`; `--memory-scope {private,shared}` sets
+`[memory] scope` (`shared` may propose to the [shared tier](glossary.md#shared-tier); default `private`);
 `--repair-settings` rewrites an
 existing cousin's hooks and `.mcp.json`; `--sync-template` shows how its
 CLAUDE.md framework part differs from the template, and `--apply` writes it
 (every start and [flip](glossary.md#flip) does that by itself). See [cousins](cousins.md).
 
-2.0.0 has no legacy tmux lane: a cousin with no `[agent] runner` is refused by
+A cousin with no `[agent] runner` is refused by
 name, with one line and before anything runs, by `cousin-spawn --start` (exit
 2), by a stop (the
 console's answers 409), by `cousin-flip` and by `cousin-reincarnate`. A
@@ -46,13 +48,6 @@ says so.
 ```
 cousin-spawn wren --name Wren --role "keeps the house notes" \
     --voice "Short and plain. Says when it does not know." --operator ana --start
-```
-
-`cousin-auth` shows or switches how a cousin's agent logs in: `claude` (the
-harness's own login, the default) or `api_key` (a per-cousin key).
-
-```
-cousin-auth wren --key-stdin < wren.key && cousin-auth wren api_key
 ```
 
 `cousin-account` (operator-run) shows the accounts runner cousins run on,
@@ -137,7 +132,7 @@ method redirects to `localhost` on the host, so it only completes from a
 browser on the host; a device-code method completes from any device.
 Refused (exit 2): the provider `anthropic`, by key or by OAuth, and any
 method named Claude or Anthropic (Claude cousins run on the Agent SDK and
-nowhere else, ruling P9-1), a provider the account does not name
+nowhere else), a provider the account does not name
 (`opencode`, the hosted service the runner disables, included), a provider or method
 that names the Claude-subscription bridge, an `endpoint` account, and these
 flags on any other kind of account. The binary is `COUSIN_OPENCODE_BIN`
@@ -200,7 +195,7 @@ packet reads. Subcommands: `state [--json]`, `inc --start|--end|--action X`,
 cousin-cycle inc --action "shipped the weekly report"
 ```
 
-`cousin-runner` runs a cousin on the runner instead of a tmux session: the
+`cousin-runner` runs a cousin on its runner: the
 [inbox](glossary.md#inbox) is the bus and the wake socket is the doorbell, no port. At start it
 resumes the session saved in `data/runner-session.json`, falling back to a
 fresh session carrying the state digest as its first message when it cannot
@@ -229,7 +224,7 @@ names a command the runner has no in-process handler for. `--home` may be
 relative: the runner makes it absolute and exports `COUSIN_HOME` (the home)
 and `FRAMEWORK_ROOT` (the install above it, else the home's grandparent) into
 its own environment, for the in-process tools and for the model's own
-`cousin-*` commands. See [agent-loop-runner](design/agent-loop-runner.md).
+`cousin-*` commands. See [runners](reference/runners.md).
 
 An account that needs a login (or whose billing stopped it) never makes the
 runner exit: it waits, says so in `data/login-required.json` (see
@@ -272,9 +267,8 @@ and exits; with `--follow` (`-f`) it keeps printing as the runner appends,
 following a restarted runner to its new stream, until interrupted. `--json`
 prints each event as its JSON line; `--home` names the home instead of
 finding it by slug. This works for every runner kind, `tmux` included (see
-[cousins](cousins.md)): a legacy tmux cousin (no `[agent] runner`) has no
-stream (its view is its tmux pane instead): exit 2, as for an unknown
-cousin.
+[cousins](cousins.md)); a cousin with no `[agent] runner` has no stream:
+exit 2, as for an unknown cousin.
 
 ```
 cousin-watch wren -f
@@ -284,8 +278,8 @@ cousin-watch wren --json --after 120
 `cousin-supervisor run` keeps an install's daemons up in one process: the
 console, the loops daemon, one `cousin-runner` per runner cousin (every
 cousin whose `cousin.toml` says `[agent] runner` is `sdk`, `fake`, `opencode`
-or `tmux`, unless `[agent] auto_start = false`; a legacy tmux cousin, one
-with no `[agent] runner` at all, is never its) and, for a runner
+or `tmux`, unless `[agent] auto_start = false`; a cousin with no
+`[agent] runner` at all is never its) and, for a runner
 cousin whose `[telegram]` is enabled and complete, its Telegram bridge
 (`telegram:<slug>`, started after the runner, stopped and held with it; see
 [telegram](telegram.md)), and each [plugin](plugins.md) service some cousin
@@ -343,9 +337,9 @@ cousin-supervisor start --name loops
 ```
 
 `cousin-migrate` switches a runner cousin between the `sdk` and `tmux` kinds,
-measures a cousin, and removes the keys 2.0.0 no longer reads. It moves nothing
-off the legacy tmux lane: 2.0.0 keeps no conversion (move each cousin on the
-last 1.x release first, or by hand: [migrating](migrating.md#a-cousin-with-no-runner)).
+measures a cousin, and removes the keys 2.0.0 no longer reads. It does not
+give a runner to a cousin that has none: 2.0.0 keeps no conversion (move each
+cousin on the last 1.x release first, or by hand: [migrating](migrating.md#a-cousin-with-no-runner)).
 `plan`, `apply` and `rollback` without `--to` exit 2 before doing anything:
 for a cousin with no `[agent] runner` with the one refusal line every entry
 point gives it, for a runner cousin with "name a kind with --to (sdk, tmux)".
@@ -464,7 +458,7 @@ cousin-sync-state --home cousins/wren
 
 `cousin-reply` stores a reply from the cousin to a person in its own chat
 history, in-process. The body comes from stdin or `-m`; `--image` attaches a picture and
-`--video` a video. It
+`--video` a video; `--reply-to ID` quotes the chat message with that id. It
 has no positional text argument.
 
 ```
@@ -506,7 +500,8 @@ cousins, in rounds ([meetings](meetings.md)). Subcommands: `list`, `show ID`,
 `open TOPIC SLUG... [--facilitator SLUG] [--timeout S]`, `post ID TEXT`,
 `skip ID`, `close ID`, `delete ID` (the user's side, `--user NAME`), `say ID TEXT`,
 `pass ID`, `minutes ID TEXT` (the cousin's side, from `COUSIN_HOME`; `--stdin`
-for long text).
+for long text). `list --state open|closing|closed` filters by state;
+`--json`, before the subcommand, prints JSON.
 
 ```
 cousin-meeting open "name the new sensor" wren kestrel --user ana
@@ -531,10 +526,16 @@ cousin-video gen "a slow pan across a misty ridge at dawn"
 `cousin-job` registers and tracks subagents and background jobs; the console's
 Jobs page reads the same store. Subcommands: `start KIND TITLE [-- CMD...]`
 (kinds `subagent`, `shell`, `build`, `other`), `done`, `fail`, `cancel`,
-`list`, `show`, `tail [-f]`.
+`list`, `show`, `tail [-f]`. `start` also takes the form `start KIND [options]
+-- TITLE [CMD...]`, every option before the `--` and the title after it, so a
+title that looks like a flag is only a title. Its options are `--desc`,
+`--json`, and one of `--log PATH` or `--home-log REL`, a log path relative to
+the cousin's home and confined to it (absolute, `~`, `..` and `.secrets` are
+refused).
 
 ```
 cousin-job start shell "rebuild the index" -- cousin-memory reindex
+cousin-job start shell --home-log logs/reindex.log -- "rebuild the index" cousin-memory reindex
 ```
 
 A cousin's `job` tool does the same with `run` (`title`, `argv` as an array,
@@ -574,8 +575,11 @@ cousin-tracker add "move the photo archive" --domain infra --tag q4
 
 `cousin-hive` runs a standalone queen and manages node tokens. Subcommands:
 `serve`, `mint`, `revoke`, `forget`, `nodes`, `send`, `recall`,
-`import-legacy`. Most installs use the console as the queen instead. See
-[remote cousins](remote-cousins.md).
+`import-legacy`. `serve` takes `--host` (0.0.0.0), `--port` (8101) and
+`--checkin-seconds`; `send` and `recall` take `--queen URL` and `--token T`;
+`import-legacy` takes the old queen's `--tokens` file. Most installs use the
+console as the queen instead. See
+[remote cousins](remote-cousins.md#cousin-hive) for every flag.
 
 ```
 cousin-hive mint kestrel --scope own,shared
@@ -592,18 +596,14 @@ cousin-spawn-node kestrel --queen-url http://192.0.2.10:8600 \
 ## Console and tools
 
 `cousin-console` serves the web console (default `127.0.0.1:8600`), or
-creates a login with `adduser NAME`. See [console](console.md).
+creates a login with `adduser NAME`. `--secure-cookie` marks the session
+cookie Secure, for a console behind TLS; `--tmux-bin` names the tmux binary
+its pane view runs for a `tmux`-kind cousin (default `tmux`). See
+[console](console.md).
 
 ```
 cousin-console --host 0.0.0.0 --port 8600
 cousin-console adduser ana
-```
-
-`cousin-ui` is the old name of the console. It prints a note and runs
-`cousin-console` with the same flags.
-
-```
-cousin-ui --port 8600
 ```
 
 `cousin-mcp` is the MCP server a cousin's harness starts (stdio). By hand you
@@ -660,7 +660,8 @@ cousin-cache-audit --days 7 --diagnose
 ```
 
 `cousin-version` prints the framework version (and commit in a git checkout),
-or bumps it in `pyproject.toml`.
+or bumps it in `pyproject.toml`; `--pyproject PATH` reads or bumps another
+`pyproject.toml` than the checkout's.
 
 ```
 cousin-version bump patch
@@ -681,7 +682,9 @@ cousin-gate --root . --denylist denylist.txt --git-visible
 
 ## Removed in 2.0.0
 
-No cousin runs a chat server of its own in 2.0.0: the console answers chat
+No local cousin runs a chat server of its own in 2.0.0 (a remote hive
+node runs its own small chat endpoint, see
+[remote cousins](remote-cousins.md)): the console answers chat
 in-process over the cousin's own store, the runner's inbox carries delivery,
 and the hive carries a node's chat through the queen.
 

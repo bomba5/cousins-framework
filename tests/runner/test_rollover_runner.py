@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import pathlib
 import threading
 import time
 import unittest
@@ -47,6 +48,7 @@ class RolloverCase(HermeticCase):
                 fh.write('\n[session]\nstart_hooks = ["echo start >> %s/hooks.log"]\n'
                          'end_hooks = ["touch %s/ended"]\n' % (self.home, self.home))
         self.clients, self.ended_before_new_client = [], None
+        self.prompts = []
         holder = {}
 
         def handoff_turn():
@@ -70,6 +72,8 @@ class RolloverCase(HermeticCase):
                 scripts = [[init_msg(session=sid), assistant(text="ok"), result(session=sid)]
                            for _ in range(8)]
             self.clients.append(ScriptedClient(options, scripts))
+            # the prompt file as this client's CLI would read it at its start
+            self.prompts.append(pathlib.Path(options.extra_args["append-system-prompt-file"]).read_bytes())
             return self.clients[-1]
         r = SdkRunner(self.home, client_factory=factory, drain_timeout_s=2.0,
                       handoff_deadline_s=deadline)
@@ -107,8 +111,11 @@ class TestRollover(RolloverCase):
     def test_the_prompt_passed_to_both_clients_is_the_same_bytes(self):
         r = self.build(); r.start(); self.work(r)
         r.rollover("max_age")
-        a, b = (c.options.system_prompt["append"] for c in self.clients)
-        self.assertEqual(a.encode(), b.encode())
+        self.assertEqual(len(self.prompts), 2)
+        self.assertEqual(self.prompts[0], self.prompts[1])
+        a, b = (c.options for c in self.clients)
+        self.assertEqual((a.system_prompt, a.extra_args["append-system-prompt-file"]),
+                         (b.system_prompt, b.extra_args["append-system-prompt-file"]))
 
     def test_an_unanswered_handoff_ends_in_an_emergency_handoff_from_the_real_transcript(self):
         r = self.build(handoff=False, deadline=0.5); r.start(); self.work(r)

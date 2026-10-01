@@ -113,6 +113,25 @@ a `late` note) or a rollback, which then rolls back a switch.
 A cousin with no `[agent] runner` is a legacy tmux cousin: it has no runner at
 all.
 
+### The system prompt is a private file
+
+The runner composes the cousin's system prompt (the law, the generated
+contract, the authored identity and self-portrait, the operator rules;
+`runner/prompt.py`) and never puts it on a command line or in an
+environment variable: an argv is readable by every local user (`ps`,
+`/proc/<pid>/cmdline`). The text is written to a file only the cousin's user
+can read (mode 0600, in `data/run/`, mode 0700), replaced atomically before
+every start, reconnect and [rollover](../glossary.md#rollover), and the CLI gets the path:
+
+| kind | file | how the agent gets it |
+|---|---|---|
+| `sdk` | `data/run/system-prompt.md` | `--append-system-prompt-file`, beside the `claude_code` preset |
+| `tmux` | `data/run/tmux-context.md` | `--append-system-prompt-file` on a fresh start, from the launcher |
+| `opencode` | none | the `system` field of each prompt, over the loopback HTTP API with the server's password |
+
+A changed identity reaches the next fresh session; a resumed SDK session
+keeps the prompt it first recorded (the preset's `snapshot`).
+
 ## Picking one
 
 - On Claude models, `runner = "sdk"`, on the account you want (`host`, a
@@ -333,10 +352,11 @@ none is a contract item:
   queues typed input to the turn's end or interrupts, never folds, so an
   operator's or a peer's message put while a turn runs is claimed only once
   the pane goes idle (see "What folds into a running turn" above).
-- The composed system prompt reaches the pane only on a fresh start, as
-  `--append-system-prompt` read from `data/run/tmux-context.md`; a resume or
-  a kind switch gets a short pointer instead, never the full block again
-  (`runner/prompt.py`, R10).
+- The composed system prompt reaches the pane only on a fresh start: the
+  launcher passes the CLI `--append-system-prompt-file` with the path of
+  `data/run/tmux-context.md` (a private file, see "The system prompt is a
+  private file" above); a resume or a kind switch gets a short pointer
+  instead, never the full block again (`runner/prompt.py`, R10).
 
 ## Known gaps on tmux
 

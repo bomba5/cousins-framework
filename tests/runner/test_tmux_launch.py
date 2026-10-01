@@ -129,9 +129,31 @@ class TestMain(LaunchCase):
         self.assertEqual(seen["env"]["DISABLE_AUTOUPDATER"], "1")
         for flag in FORBIDDEN:
             self.assertNotIn(flag, seen["argv"])
-        at = seen["argv"].index("--append-system-prompt")
-        self.assertEqual(seen["argv"][at + 1], "# Framework law\n\nthe block\n")
+        at = seen["argv"].index("--append-system-prompt-file")
+        context = home / "data" / "run" / "tmux-context.md"
+        self.assertEqual(seen["argv"][at + 1], os.path.abspath(context))
         self.assertNotIn("sk-", " ".join(seen["argv"]))
+
+    def test_the_block_is_handed_over_as_a_file_never_as_argv_text(self):
+        """#154: the block on the CLI's argv is readable by every local user
+        (ps, /proc/<pid>/cmdline); the CLI gets the private file's path."""
+        home = self.home()
+        rc, seen = self.run_main(home, fresh=True, environ={
+            "PATH": "/usr/bin", "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
+        self.assertEqual(rc, 0)
+        self.assertNotIn("--append-system-prompt", seen["argv"])
+        for element in seen["argv"]:
+            self.assertNotIn("the block", element)
+            self.assertNotIn("Framework law", element)
+
+    def test_a_fresh_start_without_its_block_file_is_refused(self):
+        home = self.home()
+        (home / "data" / "run" / "tmux-context.md").unlink()
+        rc, seen = self.run_main(home, fresh=True, environ={
+            "PATH": "/usr/bin", "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
+        self.assertEqual(rc, 2)
+        self.assertEqual(seen, {})
+        self.assertIn("context block", (home / "data" / "run" / "tmux-launch-exit.txt").read_text())
 
     def test_a_resume_gets_no_appended_block(self):
         home = self.home()
@@ -139,6 +161,7 @@ class TestMain(LaunchCase):
                                                               "FRAMEWORK_ROOT": os.environ["FRAMEWORK_ROOT"]})
         self.assertEqual(rc, 0)
         self.assertNotIn("--append-system-prompt", seen["argv"])
+        self.assertNotIn("--append-system-prompt-file", seen["argv"])
 
     def test_a_named_login_keeps_its_own_config_dir_through_the_deny(self):
         home = self.home('[accounts.team]\nkind = "claude-login"\nconfig_dir = "accounts/team"\n',

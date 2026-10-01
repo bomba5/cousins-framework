@@ -639,7 +639,7 @@ cousin-sweep compact --target both
 ```
 
 `cousin-tool-surface` writes `data/tool-surface.md`, one line per command from
-its `--help`. The boot packet quotes it so a new generation knows its tools.
+its `--help`, a list a cousin can read instead of re-discovering its tools.
 `--root` picks the install (else `FRAMEWORK_ROOT`); `--bin` is a directory of
 installed `cousin-*` wrappers to run instead of each entry point through this
 interpreter.

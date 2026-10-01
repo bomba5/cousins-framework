@@ -580,7 +580,9 @@ are a heartbeat every hour and a flip once a day, and every wake is a
 using, `cousin-loops flips` shows when each one flips, and
 `context_beat_seconds` and `flip_at` in a cousin's `cousin.toml` change both
 (`flip_at = "never"` opts a cousin out of the daily flip entirely). Start with
-one cousin until you have seen a day of it.
+one cousin until you have seen a day of it. Its first minutes go on
+bookkeeping (a state digest, then a first heartbeat);
+[what the ceremony buys](ceremony.md) lists each such cost and its knob.
 
 ```
 cousin-spawn wren --name Wren --role "helps me around the house" \
@@ -599,9 +601,9 @@ cousin-spawn wren --start
 - `cousin-mcp approve` marks the home as trusted in `~/.claude.json` and
   enables the cousin's `cousin` MCP server, so Claude Code doesn't stop on
   its trust prompt. The file exists once Claude Code has run once.
-- `cousin-tool-surface` writes `data/tool-surface.md`, which the boot packet
-  quotes. Without it the first boot is marked degraded. The daily timer keeps
-  it fresh after this.
+- `cousin-tool-surface` writes `data/tool-surface.md`, one line per
+  `cousin-*` command, a list a cousin can read instead of re-discovering its
+  tools. The daily timer keeps it fresh after this.
 - `cousin-spawn wren --start` asks the running supervisor to start Wren's
   runner. On a cousin that's already running it does nothing. With no
   supervisor running it fails (exit 1) and the home is kept: start the

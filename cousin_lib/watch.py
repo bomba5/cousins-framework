@@ -65,7 +65,7 @@ def summary(kind, p):
         return "%s %s%s (%s ms)" % (p.get("tool"), p.get("command") or "",
                                     " error" if p.get("is_error") else "", p.get("ms"))
     if kind == "result":
-        flags = [f for f in ("interrupted", "is_error") if p.get(f)]
+        flags = [f for f in ("interrupted", "is_error", "background") if p.get(f)]
         return "rows %s%s" % (p.get("inbox_ids"), " " + " ".join(flags) if flags else "")
     if kind == "error":
         return str(p.get("error") or "")

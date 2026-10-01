@@ -586,6 +586,9 @@ for the summary). A click outside, Escape or the chip again closes it. A
 task ends on its notification or on a final status update, whichever comes
 first; a runner restart marks the tasks still running as lost. A stream
 recorded before 1.27 has no task details, so its tasks are only counted.
+When a background task ends, the agent may take a turn of its own to read
+its notification; the log shows it as a turn headed "background", closed by
+the usual turn line.
 Below it the log holds one row per real thing: a turn under a rule (who
 sent it, when, and the start of the message; click for all of it, with the
 recall hits as a chip), each tool call with its result as one card (a tick

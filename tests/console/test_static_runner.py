@@ -514,6 +514,30 @@ process.stdout.write(JSON.stringify({
         # the checkpoint before the result and the meta after it land on one line
         self.assertEqual(got["footer"], "done · 3 steps · 255k tok · $0.44 est · 2 memories · checkpoint")
 
+    def test_a_background_turn_is_its_own_turn_row(self):
+        # #134: a CLI turn of its own between turns (a task notification)
+        got = self.run_node(self.EVENTS + """
+const more = [
+  E(30, "system", {subtype: "background_turn", phase: "start"}),
+  E(31, "user", {text: "<task-notification>done</task-notification>"}),
+  E(32, "text", {text: "noted"}),
+  E(33, "result", {num_turns: 1, is_error: false, background: true, inbox_ids: []}),
+  E(34, "system", {subtype: "background_turn", phase: "handed_over"}),
+  E(35, "system", {subtype: "background_end"}),
+];
+const m = rpModel(evs.concat(more));
+const rows = m.rows.slice(8);
+process.stdout.write(JSON.stringify({
+  types: rows.map(r => r.t), head: rpTurnHead(rows[0]),
+  lines: rows.filter(r => r.t === "line").map(r => r.text), turns: m.strip.turns,
+}));""")
+        self.assertEqual(got["types"], ["turn", "text", "footer", "line", "line"])
+        self.assertEqual(got["head"]["head"], "background")
+        self.assertEqual(got["head"]["snippet"], "<task-notification>done</task-notification>")
+        self.assertEqual(got["lines"], ["background turn handed to the next turn",
+                                        "the CLI's stream ended between turns"])
+        self.assertEqual(got["turns"], 2)
+
     def test_the_strip_reads_the_runner_now(self):
         got = self.run_node(self.EVENTS + """
 const done = rpModel(evs).strip;

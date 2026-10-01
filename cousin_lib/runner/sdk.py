@@ -432,6 +432,10 @@ class SdkRunner:
         # cleared once an interrupt reaches a live turn
         self._interrupt_idle = False
         self._reinterrupting = False
+        # #134: the reader of the CLI's stream between turns (_pump_run),
+        # and whether a CLI turn of its own (a task notification) is open
+        self._pump = None
+        self._pump_turn_open = False
         self._turn_seq = 0
         self._resume_id = None   # the last session_id an init or result named
         self._client_id = None   # a fresh uuid per connect (usage.record's client key)
@@ -1247,6 +1251,7 @@ class SdkRunner:
             with self._doorbell() as listener:
                 while not self._stop.is_set() and self.fatal is None:
                     if self._login_blocked:
+                        await self._pump_stop()       # the login may replace the client
                         await self._await_login()     # no claim, no turn while it holds
                         continue
                     await self._backoff()
@@ -1260,9 +1265,11 @@ class SdkRunner:
                         await asyncio.sleep(0.2)  # a wedged store must not spin the loop
                         continue
                     if not rows:
+                        self._pump_start()            # #134: the CLI is not always quiet
                         await asyncio.get_running_loop().run_in_executor(
                             None, listener.wait, self.poll_s)
                         continue
+                    await self._pump_stop()           # the row's turn reads from here on
                     if rows[0]["source"] == INTERRUPT:
                         # between turns: nothing to interrupt, and never a turn
                         self.inbox.done(rows[0]["id"], FAILED, NO_TURN)
@@ -1296,6 +1303,7 @@ class SdkRunner:
                             await self._flush_session()
         finally:
             watchdog.cancel()
+            await self._pump_stop()
             await self._stop_review()
             if not self._resume_lost:
                 # a stop never loses the last id; a lost resume's new id waits
@@ -1858,6 +1866,80 @@ class SdkRunner:
             if self.machine.state == "errored":
                 self.machine.to("idle", "recovered")
 
+    def _pump_start(self):
+        """#134: read the CLI's stream between turns. The CLI is not quiet
+        there: a background task (a subagent, a background shell) streams
+        its progress, and each completion starts a CLI turn of its own (a
+        task notification). Unread, the SDK's message buffer (100) fills,
+        its reader blocks, and the control requests behind it go unread:
+        every hook and in-process tool call of the background task times
+        out. A pump that ended (the stream stopped) is not restarted until
+        a turn has used the client."""
+        if self._pump is None and self._client is not None and self.fatal is None:
+            self._pump = asyncio.ensure_future(self._pump_run())
+
+    async def _pump_stop(self):
+        """Stop the pump before anything else reads or replaces the client.
+        A CLI turn of its own still open is left to the next reader: the
+        row written next is folded into it or queued after it, and `_turn`
+        closes the row on the result its echo precedes (#66). A read cut at
+        the instant a message arrived can lose that message, as any
+        cancelled read of the SDK's stream can (`_next`)."""
+        task, self._pump = self._pump, None
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except BaseException:  # noqa: BLE001 - the pump records its own failures
+            pass
+        if self._pump_turn_open:
+            self._pump_turn_open = False
+            self.stream.append("system", {"subtype": "background_turn", "phase": "handed_over"})
+
+    async def _pump_run(self):
+        """Record every message read between turns, as a turn records its
+        own; a CLI turn of its own is a `background_turn` start and a
+        `result` with no inbox ids and `background: True`, followed by the
+        usual post-result work (`_after_turn`). Ends when the stream stops
+        without a result (the CLI died: the next turn finds out and
+        recovers) or on a read failure, said as an `error` event."""
+        sdk = _sdk()
+        try:
+            while True:
+                got_result = False
+                responses = self._client.receive_response()
+                try:
+                    async for msg in responses:
+                        background = isinstance(msg, sdk.SystemMessage) \
+                            and msg.subtype in TASK_SUBTYPES
+                        if not background and not self._pump_turn_open \
+                                and not isinstance(msg, sdk.ResultMessage):
+                            self._pump_turn_open = True
+                            self.stream.append("system", {"subtype": "background_turn",
+                                                          "phase": "start"})
+                        self._record(sdk, msg)
+                        if isinstance(msg, sdk.ResultMessage):
+                            got_result = True
+                            self._pump_turn_open = False
+                            self.stream.append("result", {
+                                "inbox_ids": [], "background": True,
+                                "is_error": bool(msg.is_error), "num_turns": msg.num_turns,
+                                "total_cost_usd": msg.total_cost_usd,
+                                "session_id": msg.session_id, "usage": msg.usage})
+                            await self._after_turn(msg)
+                finally:
+                    await _aclose(responses)
+                if not got_result:
+                    self.stream.append("system", {"subtype": "background_end"})
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a pump failure is said, never raised
+            self.stream.append("error", {"error": "between turns: %s: %s"
+                                         % (type(exc).__name__, exc)})
+
     async def _resync(self):
         """After a turn failed mid-stream, the client's one message stream
         still holds the rest of that turn; left there, the next
@@ -1945,8 +2027,9 @@ class SdkRunner:
                                               "bodies": [first["body"]],
                                               "thread_id": first["thread_id"]})
             sending = True
-            # written and awaited before anything is read: the CLI is idle
-            # between turns, so its stdout is not filling
+            # written and awaited before anything is read: the pump read
+            # the stream up to here (#134), and the SDK buffers what comes
+            # while the write is awaited
             await self._send(sdk, first, open_rows)
             self._write_error = None
             self._unwritten = []

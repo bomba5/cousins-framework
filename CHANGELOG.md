@@ -3,6 +3,32 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 2.3.2 - 2026-10-01
+
+### Fixed
+
+- **The SDK runner reads the CLI between turns** (#134). It read the CLI's
+  stream only inside a turn, on the assumption that the CLI is quiet
+  between turns. It is not when a background task runs: a subagent or a
+  background shell streams its progress after the turn that started it has
+  ended, and each completion starts a CLI turn of its own (a task
+  notification). Unread, the SDK's message buffer (100 messages) filled,
+  its reader blocked, and the control requests queued behind it were never
+  answered: about ten minutes after the turn ended, every hook and
+  in-process tool call of the background task failed ("PreToolUse hook did
+  not respond before its timeout"), and the task notifications were
+  dropped ("UserPromptSubmit hook callback timed out"). The runner now
+  reads between turns and records what it reads like a turn's own
+  messages. A CLI turn of its own is a `system` event
+  `{"subtype": "background_turn", "phase": "start"}` and a `result` with
+  `background: true` and no inbox ids, followed by the usual usage record,
+  extraction and memory proposal; the console's reasoning pane shows it as
+  a turn headed "background". A row that arrives while one is open is
+  written into it (`background_turn` phase `handed_over`) and closed by the
+  result its echo precedes. A stream that ends between turns is a
+  `background_end` event; the next turn finds the dead CLI and recovers as
+  before.
+
 ## 2.3.1 - 2026-09-30
 
 ### Changed

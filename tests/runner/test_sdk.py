@@ -1711,6 +1711,107 @@ class TestMirrorError(HermeticCase):
         self.assertTrue(any(e.get("mirror_error") and "disk full" in e["error"] for e in errors))
 
 
+class TestIdlePump(HermeticCase):
+    """#134: between turns the runner reads the CLI's stream. A background
+    task streams progress after the turn that started it has ended, and
+    its completion starts a CLI turn of its own; unread, the SDK's buffer
+    fills and every hook of the background task times out."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = temp_home(self)
+
+    def _runner(self, scripts):
+        made = {}
+
+        def factory(options):
+            made["client"] = ScriptedClient(options, scripts)
+            return made["client"]
+        r = SdkRunner(self.home, client_factory=factory)
+        self.addCleanup(lambda: r.stop(timeout=5))
+        return r, made
+
+    def _idle_after_one_turn(self, r):
+        r.start()
+        receipt = r.enqueue(Item("operator:priya", "chat", "hi", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
+        self.assertTrue(_wait(lambda: r.machine.state == "idle"))
+
+    def _progress(self, n):
+        from claude_agent_sdk._internal.message_parser import parse_message
+        return [parse_message({"type": "system", "uuid": "u%d" % i, "session_id": "s-1",
+                               "subtype": "task_progress", "task_id": "t1",
+                               "description": "Audit", "last_tool_name": "Grep",
+                               "tool_use_id": "tu-9",
+                               "usage": {"total_tokens": 1, "tool_uses": 1, "duration_ms": 1}})
+                for i in range(n)]
+
+    def _subtypes(self, r, subtype):
+        return [e["payload"] for e in r.events() if e["kind"] == "system"
+                and e["payload"].get("subtype") == subtype]
+
+    def test_background_progress_is_read_and_recorded_between_turns(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(self._progress(150))
+        self.assertTrue(_wait(lambda: not made["client"].stream))
+        self.assertTrue(_wait(lambda: len(self._subtypes(r, "task_progress")) == 150))
+        self.assertEqual(self._subtypes(r, "background_turn"), [])   # progress is no turn
+        self.assertEqual(r.machine.state, "idle")
+
+    def test_a_cli_turn_of_its_own_is_a_background_result(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend([echo("<task-notification>done</task-notification>"),
+                                      assistant(text="noted"), result(cost=0.02)])
+        self.assertTrue(_wait(lambda: any(p.get("background") for p in _results(r))))
+        bg = [p for p in _results(r) if p.get("background")]
+        self.assertEqual(len(bg), 1)
+        self.assertEqual(bg[0]["inbox_ids"], [])
+        self.assertEqual(bg[0]["total_cost_usd"], 0.02)
+        self.assertEqual(self._subtypes(r, "background_turn"), [{"subtype": "background_turn",
+                                                                 "phase": "start"}])
+        texts = [e["payload"]["text"] for e in r.events() if e["kind"] == "text"]
+        self.assertIn("noted", texts)
+        self.assertTrue(_wait(lambda: len([e for e in r.events() if e["kind"] == "usage"]) == 2))
+
+    def test_a_row_after_a_background_turn_closes_on_its_own_result(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()],
+                                [assistant(text="second"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend([assistant(text="noted"), result()])
+        self.assertTrue(_wait(lambda: any(p.get("background") for p in _results(r))))
+        receipt = r.enqueue(Item("operator:priya", "chat", "again", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "delivered")
+        mine = [p for p in _results(r) if receipt.inbox_id in p["inbox_ids"]]
+        self.assertEqual(len(mine), 1)
+        self.assertNotIn("background", mine[0])
+
+    def test_a_row_landing_mid_background_turn_is_handed_over_and_delivered(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(_compile([assistant(text="bg"), ("SLOW", 1.0),
+                                               assistant(text="bg done"), result()]))
+        self.assertTrue(_wait(lambda: self._subtypes(r, "background_turn")))
+        receipt = r.enqueue(Item("operator:priya", "chat", "now", sender="Priya"))
+        self.assertTrue(_wait(lambda: r.inbox.get(receipt.inbox_id)["state"] == "done"))
+        self.assertEqual(r.inbox.get(receipt.inbox_id)["outcome"], "delivered")
+        self.assertIn({"subtype": "background_turn", "phase": "handed_over"},
+                      self._subtypes(r, "background_turn"))
+        texts = [e["payload"]["text"] for e in r.events() if e["kind"] == "text"]
+        self.assertIn("bg done", texts)
+
+    def test_a_stream_that_ends_between_turns_is_said_once(self):
+        r, made = self._runner([[init_msg(), assistant(text="ok"), result()]])
+        self._idle_after_one_turn(r)
+        made["client"].stream.extend(_compile(["END"]))
+        self.assertTrue(_wait(lambda: self._subtypes(r, "background_end")))
+        time.sleep(0.5)     # several idle polls: the ended pump is not restarted
+        self.assertEqual(len(self._subtypes(r, "background_end")), 1)
+        self.assertIsNone(r.fatal)
+
+
 class TestTaskEvents(HermeticCase):
     """#129: a background task's lifecycle reaches the stream with the
     fields the pane's task list shows, and nothing else of the raw payload

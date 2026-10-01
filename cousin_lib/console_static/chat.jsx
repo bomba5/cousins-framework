@@ -1862,6 +1862,15 @@ function rpModel(events) {
       // the SDK reports one around many ordinary tool calls
       if (RP_TASK_SUBTYPES[p.subtype]) strip.bgUntracked = Math.max(0, strip.bgUntracked + rpTaskEvent(strip.tasks, p, ts));
       else if (p.subtype === "fresh" || p.subtype === "init" || p.subtype === "resumed") rpBoot(rows, key, ev);
+      // #134: a CLI turn of its own between turns (a task notification)
+      else if (p.subtype === "background_turn" && p.phase === "start") {
+        turn = { t: "turn", key, ev, thread: "background", bodies: [], user: null, recall: null, meta: newMeta() };
+        recalls = [];
+        rows.push(turn);
+      }
+      else if (p.subtype === "background_turn" || p.subtype === "background_end")
+        rows.push({ t: "line", key, ev, cls: "rp-dim",
+                    text: p.subtype === "background_end" ? "the CLI's stream ended between turns" : "background turn handed to the next turn" });
       else if (p.subtype === "api_retry") {
         const auth = p.error_status === 401 || p.error_status === 403;
         rows.push({ t: "line", key, ev, cls: auth ? "rp-err" : "rp-warn",

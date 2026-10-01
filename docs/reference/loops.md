@@ -50,9 +50,9 @@ prompt = "Review the week in memory/raw and update STATUS.md."
 
 Exactly one of `interval_seconds`, `daily_at` and `cron`. None or two is an error, not a guess.
 
-A loop that doesn't validate (bad name, no schedule or two, empty prompt) is skipped and the reason is reported: on the daemon's stderr every tick, and in the `errors` list of the console's loops view. A `cousin.toml` that doesn't parse at all is reported the same way, naming the file. The other loops of that cousin and every other cousin still run.
+A loop that doesn't validate (bad name, no schedule or two, empty prompt, a `cron` field that doesn't parse) is skipped and the reason is reported: on the daemon's stderr every tick, and in the `errors` list of the console's loops view. A `cousin.toml` that doesn't parse at all is reported the same way, naming the file. The other loops of that cousin and every other cousin still run.
 
-Saving loops from the console (or `loops.save_cousin_loops`) validates the whole list first and refuses it naming the bad entry (`loops[2]: duplicate name 'digest'`), then rewrites only the `[[loops]]` tables, keeps the rest of the file, and checks the result parses back to the same thing before it replaces the file. `days` is lowercased on the way.
+Saving loops from the console (or `loops.save_cousin_loops`) validates the whole list first, each `cron` expression included, and refuses it naming the bad entry (`loops[2]: duplicate name 'digest'`), then rewrites only the `[[loops]]` tables, keeps the rest of the file, and checks the result parses back to the same thing before it replaces the file. `days` is lowercased on the way.
 
 ## When a loop is due
 
@@ -78,16 +78,16 @@ Every tick does this, in this order:
    - the context heartbeat (if due) and every due loop are collected and delivered together, as one message.
 3. **Requests.** Consume pending manual fires.
 4. **One-shots.** Deliver due `cousin-schedule` jobs.
-5. **Transcript guard.** Maybe queue one flip for a cousin whose session transcript got too big.
+5. **Index and meetings.** Queue the memory index refresh for the cousins that need it, and run the meetings' tick.
 6. **Housekeeping.** Mark pending requests older than their TTL as `expired`, write `last_tick`, save the state.
 
-A failure inside one cousin (an exception, a bad file) is reported and the walk moves on to the next cousin. A broken one-shot store or transcript guard is reported and doesn't cost the loops their tick. Errors go to the daemon's stderr, prefixed `cousin-loops:`.
+A failure inside one cousin (an exception, a bad file) is reported and the walk moves on to the next cousin. A broken one-shot store, index refresh or meetings store is reported and doesn't cost the loops their tick. Errors go to the daemon's stderr, prefixed `cousin-loops:`.
 
 ## Delivery
 
 A cousin with no `[agent] runner` gets nothing: 2.0.0 refuses it by name ([migrating](../migrating.md#a-cousin-with-no-runner)).
 
-A runner cousin, including one on the `tmux` runner kind (its own tmux pane, driven by `TmuxRunner`, not the legacy [lane](../glossary.md#lane)'s send-keys), gets each delivery as one row in its [inbox](../glossary.md#inbox) (`data/inbox.db`), on [thread](../glossary.md#thread) `loop:daemon` with source `loop`. The row is kept before the daemon moves on, so the put is the delivery: the daemon never waits for the [turn](../glossary.md#turn).
+A runner cousin, whatever its kind (the `tmux` kind included, which drives its own tmux pane through `TmuxRunner`), gets each delivery as one row in its [inbox](../glossary.md#inbox) (`data/inbox.db`), on [thread](../glossary.md#thread) `loop:daemon` with source `loop`. The row is kept before the daemon moves on, so the put is the delivery: the daemon never waits for the [turn](../glossary.md#turn).
 
 What the cousin gets:
 
@@ -110,7 +110,7 @@ What the cousin gets:
 - a one-shot: `[cousin-schedule] <prompt>`;
 - a flip warning: `[cousin-flip] wrap up tool calls - flip in 5 minutes`, and so on.
 
-Nothing is recorded as fired until delivery reports success. If typing fails, the loops stay due, the heartbeat's file changes stay unreported, the trigger file stays, the one-shot stays pending, and the next tick tries again. The flip side: if the daemon dies between typing and saving, the same thing is delivered again. So everything here is at least once. Write loop prompts that don't mind running twice now and then; heartbeats already don't.
+Nothing is recorded as fired until the row is in the inbox. If the put fails (the inbox can't be opened or written), the loops stay due, the heartbeat's file changes stay unreported, the trigger file stays, the one-shot stays pending, and the next tick tries again. The flip side: if the daemon dies between the put and saving its state, the same thing is delivered again. So everything here is at least once. Write loop prompts that don't mind running twice now and then; heartbeats already don't.
 
 ## Context heartbeats
 
@@ -155,7 +155,7 @@ A manual fire is a row in `data/loop-requests.db` that the daemon consumes on it
 
 A fire request is `done` when delivered, `failed` with `no such loop 'x'` for an unknown or disabled loop, or `failed` with `delivery failed`. A manual fire doesn't move the loop's schedule, except for `context-heartbeat`.
 
-A request still pending after its TTL is marked `expired` with `daemon missed ticks: request outlived its TTL`. It never fires late. The console runs the same expiry check, so you see expired rows even while the daemon is down.
+A request still pending after its TTL is marked `expired` with `daemon missed ticks: request outlived its TTL`. It never fires late. Only the daemon's tick runs that check, so while the daemon is down an over-age request still shows as `pending`.
 
 The daemon only claims the kinds it knows (`fire` and `flip`). Anything else sits pending until it expires.
 
@@ -189,11 +189,11 @@ cousin-schedule cancel 12
 
 Step 4 of each tick delivers every pending job whose time has come, as `[cousin-schedule] <prompt>`. A job for a cousin that's down stays pending, quietly, until the cousin is back. A failed delivery keeps the job pending and reports it. The job is marked `fired` only after delivery, so after a crash you may get it twice but never zero times.
 
-`cousin-schedule tick` fires due jobs by hand, for an install without the daemon. It doesn't check whether the cousin is alive, and it marks a job fired even when the typing was skipped (a pane showing an attention pattern), so prefer the daemon.
+`cousin-schedule tick` fires due jobs by hand, for an install without the daemon. It doesn't check whether the cousin's runner is up: it puts each due prompt into the cousin's inbox and marks the job fired once the put succeeded, so a cousin that is down gets it when its runner starts. A cousin with no `[agent] runner`, or an inbox that can't be written, keeps the job pending and the error is printed.
 
 ## Worker cousins
 
-A cousin with `[cousin] type = "worker"` has no tmux session and no heartbeat. When one of its loops is due, the daemon runs the command in `config/worker-cmd` as a tracked job instead:
+A cousin with `[cousin] type = "worker"` has no session and no heartbeat. When one of its loops is due, the daemon runs the command in `config/worker-cmd` as a tracked job instead:
 
 ```
 my-agent --print --cwd {home} {prompt}
@@ -201,15 +201,15 @@ my-agent --print --cwd {home} {prompt}
 
 The template is split like a shell line, then `{prompt}` and `{home}` are replaced in each word. Each run is a job titled `worker <slug>|<loop>` with its log under the jobs log directory; its exit code ends up in the job row, and a loop whose last job failed shows as `failed` in the console. Starting the job counts as the fire. Without `config/worker-cmd` the loop stays due and every tick reports `worker loop wren|digest due but no worker command configured`.
 
-Workers don't get trigger files, and a manual fire for a worker fails (there's no session to type into). Their loops fire on schedule only.
+Workers don't get trigger files, and a manual fire for a worker fails (there's no session to deliver to). Their loops fire on schedule only.
 
 ## Flips
 
-A flip isn't a loop. The daemon drives it three ways, all through the same `flip()` call ([lifecycle](lifecycle.md#the-flip)):
+A flip isn't a loop. The daemon drives it two ways, both through the same `flip()` call ([lifecycle](lifecycle.md#the-flip)):
 
-**Daily.** Every cousin, at its own `[lifecycle] flip_at = "HH:MM"` in `cousin.toml`, else the install's `default_flip_at`, else 04:00; `flip_at = "never"` opts one out and `cousin-loops flips` prints the effective time and its source. Once a day, as soon as the clock passes that time (late rather than skipped), for a session that started before it: the point is that a session is at most a day old. A cousin whose current session started at or after the day's flip time (spawned or started since, or rolled over since) is not flipped that day, and neither is one that has never started a session; its day is marked done and the next day's flip time is its first. When the session started is `data/generation-started.json`, which the framework writes at every generation start: a [rollover](../glossary.md#rollover) or flip, and a runner's fresh start of its session (a first boot moves no generation). A home from before that file falls back to the last change of `data/generation.txt`. At most one daily flip per tick, and none on a tick where a timed flip ran, so when several cousins share a time they flip one per tick instead of all building boot packets at once. The date of the last daily flip is kept in the state file, so a failed flip isn't retried that day; it's reported. Workers are skipped. An unparsable `flip_at` is reported every tick.
+**Daily.** Every cousin, at its own `[lifecycle] flip_at = "HH:MM"` in `cousin.toml`, else the install's `default_flip_at`, else 04:00; `flip_at = "never"` opts one out and `cousin-loops flips` prints the effective time and its source. Once a day, as soon as the clock passes that time (late rather than skipped), for a session that started before it: the point is that a session is at most a day old. A cousin whose current session started at or after the day's flip time (spawned or started since, or rolled over since) is not flipped that day, and neither is one that has never started a session; its day is marked done and the next day's flip time is its first. When the session started is `data/generation-started.json`, which the framework writes at every generation start: a [rollover](../glossary.md#rollover) or flip, and a runner's fresh start of its session (a first boot moves no generation). A home from before that file falls back to the last change of `data/generation.txt`. At most one daily flip per tick, and none on a tick where a timed flip ran, so when several cousins share a time they flip one per tick instead of all rolling over at once. The date of the last daily flip is kept in the state file, so a failed flip isn't retried that day; it's reported. Workers are skipped. An unparsable `flip_at` is reported every tick.
 
-**Timed.** A `flip` request with a `fire_at`, from the console's "flip in N minutes" or the transcript guard. While it waits, the cousin gets warnings at five minutes, one minute and 30 seconds:
+**Timed.** A `flip` request with a `fire_at`, from the console's "flip in N minutes". While it waits, the cousin gets warnings at five minutes, one minute and 30 seconds:
 
 ```
 [cousin-flip] wrap up tool calls - flip in 5 minutes
@@ -219,9 +219,7 @@ A flip isn't a loop. The daemon drives it three ways, all through the same `flip
 
 At `fire_at` it flips and marks the request `done`, or `failed` with the error. Cancelling (console, or `loops.cancel_request`) marks it `cancelled`. Only one timed flip per cousin can be pending.
 
-**Transcript guard.** With `flip_when_transcript_mb` and `transcripts_dir` set in `config/harness.toml`, every tick measures each live non-worker cousin's session transcript (`<transcripts_dir>/<session_id>.jsonl`, session id from `[runtime]`). For the biggest one over the limit it queues a timed flip five minutes out with a reason like `transcript over 40 MB (41.3 MB)`. One cousin per tick, never a second while one is pending for that cousin. Cousins without a session id or a transcript are skipped. Setting the limit without `transcripts_dir` gets reported every tick.
-
-Timed and daily flips run whether or not the cousin's runner is up.
+Neither kind starts a stopped cousin. A daily flip skips a cousin whose runner is down and marks its day done. A timed flip whose cousin is down at `fire_at` ends `failed` with `runner not running; start it before flipping`. Either way nothing is queued for the next start, so a flip never undoes an operator's stop.
 
 ## Files
 

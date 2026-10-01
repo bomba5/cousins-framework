@@ -73,6 +73,13 @@ page shows what your cousins are actually using; `cousin-loops flips` shows
 when each one flips. Both are adjustable, and a cousin can be told never to
 flip, but the defaults are on.
 
+Part of what a cousin spends is bookkeeping: your first cousin spends its
+first minutes reading a state digest and answering a heartbeat before you say
+a word, and later every session ends in a handoff. That is what lets it pick
+up tomorrow where it stopped today. [What the ceremony buys](docs/ceremony.md)
+lists each of these rituals, what it costs, what breaks without it, and the
+setting that turns it down or off.
+
 The agent also runs every tool without asking, which is what makes it able
 to work unattended and means it can do anything its user can do on that
 machine (in the container, on Docker). That is the trade this framework asks

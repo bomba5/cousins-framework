@@ -1,50 +1,34 @@
-"""How a cousin's agent authenticates: the harness's own login, or an
-API key the framework hands it.
+"""The 1.x auth mode (cousin.toml [runtime] auth, config/harness.toml
+[auth.api_key]) as far as anything still reads it, and the private-file
+reader the accounts and the console's secret writer share.
 
-Two modes, named here and nowhere else (every other module, the CLI,
-the console routes and the console page read them from this file or
-from the API that serves them):
+2.0.0 removed the mode: a runner authenticates through its [agent]
+account, and an anthropic-key account in config/accounts.toml replaces
+the api_key mode (removed_keys names the leftover keys). What stays:
 
-- MODE_LOGIN ("claude", the default): the agent runs on the harness's
-  own login. The key variable and the config-dir variable configured
-  in config/harness.toml [auth.api_key] are stripped from its
-  environment, so a key exported somewhere upstream (a shell rc, the
-  tmux server's global environment) can never switch it to metered
-  billing behind the operator's back.
-- MODE_API_KEY ("api_key"): the key comes from the cousin's own
-  <home>/.secrets/api-key.env (one line `<VAR>=<key>`, file 0600,
-  directory 0700) and reaches the agent only through its environment,
-  never its argv, never a log line. The agent is also pointed at an
-  isolated harness config directory that holds no login: a harness
-  that finds both its own login and a key in the environment may bill
-  the login (Claude Code does, and warns about it), so the key alone
-  is not enough.
+- read_mode, api_key_config, read_key and key_file, which
+  `cousin-migrate` reads to carry a 1.x api_key cousin over to an
+  account;
+- read_private_file and the key rules (KEY_MAX_CHARS, _KEY_RE), which
+  accounts.py and console/secrets.py apply to every secret file;
+- agent_env and the launcher (agent_launch.py), which the legacy start
+  path names.
 
-The mode lives in cousin.toml [runtime] auth and is read at every
-start of the agent, by the launcher (cousin_lib/agent_launch.py) that
-start_cousin puts in front of the agent command. Flips and restarts go
-through the same start, so they keep the mode.
-
-Everything harness-specific (variable names, which config entries are
-the login, which settings keys are account-bound) is configuration:
-config/harness.toml [auth.api_key]; the Claude Code values ship in
-config/harness.toml.claude-code.example.
+Two mode names, spelled here and nowhere else: MODE_LOGIN ("claude",
+the default, the harness's own login) and MODE_API_KEY ("api_key", a
+key from <home>/.secrets/api-key.env, one line `<VAR>=<key>`, file
+0600, directory 0700, handed over through the environment only).
 """
-import argparse
-import getpass
 import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import tempfile
 import tomllib
 from pathlib import Path
 
-from cousin_lib.config import (CousinConfig, FrameworkConfig,
-                               MissingConfigError, _read_harness_toml)
-from cousin_lib.trace import traced_cli
+from cousin_lib.config import MissingConfigError, _read_harness_toml
 
 # ---- the mode names: the one place they are spelled -------------------
 
@@ -67,15 +51,6 @@ _VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 class AuthError(Exception):
     """The mode cannot be used or switched; the message says why and
     never contains the key."""
-
-
-class AgentBusy(AuthError):
-    """The agent is mid-turn; a restart would cut the turn off."""
-
-
-class LaneRefused(AuthError):
-    """The cousin has no runner kind: 2.0.0 refuses it by name
-    (delivery.lane_refusal), before anything runs."""
 
 
 # ---- the mode ---------------------------------------------------------
@@ -178,25 +153,6 @@ def api_key_config(root):
     return out
 
 
-def busy_patterns(root):
-    """config/harness.toml busy_patterns: regexes that, found on the
-    agent's visible pane, mean it is mid-turn. [] when absent."""
-    try:
-        data = _read_harness_toml(root) or {}
-    except MissingConfigError as err:
-        raise AuthError(str(err))
-    patterns = _str_list(data, "busy_patterns",
-                         "config/harness.toml")
-    compiled = []
-    for p in patterns:
-        try:
-            compiled.append(re.compile(p, re.M))
-        except re.error as err:
-            raise AuthError("config/harness.toml busy_patterns %r: %s"
-                            % (p, err))
-    return compiled
-
-
 # ---- the key file -----------------------------------------------------
 
 def key_file(home):
@@ -257,7 +213,7 @@ def read_key(home, key_env):
     and the problem, never the content."""
     path = key_file(home)
     raw = read_private_file(path, what="key file",
-                            missing_hint=" (write it with cousin-auth <slug> --key-stdin)")
+                            missing_hint="")
     lines = [ln.strip() for ln in raw.decode("utf-8", "replace").splitlines()
              if ln.strip() and not ln.strip().startswith("#")]
     if not lines:
@@ -431,8 +387,7 @@ def check_isolated_dir(cfg):
     and ignore the key."""
     iso = cfg["isolated_dir"]
     if not iso.is_dir():
-        raise AuthError("the api_key config directory %s does not exist;"
-                        " switch to api_key with cousin-auth to build it"
+        raise AuthError("the api_key config directory %s does not exist"
                         % iso)
     for name in cfg["login_files"]:
         if os.path.lexists(iso / name) and _holds_login(
@@ -495,238 +450,3 @@ def launcher_argv(home, root):
     key at exec time; nothing secret is in these words."""
     return [sys.executable, str(LAUNCHER), "--home", str(home),
             "--root", str(root), "--"]
-
-
-# ---- busy detection and the switch ------------------------------------
-
-def _tmux(tmux_bin, tmux_socket, args):
-    cmd = [tmux_bin] + (["-S", tmux_socket] if tmux_socket else []) + args
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=10,
-                          check=False)
-
-
-def session_alive(session, tmux_bin="tmux", tmux_socket=None):
-    try:
-        return _tmux(tmux_bin, tmux_socket,
-                     ["has-session", "-t", "=" + session]).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def busy_reason(pane_text, patterns):
-    """The busy pattern the visible pane shows, else None."""
-    for rx in patterns:
-        m = rx.search(pane_text or "")
-        if m:
-            return rx.pattern
-    return None
-
-
-def pane_busy(session, root, tmux_bin="tmux", tmux_socket=None):
-    patterns = busy_patterns(root)
-    if not patterns:
-        return None
-    r = _tmux(tmux_bin, tmux_socket, ["capture-pane", "-p", "-t", session])
-    return busy_reason(r.stdout or "", patterns)
-
-
-def switch(root, slug, mode, *, restart=True, force=False, tmux_bin="tmux",
-           tmux_socket=None, start_chat_server=None, agent_cmd=None):
-    """Set a cousin's auth mode and, when it is running and restart is
-    on, restart its agent on the SAME session (the harness's resume, see
-    config/harness.toml [agent.resume]). All or nothing: every check
-    (mode usable, agent idle unless force, resume possible) runs before
-    cousin.toml changes or anything is killed.
-
-    A cousin with no runner kind is refused with delivery.lane_refusal
-    before anything runs, tmux included: the restart would kill its
-    legacy session and then be refused by start_cousin."""
-    from cousin_lib import delivery, spawn
-    check_mode(mode)
-    root = Path(root)
-    home = root / "cousins" / slug
-    try:
-        config = CousinConfig.load(home)
-    except MissingConfigError as err:
-        raise AuthError(str(err))
-    if not spawn.runner_lane(home):
-        raise LaneRefused(delivery.lane_refusal(home))
-    previous = read_mode(home)
-    result = {"slug": slug, "mode": mode, "previous": previous,
-              "running": False, "restarted": False}
-    cfg = api_key_config(root)
-    if mode == MODE_API_KEY:
-        if cfg is None:
-            raise AuthError("%s mode needs config/harness.toml"
-                            " [auth.api_key]" % MODE_API_KEY)
-        read_key(home, cfg["key_env"])
-        result["isolated"] = build_isolated_dir(cfg)
-        check_isolated_dir(cfg)
-    running = (not config.chat_host) and session_alive(
-        config.tmux_session, tmux_bin, tmux_socket)
-    result["running"] = running
-    resume_cmd = None
-    if running and restart:
-        if not force:
-            busy = pane_busy(config.tmux_session, root, tmux_bin,
-                             tmux_socket)
-            if busy:
-                raise AgentBusy(
-                    "%s is mid-turn (pane matches %r); wait for the turn"
-                    " to finish, or pass force" % (slug, busy))
-        if agent_cmd is None:
-            try:
-                agent_cmd = spawn._read_agent_cmd(root)
-            except spawn.SpawnError as err:
-                raise AuthError(str(err))
-        session_id = _session_id(home)
-        if not session_id:
-            raise AuthError("%s has no runtime.session_id to resume; set the"
-                            " mode with no restart and restart it yourself"
-                            % slug)
-        try:
-            resume_cmd = spawn.resume_agent_cmd(agent_cmd, root, session_id)
-        except spawn.SpawnError as err:
-            raise AuthError("cannot resume %s: %s; set the mode with no"
-                            " restart and restart it yourself" % (slug, err))
-    persist_mode(home, mode)
-    if resume_cmd is None:
-        return result
-    _tmux(tmux_bin, tmux_socket, ["kill-session", "-t", "=" +
-                                  config.tmux_session])
-    kwargs = {}
-    if start_chat_server is not None:
-        kwargs["start_chat_server"] = start_chat_server
-    try:
-        spawn.start_cousin(home, agent_cmd=resume_cmd, tmux_bin=tmux_bin,
-                           tmux_socket=tmux_socket, root=root,
-                           note="resumed session %s after the auth switch"
-                           " to %s" % (session_id[:8], mode), **kwargs)
-    except spawn.SpawnError as err:
-        raise AuthError("mode set to %s but the restart failed: %s"
-                        % (mode, err))
-    result["restarted"] = True
-    result["session_id"] = _session_id(home)
-    return result
-
-
-def _session_id(home):
-    try:
-        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
-    except (OSError, tomllib.TOMLDecodeError):
-        return ""
-    return str((data.get("runtime") or {}).get("session_id") or "")
-
-
-def status(root, slug, *, tmux_bin="tmux", tmux_socket=None):
-    """What the CLI and the console show: the mode, the modes, the key
-    file's state (never the key), whether api_key is configured."""
-    home = Path(root) / "cousins" / slug
-    if not (home / "cousin.toml").is_file():
-        raise AuthError("no cousin %r under %s"
-                        % (slug, Path(root) / "cousins"))
-    cfg = api_key_config(root)
-    out = {"slug": slug, "mode": read_mode(home), "modes": list(AUTH_MODES),
-           "default": DEFAULT_MODE, "configured": cfg is not None,
-           "key_file": str(key_file(home)),
-           "key": key_state(home, cfg["key_env"] if cfg else None)}
-    if cfg:
-        out["key_env"] = cfg["key_env"]
-        out["isolated_dir"] = str(cfg["isolated_dir"])
-    return out
-
-
-# ---- CLI --------------------------------------------------------------
-
-def _read_pasted_key():
-    stream = sys.stdin
-    if stream.isatty():
-        return getpass.getpass("key (not echoed): ")
-    return stream.read()
-
-
-@traced_cli("cousin-auth")
-def auth_main(argv=None):
-    """cousin-auth <slug> [claude|api_key] [--no-restart] [--force]
-    [--key-stdin]. Exit 0 done, 1 refused (busy, bad key file, restart
-    impossible), 2 usage or configuration error."""
-    parser = argparse.ArgumentParser(
-        prog="cousin-auth",
-        description="show or switch how a cousin's agent authenticates:"
-                    " %s (the harness's own login, the default) or %s"
-                    " (a per-cousin key)" % AUTH_MODES)
-    parser.add_argument("slug")
-    parser.add_argument("mode", nargs="?", choices=AUTH_MODES)
-    parser.add_argument("--no-restart", action="store_true",
-                        help="set the mode only; it applies at the next"
-                             " start")
-    parser.add_argument("--force", action="store_true",
-                        help="restart even when the agent is mid-turn")
-    parser.add_argument("--key-stdin", action="store_true",
-                        help="read the key from stdin (a bare key or a"
-                             " VAR=key line) into <home>/.secrets/"
-                             "api-key.env, mode 600")
-    parser.add_argument("--root", help="the framework root; falls back to"
-                                       " FRAMEWORK_ROOT")
-    args = parser.parse_args(argv)
-    try:
-        root = FrameworkConfig.resolve(args.root, cwd_fallback=True).root
-    except MissingConfigError as err:
-        print("cousin-auth: %s" % err, file=sys.stderr)
-        return 2
-    home = root / "cousins" / args.slug
-    if not (home / "cousin.toml").is_file():
-        print("cousin-auth: no cousin %r under %s"
-              % (args.slug, root / "cousins"), file=sys.stderr)
-        return 2
-    try:
-        if args.key_stdin:
-            cfg = api_key_config(root)
-            if cfg is None:
-                print("cousin-auth: config/harness.toml has no"
-                      " [auth.api_key]; nothing written", file=sys.stderr)
-                return 2
-            state = write_key(home, _read_pasted_key(), cfg["key_env"])
-            print("key written to %s%s" % (
-                key_file(home),
-                " (ends %s)" % state["last4"] if state["last4"] else ""))
-        if args.mode:
-            out = switch(root, args.slug, args.mode,
-                         restart=not args.no_restart, force=args.force)
-            line = "%s: auth %s -> %s" % (args.slug, out["previous"],
-                                          out["mode"])
-            if out["restarted"]:
-                line += "; restarted on session %s" % out["session_id"]
-            elif out["running"]:
-                line += "; applies at the next start (not restarted)"
-            else:
-                line += "; not running, applies at the next start"
-            print(line)
-            return 0
-        if not args.key_stdin:
-            st = status(root, args.slug)
-            print("%s: auth %s (modes: %s)" % (
-                args.slug, st["mode"], ", ".join(st["modes"])))
-            key = st["key"]
-            if key["set"]:
-                print("key: set%s (%s)" % (
-                    " (ends %s)" % key["last4"] if key["last4"] else "",
-                    st["key_file"]))
-            else:
-                print("key: not set (%s)%s" % (
-                    st["key_file"],
-                    "; " + key["error"] if key["error"] else ""))
-            if not st["configured"]:
-                print("api_key mode: not configured (config/harness.toml"
-                      " [auth.api_key])")
-    except AgentBusy as err:
-        print("cousin-auth: refused: %s" % err, file=sys.stderr)
-        return 1
-    except AuthError as err:
-        print("cousin-auth: %s" % err, file=sys.stderr)
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(auth_main())

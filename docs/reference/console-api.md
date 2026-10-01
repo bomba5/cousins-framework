@@ -378,7 +378,6 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `flipAt` | `[lifecycle] flip_at`, or null |
 | `model`, `effort` | what the next start will use: a runner cousin's `[agent] model` and `effort`, else null (the CLI's own default); on `tmux-legacy`, the `[runtime]` value, else `config/harness.toml [agent]` default, else null |
 | `hidden` | `[cousin] hidden` |
-| `auth` | the legacy lane's `[runtime] auth` mode, `claude` or `api_key`, on `tmux-legacy`; null if cousin.toml holds a mode the framework doesn't know. Null on every runner kind: no runner reads the mode, and a runner cousin's credential is its `account` |
 | `status` | `running` or `stopped`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). [Worker](../glossary.md#worker): always `running`. A cousin on `tmux-legacy` (which 2.0.0 refuses to start): its tmux session exists, or with `[chat] host` its chat server answers. |
 | `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
 | `chat` | `console` for a runner cousin, whose chat the console serves itself; for any other cousin `ok`, `down` or `none` (no port) from an upstream chat server's `/health` |
@@ -452,24 +451,6 @@ Immediate stop (as `{"clean": false}`), wait about a second, start. `200 {"ok": 
 
 A runner cousin that is running is signalled and answered at once, `202 {"ok": true, "slug", "status": "stopping", "runner": "stopping", "supervisor": "running", "target": "cousin/<slug>"}`; the console starts it again in the background once the supervisor reports it down, and says how that went with a `cousin-status` event (`started` or `start failed`) and a `cousins-refresh`. With nothing to stop it is the `200` above.
 
-### `GET /api/cousins/<slug>/auth`
-
-```json
-{"ok": true, "slug": "wren", "mode": "claude", "modes": ["claude","api_key"],
- "default": "claude", "configured": true,
- "key": {"set": true, "last4": "x9Qa", "error": null}, "key_env": "ANTHROPIC_API_KEY"}
-```
-
-`configured` says whether `config/harness.toml [auth.api_key]` exists; `key_env` only appears when it does. `key` describes `.secrets/api-key.env`: whether it's usable, the last four characters when the key is at least 16 long, and why not when it isn't. The key itself never comes back from any route.
-
-### `POST /api/cousins/<slug>/auth`
-
-Switch the auth mode, the retired legacy lane's `[runtime] auth`. A cousin with no runner is `409` with the lane refusal line, before anything is stopped. On a runner cousin the route writes that key, which no runner reads; the restart below only ever restarts a legacy tmux session (`[chat] tmux_session`). Body `{"mode": "api_key", "force": false, "restart": true}`. For `api_key` the key file is checked and the isolated harness config dir rebuilt. A running agent restarts on the same session unless `restart` is false. `200 {"ok": true, "slug", "mode", "previous", "running", "restarted", ..., "auth": <the GET body>}`. `409 {"busy": true}` when the pane looks mid-turn (`busy_patterns` in harness.toml) and `force` is false. `400` unknown mode, unusable key, or a restart that can't resume. A refusal changes nothing.
-
-### `POST /api/cousins/<slug>/auth/key`
-
-Body `{"key": "sk-..."}` (a bare key or a `KEY_ENV=key` line). Writes `.secrets/api-key.env` (dir 0700, file 0600). Answers with the GET body above. `400` for an unusable key or no `[auth.api_key]`.
-
 ### `POST /api/cousins/<slug>/role`
 
 Body `{"role": "..."}`, up to 5000 characters. Rewrites `[cousin] role` in place, keeping every other line. `200 {"ok": true, "slug", "role"}`.
@@ -540,7 +521,7 @@ Cancels a pending timed flip. `200 {"ok": true, "slug", "was_pending": bool}`. A
 
 ### `GET /api/cousins/<slug>/op`
 
-The cousin's long operation (a kind switch, an account login: whatever a route runs through `console/longop.py`), running or the last one finished since the console started: `200 {"ok": true, "op": null}` before any, else `{"ok": true, "op": {"id", "slug", "kind", "status": "running" | "done" | "failed", "started_at", "finished_at", "params", "stages": [{"name", "status": "running" | "done" | "failed" | "skipped", "detail", "at"}], "result", "error"}}`. One operation runs per cousin at a time, and never beside a flip or a clean stop: a route that starts one answers `202 {"ok": true, "op"}`, or `409 {"busy": true}`. While one runs, the cousin's start, stop, restart, dismiss and auth switch are `409` too. A failure an operation words for the operator is its `error`; any other exception is `"failed: <ExceptionType>, see the console log"`, its text on the console's stderr only. Progress comes as `cousin-op` events. `404` unknown cousin.
+The cousin's long operation (a kind switch, an account login: whatever a route runs through `console/longop.py`), running or the last one finished since the console started: `200 {"ok": true, "op": null}` before any, else `{"ok": true, "op": {"id", "slug", "kind", "status": "running" | "done" | "failed", "started_at", "finished_at", "params", "stages": [{"name", "status": "running" | "done" | "failed" | "skipped", "detail", "at"}], "result", "error"}}`. One operation runs per cousin at a time, and never beside a flip or a clean stop: a route that starts one answers `202 {"ok": true, "op"}`, or `409 {"busy": true}`. While one runs, the cousin's start, stop, restart and dismiss are `409` too. A failure an operation words for the operator is its `error`; any other exception is `"failed: <ExceptionType>, see the console log"`, its text on the console's stderr only. Progress comes as `cousin-op` events. `404` unknown cousin.
 
 ### `GET /api/tokens`
 
@@ -1063,9 +1044,9 @@ The events come from two places: route handlers announce what they just did, and
 | kind | data | sent when |
 |---|---|---|
 | `snapshot` | `{"cousins", "loops", "jobs", "daemon"}` | on connect; the same rows the GET routes return |
-| `cousins-refresh` | `[row]` | every fleet poll, and after spawn, identity edits, auth switches and hive changes |
+| `cousins-refresh` | `[row]` | every fleet poll, and after spawn, identity edits and hive changes |
 | `loops-refresh` | `[row]` | every loops poll, and after a loops save |
-| `cousin-status` | `{"slug", "status", "error"?}` | `starting` when a start or restart begins, then `start failed` (with `error`) when the start is refused, or `started` when a restart's background start succeeds; `stopping` when a stop, restart or dismiss begins, then `stop failed` when the stop is refused; `switching auth` when an auth switch begins |
+| `cousin-status` | `{"slug", "status", "error"?}` | `starting` when a start or restart begins, then `start failed` (with `error`) when the start is refused, or `started` when a restart's background start succeeds; `stopping` when a stop, restart or dismiss begins, then `stop failed` when the stop is refused |
 | `job-add`, `job-update` | job row | a job appeared or changed |
 | `job-delete` | `{"id"}` | a job went away |
 | `cousin-flip` | `{"slug", "phase", ...}` | see below |

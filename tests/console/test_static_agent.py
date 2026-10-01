@@ -96,13 +96,13 @@ class AgentJsx(unittest.TestCase):
 
 
 class TheOtherFiles(unittest.TestCase):
-    def test_the_inspector_shows_model_effort_and_auth_on_the_tmux_legacy_lane_only(self):
+    def test_the_inspector_shows_model_and_effort_on_the_tmux_legacy_lane_only(self):
         inspector = _component(_read("cousins.jsx"), "Inspector")
         # the name the server gives the lane, never a literal
         self.assertIn("c.lane === options.tmux_lane", inspector)
         self.assertNotIn('"tmux-legacy"', inspector)
         block = inspector[inspector.index("{tmuxLane && <>"):inspector.index("</>}")]
-        for token in ('field="model"', 'field="effort"', "<AuthField"):
+        for token in ('field="model"', 'field="effort"'):
             self.assertIn(token, block, token)
 
     def test_the_spawn_dialog_offers_the_kinds_and_the_accounts_models(self):

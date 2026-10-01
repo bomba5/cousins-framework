@@ -333,13 +333,12 @@ function Inspector({ cousin: c, onClose, onAct }) {
           <dt>tmux</dt><dd>{c.tmuxSession || "none"}</dd>
           <dt>chat</dt><dd>{c.chat || "none"}</dd>
           <dt>heartbeat</dt><dd><IdentityField cousin={c} field="heartbeat" options={options} /></dd>
-          {/* model, effort and the auth mode are the tmux-legacy lane's
-              ([runtime]); a runner cousin's are its agent panel's (agent.jsx),
-              where the account is the credential */}
+          {/* model and effort are the tmux-legacy lane's ([runtime]); a
+              runner cousin's are its agent panel's (agent.jsx), where the
+              account is the credential */}
           {tmuxLane && <>
           <dt>model</dt><dd><IdentityField cousin={c} field="model" options={options} /></dd>
           <dt>effort</dt><dd><IdentityField cousin={c} field="effort" options={options} /></dd>
-          <dt>auth</dt><dd><AuthField cousin={c} /></dd>
           </>}
           <dt>lane</dt><dd>{c.lane || "-"}{c.account ? ` · account ${c.account}` : ""}{c.held ? " · held" : ""}{c.autoStart === false ? " · no auto start" : ""}</dd>
           <dt>pid</dt><dd>{c.pid ?? <span style={{ color: "var(--fg-3)" }}>-</span>}</dd>
@@ -532,101 +531,6 @@ function IdentityField({ cousin, field, options }) {
         <span style={{ fontSize: 10, color: "var(--fg-3)" }}>{fmtBeat(draft.trim())}</span>
       )}
       {problem && draft !== "" && <span style={{ fontSize: 10, color: "var(--fg-3)" }}>{problem}</span>}
-      {err && <div style={{ padding: "5px 9px", fontSize: 11, fontFamily: "var(--mono)",
-                            color: "var(--red)", background: "oklch(from var(--red) l c h / 0.08)", borderRadius: 3 }}>{err}</div>}
-    </div>
-  );
-}
-
-// How the cousin's agent authenticates (GET/POST /api/cousins/<slug>/auth).
-// The mode names come from the server, never from this file. The key is
-// pasted into a password field, sent once to POST .../auth/key and
-// dropped from state; the page only ever shows "set" and the last four.
-function AuthField({ cousin }) {
-  const [st, setSt] = React.useState(null);
-  const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState(null);
-  const [needForce, setNeedForce] = React.useState(null);
-  const [keyOpen, setKeyOpen] = React.useState(false);
-  const [note, setNote] = React.useState(null);
-  const load = React.useCallback(async () => {
-    const d = await apiGet(`/api/cousins/${cousin.slug}/auth`);
-    if (d) setSt(d);
-  }, [cousin.slug]);
-  React.useEffect(() => {
-    setSt(null); setErr(null); setNeedForce(null); setKeyOpen(false); setNote(null);
-    load();
-  }, [cousin.slug, load]);
-
-  const switchTo = async (mode, force) => {
-    if (busy || !st) return;
-    setBusy(true); setErr(null); setNote(null);
-    try {
-      const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/auth`, { mode, force: !!force });
-      if (r.status === 409 && d.busy) { setNeedForce(mode); setErr(d.error); return; }
-      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setNeedForce(null);
-      if (d.auth) setSt(d.auth);
-      setNote(d.restarted ? "restarted on the same session" : "applies at the next start");
-    } catch (e) {
-      setErr(String(e.message || e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // SecretField (ui.jsx) clears its box before this is called
-  const sendKey = async (key) => {
-    if (busy) return;
-    setBusy(true); setErr(null); setNote(null);
-    try {
-      const { r, d } = await apiSend("POST", `/api/cousins/${cousin.slug}/auth/key`, { key });
-      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setSt(d);
-      setKeyOpen(false);
-      setNote("key saved");
-    } catch (e) {
-      setErr(String(e.message || e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!st) return <span style={{ color: "var(--fg-3)" }}>{cousin.auth || "-"}</span>;
-  const small = { fontSize: 10, padding: "2px 8px", minHeight: 18 };
-  const keyText = st.key?.set
-    ? `key set${st.key.last4 ? ` (ends ${st.key.last4})` : ""}`
-    : "key not set";
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-        <select className="sel" value={st.mode} disabled={busy}
-                title="restarts a running agent on the same session"
-                onChange={e => switchTo(e.target.value, false)}>
-          {(st.modes || []).map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-        {st.configured && (
-          <span style={{ color: st.key?.set ? "var(--fg-1)" : "var(--fg-3)", fontSize: 11 }}>{keyText}</span>
-        )}
-        {st.configured && !keyOpen && (
-          <button className="btn ghost" style={small} onClick={() => { setKeyOpen(true); setErr(null); }}>
-            {st.key?.set ? "replace key" : "set key"}
-          </button>
-        )}
-        {needForce && (
-          <button className="btn danger" style={small} disabled={busy}
-                  onClick={() => switchTo(needForce, true)}>restart anyway</button>
-        )}
-      </div>
-      {keyOpen && (
-        <SecretField placeholder="paste the key" autoFocus busy={busy}
-                     onSubmit={sendKey} onCancel={() => setKeyOpen(false)} />
-      )}
-      {!st.configured && (
-        <span style={{ fontSize: 10, color: "var(--fg-3)" }}>key mode not configured (config/harness.toml [auth.api_key])</span>
-      )}
-      {st.key?.error && <span style={{ fontSize: 10, color: "var(--fg-3)" }}>{st.key.error}</span>}
-      {note && <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{note}</span>}
       {err && <div style={{ padding: "5px 9px", fontSize: 11, fontFamily: "var(--mono)",
                             color: "var(--red)", background: "oklch(from var(--red) l c h / 0.08)", borderRadius: 3 }}>{err}</div>}
     </div>
@@ -1800,4 +1704,4 @@ function FormField({ label, hint, children }) {
   );
 }
 
-Object.assign(window, { CousinsView, CousinCard, RemoteCousinCard, RemoteSpawnForm, CopyButton, Inspector, IdentityField, AuthField, TelegramPanel, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });
+Object.assign(window, { CousinsView, CousinCard, RemoteCousinCard, RemoteSpawnForm, CopyButton, Inspector, IdentityField, TelegramPanel, RoleEditor, ClaudeMdEditor, LoopsEditor, FlipModal, SpawnModal, SectionLabel, FormField });

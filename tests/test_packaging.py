@@ -39,9 +39,10 @@ class TestPackageData(unittest.TestCase):
 
     def test_the_retired_scripts_are_not_shipped(self):
         # no per-cousin chat server, so neither it nor its watchdog
-        # ships, and their modules are gone
+        # ships, and their modules are gone; the auth-mode switch went
+        # with the legacy lane's [runtime] auth
         scripts = self.pyproject["project"]["scripts"]
-        for name in ("cousin-chat-server", "cousin-chat-watchdog"):
+        for name in ("cousin-chat-server", "cousin-chat-watchdog", "cousin-auth"):
             self.assertNotIn(name, scripts)
         for module in ("server/app.py", "server/injection.py", "chat_watchdog.py"):
             self.assertFalse((_REPO_ROOT / "cousin_lib" / module).exists(), module)

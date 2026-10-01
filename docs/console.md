@@ -183,14 +183,6 @@ Click a card to open the inspector drawer. From top to bottom:
   comments included. When a restart is needed the field says "restart to
   apply".
 - **Agent** and **cousin settings.** See [Agent settings](#agent-settings).
-- **Auth** (a tmux-legacy cousin only, which 2.0.0 refuses: the switch
-  answers with the refusal line; a runner cousin's credential is its
-  account). A select for `claude` or `api_key`, and when the key mode is
-  configured, "set key" / "replace key". The key goes into a password field,
-  is sent once, and from then on the page shows only "key set (ends WXYZ)".
-  Switching restarts a running agent on the same session; if the agent is in
-  the middle of a [turn](glossary.md#turn) you get "restart anyway" instead. See
-  [cousins](cousins.md#auth-accounts).
 - **Telegram.** The cousin's Telegram bridge: status (enabled, token set,
   bridge running, what is missing), the bot's @name after a check, an enable
   switch, a write-only token field (stored at `config/telegram/<slug>.token`,
@@ -313,7 +305,7 @@ the console.)
   `deny_bash_patterns` one per line (compiled on save; on opencode a pattern
   JavaScript cannot compile is flagged, since it would deny every command),
   and `outbound_filter`. `mcp__cousin__handoff` can never be denied: every
-  generation ends through it. A change that removes a deny entry or turns the
+  generation ends through it. A change that removes a deny entry or switches the
   filter off lists what it removes and needs "save and loosen". A guardrail,
   not a sandbox: the model can rewrite the file.
 - **Settings > mcp tool registry**: the install default,
@@ -346,7 +338,7 @@ button opens the same dialog. The routes are in
   everywhere else the runner types, and the chat is the way in.
 - **check**: the exit criterion as a report ([inbox](glossary.md#inbox) rows, tool calls with no
   result, recorder hook errors, the runner's config against the cousin's),
-  optionally since a time and with one validating turn.
+  optionally since a time and with one validating [turn](glossary.md#turn).
 - **roll back**: offered while a record allows it, the kind switch back to
   the kind it came from. A second click confirms.
 

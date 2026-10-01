@@ -680,6 +680,12 @@ cousin-gate --root /tmp/publish --denylist ~/private/denylist.txt
 cousin-gate --root . --denylist denylist.txt --git-visible
 ```
 
+## Removed in 3.0.0
+
+| removed | instead |
+|---|---|
+| `cousin-auth` (and the console's auth control) | a runner cousin authenticates through its `[agent] account`; `cousin-account` and the console's accounts page manage the accounts ([configuration](configuration.md#accountstoml)) |
+
 ## Removed in 2.0.0
 
 No local cousin runs a chat server of its own in 2.0.0 (a remote hive

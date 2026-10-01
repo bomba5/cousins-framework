@@ -178,11 +178,10 @@ class SecretFieldPin(unittest.TestCase):
         self.assertIn("last4", text)
         self.assertIn('"not set"', text)
 
-    def test_the_two_old_boxes_use_it(self):
+    def test_the_token_box_uses_it(self):
         cousins = _read("cousins.jsx")
-        auth = _component(cousins, "AuthField")
         telegram = _component(cousins, "TelegramPanel")
-        for src, route in ((auth, "/auth/key`"), (telegram, 'post("/token"')):
+        for src, route in ((telegram, 'post("/token"'),):
             self.assertIn("<SecretField", src)
             self.assertIn(route, src)
             self.assertNotIn('type="password"', src)

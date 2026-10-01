@@ -1,13 +1,14 @@
-"""Per-cousin auth mode: the harness's own login (the default) or an
-API key from the cousin's key file.
+"""The 1.x per-cousin auth mode as far as anything still reads it: the
+harness's own login (the default) or an API key from the cousin's key
+file. The switch and its CLI are gone (a runner's credential is its
+account); `cousin-migrate` reads the mode and the key to carry a 1.x
+cousin over.
 
 The properties pinned here are the ones a billing mistake hides:
-the key reaches the agent only through its environment (a fake agent
-prints its argv and environment; tmux's argv is logged), the default
+the key reaches the agent only through its environment, the default
 mode strips the key and config-dir variables, a bad key file refuses
 the mode, the isolated harness config holds no login and no account
-block, a login found there refuses the launch, a mid-turn agent is not
-restarted, and the mode survives a start and a flip.
+block, and a login found there refuses the launch.
 
 The harness here is invented (kestrel): its variable names, config dir
 and settings file come from a test harness.toml, as they do in
@@ -28,7 +29,7 @@ from unittest import mock
 
 from cousin_lib import agent_auth
 from cousin_lib.agent_auth import (AUTH_MODES, DEFAULT_MODE, MODE_API_KEY,
-                                   MODE_LOGIN, AgentBusy, AuthError)
+                                   MODE_LOGIN, AuthError)
 
 KEY = "kst-test-0123456789abcdefWXYZ"
 
@@ -361,36 +362,6 @@ class TestResume(AuthCase):
                              "x; rm")
 
 
-class TestSwitch(AuthCase):
-    def running(self, pane):
-        os.environ["FAKE_TMUX_HAS"] = "0"
-        self.pane.write_text(pane)
-        with open(self.home / "cousin.toml", "a") as fh:
-            fh.write('\n[runtime]\nsession_id = "11111111-2222"\n')
-
-    def switch(self, mode, **kw):
-        return agent_auth.switch(self.root, "wren", mode,
-                                 tmux_bin=str(self.tmux),
-                                 start_chat_server=lambda home: None, **kw)
-
-    def test_a_cousin_with_no_runner_is_refused_before_any_tmux_call(self):
-        """The mode switch restarted a legacy session (kill-session,
-        then a start that 2.0.0 refuses): it is refused by name first, with
-        no tmux call, cousin.toml untouched."""
-        from cousin_lib.delivery import lane_refusal
-        self.write_key()
-        self.running("idle\n")
-        before = (self.home / "cousin.toml").read_text()
-        for kw in ({}, {"restart": False}, {"force": True}):
-            with self.assertRaises(AuthError) as ctx:
-                self.switch(MODE_API_KEY, **kw)
-            self.assertEqual(str(ctx.exception), lane_refusal(self.home))
-        self.assertEqual((self.home / "cousin.toml").read_text(), before)
-        self.assertEqual(agent_auth.read_mode(self.home), MODE_LOGIN)
-        self.assertFalse(self.log.exists() and self.log.read_text(),
-                         "tmux was called")
-
-
 class TestSecretsStayHome(AuthCase):
     def test_the_dismiss_archive_leaves_the_key_out(self):
         from cousin_lib.spawn import dismiss_cousin
@@ -406,38 +377,6 @@ class TestSecretsStayHome(AuthCase):
         repo = pathlib.Path(__file__).resolve().parents[1]
         lines = (repo / ".gitignore").read_text().splitlines()
         self.assertIn(".secrets/", lines)
-
-
-class TestCli(AuthCase):
-    def run_cli(self, argv, stdin_text=None):
-        out, err = io.StringIO(), io.StringIO()
-        stdin = io.StringIO(stdin_text or "")
-        with contextlib.redirect_stdout(out), \
-                contextlib.redirect_stderr(err), \
-                mock.patch("sys.stdin", stdin):
-            rc = agent_auth.auth_main(argv + ["--root", str(self.root)])
-        return rc, out.getvalue(), err.getvalue()
-
-    def test_show_and_key_stdin(self):
-        rc, out, _ = self.run_cli(["wren"])
-        self.assertEqual(rc, 0)
-        self.assertIn("auth claude", out)
-        self.assertIn("key: not set", out)
-        rc, out, _ = self.run_cli(["wren", "--key-stdin"], KEY + "\n")
-        self.assertEqual(rc, 0, out)
-        self.assertIn("ends WXYZ", out)
-        self.assertNotIn(KEY, out)
-        rc, out, _ = self.run_cli(["wren"])
-        self.assertIn("auth claude", out)
-        self.assertNotIn(KEY, out)
-
-    def test_a_refusal_is_rc_1(self):
-        from cousin_lib.delivery import lane_refusal
-        for argv in (["wren", "api_key"], ["wren", "api_key", "--no-restart"]):
-            rc, _out, err = self.run_cli(argv)
-            self.assertEqual(rc, 1, argv)
-            self.assertIn(lane_refusal(self.home), err, argv)
-        self.assertEqual(agent_auth.read_mode(self.home), MODE_LOGIN)
 
 
 if __name__ == "__main__":

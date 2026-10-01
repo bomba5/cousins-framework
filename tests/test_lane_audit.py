@@ -29,8 +29,6 @@ LITERAL = re.compile(r"""(runner"\)|_runner_kind\([^)]*\))\s*[!=]=\s*["'](sdk|fa
 OWNERS = {"cousin_lib/migrate.py": "the legacy migration (check's config_mismatches)"}
 
 SITES = (
-    ('cousin_lib/agent_auth.py', 'if not spawn.runner_lane(home):', 'transport'),
-    ('cousin_lib/agent_auth.py', 'raise LaneRefused(delivery.lane_refusal(home))', 'refusal'),
     ('cousin_lib/agent_settings.py', 'The lanes are delivery.RUNNER_KINDS, read at call time and never copied', 'kinds'),
     ('cousin_lib/agent_settings.py', "added to RUNNER_KINDS later (as `tmux` was) gets the keys that name", 'kinds'),
     ('cousin_lib/agent_settings.py', 'return list(delivery.RUNNER_KINDS)', 'kinds'),

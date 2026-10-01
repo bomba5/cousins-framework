@@ -367,10 +367,27 @@ class TestServerBuild(HermeticCase):
         self.assertEqual(cfg["type"], "sdk"); self.assertEqual(cfg["name"], "cousin")
 
 
+class TestJobLaunchBound(unittest.TestCase):
+    def test_the_launch_handshake_is_bounded_tightly(self):
+        self.assertLessEqual(tools._LAUNCH_TIMEOUT, 15)
+
+
 class TestJobRun(HermeticCase):
     """`job run`: the tool form of `cousin-job start shell TITLE -- CMD`. A
     real short command in a scratch root: the row runs, then closes with
     the command's own exit code, and the log holds its output."""
+
+    # Deadlines, not delays: each returns as soon as its condition holds. A
+    # loaded host held the launcher's fresh interpreter past the shipped
+    # 15 s handshake bound (#130); the bound itself is checked by
+    # TestJobLaunchBound, the jobs here only need the launch to finish.
+    LAUNCH_S, WAIT_S = 120, 120
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(tools, "_LAUNCH_TIMEOUT", self.LAUNCH_S)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _ctx(self):
         ctx = _ctx(self)
@@ -382,11 +399,12 @@ class TestJobRun(HermeticCase):
         self.assertFalse(err, text)
         return json.loads(text)
 
-    def _wait(self, job_id, timeout=20):
+    def _wait(self, job_id, timeout=None):
         """The closed row, once the job's detached runner has also exited:
         it goes on writing (the row, then a raw memory entry) after the
         status flips, and the scratch root is removed at cleanup."""
         from cousin_lib import jobs
+        timeout = timeout or self.WAIT_S
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             job = jobs.get_job(job_id)
@@ -401,7 +419,7 @@ class TestJobRun(HermeticCase):
         # The command holds until the test says go (a file in its working
         # directory, the home), so "running" is observed, not raced.
         code = ("import os, time\nprint('hello from run', flush=True)\n"
-                "deadline = time.time() + 20\n"
+                "deadline = time.time() + 300\n"
                 "while not os.path.exists('go') and time.time() < deadline:\n"
                 "    time.sleep(0.02)\nraise SystemExit(3)")
         out = self._run(ctx, title="exit three", argv=[sys.executable, "-c", code])
@@ -422,10 +440,15 @@ class TestJobRun(HermeticCase):
         self.assertEqual((job["status"], job["exit_code"], job["description"]), ("done", 0, "a check"))
 
     def test_run_returns_before_the_command_finishes(self):
+        from cousin_lib import jobs
         ctx = self._ctx()
-        t0 = time.monotonic()
-        out = self._run(ctx, title="sleeper", argv=[sys.executable, "-c", "import time; time.sleep(30)"])
-        self.assertLess(time.monotonic() - t0, 10)
+        # The command sleeps far past any launch: the call has returned
+        # while it still runs (was a wall-clock "< 10 s", which a loaded
+        # host broke without the call ever waiting for the command, #130).
+        out = self._run(ctx, title="sleeper", argv=[sys.executable, "-c", "import time; time.sleep(600)"])
+        job = jobs.get_job(out["job_id"])
+        self.assertEqual(job["status"], "running")
+        self.assertTrue(jobs.live_members(job), "the command is still running")
         text, err = tools.call(ctx, "job", {"command": "fail", "id": out["job_id"], "summary": "test over"})
         self.assertFalse(err, text)
         self.assertEqual(self._wait(out["job_id"])["status"], "failed")
@@ -478,9 +501,6 @@ class TestJobRun(HermeticCase):
                                                     "argv": ["true"]})
             self.assertTrue(err, stdout)
             self.assertIn(stdout, text)
-
-    def test_the_launch_handshake_is_bounded_tightly(self):
-        self.assertLessEqual(tools._LAUNCH_TIMEOUT, 15)
 
     def test_empty_or_invalid_argv_and_a_missing_title_are_refused(self):
         from cousin_lib import jobs

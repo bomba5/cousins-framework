@@ -949,14 +949,16 @@ class TestSdkRunner(HermeticCase):
         for i in range(5):   # loop rows: never folded, so one turn each
             r.enqueue(Item("loop:heartbeat", "loop", "fails %d" % i, sender=""))
         r.start()
-        self.assertTrue(_wait(lambda: len(_results(r)) == 5, timeout=8))
+        # Deadlines, not delays: five turns and their backoffs take well
+        # under a second here; a starved host took past a flat 8 s (#117, #130).
+        self.assertTrue(_wait(lambda: len(_results(r)) == 5, timeout=60))
         ok = r.enqueue(self._op("works"))
-        self.assertTrue(_wait(lambda: r.inbox.get(ok.inbox_id)["state"] == "done", timeout=8))
+        self.assertTrue(_wait(lambda: r.inbox.get(ok.inbox_id)["state"] == "done", timeout=60))
         backoffs = [e["payload"]["seconds"] for e in r.events()
                     if e["kind"] == "system" and e["payload"].get("subtype") == "backoff"]
         self.assertEqual(backoffs, [0.1, 0.2, 0.3])
         self.assertEqual(r.inbox.get(ok.inbox_id)["outcome"], "delivered")
-        self.assertTrue(_wait(lambda: r._failures == 0, timeout=8))
+        self.assertTrue(_wait(lambda: r._failures == 0, timeout=60))
         self.assertEqual(r._failures, 0)
 
     def test_a_connect_failure_at_start_ends_the_worker(self):

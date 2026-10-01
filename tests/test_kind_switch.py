@@ -313,13 +313,19 @@ class TestTrustScreenOnTheRunner(SwitchCase):
         since = time.time()
         r.start()
         migrate._switch_notice(self.home, "sdk", "tmux")
+        # The runner writes login-required.json a moment before it records
+        # the `auth` event: both are waited for, under one deadline that a
+        # loaded host does not reach (#130: the event was read in between).
+        def trust_event():
+            return any(e["kind"] == "auth" and e["payload"].get("screen") == "trust"
+                       for e in r.events())
         t = time.monotonic()
-        while time.monotonic() - t < 5 and migrate.pane_dialog(self.home, since) is None:
+        while time.monotonic() - t < 30 and (migrate.pane_dialog(self.home, since) is None
+                                             or not trust_event()):
             time.sleep(0.02)
         self.assertEqual(migrate.pane_dialog(self.home, since), "trust")
         self.assertEqual(panes[0].typed, [])
-        self.assertTrue(any(e["kind"] == "auth" and e["payload"].get("screen") == "trust"
-                            for e in r.events()))
+        self.assertTrue(trust_event())
 
 
 if __name__ == "__main__":

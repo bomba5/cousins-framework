@@ -14,12 +14,31 @@ import json
 import threading
 import time
 import uuid
+import weakref
 from pathlib import Path
 
 from cousin_lib.runner.tmux_pane import NO_PANE, Outcome
 
 
 class FakePane:
+    _made = weakref.WeakSet()      # every fake made, for quiesce_all
+
+    @classmethod
+    def quiesce_all(cls, timeout=60.0):
+        """End every fake CLI and wait for its turn threads: a turn still
+        writing its transcript while a test removes its home fails the
+        removal ("Directory not empty"), which a loaded host made happen
+        (#130). A test's cleanup calls this before the home goes."""
+        panes = list(cls._made)
+        for pane in panes:
+            pane.die()
+        deadline = time.monotonic() + timeout
+        for pane in panes:
+            for thread in list(pane._players):
+                thread.join(max(0.0, deadline - time.monotonic()))
+                if thread.is_alive():
+                    raise AssertionError("a fake CLI's turn outlived its test by %ss" % timeout)
+
     def __init__(self, transcript, *, slow=False, fail_first=False, turn_s=0.05, slow_s=3.0,
                  attention=None, on_prompt=None, settle_s=0.0, linger=None, context_home=None,
                  boot_s=0.0):
@@ -49,6 +68,8 @@ class FakePane:
         # this long after start
         self.boot_s, self._ready_at = boot_s, 0.0
         self.type_calls = 0        # every type_row, typed or not
+        self._players = []         # the turn threads, joined by quiesce_all
+        FakePane._made.add(self)
 
     # -- the Pane protocol ------------------------------------------------
     def alive(self):
@@ -125,7 +146,9 @@ class FakePane:
             self._busy = True
             self._turns += 1
             n = self._turns
-        threading.Thread(target=self._play, args=(first_line, body, n), daemon=True).start()
+        player = threading.Thread(target=self._play, args=(first_line, body, n), daemon=True)
+        self._players.append(player)
+        player.start()
         return Outcome.TYPED
 
     def key(self, name):
@@ -149,6 +172,8 @@ class FakePane:
     def _play(self, first_line, body, n):
         prompt_id = uuid.uuid4().hex
         self._escape.clear()
+        if self._dead:             # died before this turn began: quiesce_all set the
+            return                 # escape this clear() would otherwise swallow
         text = first_line + ("\n\n<pasted_content id=\"f00d\">\n%s\n</pasted_content>" % body if body else "")
         self._write({"type": "user", "promptSource": "typed", "promptId": prompt_id,
                      "entrypoint": "cli", "message": {"role": "user", "content": text}})

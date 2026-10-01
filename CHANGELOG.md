@@ -54,6 +54,13 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `cousin-spawn --runner opencode` skips the model; the entrypoint's
   first-start checklist no longer suggests an editor the image does not
   have.
+- **Timing tests that failed on a loaded host and passed alone** (#130):
+  the tmux runner, kind switch, job run, SDK backoff and console memory
+  explorer tests now wait for the condition they assert under deadlines a
+  loaded host does not reach, instead of fixed sleeps, wall-clock bounds or
+  counted polls. What each test checks is unchanged. The console test
+  harness waits for the server's serving and events-poller threads before
+  it removes the temp root.
 
 ## 2.3.2 - 2026-10-01
 

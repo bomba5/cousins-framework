@@ -158,7 +158,23 @@ class ConsoleCase(unittest.TestCase):
         server = ConsoleServer(self.root, guard=guard,
                                tmux_bin=str(self.tmux), **kw)
         server.start()
-        self.addCleanup(server.stop)
+        # The server's stop waits 5 s for its threads, then lets them run
+        # on. On a loaded host the events poller can still be in a poll
+        # (it opens the stores under root/data) when the temp root is
+        # removed, which then fails "Directory not empty" (#130). The
+        # harness waits for both threads, generously, before the root goes.
+        from cousin_lib.console import sse
+        poller = sse._poller
+        threads = [t for t in (server._thread, poller and poller._thread) if t is not None]
+
+        def stop():
+            server.stop()
+            for thread in threads:
+                thread.join(timeout=60)
+                if thread.is_alive():
+                    self.fail("the console's %s thread outlived its stop by 60 s"
+                              % thread.name)
+        self.addCleanup(stop)
         self.server = server
         return server
 

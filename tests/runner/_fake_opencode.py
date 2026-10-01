@@ -178,7 +178,7 @@ class FakeOpencode:
 
     def __init__(self, scripts=(), *, password="pw", config=None, mcp=None, heartbeat=10.0,
                  tokens=None, directory=None, port=0, providers=None, plugin_env=None,
-                 plugin_mode="load"):
+                 plugin_mode="load", cost=0):
         self.password = password
         self.plugin_env, self.plugin_mode = plugin_env, plugin_mode
         self.config = _copy(config if config is not None else {})
@@ -186,6 +186,7 @@ class FakeOpencode:
         self.providers = _copy(providers if providers is not None else [])
         self.heartbeat = heartbeat
         self.tokens = _copy(tokens if tokens is not None else TOKENS)
+        self.cost = cost        # each answer's cost, as opencode sets it at step-finish
         self.directory = directory or os.getcwd()
         self.requests = []
         self.events = []
@@ -441,10 +442,11 @@ class FakeOpencode:
             self._part_updated(sid, {"id": self._id("prt"), "sessionID": sid,
                                      "messageID": info["id"], "type": "step-finish",
                                      "reason": reason, "snapshot": start, "tokens": self.tokens,
-                                     "cost": 0})
+                                     "cost": self.cost})
         info["finish"] = reason
         if start is not None:
             info["tokens"] = _copy(self.tokens)
+            info["cost"] = self.cost
         self._message_updated(sid, info)
         info["time"]["completed"] = _now_ms()
         self._message_updated(sid, info)

@@ -1,12 +1,16 @@
-"""Per-turn usage on the SDK lane (master plan, phase 4 task 4).
+"""Per-turn usage on the SDK and opencode lanes (master plan, phase 4
+task 4).
 
-One row per ResultMessage in <home>/data/usage.db. `total_cost_usd` is
+One row per result in <home>/data/usage.db. `total_cost_usd` is
 cumulative per CLIENT (phase 0 finding 4: 0.0088 then 0.0136 on one
 client), so a row stores the DIFFERENCE from the same client's previous
 row. A client is identified by a string unique to one connect of one
 process (the runner mints a uuid), so neither a reconnect nor a restart
 diffs against a client that no longer exists. On the login lane the
-figure is the SDK's own estimate, not a bill, and the row says so.
+figure is the SDK's own estimate, not a bill, and the row says so; on the
+opencode lane it is opencode's figure (the model's list price times the
+tokens the provider reported), an estimate too. The opencode runner keeps
+its own running cost per runner, so a row there is its turn's cost.
 Best-effort: recording never fails a turn."""
 import sqlite3
 import time
@@ -16,8 +20,8 @@ from pathlib import Path
 
 from cousin_lib.sqlite_util import wal
 
-_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
-         "cache_creation_input_tokens")
+USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+              "cache_creation_input_tokens")
 _SCHEMA = ("CREATE TABLE IF NOT EXISTS usage ("
            " id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, day TEXT NOT NULL,"
            " client_id TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '',"
@@ -51,7 +55,7 @@ def _db(home):
 
 def _totals(u):
     total = output = 0
-    for key in _KEYS:
+    for key in USAGE_KEYS:
         value = (u or {}).get(key) or 0
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             total += int(value)

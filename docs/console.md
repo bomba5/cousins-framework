@@ -763,7 +763,8 @@ separate, and fleet totals, and the prompt-cache hit rate today and over the
 `cache_read / (cache_read + cache_creation + input)`, as the model reported
 it (`-` when there was no usage to measure). The numbers come from the harness
 transcripts, so this page needs `transcripts_dir` in `config/harness.toml`;
-a runner cousin's come from its own `data/usage.db` and need nothing. Without
+an `sdk` or `opencode` cousin's come from its own `data/usage.db` and need
+nothing (an opencode cousin's are the tokens its provider reported). Without
 either the page says that instead of showing zeros.
 
 ## Tracker

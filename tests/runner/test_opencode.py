@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -95,7 +96,8 @@ class FakeServer:
             self.fake = FakeOpencode(self.factory.scripts, password=secrets.token_urlsafe(8),
                                      config=config, mcp=mcp, providers=self.factory.providers,
                                      directory=str(self.kwargs["cwd"]),
-                                     plugin_env=self.kwargs["env"], plugin_mode=mode).start()
+                                     plugin_env=self.kwargs["env"], plugin_mode=mode,
+                                     tokens=self.factory.tokens, cost=self.factory.cost).start()
             if self.factory.shared is not None:
                 self.factory.shared.fake = self.fake
         self.url, self.password = self.fake.url, self.fake.password
@@ -129,9 +131,10 @@ def _merged(base, extra):
 
 class Factory:
     def __init__(self, scripts=(), *, mcp=None, shared=None, providers=None, plugin="load",
-                 merge=None):
+                 merge=None, tokens=None, cost=0):
         self.scripts, self.mcp, self.shared = list(scripts), mcp, shared
         self.providers, self.plugin, self.merge = providers, plugin, merge
+        self.tokens, self.cost = tokens, cost
         self.calls, self.servers = [], []
 
     def __call__(self, **kwargs):
@@ -738,7 +741,7 @@ class TestTurns(OpencodeCase):
         self.assertEqual((result["inbox_ids"], result["requeued"], result["interrupted"],
                           result["is_error"]), ([a.inbox_id], [], False, False))
         self.assertEqual(result["session_id"], r.opencode_session)
-        self.assertEqual(result["usage"]["total"], 14)
+        self.assertEqual(result["usage"]["input_tokens"], 22)   # both steps' answers
         self.assertEqual(result["num_turns"], 2)          # the tool step, then the answer
         self.assertTrue(_wait(lambda: r.state() == "idle"))
         echo = self.payloads(r, "user")[0]
@@ -937,7 +940,8 @@ class TestTurns(OpencodeCase):
         a = r.enqueue(_op("one"))
         self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 8))
         self.assertTrue(_wait(lambda: not (home / "data" / "login-required.json").exists(), 8))
-        self.assertTrue(self.payloads(r, "auth")[-1]["restored"])
+        # the file goes first, the event after it
+        self.assertTrue(_wait(lambda: any(p.get("restored") for p in self.payloads(r, "auth"))))
 
     def test_a_credential_change_is_checked_before_the_login_block_lifts(self):
         """Review Important 7: opencode reads auth.json live, so the retry that
@@ -1011,6 +1015,74 @@ class TestTurns(OpencodeCase):
         self.assertEqual(self.outcome(r, a), "delivered")     # aborted: the model received it
         r.stop(timeout=5)
         self.assertEqual(r.state(), "stopped")
+
+
+# opencode's per-message shape: `input` is the uncached input, `output`
+# excludes `reasoning`, `cache.write` is the cache creation
+SPENT = {"total": 30, "input": 11, "output": 3, "reasoning": 2, "cache": {"read": 10, "write": 4}}
+TOOL_THEN_ANSWER = [("tool", "cousin_memory", {"command": "search"}, "found"), ("text", "done")]
+
+
+class TestUsage(OpencodeCase):
+    """A result is recorded in usage.db and announced as a `usage` event,
+    as on the SDK lane: every answer of the turn summed, once per message
+    however often opencode re-sends it, with opencode's reported cost."""
+
+    def usage_rows(self, r):
+        conn = sqlite3.connect(r.home / "data" / "usage.db")
+        try:
+            return conn.execute("SELECT client_id, total, output, cache_read, cache_creation,"
+                                " cost_usd, cumulative_usd, lane, estimate FROM usage"
+                                " ORDER BY id").fetchall()
+        finally:
+            conn.close()
+
+    def turn(self, r, body):
+        a = r.enqueue(_op(body))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None))
+        self.assertTrue(_wait(lambda: len(self.payloads(r, "usage"))
+                              == len(self.payloads(r, "result"))))
+        return a
+
+    def test_a_turns_answers_are_summed_and_recorded_once(self):
+        r = self.started(self.runner(factory=Factory([TOOL_THEN_ANSWER], tokens=SPENT,
+                                                     cost=0.25)))
+        self.turn(r, "look it up")
+        result = self.payloads(r, "result")[-1]
+        self.assertEqual(result["num_turns"], 2)          # two answers, each updated twice
+        self.assertEqual(result["usage"], {"input_tokens": 22, "output_tokens": 10,
+                                           "cache_read_input_tokens": 20,
+                                           "cache_creation_input_tokens": 8})
+        self.assertEqual(result["total_cost_usd"], 0.5)
+        self.assertEqual(self.payloads(r, "usage"),
+                         [{"cost_usd": 0.5, "estimate": True, "total": 60}])
+        rows = self.usage_rows(r)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][1:], (60, 10, 20, 8, 0.5, 0.5, "opencode", 1))
+
+    def test_each_turn_records_its_own_cost_on_one_cumulative_client(self):
+        r = self.started(self.runner(factory=Factory([TOOL_THEN_ANSWER, TOOL_THEN_ANSWER],
+                                                     tokens=SPENT, cost=0.25)))
+        self.turn(r, "one")
+        self.turn(r, "two")
+        rows = self.usage_rows(r)
+        self.assertEqual([(row[1], row[5], row[6]) for row in rows],
+                         [(60, 0.5, 0.5), (60, 0.5, 1.0)])
+        self.assertEqual(len({row[0] for row in rows}), 1)
+
+    def test_a_free_model_costs_nothing_and_still_counts_tokens(self):
+        r = self.started(self.runner())
+        self.turn(r, "hi")
+        self.assertEqual(self.payloads(r, "usage"), [{"cost_usd": 0.0, "estimate": True,
+                                                      "total": 14}])
+
+    def test_a_usage_failure_is_an_event_never_a_failed_turn(self):
+        r = self.started(self.runner())
+        with mock.patch.object(opencode.usage, "record", side_effect=OSError("disk full")):
+            a = self.turn(r, "hi")
+        self.assertEqual(self.outcome(r, a), "delivered")
+        self.assertEqual(self.payloads(r, "usage"), [{"error": "OSError: disk full"}])
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
 
 
 class TestSession(OpencodeCase):

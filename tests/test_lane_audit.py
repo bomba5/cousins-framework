@@ -67,7 +67,7 @@ SITES = (
     ('cousin_lib/console/routes_telegram.py', 'if _runner_lane(home):', 'transport'),
     ('cousin_lib/console/routes_telegram.py', 'return delivery.lane_refusal(home)', 'refusal'),
     ('cousin_lib/console/tokens.py', 'return any(_runner_kind(c.home) in OWN_USAGE_KINDS', 'kinds'),
-    ('cousin_lib/console/tokens.py', 'if _runner_kind(home) == "sdk":', 'kinds'),
+    ('cousin_lib/console/tokens.py', 'if _runner_kind(home) in USAGE_DB_KINDS:', 'kinds'),
     ('cousin_lib/console/tokens.py', 'if _runner_kind(home) == "tmux":', 'kinds'),
     ('cousin_lib/delivery.py', 'A cousin whose `[agent] runner` names a runner kind (`RUNNER_KINDS`)', 'kinds'),
     ('cousin_lib/delivery.py', '`failed`, and `lane_refusal(home)` is the one line every entry point', 'refusal'),

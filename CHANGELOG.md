@@ -5,6 +5,19 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## Unreleased
 
+### Fixed
+
+- **An opencode cousin's tokens and cost are counted.** The opencode runner
+  recorded no usage: its cousins showed nothing on the console's tokens page
+  and in the reasoning pane's token strip, and its `result` carried only the
+  last answer's tokens in opencode's own shape. Each result is now recorded
+  in `data/usage.db` with lane `opencode` and announced as a `usage` event,
+  as on the SDK lane: every answer of the turn summed once per message (opencode
+  re-sends a message as it updates), reasoning tokens counted as output,
+  the cost opencode reported (0 on a free model, shown as an estimate). The
+  tokens page reads an opencode cousin's `usage.db` with no transcript seam.
+  Context pressure still measures the last answer alone.
+
 ### Documentation
 
 - **Claude logins and Anthropic's terms** (#52): a new page,

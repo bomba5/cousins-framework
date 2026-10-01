@@ -171,6 +171,24 @@ class TestPressure(OpencodeCase):
         stream = "".join(p.read_text() for p in (r.home / "data" / "stream").glob("*.jsonl"))
         self.assertNotIn("sk-testa-not-for-the-stream", stream)   # the answer's keys stay put
 
+    def test_pressure_measures_the_last_answer_not_the_turns_sum(self):
+        """Two answers of 14 tokens against a limit of 32: the turn spent 28
+        (87%, its usage record), the context holds the last answer's 14."""
+        roomy = json.loads(json.dumps(LIMITED))
+        roomy[0]["models"]["m1"]["limit"]["context"] = 32
+        r = self.started(self.runner(factory=Factory(
+            [[("tool", "cousin_memory", {"command": "search"}, "found"), ("text", "done")]],
+            providers=roomy)))
+        a = r.enqueue(_op("two answers"))
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered"))
+        self.assertTrue(_wait(lambda: self.payloads(r, "usage")))
+        self.assertEqual(self.payloads(r, "usage")[0]["total"], 28)
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        time.sleep(0.3)
+        self.assertEqual([p for p in self.payloads(r, "rollover") if p["phase"] == "requested"],
+                         [])
+        self.assertEqual(r.inbox.open_rows("flip"), [])
+
     def test_no_limit_means_no_pressure_and_says_so_once(self):
         r = self.started(self.runner())
         for body in ("one", "two"):

@@ -68,6 +68,16 @@ class TestSdkLane(Fleet):
         self.assertEqual(tokens.cache(self.server, home)["days"][-1]["rate"], None)
 
 
+class TestOpencodeLane(Fleet):
+    def test_an_opencode_cousin_is_read_from_its_usage_db_with_no_seam(self):
+        home = self._cousin("testa", "opencode")
+        usage.record(home, client_id="c", session_id="s",
+                     result={"usage": _usage(10, 90, 0), "total_cost_usd": 0.0}, lane="opencode")
+        self.assertEqual(tokens.availability(self.root), (True, ""))
+        self.assertEqual(tokens.cache_days(self.server, home)[_today()]["rate"], 0.9)
+        self.assertEqual(tokens.series(self.server, home)[-1]["total"], 105)
+
+
 class TestTmuxLane(Fleet):
     def test_the_transcripts_usage_gives_the_same_rate(self):
         (self.root / "config" / "harness.toml").write_text(

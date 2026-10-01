@@ -35,9 +35,12 @@ def _seam(root):
     return True, ""
 
 
-# The kinds whose usage needs no harness seam: the SDK's usage.db, and the
-# tmux kind's own transcripts under its account's config dir (phase 11 R16).
-OWN_USAGE_KINDS = ("sdk", "tmux")
+# The kinds whose runner writes its own usage.db (the SDK's results, and
+# opencode's answers as the provider reported them), read from it only.
+USAGE_DB_KINDS = ("sdk", "opencode")
+# The kinds whose usage needs no harness seam: those, and the tmux kind's
+# own transcripts under its account's config dir (phase 11 R16).
+OWN_USAGE_KINDS = USAGE_DB_KINDS + ("tmux",)
 
 
 def _any_sdk(root):
@@ -65,8 +68,8 @@ def _pane_transcripts_dir(root, home):
 
 
 def availability(root):
-    """(available, reason): the harness seam, or any cousin on the SDK
-    lane (its usage is in its own usage.db, no seam needed)."""
+    """(available, reason): the harness seam, or any cousin whose usage
+    needs none (OWN_USAGE_KINDS)."""
     ok, reason = _seam(root)
     if ok or _any_sdk(root):
         return True, ""
@@ -160,14 +163,15 @@ def _scan(entry, path):
 
 def _day_buckets(server, home, *, days=SERIES_DAYS):
     """{day: {"total", "output", "read", "creation", "input"}} for one
-    cousin. A cousin on runner = "sdk" is read from its usage.db ONLY: the
-    SDK also writes the harness's local transcript for it (phase 0 finding
-    2), and scanning that too would count its turns twice. Every other
+    cousin. A cousin on runner = "sdk" or "opencode" is read from its
+    usage.db ONLY: the SDK also writes the harness's local transcript for
+    it (phase 0 finding 2), and scanning that too would count its turns
+    twice; opencode writes none. Every other
     cousin: every transcript touched in the last `days` days, scanning only
     the bytes appended since the last call on this server."""
     from cousin_lib import usage
     from cousin_lib.delivery import _runner_kind
-    if _runner_kind(home) == "sdk":
+    if _runner_kind(home) in USAGE_DB_KINDS:
         return {day: {"total": b["total"], "output": b["output"], "read": b["cache_read"],
                       "creation": b["cache_creation"], "input": b["input"]}
                 for day, b in usage.day_totals(home, days=days).items()}

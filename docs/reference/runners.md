@@ -215,17 +215,22 @@ runs), which the contract does not cover.
   file (see [policy.toml on the opencode lane](../configuration.md#policytoml-on-the-opencode-lane)).
 - Tool calls (with their arguments), subagent jobs and checkpoints are
   recorded by the runner from opencode's event stream, not by hooks.
+- Usage is recorded in `data/usage.db` with lane `opencode`, one row per
+  result, and announced as a `usage` event, as on the SDK lane: the tokens
+  the provider reported to opencode, every answer of the turn summed once,
+  and the cost opencode reported for them. Reasoning tokens count as output;
+  the cost is opencode's figure (0 on a free model) and is shown as an
+  estimate.
 
 ## Known gaps
 
 What the opencode lane does not do yet. Each is stated, none is hidden, and
 none is a contract item:
 
-- **No usage records, transcript mining, memory proposals or review gate.**
-  `usage.db`, `extract.mine_turn`, the per-turn memory proposal and the
-  review gate's per-turn check read or run beside the SDK's session store;
-  opencode keeps its transcript in its own database in the account's data
-  dir. A turn's `result` event still carries opencode's token counts and cost.
+- **No transcript mining, memory proposals or review gate.**
+  `extract.mine_turn`, the per-turn memory proposal and the review gate's
+  per-turn check read or run beside the SDK's session store; opencode keeps
+  its transcript in its own database in the account's data dir.
 - **Image attachments are sent as names** (`[image: <name>]` in the text),
   not as image parts.
 - **`cousin-runner --check-auth --validate` is refused** for an `opencode`

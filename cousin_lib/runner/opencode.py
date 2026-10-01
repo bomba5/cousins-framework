@@ -55,7 +55,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import accounts, boot, recording, session
+from cousin_lib import accounts, boot, recording, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import auth, checkpoints, envelope, opencode_guard, opencode_http
 from cousin_lib.runner import tools, wake
@@ -428,6 +428,26 @@ def classify(error):
     return "failed", detail
 
 
+def usage_of(messages):
+    """usage.record's shape (the SDK's ResultMessage keys) from opencode's
+    per-message token counts, summed over `messages`. opencode splits the
+    provider's figures: `input` is the uncached input, `output` leaves out
+    `reasoning`, `cache.write` is the cache creation; the reasoning goes
+    back into output_tokens, as the provider bills it."""
+    out = dict.fromkeys(usage.USAGE_KEYS, 0)
+
+    def n(value):
+        return int(value) if isinstance(value, (int, float)) \
+            and not isinstance(value, bool) and value > 0 else 0
+    for tokens in messages:
+        cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+        out["input_tokens"] += n(tokens.get("input"))
+        out["output_tokens"] += n(tokens.get("output")) + n(tokens.get("reasoning"))
+        out["cache_read_input_tokens"] += n(cache.get("read"))
+        out["cache_creation_input_tokens"] += n(cache.get("write"))
+    return out
+
+
 def _thinking_payload(text):
     payload = {"length": len(text), "text": text[:THINKING_CHARS]}
     if len(text) > THINKING_CHARS:
@@ -459,7 +479,9 @@ class _Run:
         self.user_ids = {}          # user message id -> _Sent
         self.assistant_ids = set()  # assistant messages answering this turn's prompts
         self.costs = {}
-        self.tokens = None
+        self.tokens = None          # the LAST answer's tokens: the context's size (R11)
+        self.spent = {}             # assistant message id -> its tokens, the newest copy
+        self.recorded = (dict.fromkeys(usage.USAGE_KEYS, 0), 0.0)   # at the last result
         self.error = None           # (kind, detail) seen after an echo
         self.pending_error = None   # seen before any echo: stale, or a prompt never stored
         self.pending_at = None
@@ -567,6 +589,10 @@ class OpencodeRunner:
             payload, self.home, self.root, slug=slug))
         self._policy_nonce = None
         self._limit = None            # (model, limit.context or None), read once per start
+        # usage.record's client: this runner's own running cost, so a new
+        # opencode server or session never resets what it diffs against
+        self._usage_client = uuid.uuid4().hex
+        self._usage_spent = 0.0
         self.fatal = None
         self._server = self._client = self._reader = self._mcp = None
         self._reader_stop = threading.Event()
@@ -1371,10 +1397,11 @@ class OpencodeRunner:
             cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
             used = sum(float(x or 0) for x in (tokens.get("input"), tokens.get("output"),
                                                cache.get("read"), cache.get("write")))
-            usage = {"percentage": 100.0 * used / limit, "totalTokens": used, "maxTokens": limit}
-            if self.hysteresis.allow(usage, self.rollover_at_percent) \
-                    and _rollover.pressure_due(usage, self.rollover_at_percent):
-                self._request_rollover("context pressure %d%%" % int(usage["percentage"]))
+            measured = {"percentage": 100.0 * used / limit, "totalTokens": used,
+                        "maxTokens": limit}
+            if self.hysteresis.allow(measured, self.rollover_at_percent) \
+                    and _rollover.pressure_due(measured, self.rollover_at_percent):
+                self._request_rollover("context pressure %d%%" % int(measured["percentage"]))
         except Exception as exc:  # noqa: BLE001 - the trigger must never fail a turn
             self.stream.append("error", {"error": "rollover trigger: %s: %s"
                                          % (type(exc).__name__, exc)})
@@ -1443,8 +1470,10 @@ class OpencodeRunner:
         if isinstance(info.get("cost"), (int, float)):
             run.costs[mid] = info["cost"]
         tokens = info.get("tokens")
-        if isinstance(tokens, dict) and any(tokens.get(k) for k in ("input", "output", "total")):
-            run.tokens = tokens
+        if isinstance(tokens, dict):
+            run.spent[mid] = tokens     # opencode re-sends a message: per id, never twice
+            if any(tokens.get(k) for k in ("input", "output", "total")):
+                run.tokens = tokens
 
     def _on_part(self, run, part):
         if run is None or not self._live:
@@ -1861,7 +1890,8 @@ class OpencodeRunner:
         payload = {"inbox_ids": [s.row["id"] for s in closing if s.row is not None],
                    "requeued": [s.row["id"] for s in requeue if s.row is not None],
                    "interrupted": bool(interrupted), "is_error": kind in ("failed", "auth"),
-                   "session_id": self.opencode_session, "usage": run.tokens,
+                   "session_id": self.opencode_session,
+                   "usage": usage_of(run.spent.values()) if run.spent else None,
                    "total_cost_usd": sum(run.costs.values()) if run.costs else None,
                    "num_turns": len(run.assistant_ids)}
         if kind in ("failed", "auth"):
@@ -1884,11 +1914,41 @@ class OpencodeRunner:
                 s.closed = True
                 if s.row is not None and s.row["id"] > 0:
                     self.inbox.requeue(s.row["id"])
+        self._record_usage(run)
         run.over = not run.unclosed()
         if kind == "auth":
             self._login_required(detail)
         elif kind is None and not interrupted:
             self._note_good_result()
+
+    def _record_usage(self, run):
+        """The usage record of one result, as the SDK lane's: what the run's
+        answers spent since its last result (the tokens the provider
+        reported), at the cost opencode put on them (0 on a free model,
+        an estimate as on the login lane), the cost passed as this
+        runner's running total since usage.record diffs it per client. The
+        handoff run is recorded without an event, as it writes no result. A
+        failure is a `usage` event with the error, never a failed turn."""
+        try:
+            spent, cost = usage_of(run.spent.values()), sum(run.costs.values())
+            tokens_before, cost_before = run.recorded
+            run.recorded = (spent, max(cost, cost_before))
+            self._usage_spent += max(0.0, cost - cost_before)
+            row = usage.record(self.home, client_id=self._usage_client,
+                               session_id=self.opencode_session or "", lane=LANE,
+                               result={"usage": {k: max(0, v - tokens_before[k])
+                                                 for k, v in spent.items()},
+                                       "total_cost_usd": self._usage_spent,
+                                       "session_id": self.opencode_session})
+        except Exception as exc:  # noqa: BLE001 - usage must never fail a turn
+            row = {"error": "%s: %s" % (type(exc).__name__, exc)}
+        if run.quiet:
+            return
+        try:
+            self.stream.append("usage", {k: row[k] for k in ("cost_usd", "estimate", "total",
+                                                             "error") if k in row})
+        except Exception:  # noqa: BLE001 - nor does its event
+            pass
 
     # -- a login to do (the SDK lane's detection shape) ------------------------
     def _credential_mark(self):

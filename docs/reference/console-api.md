@@ -258,7 +258,7 @@ Install-level extensions ([plugins](../plugins.md)), declared in `config/plugins
 
 ### `GET /api/cousins/<slug>/plugins`
 
-`{"ok": true, "slug", "enabled", "problem", "skipped", "available", "plugins", "note"}`: `enabled` is `[plugins] enabled` as written, `problem` why the table is unusable (else null), `skipped` the enabled names that do not load and why, `available` the install's rows (as above, without the live keys), `plugins` the row's `plugins`, and `note` the tmux kind's gap (its pane reads `.mcp.json` itself, so a plugin's MCP server does not reach it in 2.1.0), null on the other kinds.
+`{"ok": true, "slug", "enabled", "problem", "skipped", "available", "plugins", "note"}`: `enabled` is `[plugins] enabled` as written, `problem` why the table is unusable (else null), `skipped` the enabled names that do not load and why, `available` the install's rows (as above, without the live keys), `plugins` the row's `plugins`, and `note` the tmux kind's gap (its pane reads `.mcp.json` itself, so a plugin's MCP server does not reach it), null on the other kinds.
 
 ### `POST /api/cousins/<slug>/plugins`
 

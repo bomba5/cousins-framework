@@ -136,6 +136,23 @@ def _run_cli(kind, argv):
     c.add_argument("--user", required=True)
     c.add_argument("--caption", default="")
     args = parser.parse_args(argv)
+    config = caption = None
+    if args.cmd == "chat":
+        config = CousinConfig.from_env()
+        caption = args.caption
+        # The caption is outbound: it crosses the same filter every
+        # outbound surface does, BEFORE anything is generated, so a
+        # blocked caption leaves no file and no job row. dest_slug is
+        # empty - the recipient is a person, not a cousin - so only the
+        # always-active terms apply.
+        if caption:
+            policy = OutboundPolicy.load(FrameworkConfig.from_env().root)
+            try:
+                policy.check(caption, from_slug=config.slug, dest_slug="",
+                             surface="media", context="media caption")
+            except FilterBlocked as err:
+                print("cousin-%s: %s" % (kind, err), file=sys.stderr)
+                return 3
     try:
         path = generate_tracked(kind, args.prompt)
     except NoProviderConfigured as err:
@@ -147,19 +164,6 @@ def _run_cli(kind, argv):
     if args.cmd == "gen":
         print(str(path))
         return 0
-    config = CousinConfig.from_env()
-    caption = args.caption
-    # The caption is outbound: it crosses the same filter every
-    # outbound surface does. dest_slug is empty - the recipient is a
-    # person, not a cousin - so only the always-active terms apply.
-    if caption:
-        policy = OutboundPolicy.load(FrameworkConfig.from_env().root)
-        try:
-            policy.check(caption, from_slug=config.slug, dest_slug="",
-                         surface="media", context="media caption")
-        except FilterBlocked as err:
-            print("cousin-%s: %s" % (kind, err), file=sys.stderr)
-            return 3
     _post_reply(config, user=args.user, message=caption,
                 attachment={"kind": kind, "path": str(path)})
     print("posted %s to %s" % (path.name, args.user))

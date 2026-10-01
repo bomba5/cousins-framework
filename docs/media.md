@@ -106,7 +106,8 @@ Nothing cleans these up; they're the cousin's to manage.
 `chat` stores the file as a reply from the cousin to `--user` in the
 cousin's own chat history, the same way `cousin-reply` does. The caption
 is optional and goes through the outbound filter first
-([configuration](configuration.md)). Posting only happens when you ask
+([configuration](configuration.md)), before anything is generated: a
+blocked caption leaves no file and no job row. Posting only happens when you ask
 for it with `chat`; `gen` never posts anything. The posted file is never
 delivered back to the cousin: it made the file, it already knows.
 

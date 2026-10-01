@@ -157,6 +157,27 @@ class TestCli(MediaCase):
         self.assertEqual(rows[0][:2], ("Sam", "image"))
         self.assertIn("chat/images", rows[0][2])
 
+    def test_a_blocked_caption_is_refused_before_anything_is_generated(self):
+        # the filter runs first: no provider call, no file, no job row,
+        # no post (docs/media.md)
+        (self.root / "config").mkdir(exist_ok=True)
+        (self.root / "config" / "outbound-filter.json").write_text(
+            '{"terms": ["kestrel-secret"]}')
+        url = self._serve()
+        self._configure(url)
+        calls = []
+        with mock.patch("cousin_lib.media.generate",
+                        side_effect=lambda *a, **kw: calls.append(a)), \
+                mock.patch("cousin_lib.media._post_reply",
+                           side_effect=lambda config, **kw: calls.append(kw)):
+            rc, _, err = self._main(["chat", "a cat", "--user", "Sam",
+                                     "--caption", "about kestrel-secret"])
+        self.assertEqual(rc, 3, err)
+        self.assertEqual(calls, [])
+        self.assertEqual(list((self.home / "chat").rglob("*.*")), [])
+        from cousin_lib.jobs import list_jobs
+        self.assertEqual(list_jobs(), [])
+
     def test_unconfigured_cli_refuses_with_exit_2(self):
         rc, _, err = self._main(["gen", "a cat"])
         self.assertEqual(rc, 2)

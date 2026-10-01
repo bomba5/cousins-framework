@@ -40,16 +40,16 @@ Everything below is relative to the cousin home.
 |---|---|---|---|
 | Active state | `STATUS.md`, `data/handoff.md`, `data/handoff-manual.md`, `data/active-threads.md`, `data/session-checkpoint.md`, `data/pre-compact-checkpoint.md` | the cousin; the checkpoint files by the harness hooks | boot packet, heartbeat, session start hook |
 | Index | `MEMORY.md` | the cousin | boot packet (the first 1000 characters), heartbeat |
-| Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining at a flip, a transplant merge | distiller, boot packet |
+| Raw entries | `memory/raw/YYYY-MM-DD.jsonl` | `decide`, `remember`, transcript mining after each [turn](glossary.md#turn), a transplant merge | distiller, boot packet |
 | Monthly digests | `memory/raw/YYYY-MM-digest.jsonl` | the raw fold | distiller, boot packet |
-| Raw archive | `memory/raw/archive/YYYY-MM.jsonl.gz` | the raw fold | nothing automatic (`zcat` it) |
+| Raw archive | `memory/raw/archive/YYYY-MM.jsonl.gz` | the raw fold | search (an entry also in a monthly digest is indexed once), explorer |
 | Distilled views | `memory/distilled/*.md` | the distiller | boot packet |
 | Decisions | `data/decisions.jsonl` | `decide` | `consolidate`, the boot packet's staleness warning (a compatibility log: `recall` reads raw memory, and the one-time backfill (triggered by recall, search, consolidate) copies the decisions only this log holds into raw) |
 | Memory and notes files | `memory/**/*.md`, `notes/**/*.md` | the cousin | search |
 | Reasoning capsules | `memory/capsules.jsonl`, mirrored to `memory/distilled/reasoning-capsules.md` | `cousin-reason capsule` | boot packet, search (the mirror) |
 | Corrections | `data/corrections.jsonl` | the chat send path, from your messages | boot packet (calibration layer) |
-| Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
-| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off on the SDK [lane](glossary.md#lane)) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
+| Raw entries | `memory/raw/*.jsonl`, `memory/raw/archive/*.jsonl.gz` | `cousin-memory decide` and `remember`, the transcript miner, the jobs ledger, framework events | distill, **search**, `recall` |
+| Harness auto-memory | the directory `config/harness.toml` names in `auto_memory_dir` | the agent harness itself (switched off by the `sdk` and `tmux` [runner](glossary.md#runner) kinds) | search (a file whose imported copy is current is found as the copy), explorer, `import-auto` |
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
 | Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
@@ -61,7 +61,8 @@ A few notes on the ones that aren't obvious.
 **Active state** is what the cousin is doing right now. `STATUS.md`
 holds the open loops, `data/handoff.md` is what the last generation
 told the next one, and `data/active-threads.md` is one bullet per thread in flight.
-The flip asks the cousin to write all three before it ends a session.
+The `handoff` tool writes them when a flip ends a session (its `active_threads`
+list when the cousin gives one).
 `data/handoff-manual.md` is for a handoff written by hand; the
 framework never writes it. The two checkpoint files come from the
 Claude Code hooks in `hooks/` (see [cousins](cousins.md)).
@@ -232,7 +233,7 @@ fill themselves in:
   title, exit code and summary land in that cousin's memory under
   `job:<title>`. Repeat runs of the same job fold into one line.
   Cancelled jobs and jobs with no owning cousin are skipped.
-- **L4 hypothesis.** When a flip mines the old session's transcript, a
+- **L4 hypothesis.** When the runner mines a turn's transcript, a
   sentence that hedges ("probably", "might", "I suspect", "I think",
   "likely", "maybe", "not sure", "seems") is kept as a hypothesis under
   `episode:<id>:hypothesis` instead of as a conclusion.
@@ -270,12 +271,12 @@ console has the same list at `GET /api/memory/{slug}/tensions`.
 
 When more than `[memory] review_batch` new entries on authored topics
 (default 3) have been written since the review gate last looked, the gate
-holds all of them. On the runner lane it looks after every [turn](glossary.md#turn); the
+holds all of them. On the `sdk` runner kind it looks after every [turn](glossary.md#turn) (the other kinds do not run it); the
 count is per cousin, so entries from a turn that crashed or ended in an
 error are caught at the next look. A held entry stays in raw and search
 still finds it, but it stays out of the distilled views and out of the
 recent memory a new session starts with, until it is kept or dropped. On
-the runner lane a second model reviews the batch in the background after
+the `sdk` kind a second model reviews the batch in the background after
 the turn. Anything it does not settle, or everything if the review fails,
 waits for you:
 
@@ -307,7 +308,7 @@ cousin's long-term floor:
 - `operator-calibration.md`
 - `glossary.md`
 
-They're rebuilt from raw every time a boot packet is assembled (a
+They're rebuilt from raw every time a state digest is built (a
 flip), every time the cousin is started or resumed, by the loops
 daemon within a tick of any raw write (it compares the raw files
 against `memory/.last-distill`, which every distill touches),
@@ -336,8 +337,8 @@ You can write in these files. Everything above the line
 is kept as-is on every run. Everything below it is rewritten. An empty
 file holds the stub `_(empty - awaiting distillation)_`.
 
-`consolidate` also prints topics with three or more entries across the
-decisions log and raw, as candidates for a proper topic file in
+`consolidate` also prints topics with three or more entries in raw
+memory (which holds every decision too), as candidates for a proper topic file in
 `memory/` with a line in `MEMORY.md`.
 
 ## Reasoning capsules
@@ -392,16 +393,20 @@ cousin; see [operations](operations.md).
 
 ## What the boot packet reads
 
-The boot packet is the text a new session starts from. It has nine
-layers in a fixed order, a hard ceiling of about 8000 tokens, and a
-list of required actions at the end. The memory it pulls in:
+The boot packet is what a new session starts from, in two parts. The
+system prompt, never cut, holds:
 
 1. Framework law (`config/law.md`), not memory, but first.
-2. Shared rules and fleet memory: the [shared tier](glossary.md#shared-tier)'s `kind: rule`
-   entries in full, then a one-line index of the rest.
-3. The committed self-portrait.
-4. Operator calibration: `operator-calibration.md` (or the portrait's
-   calibration section), plus recent corrections.
+2. The operator rules: the [shared tier](glossary.md#shared-tier)'s `kind: rule`
+   entries in full.
+3. The identity: the authored parts of `CLAUDE.md` and the committed
+   self-portrait.
+
+The state digest, the session's first message, has a ceiling of about
+8000 tokens and holds:
+
+4. Operator calibration: `operator-calibration.md`, plus recent
+   corrections.
 5. Active state: the open loops from `STATUS.md` and the latest
    `data/handoff.md`.
 6. Task packet: `data/active-threads.md` and the last three capsules.
@@ -409,11 +414,10 @@ list of required actions at the end. The memory it pulls in:
 8. Retrieved memories: the other five distilled files, the newest
    capsule conclusions, recent raw entries (up to the last 60 lines
    from the newest 14 raw files) and the head of `MEMORY.md`.
-9. Tool surface: the list of `cousin-*` commands and what each one does.
+9. Shared reference: a one-line index of the rest of the shared tier.
 
-When the packet is too big, the command list and then the memories
-are cut first, and law never. A
-layer that's missing (no self-portrait, no calibration, no active
+When the digest is too big, the memories are cut first. A
+layer that's missing (no identity, no active
 state) is named at the top as degraded, so the cousin knows it's
 booting short. An empty memories layer is normal for a new cousin and
 isn't flagged. The step-by-step is in
@@ -545,8 +549,8 @@ beat a better match. Delete the two files to reset it.
 
 ### Importing the agent CLI's own memory
 
-On the SDK lane the runner switches the agent CLI's own auto-memory off
-(`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`), so framework memory is the only
+The `sdk` and `tmux` runner kinds switch the agent CLI's own auto-memory
+off (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`), so framework memory is the only
 one. What the CLI kept before that [folds](glossary.md#fold) in once:
 
 ```
@@ -622,8 +626,8 @@ when the runner stopped first). The reviewing model may keep an entry recorded a
 operator level but never drop one: a drop cannot be undone, so that
 drop is yours, and the entry stays held until you give it. Anything the review did not settle stays
 held for `cousin-memory review`; a later start of the runner offers it to
-the reviewer once more. On the tmux lane nothing runs the gate after a
-turn.
+the reviewer once more. On the `tmux` and `opencode` kinds nothing runs
+the gate after a turn.
 
 ### Proactive recall in chat
 
@@ -714,8 +718,8 @@ a cousin whose `cousin.toml` says:
 scope = "shared"     # may nominate; the default "private" never does
 ```
 
-Every cousin's boot packet carries the canonical shared tier in its
-layer 2, whatever the cousin's own `scope` (scope decides what a cousin
+Every cousin's boot packet carries the canonical shared tier (the
+rules in its system prompt, the index in its state digest), whatever the cousin's own `scope` (scope decides what a cousin
 nominates, not what it reads). An entry whose frontmatter has
 `kind: rule` is quoted in full: it is an operator rule the whole fleet
 follows. Every other entry is one line, its file name and

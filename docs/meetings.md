@@ -96,7 +96,7 @@ The `meeting` MCP tool does the same (`say`, `pass`, `minutes`, `show`).
 ## What a cousin receives
 
 ```
-(Meeting 3 "name the new sensor" round 1, your turn: 2 of 2; order 1 kestrel > 2 wren (now)): ana: ideas? | wren: Kestrel || Answer with: cousin-meeting say 3 "<text>" (or: cousin-meeting pass 3). One turn; stay on topic; be brief.
+(Meeting 3 "name the new sensor" round 1, your turn: 2 of 2; order 1 wren > 2 kestrel (now)): ana: ideas? | wren: Kestrel || Answer with: cousin-meeting say 3 "<text>" (or: cousin-meeting pass 3). One turn; stay on topic; be brief.
 ```
 
 A direct question says `a direct question to you`; the facilitator's closing
@@ -117,5 +117,3 @@ turn says `closing, you facilitate` and carries the whole transcript.
 whose turn, round, timeout), `entries` (the transcript) and `seen` (what each
 participant has been sent). The console is only a view of it: restarting the
 console loses nothing, and `cousin-loops` keeps turns moving.
-
-The design and its decisions: [meetings design](design/meetings.md).

@@ -433,9 +433,9 @@ context". The systemd units set all of this themselves.
 python3 -m unittest discover -s tests
 ```
 
-It takes a few minutes (about ten on a 2-core VM). The summary has to say
-`OK` (a few skips are fine); a line or two of test output can print after
-it, so look for `OK` near the end rather than on the very last line.
+How long it takes depends on the host (about ten minutes on a 2-core VM).
+The summary has to say `OK` (a few skips are fine); a line or two of test
+output can print after it, so look for `OK` near the end rather than on the very last line.
 Do it now, before any cousin exists, so a failure is the framework's and not
 your install's.
 
@@ -704,12 +704,14 @@ shows the version and commit the console process is running, so a pull
 without a restart is visible there. (In the container the commit is blank:
 the image carries no `.git`.)
 
-An install upgraded from 1.x still has the old chat server units. 2.0.0 runs
-no chat server, so disable them once, for each slug that had one, and delete
-their files from `~/.config/systemd/user/`:
+An install upgraded from 1.x still has the units 1.x had for its
+per-cousin chat servers and session starts. 2.0.0 runs neither, so disable
+them once, for each slug that had one, and delete their files from
+`~/.config/systemd/user/`:
 
 ```
-systemctl --user disable --now cousin-chat-watchdog.timer cousin-chat-server@<slug>.service
+systemctl --user disable --now cousin-chat-watchdog.timer \
+    cousin-chat-server@<slug>.service cousin-start@<slug>.service
 ```
 
 If you move the checkout to another path, the cousins' Claude Code settings

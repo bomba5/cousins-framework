@@ -46,9 +46,14 @@ That removes the classic mistake of answering a peer cousin with
 once, from `cousin-chat list`, when the MCP process starts.
 
 `cousin-spawn --operator ana` puts `ana` in the new cousin's `operators`
-list. Without it, `send` reaches peers only, and its error says no
-operator is configured. For an existing cousin, edit the `operators =
-[...]` line in its `mcp-registry.toml`.
+list. For an existing cousin, edit the `operators = [...]` line in its
+`mcp-registry.toml`. On the `sdk` and `opencode` kinds, `send` also
+reaches the cousin's own `[operator] name` from `cousin.toml`, so a cousin
+with an empty list still reaches its operator; the error names the known
+peers and operators (`unknown destination 'x'; known peers: ...; known
+operators: ...`). On the `tmux` kind (the stdio server) only the
+`operators` list counts, and with it empty `send` reaches peers only and
+its error says no operator is configured.
 
 `job run` is how a cousin launches a long shell command as a tracked
 job without a shell of its own: it takes `title`, `argv` (the command as
@@ -128,16 +133,18 @@ same registry builds the tools inside the runner's own process
 either way, so a tool cannot exist on one transport and not the other.
 Each registry command maps to a library function in `HANDLERS`; a
 command the registry enables but `HANDLERS` has no function for stops
-the runner at start, with the list of what's missing. Two tools exist
-only in-process and never over stdio: `reply`, the sole writer of
-`chat.db` on this lane, and `handoff`. Handlers are library calls in the
+the runner at start, with the list of what's missing. Two tools are
+the runner's own, not registry commands: `reply`, the sole writer of
+`chat.db` on this lane, and `handoff`. The stdio server serves them only
+to a `tmux`-kind cousin, whose pane reaches the framework that way; any
+other cousin gets them in-process. Handlers are library calls in the
 runner's process, with one exception: `job run` starts the `cousin-job
 start shell` launcher in a fresh interpreter (the same code the runner
 imported), from the cousin's home, because forking the multi-threaded
 runner itself could hang the child.
 
 `handoff` ends the generation: the runner asks for it at a [rollover](glossary.md#rollover) (see
-[agent-loop-runner](design/agent-loop-runner.md#continuous-extraction-and-rollover)),
+`rollover_at_percent` in [`[agent] runner`](configuration.md#agent-runner)),
 and it is called exactly once, with five fields: `position` (a paragraph,
 where the work stands), `next_action` (the first thing the next generation
 should do) and `status` (markdown, the section's body: replaces
@@ -155,7 +162,7 @@ ritual), and returns one line naming what it wrote and how many memories.
 
 A `kind = "job"` registry tool (its `gen`, `status` and `result`
 commands, wrapping a slow shelled-out command as a tracked background
-job) has no in-process handler in this phase: a cousin whose registry
+job) has no in-process handler: a cousin whose registry
 enables one refuses to start on the runner, named in the same missing-
 handlers list, exit 2. And a registry command's `argv` with a flag
 baked in (`argv = ["list", "--json"]`, say) is not honoured in-process:
@@ -187,17 +194,18 @@ handled differently:
   user server's tools stay deferred there. The runner's event [stream](glossary.md#stream)
   carries an `mcp_config` event with server names, types, ignored keys
   and skip reasons, ordered by name, never a value.
-- **tmux** (the legacy lane and the tmux runner kind). Claude Code reads
+- **tmux** (the tmux runner kind). Claude Code reads
   `<home>/.mcp.json` itself, the ordinary project-config way, including
   the `cousin` entry spawn wrote (see "How it's wired" above). An extra
   server an operator adds there works exactly as Claude Code has always
   handled it; the framework does nothing special for it.
-- **opencode.** The runner renders opencode's own config with exactly
-  one MCP server, `cousin`, a remote HTTP bridge
-  (`cousin_lib/runner/mcp_http.py`) with a bearer token; it does not
-  read the home's `.mcp.json` for this kind. Before a turn it checks
+- **opencode.** The runner renders opencode's own config with the
+  `cousin` MCP server, a remote HTTP bridge
+  (`cousin_lib/runner/mcp_http.py`) with a bearer token, plus a `local`
+  entry for each MCP server of a [plugin](plugins.md) the cousin enables;
+  it does not read the home's `.mcp.json` for this kind. Before a turn it checks
   opencode's effective config (every config source opencode itself
-  merged) and refuses to run if anything besides `cousin` shows up
+  merged) and refuses to run if any server besides those shows up
   there, so a stray opencode config file can't add a server the runner
   never rendered.
 - **fake.** No MCP servers of any kind; it exists for tests.

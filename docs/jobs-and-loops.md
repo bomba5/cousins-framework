@@ -95,9 +95,10 @@ kept, together with their logs in `data/job-logs/`.
 
 ### Automatic tracking from Claude Code
 
-Every cousin spawned by the framework has hooks in its
-`.claude/settings.json` that record jobs on their own, so a cousin
-doesn't have to remember:
+Every cousin records jobs on its own, so it doesn't have to remember. On
+the `sdk` kind the [runner](glossary.md#runner)'s in-process hooks do it; on the `tmux` kind,
+the hooks spawn writes into the home's `.claude/settings.json`; on the
+`opencode` kind, the runner reads them from the event [stream](glossary.md#stream):
 
 - **Subagents.** A call to the `Agent` tool (`Task` in older Claude Code)
   becomes a `subagent` job titled by its description. It closes `done`
@@ -144,7 +145,7 @@ cousin-spawn wren --repair-settings
 
 ## Loops
 
-A loop is a prompt that gets typed into a cousin's session on a
+A loop is a prompt that gets delivered to a cousin's session on a
 schedule. Loops live in the cousin's own `cousin.toml`:
 
 ```toml
@@ -224,9 +225,10 @@ What happens on each tick, for every cousin whose [runner](glossary.md#runner) i
    one message. A single item goes as its bare prompt; several go under
    a `[Framework scheduler: N loops due this tick - handle in order]`
    line, one `### name` section each.
-3. Only when the text was actually typed in does the loop count as
-   fired. If delivery fails, or the pane is sitting at a login prompt,
-   the loop stays due and is tried again next tick. So a loop can fire
+3. Each delivery is one row in the cousin's [inbox](glossary.md#inbox),
+   and only once that row is stored does the loop count as fired. The
+   daemon doesn't wait for the turn. If the row can't be stored, the
+   loop stays due and is tried again next tick. So a loop can fire
    twice after a crash; write prompts that don't mind that.
 
 A `daily_at` loop missed while the cousin was down fires once when it's
@@ -263,7 +265,7 @@ Anything that can write a file can poke a cousin. Drop a file named
 - `<loop name>.ready` fires that loop now. Its regular schedule isn't
   affected.
 - `context-heartbeat.ready` sends a heartbeat now.
-- `<anything>-message.ready` types the file's contents, as one line.
+- `<anything>-message.ready` delivers the file's contents, as one line.
 - Any other name is deleted and logged, never delivered.
 
 ```
@@ -282,19 +284,18 @@ Two kinds of flip are also driven from here:
   `default_flip_at` from `config/harness.toml`, else 04:00. Set
   `flip_at = "never"` to opt a cousin out, and `cousin-loops flips` to
   see which cousin flips when and why. At most one cousin flips per
-  tick, so they don't all rebuild their boot packets at once. A cousin
-  whose session started after the day's flip time is not flipped that
-  day.
-- With `flip_when_transcript_mb` set in `config/harness.toml`, a cousin
-  whose session transcript grows past that size gets a flip scheduled
-  five minutes out, with warnings typed in at 5 minutes, 1 minute and 30
-  seconds.
+  tick, so they don't all roll over at once. A cousin whose session
+  started after the day's flip time is not flipped that day, and
+  neither is one whose runner is down.
+- A timed flip, from the console's "flip in N minutes", with warnings
+  delivered at 5 minutes, 1 minute and 30 seconds. A cousin whose
+  runner is down at that time isn't flipped; the request fails.
 
 What a flip does is in [cousins](cousins.md).
 
 ### Worker cousins
 
-A cousin with `type = "worker"` under `[cousin]` has no tmux session and
+A cousin with `type = "worker"` under `[cousin]` has no session and
 no heartbeat. When one of its loops is due, the daemon runs the command
 in `config/worker-cmd` as a tracked job instead, with `{prompt}` and
 `{home}` replaced:

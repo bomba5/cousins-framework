@@ -1,6 +1,6 @@
 """Delivery: the one way anything reaches a cousin.
 
-docs/design/agent-loop-runner.md is the contract. Every producer (chat,
+docs/reference/runners.md is the contract. Every producer (chat,
 reactions, chat hooks, loops, schedules, meetings, the flip, a pending
 boot) hands an `Item` to `deliver()`. The item names its thread, so a
 reply can be routed back to where the turn came from, and its source,

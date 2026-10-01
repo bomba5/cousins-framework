@@ -20,8 +20,15 @@ the old home around until you're happy with the new one.
 ## Before you start
 
 Stop the cousin on the source, after it has written its handoff (a [flip](glossary.md#flip) or
-its session-end routine does that). Both halves: the tmux session and the
-chat server.
+its session-end routine does that). On a 2.x source, that is the console's
+stop button or:
+
+```
+cousin-supervisor stop wren
+```
+
+A source from before 2.0.0 (1.x, or the older framework) ran a cousin in two
+halves, a tmux session and a per-cousin chat server. Stop both:
 
 ```
 tmux kill-session -t wren
@@ -50,8 +57,10 @@ rsync -a <old home>/ "$FRAMEWORK_ROOT"/cousins/wren/
 ```
 
 That carries everything: `cousin.toml`, `CLAUDE.md`, memory, notes, the chat
-store (`data/chat.db`) with its pictures under `chat/`, loops, hooks and
-the `api_key` secret if there is one.
+store (`data/chat.db`) with its pictures under `chat/`, loops and hooks.
+The account a cousin runs on is the install's, not the home's: make sure
+`config/accounts.toml` here has the account its `[agent] account` names,
+logged in.
 
 Then fix what points at the old place:
 
@@ -60,9 +69,11 @@ cousin-spawn wren --repair-settings     # rewrite .claude/settings.json and .mcp
 cousin-mcp approve wren                 # trust the new path in ~/.claude.json
 ```
 
-- **The chat port.** Check `[chat] port` in `cousin.toml` against the other
-  cousins here (`grep -h '^port' cousins/*/cousin.toml`) and anything else
-  listening on the machine. Change it if it collides.
+- **A home from 1.x.** Its `cousin.toml` can still carry keys 2.0.0 no
+  longer reads (`[chat] port` among them; no chat server runs, so a port
+  collides with nothing) and may have no `[agent] runner`. See
+  [a cousin with no runner](#a-cousin-with-no-runner) and
+  [removed keys](#removed-keys-after-the-upgrade-to-200).
 - **Claude Code's own memory.** Claude Code keeps a memory directory per
   project, named after the project path, and the path just changed. If
   `config/harness.toml` sets `auto_memory_dir`, copy the old directory to
@@ -139,15 +150,15 @@ table of commands, drop the rows for commands this framework doesn't have;
 
 ### Chat history
 
-With the new chat server stopped:
+With the new cousin stopped (`cousin-supervisor stop wren`):
 
 ```
 cousin-chat-import wren --old-home <old home>
 ```
 
 `--old-home` is the old home or an unpacked archive of it; it needs
-`data/chat.db` and `chat/`. The command refuses while the cousin's chat
-server answers. What it does:
+`data/chat.db` and `chat/`. The command refuses while the cousin's runner
+is running (exit 2), since the import rewrites its store. What it does:
 
 - Every old message keeps its id, so replies still quote the right message.
 - Messages already in the new store (say, a hello you sent to test it) move
@@ -220,7 +231,7 @@ See [remote cousins](remote-cousins.md).
 
 ## Accounts for runner cousins
 
-Existing cousins keep working with no change: a cousin that names no account runs on `host`, the host's default login in `~/.claude`, shared by every such cousin, exactly as before; a cousin with `api_key_file` runs on an implicit key account. One change is not silent: an `api_key_file` is now read as strictly as `cousin-auth`'s key file, so a key file at mode 0644, or in a directory open to group or others, now REFUSES to start (exit 2, the message names the file and the `chmod`): `chmod 600` the file and `chmod 700` its directory. Move a cousin to its own login with an `[accounts.<name>]` entry, the login command, and `account = "<name>"` in its `cousin.toml`; a token or key account keeps its secret in `.secrets/accounts/<name>` unless `secret_file` says otherwise.
+Existing cousins keep working with no change: a cousin that names no account runs on `host`, the host's default login in `~/.claude`, shared by every such cousin, exactly as before; a cousin with `api_key_file` runs on an implicit key account. One change is not silent: an `api_key_file` is now read as strictly as an account's secret file, so a key file at mode 0644, or in a directory open to group or others, now REFUSES to start (exit 2, the message names the file and the `chmod`): `chmod 600` the file and `chmod 700` its directory. Move a cousin to its own login with an `[accounts.<name>]` entry, the login command, and `account = "<name>"` in its `cousin.toml`; a token or key account keeps its secret in `.secrets/accounts/<name>` unless `secret_file` says otherwise.
 
 Moving a cousin from `host` to a named login account moves where the CLI
 keeps its local transcripts (they live under the account's config dir), so
@@ -330,8 +341,8 @@ moves between.
 
 **Switching to the `tmux` kind** starts the host's interactive Claude
 Code CLI in a tmux pane on the framework's own tmux socket
-(`<root>/run/tmux.sock`, session `tmux-<slug>`, separate from the legacy
-lane's tmux sessions). Its account has to be a subscription login
+(`<root>/run/tmux.sock`, session `tmux-<slug>`, separate from the tmux
+sessions 1.x used). Its account has to be a subscription login
 (`claude-login`): a `claude-token` or `anthropic-key` account is refused
 at `plan`, because the tmux kind has no way yet to show that CLI a
 login-free config dir with no menu to click through. The CLI may show

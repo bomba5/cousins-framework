@@ -3,8 +3,7 @@ transcript is that kind's source of truth: which prompt the model took,
 when a turn ended, how it ended. Hooks only wake the runner up; nothing
 here trusts them.
 
-The shapes are the ones measured on Claude Code 2.1.281 in a tmux pane
-(docs/design/plans/phase-11-findings.md):
+The shapes are the ones measured on Claude Code 2.1.281 in a tmux pane:
 
 - a turn starts at a `user` entry with `promptSource` "typed" or "queued"
   and string or text content, not meta, carrying no `tool_result`; its

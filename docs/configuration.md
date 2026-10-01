@@ -59,12 +59,16 @@ Otherwise the command stops and tells you how to name the root.
 ## Removed in 2.0.0
 
 2.0.0 retired the legacy tmux [lane](glossary.md#lane) and the per-cousin chat server, and with
-them these keys and one file. Nothing reads them any more. A key still in a
-file is inert and never a refusal: `cousin-runner` names it at start (one
-stderr line, and a `system` `config` event on the [stream](glossary.md#stream)), `cousin-supervisor
-status` lists it under `config`, the console's card shows it, and
-`cousin-migrate plan --to` and `check` print a `warn 2.0.0` line. `cousin-migrate
-tidy <slug>|--all --yes` removes them, keeping each file's prior bytes beside
+them these keys, one file and one environment variable. Nothing reads them
+any more. A key still in a file is inert and never a refusal: a key in
+`cousin.toml`, `config/harness.toml` or `config/hive.toml`, or a leftover
+`config/agent-cmd`, is named by `cousin-runner` at start (one stderr line,
+and a `system` `config` event on the [stream](glossary.md#stream)), listed
+by `cousin-supervisor status` under `config`, and given a `warn 2.0.0` line
+by `cousin-migrate plan --to` and `check`; the console's card shows a
+cousin's own `cousin.toml` keys. `COUSIN_TMUX_SOCKET` is simply unused:
+nothing looks at it or names it. `cousin-migrate
+tidy <slug>|--all --yes` removes the keys and the file, keeping each file's prior bytes beside
 it ([commands](commands.md)). A cousin with no `[agent] runner` at all is a
 different case: it is refused ([migrating](migrating.md)).
 
@@ -79,7 +83,7 @@ different case: it is refused ([migrating](migrating.md)).
 | `busy_patterns` | `config/harness.toml` | delete: the auth-mode switch that read it is gone |
 | `[input_mode]` | `config/harness.toml` | delete: nothing types chat into a pane |
 | `flip_when_transcript_mb` | `config/harness.toml` | delete: the transcript-size guard read the legacy lane's session |
-| `COUSIN_TMUX_SOCKET` | the environment | unset it: it named the legacy sessions' tmux socket; the tmux kind uses `<root>/run/tmux.sock` |
+| `COUSIN_TMUX_SOCKET` | the environment | unset it: it named the legacy sessions' tmux socket and is simply unused now; the tmux kind uses `<root>/run/tmux.sock` |
 | `[agent.resume]` | `config/harness.toml` | delete: a runner resumes its own session |
 | `[auth.api_key]` | `config/harness.toml` | delete: an `anthropic-key` account in `accounts.toml` replaces the `api_key` mode |
 | `home_chat_url` | `config/hive.toml` | delete: set `home_cousin`, reached through the queen |
@@ -176,11 +180,17 @@ that names the key, never a secret:
   proxy names, or port 3456, the bridge proxy's port) is refused: move a
   legitimate local proxy on 3456 to another port.
 
+In the framework's image, an API key given as the compose secret
+`anthropic_api_key` is installed and declared for you as the
+`anthropic-key` account `api-key` (see `COUSIN_API_KEY_SECRET` under
+[Environment variables](#environment-variables)); name it with `[agent]
+account = "api-key"`.
+
 The secret files default to `.secrets/accounts/<name>` because the checkout's
 `.gitignore` covers `.secrets/`: a secret is never visible to git and never
 reaches a published tree. A secret file is read (by the runner when it
-starts and connects, and by `cousin-account status`) as strictly as
-`cousin-auth` reads its key file: the directory must be a 0700 directory of
+starts and connects, and by `cousin-account status`) strictly: the
+directory must be a 0700 directory of
 yours, the file a regular 0600 file of yours, and a symlink is refused. A file
 open to group or others refuses the start (exit 2, the message names the file
 and the `chmod`). A missing secret file is not a configuration error but a
@@ -229,8 +239,8 @@ the file and the `chmod`); a missing one is a login to do. An Anthropic
 OAuth login in it (a Claude subscription) refuses the start, and so does any
 entry but an `api` key and another vendor's `oauth` login, and any entry
 whose provider id says claude or anthropic, of any type (an Anthropic API
-key included: ruling P9-1). Claude cousins
-run on the Agent SDK and nowhere else (ruling P9-1): an opencode account that
+key included). Claude cousins
+run on the Agent SDK and nowhere else: an opencode account that
 names the `anthropic` provider, or an `endpoint_model`, `[agent] model` or
 `small_model` whose id says claude or anthropic (in any case), is refused at
 start (exit 2). `cousin-account status <name>`
@@ -272,7 +282,7 @@ second paste, a late code) is kept out of the chat and discarded, and any
 other message passes as usual. A capture whose flow is gone is a tombstone
 whatever its clock says, and a stored code never outlives its window.
 
-Until the phase 6 container every cousin runs as your Unix user, so the model's own commands can read the account secrets, the account login directories and a pending login capture. The refusal inside a cousin and the policy's deny pattern are guardrails against a cousin RUNNING `cousin-account`, not a boundary around those files.
+Every cousin runs as one Unix user (yours on a bare host, the image's own user in the container), so the model's own commands can read the account secrets, the account login directories and a pending login capture. The refusal inside a cousin and the policy's deny pattern are guardrails against a cousin RUNNING `cousin-account`, not a boundary around those files.
 
 The refusal looks at the environment `cousin-account` runs in and at the
 environment every ancestor process started with (best effort, where `/proc`
@@ -336,13 +346,18 @@ is accurate: nothing has proven the login yet.
 ## harness.toml
 
 Where the agent harness keeps its own files, and a few things about how it
-behaves. For Claude Code copy `harness.toml.claude-code.example`, which has
-every value filled in. `harness.toml.example` is the same keys, commented,
-for another harness.
+behaves. For Claude Code copy `harness.toml.claude-code.example`, which fills
+in Claude Code's paths and the spawn dialog's model and effort.
+`harness.toml.example` lists the keys, commented, for another harness.
+Neither example shows `host_label` (below); add it by hand. In the
+framework's image the entrypoint creates `config/harness.toml` from the
+commented `harness.toml.example` on a start that finds none, so every key is
+at its default until you edit it.
 
-Without the file, all of this is off: transcript mining at [flip](glossary.md#flip), the harness
-memory collection in search, the console's token counts, `cousin-mcp
-approve`, and the spawn dialog's model and effort preselection. A file that
+Without the file, all of this is off: the harness memory collection in
+search, the console's token counts for a cousin whose kind keeps none of its
+own (below), `cousin-cache-audit`, `cousin-mcp approve`, and the spawn
+dialog's model and effort preselection. A file that
 doesn't parse is an error, not "off". The keys 2.0.0 removed from it are
 listed under [Removed in 2.0.0](#removed-in-200).
 
@@ -350,10 +365,10 @@ Top-level keys:
 
 | key | default | meaning |
 |---|---|---|
-| `transcripts_dir` | none | where the harness writes session transcripts for a cousin. A path template, see below. Used by transcript mining at flip and the console's token counts. |
+| `transcripts_dir` | none | where the harness writes session transcripts for a cousin. A path template, see below. Read by `cousin-cache-audit`, and by the console's token counts for a cousin whose kind keeps no usage of its own (an `sdk` or `opencode` cousin's come from its `data/usage.db`, a `tmux` cousin's from its pane's own transcripts). A runner mines its own session store after every turn and does not read this. |
 | `auto_memory_dir` | none | the harness's own memory directory for a cousin. When set, it becomes the `harness` collection in `cousin-memory search`. |
 | `mcp_logs_dir` | Claude Code's `~/.cache/claude-cli-nodejs/{home_encoded}/mcp-logs-{server}` | where the harness writes a log per session per MCP server. The boot packet and `cousin-mcp --last-connection` read it for the reason a cousin's MCP server failed, which the harness itself does not report. |
-| `default_flip_at` | `04:00` | `"HH:MM"`, the daily flip time for every cousin that does not set its own. `"never"` makes no flip the default. One time for the whole fleet is fine: the daemon fires at most one flip per tick. |
+| `default_flip_at` | `04:00` | `"HH:MM"`, the daily [flip](glossary.md#flip) time for every cousin that does not set its own. `"never"` (or `"off"`, `"none"`, `"no"` or `""`, in any case) makes no flip the default. One time for the whole fleet is fine: the daemon fires at most one flip per tick. |
 | `settings_file` | none | the harness's settings JSON, the file that records project trust and approved MCP servers. `cousin-mcp approve` edits exactly this file. Without it, `approve` refuses and prints the edit to make by hand. |
 | `host_label` | the hostname | a non-empty string: the host a login message names ("log in on <host>"), in `data/login-required.json`, `cousin-chat list` and the Telegram notice. Anything else is an error. |
 
@@ -369,7 +384,7 @@ ASCII letter or digit becomes `-`, so `/a/b` is `-a-b` and `/tmp/x_/w.v2` is
 | `default_model` | none | the model the console's spawn dialog preselects for a new cousin |
 | `default_effort` | none | the effort it preselects; one of `low`, `medium`, `high`, `xhigh`, `max` (`EFFORT_LEVELS` in `cousin_lib/config.py`, the one list every command, route and doc follows) |
 | `models` | a built-in list | the models the console's spawn dialog offers. Leave it unset to get the built-in list (`DEFAULT_MODELS` in `cousin_lib/config.py`, its first entry the fallback default), which follows code updates. |
-| `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux lane (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` [stream](glossary.md#stream) event, so it is observable without reading either toml file. |
+| `commit_attribution` | `true` | whether a commit or pull request a cousin makes carries the harness's own injected attribution (a Co-Authored-By trailer, a "Generated with Claude Code" line). A cousin's own `cousin.toml` `[agent] commit_attribution` overrides this. `true` keeps the harness's stock behaviour, since the framework is public and does not impose one operator's policy on every install; `false` turns it off for the SDK runner (`options.settings`, composed with anything else `options()` passes) and for the tmux kind (`includeCoAuthoredBy: false` and an empty `attribution` object written into `<home>/.claude/settings.json` by `apply_project_settings`, idempotently and without touching an operator's own keys in that file). The resolved value also rides the SDK runner's head `runner` [stream](glossary.md#stream) event, so it is observable without reading either toml file. |
 
 ## console-users.json
 
@@ -409,8 +424,8 @@ Missing or unreadable: the defaults. A client outside the list gets 403.
 
 ## embedding.toml
 
-The semantic leg of memory search. Read by `cousin-memory search`, the chat
-server's proactive recall and the hive's recall. Missing: keyword search only,
+The semantic leg of memory search. Read by `cousin-memory search`, the
+runner's proactive recall and the hive's recall. Missing: keyword search only,
 quietly. Present but unreachable or without a `url`: keyword results plus a
 notice saying so. In Docker the image's entrypoint writes it on a start that
 finds none, from `COUSIN_EMBEDDING_URL` and `COUSIN_EMBEDDING_MODEL`, which
@@ -430,6 +445,7 @@ timeout_s = 120
 | `timeout_s` | 10 | seconds per request. Set it above the time one chunk takes, or every search waits it out and falls back to keyword. 120 on a CPU-only box, 30 with a GPU. |
 | `chunk_chars` | 2000 | long files are embedded in chunks this long |
 | `chunk_overlap` | 200 | each chunk overlaps the previous one by this much |
+| `[options]` | none | a table sent as is, as `options`, with every request. For Ollama, `num_thread = 4` caps the cores one embedding takes (it uses them all by default, which on a CPU-only host stalls everything else). |
 
 `[recall]`, for proactive recall (the runner searching memory for each
 message a cousin receives and adding a "possibly relevant" line):
@@ -617,7 +633,7 @@ That's an install choice, so it doesn't mark a boot as degraded. See
 ## worker-cmd
 
 One line, for worker cousins (`[cousin] type = "worker"`): cousins with no
-tmux session that only run loops. When a worker's loop is due, the loops
+session that only run loops. When a worker's loop is due, the loops
 daemon runs this command as a tracked job. `{prompt}` becomes the loop's
 prompt and `{home}` the cousin's home.
 
@@ -644,10 +660,12 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_HOME` | the cousin a command acts for. Set in every runner's environment; set it yourself to use `cousin-memory`, `cousin-job` and friends from a plain shell. |
 | `COUSIN_SLUG` | set by the framework for session hooks, chat hooks and the MCP server |
 | `COUSIN_FILTER_OVERRIDE` | `1` switches the outbound filter off for one command |
-| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the [supervisor](glossary.md#supervisor), not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the runners and the tmux kind's panes. Only the console's restart route reads it (to report `supervised`) |
+| `COUSIN_SUPERVISED` | `1` in every process `cousin-supervisor` starts (with `PYTHONUNBUFFERED=1` and `FRAMEWORK_ROOT`); set by the [supervisor](glossary.md#supervisor), not by you. It is inherited by whatever those children launch in turn: on a bare host that includes the runners and the tmux kind's panes. Read by the console's restart route (beside systemd's `INVOCATION_ID`) and its supervisor-status route (`GET /api/system/supervisor`), both to report `supervised`; any non-empty value counts |
 | `COUSIN_DEFAULT_RUNNER` | `sdk`, `tmux`, `opencode` or `fake`: the runner kind a new cousin gets when `cousin-spawn --runner` (or the console's `runner`) is not given, written to its `[agent] runner`. Unset or empty: `sdk`. Any other value is refused before anything is created |
-| `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
-| `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The default image sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the slim image, a bare host): `opencode` on `PATH` |
+| `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Used for every runner kind, and refused, also before anything is created, when the kind cannot run on it: a `claude-token` or `anthropic-key` account for a tmux cousin, anything but an `opencode` account for an opencode cousin, an `opencode` account for any other kind |
+| `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The default image sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the slim image, a bare host): `opencode` on `PATH`. `cousin-account login <name> --provider <id> --method <label>` reads it too and needs an absolute path there: a relative one is refused |
+| `COUSIN_IMAGE_SRC` | read by the image's entrypoint only: where the framework sits in the image (default `/opt/framework`), the source of `templates/` and the `config/*.example` files. You do not set it in the image; it is there so the entrypoint can run on a host |
+| `COUSIN_API_KEY_SECRET` | read by the image's entrypoint only: the file holding an Anthropic API key (default `/run/secrets/anthropic_api_key`, the compose secret `compose.api-key.yml` mounts). When it exists and is non-empty, each start copies it to `.secrets/accounts/api-key` (0600 in a 0700 directory) and appends `[accounts.api-key]` with `kind = "anthropic-key"` to `config/accounts.toml` when that file has no such table yet. An empty or unreadable file installs nothing and says so |
 | `COUSIN_IN_CONTAINER` | `1` in the framework's image (its Dockerfile sets it), not set by you. Only exactly `1` counts. Read by the login lines for `host`: inside the image there is no host user to log in as and the hostname is the container's id, so the line names `docker compose exec framework cousin-account login host` on the Docker host instead of `claude auth login` on the host |
 | `COUSIN_EMBEDDING_URL` | read by the image's entrypoint only, on each start: set and non-empty, with no `config/embedding.toml`, it writes that file with this `url`, `COUSIN_EMBEDDING_MODEL` as its `model` and `timeout_s = 120`. An existing file is never touched. `compose.yml` sets `http://embeddings:11434/api/embeddings`; `compose.own-ollama.yml` points it at your own Ollama, or sets it empty for keyword search only. Unset (a bare host, a plain `docker run`): nothing is written |
 | `COUSIN_EMBEDDING_MODEL` | the `model` the entrypoint writes with `COUSIN_EMBEDDING_URL`. `compose.yml` sets `nomic-embed-text:v1.5`, the tag its `embeddings` service pulls |
@@ -669,10 +687,15 @@ role = "helps me around the house"
 
 [operator]
 name = "ana"
+
+[agent]
+runner = "sdk"
 ```
 
-With `--runner` (or `COUSIN_DEFAULT_RUNNER`) it also writes `[agent] runner`,
-and `account` when one is given (`--account` or `COUSIN_DEFAULT_ACCOUNT`):
+`[agent] runner` is always written: `--runner`, else
+`COUSIN_DEFAULT_RUNNER`, else `sdk`. `account` is written when one is given
+(`--account` or `COUSIN_DEFAULT_ACCOUNT`), and `model` and `effort` when
+given, under `[agent]` too:
 
 ```
 [agent]
@@ -717,7 +740,7 @@ account = "metered"
 
 | key | default | meaning |
 |---|---|---|
-| `flip_at` | the install's `default_flip_at` (`04:00`) | `"HH:MM"`. The loops daemon flips this cousin once a day at or after that time, unless its session started after that time that day (then the next day's time is its first). `"never"` opts this cousin out. Leave it out and the install default applies, so a new cousin flips without being configured. `cousin-loops flips` prints the effective time and where it came from. |
+| `flip_at` | the install's `default_flip_at` (`04:00`) | `"HH:MM"`. The loops daemon flips this cousin once a day at or after that time, unless its session started after that time that day (then the next day's time is its first). `"never"` (or `"off"`, `"none"`, `"no"` or `""`, in any case) opts this cousin out. Leave it out and the install default applies, so a new cousin flips without being configured. `cousin-loops flips` prints the effective time and where it came from. |
 
 `[[loops]]`, one table per loop:
 
@@ -754,17 +777,15 @@ The bridge refuses to start when any of these is missing. See [telegram](telegra
 
 ### [agent] runner
 
-`runner = "sdk"` puts the cousin on `cousin-runner`
-(docs/design/agent-loop-runner.md) instead of a tmux session. Chat, schedules,
-loops and meetings all reach it the same way now: each producer hands its item
-to the delivery facade and reads back `delivery.accepted(outcome, home)` (a
-durable [inbox](glossary.md#inbox) put is acceptance, `delivered` or a runner's `queued` row, never
-a bare `failed`; a producer hands a runner cousin its item without waiting,
-since the put is the acceptance, and waits on a tmux cousin's typed line as
-before) and, where it needs to know whether the cousin is up,
-`delivery.is_alive(home)` (a runner cousin's answer is whether a runner holds
-its lock; a tmux cousin's is unchanged, tmux `has-session` or the chat port).
-This is no longer experimental for those four producers. The console serves a
+`runner` names the cousin's runner kind: `sdk` (the default a new cousin
+gets), `tmux`, `opencode` or `fake`. `cousin-runner` builds that kind and
+serves the cousin's [inbox](glossary.md#inbox); [runners](reference/runners.md)
+compares the kinds. Chat, schedules, loops and meetings all reach a cousin the
+same way: each producer hands its item to the delivery facade without waiting
+and reads back `delivery.accepted(outcome, home)` (a durable inbox put is
+acceptance: `delivered` or a runner's `queued` row, never a bare `failed`)
+and, where it needs to know whether the cousin is up, `delivery.is_alive(home)`
+(whether a runner holds the cousin's lock). The console serves a
 runner cousin's chat from its `chat.db` and shows its reasoning stream, with an
 interrupt and a say box ([console](console.md)); `cousin-watch` shows the same
 stream in a terminal. The runner starts its
@@ -772,7 +793,7 @@ session with no settings files and `bypassPermissions`; `policy.toml`
 (`deny_tools`, `deny_bash_patterns`, `ask`, `outbound_filter`) is what stands
 in for a settings file's deny rules, read once at start and enforced by a
 `PreToolUse` hook, and a malformed one is a config error, exit 2, naming the
-key. `runner = "fake"` is for tests. `runner = "tmux"` (phase 11) runs the
+key. `runner = "fake"` is for tests. `runner = "tmux"` runs the
 host's interactive Claude Code in a tmux pane on the framework's own socket,
 fed by the same inbox; it runs on `host` or a named `claude-login` account only
 (`claude-token` and `anthropic-key` accounts are refused, exit 2), and the pane
@@ -787,10 +808,14 @@ recognises). The in-pane launcher also sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
 chain makes the CLI's too, so the pane hook and a crash recovery know which
 process is this cousin's), and refuses the CLI's print-mode flags (`-p`,
 `--print`, `--output-format`, `--input-format`, `--strict-mcp-config`): the
-tmux kind's contract is an interactive pane, never a one-shot call. Absent: the tmux path, unchanged
-(and `cousin-runner` refuses the cousin, exit 2, unless `--runner` is given; a
-cousin.toml that does not parse is also the tmux path, and `cousin-runner`
-refuses it the same way).
+tmux kind's contract is an interactive pane, never a one-shot call.
+
+A cousin with no `runner`, a value that is not one of the four kinds, or a
+`cousin.toml` that does not parse is refused, with one line that says why
+(`delivery.lane_refusal`): every delivery to it is `failed`, it is never
+alive, it is never flipped, and `cousin-runner` refuses it, exit 2 (unless
+`--runner` names a kind and the file parses). See
+[migrating](migrating.md) for moving such a cousin onto a runner.
 
 With a runner, delivery puts a row in the cousin's inbox (`data/inbox.db`) and
 pokes it. Without waiting it reports `queued`. Waiting, it reports `delivered`
@@ -818,14 +843,14 @@ user's: see [Claude logins and Anthropic's terms](terms-risk.md).
 `cousin-spawn --runner sdk|fake|opencode|tmux [--account <name>]` (or the console's spawn
 with `runner` and `account`) writes both keys when the cousin is created, and
 `COUSIN_DEFAULT_RUNNER` / `COUSIN_DEFAULT_ACCOUNT` supply them when the flags
-are left out (see [Environment variables](#environment-variables)); an
-account without a runner is refused.
+are left out (see [Environment variables](#environment-variables)); with
+neither, the runner is `sdk` and no account is written.
 
 `auto_start` (default `true`) says whether `cousin-supervisor` starts this
 runner cousin by itself when it starts or rescans (see
 [commands](commands.md)). `auto_start = false` leaves it down until
-`cousin-supervisor start <slug>`; only a literal `false` opts out. A tmux
-cousin is never the supervisor's, whatever this says. A runtime stop (the
+`cousin-supervisor start <slug>`; only a literal `false` opts out. This holds
+for every runner kind, `tmux` included. A runtime stop (the
 console's, `cousin-supervisor stop <slug>`) also keeps a runner cousin down
 across a supervisor or container restart: it writes `<home>/run/held` (the
 time and who asked), which the supervisor honours at every start and rescan,
@@ -840,15 +865,15 @@ key to an account. `account` and `api_key_file` together is refused.
 The runner waits at most 10 minutes for the next message of a turn (a stream
 gone silent fails the turn) and puts no limit on a whole turn. These are
 constructor defaults of the SDK runner (`idle_timeout_s`, `turn_timeout_s`),
-not cousin.toml keys in this phase.
+not cousin.toml keys.
 
 `commit_attribution` overrides `config/harness.toml [agent]
-commit_attribution` for this cousin alone (tracker #112, see the table
+commit_attribution` for this cousin alone (see the table
 above): `false` turns off the CLI's own injected attribution on this
 cousin's commits and PRs, whatever the install default says; `true` or
 absent falls back to the install default (itself `true` when unset).
 The resolved value composes into the SDK runner's `options()` (and
-`validate_account`'s), and into the tmux lane's
+`validate_account`'s), and into the tmux kind's
 `<home>/.claude/settings.json` (`apply_project_settings`), and rides
 the runner's head `runner` stream event.
 
@@ -893,9 +918,11 @@ that rollover.
 
 A few other files in a cousin's home are configuration too:
 `mcp-registry.toml` (its MCP tools), `.mcp.json` (its other MCP servers,
-below), `chat-hooks.json` (patterns the chat
-server reacts to, see [chat](chat.md)), `policy.toml` (below) and
-`.secrets/api-key.env` (the key for `api_key` mode, written by `cousin-auth`).
+below), `chat-hooks.json` (patterns incoming chat
+is matched against, see [chat](chat.md)) and `policy.toml` (below). A
+`.secrets/api-key.env` left from 1.x is not configuration any more:
+`cousin-migrate` reads it once, to move a 1.x cousin's key into an
+`anthropic-key` account, and nothing else reads it.
 
 ### [agent.sessions]
 
@@ -940,15 +967,15 @@ kept in `data/runner-session-<kind>.json` and its event stream in
 by the `runner` event that heads the primary's stream. A side session that
 fails (its CLI does not start, a reconnect fails) is restarted inside the
 same `cousin-runner` after a backoff; the primary and its running turn are
-never stopped for it. A side session is not interruptible from the console
-in this phase: an interrupt reaches the primary's live turn only. Each side
+never stopped for it. A side session is not interruptible from the console:
+an interrupt reaches the primary's live turn only. Each side
 session is one more agent CLI process: measured at 300 to 480 MB of
 resident memory per interactive CLI on the reference host.
 
 ### [agent] on the opencode lane
 
 `runner = "opencode"` puts the cousin on `cousin-runner` with opencode as its
-agent loop (`OpencodeRunner`, phase 9) instead of the Claude Agent SDK: the
+agent loop (`OpencodeRunner`) instead of the Claude Agent SDK: the
 same inbox, event stream, tools, policy and memory. It runs on a
 `kind = "opencode"` account (see [accounts.toml](#accountstoml)) and these
 `[agent]` keys. How the kinds compare, the per-runner contract table and
@@ -1104,7 +1131,7 @@ the same tool list at every start.
 
 - **`cousin` is reserved.** An entry named `cousin` is skipped, never
   started beside the runner's own server. That is the entry `cousin-spawn`
-  writes for the tmux lane's `cousin-mcp`, so a migrated cousin's file is
+  writes for the tmux kind's `cousin-mcp`, so a migrated cousin's file is
   left as it is.
 - **`${VAR}` and `${VAR:-default}`** work as in Claude Code, in `command`,
   `args`, `env` values, `url` and `headers` values. The runner passes them

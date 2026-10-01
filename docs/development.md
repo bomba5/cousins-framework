@@ -9,13 +9,15 @@ when you add a command, a config file, a console route or an MCP tool.
 ```sh
 git clone <repo> cousins-framework && cd cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[mcp]"      # or -e . if you don't need to serve MCP
+pip install -e ".[mcp,sdk]"
 python3 -m unittest discover -s tests
 ```
 
-Python 3.11 or newer. There are no third-party runtime dependencies.
-The `mcp` extra (the MCP SDK) is the only optional one, and only
-`cousin-mcp` needs it. The console's frontend is JSX compiled in the
+Python 3.11 or newer. The core has no third-party dependencies; two
+extras are optional. `sdk` (the Claude Agent SDK) is what an `sdk`
+[cousin](glossary.md#cousin) runs on, and that is the default
+[runner](glossary.md#runner) kind, so a working install needs it. `mcp` (the MCP SDK) is needed only by `cousin-mcp`. The suite runs
+without either (CI installs plain `-e .`). The console's frontend is JSX compiled in the
 browser (React and Babel from a CDN), so there's no build step either:
 edit a `.jsx` file and reload.
 
@@ -29,7 +31,6 @@ edit a `.jsx` file and reload.
 | `cousin_lib/server/` | the chat API in-process (no per-cousin chat server runs): `chat_api.py` (history, search, send, reply, archive, reactions), `storage.py` (the SQLite chat store), `inbound.py` (what follows a stored message), `netguard.py` (who may connect) |
 | `cousin_lib/delivery.py` | the one way anything reaches a [cousin](glossary.md#cousin): a typed, thread-keyed `Item` handed to `deliver()`, which picks the backend. Producers never build an injector themselves |
 | `cousin_lib/gate/` | the contamination gate (`cousin-gate`) |
-| `cousin_lib/ui.py`, `ui_static/` | the older single-page UI behind `cousin-ui` |
 | `templates/` | `cousin-CLAUDE.template.md` (every cousin's identity file) and `hive-node/` (the remote node runtime, installer and identity) |
 | `config/` | only `*.example` files are tracked. A live install's real configs sit next to them and are gitignored |
 | `systemd/` | user unit templates and their README |
@@ -49,9 +50,8 @@ python3 -m unittest tests.test_hive              # one module
 python3 -m unittest tests.console.test_hive_console -k revoke
 ```
 
-The full run is about 4800 tests and takes around twenty minutes on a
-small host. That's the
-same command CI runs.
+The full run is about 4800 tests. How long it takes depends on the host
+(about ten minutes on a 2-core VM). That's the same command CI runs.
 
 Every test runs hermetic: `tests/_hermetic.py` strips `FRAMEWORK_ROOT`,
 `COUSIN_HOME`, `COUSIN_SLUG`, `COUSIN_TMUX_SOCKET`,
@@ -61,9 +61,10 @@ the suite from a shell that has a live install activated, and it won't
 touch the install's config, databases or cousins. A test that needs one
 of those variables sets it itself, pointing at its own temp directory.
 
-Tests use a small invented cast for people and cousins: Wren, Testa,
-Sam, Priya, Toki, Mallory. Use those. Don't make up a name on the spot;
-that's how real ones slip in.
+Tests, docs and examples share one small invented cast. Cousins and
+people: Wren, Kestrel, Testa, Sam, Priya, Toki, Mallory. The operator:
+`ana`. Hosts: 192.0.2.x addresses or names under `example.invalid`. Use
+those. Don't make up a name on the spot; that's how real ones slip in.
 
 ## CI
 
@@ -75,9 +76,15 @@ pip install -e .
 python -m unittest discover -s tests
 ```
 
-That's all it does. The gate's generic checks run inside the suite (see
-below), so CI gates every commit. Your denylist of real names is never
-in CI, since it can't be in the repo.
+The gate's generic checks run inside the suite (see below), so CI gates
+every commit. Your denylist of real names is never in CI, since it can't
+be in the repo.
+
+`.github/workflows/image.yml` runs on every push and pull request too. It
+builds the image from the checkout, runs the runner contract suite
+(`tests/runner/contract`) inside it, runs `tests.test_docker_files` on the
+host against that image (`COUSIN_DOCKER=1`), and fails if the compressed
+image is over its size budget (`docker/image-size.sh`, 240 MB).
 
 ## The image's pins
 
@@ -197,9 +204,8 @@ mean a file is good; that's still review.
   comes with a test. A bug fix comes with a test that fails without the
   fix.
 - **Generic names in code.** No real people, cousins or hosts in code,
-  comments, tests or docs. Use the cast above in tests; in docs and
-  examples use Wren and Kestrel, the operator ana, and hosts like
-  192.0.2.10 or `example.invalid`. The gate will catch the rest.
+  comments, tests or docs. Use the cast above everywhere. The gate will
+  catch the rest.
 - **CLI exit codes.** 0 for success, 1 for a failure while doing the
   work, 2 for bad usage or configuration. Some commands add their own
   (`cousin-reply` uses 3 for a message the outbound filter blocked).

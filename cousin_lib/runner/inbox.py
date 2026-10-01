@@ -1,6 +1,6 @@
 """The durable inbox: the store is the bus.
 
-docs/design/agent-loop-runner.md, "The store is the bus". A producer
+docs/reference/runners.md, "What a runner is". A producer
 inserts a row here and pokes the runner; nothing needs to be running
 for the insert to succeed, and a row survives any process dying
 between put and claim.

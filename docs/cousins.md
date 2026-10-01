@@ -12,11 +12,9 @@ directory that holds everything it is, and a **kind**, `[agent] runner` in
 [runner](glossary.md#runner), `cousin-runner`, started and kept up by `cousin-supervisor`: `sdk` (the
 default) and `opencode` with no tmux at all; `tmux` drives the host's
 interactive Claude Code in a tmux pane on the framework's own socket; `fake`
-exercises the [lane](glossary.md#lane) itself. A cousin with no `[agent] runner` was on the
-legacy tmux lane, which 2.0.0 retired: it is refused by name
-([migrating](migrating.md#a-cousin-with-no-runner)). See
-[runners](reference/runners.md) for the kinds themselves and
-[agent-loop-runner](design/agent-loop-runner.md) for the design.
+exercises the [lane](glossary.md#lane) itself. A cousin with no `[agent] runner` is refused by
+name ([migrating](migrating.md#a-cousin-with-no-runner)). See
+[runners](reference/runners.md) for the kinds themselves.
 
 Every cousin's home directory:
 
@@ -35,7 +33,7 @@ cousins/wren/
   .claude/settings.json  its harness hooks
 ```
 
-No cousin runs a chat server of its own (2.0.0): a runner cousin's chat
+No local cousin runs a chat server of its own: a runner cousin's chat
 history and [inbox](glossary.md#inbox) are written directly, and the console reads its chat
 store itself. A cousin with no `[agent] runner` has no chat: it is refused
 by name. The agent answers with `cousin-reply`, and messages another
@@ -62,7 +60,7 @@ cousin-spawn wren --name Wren \
     --operator ana \
     --start
 #   -> created wren at <checkout>/cousins/wren
-#      started wren (cousin-supervisor)
+#      started wren
 ```
 
 Every option:
@@ -83,7 +81,6 @@ Every option:
 | `--runner` | `[agent] runner`: `sdk`, `tmux`, `opencode` or `fake`; absent, `COUSIN_DEFAULT_RUNNER` applies, and unset means `sdk` |
 | `--account` | `[agent] account`, one of `config/accounts.toml`'s (or `host`); absent, `COUSIN_DEFAULT_ACCOUNT` applies, else `host` |
 | `--start` | start it after creating; on an existing cousin without `--role`/`--voice`, only start it. The start asks the running [supervisor](glossary.md#supervisor); with none the start fails, exit 1. A cousin with no `[agent] runner` is refused, exit 2 |
-| `--resume` | kept for 1.x scripts and ignored: a runner resumes its own session (`data/runner-session.json`) |
 | `--sync-template` | create nothing; show how an existing cousin's CLAUDE.md framework part differs from the current template (see [the CLAUDE.md template](#the-claudemd-template)) |
 | `--apply` | with `--sync-template`: write the sync |
 | `--repair-settings` | create nothing; rewrite an existing cousin's `.claude/settings.json` and the `cousin` entry in `.mcp.json` |
@@ -118,13 +115,12 @@ an older release, or after you move the checkout. It is safe to repeat.
 ## The CLAUDE.md template
 
 Every new cousin's `CLAUDE.md` comes from `templates/cousin-CLAUDE.template.md`.
-Nothing else writes one. Spawn fills in six placeholders:
+Nothing else writes one. Spawn fills in five placeholders:
 
 | placeholder | from |
 |---|---|
 | `{{NAME}}` | `--name` |
 | `{{SLUG}}` | the slug |
-| `{{PORT}}` | the chat port |
 | `{{ROLE_ONE_LINE}}` | `--role` (the title line) |
 | `{{ROLE_PARAGRAPH}}` | `--role-paragraph`, else the role |
 | `{{VOICE_GUIDE}}` | `--voice` (the `## Voice` section) |
@@ -155,7 +151,7 @@ reaches every cousin, not only the ones spawned after it:
 - `## Identity` and `## Voice` stay the cousin's own (the template renders
   them from text given at spawn and kept nowhere else).
 - Every other framework section gets the current template text, filled in
-  with the cousin's name, slug, port and role from `cousin.toml`. An edit you
+  with the cousin's name, slug and role from `cousin.toml`. An edit you
   make there is replaced at the next start: put your own rules below the
   marker.
 - A section above the marker that the template doesn't have is kept, at the
@@ -232,7 +228,7 @@ A change needs a restart. The console's agent settings (the inspector, and the
 chat header's effort select) write these keys; an `sdk` model is checked with
 one smallest [turn](glossary.md#turn) before it is written. See
 [`[agent] runner`](configuration.md#agent-runner). `[runtime] model` and
-`effort` are the retired legacy lane's and are not read
+`effort` are 1.x keys and are not read
 ([removed keys](configuration.md#removed-in-200)).
 
 ## Auth: accounts
@@ -242,9 +238,8 @@ A cousin runs on an account: `[agent] account` in `cousin.toml`, one of
 default). An account is a Claude login, a Claude token, an Anthropic API key,
 or an opencode data dir with its providers' keys; which kinds run on which
 is in [accounts.toml](configuration.md#accountstoml), and `cousin-account`
-manages them ([commands](commands.md)). `[runtime] auth` and the
-`cousin-auth` mode switch belonged to the retired legacy lane and do nothing
-for a runner cousin.
+manages them ([commands](commands.md)). `[runtime] auth` is a 1.x key and
+is not read ([removed keys](configuration.md#removed-in-200)).
 
 ## Generations and the flip
 

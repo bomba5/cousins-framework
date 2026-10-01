@@ -623,7 +623,7 @@ class TestValidateTurnOutOfProcess(unittest.TestCase):
         self.assertIn("boom", line)
 
     def test_a_bad_byte_is_replaced_never_raised(self):
-        """#100 re-review minor: a byte that is not UTF-8 must not raise out
+        """A byte that is not UTF-8 must not raise out
         of the decode (a 500, and the child left unwaited)."""
         rc, line = self._run(
             "import sys; sys.stdout.buffer.write(b'\\xff\\xfe junk\\n'); "

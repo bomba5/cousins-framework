@@ -1,4 +1,4 @@
-"""The one way anything reaches a cousin (docs/design/agent-loop-runner.md)."""
+"""The one way anything reaches a cousin (docs/reference/runners.md)."""
 import os
 import pathlib
 import tempfile

@@ -1,4 +1,4 @@
-"""Receipt, protocol and priority (docs/design/agent-loop-runner.md)."""
+"""Receipt, protocol and priority (docs/reference/runners.md)."""
 import unittest
 
 from cousin_lib.delivery import Item

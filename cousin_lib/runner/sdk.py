@@ -582,12 +582,16 @@ class SdkRunner:
         # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first
         # recorded, so an edit to identity files lands at the next rollover.
+        # The text is never on the CLI's argv (every local user can read
+        # one): system_prompt_option writes it to a private file, and the CLI
+        # gets the file's path.
         from cousin_lib.runner import prompt
         system_prompt = prompt.system_prompt_option(self.home, root=self.root,
                                                     registry=self.tool_context.registry)
         # replay-user-messages: the echo is how a turn knows which rows the
         # model actually took in (see the module docstring).
-        extra = {"replay-user-messages": None}
+        extra = {"replay-user-messages": None,
+                 prompt.APPEND_FILE_FLAG: str(prompt.system_prompt_path(self.home))}
         store_resume = resume
         if resume and self._resume_via_cli():
             # A login account, or a lane never recorded: the CLI's own --resume.

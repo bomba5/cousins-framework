@@ -380,6 +380,46 @@ class TestSdkRunner(HermeticCase):
         self.assertIs(settings["includeCoAuthoredBy"], False)
         self.assertEqual(settings["attribution"], {"commit": "", "pr": ""})
 
+    # -- the system prompt never on the argv (#154) ----------------------------
+    def test_the_real_argv_names_the_prompt_file_and_never_holds_its_text(self):
+        # The composed prompt (law, contract, persona) on the CLI's argv is
+        # readable by every local user (ps, /proc/<pid>/cmdline): the argv
+        # SubprocessCLITransport would exec holds the private file's path only.
+        from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        from cousin_lib.runner import prompt
+        (self.home / "self-portrait.md").write_text(
+            "# Testa\n\nTesta keeps a private ledger of the vault codes.\n")
+        r, _ = self._runner([])
+        transport = SubprocessCLITransport("hi", r.options())
+        transport._cli_path = "/bin/true"
+        argv = transport._build_command()
+        path = prompt.system_prompt_path(self.home)
+        text = path.read_text()
+        self.assertIn("private ledger of the vault codes", text)
+        self.assertNotIn("--append-system-prompt", argv)
+        self.assertNotIn("--system-prompt", argv)
+        at = argv.index("--append-system-prompt-file")
+        self.assertEqual(argv[at + 1], str(path))
+        self.assertTrue(path.is_absolute())
+        for element in argv:
+            self.assertNotIn("private ledger", element)
+            self.assertNotIn("# Framework law", element)
+        self.assertLess(max(len(a) for a in argv if not a.startswith("{")), 4096)
+
+    def test_the_preset_switches_still_reach_the_cli_without_the_text(self):
+        r, _ = self._runner([])
+        sp = r.options().system_prompt
+        self.assertEqual(sp, {"type": "preset", "preset": "claude_code",
+                              "exclude_dynamic_sections": True, "snapshot": True})
+
+    def test_a_new_options_call_rewrites_the_file(self):
+        from cousin_lib.runner import prompt
+        r, _ = self._runner([])
+        r.options()
+        (self.home / "self-portrait.md").write_text("# Testa\n\nTesta changed her mind.\n")
+        r.options(resume="s-1")
+        self.assertIn("Testa changed her mind.", prompt.system_prompt_path(self.home).read_text())
+
     # -- one turn ----------------------------------------------------------------
     def test_a_turn_records_init_text_tool_and_result_and_closes_the_row(self):
         r, made = self._runner([[init_msg("none"), assistant(tool="Bash"),

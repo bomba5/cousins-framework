@@ -272,7 +272,10 @@ Ways to trigger one:
 
 The runner's system prompt includes the committed self-portrait: a description of the
 cousin drafted from its real sources and reviewed by a person before it
-counts.
+counts. The runner hands the composed prompt to the agent CLI as a private
+file (`data/run/system-prompt.md`, readable by the cousin's user only), never
+on its command line, where every local user could read it
+([runners](reference/runners.md#the-system-prompt-is-a-private-file)).
 
 ```
 cousin-self-portrait synthesize   # draft a candidate

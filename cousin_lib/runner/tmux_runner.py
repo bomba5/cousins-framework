@@ -396,7 +396,8 @@ class TmuxRunner:
     def _write_context(self, fresh):
         """Before every pane start: the block (law, the pane's contract,
         operator rules; prompt.compose_context_block) to data/run/
-        tmux-context.md, which the launcher appends on a fresh start. A fresh
+        tmux-context.md (private: prompt.write_private), whose path the
+        launcher hands the CLI on a fresh start. A fresh
         session's block is remembered by its digest; a resumed one gets
         data/run/tmux-resume.md, the short pointer the pane's SessionStart
         hook hands the model (--append-system-prompt is dropped on a
@@ -406,7 +407,7 @@ class TmuxRunner:
         registry, _notice = tools.resolve_registry(self.home, self.root)
         block = prompt.compose_context_block(self.home, root=self.root, registry=registry)
         path = self.home.joinpath(*CONTEXT_FILE)
-        _atomic_write_text(path, block)
+        prompt.write_private(path, block)           # the launcher hands the CLI its path
         digest = hashlib.sha256(block.encode()).hexdigest()[:16]
         origins_path = self.home.joinpath(*ORIGINS_FILE)
         origins = _read_json(origins_path) or {}

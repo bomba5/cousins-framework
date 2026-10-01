@@ -522,7 +522,8 @@ class TestReincarnateOnTheRunnerLane(HermeticCase):
         self.assertTrue(bequest["carried"])
         asked = [q["message"]["content"][0]["text"] for q in clients[0].queries]
         self.assertTrue(any("You are about to be reincarnated" in t for t in asked))  # carried
-        self.assertIn("# Wren - audits the audits", clients[-1].options.system_prompt["append"])
+        self.assertIn("# Wren - audits the audits", pathlib.Path(
+            clients[-1].options.extra_args["append-system-prompt-file"]).read_text())
         raw = "".join(p.read_text() for p in (home / "memory" / "raw").glob("*.jsonl"))
         self.assertIn("March is open", raw)                               # memory kept
 

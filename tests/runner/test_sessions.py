@@ -526,7 +526,8 @@ class TestOneCachedPrefix(SessionsCase):
             with self.subTest(field=field):
                 self.assertEqual(getattr(a, field), getattr(b, field))
         self.assertEqual(a.session_store.path, b.session_store.path)   # one transcript store
-        self.assertIn("Wren keeps the ledger", a.system_prompt["append"])
+        self.assertIn("Wren keeps the ledger",
+                      pathlib.Path(a.extra_args["append-system-prompt-file"]).read_text())
         self.assertEqual(sorted(a.mcp_servers), sorted(b.mcp_servers))
         self.assertEqual(tools.tool_definitions(s.primary.tool_context.registry),
                          tools.tool_definitions(side.tool_context.registry))

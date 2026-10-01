@@ -11,9 +11,10 @@ launcher then
   - adds CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 and DISABLE_AUTOUPDATER=1, and
     COUSIN_PANE_PID: its own pid, which the exec chain makes the pane's and
     the CLI's (the pane hook writes only for that CLI, tmux_hook.from_pane);
-  - on a fresh start (--fresh) appends `--append-system-prompt` with the
-    text of data/run/tmux-context.md, read here so it never passes
-    through tmux's parser;
+  - on a fresh start (--fresh) appends `--append-system-prompt-file` with
+    the path of data/run/tmux-context.md: the CLI reads the block
+    from that private file, so it never passes through tmux's parser and
+    never sits on an argv, which every local user can read;
   - applies the hard deny again (DENY_PREFIXES), except the variables it
     set itself, and refuses the print-mode flags;
   - execs the CLI.
@@ -149,12 +150,14 @@ def main(argv=None):
     keep = set(own) | set(SWITCHES) | {PANE_PID_VAR}
     env = {k: v for k, v in env.items() if k in keep or not denied(k)}
     if opts.fresh:
+        context = Path(os.path.abspath(home.joinpath(*CONTEXT)))
         try:
-            context = home.joinpath(*CONTEXT).read_text()
+            with open(context):
+                pass
         except OSError as err:
             return _refuse(home, "fresh start without its context block %s: %s"
-                           % (home.joinpath(*CONTEXT), err))
-        cli += ["--append-system-prompt", context]
+                           % (context, err))
+        cli += ["--append-system-prompt-file", str(context)]
     try:
         home.joinpath(*EXIT_NOTE).unlink()     # an older refusal is not this start's
     except OSError:

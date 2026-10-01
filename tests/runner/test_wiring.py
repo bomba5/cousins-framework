@@ -2,6 +2,7 @@
 here spawns a process per tool call."""
 import asyncio
 import os
+import pathlib
 import subprocess
 import time
 import unittest
@@ -117,6 +118,7 @@ class TestWiring(HermeticCase):
         # the composed preset replaces None; the guard is that
         # two calls compose the same bytes (the cache depends on it)
         self.assertEqual(o1.system_prompt, o2.system_prompt)
+        self.assertEqual(o1.extra_args, o2.extra_args)
 
     def test_additional_context_comes_only_from_the_prompt_hook_not_options(self):
         patch = mock.patch.object(hooks, "default_recall",
@@ -300,14 +302,18 @@ class TestPromptAndStoreWiring(HermeticCase):
         self.assertEqual(opts.system_prompt["preset"], "claude_code")
         self.assertIs(opts.system_prompt["exclude_dynamic_sections"], True)
         self.assertIs(opts.system_prompt["snapshot"], True)
-        self.assertIn("1. The law.", opts.system_prompt["append"])
+        self.assertIn("1. The law.",
+                      pathlib.Path(opts.extra_args["append-system-prompt-file"]).read_text())
         self.assertIsInstance(opts.session_store, SqliteSessionStore)
         self.assertEqual(opts.setting_sources, [])
 
     def test_a_reconnect_composes_the_same_bytes(self):
         r = self._runner()
-        self.assertEqual(r.options().system_prompt["append"].encode(),
-                         r.options(resume="s-1").system_prompt["append"].encode())
+        path = pathlib.Path(r.options().extra_args["append-system-prompt-file"])
+        first = path.read_bytes()
+        self.assertEqual(pathlib.Path(r.options(resume="s-1").extra_args["append-system-prompt-file"]),
+                         path)
+        self.assertEqual(path.read_bytes(), first)
 
 
 class TestAccountWiring(HermeticCase):

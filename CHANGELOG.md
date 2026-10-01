@@ -76,6 +76,25 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `host_label` among them, the defaults commented out at their documented
   values.
 
+## 2.5.1 - 2026-10-01
+
+### Security
+
+- **A cousin's system prompt is no longer on the agent CLI's command line.**
+  The `sdk` runner passed the whole composed prompt (the law, the generated
+  contract, the cousin's identity and self-portrait, the operator rules) as
+  `--append-system-prompt <text>`, and the `tmux` launcher did the same with
+  its context block, so every local user could read it with `ps` or
+  `/proc/<pid>/cmdline`, and it landed in process listings and crash
+  reports. Both now write the text to a file only the cousin's user can read
+  (`data/run/system-prompt.md` and `data/run/tmux-context.md`, mode 0600 in
+  `data/run/`, now mode 0700), replaced atomically before every start, and
+  pass the CLI `--append-system-prompt-file <path>`. The `sdk` runner keeps
+  the `claude_code` preset and its `exclude_dynamic_sections` and `snapshot`
+  switches. The `opencode` runner was not affected: it sends the prompt over
+  its loopback HTTP API. See
+  [the system prompt is a private file](docs/reference/runners.md#the-system-prompt-is-a-private-file).
+
 ## 2.5.0 - 2026-10-01
 
 ### Changed

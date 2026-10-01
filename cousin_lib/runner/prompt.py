@@ -10,9 +10,19 @@
 The system prompt MUST be byte-stable across generations: nothing here
 reads a clock, a counter, the generation, a hash or any state file. The digest carries all of that, under the boot
 packet's budget rules (boot.fit). Every read is under the `root` the
-caller passes; nothing here discovers a root from the environment."""
+caller passes; nothing here discovers a root from the environment.
+
+The text never goes on a command line: an argv is readable by every
+local user (ps, /proc/<pid>/cmdline) and lands in process listings and
+crash reports. It is written to a private file in the cousin's home
+(write_private: 0600 in a 0700 directory, atomically) and the CLI gets
+the file's path with `--append-system-prompt-file`. data/run/ is where
+the runner already keeps the files it writes for the CLI it starts (the
+tmux kind's context block and resume pointer)."""
 import hashlib
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -137,10 +147,50 @@ def _compose(root, registry, version, *, identity, tool_name=None, runner=None,
     return "\n\n".join(sections) + "\n"
 
 
+SYSTEM_PROMPT_FILE = ("data", "run", "system-prompt.md")
+APPEND_FILE_FLAG = "append-system-prompt-file"     # the CLI's flag, without its dashes
+
+
+def system_prompt_path(home):
+    """Where the SDK runner's composed prompt is handed to the CLI: an
+    absolute path, so the CLI reads it whatever its cwd."""
+    return Path(os.path.abspath(Path(home).joinpath(*SYSTEM_PROMPT_FILE)))
+
+
+def write_private(path, text):
+    """`text` to `path`, readable by this user only: the directory made or
+    narrowed to 0700, the file 0600, written to a temporary file beside it
+    and renamed over the old one, so a reader sees the old text or the new,
+    never a part. A failure leaves the old file and no temporary one."""
+    path = Path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="." + path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            os.fchmod(fh.fileno(), 0o600)
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
 def system_prompt_option(home, *, root, registry, version=None):
-    """The SDK's SystemPromptPreset for this cousin."""
+    """The SDK's SystemPromptPreset for this cousin, WITHOUT the text: the
+    SDK would put an `append` on the CLI's argv. The composed text is
+    written here, at every call (every connect: a rollover or a restart
+    with a changed identity gets the new text), to system_prompt_path(home);
+    the caller passes that path with APPEND_FILE_FLAG in extra_args."""
+    write_private(system_prompt_path(home),
+                  compose_system_prompt(home, root=root, registry=registry, version=version))
     return {"type": "preset", "preset": "claude_code",
-            "append": compose_system_prompt(home, root=root, registry=registry, version=version),
             "exclude_dynamic_sections": True, "snapshot": True}
 
 

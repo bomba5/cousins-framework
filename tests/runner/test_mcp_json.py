@@ -4,6 +4,7 @@ invented values only; nothing here starts a server or a model."""
 import asyncio
 import json
 import os
+import pathlib
 import unittest
 from unittest import mock
 
@@ -238,11 +239,13 @@ class TestOrder(McpCase):
         self.assertEqual(user(a), user(b))
 
     def test_the_system_prompt_does_not_depend_on_the_file(self):
-        r1 = self.runner()
-        without = r1.options().system_prompt
+        def composed(runner):
+            opts = runner.options()
+            return opts.system_prompt, pathlib.Path(
+                opts.extra_args["append-system-prompt-file"]).read_bytes()
+        without = composed(self.runner())
         self.write({"ha": {"type": "http", "url": "http://ha.example/mcp"}})
-        with_file = self.runner().options().system_prompt
-        self.assertEqual(without, with_file)
+        self.assertEqual(without, composed(self.runner()))
 
 
 class TestSideSession(McpCase):

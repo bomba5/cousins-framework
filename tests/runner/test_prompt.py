@@ -187,13 +187,54 @@ class TestIdentity(PromptCase):
 
 
 class TestOption(PromptCase):
-    def test_the_preset_carries_both_switches(self):
-        opt = prompt.system_prompt_option(self.home, root=self.root, registry=self.registry,
-                                          version="1.12.0")
+    def option(self):
+        return prompt.system_prompt_option(self.home, root=self.root, registry=self.registry,
+                                           version="1.12.0")
+
+    def test_the_preset_carries_both_switches_and_never_the_text(self):
+        opt = self.option()
         self.assertEqual(opt["type"], "preset"); self.assertEqual(opt["preset"], "claude_code")
         self.assertIs(opt["exclude_dynamic_sections"], True)
         self.assertIs(opt["snapshot"], True)
-        self.assertEqual(opt["append"], self.compose())
+        self.assertNotIn("append", opt)                 # the SDK would put it on the argv
+        self.assertNotIn(self.compose().strip()[:200], repr(opt))
+
+    def test_the_text_is_written_to_the_private_file(self):
+        self.option()
+        path = prompt.system_prompt_path(self.home)
+        self.assertEqual(path, self.home / "data" / "run" / "system-prompt.md")
+        self.assertEqual(path.read_text(), self.compose())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_a_wider_file_or_directory_is_narrowed(self):
+        run = self.home / "data" / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        run.chmod(0o755)
+        path = prompt.system_prompt_path(self.home)
+        path.write_text("old")
+        path.chmod(0o644)
+        self.option()
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(run.stat().st_mode & 0o777, 0o700)
+
+    def test_every_call_rewrites_it_so_a_new_start_gets_the_new_persona(self):
+        self.option()
+        (self.home / "self-portrait.md").write_text("# Wren\n\nWren now audits the audits.\n")
+        self.option()
+        self.assertIn("Wren now audits the audits.",
+                      prompt.system_prompt_path(self.home).read_text())
+
+    def test_the_write_is_atomic_and_leaves_no_partial_file(self):
+        self.option()
+        path = prompt.system_prompt_path(self.home)
+        before = path.read_text()
+        (self.home / "self-portrait.md").write_text("# Wren\n\nchanged\n")
+        with mock.patch.object(prompt.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.option()
+        self.assertEqual(path.read_text(), before)      # the old file, whole
+        self.assertEqual(sorted(p.name for p in path.parent.iterdir()), [path.name])
 
 
 class TestRunnerLaneDoctrine(PromptCase):

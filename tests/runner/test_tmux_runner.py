@@ -428,6 +428,22 @@ class TestContext(Case):
         self.assertIn("You run on an interactive Claude Code pane", self.context().read_text())
         self.assertNotIn("Framework law", self.pointer().read_text() if self.pointer().exists() else "")
 
+    def test_the_block_is_private_to_the_cousins_user(self):
+        """#154: the block holds the law and the contract; the launcher hands
+        its path to the CLI, so the file is the only copy: 0600 in a 0700 dir."""
+        self.home = temp_home(self)
+        run = self.home / "data" / "run"
+        run.mkdir(parents=True, exist_ok=True)
+        run.chmod(0o755)
+        self.context().write_text("old")
+        self.context().chmod(0o644)
+        r = self.runner()
+        r.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertIn("You run on an interactive Claude Code pane", self.context().read_text())
+        self.assertEqual(self.context().stat().st_mode & 0o777, 0o600)
+        self.assertEqual(run.stat().st_mode & 0o777, 0o700)
+
     def test_a_fresh_start_records_the_generation_start_and_a_resume_keeps_it(self):
         from cousin_lib import boot
         before = time.time()

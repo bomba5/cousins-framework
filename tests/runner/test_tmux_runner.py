@@ -792,6 +792,24 @@ class TestUnreachable(Case):
         errors = [e["payload"]["error"] for e in r.events() if e["kind"] == "error"]
         self.assertTrue(any("still running" in e for e in errors), errors)
 
+    def test_a_poll_late_past_the_bound_still_sends_the_sigkill(self):
+        """A loaded host can hold one poll past both the grace and the
+        bound: the CLI is SIGKILLed before the runner gives up on it, never
+        left running unkilled (#130)."""
+        class Late(FakePane):
+            polls = 0
+
+            def process_alive(self, pid):
+                self.polls += 1
+                if self.polls == 1:
+                    time.sleep(0.5)              # the first poll comes back late
+                return not self.sigkills         # runs until it is SIGKILLed
+        r = self.runner()
+        r.kill_grace_s, r.kill_bound_s = 0.1, 0.3
+        r.pane = Late(self.home / "transcript.jsonl", context_home=self.home)
+        self.assertTrue(r._gone(4242))
+        self.assertEqual(r.pane.sigkills, [4242])
+
 
 class TestRound2Minors(Case):
     def test_a_fresh_start_removes_a_stale_resume_pointer(self):

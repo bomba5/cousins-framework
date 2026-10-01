@@ -524,17 +524,20 @@ class TmuxRunner:
 
     def _gone(self, pid):
         """Wait for a killed pane's CLI to be gone: SIGKILL after
-        kill_grace_s, False when it is still there at kill_bound_s."""
+        kill_grace_s, False when it is still there at kill_bound_s. The
+        SIGKILL comes first and is polled once more: a poll a loaded host
+        returns past both the grace and the bound never gives up on a CLI
+        it has not killed (#130)."""
         if pid is None:
             return True
         start, killed = time.monotonic(), False
         while self.pane.process_alive(pid):
             waited = time.monotonic() - start
-            if waited >= self.kill_bound_s:
-                return False
             if not killed and waited >= self.kill_grace_s:
                 self.pane.process_kill(pid)
                 killed = True
+            elif waited >= self.kill_bound_s:
+                return False
             time.sleep(POLL_S)
         return True
 

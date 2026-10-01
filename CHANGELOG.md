@@ -6,6 +6,14 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 ## 2.3.3 - 2026-10-01
 
 ### Fixed
+- **A killed pane's CLI is SIGKILLed before the tmux runner gives up on
+  it** (#130). The runner waits for an old or refused pane's CLI to be gone
+  before it starts another on the same session: SIGKILL after
+  `kill_grace_s`, give up at `kill_bound_s`. It checked the bound first, so
+  a poll a loaded host returned past both gave up without ever sending the
+  SIGKILL, and the reopen failed with "the old CLI is still running"
+  against a CLI nobody had killed. The SIGKILL now comes first and is
+  polled once more before the runner gives up.
 - The between-turns reader (#134, 2.3.2) opened a `background_turn` for a
   subagent's own messages, which the CLI forwards to the parent's stream
   (seen live: a "turn" that never ended, handed over at the next row). A

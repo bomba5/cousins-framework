@@ -348,20 +348,6 @@ class TestLaunchThroughTmux(AuthCase):
         self.assertFalse(self.out.exists())
 
 
-class TestResume(AuthCase):
-    def test_the_session_arg_is_swapped_for_the_resume_arg(self):
-        from cousin_lib.spawn import SpawnError, resume_agent_cmd
-        self.assertEqual(
-            resume_agent_cmd("a --model {model} --session-id {session_id}",
-                             self.root, "abc-123"),
-            "a --model {model} --resume abc-123")
-        with self.assertRaises(SpawnError):
-            resume_agent_cmd("a --sid {session_id}", self.root, "abc-123")
-        with self.assertRaises(SpawnError):
-            resume_agent_cmd("a --session-id {session_id}", self.root,
-                             "x; rm")
-
-
 class TestSecretsStayHome(AuthCase):
     def test_the_dismiss_archive_leaves_the_key_out(self):
         from cousin_lib.spawn import dismiss_cousin

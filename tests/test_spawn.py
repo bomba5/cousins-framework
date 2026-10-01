@@ -721,65 +721,21 @@ class TestSpawnMainRuntimeFlags(CreateCase):
         self.assertFalse((root / "cousins").exists())
 
 
-class TestResumePlan(unittest.TestCase):
-    """cousin-spawn --start --resume: the start-at-boot unit resumes a
-    cousin's last session. Without it, nothing restarts a cousin after a
-    reboot, and a plain start throws the session away."""
+class TestResumeFlagGone(CreateCase):
+    """--resume resumed a legacy tmux session from [agent.resume]; a
+    runner resumes its own session, so the flag is gone, not ignored."""
 
-    def _home(self, tmp, session_id="", harness=""):
-        import pathlib
-        root = pathlib.Path(tmp)
-        (root / "config").mkdir()
-        if harness:
-            (root / "config" / "harness.toml").write_text(harness)
-        home = root / "cousins" / "wren"
-        home.mkdir(parents=True)
-        run = '[runtime]\nsession_id = "%s"\n' % session_id if session_id else ""
-        (home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n' + run)
-        return root, home
-
-    RULE = ('[agent.resume]\nsession_arg = "--session-id {session_id}"\n'
-            'resume_arg = "--resume {session_id}"\n')
-
-    def test_resumes_the_saved_session(self):
-        import tempfile
-        from cousin_lib import spawn
-        with tempfile.TemporaryDirectory() as tmp:
-            root, home = self._home(tmp, "1234abcd-0000", self.RULE)
-            cmd, note = spawn.resume_plan(home, root,
-                                          "agent --session-id {session_id}")
-            self.assertEqual(cmd, "agent --resume 1234abcd-0000")
-            self.assertIn("1234abcd", note)
-
-    def test_no_session_id_means_a_new_session(self):
-        import tempfile
-        from cousin_lib import spawn
-        with tempfile.TemporaryDirectory() as tmp:
-            root, home = self._home(tmp, "", self.RULE)
-            cmd, why = spawn.resume_plan(home, root,
-                                         "agent --session-id {session_id}")
-            self.assertIsNone(cmd)
-            self.assertIn("session_id", why)
-
-    def test_no_resume_rule_means_a_new_session(self):
-        import tempfile
-        from cousin_lib import spawn
-        with tempfile.TemporaryDirectory() as tmp:
-            root, home = self._home(tmp, "1234abcd-0000", "")
-            cmd, _ = spawn.resume_plan(home, root,
-                                       "agent --session-id {session_id}")
-            self.assertIsNone(cmd)
-
-    def test_a_missing_transcript_means_a_new_session(self):
-        import tempfile
-        from cousin_lib import spawn
-        with tempfile.TemporaryDirectory() as tmp:
-            rule = 'transcripts_dir = "%s/tx"\n' % tmp + self.RULE
-            root, home = self._home(tmp, "1234abcd-0000", rule)
-            cmd, why = spawn.resume_plan(home, root,
-                                         "agent --session-id {session_id}")
-            self.assertIsNone(cmd)
-            self.assertIn("transcript", why)
+    def test_resume_is_refused_by_argparse(self):
+        import contextlib
+        import io
+        root = self._framework_root()
+        with contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as caught:
+            spawn_main(["wren", "--root", str(root), "--role", "x", "--voice", "v",
+                        "--resume"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("unrecognized arguments: --resume", err.getvalue())
+        self.assertFalse((root / "cousins").exists())
 
 
 class PendingBootPacket(unittest.TestCase):
@@ -801,13 +757,6 @@ class PendingBootPacket(unittest.TestCase):
         self.pending = self.home / "data" / "pending-boot.json"
         self.pending.write_text(json.dumps(
             {"generation": 2, "packet": str(self.packet)}))
-
-    def test_resume_is_declined_while_a_packet_is_pending(self):
-        from cousin_lib.spawn import resume_plan
-        cmd, why = resume_plan(self.home, self.home.parent.parent,
-                               "agent --session-id {session_id}")
-        self.assertIsNone(cmd)
-        self.assertIn("closed cleanly", why)
 
     def test_a_record_whose_packet_is_gone_is_not_pending(self):
         from cousin_lib.spawn import pending_boot

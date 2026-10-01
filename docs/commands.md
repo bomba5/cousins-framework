@@ -686,6 +686,7 @@ cousin-gate --root . --denylist denylist.txt --git-visible
 |---|---|
 | `cousin-auth` (and the console's auth control) | a runner cousin authenticates through its `[agent] account`; `cousin-account` and the console's accounts page manage the accounts ([configuration](configuration.md#accountstoml)) |
 | `cousin-ui` (a retired alias of `cousin-console`) | `cousin-console`, same flags |
+| `cousin-spawn --resume` | none: a runner resumes its own session (`data/runner-session.json`) at every start; `cousin-spawn <slug> --start` starts it |
 
 ## Removed in 2.0.0
 

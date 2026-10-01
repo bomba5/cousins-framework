@@ -31,7 +31,6 @@ from cousin_lib.config import (
     CousinConfig,
     FrameworkConfig,
     MissingConfigError,
-    _read_harness_toml,
     agent_config,
     expand_harness_path,
     harness_config,
@@ -1014,46 +1013,6 @@ def render_agent_cmd(agent_cmd, home, *, root=None):
     return agent_cmd
 
 
-def resume_rule(root):
-    """config/harness.toml [agent.resume]: how the agent command resumes
-    an existing session instead of starting a new one. session_arg is
-    the words of config/agent-cmd that start a session under a given
-    id (e.g. "--session-id {session_id}"), resume_arg the words that
-    resume one (e.g. "--resume {session_id}"). None when absent."""
-    try:
-        data = _read_harness_toml(root) or {}
-    except MissingConfigError as err:
-        raise SpawnError(str(err))
-    table = (data.get("agent") or {}).get("resume")
-    if table is None:
-        return None
-    if not isinstance(table, dict) or not all(
-            isinstance(table.get(k), str) and "{session_id}" in table[k]
-            for k in ("session_arg", "resume_arg")):
-        raise SpawnError(
-            "config/harness.toml [agent.resume] needs session_arg and"
-            " resume_arg, each carrying {session_id}")
-    return {"session_arg": table["session_arg"],
-            "resume_arg": table["resume_arg"]}
-
-
-def resume_agent_cmd(agent_cmd, root, session_id):
-    """The agent command that resumes session_id: the [agent.resume]
-    session_arg in agent_cmd swapped for resume_arg, the id rendered.
-    A SpawnError says why a resume is not possible."""
-    if not re.fullmatch(r"[a-z0-9-]+", session_id or ""):
-        raise SpawnError("session id %r is not resumable" % (session_id,))
-    rule = resume_rule(root)
-    if rule is None:
-        raise SpawnError("config/harness.toml has no [agent.resume]")
-    if rule["session_arg"] not in agent_cmd:
-        raise SpawnError("config/agent-cmd does not carry %r, the"
-                         " [agent.resume] session_arg"
-                         % rule["session_arg"])
-    return agent_cmd.replace(rule["session_arg"], rule["resume_arg"]) \
-        .replace("{session_id}", session_id)
-
-
 # A clean stop (flip.close_session) ends the generation the way a flip
 # does and leaves the next generation's boot packet here. The next
 # start, whatever starts it, consumes it: a fresh session (never a
@@ -1124,7 +1083,7 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
 
     A packet a clean stop left (pending_boot) is typed in after
     boot_settle seconds; the caller is responsible for not resuming
-    the closed session (resume_plan declines while one is pending).
+    the closed session.
 
     On the runner lane (runner_lane) nothing here runs: the
     cousin-supervisor is asked to start the cousin's runner, the one
@@ -1210,23 +1169,6 @@ def start_cousin(home, *, agent_cmd, tmux_bin="tmux", tmux_socket=None,
                              tmux_socket=tmux_socket, settle=boot_settle)
 
 
-def _read_agent_cmd(root):
-    """The agent command comes from <root>/config/agent-cmd - one line,
-    host configuration. Starting a cousin without it is an error with a
-    remediation, not a guessed default binary."""
-    path = root / "config" / "agent-cmd"
-    try:
-        cmd = path.read_text().strip()
-    except OSError:
-        cmd = ""
-    if not cmd:
-        raise SpawnError(
-            "no agent command configured: write the command line that "
-            "runs your agent into %s" % path
-        )
-    return cmd
-
-
 def start_preflight(agent_cmd, *, tmux_bin="tmux", which=shutil.which):
     """What a start needs from the host, checked with no side effects:
     tmux (it hosts every agent session) and the agent command's
@@ -1254,67 +1196,6 @@ def start_preflight(agent_cmd, *, tmux_bin="tmux", which=shutil.which):
             " (services started by systemd do not see a login shell's"
             " PATH)" % head)
     return failures
-
-
-def _session_alive(session, tmux_bin="tmux"):
-    try:
-        r = subprocess.run([tmux_bin, "has-session", "-t", "=" + session],
-                           capture_output=True, text=True, timeout=10,
-                           check=False)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0
-
-
-def resume_plan(home, root, agent_cmd):
-    """(agent command, note) that resumes the cousin's last session, or
-    (None, why not). Resuming needs [agent.resume] in harness.toml, a
-    runtime.session_id, and - when harness.toml names transcripts_dir -
-    that session's transcript on disk (a resume of a session the
-    harness no longer has would open an empty pane)."""
-    try:
-        data = tomllib.loads((Path(home) / "cousin.toml").read_text())
-    except (OSError, tomllib.TOMLDecodeError):
-        return None, "cousin.toml unreadable"
-    if pending_boot(home) is not None:
-        return None, ("the last session closed cleanly; starting fresh on"
-                      " its boot packet")
-    session_id = str((data.get("runtime") or {}).get("session_id") or "")
-    if not session_id:
-        return None, "no runtime.session_id yet"
-    try:
-        cmd = resume_agent_cmd(agent_cmd, root, session_id)
-    except SpawnError as err:
-        return None, str(err)
-    from cousin_lib import transcript_mine
-    path = transcript_mine.transcript_path(home, root, session_id)
-    if path is not None and not path.is_file():
-        return None, "no transcript for session %s" % session_id[:8]
-    return cmd, "resumed session %s" % session_id[:8]
-
-
-def _start_existing(root, slug, agent_cmd, resume=False):
-    home = root / "cousins" / slug
-    config = CousinConfig.load(home)
-    if _session_alive(config.tmux_session):
-        print("%s is already running (tmux session %s); nothing started"
-              % (slug, config.tmux_session))
-        return 0
-    cmd, note = agent_cmd, None
-    if resume:
-        resumed, why = resume_plan(home, root, agent_cmd)
-        if resumed is None:
-            print("%s: not resuming (%s); starting a new session"
-                  % (slug, why))
-        else:
-            cmd, note = resumed, why
-    try:
-        start_cousin(home, agent_cmd=cmd, root=root, note=note)
-    except SpawnError as err:
-        print("cousin-spawn: start failed: %s" % err, file=sys.stderr)
-        return 1
-    print("started %s%s" % (slug, " (%s)" % note if note else ""))
-    return 0
 
 
 def _start_existing_runner(root, slug):
@@ -1471,12 +1352,6 @@ def spawn_main(argv=None):
                              " cousin-supervisor) after creating it; on an EXISTING"
                              " cousin, given without --role/--voice, just"
                              " start it (a no-op when already running)")
-    parser.add_argument("--resume", action="store_true",
-                        help="with --start on an existing cousin: resume"
-                             " its last session (config/harness.toml"
-                             " [agent.resume]) instead of a new one; falls"
-                             " back to a new session when that is not"
-                             " possible")
     parser.add_argument("--sync-template", action="store_true",
                         help="create nothing: show how an EXISTING"
                              " cousin's CLAUDE.md framework part differs"
@@ -1542,28 +1417,6 @@ def spawn_main(argv=None):
         why = delivery.lane_refusal(root / "cousins" / args.slug)
         print("cousin-spawn: %s" % why, file=sys.stderr)
         return 2
-    agent_cmd = None
-    if args.start and not on_runner:
-        # Everything a start needs is checked before anything is
-        # created: a half-made cousin whose start then crashes is the
-        # failure this exists to prevent. A runner cousin needs neither
-        # config/agent-cmd nor tmux: cousin-supervisor starts it.
-        try:
-            agent_cmd = _read_agent_cmd(root)
-        except SpawnError as err:
-            print("cousin-spawn: %s; nothing created or started" % err,
-                  file=sys.stderr)
-            return 2
-        failures = start_preflight(agent_cmd)
-        if failures:
-            for line in failures:
-                print("cousin-spawn: %s" % line, file=sys.stderr)
-            print("cousin-spawn: nothing created or started",
-                  file=sys.stderr)
-            return 2
-    if start_existing:
-        return _start_existing(root, args.slug, agent_cmd,
-                               resume=args.resume)
     try:
         out = create_cousin(
             root, slug=args.slug, role=args.role, name=args.name,
@@ -1579,7 +1432,7 @@ def spawn_main(argv=None):
     print("created %s at %s" % (out["slug"], out["home"]))
     if args.start:
         try:
-            start_cousin(out["home"], agent_cmd=agent_cmd, root=root)
+            start_cousin(out["home"], agent_cmd=None, root=root)
         except SpawnError as err:
             print("cousin-spawn: created but start failed: %s\n"
                   "the home is kept; fix the cause and start it with:"

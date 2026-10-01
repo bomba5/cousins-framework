@@ -66,11 +66,12 @@ public_url = "http://192.0.2.10:8600"
 ```
 
 Nodes have to reach the console, so it can't stay on its default
-`127.0.0.1`. Give it the `--host 0.0.0.0` drop-in from
-[install](install.md), then restart it:
+`127.0.0.1`. Give the [supervisor](glossary.md#supervisor) the `--console-host 0.0.0.0` drop-in from
+[install](install.md#reaching-the-console-from-the-lan), then restart it
+(every running cousin restarts with it and resumes its session):
 
 ```sh
-systemctl --user restart cousin-console
+systemctl --user daemon-reload && systemctl --user restart cousin-supervisor
 curl http://192.0.2.10:8600/hive/health
 # {"status": "ok"}
 ```

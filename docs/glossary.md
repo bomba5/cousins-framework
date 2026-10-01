@@ -151,9 +151,9 @@ thinking block and tool call, appended as JSONL and readable live
 
 ### supervisor
 
-`cousin-supervisor`: one process that keeps one runner per
-runner cousin up (and, in the Docker install, the console and the loops
-daemon), restarts what crashes and stops them in order. See
+`cousin-supervisor`: one process that keeps the console, the loops daemon
+and one runner per cousin up, in the Docker install and on a bare host
+alike, restarts what crashes and stops them in order. See
 [operations.md](operations.md).
 
 ### thread

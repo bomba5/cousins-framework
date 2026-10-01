@@ -17,8 +17,8 @@ service (`plugin:<name>`), restarts a child that exits (backing
 off up to 60 seconds), and stops them in order when the container stops: the
 bridges, then the runners, each given 35 seconds to finish its [turn](glossary.md#turn), then the
 plugin services, then the loops daemon, then the console. compose waits 45 seconds before it kills anything
-(`stop_grace_period`). Every cousin in the container is a runner cousin; tmux
-cousins need a bare host. See each child:
+(`stop_grace_period`). A `tmux`-kind cousin needs a bare host: the image has
+no tmux. See each child:
 
 ```
 docker compose exec framework cousin-supervisor status
@@ -36,7 +36,7 @@ reason and no child, and `reload` picks up a change. A stop of a runner cousin
 (`cousin-supervisor stop` or the console's stop button) writes
 `cousins/<slug>/run/held`, with the time and who asked, and the hold lasts
 until `start`: across `docker compose restart`, `down` and `up`, an upgrade or
-a reboot, as a stopped tmux cousin stays stopped. `stop` answers once the
+a reboot. `stop` answers once the
 runner is down (it finishes its turn first, up to 35 seconds); `stop
 --no-wait` answers at once. The console's stop button does not wait either:
 it answers 202 `stopping` and the fleet row shows when the runner is down;
@@ -198,18 +198,22 @@ mining and memory proposals, image attachments as parts,
 sessions) is listed under [known gaps](reference/runners.md#known-gaps).
 
 **The same supervisor on a bare host.** `systemd/cousin-supervisor.service`
-runs `cousin-supervisor run` as one user unit in place of
-`cousin-console.service` and `cousin-loops.service`, never beside them.
-`cousin-loops run` holds `run/loops.lock`, so a second loops daemon (a second
-clock) exits 5 (busy): whichever started second never ticks. When that is the
-supervisor's loops child, it waits in `backoff` (never `failing`) and becomes
-the clock once the old daemon stops, so no clock ticks until then. And the
-supervisor's console listens on `127.0.0.1:8600` unless its unit carries the
-old console's `--host` and `--port`, which the migration in the units README
-does. `systemctl --user reload cousin-supervisor.service` is the rescan. Its
-stop takes the unit's whole control group with it, so while you still have
-tmux cousins keep the two old units and run the supervisor beside them for
-the runner cousins only (`--no-console --no-loops`). The steps are in
+runs `cousin-supervisor run` as one user unit: the console, the loops daemon
+and one runner per cousin, `tmux`-kind cousins included. The units directory
+also has `cousin-console.service` and `cousin-loops.service`, the same two
+daemons as separate units; leave them disabled, never enabled beside the
+supervisor. `cousin-loops run` holds `run/loops.lock`, so a second loops
+daemon (a second clock) exits 5 (busy): whichever started second never
+ticks. When that is the supervisor's loops child, it waits in `backoff`
+(never `failing`) and becomes the clock once the other daemon stops, so no
+clock ticks until then. The supervisor's console listens on
+`127.0.0.1:8600` unless its unit carries `--console-host` and
+`--console-port` (the LAN drop-in in
+[install](install.md#reaching-the-console-from-the-lan)).
+`systemctl --user reload cousin-supervisor.service` is the rescan. Its stop
+takes the unit's whole control group with it: the runners and their bridges
+stop with it. Moving an older install from the two separate units to the
+supervisor is in
 [the units](../systemd/README.md#one-unit-instead-of-two-the-supervisor).
 
 One thing to know, in the container as on a bare host: the loops daemon
@@ -218,30 +222,32 @@ deliver that tick's heartbeat or loop again after the start.
 
 ## What runs
 
-Four things run under your systemd user manager, plus the supervisor that
-runs the cousins ([above](#the-container); its unit can take the place of
-the first two). The templates and how to install them are in
-[the units](../systemd/README.md).
+Three units run under your systemd user manager. The templates and how to
+install them are in [the units](../systemd/README.md).
 
-- **`cousin-loops.service`** is the scheduler. Every 30 seconds it ticks:
-  heartbeats, each cousin's `[[loops]]`, one-shot schedules, timed [flip](glossary.md#flip)
-  requests, the daily `flip_at` flips and the transcript-size guard. It's the
-  only thing that fires recurring work, so don't add a cron job that also
-  fires a loop or a flip.
-- **`cousin-console.service`** is the web console on port 8600. It owns
-  nothing but browser sessions and `config/console-users.json`; everything it
-  shows it reads from the other stores on each request. Restarting it costs
-  every open browser a login and nothing else.
+- **`cousin-supervisor.service`** runs the [supervisor](#the-container),
+  and the supervisor runs the rest as its children:
+  - **the loops daemon** (`loops`) is the scheduler. Every 30 seconds it
+    ticks: heartbeats, each cousin's `[[loops]]`, one-shot schedules, timed
+    [flip](glossary.md#flip) requests and the daily `flip_at` flips. It's
+    the only thing that fires recurring work, so don't add a cron job that
+    also fires a loop or a flip.
+  - **the console** (`console`) is the web console on port 8600. It owns
+    nothing but browser sessions and `config/console-users.json`; everything
+    it shows it reads from the other stores on each request. Restarting it
+    costs every open browser a login and nothing else.
+  - **one `cousin-runner` per cousin** (`runner:<slug>`), and a cousin's
+    Telegram bridge and each enabled plugin's service when there are any.
 - **`cousin-tool-surface.timer`** runs daily at 06:00 and rewrites
   `data/tool-surface.md`.
 - **`cousin-sweep.timer`** runs Sundays at 05:30 and compacts every cousin's
   memory.
 
-Each running cousin is one `cousin-runner`, a child of `cousin-supervisor`,
-and no cousin runs a chat server: the console answers chat itself
+No cousin runs a chat server of its own: the console answers chat itself
 ([chat](chat.md#where-a-message-goes)). The runners are not children of the
-console or the loops daemon, so restarting either of those units leaves the
-cousins running.
+console or the loops daemon, so restarting either of those
+(`cousin-supervisor stop --name console` then `start --name console`, or
+`--name loops`) leaves the cousins running.
 
 Check everything at once:
 
@@ -256,8 +262,8 @@ cousin-supervisor status
 
 | what | where |
 |---|---|
-| loops daemon | `journalctl --user -u cousin-loops.service` |
-| console | `journalctl --user -u cousin-console.service` |
+| loops daemon | `journalctl --user -u cousin-supervisor.service`, the lines starting with `loops` |
+| console | `journalctl --user -u cousin-supervisor.service`, the lines starting with `console` |
 | sweep | `journalctl --user -u cousin-sweep.service` |
 | tool surface | `journalctl --user -u cousin-tool-surface.service` |
 | the supervisor and its children (runners, bridges) | `journalctl --user -u cousin-supervisor.service`, each line starting with the child's name (`runner:wren`) |
@@ -383,25 +389,30 @@ refreshes it daily; run it by hand after an upgrade that adds commands.
 
 ```
 cd ~/cousins-framework && git pull
-. .venv/bin/activate && pip install -e ".[mcp]"
+. .venv/bin/activate && pip install -e ".[mcp,sdk]"
 cousin-tool-surface
-systemctl --user restart cousin-loops.service cousin-console.service
+systemctl --user daemon-reload
+systemctl --user restart cousin-supervisor.service
 ```
 
-If `systemd/` changed, re-render the units first (see
-[the units](../systemd/README.md)). A cousin's runner keeps running the old
-code until it is restarted: the console's restart button, or
-`cousin-supervisor stop <slug>` then `start <slug>`.
+If `systemd/` changed, re-render the units before the `daemon-reload` (see
+[the units](../systemd/README.md)). Restarting the supervisor restarts the
+console, the loops daemon and every running cousin, each resuming its
+session. To restart one cousin's runner on the new code instead, use the
+console's restart button, or `cousin-supervisor stop <slug>` then
+`start <slug>`; the steps are in [install](install.md#update).
 
-An install upgraded from 1.x disables the old chat server units once, since
-2.0.0 runs no chat server:
+An install upgraded from 1.x disables the units 1.x had for its per-cousin
+chat servers and session starts once, since 2.0.0 runs neither:
 
 ```
-systemctl --user disable --now cousin-chat-watchdog.timer cousin-chat-server@<slug>.service
+systemctl --user disable --now cousin-chat-watchdog.timer \
+    cousin-chat-server@<slug>.service cousin-start@<slug>.service
 ```
 
-with one `cousin-chat-server@<slug>.service` for each slug that had one, and
-removes their files ([the units](../systemd/README.md#no-chat-server-units)).
+with one `cousin-chat-server@<slug>.service` and one
+`cousin-start@<slug>.service` for each slug that had one, and removes their
+files ([the units](../systemd/README.md#units-200-removed)).
 
 `cousin-version` prints the version and commit of the checkout; the
 console's top bar shows the one the console process is running.
@@ -424,8 +435,8 @@ recover.
 **Nothing recurring happens (no heartbeats, loops or flips)**
 - Check: `cousin-loops status`. "loops daemon has never run" or "loops daemon
   down (last tick Ns ago)" means nothing fires for anyone.
-- Fix: `systemctl --user status cousin-loops.service` and its journal say
-  why. After a fix, a loop that was due fires once on the next tick.
+- Fix: `cousin-supervisor status` (the `loops` child) and the supervisor's
+  journal (the `loops | ` lines) say why. After a fix, a loop that was due fires once on the next tick.
 
 **A loop "never fires"**
 - Check: the loops daemon's journal. A loop only counts as fired once its
@@ -454,7 +465,8 @@ recover.
   is delivered to it ([chat](chat.md#where-a-message-goes)).
 
 **The console shows 0 cousins**
-- Check: the startup line in `journalctl --user -u cousin-console.service`
+- Check: the console's startup line in `journalctl --user -u
+  cousin-supervisor.service` (`console | cousin-console: serving <root>`)
   names the root it serves. It has to be the directory whose `cousins/` holds
   your homes. A wrong `{{ROOT}}` in the unit or a wrong `--root` gives an
   empty fleet.
@@ -463,7 +475,7 @@ recover.
 - Check: one `cousin.toml` that doesn't parse breaks the whole list (the API
   answers 500 with the parse error). Find it:
   `for f in cousins/*/cousin.toml; do python3 -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],"rb"))' "$f" || echo "$f"; done`
-- Fix: correct the root and restart the console, or fix the file.
+- Fix: correct the root and restart the supervisor, or fix the file.
 
 **The console: 403, 401 or 503 on every request**
 - 403: your address isn't loopback or a private range, and isn't in
@@ -482,30 +494,46 @@ recover.
   `cousin_lib/console_static/index.html` and point its script tags at them.
 
 **The console's restart button stops the console**
-- Check: the button exits with code 75 and relies on systemd to start it
-  again. That works with the shipped unit (`Restart=on-failure`). If you run
-  the console by hand or under a unit without a restart policy, nothing
+- Check: the button exits with code 75 and relies on whatever runs the
+  console to start it again. The supervisor restarts it at once. If you run
+  the console by hand, or as its own unit without a restart policy, nothing
   brings it back.
-- Fix: `systemctl --user start cousin-console`, and use the shipped unit.
+- Fix: `cousin-supervisor start --name console`, and run the console under
+  the supervisor.
 
 **A cousin keeps getting restarted**
 - Check: `cousin-loops requests` and the loops journal. A flip ends the
   session and starts a new one. The usual causes: `flip_at` in its
-  `cousin.toml`, or `flip_when_transcript_mb` in `config/harness.toml`
-  (a long session crosses the size and gets flipped).
-- Fix: raise or remove the threshold, or move `flip_at`.
+  `cousin.toml` (or the install's `default_flip_at`), or timed flip requests.
+- Check: `cousin-supervisor status`. A runner that keeps exiting is
+  restarted with backoff, and the reason is on its `runner:<slug> | ` lines
+  in the supervisor's journal.
+- Fix: move `flip_at`, or fix what the runner names.
 
 **Port already in use**
-- The console: the unit fails at start with "Address already in use". Change
-  `--port` in a drop-in, or stop whatever holds 8600.
+- The console: the supervisor's `console` child fails at start with
+  "Address already in use". Change `--console-port` in the supervisor's
+  drop-in, or stop whatever holds 8600.
 
 **A start fails right away**
 - `cousin-spawn <slug> --start` and the console name the cause: no
-  `config/agent-cmd`, tmux not on PATH, or the agent command's first word not
-  found. Under systemd, PATH is the unit's, not your login shell's; write the
-  agent's absolute path into `config/agent-cmd`.
-- `auth:` errors come from the `api_key` mode's checks (no key file, a login
-  left in the isolated directory). See [cousins](cousins.md).
+  supervisor running (start it, then start the cousin again; the home is
+  kept), a cousin with no `[agent] runner` or one that is not a runner kind
+  (refused by name, exit 2), or a runner started by hand that holds the
+  cousin's lock (stop it first).
+- A runner that starts and exits shows as `failing` in `cousin-supervisor
+  status`, with its reason. A configuration error (exit 2) is `failing` at
+  once: an unknown account or one on the wrong lane, a secret file open to
+  group or others, a `policy.toml` that doesn't parse, an `opencode` cousin
+  with no `[agent] model`. An `sdk` cousin on a checkout installed without
+  the `sdk` extra says "claude-agent-sdk is not installed"; reinstall with
+  `pip install -e ".[mcp,sdk]"`.
+- An `opencode` cousin whose binary isn't found fails its start with
+  `opencode start: ...`. Under systemd, PATH is the unit's, not your login
+  shell's; put the binary's absolute path in `[agent] opencode_bin`.
+- An account that isn't logged in is not a start failure: the runner says
+  "login required" in the console and waits. See [cousins](cousins.md) and
+  [install](install.md#4-claude-code).
 
 **The cousin booted degraded**
 - Check: the boot packet header lists `DEGRADED layers`. A missing tool

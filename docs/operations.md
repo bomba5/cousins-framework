@@ -192,8 +192,8 @@ This [lane](glossary.md#lane) never carries a Claude subscription: a Claude acco
 Anthropic OAuth login in its `auth.json`, or any config or environment that
 names the Claude-subscription bridge refuses the start (exit 2), and a live
 install that still carries the bridge removes it with the runbook in
-[migrating](migrating.md). What the lane does not do yet (usage records,
-transcript mining and memory proposals, image attachments as parts,
+[migrating](migrating.md). What the lane does not do yet (transcript
+mining and memory proposals, image attachments as parts,
 `--check-auth --validate`, `apply_patch` under an `Edit`/`Write` deny, side
 sessions) is listed under [known gaps](reference/runners.md#known-gaps).
 

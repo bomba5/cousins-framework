@@ -145,9 +145,11 @@ class TestPhase9Exit(unittest.TestCase):
         sessions = _section(self.read("docs/configuration.md"), "### [agent.sessions]")
         self.has('`runner = "opencode"`', sessions, "configuration.md, [agent.sessions]")
         gaps = _section(self.read("docs/reference/runners.md"), "## Known gaps")
-        for needle in ("apply_patch", "usage records", "--check-auth --validate",
+        for needle in ("apply_patch", "--check-auth --validate",
                        "Image attachments", "cousin-spawn --runner opencode"):
             self.has(needle, gaps, "runners.md, Known gaps")
+        # usage is recorded on this lane since 2.5.0: no longer a known gap
+        self.assertNotIn("usage records", gaps)
 
 
 if __name__ == "__main__":

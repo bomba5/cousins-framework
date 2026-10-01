@@ -324,9 +324,6 @@ def open_meeting(topic, participants, *, created_by="", facilitator="",
     for slug in slugs + ([facilitator] if facilitator else []):
         if slug not in known:
             raise MeetingError("no cousin %r" % slug)
-        if known[slug].chat_host:
-            raise MeetingError("%s is a remote cousin; remote cousins cannot"
-                               " join a meeting yet" % slug)
     alive = is_alive or default_is_alive
     stopped = [s for s in slugs if not alive(s)]
     if stopped:

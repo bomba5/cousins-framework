@@ -822,3 +822,17 @@ class TestMaxAgeOnTheRunnerLane(HermeticCase):
         calls = []
         loops.daily_flip(lambda slug: calls.append(slug) or {"ok": True})("wren")
         self.assertEqual(calls, ["wren"])
+
+
+class TestLeftoverChatHostIsInert(LoopsCase):
+    def test_a_leftover_chat_host_keeps_the_cousins_index_fresh(self):
+        # [chat] host is a key 2.0.0 removed: it no longer makes a cousin
+        # "remote" and skipped by the daemon's index refresh
+        from cousin_lib import loops
+        self._cousin("wren")
+        self._cousin("far", loops_toml='host = "far-host"\n')
+        seen = []
+        with mock.patch.object(loops, "schedule_index_refresh",
+                               side_effect=lambda now, report, homes: seen.extend(homes)):
+            self._tick(index_refresh=True)
+        self.assertEqual(sorted(slug for slug, _home in seen), ["far", "wren"])

@@ -982,7 +982,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             schedule_index_refresh(now, report, homes=[
                 (c.slug, root / "cousins" / c.slug)
                 for c in FrameworkConfig.from_env().list_cousins()
-                if c.type != "worker" and not c.chat_host])
+                if c.type != "worker"])
         except Exception as err:
             report["errors"].append("index refresh: %s" % err)
     try:

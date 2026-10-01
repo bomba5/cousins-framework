@@ -63,7 +63,7 @@ class MeetingCase(unittest.TestCase):
 
 
 class TestOpen(MeetingCase):
-    def test_refuses_empty_unknown_duplicate_stopped_remote(self):
+    def test_refuses_empty_unknown_duplicate_stopped(self):
         with self.assertRaises(MeetingError):
             self.open(())
         with self.assertRaises(MeetingError):
@@ -73,9 +73,12 @@ class TestOpen(MeetingCase):
         self.alive["toki"] = False
         with self.assertRaisesRegex(MeetingError, "not running: toki"):
             self.open()
+
+    def test_a_leftover_chat_host_does_not_make_a_cousin_remote(self):
+        # [chat] host is a key 2.0.0 removed: inert, never a refusal
         self._cousin("far", 'host = "far-host"\n')
-        with self.assertRaisesRegex(MeetingError, "remote"):
-            self.open(("far",))
+        m = self.open(("wren", "far"))
+        self.assertEqual(m["participants"], ["wren", "far"])
 
     def test_opens_on_the_users_floor_with_a_system_line(self):
         m = self.open()

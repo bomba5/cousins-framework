@@ -291,7 +291,7 @@ its session is younger than the flip point. [Worker](glossary.md#worker) cousins
 ```
 cousin-loops requests          # pending timed flips
 cousin-flip wren --dry-run     # what a flip would do
-cousin-flip wren --confirm     # flip now; --confirm has it post one line in chat once it's back
+cousin-flip wren               # flip now
 ```
 
 Never run a flip from inside the cousin itself. More in

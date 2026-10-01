@@ -1174,7 +1174,7 @@ function FlipModal({ cousin: c, onClose, onFlash }) {
     setBusy(true);
     setError(null);
     try {
-      const body = delay > 0 ? { delay_seconds: delay } : { confirm: true };
+      const body = delay > 0 ? { delay_seconds: delay } : {};
       const { r, d } = await apiSend("POST", `/api/cousins/${c.slug}/flip`, body);
       if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
       if (delay > 0) {

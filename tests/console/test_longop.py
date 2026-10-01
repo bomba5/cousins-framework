@@ -89,7 +89,7 @@ class Lifecycle(LongOpCase):
         gate = threading.Event()
         self.addCleanup(gate.set)
         longop.start(self.server, "wren", "migrate", lambda op: gate.wait(5) and {})
-        status, body = self.post("/api/cousins/wren/flip", {"confirm": True})
+        status, body = self.post("/api/cousins/wren/flip", {})
         self.assertEqual(status, 409, body)
         self.assertIn("migrate", body["error"])
         gate.set()

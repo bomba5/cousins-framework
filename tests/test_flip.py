@@ -69,7 +69,7 @@ class TestLegacyFlipRefused(FlipCase):
 
     def test_flipping_a_cousin_with_no_runner_is_refused_with_the_line(self):
         from cousin_lib.delivery import lane_refusal
-        for kw in ({"confirm": True}, {"dry_run": True}):
+        for kw in ({}, {"dry_run": True}):
             out = self._flip(**kw)
             self.assertFalse(out["ok"], out)
             self.assertEqual(out["error"], lane_refusal(self.home))
@@ -114,6 +114,20 @@ class TestCli(FlipCase):
                                 "--dry-run"])
         self.assertEqual(rc, 0)
         self.assertEqual(pathlib.Path(seen["root"]), self.root)
+        self.assertNotIn("confirm", seen)
+
+    def test_confirm_is_gone(self):
+        # a rollover's new generation was never asked to announce itself
+        import contextlib
+        import io
+        from cousin_lib.flip import flip, flip_main
+        with contextlib.redirect_stderr(io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as caught:
+            flip_main(["wren", "--root", str(self.root), "--confirm"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("unrecognized arguments: --confirm", err.getvalue())
+        with self.assertRaises(TypeError):
+            flip("wren", confirm=True)
 
 if __name__ == "__main__":
     unittest.main()
@@ -137,7 +151,7 @@ class TestFlipOnTheRunnerLane(HermeticCase):
         with hold_lock(home):
             r = FakeRunner(home); r.start(); self.addCleanup(lambda: r.stop(timeout=5))
             with mock.patch("subprocess.run") as run:
-                out = flip.flip("wren", confirm=True, reason="cousin-flip")
+                out = flip.flip("wren", reason="cousin-flip")
         self.assertTrue(out["ok"], out)
         self.assertEqual(out["lane"], "runner")
         self.assertEqual(out["stages"][0]["stage"], "rollover")
@@ -149,7 +163,7 @@ class TestFlipOnTheRunnerLane(HermeticCase):
         from cousin_lib import flip
         from cousin_lib.runner.inbox import Inbox
         home = self._cousin()
-        out = flip.flip("wren", confirm=True)
+        out = flip.flip("wren")
         self.assertFalse(out["ok"])
         self.assertIn("not running", out["error"])
         self.assertEqual(Inbox(home).pending(), 0)
@@ -158,6 +172,6 @@ class TestFlipOnTheRunnerLane(HermeticCase):
         from cousin_lib import flip
         from cousin_lib.runner.inbox import Inbox
         home = self._cousin()
-        out = flip.flip("wren", confirm=True, queue_if_stopped=True)
+        out = flip.flip("wren", queue_if_stopped=True)
         self.assertFalse(out["ok"])
         self.assertEqual(Inbox(home).pending(), 1)

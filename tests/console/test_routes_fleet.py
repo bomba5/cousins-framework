@@ -403,14 +403,14 @@ class TestFlip(ConsoleCase):
         server.listeners.append(lambda k, d: seen.append((k, d)))
 
         def fake_flip(slug, **kw):
-            calls.append((slug, kw.get("confirm")))
+            calls.append((slug, sorted(kw)))
             return {"slug": slug, "ok": True, "stages": [{"stage": "x"}],
                     "new_generation": 2, "boot_packet_tokens": 10,
                     "degraded_sections": []}
         server.flip_fn = fake_flip
         self.assertEqual(self.get("/api/cousins/wren/flip")[1]["status"],
                          "idle")
-        status, body = self.post("/api/cousins/wren/flip", {"confirm": True})
+        status, body = self.post("/api/cousins/wren/flip", {})
         self.assertEqual(status, 202)
         self.assertEqual(body["status"], "running")
         deadline = time.time() + 5
@@ -422,7 +422,8 @@ class TestFlip(ConsoleCase):
         self.assertEqual(state["status"], "done")
         self.assertEqual(state["result"]["new_generation"], 2)
         self.assertEqual(state["stages"], [{"stage": "x"}])
-        self.assertEqual(calls, [("wren", True)])
+        # no `confirm`: the new generation is never asked to announce itself
+        self.assertEqual(calls, [("wren", ["tmux_bin", "tmux_socket"])])
         phases = [d["phase"] for k, d in seen if k == "cousin-flip"]
         self.assertEqual(phases, ["started", "complete"])
 

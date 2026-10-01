@@ -209,7 +209,7 @@ def _flip_runner(slug, home, *, reason, deadline, queue_if_stopped):
     return result
 
 
-def flip(slug, *, confirm=False, dry_run=False, tmux_bin="tmux",
+def flip(slug, *, dry_run=False, tmux_bin="tmux",
          tmux_socket=None, handoff_deadline=HANDOFF_DEADLINE_SECONDS,
          halfway=HANDOFF_HALFWAY_SECONDS,
          settle=RESPAWN_SETTLE_SECONDS, which=shutil.which,
@@ -336,7 +336,7 @@ def close_session(slug, *, tmux_bin="tmux", tmux_socket=None,
 
 @traced_cli("cousin-flip")
 def flip_main(argv=None):
-    """Console entry point: cousin-flip <slug> [--confirm] [--dry-run].
+    """Console entry point: cousin-flip <slug> [--dry-run].
     Operator-driven; a cousin must never flip itself."""
     import argparse
     import os
@@ -344,7 +344,6 @@ def flip_main(argv=None):
 
     parser = argparse.ArgumentParser(prog="cousin-flip")
     parser.add_argument("slug")
-    parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--root",
@@ -357,8 +356,7 @@ def flip_main(argv=None):
         # session) read the root from the environment; the CLI owns its
         # process environment, so --root is exported for all of them.
         os.environ["FRAMEWORK_ROOT"] = str(root)
-        result = flip(args.slug, confirm=args.confirm,
-                      dry_run=args.dry_run)
+        result = flip(args.slug, dry_run=args.dry_run)
     except MissingConfigError as err:
         print("cousin-flip: %s" % err, file=sys.stderr)
         return 2

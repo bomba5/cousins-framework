@@ -146,8 +146,7 @@ cousin-account login keyed --provider openai --method "ChatGPT Pro/Plus (headles
 ```
 
 `cousin-flip` ends the cousin's current generation and starts the next one on
-a fresh session with a boot packet. `--dry-run` runs the checks only;
-`--confirm` asks the new generation to post one line when it is oriented. On
+a fresh session with a boot packet. `--dry-run` runs the checks only. On
 a runner cousin (`[agent] runner`), `cousin-flip` is a [rollover](glossary.md#rollover): it puts (or
 joins) the pending `flip` row on the running `cousin-runner` and waits for
 the handoff, the same path context pressure or the daily cadence uses. It
@@ -688,6 +687,7 @@ cousin-gate --root . --denylist denylist.txt --git-visible
 | `cousin-ui` (a retired alias of `cousin-console`) | `cousin-console`, same flags |
 | `cousin-spawn --resume` | none: a runner resumes its own session (`data/runner-session.json`) at every start; `cousin-spawn <slug> --start` starts it |
 | `cousin-migrate plan`/`apply` `--account` and `--validate`, `rollback --force` | none: they belonged to the legacy migration, which 2.0.0 does not run; a `--to` switch runs on the cousin's own `[agent] account` |
+| `cousin-flip --confirm` (and `confirm` in `POST /api/cousins/<slug>/flip`) | none: a rollover's new generation was never asked to announce itself; the console's flip events and `cousin-flip`'s JSON say when it is done |
 | `cousin-reincarnate --timeout` (and the console's bequest wait: `timeout` in `POST /api/cousins/<slug>/reincarnate`, `timeout` and `timeout_range` in `GET /api/lifecycle/modes`) | none: the bequest rides the flip's own handoff request, under the runner's handoff deadline |
 | the `chat server:` line of `cousin-migrate check` (and `chat`, `chat_ok` in its `--json`) | none: no cousin runs a chat server of its own |
 

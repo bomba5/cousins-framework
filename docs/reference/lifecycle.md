@@ -102,7 +102,7 @@ A runner that is not running is handled two ways on purpose. `cousin-flip` and a
 
 The daily cadence keeps its stagger: the loops daemon flips at most one cousin per tick.
 
-`--dry-run` doesn't touch the runner: it loads the cousin's `cousin.toml` and answers ok with the rollover stage skipped (`{"stage": "rollover", "skipped": "dry-run"}`). A cousin with no runner kind is refused, as a real flip would be. `--confirm` is still accepted and does nothing.
+`--dry-run` doesn't touch the runner: it loads the cousin's `cousin.toml` and answers ok with the rollover stage skipped (`{"stage": "rollover", "skipped": "dry-run"}`). A cousin with no runner kind is refused, as a real flip would be.
 
 ### A clean stop
 

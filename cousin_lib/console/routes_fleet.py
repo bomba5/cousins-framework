@@ -968,7 +968,6 @@ def register():
         cousin_home(req.server, slug)
         server = req.server
         body = req.body
-        confirm = bool(body.get("confirm", False))
         delay = body.get("delay_seconds", 0)
         if delay is None:
             delay = 0
@@ -1003,8 +1002,7 @@ def register():
 
         def run():
             try:
-                result = run_flip(slug, confirm=confirm,
-                                  tmux_bin=server.tmux_bin,
+                result = run_flip(slug, tmux_bin=server.tmux_bin,
                                   tmux_socket=server.tmux_socket)
             except Exception as err:  # noqa: BLE001 - reported on the row
                 result = {"slug": slug, "ok": False, "error": str(err),

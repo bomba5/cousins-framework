@@ -508,7 +508,7 @@ The last flip this console ran for the cousin, and any timed flip waiting in the
 
 ### `POST /api/cousins/<slug>/flip`
 
-Body `{"confirm": false, "delay_seconds": 0}`.
+Body `{"delay_seconds": 0}`.
 
 - No delay: runs the flip on a background thread and answers `202 {"ok": true, "slug", "status": "running", "started_at"}` straight away. Progress comes as `cousin-flip` events. `409` if one is already running, or a long operation runs on the cousin (below). A clean stop is refused the same way.
 - `delay_seconds > 0`: queues a flip request for the loops daemon, which sends the T-5m / T-1m / T-30s warnings and fires it. `202 {"ok": true, "slug", "request_id", "fire_at", "delay_seconds"}`. `409` if a timed flip is already pending.

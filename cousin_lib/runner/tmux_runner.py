@@ -488,6 +488,15 @@ class TmuxRunner:
         if how is None:
             self._start_pane(self._fresh)
             how = "fresh" if self._fresh else "resumed"
+            if how == "fresh":
+                # a new session is a generation start, moved or not (a first
+                # boot is not; a rollover's bump records its own)
+                from cousin_lib import boot
+                try:
+                    boot.mark_generation_start(self.home)
+                except Exception as exc:  # noqa: BLE001 - a record; the pane runs on
+                    self.stream.append("error", {"error": "generation start: %s: %s"
+                                                 % (type(exc).__name__, exc)})
         else:
             self._pane_pid, self._probation = self.pane.pid(), None
         self._save_session()

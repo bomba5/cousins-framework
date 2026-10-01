@@ -725,7 +725,14 @@ class SdkRunner:
         """A generation's start: start hooks once, then the digest as the
         first message when there is state to carry. Runs at a turn boundary
         (the machine idle), never inside a turn: the digest is a turn of its
-        own. A failed step is an `error` event, never a raise into the loop."""
+        own. A failed step is an `error` event, never a raise into the loop.
+        A new session is a generation start whether or not the generation
+        moved (a first boot does not): recorded for the daily flip."""
+        try:
+            await asyncio.to_thread(boot.mark_generation_start, self.home)
+        except Exception as exc:  # noqa: BLE001 - a record; the session runs on
+            self.stream.append("error", {"error": "generation start: %s: %s"
+                                         % (type(exc).__name__, exc)})
         try:
             await asyncio.to_thread(session.run_phase, self.home, "start")
         except Exception as exc:  # noqa: BLE001 - the session runs on without its hooks

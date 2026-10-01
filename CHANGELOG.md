@@ -38,6 +38,23 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   tokens page reads an opencode cousin's `usage.db` with no transcript seam.
   Context pressure still measures the last answer alone.
 
+### Fixed
+
+- **A cousin started after the day's flip time is no longer flipped at
+  once** (#136). The daily flip catches up late, once a day, and a cousin
+  the loops daemon had no record of (a new one, say) whose day's `flip_at`
+  had already passed was flipped seconds after its first boot, its first
+  turn followed by "Your generation is ending (max_age)". The daily flip now
+  ends only a session that started before the day's flip time (still late
+  when the daemon was down at it): a cousin whose session started at or
+  after it, or that has never started one, is not flipped that day and its
+  day is marked done. The framework records when the current generation's
+  session started in a new file, `data/generation-started.json`, written at
+  every rollover or flip and at a runner's fresh start of its session (a
+  first boot moves no generation), on the `sdk`, `opencode` and `tmux`
+  kinds; a home from before it falls back to `data/generation.txt`'s last
+  change.
+
 ### Documentation
 
 - **Claude logins and Anthropic's terms** (#52): a new page,

@@ -85,6 +85,18 @@ class TestResume(HermeticCase):
         self.assertNotIn(("system", "resume_failed"), kinds)
         self.assertEqual(boot.read_generation(self.home), g0)   # a deploy costs no generation
 
+    def test_a_fresh_start_records_the_generation_start_and_a_resume_keeps_it(self):
+        # the daily flip leaves a session younger than the day's flip
+        # point alone: a first boot is a generation start, a resume is not
+        before = time.time()
+        r1 = self.runner(); r1.start(); self.one_turn(r1)
+        self.assertGreaterEqual(boot.generation_started(self.home) or 0, before)
+        r1.stop(timeout=5)
+        boot.mark_generation_start(self.home, now=1000.0)
+        r2 = self.runner(); r2.start(); self.one_turn(r2)
+        self.assertEqual(self.inits(r2)[0], "s-live")              # resumed
+        self.assertEqual(boot.generation_started(self.home), 1000.0)
+
     def test_the_key_lane_resumes_from_the_store(self):
         # the account's kind decides the resume path (R12 folded into accounts)
         key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")

@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -103,14 +104,68 @@ def read_generation(home):
 def bump_generation(home):
     """The next generation, written through a tmp file and a rename: a
     reader in another session (a side session's boundary) sees the old
-    number or the new one, never an empty file read as 0."""
+    number or the new one, never an empty file read as 0. A bump is a
+    generation start, so it records one (mark_generation_start); that
+    record failing never fails the bump, which has happened."""
     path = Path(home) / "data" / "generation.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
     generation = read_generation(home) + 1
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(str(generation))
     os.replace(tmp, path)
+    try:
+        mark_generation_start(home, generation=generation)
+    except OSError:
+        pass        # generation_started falls back to generation.txt
     return generation
+
+
+GENERATION_STARTED = "generation-started.json"
+
+
+def mark_generation_start(home, *, generation=None, now=None):
+    """Record that the current generation's session started now:
+    data/generation-started.json, {"generation", "started"} (epoch
+    seconds), through a tmp file and a rename. The framework writes it
+    at every generation start: a bump (a rollover or a flip, every
+    runner kind) and a runner's fresh start of its primary session (a
+    first boot, a resume that came back as a new session), which moves
+    no generation. The daily flip reads it (generation_started). Raises
+    OSError; a caller that must not fail says so."""
+    path = Path(home) / "data" / GENERATION_STARTED
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if generation is None:
+        generation = read_generation(home)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"generation": generation,
+                               "started": time.time() if now is None else now}))
+    os.replace(tmp, path)
+
+
+def generation_started(home):
+    """When the current generation's session started, as epoch seconds,
+    or None when the cousin has never started one. The record
+    mark_generation_start keeps; a home from before it falls back to
+    generation.txt's last change (its last bump), then to a primary
+    session on file, started at a time nobody recorded: 0.0, as old as
+    can be."""
+    data = Path(home) / "data"
+    try:
+        record = json.loads((data / GENERATION_STARTED).read_text())
+        return float(record["started"])
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    try:
+        return (data / "generation.txt").stat().st_mtime
+    except OSError:
+        pass
+    try:
+        on_file = json.loads((data / "runner-session.json").read_text())
+    except (OSError, ValueError):
+        return None
+    if isinstance(on_file, dict) and on_file.get("session_id"):
+        return 0.0
+    return None
 
 
 def fit(sections, budgets, order, total_max):

@@ -282,7 +282,9 @@ Two kinds of flip are also driven from here:
   `default_flip_at` from `config/harness.toml`, else 04:00. Set
   `flip_at = "never"` to opt a cousin out, and `cousin-loops flips` to
   see which cousin flips when and why. At most one cousin flips per
-  tick, so they don't all rebuild their boot packets at once.
+  tick, so they don't all rebuild their boot packets at once. A cousin
+  whose session started after the day's flip time is not flipped that
+  day.
 - With `flip_when_transcript_mb` set in `config/harness.toml`, a cousin
   whose session transcript grows past that size gets a flip scheduled
   five minutes out, with warnings typed in at 5 minutes, 1 minute and 30

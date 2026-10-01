@@ -429,6 +429,25 @@ class TestContext(Case):
         self.assertIn("You run on an interactive Claude Code pane", self.context().read_text())
         self.assertNotIn("Framework law", self.pointer().read_text() if self.pointer().exists() else "")
 
+    def test_a_fresh_start_records_the_generation_start_and_a_resume_keeps_it(self):
+        from cousin_lib import boot
+        before = time.time()
+        r = self.runner()
+        r.start()
+        # recorded just after the pane starts: waited for, never raced (#130)
+        self.assertTrue(_wait(lambda: (boot.generation_started(self.home) or 0) >= before))
+        rec = r.enqueue(Item("operator:wren", "chat", "one turn", sender="Wren"))
+        self.assertTrue(_wait(lambda: self.outcome(r, rec)[1] == "delivered"))
+        r._stop.set()
+        r._thread.join(3)
+        self.panes[0].die()
+        boot.mark_generation_start(self.home, now=1000.0)
+        r2 = self.runner()
+        r2.start()
+        self.assertTrue(_wait(lambda: self.panes and self.panes[0].alive()))
+        self.assertNotIn("--fresh", self.panes[0].started[0][0])     # resumed
+        self.assertEqual(boot.generation_started(self.home), 1000.0)
+
     def test_a_resume_gets_a_pointer_to_the_block_saying_what_changed(self):
         sid = "5e55a000-0000-4000-8000-000000000002"
         self.home = temp_home(self)

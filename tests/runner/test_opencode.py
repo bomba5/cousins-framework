@@ -1114,6 +1114,20 @@ class TestSession(OpencodeCase):
                   and q["path"].startswith("/session/%s" % sid)]
         self.assertEqual(probes, ["/session/%s" % sid])
 
+    def test_a_new_session_records_the_generation_start_and_a_resume_keeps_it(self):
+        from cousin_lib import boot
+        home, shared = self.home(), Shared()
+        before = time.time()
+        one = self.started(self.runner(home=home, factory=Factory(shared=shared)))
+        self.assertTrue(_wait(lambda: (boot.generation_started(home) or 0) >= before))
+        one.stop(timeout=5)
+        self.addCleanup(shared.fake.close)
+        boot.mark_generation_start(home, now=1000.0)
+        two = self.started(self.runner(home=home, factory=Factory(shared=shared)))
+        self.assertTrue(_wait(lambda: {"subtype": "resumed", "session_id": one.opencode_session}
+                              in self.payloads(two, "system")))
+        self.assertEqual(boot.generation_started(home), 1000.0)
+
     def test_a_session_on_file_that_is_gone_or_not_opencodes_starts_fresh(self):
         home = self.home()
         for lane, subtype in (("opencode", "resume_failed"), ("sdk", None)):

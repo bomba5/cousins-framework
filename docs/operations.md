@@ -278,7 +278,9 @@ opts a cousin out, and `cousin-loops flips` prints each cousin's time and
 where it came from. The daemon flips at most one cousin per tick, so a shared
 time queues rather than collides. If the daemon was
 down at flip time, the flip happens once on the next tick after it comes
-back, not once per missed day. [Worker](glossary.md#worker) cousins are skipped.
+back, not once per missed day. A cousin whose session started after the
+day's flip time (one spawned or started since) is not flipped that day:
+its session is younger than the flip point. [Worker](glossary.md#worker) cousins are skipped.
 
 ```
 cousin-loops requests          # pending timed flips

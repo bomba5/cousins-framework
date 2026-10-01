@@ -384,10 +384,76 @@ class TestFlipDrivers(LoopsCase):
                       or {"ok": True})
         return self._tick(**kw)
 
-    def _flip_cousin(self, slug, at="04:00"):
-        self._cousin(slug, extra=(
+    def _flip_cousin(self, slug, at="04:00", started="yesterday"):
+        # A daily flip ends a session older than the day's flip point, so
+        # the fixture's generation started yesterday unless a test says
+        # otherwise; None is a cousin that has never started one.
+        home = self._cousin(slug, extra=(
             "[heartbeat]\ncontext_beat_seconds = 0\n"
             '[lifecycle]\nflip_at = "%s"\n' % at))
+        if started == "yesterday":
+            started = self._at(0, 0) - 86400
+        if started is not None:
+            from cousin_lib import boot
+            boot.mark_generation_start(home, now=started)
+        return home
+
+    @staticmethod
+    def _at(hour, minute=0):
+        from datetime import datetime
+        return datetime.now().replace(hour=hour, minute=minute, second=0,
+                                      microsecond=0).timestamp()
+
+    def _flipped_on(self, slug):
+        from cousin_lib import loops
+        return loops._load_state().get("last_flips", {}).get(slug)
+
+    def test_a_session_started_after_the_flip_time_is_not_flipped_that_day(self):
+        # A cousin spawned or started after today's flip time: its session
+        # is younger than the flip point, so the late-once catch-up must
+        # not end it seconds after its first turn. Its day is done; the
+        # next day's flip time is the first that applies to it.
+        from datetime import date, datetime, timedelta
+        self._flip_cousin("wren", started=self._at(14, 28))
+        self._tick_f(now=self._at(14, 29))
+        self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(self._flipped_on("wren"), str(date.today()))
+        tomorrow = (datetime.now() + timedelta(days=1)).replace(
+            hour=23, minute=0, second=0, microsecond=0)
+        self._tick_f(now=tomorrow.timestamp())
+        self.assertEqual(self.flips, ["wren"])
+        self.assertEqual(self._flipped_on("wren"), str(tomorrow.date()))
+
+    def test_a_session_started_before_the_flip_time_is_flipped_late(self):
+        # The daemon was down at 04:00: a session that started at 03:00
+        # is older than today's flip point, so it flips late, as today's.
+        from datetime import date
+        self._flip_cousin("wren", started=self._at(3))
+        self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, ["wren"])
+        self.assertEqual(self._flipped_on("wren"), str(date.today()))
+
+    def test_a_cousin_that_never_started_is_not_flipped(self):
+        from datetime import date
+        self._flip_cousin("wren", started=None)
+        self._tick_f(now=self._at(23))
+        self.assertEqual(self.flips, [])
+        self.assertEqual(self._flipped_on("wren"), str(date.today()))
+
+    def test_one_flip_per_tick_skips_the_young_session_without_spending_the_slot(self):
+        # The young session is marked done and the walk goes on: the
+        # tick's one flip goes to the cousin that is due.
+        self._flip_cousin("testa", started=self._at(22))
+        self._flip_cousin("wren")
+        self._flip_cousin("toki")
+        self._tick_f(now=self._at(23))
+        self.assertEqual(len(self.flips), 1)
+        self.assertNotIn("testa", self.flips)
+        self._tick_f(now=self._at(23) + 30)
+        self.assertEqual(sorted(self.flips), ["toki", "wren"])
+        self._tick_f(now=self._at(23) + 60)
+        self.assertEqual(sorted(self.flips), ["toki", "wren"])
 
     def test_daily_flip_fires_late_once(self):
         self._flip_cousin("wren")
@@ -430,8 +496,10 @@ class TestFlipDrivers(LoopsCase):
         # wrote one, so a cousin spawned or migrated later never
         # flipped and nothing said so. No [lifecycle] block at all,
         # which is the shape a migrated cousin actually had.
-        self._cousin("wren",
-                     extra="[heartbeat]\ncontext_beat_seconds = 0\n")
+        home = self._cousin("wren",
+                            extra="[heartbeat]\ncontext_beat_seconds = 0\n")
+        from cousin_lib import boot
+        boot.mark_generation_start(home, now=self._at(0) - 86400)
         from datetime import datetime
         evening = datetime.now().replace(hour=23, minute=0,
                                          second=0).timestamp()
@@ -717,6 +785,10 @@ class TestMaxAgeOnTheRunnerLane(HermeticCase):
             (home / "cousin.toml").write_text(
                 '[cousin]\nslug = "%s"\nname = "%s"\n\n[agent]\nrunner = "fake"\n\n'
                 '[lifecycle]\nflip_at = "11:00"\n' % (slug, slug.capitalize()))
+            # sessions from yesterday: older than today's 11:00, so due
+            yesterday = dt.datetime.now().replace(hour=0, minute=0, second=0,
+                                                  microsecond=0).timestamp() - 86400
+            boot.mark_generation_start(home, now=yesterday)
             homes.append(home)
         p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(root)}); p.start(); self.addCleanup(p.stop)
         with contextlib.ExitStack() as stack:

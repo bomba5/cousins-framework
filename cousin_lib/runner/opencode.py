@@ -1119,6 +1119,12 @@ class OpencodeRunner:
         self.stream.append("system", {"subtype": "session", "session_id": self.opencode_session})
 
     def _start_fresh(self, *, with_digest):
+        # a new session is a generation start, moved or not (SdkRunner._start_fresh)
+        try:
+            boot.mark_generation_start(self.home)
+        except Exception as exc:  # noqa: BLE001 - a record; the session runs on
+            self.stream.append("error", {"error": "generation start: %s: %s"
+                                         % (type(exc).__name__, exc)})
         try:
             session.run_phase(self.home, "start")
         except Exception as exc:  # noqa: BLE001 - the session runs on without its hooks

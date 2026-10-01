@@ -18,6 +18,8 @@ from cousin_lib.boot import (
     _truncate,
     assemble,
     bump_generation,
+    generation_started,
+    mark_generation_start,
     read_generation,
 )
 
@@ -62,6 +64,47 @@ class TestGeneration(BootCase):
         self.assertEqual(read_generation(self.home), 0)
         self.assertEqual(bump_generation(self.home), 1)
         self.assertEqual(read_generation(self.home), 1)
+
+
+class TestGenerationStart(BootCase):
+    """When the current generation's session started: what the daily flip
+    reads to leave a session younger than the day's flip point alone."""
+
+    def stamp(self):
+        return json.loads((self.home / "data" / "generation-started.json").read_text())
+
+    def test_a_home_that_never_started_a_generation_has_no_start(self):
+        self.assertIsNone(generation_started(self.home))
+
+    def test_a_bump_records_the_new_generations_start(self):
+        before = time.time()
+        bump_generation(self.home)
+        self.assertEqual(self.stamp()["generation"], 1)
+        self.assertGreaterEqual(generation_started(self.home), before)
+        self.assertLessEqual(generation_started(self.home), time.time())
+
+    def test_a_start_without_a_bump_is_recorded_too(self):
+        # a runner's first boot: a session starts, the generation stays 0
+        mark_generation_start(self.home, now=1000.0)
+        self.assertEqual(self.stamp(), {"generation": 0, "started": 1000.0})
+        self.assertEqual(generation_started(self.home), 1000.0)
+
+    def test_a_home_from_before_the_stamp_falls_back_to_its_last_bump(self):
+        path = self.home / "data" / "generation.txt"
+        path.write_text("4")
+        os.utime(path, (2000.0, 2000.0))
+        self.assertEqual(generation_started(self.home), 2000.0)
+
+    def test_a_session_on_file_with_no_generation_record_started_at_an_unknown_time(self):
+        # a home from before the stamp that never rolled over: started,
+        # when unknown, so as old as can be (the daily flip ends it)
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-1", "updated": 9e9}))
+        self.assertEqual(generation_started(self.home), 0.0)
+
+    def test_a_torn_stamp_falls_back(self):
+        (self.home / "data" / "generation-started.json").write_text("{")
+        self.assertIsNone(generation_started(self.home))
 
 
 class TestTruncate(BootCase):

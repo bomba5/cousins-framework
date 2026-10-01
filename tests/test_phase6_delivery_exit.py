@@ -484,8 +484,9 @@ class TestComposeDelivery(unittest.TestCase):
             self.assertIn(_row(after, next(iter(ours)))["id"], after["answered"])
             # Rows added after down can only be ours or the loops daemon's:
             # a heartbeat (source loop), or the day's flip_at rollover (source
-            # flip), which a cousin not yet flipped today gets at its first
-            # live tick, and the state digest that rollover queues for the
+            # flip), which a cousin not yet flipped today whose session is
+            # older than today's flip time gets at its first live tick, and
+            # the state digest that rollover queues for the
             # new session (source boot). Never another message.
             added = [r for r in after["rows"]
                      if r["id"] not in old_ids and r["body"] not in ours]

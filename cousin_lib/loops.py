@@ -658,7 +658,15 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
     tick - the tick cadence is the stagger that keeps boot packets
     from assembling simultaneously. A stopped cousin is skipped and
     its day marked done: a flip starts the agent, so flipping a
-    cousin the operator stopped would undo the stop."""
+    cousin the operator stopped would undo the stop.
+
+    The point is that a session is at most a day old, so the flip ends
+    a session that started before today's flip time (late when the
+    daemon was down at it). A session that started at or after it
+    (a cousin spawned or started since), or none at all, is younger
+    than the flip point: its day is marked done, not flipped seconds
+    after its first turn (boot.generation_started)."""
+    from cousin_lib import boot
     if report["flips"]:
         return  # a timed flip already used this tick's slot
     when = datetime.fromtimestamp(now)
@@ -676,7 +684,9 @@ def _fire_daily_flips(state, do_flip, is_alive, now, report):
                               microsecond=0).timestamp()
         last = state.setdefault("last_flips", {}).get(config.slug)
         if now >= target and last != str(when.date()):
-            if not is_alive(config.slug):
+            started = boot.generation_started(config.home)
+            if (started is None or started >= target
+                    or not is_alive(config.slug)):
                 state["last_flips"][config.slug] = str(when.date())
                 continue
             result = do_flip(config.slug)

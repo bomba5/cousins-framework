@@ -69,7 +69,7 @@ Body: `user` and a non-empty `message` (both required), plus optional `reply_to`
 
 On this machine, before any of that, every send checks whether the message is a login
 code a running `cousin-account login|token --via <this cousin>` is waiting
-on (R18). When it is, the send answers `200 {"ok": true, "id", "timestamp",
+on. When it is, the send answers `200 {"ok": true, "id", "timestamp",
 "diverted": true}` and delivers nothing: no chat hook ever sees it. The row
 stored in `chat.db` is a redaction line
 (`[login code received for account <name>]`, or, for a second or late code,

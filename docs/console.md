@@ -52,12 +52,13 @@ cousin-console adduser ana       # prompts for the password, never takes it as a
 That writes `config/console-users.json` (PBKDF2-SHA256, mode 600). Run the
 same command again to reset a password or add another user. From then on:
 
-- Every `/api` route needs a session except login and `GET /api/auth/me`.
+- Every `/api` route needs a session except login, `GET /api/auth/me` and
+  `GET /api/version`.
   There is no bypass for localhost or the LAN.
 - A user signs in on the login form and gets a `console_session` cookie
   (HttpOnly, SameSite=Strict). Idle sessions expire after 30 days.
-- Sessions live in the console's memory, so restarting the console logs
-  everyone out.
+- Sessions are saved in `data/console-sessions.json`, so restarting the
+  console keeps everyone logged in.
 - All users can do everything. There are no per-user permissions.
 
 If `console-users.json` exists but can't be read (bad JSON, no users), the
@@ -169,9 +170,9 @@ Click a card to open the inspector drawer. From top to bottom:
 
 - **Role.** The one-line role, with an edit button. It rewrites `[cousin]
   role` in `cousin.toml`.
-- **Identity.** Slug, type, home, tmux session, chat state, model,
-  effort, pid, uptime, flip time, activity. Three of them have an edit
-  button:
+- **Identity.** Slug, type, home, operator, scope, tmux session, chat
+  state, heartbeat, lane (with the account, held and auto start), pid,
+  uptime, flip time, activity. Three of them have an edit button:
   - operator: one line, up to 64 characters, no leading or trailing spaces.
     Needs a restart (the runner reads it at start).
   - scope: `private` or `shared` (may propose to the [shared tier](glossary.md#shared-tier)). Applies at once.
@@ -189,7 +190,7 @@ Click a card to open the inspector drawer. From top to bottom:
   is sent once, and from then on the page shows only "key set (ends WXYZ)".
   Switching restarts a running agent on the same session; if the agent is in
   the middle of a [turn](glossary.md#turn) you get "restart anyway" instead. See
-  [cousins](cousins.md#auth-login-or-api-key).
+  [cousins](cousins.md#auth-accounts).
 - **Telegram.** The cousin's Telegram bridge: status (enabled, token set,
   bridge running, what is missing), the bot's @name after a check, an enable
   switch, a write-only token field (stored at `config/telegram/<slug>.token`,
@@ -349,8 +350,9 @@ button opens the same dialog. The routes are in
 - **roll back**: offered while a record allows it, the kind switch back to
   the kind it came from. A second click confirms.
 
-Not there yet, because phase 11 defers them, and the panel says so: adopting
-a live pane, and switching the whole fleet (`--all --keep-going`).
+Two things the panel does not do, and it says so: adopt a live pane (a
+tmux-kind start adopts its pane on its own), and switch the whole fleet
+(`--all --keep-going`; switch one cousin at a time).
 
 ### Lifecycle
 
@@ -836,7 +838,7 @@ The install as a whole, in six tabs. The routes are in [the API reference](refer
 - **users**: console users. Add one, reset another user's password (your own changes in Settings, with the current one), remove one by typing its name. The last user and the one you are logged in as cannot be removed. Passwords are never shown again.
 - **backup**: back up now. Pick an absolute destination (remembered in this browser) and the cousins; each one becomes a long operation and a job, and lands in `<dest>/<slug>/<date>/`. A destination inside the install, or one other users can write without the sticky bit, is refused, and the snapshot is owner-only (`0700` directories, `0600` files). A copy that lands anywhere but its own directory fails with the path it landed at, nothing is deleted, and the event is logged in `data/system/audit.jsonl`.
 - **agent defaults**: `config/harness.toml [agent]`: `default_model`, `default_effort` and `commit_attribution`, each shown with where its value comes from. A cousin reads them when it starts, so restart one from its inspector to apply.
-- **install config**: editors for `media.toml` (with each provider's key as a write-only field), `embedding.toml`, `hive.toml`, `external-peers.toml` (with each peer's outbound and inbound token as write-only fields), `outbound-filter.json`, `law.md` and `net-allowlist.json`. Each save is checked by the file's own loader first, a number that does not parse is refused, and an emptied field removes its key; the JSON and Markdown files are backed up to `data/config-backups/` and refused if they changed since you opened them. The allowlist refuses a list that would lock out the address you are on, and offers the console restart it needs. `agent-cmd` and `worker-cmd` are shown read-only: edit them on the host.
+- **install config**: editors for `media.toml` (with each provider's key as a write-only field), `embedding.toml`, `hive.toml`, `external-peers.toml` (with each peer's outbound and inbound token as write-only fields), `outbound-filter.json`, `law.md` and `net-allowlist.json`. Each save is checked by the file's own loader first, a number that does not parse is refused, and an emptied field removes its key; the JSON and Markdown files are backed up to `data/config-backups/` and refused if they changed since you opened them. The allowlist refuses a list that would lock out the address you are on, and offers the console restart it needs. `worker-cmd` is shown read-only: edit it on the host. A leftover `agent-cmd` shows there too; no runner kind reads it.
 
 ## Settings
 

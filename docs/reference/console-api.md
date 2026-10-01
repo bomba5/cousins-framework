@@ -43,7 +43,7 @@ There are no per-user permissions. Anyone who can log in can do everything.
 - Status codes: `200` done, `201` created, `202` accepted and still running in the background, `400` bad input, `401` no session, `403` refused, `404` unknown thing (or an unknown path), `405` known path with the wrong method, `409` state conflict, `500` local failure with the reason in `error`, `502` an upstream chat server (a hive node's) is unreachable or answered something that isn't JSON, `503` broken users file.
 - A `<slug>` has to match `^[a-z][a-z0-9_-]{1,31}$`, otherwise `400 {"error": "bad slug"}` before anything is looked up. A loop `<name>` matches `^[a-z][a-z0-9_-]{0,31}$`.
 - A trailing slash on a path is accepted.
-- Anything not under `/api/` or `/hive/` is a static file (GET only).
+- Paths under `/hive/` ([the hive API](hive-api.md)), `/peer/` ([external peers](#external-peers)) and `/plugins/` ([the plugin proxy](#pluginsnamepath-the-proxy)) are handled first. Any other path not under `/api/` is a static file (GET only).
 
 ## Auth
 
@@ -61,11 +61,11 @@ Drops the session and clears the cookie. `200 {"ok": true}`.
 
 ### `POST /api/auth/change-password`
 
-Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"ok": true, "user": "ana"}`. `400` new password under 8 characters, `403 current password incorrect`. Your other sessions stay logged in.
+Body `{"old_password": "...", "new_password": "..."}`. Needs a session. `200 {"ok": true, "user": "ana"}`. `400` new password under 8 characters, `403 current password incorrect`. The session that changed the password stays logged in; every other session of that user ends.
 
 ## Telegram
 
-Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process belongs to its cousin: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. A [runner](../glossary.md#runner) cousin's bridge is a `cousin-supervisor` child (`telegram:<slug>`): these routes write `cousin.toml` and ask the [supervisor](../glossary.md#supervisor) to rescan, and never start a bridge themselves.
+Per-cousin provisioning of the Telegram bridge ([telegram](../telegram.md)). The bot token is write-only: it is stored at `config/telegram/<slug>.token` (mode 0600) and no answer ever contains it. The bridge process is a `cousin-supervisor` child (`telegram:<slug>`) that follows its cousin's runner: it starts with the cousin when `[telegram] enabled` is true and the config is complete, and stops with it. These routes write `cousin.toml` and ask the [supervisor](../glossary.md#supervisor) to rescan, and never start a bridge themselves.
 
 A status: `{"slug", "enabled", "token_set", "operators": [{"user_id", "name"}], "pending": [{"user_id", "username", "first_name", "at"}], "running", "ready": null | "<why the bridge cannot run>"}`. `pending` lists the last five people who wrote to the bot and were refused, so they can be added without looking up a numeric id. Anyone who messages the bot can appear there.
 
@@ -85,7 +85,7 @@ Body `{"operators": [{"user_id", "name"}]}`, the whole list. `400` for a non-num
 
 ### `POST /api/cousins/<slug>/telegram/enabled`
 
-Body `{"enabled": true|false}`. Starts the bridge when the cousin runs (`bridge: "started"`, or `"starts with the cousin"` when it is stopped), stops it when false. For a runner cousin the supervisor does it: `bridge: "supervised"` once it took the rescan, or a line saying no supervisor runs (the bridge starts with it) or why it refused.
+Body `{"enabled": true|false}`. Writes the switch and asks the supervisor to rescan; its rescan starts, stops or restarts the bridge. `bridge` says what happened: `"supervised"` once the supervisor took the rescan, a line saying no supervisor runs (the bridge starts with it), a line saying the supervisor did not answer (the bridge follows its rescan when it does), or why it refused. With no supervisor running, the console stops a bridge itself when the config no longer runs; it never starts one. A cousin with no [runner](../glossary.md#runner) kind gets no bridge: the config is written and `bridge` says why.
 
 ### `POST /api/cousins/<slug>/telegram/check`
 
@@ -111,7 +111,7 @@ Is it logged in, with no model call: `claude auth status --json` under the accou
 
 ### `POST /api/accounts`
 
-Add an entry. Body `{"name", "entry": {"kind", ...}}`, the entry's keys as in accounts.toml (a list of strings for `providers`, whole numbers for `endpoint_context` and `endpoint_output`; left out means the default). Written by `accounts.write_entry`: every other line of the file kept, the result checked by the same rules the runner reads it by (paths under the root, one of providers or endpoint, no credentials in an endpoint, no provider or endpoint model naming Claude, ruling P9-1) before the atomic rename. The console keeps an entry's paths where the framework puts them: `secret_file` and `data_dir` under `.secrets/`, `config_dir` under `data/accounts/` (another place is a hand edit of the file), and an `endpoint` whose query or fragment names a credential-like parameter (`key`, `token`, `secret`, `pass`, `auth`, `sig`, `cred`, `session`) is refused. `201 {"ok": true, "account": row}`. `400` refused (the reason), `409` the name exists. An `accounts-change` event follows; the page re-reads the list on it.
+Add an entry. Body `{"name", "entry": {"kind", ...}}`, the entry's keys as in accounts.toml (a list of strings for `providers`, whole numbers for `endpoint_context` and `endpoint_output`; left out means the default). Written by `accounts.write_entry`: every other line of the file kept, the result checked by the same rules the runner reads it by (paths under the root, one of providers or endpoint, no credentials in an endpoint, no provider or endpoint model naming Claude, since Claude cousins run on the Agent SDK only) before the atomic rename. The console keeps an entry's paths where the framework puts them: `secret_file` and `data_dir` under `.secrets/`, `config_dir` under `data/accounts/` (another place is a hand edit of the file), and an `endpoint` whose query or fragment names a credential-like parameter (`key`, `token`, `secret`, `pass`, `auth`, `sig`, `cred`, `session`) is refused. `201 {"ok": true, "account": row}`. `400` refused (the reason), `409` the name exists. An `accounts-change` event follows; the page re-reads the list on it.
 
 ### `POST /api/accounts/<name>`
 
@@ -270,7 +270,7 @@ Not under `/api/`, behind the same guard and login (a session; `401` without one
 
 ## Kind switch and migration
 
-`cousin-migrate` from the console (`cousin_lib/console/routes_migrate.py`), through the migrate library only: the tmux-lane migration to the sdk runner (plan, apply, check, rollback; the runbook is [migrating](../migrating.md)) and the phase 11 kind switch between the `sdk` and `tmux` runner kinds (`--to`). apply and rollback change a live cousin: each is the cousin's long operation (`GET /api/cousins/<slug>/op`), its steps reported as stages as the library writes them to `data/migration.json` or `data/kind-switch.json`, and they run one at a time across the whole fleet: another cousin's migration, switch or rollback makes them `409 {"busy": true}`, as does a flip, a clean stop or another op on the cousin. A plan or a check with `validate` spends one model turn, so it is an op too (kinds `migrate-plan`, `migrate-check`); without it, it answers at once. Who started an op is its `params.by`. Not built, because phase 11 defers them: adopt and `--all --keep-going`; the state says so in `deferred`.
+`cousin-migrate` from the console (`cousin_lib/console/routes_migrate.py`), through the migrate library only: the tmux-lane migration to the sdk runner (plan, apply, check, rollback; the runbook is [migrating](../migrating.md)) and the kind switch between the `sdk` and `tmux` runner kinds (`--to`). apply and rollback change a live cousin: each is the cousin's long operation (`GET /api/cousins/<slug>/op`), its steps reported as stages as the library writes them to `data/migration.json` or `data/kind-switch.json`, and they run one at a time across the whole fleet: another cousin's migration, switch or rollback makes them `409 {"busy": true}`, as does a flip, a clean stop or another op on the cousin. A plan or a check with `validate` spends one model turn, so it is an op too (kinds `migrate-plan`, `migrate-check`); without it, it answers at once. Who started an op is its `params.by`. Not supported from the console: adopt (a tmux-kind start adopts its pane on its own) and `--all --keep-going` (switch one cousin at a time); the state lists them in `deferred`.
 
 ### `GET /api/cousins/<slug>/migrate`
 
@@ -373,13 +373,13 @@ Body `{"sidebar": {...}}` in the shape above: at least one group, unique string 
 | `home` | the cousin's home directory |
 | `tmuxSession` | the tmux session the cousin runs in: on `tmux-legacy`, `[chat] tmux_session`, default the slug; on the `tmux` runner kind, the runner's own `tmux-<slug>`; null on every other runner kind (`sdk`, `opencode`, `fake`), which has no tmux session |
 | `operator` | `[operator] name`, or null |
-| `memoryScope` | `private`, `shared` or `both` |
+| `memoryScope` | `private` or `shared` (an older `both` in cousin.toml reads as `shared`) |
 | `heartbeat` | context heartbeat in seconds (default 3600) |
 | `flipAt` | `[lifecycle] flip_at`, or null |
-| `model`, `effort` | what the next start will use: the cousin's `[runtime]` value, else `config/harness.toml [agent]` default, else null |
+| `model`, `effort` | what the next start will use: a runner cousin's `[agent] model` and `effort`, else null (the CLI's own default); on `tmux-legacy`, the `[runtime]` value, else `config/harness.toml [agent]` default, else null |
 | `hidden` | `[cousin] hidden` |
 | `auth` | the legacy lane's `[runtime] auth` mode, `claude` or `api_key`, on `tmux-legacy`; null if cousin.toml holds a mode the framework doesn't know. Null on every runner kind: no runner reads the mode, and a runner cousin's credential is its `account` |
-| `status` | `running` or `stopped`. Local cousin: the tmux session exists. Cousin with `[chat] host`: its chat server answers. [Worker](../glossary.md#worker): always `running`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). |
+| `status` | `running` or `stopped`. Runner cousin (`[agent] runner`): a runner holds its lock (`run/runner.lock`). [Worker](../glossary.md#worker): always `running`. A cousin on `tmux-legacy` (which 2.0.0 refuses to start): its tmux session exists, or with `[chat] host` its chat server answers. |
 | `attention` | for a running local cousin, the first string from `config/harness.toml attention_patterns` found in the last 20 lines of the pane (a login menu, say), else null |
 | `chat` | `console` for a runner cousin, whose chat the console serves itself; for any other cousin `ok`, `down` or `none` (no port) from an upstream chat server's `/health` |
 | `active` | the last 20 pane lines changed in the last 60 seconds; for a runner cousin, a live turn (`running` or `waiting_permission`) |
@@ -464,7 +464,7 @@ A runner cousin that is running is signalled and answered at once, `202 {"ok": t
 
 ### `POST /api/cousins/<slug>/auth`
 
-Switch the auth mode (the retired legacy lane's; `409` with the lane refusal line for a cousin with no runner, before anything is stopped). Body `{"mode": "api_key", "force": false, "restart": true}`. For `api_key` the key file is checked and the isolated harness config dir rebuilt. A running agent restarts on the same session unless `restart` is false. `200 {"ok": true, "slug", "mode", "previous", "running", "restarted", ..., "auth": <the GET body>}`. `409 {"busy": true}` when the pane looks mid-turn (`busy_patterns` in harness.toml) and `force` is false. `400` unknown mode, unusable key, or a restart that can't resume. A refusal changes nothing.
+Switch the auth mode, the retired legacy lane's `[runtime] auth`. A cousin with no runner is `409` with the lane refusal line, before anything is stopped. On a runner cousin the route writes that key, which no runner reads; the restart below only ever restarts a legacy tmux session (`[chat] tmux_session`). Body `{"mode": "api_key", "force": false, "restart": true}`. For `api_key` the key file is checked and the isolated harness config dir rebuilt. A running agent restarts on the same session unless `restart` is false. `200 {"ok": true, "slug", "mode", "previous", "running", "restarted", ..., "auth": <the GET body>}`. `409 {"busy": true}` when the pane looks mid-turn (`busy_patterns` in harness.toml) and `force` is false. `400` unknown mode, unusable key, or a restart that can't resume. A refusal changes nothing.
 
 ### `POST /api/cousins/<slug>/auth/key`
 
@@ -496,7 +496,7 @@ Body `{"operator": "ana"}`. Written to `[operator] name`. One line, 1 to 64 char
 
 ### `POST /api/cousins/<slug>/memory-scope`
 
-Body `{"memory_scope": "shared"}`, one of `private`, `shared`, `both`. Written to `[memory] scope`. `200 {"ok": true, "slug", "memory_scope", "restart_required": false}`: it's read on every shared-tier call.
+Body `{"memory_scope": "shared"}`, `private` or `shared`. `both`, an older name, is accepted and stored as `shared`. Written to `[memory] scope`. `200 {"ok": true, "slug", "memory_scope" (the stored value), "restart_required": false}`: it's read on every shared-tier call.
 
 ### `POST /api/cousins/<slug>/heartbeat`
 
@@ -591,7 +591,7 @@ One generated file from `<home>/chat/<folder>/`, folder `images`, `audio` or `vi
 
 ## The pane (the tmux terminal)
 
-All four resolve the cousin's tmux session (`[chat] tmux_session`, default the slug) through the console's `--tmux-bin` and `--tmux-socket`. For a cousin with `[chat] host` they run tmux over `ssh <host>` with the remote user's default socket. `404` unknown cousin, `400` no tmux session configured, `409 session not running`.
+Only a tmux-kind runner cousin has a pane (below); the `sdk`, `opencode` and `fake` kinds have none. For any other cousin all four fall back to the retired legacy lane's lookup: the tmux session `[chat] tmux_session` (default the slug) through the console's `--tmux-bin` and `--tmux-socket`, or over `ssh <host>` with the remote user's default socket for a cousin with `[chat] host`. Nothing 2.0.0 starts runs there, so that is normally `409 session not running`. Errors: `404` unknown cousin, `400` no tmux session configured, `409 session not running`.
 
 A tmux-kind runner cousin (`[agent] runner = "tmux"`) is addressed where its runner keeps its pane instead: the framework's own socket (`<root>/run/tmux.sock`) and the session `tmux-<slug>`, matched exactly. Its runner types into that pane itself, from its own process, so `input` there answers only a one-screen dialog the runner never types into: the trust, bypass and MCP approval dialogs (the kind switch's trust step is the case this is for). The login and onboarding flows take several screens, a URL and a code: do them in a terminal attached to the pane (`tmux -S <root>/run/tmux.sock attach -t tmux-<slug>`); input on them is `409` saying so. On an answerable dialog:
 
@@ -671,7 +671,7 @@ Query `lines` (default 40), `from` (byte offset). `{"ok": true, "log", "log_path
 
 ### `POST /api/jobs/<id>`
 
-Body with any of `status`, `result_summary`, `exit_code`, `title`, `description`. Setting `status: "cancelled"` on a running job with a pid sends it SIGTERM first. `200 {"ok": true, "job": row}` and a `job-update` event. `400` no fields or a bad status.
+Body with any of `status`, `result_summary`, `exit_code`, `title`, `description`. Setting `status` to `cancelled`, `done` or `failed` ends the job's processes, as `cousin-job` does: every live member of its process group gets SIGTERM, and whatever is still alive 3 seconds later gets SIGKILL. A running row that recorded a pid but no process group (an older row) also has that pid sent SIGTERM on `cancelled`. `200 {"ok": true, "job": row}` and a `job-update` event. `400` no fields or a bad status.
 
 ### `DELETE /api/jobs/<id>`
 
@@ -679,7 +679,7 @@ Removes the row, and the log file too if it's one `cousin-job` created in its ow
 
 ## Loops
 
-The console reads loop state and queues requests; the loops daemon does the firing. See [loops](loops.md) for the model. Every loops response carries `"daemon": {"ok", "last_tick"?, "message"}`; when `ok` is false the message says `loops daemon has never run` or `loops daemon down (last tick NNs ago)`.
+The console reads loop state and queues requests; the loops daemon does the firing. See [loops](loops.md) for the model. The three reads (`GET /api/loops`, `GET /api/loops/recent` and `GET /api/cousins/<slug>/loops`) carry `"daemon": {"ok", "last_tick"?, "message"}`; drift, save, hidden and fire do not. When `ok` is false the message says `loops daemon has never run` or `loops daemon down (last tick NNs ago)`.
 
 ### `GET /api/loops`
 
@@ -995,11 +995,11 @@ The same for one cousin (`?all=1` for its history, 100 at most).
 
 ### `POST /api/system/users`
 
-`{"name", "password"}`: a new console user. The name is taken as `cousin-console adduser` takes it (any non-empty string without NUL, kept exactly; percent-encode it in a path); the password is 8 or more characters, kept as typed. `201 {"ok": true, "user", "users"}`; `409` the user exists. The first user closes the console to everyone without a session, so that request is also logged in as it (`Set-Cookie`, `"logged_in": true`). The password is never returned or logged.
+`{"name", "password"}`: a new console user. The name is taken as `cousin-console adduser` takes it (any non-empty string without NUL, at most 1024 characters, kept exactly; percent-encode it in a path); the password is 8 to 1024 characters, kept as typed. `201 {"ok": true, "user", "users"}`; `409` the user exists. The first user closes the console to everyone without a session, so that request is also logged in as it (`Set-Cookie`, `"logged_in": true`). The password is never returned or logged.
 
 ### `POST /api/system/users/<name>/password`
 
-`{"password"}`: reset another user's password; their sessions end. `400` your own name (that goes through `POST /api/auth/change-password`, which asks for the current one); `404` no such user.
+`{"password"}`: reset another user's password (8 to 1024 characters); their sessions end. `400` your own name (that goes through `POST /api/auth/change-password`, which asks for the current one); `404` no such user.
 
 ### `POST /api/system/users/<name>/remove`
 
@@ -1011,14 +1011,14 @@ The same for one cousin (`?all=1` for its history, 100 at most).
 
 ### `GET /api/system/config`
 
-The install config files, each `{"path", "exists", "error", "applies", "restart"}` plus its values:
+`{"ok": true, "files": {...}}`: the install config files by name, each `{"path", "exists", "error", "applies", "restart"}` plus its values:
 
 - `media`: `kinds.<image|voice|video>` = `{url, model, timeout_s, key_file, key: {set, last4, error}}` or null; `key` is read as media reads it (a plain read under the root);
 - `embedding`, `hive`: `values` by key (`recall.min_score` for a subtable key);
 - `peers`: `peers.<slug>` = `{url, send_path, name, sender, reach, token_file, inbound_token_file, token, inbound_token, shadowed, unknown_reach}`; a token is read as `chat.read_secret` reads it, so a file group or others can read shows its refusal in `error`;
 - `outbound_filter`, `law`: `{content, sha}`;
 - `allowlist`: `{allow, sha, client, builtin}`, and `restart` naming the console;
-- `commands`: `agent-cmd` and `worker-cmd` as `{path, exists, content}`, shown only: no route writes them.
+- `commands`: `worker-cmd` and a leftover `agent-cmd` (no runner kind reads it) as `{path, exists, content}`, shown only: no route writes them.
 
 A secret's value is never in the answer: `{set, last4, error}` only, `last4` for a value of 16 characters or more. A key or token file outside `config/` is never read (`set: null`).
 
@@ -1058,21 +1058,22 @@ Any of `default_model` (one word, as the agent command renders it), `default_eff
 
 The live stream every open tab holds. Server-sent events, each frame a `data:` line with `{"kind": "...", "data": ...}`. The first frame is always a `snapshot`. A `: ping` comment goes out after 25 s of silence.
 
-The events come from two places: route handlers announce what they just did, and a poller inside the console re-reads the stores and sends the differences (jobs, timed flip requests and the tracker every 2 s; the fleet, the loops and the fire times every 15 s). If a tab falls behind by 200 frames it's dropped; it reconnects and gets a fresh snapshot, so nothing is lost.
+The events come from two places: route handlers announce what they just did, and a poller inside the console re-reads the stores and sends the differences (jobs, timed flip requests, the tracker and meetings every 2 s; the fleet, the loops and the fire times every 15 s). If a tab falls behind by 200 frames it's dropped; it reconnects and gets a fresh snapshot, so nothing is lost.
 
 | kind | data | sent when |
 |---|---|---|
 | `snapshot` | `{"cousins", "loops", "jobs", "daemon"}` | on connect; the same rows the GET routes return |
 | `cousins-refresh` | `[row]` | every fleet poll, and after spawn, identity edits, auth switches and hive changes |
 | `loops-refresh` | `[row]` | every loops poll, and after a loops save |
-| `cousin-status` | `{"slug", "status": "starting" \| "stopping" \| "switching auth"}` | a start, stop, restart, dismiss or auth switch begins |
+| `cousin-status` | `{"slug", "status", "error"?}` | `starting` when a start or restart begins, then `start failed` (with `error`) when the start is refused, or `started` when a restart's background start succeeds; `stopping` when a stop, restart or dismiss begins, then `stop failed` when the stop is refused; `switching auth` when an auth switch begins |
 | `job-add`, `job-update` | job row | a job appeared or changed |
 | `job-delete` | `{"id"}` | a job went away |
 | `cousin-flip` | `{"slug", "phase", ...}` | see below |
 | `cousin-op` | `{"slug", "id", "kind", "phase": "started" \| "stage" \| "done" \| "failed", "stage"?, "error"?}` | a long operation started, reported a stage, or finished (`GET /api/cousins/<slug>/op`) |
 | `loop-fire` | `{"cousin", "loop", "ts"}` | a loop's last fire time moved forward |
 | `tracker-change` | `{"id", "op": "add" \| "update" \| "delete"}` | a tracker item changed, through the console or anything else |
-| `memory-change` | `{"slug", "action": "trash" \| "restore" \| "obsolete", ...}` | a memory delete, restore or obsolete mark through the console |
+| `memory-change` | `{"slug", "action", ...}` | a memory change through the console: `trash` (a delete) and `restore` (with `id`), `obsolete`, `remember` and `decide` (with `topic`), `review` (verdicts settled), a maintain action by its name (`distill`, `compact-raw`, `compact-index`, `reindex`), `portrait-synthesize` and `portrait-edit`, and `portrait-commit` (with `by`) |
+| `meeting-change` | `{"id", "op": "open" \| "post" \| "skip" \| "delete" \| "close" \| "update"}` | a meeting opened, got a post or a skip, was deleted or closed through the console; `update` when the poller (every 2 s) sees a meeting's row or entry count change, as when a cousin speaks through the CLI |
 | `accounts-change` | `{"name", "what": "added" \| "edited" \| "removed" \| "key"}` | an account entry or key changed through the console (never the key) |
 
 `cousin-flip` phases: `scheduled` (with `fire_at`, and `delay_seconds` or `request_id`), `started`, `complete` (with `ok: true`, and `new_generation`, `boot_packet_tokens`, `degraded_sections` when the console ran it), `failed` (with `ok: false` and `error`), `cancelled`. Timed flips the daemon runs show up through the poller: a request that turns `done` is `complete`, `failed` or `expired` is `failed`.
@@ -1081,7 +1082,7 @@ The events come from two places: route handlers announce what they just did, and
 
 `GET /` serves `index.html`, and `GET /<file>` serves files from `cousin_lib/console_static/` with one of these suffixes: `.html .jsx .js .css .json .webmanifest .svg .png .ico`. Anything that resolves outside that directory is `403`, anything else missing is `404`. Everything is `Cache-Control: no-store`, and `index.html` gets `?v=<mtime>` stamped on its local `src`/`href` links, so a redeploy shows up on the next reload. The page loads React, Babel, marked, mermaid and xterm from a CDN; that's the only outside fetch.
 
-Non-GET requests outside `/api/` are `404`.
+Non-GET requests outside `/api/`, `/hive/`, `/peer/` and `/plugins/` are `404`.
 
 ## Hive (remote cousins)
 

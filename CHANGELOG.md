@@ -3,6 +3,74 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Removed
+
+- **`cousin-auth`**, with the console's auth control on the cousin card and
+  its routes `GET`/`POST /api/cousins/<slug>/auth` and
+  `POST /api/cousins/<slug>/auth/key` (now 404), and the `auth` field of a
+  fleet row. They switched the legacy lane's auth mode (`[runtime] auth`,
+  `[auth.api_key]`), which 2.0.0 removed. A runner cousin authenticates
+  through its `[agent] account`; manage accounts on the console's accounts
+  page or with `cousin-account`.
+- **`cousin-ui`**, the alias of `cousin-console`. Run `cousin-console` with
+  the same flags.
+- **`cousin-spawn --resume`.** A runner resumes its own session at every
+  start; `cousin-spawn <slug> --start` starts it.
+- **`cousin-migrate plan`/`apply` `--account` and `--validate`, and
+  `rollback --force`.** Only the legacy migration read them, and 2.0.0 runs
+  none; a `--to` switch runs on the cousin's own `[agent] account`.
+  `cousin-migrate check` no longer prints a `chat server:` line, and its
+  `--json` no longer carries `chat` or `chat_ok`.
+- **`cousin-flip --confirm`**, and `confirm` in the body of
+  `POST /api/cousins/<slug>/flip`. A runner's new generation was never asked
+  to announce itself; the flip's result and the console's flip events say
+  when it is done.
+- **`cousin-reincarnate --timeout`**, the console's "bequest wait" field,
+  `timeout` in the body of `POST /api/cousins/<slug>/reincarnate`, and
+  `timeout`/`timeout_range` in `GET /api/lifecycle/modes`. The bequest rides
+  the flip's own handoff request, under the runner's handoff deadline.
+
+### Fixed
+
+- **Removed configuration keys are inert, as documented.** A leftover
+  `flip_when_transcript_mb` or `attention_patterns` with a malformed value
+  in `config/harness.toml` no longer stops everything that reads the file.
+  A leftover `flip_when_transcript_mb` no longer queues timed flips (the
+  loops daemon's transcript-size guard is gone), a leftover
+  `attention_patterns` no longer flags a cousin as needing attention (a
+  fleet row's `attention` is always null), and a leftover `[chat] host` no
+  longer makes a cousin "remote" and refused by meetings or skipped by the
+  memory index refresh.
+- **The shipped example cousin starts.** `examples/wren/cousin.toml` names
+  its runner kind (`sdk`); without it every command refused the example.
+- **`cousin-transplant` refuses a cousin with no runner before touching
+  anything** and exits 2, as documented. It used to snapshot and change
+  both cousins' files first, then fail at the flip.
+- **A bad `cron` field no longer silences a cousin's other loops.** A
+  weekday name like `mon`, a value out of range or a zero step is refused
+  when the loops are saved, naming the entry; one written by hand is
+  skipped and reported, and the cousin's other loops and heartbeat keep
+  firing. The loops reference's examples now use numeric weekdays.
+- **A blocked media caption leaves nothing behind.** `cousin-image`,
+  `cousin-voice` and `cousin-video` `chat --caption` check the caption
+  against the outbound filter before generating: a blocked caption exits 3
+  with no file and no job.
+- **The memory scope route answers with what it stored.** Setting the
+  older scope name `both` stores `shared`, and the answer now says `shared`.
+- **A loops request never fires late.** The first tick after the daemon was
+  down expires requests past their TTL before it fires anything, so an
+  over-age timed flip or manual fire is marked `expired` instead of run.
+- **The systemd unit guide matches the install guide.** It enables
+  `cousin-supervisor.service`, which runs the console and the loops daemon,
+  keeps `cousin-console.service` and `cousin-loops.service` disabled, adds
+  the console's first user before the start, and its removal steps stop the
+  supervisor too.
+- **Both `config/harness.toml` examples show every documented key**,
+  `host_label` among them, the defaults commented out at their documented
+  values.
+
 ## 2.5.0 - 2026-10-01
 
 ### Changed

@@ -286,5 +286,25 @@ class TestClaudeCodePreset(unittest.TestCase):
         self.assertEqual(removed_keys.findings(commented, removed_keys.HARNESS_KEYS,
                                                "config/harness.toml"), [])
 
+    def test_both_examples_show_every_documented_key_with_its_default(self):
+        # configuration.md's harness.toml tables: every key is in both
+        # examples (set, or commented out), a default shown at its value
+        import tomllib
+        here = Path(__file__).resolve().parent.parent / "config"
+        top = {"transcripts_dir", "auto_memory_dir", "mcp_logs_dir", "default_flip_at",
+               "settings_file", "host_label"}
+        agent = {"default_model", "default_effort", "models", "commit_attribution"}
+        for name in ("harness.toml.example", "harness.toml.claude-code.example"):
+            lines = (here / name).read_text().splitlines()
+            shown = tomllib.loads("\n".join(
+                line[1:] if len(line) > 1 and line.startswith("#") and not line.startswith("# ")
+                else line for line in lines if not line.startswith("# ") and line != "#"))
+            self.assertEqual(top - set(shown), set(), name)
+            self.assertEqual(agent - set(shown.get("agent", {})), set(), name)
+            self.assertEqual(shown["default_flip_at"], "04:00", name)
+            self.assertEqual(shown["mcp_logs_dir"],
+                             "~/.cache/claude-cli-nodejs/{home_encoded}/mcp-logs-{server}", name)
+            self.assertIs(shown["agent"]["commit_attribution"], True, name)
+
     def test_the_preset_does_not_pin_a_model_catalogue(self):
         self.assertNotIn("models", self._preset().get("agent", {}))

@@ -349,7 +349,7 @@ Where the agent harness keeps its own files, and a few things about how it
 behaves. For Claude Code copy `harness.toml.claude-code.example`, which fills
 in Claude Code's paths and the spawn dialog's model and effort.
 `harness.toml.example` lists the keys, commented, for another harness.
-Neither example shows `host_label` (below); add it by hand. In the
+Both show every key below; one left commented out is at its default. In the
 framework's image the entrypoint creates `config/harness.toml` from the
 commented `harness.toml.example` on a start that finds none, so every key is
 at its default until you edit it.

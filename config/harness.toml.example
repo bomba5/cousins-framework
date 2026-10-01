@@ -3,9 +3,12 @@
 # Claude Code, copy config/harness.toml.claude-code.example instead:
 # the same keys, filled in.
 #
-# Absent file: transcript mining at flip and the harness auto-memory
-# search collection are off (mining says so once at flip). Present but
-# unparsable: a loud error, because the file promised something.
+# Absent file: the harness auto-memory search collection, the console's
+# token counts for a cousin whose kind keeps none of its own,
+# cousin-cache-audit, `cousin-mcp approve` and the spawn dialog's model
+# and effort preselection are off. Present but unparsable: a loud error,
+# because the file promised something. Every key is documented in
+# docs/configuration.md, "harness.toml".
 #
 # The keys 2.0.0 removed with the legacy tmux lane (attention_patterns,
 # busy_patterns, [input_mode], flip_when_transcript_mb, [agent.resume],
@@ -20,7 +23,9 @@
 #                   becomes -srv-fw-1-cousins-testa-files
 #
 # Where the harness writes session transcripts (one directory per
-# project, JSONL files inside).
+# project, JSONL files inside). Read by cousin-cache-audit and by the
+# console's token counts for a cousin whose kind keeps no usage of its
+# own; a runner mines its own session store and does not read it.
 #transcripts_dir = "/var/lib/harness/projects/{home_encoded}"
 #
 # The harness's own auto-memory directory for this cousin. When set it
@@ -50,6 +55,11 @@
 # exactly this file. Absent: approve refuses and prints the manual
 # edit instead of guessing where the harness keeps its settings.
 #settings_file = "~/.harness-settings.json"
+#
+# The host a login message names ("log in on <host>"): in
+# data/login-required.json, `cousin-chat list` and the Telegram notice.
+# A non-empty string. Absent: the hostname.
+#host_label = "studio"
 #
 # Install-wide agent defaults: the model and effort the console's
 # spawn dialog preselects for a new cousin (it writes them to the

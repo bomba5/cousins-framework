@@ -1606,6 +1606,11 @@ def _seed_house_rules(root):
     if written:
         print("supervisor: seeded house rules into shared/: %s" % ", ".join(written),
               flush=True)
+    try:
+        if shared_tier.seed_law(root):
+            print("supervisor: seeded the Framework Law into config/law.md", flush=True)
+    except OSError as err:
+        print("supervisor: law not seeded: %s" % err, file=sys.stderr)
 
 
 def supervisor_main(argv=None):

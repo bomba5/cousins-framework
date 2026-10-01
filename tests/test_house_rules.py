@@ -195,6 +195,52 @@ class TestAFreshCousinCarriesThem(PromptCase):
         self.assertNotIn("truncated", section)
 
 
+class TestTheLaw(RootCase):
+    """The Framework Law ships too (templates/law.md) and is seeded once
+    into config/law.md, by the same rule as the house rules."""
+
+    def law(self):
+        return self.root / "config" / "law.md"
+
+    def test_a_fresh_root_gets_the_shipped_law(self):
+        self.assertTrue(shared_tier.seed_law(self.root))
+        self.assertEqual(self.law().read_text(), shared_tier.LAW_TEMPLATE.read_text())
+        rows = [r for r in self.audit() if r.get("file") == "config/law.md"]
+        self.assertEqual([r["kind"] for r in rows], ["seed"])
+
+    def test_an_existing_law_is_never_overwritten(self):
+        self.law().write_text("# my own law\n")
+        self.assertFalse(shared_tier.seed_law(self.root))
+        self.assertEqual(self.law().read_text(), "# my own law\n")
+
+    def test_a_deleted_law_stays_deleted(self):
+        shared_tier.seed_law(self.root)
+        self.law().unlink()
+        self.assertFalse(shared_tier.seed_law(self.root))
+        self.assertFalse(self.law().exists())
+
+    def test_the_shipped_law_is_generic_ascii_and_short(self):
+        text = shared_tier.LAW_TEMPLATE.read_text()
+        self.assertTrue(text.isascii())
+        self.assertNotIn("\u2014", text)
+        self.assertLess(len(text), 6000)
+        for word in ("--confirm", "Juno", "2026-"):
+            self.assertNotIn(word, text)
+
+    def test_the_boot_reads_the_seeded_law(self):
+        shared_tier.seed_law(self.root)
+        self.assertIn("Framework Law", boot.law_text(self.root))
+
+    def test_the_supervisor_seeds_the_law(self):
+        with mock.patch.object(supervisor.Supervisor, "serve", lambda sup: 0), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = supervisor.supervisor_main(["run", "--root", str(self.root),
+                                               "--no-console", "--no-loops"])
+        self.assertEqual(code, 0)
+        self.assertTrue(self.law().exists())
+        self.assertIn("seeded the Framework Law", out.getvalue())
+
+
 class TestTheDocs(unittest.TestCase):
     def test_the_page_names_every_shipped_file(self):
         page = (REPO / "docs" / "house-rules.md").read_text()

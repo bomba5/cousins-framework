@@ -26,6 +26,8 @@ class PromoteRefused(Exception):
 # The house rules a fresh install ships with (docs/house-rules.md): every
 # *.md directly in it is seeded; examples/ below it never is.
 HOUSE_RULES = Path(__file__).resolve().parents[1] / "templates" / "shared"
+LAW_TEMPLATE = Path(__file__).resolve().parents[1] / "templates" / "law.md"
+LAW_SEED_NAME = "config/law.md"
 SEED_ACTOR = "install"
 
 
@@ -104,6 +106,30 @@ def seed_house_rules(root, *, source=None):
         }, root=root)
         written.append(name)
     return written
+
+
+def seed_law(root, *, source=None):
+    """Copy the shipped Framework Law to <root>/config/law.md, once ever,
+    like the house rules (seed_house_rules): an existing file is never
+    overwritten (its row says "kept"), and a law the operator deleted
+    stays deleted. True when the file was written."""
+    source = LAW_TEMPLATE if source is None else Path(source)
+    if LAW_SEED_NAME in _seeded(root) or not source.is_file():
+        return False
+    target = Path(root) / LAW_SEED_NAME
+    body = source.read_text()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(target, "x") as fh:     # never clobbers, even racing
+            fh.write(body)
+    except FileExistsError:
+        _audit("seed", SEED_ACTOR, LAW_SEED_NAME, {"action": "kept"}, root=root)
+        return False
+    _audit("seed", SEED_ACTOR, LAW_SEED_NAME, {
+        "action": "written",
+        "sha": hashlib.sha256(body.encode()).hexdigest()[:12],
+    }, root=root)
+    return True
 
 
 def list_shared():

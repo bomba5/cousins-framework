@@ -58,6 +58,17 @@ class TestWren(unittest.TestCase):
         self.assertEqual(cfg["cousin"]["slug"], "wren")
         self.assertNotIn("chat", cfg)   # no per-cousin chat server
 
+    def test_the_example_names_a_runner_kind_so_it_is_not_refused(self):
+        # A cousin with no [agent] runner is refused by every entry point
+        # (delivery.lane_refusal); the example is what cousin-spawn writes
+        # with the default kind.
+        from cousin_lib import delivery, spawn
+        cfg = tomllib.loads((_WREN / "cousin.toml").read_text())
+        self.assertEqual(cfg["agent"]["runner"], "sdk")
+        self.assertIn(cfg["agent"]["runner"], delivery.RUNNER_KINDS)
+        self.assertTrue(spawn.runner_lane(_WREN))
+        self.assertNotIsInstance(delivery.backend_for(_WREN), delivery.RefusedBackend)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,3 +2,6 @@
 slug = "wren"
 name = "Wren"
 role = "example cousin for this framework"
+
+[agent]
+runner = "sdk"

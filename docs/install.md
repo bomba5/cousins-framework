@@ -22,7 +22,11 @@ The default image is 225 MB compressed and about 590 MB on disk. The first
 `up` builds it from the checkout: it pulls the `python:3.13-slim` base,
 downloads the Agent SDK, whose bundled Claude Code CLI is most of the size,
 and the opencode binary, so a cousin on opencode runs with no extra step.
-Nothing else is pulled unless you turn on a profile. A Claude-only install
+The first `up` also starts the `embeddings` service, which gives memory
+search its semantic leg from the start: it pulls the `ollama/ollama` image
+(a 3.8 GB download on x86-64, 2.8 GB on arm64; 5.5 GB on disk) and, on its
+first start, the `nomic-embed-text` model (274 MB) onto its own volume
+([below](#running-the-container)). A Claude-only install
 can build the smaller image without opencode instead, with
 `compose.slim.yml` ([below](#running-the-container)). The build's inputs
 are pinned: the base image by its multi-arch
@@ -32,8 +36,9 @@ release), every Python package by exact version and sha256
 opencode binary by its sha256. No stage installs a system package, so
 nothing is left to float; two builds of one checkout install the same
 packages, though the image's own digest differs (timestamps). The
-optional `embeddings` service's `ollama/ollama` image is pinned by tag
-only. Refreshing the pins: [development](development.md#the-images-pins).
+`embeddings` service's `ollama/ollama` image is pinned by tag only, and
+its model by tag (`nomic-embed-text:v1.5`; Ollama pulls by tag, not by
+digest). Refreshing the pins: [development](development.md#the-images-pins).
 
 ```
 git clone https://github.com/bomba5/cousins-framework.git
@@ -240,10 +245,21 @@ services:
 That is plain HTTP; the notes in
 [Reaching the console from the LAN](#reaching-the-console-from-the-lan) apply.
 
-**Semantic search** is the `embeddings` profile: `docker compose --profile
-embeddings up -d`, then the steps in the comment in `compose.yml` (pull the
-model once, write `config/embedding.toml`). It pulls the Ollama image, several
-GB.
+**Semantic search** is on from the first `up`, with nothing to do. The
+`embeddings` service runs Ollama on the compose network (no published port)
+and, on its first start, pulls `nomic-embed-text:v1.5` onto the
+`embeddings-models` volume; later starts find it there. The framework's
+entrypoint writes `config/embedding.toml` pointing at it
+(`COUSIN_EMBEDDING_URL` and `COUSIN_EMBEDDING_MODEL` in `compose.yml`) on any
+start that finds no such file, and never overwrites one you wrote. The
+framework does not wait for the service: until the model is on the volume,
+or with no network (the service retries the pull every minute), cousins run
+as usual and `cousin-memory search` gives keyword results plus a notice that
+the embedding service is unreachable. `docker compose ps embeddings` says `healthy`
+once the model is there.
+
+Your own Ollama instead, or none at all:
+[below](#your-own-ollama-or-none).
 
 **opencode in the image.** The default image (a build with no `--target`)
 carries opencode 1.18.31, one self-contained binary at
@@ -277,6 +293,61 @@ the `framework-data` volume and survives, and a cousin you stopped stays
 stopped until you start it. `docker compose down -v` deletes the volume,
 and with it everything. Running it day to day, backups and upgrades are in
 [operations](operations.md#the-container).
+
+### Your own Ollama, or none
+
+`compose.own-ollama.yml` leaves the bundled `embeddings` service out (its
+image and its model are never pulled) and points the framework at an
+embedding service you run. Copy it, edit its two variables, start:
+
+```
+cp compose.own-ollama.yml compose.override.yml
+docker compose up -d --build
+```
+
+As shipped it points at an Ollama on the Docker host:
+
+```
+services:
+  framework:
+    environment:
+      COUSIN_EMBEDDING_URL: http://host.docker.internal:11434/api/embeddings
+      COUSIN_EMBEDDING_MODEL: nomic-embed-text
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+On Linux `host.docker.internal` exists in the container only through that
+`extra_hosts` line. The host's Ollama must have the model
+(`ollama pull nomic-embed-text`) and listen beyond 127.0.0.1, which it does
+not by default: `OLLAMA_HOST=0.0.0.0` in its environment (for the systemd
+service, `sudo systemctl edit ollama` with
+`Environment="OLLAMA_HOST=0.0.0.0"` under `[Service]`, then
+`sudo systemctl restart ollama`). That opens port 11434 to your network
+too; firewall it if that matters. An Ollama on another machine: put its
+URL instead (the `extra_hosts` line then does nothing).
+
+**None at all**, keyword search only: in `compose.override.yml`, set
+`COUSIN_EMBEDDING_URL: ""`. Nothing is pulled and no `config/embedding.toml`
+is written.
+
+The entrypoint writes `config/embedding.toml` from these only when the file
+is absent. On an install that already ran with the bundled service, remove
+it first, then restart with the override:
+
+```
+docker compose exec framework rm config/embedding.toml
+docker compose down
+cp compose.own-ollama.yml compose.override.yml    # then edit it
+docker compose up -d
+```
+
+The bundled model stays on the `cousins-framework_embeddings-models`
+volume until you delete it (`docker volume rm
+cousins-framework_embeddings-models`). Back to the bundled service: delete
+`compose.override.yml` and `config/embedding.toml` the same way, then
+`docker compose up -d`. Beside the key or slim override, name the files on
+every command ([above](#install-with-docker)).
 
 ## Install on a bare host
 

@@ -1,0 +1,26 @@
+# Your own Ollama, or none: the bundled embeddings service is left out
+# (neither its image nor its model is pulled) and the framework is pointed
+# at an embedding service you run. Before the first start:
+#   cp compose.own-ollama.yml compose.override.yml
+#   docker compose up -d --build
+# Edit the two variables below first. The default is an Ollama on the
+# Docker host, which must listen beyond 127.0.0.1 (OLLAMA_HOST=0.0.0.0)
+# and have the model pulled (ollama pull nomic-embed-text). One on another
+# machine: its URL; extra_hosts is then not needed.
+# No embedding service at all (keyword search only): set
+# COUSIN_EMBEDDING_URL to "".
+# The entrypoint writes config/embedding.toml from them only when that file
+# is absent: on an install that already ran, remove it first (docs/install.md,
+# "Your own Ollama, or none").
+services:
+  framework:
+    environment:
+      COUSIN_EMBEDDING_URL: http://host.docker.internal:11434/api/embeddings
+      COUSIN_EMBEDDING_MODEL: nomic-embed-text
+    extra_hosts:
+      # On Linux the name exists only with this line: the Docker host's
+      # address as seen from the container.
+      - "host.docker.internal:host-gateway"
+  embeddings:
+    # A profile nobody passes: compose skips the service.
+    profiles: ["bundled-ollama"]

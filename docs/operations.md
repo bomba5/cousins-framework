@@ -72,7 +72,9 @@ link into the image, so an upgrade brings new templates, and the
 `config/*.example` files are refreshed from the image on every start. compose
 pins the project name, so the volume is `cousins-framework_framework-data`
 whatever you called the checkout. `docker compose down` keeps it;
-`down -v` deletes it.
+`down -v` deletes it. The `embeddings` service keeps the Ollama model on a
+second volume, `cousins-framework_embeddings-models`; nothing on it needs a
+backup (the service pulls the model again if it is gone).
 
 **Backup.** `cousin-backup` works inside the container, then copy the
 snapshot out:
@@ -513,6 +515,9 @@ recover.
 - Check: `config/embedding.toml` exists and the service answers. When it's
   configured but unreachable, search says so under the results. A timeout
   shorter than one chunk's embedding time looks the same: raise `timeout_s`.
+- In Docker: `docker compose ps embeddings` is `healthy` once the model is on
+  its volume; `docker compose logs embeddings` shows the pull and, with no
+  network, its retries every minute.
 
 **A reply was blocked**
 - `cousin-reply` or `cousin-chat send` exits 3 and names the word:

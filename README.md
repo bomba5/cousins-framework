@@ -28,8 +28,12 @@ them, watch them work, and browse their memory.
   a cousin needs no key and no account at all. For Claude, an Anthropic API
   key or a Claude login ([Claude Code](https://claude.com/claude-code),
   logged in, on a bare host).
-- Optional: [Ollama](https://ollama.com) with `nomic-embed-text` for
-  semantic memory search. Without it, search is keyword only.
+- Optional: [Ollama](https://ollama.com) with `nomic-embed-text`, for
+  semantic memory search. Docker runs a bundled one beside the framework and
+  pulls both on the first start (a 3.8 GB image and a 274 MB model); to use
+  your own Ollama or none, `compose.own-ollama.yml`
+  ([install](docs/install.md#your-own-ollama-or-none)). Without it, search is
+  keyword only.
 
 ## What it costs, and what it does unattended
 
@@ -64,7 +68,7 @@ details.
 ```
 git clone https://github.com/bomba5/cousins-framework.git
 cd cousins-framework
-docker compose up -d --build                     # the image carries opencode
+docker compose up -d --build                     # opencode, and semantic search
 docker compose exec framework cousin-console adduser ana
 
 # an opencode account on its free models: no key

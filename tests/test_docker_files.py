@@ -38,6 +38,10 @@ _SIZE = _REPO / "docker" / "image-size.sh"
 _WORKFLOW = _REPO / ".github" / "workflows" / "image.yml"
 _COMPOSE_OPENCODE = _REPO / "compose.opencode.yml"
 _COMPOSE_SLIM = _REPO / "compose.slim.yml"
+_COMPOSE_OWN = _REPO / "compose.own-ollama.yml"
+# The embedding model compose.yml pulls and points the framework at,
+# pinned by tag (Ollama pulls by name:tag, not by digest).
+_EMBED_MODEL = "nomic-embed-text:v1.5"
 _LOCK = _REPO / "docker" / "requirements.txt"
 _LOCK_SCRIPT = _REPO / "docker" / "lock.sh"
 # Every stage on the slim base names it through one global ARG, whose
@@ -95,10 +99,13 @@ class _EntrypointCase(HermeticCase):
         self.root = self.base / "data"
         self.secret = self.base / "anthropic_api_key"
 
-    def run_entry(self, *command):
+    def run_entry(self, *command, extra=None):
         env = dict(os.environ, FRAMEWORK_ROOT=str(self.root),
                    COUSIN_IMAGE_SRC=str(self.src),
                    COUSIN_API_KEY_SECRET=str(self.secret))
+        for name in ("COUSIN_EMBEDDING_URL", "COUSIN_EMBEDDING_MODEL"):
+            env.pop(name, None)
+        env.update(extra or {})
         return subprocess.run(["sh", str(_ENTRY)] + list(command or ["true"]),
                               env=env, capture_output=True, text=True,
                               timeout=_TIMEOUT)
@@ -216,6 +223,54 @@ class TestEntrypointSecret(_EntrypointCase):
         self.assertFalse(self._key().exists())
         self.assertIn(str(self.secret), out)
         self.assertIn("empty or unreadable", out)
+
+
+class TestEntrypointEmbedding(_EntrypointCase):
+    """compose.yml names the embedding service in the framework's
+    environment; the entrypoint turns it into config/embedding.toml when
+    that file is absent, and never touches an existing one."""
+
+    _URL = "http://embeddings:11434/api/embeddings"
+    _MODEL = "nomic-embed-text:v1.5"
+
+    def ok_with(self, env):
+        r = self.run_entry("true", extra=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout + r.stderr
+
+    def _live(self):
+        return self.root / "config" / "embedding.toml"
+
+    def test_the_url_writes_a_config_the_search_reads(self):
+        from cousin_lib import memory_search
+        out = self.ok_with({"COUSIN_EMBEDDING_URL": self._URL,
+                            "COUSIN_EMBEDDING_MODEL": self._MODEL})
+        config = memory_search._embedding_config(self.root)
+        self.assertIsInstance(config, dict, self._live().read_text())
+        self.assertEqual(config["url"], self._URL)
+        self.assertEqual(config["model"], self._MODEL)
+        self.assertEqual(config["timeout_s"], 120)
+        self.assertIn("config/embedding.toml", out)
+
+    def test_an_existing_config_is_never_overwritten(self):
+        (self.root / "config").mkdir(parents=True)
+        self._live().write_text('url = "http://127.0.0.1:9/api/embeddings"\n')
+        self.ok_with({"COUSIN_EMBEDDING_URL": self._URL,
+                      "COUSIN_EMBEDDING_MODEL": self._MODEL})
+        self.assertEqual(self._live().read_text(),
+                         'url = "http://127.0.0.1:9/api/embeddings"\n')
+
+    def test_no_url_or_an_empty_one_writes_nothing(self):
+        for env in ({}, {"COUSIN_EMBEDDING_URL": "", "COUSIN_EMBEDDING_MODEL": self._MODEL}):
+            with self.subTest(env=env):
+                self.ok_with(env)
+                self.assertFalse(self._live().exists())
+
+    def test_a_value_that_would_break_the_toml_is_refused(self):
+        out = self.ok_with({"COUSIN_EMBEDDING_URL": 'http://x/"y',
+                            "COUSIN_EMBEDDING_MODEL": self._MODEL})
+        self.assertFalse(self._live().exists())
+        self.assertIn("COUSIN_EMBEDDING_URL", out)
 
 
 class TestEntrypointMessages(_EntrypointCase):
@@ -925,15 +980,70 @@ class TestCompose(unittest.TestCase):
         self.assertIn("  anthropic_api_key:", live)
         self.assertIn("    file: ./secrets/anthropic_api_key", live)
 
-    def test_heavier_lanes_are_opt_in_profiles(self):
-        for name, block in self.services.items():
-            if name != "framework":
-                self.assertTrue(any(l.startswith("profiles:") for l in block), name)
+    def test_semantic_search_runs_by_default_on_the_compose_network(self):
+        # The embedding service starts with a plain `up` (no profile) and
+        # is reached by name only: no published port.
         embeddings = self.services["embeddings"]
-        self.assertIn('profiles: ["embeddings"]', embeddings)
+        self.assertFalse(any(l.startswith("profiles:") for l in embeddings), embeddings)
         self.assertTrue(any(l.startswith("image: ollama/ollama:") for l in embeddings))
         self.assertFalse(any(l.startswith("ports:") for l in embeddings),
                          "the embedding service is reached on the compose network only")
+        self.assertIn("- embeddings-models:/root/.ollama", embeddings)
+        self.assertIn("restart: unless-stopped", embeddings)
+        # Any other service beside the framework stays an opt-in profile.
+        for name, block in self.services.items():
+            if name not in ("framework", "embeddings"):
+                self.assertTrue(any(l.startswith("profiles:") for l in block), name)
+
+    def test_the_model_is_pulled_on_start_and_its_presence_is_the_health(self):
+        embeddings = self.services["embeddings"]
+        text = "\n".join(embeddings)
+        model = [l.split(":", 1)[1].strip() for l in embeddings
+                 if l.startswith("EMBEDDING_MODEL:")]
+        self.assertEqual(model, [_EMBED_MODEL])
+        self.assertIn("ollama serve", text)
+        self.assertIn('ollama pull "$$EMBEDDING_MODEL"', text)
+        self.assertIn('ollama show "$$EMBEDDING_MODEL"', text)
+        self.assertIn("healthcheck:", embeddings)
+
+    def test_the_framework_is_told_the_service_and_does_not_wait_for_it(self):
+        self.assertIn("COUSIN_EMBEDDING_URL: http://embeddings:11434/api/embeddings",
+                      self.framework)
+        # The same model the service pulls, tag and all: a bare name
+        # would ask Ollama for :latest, which was never pulled.
+        self.assertIn("COUSIN_EMBEDDING_MODEL: %s" % _EMBED_MODEL, self.framework)
+        # No depends_on: a failed pull or no network never holds the
+        # framework back; search is keyword-only with a notice meanwhile.
+        self.assertFalse(any(l.startswith("depends_on:") for l in self.framework))
+
+    def test_own_ollama_or_none_is_one_override_file(self):
+        services = _services(_COMPOSE_OWN)
+        self.assertEqual(sorted(services), ["embeddings", "framework"])
+        # The bundled service gets a profile nobody passes, so it never starts.
+        self.assertEqual(services["embeddings"], ['profiles: ["bundled-ollama"]'])
+        self.assertEqual(services["framework"], [
+            "environment:",
+            "COUSIN_EMBEDDING_URL: http://host.docker.internal:11434/api/embeddings",
+            "COUSIN_EMBEDDING_MODEL: nomic-embed-text",
+            "extra_hosts:",
+            '- "host.docker.internal:host-gateway"'])
+        # The other path the same file covers: no URL, keyword search only.
+        text = " ".join(_COMPOSE_OWN.read_text().split())
+        self.assertTrue('COUSIN_EMBEDDING_URL to ""' in text, text)
+
+    def test_the_docs_say_search_is_semantic_by_default_and_how_to_opt_out(self):
+        for path in (_COMPOSE, _REPO / "docs" / "install.md", _REPO / "README.md"):
+            text = " ".join(path.read_text().split())
+            with self.subTest(path=path.name):
+                self.assertTrue("compose.own-ollama.yml" in text)
+                self.assertFalse("--profile embeddings" in text)
+                self.assertFalse("exec embeddings ollama pull" in text)
+        install = " ".join((_REPO / "docs" / "install.md").read_text().split())
+        for needle in ("### Your own Ollama, or none",
+                       "cp compose.own-ollama.yml compose.override.yml",
+                       "OLLAMA_HOST=0.0.0.0", 'COUSIN_EMBEDDING_URL: ""',
+                       "docker compose exec framework rm config/embedding.toml"):
+            self.assertTrue(needle in install, "%r not in install.md" % needle)
 
     def test_the_key_file_never_reaches_git_or_the_image(self):
         ignored = (_REPO / ".gitignore").read_text().splitlines()
@@ -986,7 +1096,7 @@ class TestComposeOpencode(unittest.TestCase):
     def test_the_override_files_are_ascii_without_a_home_path_and_not_in_the_image(self):
         patterns = [l.strip() for l in _DOCKERIGNORE.read_text().splitlines()
                     if l.strip() and not l.strip().startswith("#")]
-        for path in (_COMPOSE_OPENCODE, _COMPOSE_SLIM):
+        for path in (_COMPOSE_OPENCODE, _COMPOSE_SLIM, _COMPOSE_OWN):
             with self.subTest(path=path.name):
                 text = path.read_text()
                 text.encode("ascii")
@@ -1088,17 +1198,18 @@ class TestComposeConfig(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)
 
-    def test_the_file_is_valid_with_and_without_profiles(self):
-        for extra in ([], ["--profile", "embeddings"], ["-f", str(_COMPOSE),
-                                                          "-f", str(_COMPOSE_KEY)]):
+    def test_the_file_is_valid_alone_and_with_each_override(self):
+        for extra in ([], [_COMPOSE_OWN], [_COMPOSE_KEY]):
             with self.subTest(extra=extra):
-                args = extra if extra[:1] == ["-f"] else ["-f", str(_COMPOSE)] + extra
+                args = ["-f", str(_COMPOSE)]
+                for f in extra:
+                    args += ["-f", str(f)]
                 r = _compose(*(args + ["config", "-q"]))
                 self.assertEqual(r.returncode, 0, r.stderr)
 
-    def test_the_default_set_is_the_framework_alone(self):
+    def test_the_default_set_is_the_framework_and_the_embedding_service(self):
         cfg = self.config("-f", str(_COMPOSE))
-        self.assertEqual(sorted(cfg["services"]), ["framework"])
+        self.assertEqual(sorted(cfg["services"]), ["embeddings", "framework"])
         fw = cfg["services"]["framework"]
         self.assertEqual(fw["stop_grace_period"], "45s")
         self.assertEqual([(p["host_ip"], p["published"], p["target"]) for p in fw["ports"]],
@@ -1106,11 +1217,30 @@ class TestComposeConfig(unittest.TestCase):
         self.assertEqual([(v["type"], v["source"], v["target"]) for v in fw["volumes"]],
                          [("volume", "framework-data", "/data")])
         self.assertEqual(fw["environment"]["COUSIN_DEFAULT_RUNNER"], "sdk")
+        self.assertEqual(fw["environment"]["COUSIN_EMBEDDING_URL"],
+                         "http://embeddings:11434/api/embeddings")
+        self.assertEqual(fw["environment"]["COUSIN_EMBEDDING_MODEL"], _EMBED_MODEL)
         self.assertNotIn("secrets", fw)
+        self.assertNotIn("depends_on", fw)
+        emb = cfg["services"]["embeddings"]
+        self.assertNotIn("ports", emb)
+        self.assertEqual(emb["environment"]["EMBEDDING_MODEL"], _EMBED_MODEL)
+        self.assertIn("healthcheck", emb)
 
-    def test_the_embeddings_profile_adds_the_embedding_service(self):
-        cfg = self.config("-f", str(_COMPOSE), "--profile", "embeddings")
-        self.assertEqual(sorted(cfg["services"]), ["embeddings", "framework"])
+    def test_the_own_ollama_override_drops_the_bundled_service(self):
+        cfg = self.config("-f", str(_COMPOSE), "-f", str(_COMPOSE_OWN))
+        self.assertEqual(sorted(cfg["services"]), ["framework"])
+        fw = cfg["services"]["framework"]
+        self.assertEqual(fw["environment"]["COUSIN_EMBEDDING_URL"],
+                         "http://host.docker.internal:11434/api/embeddings")
+        self.assertEqual(fw["environment"]["COUSIN_EMBEDDING_MODEL"], "nomic-embed-text")
+        self.assertEqual(fw["extra_hosts"], ["host.docker.internal=host-gateway"])
+        self.assertNotIn("depends_on", fw)
+        # It combines with the key override like the image overrides do.
+        cfg = self.config("-f", str(_COMPOSE), "-f", str(_COMPOSE_KEY), "-f", str(_COMPOSE_OWN))
+        self.assertEqual(sorted(cfg["services"]), ["framework"])
+        self.assertEqual(cfg["services"]["framework"]["environment"]["COUSIN_DEFAULT_ACCOUNT"],
+                         "api-key")
 
     def test_the_key_override_adds_the_secret_and_the_default_account(self):
         cfg = self.config("-f", str(_COMPOSE), "-f", str(_COMPOSE_KEY))
@@ -1142,7 +1272,9 @@ class TestComposeOpencodeConfig(unittest.TestCase):
         for path, target in ((_COMPOSE_SLIM, "slim"), (_COMPOSE_OPENCODE, "opencode")):
             with self.subTest(target=target):
                 cfg = self.config(_COMPOSE, path)
-                self.assertEqual(sorted(cfg["services"]), ["framework"])
+                self.assertEqual(sorted(cfg["services"]), ["embeddings", "framework"])
+                self.assertEqual(cfg["services"]["embeddings"],
+                                 self.config(_COMPOSE)["services"]["embeddings"])
                 fw = cfg["services"]["framework"]
                 self.assertEqual(fw["build"]["target"], target)
                 self.assertEqual(fw["build"]["context"], base["build"]["context"])

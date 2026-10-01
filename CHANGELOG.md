@@ -5,6 +5,26 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## Unreleased
 
+### Changed
+
+- **Semantic memory search is on from the first `docker compose up`.** The
+  `embeddings` service (Ollama) is no longer a profile: it runs by default,
+  pulls `nomic-embed-text:v1.5` onto the `embeddings-models` volume on its
+  first start (retrying every minute with no network), and is healthy once
+  the model is there. The framework's entrypoint writes
+  `config/embedding.toml` from the new `COUSIN_EMBEDDING_URL` and
+  `COUSIN_EMBEDDING_MODEL`, which `compose.yml` points at that service, on any
+  start that finds no such file; an existing file is never overwritten. The
+  framework does not wait for the service: until the model is pulled, search
+  is keyword only with a notice, as before. The first start now also pulls
+  the Ollama image (a 3.8 GB download on x86-64) and the model (274 MB).
+  `compose.own-ollama.yml` leaves the bundled service out and points the
+  framework at your own Ollama (on the Docker host through
+  `host.docker.internal`, or anywhere by URL), or at none with an empty
+  `COUSIN_EMBEDDING_URL` (keyword search only). The manual steps
+  (`--profile embeddings`, `ollama pull`, writing the file) are gone from the
+  Docker path; the bare-host path is unchanged.
+
 ### Fixed
 
 - **An opencode cousin's tokens and cost are counted.** The opencode runner

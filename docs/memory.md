@@ -439,8 +439,10 @@ hits as a list with `path`, `collection`, `score`, `similarity`,
 `snippet` and `chunk`; any warning goes to stderr so the JSON stays
 clean. The trash is never searched.
 
-Out of the box search is keyword only: SQLite FTS5 in
-`memory/fts_index.db`, with nothing to install. Every cousin's indexes
+The keyword leg is always there: SQLite FTS5 in `memory/fts_index.db`,
+with nothing to install. In Docker the semantic leg is on from the first
+start too (below); on a bare host search is keyword only until you add an
+embedding service. Every cousin's indexes
 (keyword and, with an embedding service, vectors) are kept level with its
 files by the loops daemon: each home is checked every 5 minutes and only
 what changed is embedded, one home at a time, so the embedding service is
@@ -449,8 +451,19 @@ itself if it finds it behind, so you rarely need `reindex`.
 
 ### Semantic search
 
-Add an embedding service and search also finds things by meaning.
-Copy `config/embedding.toml.example` to `config/embedding.toml`:
+With an embedding service, search also finds things by meaning.
+
+**In Docker** there is nothing to do. `compose.yml` runs Ollama as the
+`embeddings` service, which pulls `nomic-embed-text:v1.5` on its first
+start, and the framework's entrypoint writes `config/embedding.toml`
+pointing at it (`http://embeddings:11434/api/embeddings`, `timeout_s =
+120`) when the file is absent; a file you wrote is never overwritten.
+Until the model is pulled, or when the service is down, search gives
+keyword results plus a notice. Your own Ollama instead, or
+none: [install](install.md#your-own-ollama-or-none).
+
+**On a bare host**, copy `config/embedding.toml.example` to
+`config/embedding.toml`:
 
 ```toml
 url = "http://localhost:11434/api/embeddings"

@@ -412,7 +412,10 @@ Missing or unreadable: the defaults. A client outside the list gets 403.
 The semantic leg of memory search. Read by `cousin-memory search`, the chat
 server's proactive recall and the hive's recall. Missing: keyword search only,
 quietly. Present but unreachable or without a `url`: keyword results plus a
-notice saying so.
+notice saying so. In Docker the image's entrypoint writes it on a start that
+finds none, from `COUSIN_EMBEDDING_URL` and `COUSIN_EMBEDDING_MODEL`, which
+`compose.yml` points at its `embeddings` service (`timeout_s = 120`); edit it
+freely, it is not written again while it exists. On a bare host you write it.
 
 ```
 url = "http://localhost:11434/api/embeddings"
@@ -646,6 +649,8 @@ ignores it. Setup steps are in [telegram](telegram.md).
 | `COUSIN_DEFAULT_ACCOUNT` | the `[agent] account` a new runner cousin gets when `--account` is not given: `host` or one of `config/accounts.toml`'s (an unknown name is refused before anything is created). Ignored for a tmux cousin |
 | `COUSIN_OPENCODE_BIN` | the `opencode` binary an opencode cousin's runner starts when its `[agent] opencode_bin` is not set. The default image sets it to its pinned binary, `/opt/opencode/bin/opencode` (also on its `PATH`); unset (the slim image, a bare host): `opencode` on `PATH` |
 | `COUSIN_IN_CONTAINER` | `1` in the framework's image (its Dockerfile sets it), not set by you. Only exactly `1` counts. Read by the login lines for `host`: inside the image there is no host user to log in as and the hostname is the container's id, so the line names `docker compose exec framework cousin-account login host` on the Docker host instead of `claude auth login` on the host |
+| `COUSIN_EMBEDDING_URL` | read by the image's entrypoint only, on each start: set and non-empty, with no `config/embedding.toml`, it writes that file with this `url`, `COUSIN_EMBEDDING_MODEL` as its `model` and `timeout_s = 120`. An existing file is never touched. `compose.yml` sets `http://embeddings:11434/api/embeddings`; `compose.own-ollama.yml` points it at your own Ollama, or sets it empty for keyword search only. Unset (a bare host, a plain `docker run`): nothing is written |
+| `COUSIN_EMBEDDING_MODEL` | the `model` the entrypoint writes with `COUSIN_EMBEDDING_URL`. `compose.yml` sets `nomic-embed-text:v1.5`, the tag its `embeddings` service pulls |
 | `COUSIN_POLICY_FILE` | set by an opencode cousin's runner for its `opencode serve`, not by you: the rendered policy file the plugin pack reads (`<data_dir>/cousin-policy.json`) |
 
 ## cousin.toml

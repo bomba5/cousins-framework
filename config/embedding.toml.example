@@ -2,6 +2,8 @@
 # Copy to config/embedding.toml and fill in. Absent: keyword search
 # only, silently (nothing was promised). Present but unreachable or
 # unparsable: keyword results plus a notice, never a quiet pretence.
+# In Docker the image's entrypoint writes it on a start that finds none,
+# pointing at compose.yml's embeddings service (COUSIN_EMBEDDING_URL).
 #
 # The endpoint takes {"model": ..., "prompt": ...} as JSON and returns
 # {"embedding": [...]}. Front any service with that contract.

@@ -48,20 +48,55 @@ services:
     environment:
       # A cousin created in the container runs on the SDK runner.
       COUSIN_DEFAULT_RUNNER: sdk
+      # Semantic memory search: on a start with no config/embedding.toml,
+      # the entrypoint writes one pointing at the embeddings service below
+      # (an existing file is never touched). The model is the one that
+      # service pulls, tag and all. No depends_on: while the service is
+      # down or still pulling, search is keyword only, with a notice.
+      COUSIN_EMBEDDING_URL: http://embeddings:11434/api/embeddings
+      COUSIN_EMBEDDING_MODEL: nomic-embed-text:v1.5
 
-  # Semantic memory search (profile "embeddings"): docker compose --profile
-  # embeddings up -d, then pull the model once:
-  #   docker compose exec embeddings ollama pull nomic-embed-text
-  # and turn it on in config/embedding.toml:
-  #   url = "http://embeddings:11434/api/embeddings"
-  #   model = "nomic-embed-text"
-  # Without it, memory search is keyword only.
+  # Semantic memory search, on by default: Ollama, reached by the framework
+  # on the compose network only (no published port). The image is a 3.8 GB
+  # download; its first start pulls the model (274 MB, pinned by tag: Ollama
+  # pulls by name:tag) onto the embeddings-models volume, and a later start
+  # finds it there and pulls nothing. With no network the pull is retried every
+  # minute while the server runs, and the cousins run meanwhile on keyword
+  # search. Healthy once the model is on the volume:
+  #   docker compose ps embeddings
+  # Your own Ollama instead, or none (keyword search only), with nothing
+  # pulled: compose.own-ollama.yml, see docs/install.md "Your own Ollama,
+  # or none".
   embeddings:
     image: ollama/ollama:0.34.4
-    profiles: ["embeddings"]
     restart: unless-stopped
     volumes:
       - embeddings-models:/root/.ollama
+    environment:
+      EMBEDDING_MODEL: nomic-embed-text:v1.5
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve & serve=$$!
+        trap 'kill -TERM $$serve; wait $$serve; exit 0' TERM INT
+        (
+          until ollama list >/dev/null 2>&1; do sleep 1; done
+          ollama show "$$EMBEDDING_MODEL" >/dev/null 2>&1 && exit 0
+          echo "embeddings: pulling $$EMBEDDING_MODEL" >&2
+          until ollama pull "$$EMBEDDING_MODEL" >/tmp/pull.log 2>&1; do
+            tail -c 300 /tmp/pull.log >&2
+            echo "embeddings: pulling $$EMBEDDING_MODEL failed; again in 60 s" >&2
+            sleep 60
+          done
+          echo "embeddings: $$EMBEDDING_MODEL is ready" >&2
+        ) &
+        wait $$serve
+    healthcheck:
+      test: ["CMD-SHELL", 'ollama show "$$EMBEDDING_MODEL" >/dev/null']
+      interval: 60s
+      timeout: 10s
+      start_period: 15m
+      start_interval: 5s
 
   # The image is the Dockerfile's default target, which carries the pinned
   # opencode binary (no node, no bun). For a Claude-only install that wants

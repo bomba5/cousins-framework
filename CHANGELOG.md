@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## Unreleased
+## 2.3.4 - 2026-10-01
 
 ### Fixed
 - **A `host` cousin's login line in the container names the way in the

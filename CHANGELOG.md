@@ -38,8 +38,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   tokens page reads an opencode cousin's `usage.db` with no transcript seam.
   Context pressure still measures the last answer alone.
 
-### Fixed
-
 - **A cousin started after the day's flip time is no longer flipped at
   once** (#136). The daily flip catches up late, once a day, and a cousin
   the loops daemon had no record of (a new one, say) whose day's `flip_at`
@@ -54,8 +52,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   first boot moves no generation), on the `sdk`, `opencode` and `tmux`
   kinds; a home from before it falls back to `data/generation.txt`'s last
   change.
-
-### Fixed
 
 - **STATUS.md's open loops read the same everywhere, and the handoff no
   longer strands them** (#137). The handoff writes the bare `## Open loops`

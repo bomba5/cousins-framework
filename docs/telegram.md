@@ -30,8 +30,9 @@ Code: `cousin_lib/telegram.py` (entry point `telegram_main`, CLI
   on stderr. If the runner is taken out of `cousin.toml` while the bridge
   runs, each message is refused with the same line in the log and retried
   on the next pass.
-- **Its only state:** where it is, in `data/telegram-bridge.json`
-  ([below](#the-state-file)).
+- **Its state:** where it is, in `data/telegram-bridge.json`
+  ([below](#the-state-file)), and the senders it refused, in
+  `data/telegram-pending.json` ([security notes](#security-notes)).
 - **What it depends on:** the bridge belongs to its cousin. It is a child
   of `cousin-supervisor` and starts and stops with the cousin's runner
   ([when it runs](#6-when-it-runs)).

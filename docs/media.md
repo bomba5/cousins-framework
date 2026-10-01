@@ -107,8 +107,8 @@ Nothing cleans these up; they're the cousin's to manage.
 cousin's own chat history, the same way `cousin-reply` does. The caption
 is optional and goes through the outbound filter first
 ([configuration](configuration.md)). Posting only happens when you ask
-for it with `chat`; `gen` never posts anything. The cousin isn't sent a
-copy in its pane: it made the file, it already knows.
+for it with `chat`; `gen` never posts anything. The posted file is never
+delivered back to the cousin: it made the file, it already knows.
 
 Exit codes: 0 ok, 2 not configured (or bad arguments), 3 caption blocked
 by the outbound filter, 4 the provider failed.

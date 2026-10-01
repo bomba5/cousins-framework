@@ -6,7 +6,7 @@ the cousin answers, how cousins talk to each other, what the console does
 with the history, and where the Telegram bridge fits ([telegram](telegram.md)
 has the details). The chat routes the console answers are in
 [reference/console-api.md](reference/console-api.md); the same API over HTTP,
-which a remote hive node's own chat server answers, is in
+which a remote hive node's own chat endpoint answers, is in
 [reference/chat-api.md](reference/chat-api.md).
 
 ## Where a message goes
@@ -28,14 +28,14 @@ depends on where the message comes from:
   inbox itself ([telegram](telegram.md)).
 - **A remote hive node.** The hive carries it. A node reaches its home
   cousin through the queen's `POST /hive/tell-home`, and a message for the
-  node goes to the node's own chat server, which the console forwards to
+  node goes to the node's own chat endpoint, which the console forwards to
   ([remote cousins](remote-cousins.md)).
 
 Nothing listens for chat but the console, so who can send a message is who
 can reach the console: its address allowlist and its login
 ([console](console.md)).
 
-A cousin with no `[agent] runner` gets nothing. 2.0.0 has no legacy tmux
+A cousin with no `[agent] runner` gets nothing: it is on no
 [lane](glossary.md#lane), so it is refused by name, with one line:
 
 ```
@@ -244,6 +244,15 @@ cousin-chat send kestrel "the deploy is green"
 ```
 
 The message is POSTed as `{"user": <sender name>, "message": <text>}`.
+A peer on a 2.x install takes messages on its console's `POST /peer/send`
+instead: give its entry a `token_file` (the secret the two installs share,
+a 0600 file under the root) and a `sender` (the name that peer knows this
+install by). `send_path` then defaults to `/peer/send`, the body is
+`{"to", "message", "msg_id", "sent_at"}`, and the request carries an
+`Authorization: HMAC <sender>:<signature>` header signed with the secret;
+the secret itself is never sent. The keys, and the peer's side
+(`inbound_token_file`, `reach`), are in
+[external-peers.toml](configuration.md#external-peerstoml).
 The address must pass the same allowlist the console uses (loopback,
 private ranges, plus `config/net-allowlist.json`). The request goes
 direct, no proxy, and a redirect is refused. A local cousin with the
@@ -254,7 +263,7 @@ are part of this install, see [remote cousins](remote-cousins.md).
 
 The console answers its chat view itself, over each cousin's
 `data/chat.db`, and keeps no copy of the history. For a remote hive node
-it forwards to the node's own chat server ([console](console.md)).
+it forwards to the node's own chat endpoint ([console](console.md)).
 
 - Messages render as Markdown (GitHub flavour, single line breaks kept).
   A fenced code block tagged `mermaid` is drawn as a diagram. Both
@@ -267,8 +276,9 @@ it forwards to the node's own chat server ([console](console.md)).
   the thread, Escape closes it.
 - The media button in the chat header hides or shows all attachments.
   It's remembered in your browser only.
-- Search, reply-to, reactions, archive and the live terminal pane are
-  all in the same view.
+- Search, reply-to, reactions, archive and the [reasoning pane](console.md#the-reasoning-pane-a-runner-cousin) (the
+  runner's live stream of the cousin's turns, with the interrupt) are all
+  in the same view.
 
 ## Telegram bridge
 

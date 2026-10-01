@@ -72,3 +72,34 @@ class TestWren(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHelloPlugin(unittest.TestCase):
+    """examples/plugins/hello, the plugin docs/plugins.md walks through,
+    loads cleanly and yields its tool, its tab and its service."""
+
+    def test_the_hello_example_loads_and_offers_all_three_parts(self):
+        import tempfile
+        from cousin_lib import plugins
+        example = pathlib.Path(__file__).resolve().parent.parent / "examples" / "plugins" / "hello"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "config").mkdir()
+            (root / "config" / "plugins.toml").write_text(
+                '[plugins.hello]\npath = "%s"\n' % example)
+            home = root / "cousins" / "wren"
+            home.mkdir(parents=True)
+            (home / "cousin.toml").write_text(
+                '[cousin]\nslug = "wren"\n\n[plugins]\nenabled = ["hello"]\n')
+            loaded = plugins.load(root)
+            found, problems = loaded
+            self.assertEqual(problems, [])
+            self.assertEqual(list(found), ["hello"])
+            servers, skipped = plugins.mcp_servers(home, root, loaded=loaded)
+            self.assertEqual(skipped, [])
+            self.assertIn("hello", servers)
+            self.assertIn("mcp_server.py", " ".join(servers["hello"]["args"]))
+            self.assertIn("HELLO_URL", servers["hello"]["env"])
+            tabs = plugins.console_tabs(home, root, loaded=loaded)
+            self.assertEqual([t["title"] for t in tabs], ["Hello"])
+            self.assertIn("hello", plugins.services_wanted(root, loaded=loaded))

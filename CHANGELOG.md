@@ -5,6 +5,11 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## Unreleased
 
+### Added
+
+- **An example plugin**, `examples/plugins/hello`: one MCP tool, a small
+  service and a console page, the plugin the plugins guide walks through.
+
 ### Removed
 
 - **`cousin-auth`**, with the console's auth control on the cousin card and

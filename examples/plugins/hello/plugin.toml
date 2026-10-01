@@ -1,0 +1,18 @@
+name = "hello"
+description = "a greeting, as a tool and as a page"
+version = "0.1.0"
+
+[mcp]                                   # one tool, `hello`, for each cousin that enables it
+command = "python3"
+args = ["{plugin_dir}/mcp_server.py"]
+env = { HELLO_URL = "{service_url}" }
+
+[service]                               # one small web server for the whole install
+command = "python3"
+args = ["{plugin_dir}/server.py"]
+port = 8191
+health = "/healthz"
+
+[console]                               # a tab over the cousin's pane
+title = "Hello"
+page = "/page/{slug}"

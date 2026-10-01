@@ -16,12 +16,10 @@ from pathlib import Path
 
 from cousin_lib.config import (CousinConfig, FrameworkConfig,
                                MissingConfigError, default_flip_at,
-                               flip_time, harness_config, parse_flip_at)
+                               flip_time, parse_flip_at)
 
 REQUEST_TTL_SECONDS = 600
 READY_SUFFIX = ".ready"
-GUARD_FLIP_DELAY_SECONDS = 300
-_MB = 1024 * 1024
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _SCHEDULE_FORMS = ("interval_seconds", "daily_at", "cron")
 
@@ -779,71 +777,6 @@ def _fire_ready_files(slug, home, loops, state, deliver, now, report):
                 "delivery failed for %s; the file stays" % path)
 
 
-def _pending_flip_cousins():
-    con = _db()
-    try:
-        rows = con.execute(
-            "SELECT DISTINCT cousin FROM requests"
-            " WHERE status='pending' AND kind='flip'").fetchall()
-        return {row["cousin"] for row in rows}
-    finally:
-        con.close()
-
-
-def _guard_transcript_size(is_alive, now, report):
-    """The transcript-size guard: when config/harness.toml sets
-    flip_when_transcript_mb and a live cousin's session transcript
-    (<transcripts_dir>/<runtime.session_id>.jsonl) has grown past it,
-    submit ONE timed-flip request through the request store - the
-    same row an operator's timed flip is, with the same warning
-    ladder - for the largest offender only, at most one cousin per
-    tick, and never a second while one is pending for that cousin.
-    Workers, dead cousins, cousins without a persisted session id and
-    absent transcripts are skipped without comment; a threshold with
-    no transcripts_dir to measure against is a dead key and is said."""
-    root = FrameworkConfig.from_env().root
-    try:
-        cfg = harness_config(root)
-    except MissingConfigError as err:
-        report["errors"].append("size guard off: %s" % err)
-        return
-    if not cfg or cfg.get("flip_when_transcript_mb") is None:
-        return
-    threshold_mb = cfg["flip_when_transcript_mb"]
-    if not cfg.get("transcripts_dir"):
-        report["errors"].append(
-            "config/harness.toml sets flip_when_transcript_mb but not"
-            " transcripts_dir; the size guard has nothing to measure")
-        return
-    from cousin_lib.flip import _read_session_id
-    from cousin_lib.transcript_mine import transcript_path
-
-    over = []
-    for config in FrameworkConfig.from_env().list_cousins():
-        if config.type == "worker" or not is_alive(config.slug):
-            continue
-        session_id = _read_session_id(config.home)
-        if not session_id:
-            continue
-        path = transcript_path(config.home, root, session_id)
-        try:
-            size = path.stat().st_size
-        except OSError:
-            continue
-        if size > threshold_mb * _MB:
-            over.append((size, config.slug))
-    pending = _pending_flip_cousins() if over else set()
-    for size, slug in sorted(over, reverse=True):
-        if slug in pending:
-            continue
-        submit_request("flip", cousin=slug, payload={
-            "fire_at": now + GUARD_FLIP_DELAY_SECONDS,
-            "reason": "transcript over %s MB (%.1f MB)"
-                      % (threshold_mb, size / _MB)})
-        report["guarded"].append(slug)
-        return  # one cousin per tick
-
-
 class _CousinNotAlive(Exception):
     """A one-shot whose cousin is down: held pending, not an error."""
 
@@ -972,7 +905,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
-              "ready": [], "guarded": [], "scheduled": 0, "distilled": []}
+              "ready": [], "scheduled": 0, "distilled": []}
     _walk_timed_flips(state, deliver, timed_flip(do_flip), now, report)
     _fire_daily_flips(state, daily_flip(do_flip), is_alive, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
@@ -1058,11 +991,6 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     except Exception as err:
         # A broken meetings store never costs the loops their tick.
         report["errors"].append("meetings: %s" % err)
-    try:
-        _guard_transcript_size(is_alive, now, report)
-    except Exception as err:
-        # The guard is advisory; it never costs the tick.
-        report["errors"].append("size guard: %s" % err)
     expire_stale_requests(now=now)
     state["last_tick"] = now
     _save_state(state)

@@ -21,9 +21,9 @@ here).
 
 | unit | runs | when |
 |---|---|---|
-| `cousin-loops.service` | `cousin-loops run --interval 30`: heartbeats, loops, one-shot schedules, timed flips, the daily `flip_at` | always |
-| `cousin-console.service` | `cousin-console --port 8600`: the web console, on loopback | always |
-| `cousin-supervisor.service` | `cousin-supervisor run --console-port 8600`: the console (on loopback), the loops daemon and one `cousin-runner` per runner cousin, restarted with backoff and stopped in order | instead of `cousin-console.service` and `cousin-loops.service`, never beside them (see below) |
+| `cousin-supervisor.service` | `cousin-supervisor run --console-port 8600`: the console (on loopback), the loops daemon and one `cousin-runner` per runner cousin, restarted with backoff and stopped in order | always |
+| `cousin-loops.service` | `cousin-loops run --interval 30`: heartbeats, loops, one-shot schedules, timed flips, the daily `flip_at` | never beside the supervisor, which runs the same daemon: leave it disabled (see below) |
+| `cousin-console.service` | `cousin-console --port 8600`: the web console, on loopback | never beside the supervisor, which runs the same console: leave it disabled (see below) |
 | `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
 
@@ -57,16 +57,24 @@ for unit in systemd/*.service systemd/*.timer; do
 done
 ! grep -l '{{' ~/.config/systemd/user/cousin-*
 systemctl --user daemon-reload
-systemctl --user enable --now cousin-loops.service cousin-console.service
+cousin-console adduser ana
+systemctl --user enable --now cousin-supervisor.service
 systemctl --user enable --now cousin-tool-surface.timer cousin-sweep.timer
 loginctl enable-linger "$USER"
 ```
 
+`cousin-supervisor.service` runs the console (on `127.0.0.1:8600`), the
+loops daemon and one runner per cousin. The loop also renders
+`cousin-console.service` and `cousin-loops.service`, the same two daemons
+as separate units: leave them disabled, never enabled beside the
+supervisor (two consoles would serve one root; see below). Add the
+console's first user (`cousin-console adduser`, any name) before it
+starts: until a user exists the console has no login at all
+([install](../docs/install.md)).
+
 A cousin comes back after a reboot with the supervisor: every cousin runs
 on a runner kind, and `cousin-supervisor` starts each one's runner (unless its
-`[agent] auto_start` is false), so enable `cousin-supervisor.service` (below),
-or keep the two units and run the supervisor for the runners only. There is
-no per-cousin start unit.
+`[agent] auto_start` is false). There is no per-cousin start unit.
 
 The `grep` line prints nothing when every placeholder was replaced. If it
 prints a file name, that unit still has a `{{...}}` in it and will fail at
@@ -81,11 +89,12 @@ rather than editing the rendered file: re-running the loop above overwrites
 the file but leaves drop-ins alone. That's how you put the console on the
 LAN, see [install](../docs/install.md#reaching-the-console-from-the-lan).
 
-## One unit instead of two: the supervisor
+## An install that runs the two units: move to the supervisor
 
 `cousin-supervisor.service` runs the supervisor the container runs. It starts
 the console and the loops daemon itself, so it replaces
-`cousin-console.service` and `cousin-loops.service`. Enable one set, never
+`cousin-console.service` and `cousin-loops.service`, which an install set up
+before the supervisor may still have enabled. Enable one set, never
 both: two consoles would serve one root, and the second loops daemon is
 refused by the first one's lock, which leaves the supervisor's loops child
 in `backoff` (busy, retried against the holder's lock forever, never
@@ -175,9 +184,10 @@ files from `~/.config/systemd/user/`.
 ## Remove
 
 ```
-systemctl --user disable --now cousin-loops.service cousin-console.service \
-    cousin-tool-surface.timer cousin-sweep.timer
+systemctl --user disable --now cousin-supervisor.service cousin-loops.service \
+    cousin-console.service cousin-tool-surface.timer cousin-sweep.timer
 rm -rf ~/.config/systemd/user/cousin-*
+rm -f ~/.local/share/systemd/timers/stamp-cousin-*
 systemctl --user daemon-reload
 systemctl --user reset-failed
 ```

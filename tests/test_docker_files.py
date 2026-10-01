@@ -1153,14 +1153,16 @@ class TestSupervisorUnit(unittest.TestCase):
         readme = (_REPO / "systemd" / "README.md").read_text()
         row = [l for l in readme.splitlines() if l.startswith("| `cousin-supervisor.service`")]
         self.assertEqual(len(row), 1)
-        self.assertIn("instead of", row[0])
-        for name in ("cousin-console.service", "cousin-loops.service",
-                     "--no-console --no-loops"):
-            self.assertIn(name, readme)
+        self.assertTrue(row[0].endswith("| always |"), row[0])
+        for unit in ("cousin-console.service", "cousin-loops.service"):
+            row = [l for l in readme.splitlines() if l.startswith("| `%s`" % unit)]
+            self.assertEqual(len(row), 1, unit)
+            self.assertIn("never beside the supervisor", row[0])
+        self.assertIn("--no-console --no-loops", readme)
 
     def test_the_readme_migration_keeps_the_console_address_and_can_go_back(self):
         readme = (_REPO / "systemd" / "README.md").read_text()
-        section = readme.split("## One unit instead of two", 1)[1].split("\n## ", 1)[0]
+        section = readme.split("## An install that runs the two units", 1)[1].split("\n## ", 1)[0]
         # the old console's address, read and carried into a drop-in
         self.assertIn("systemctl --user cat cousin-console.service", section)
         self.assertIn("cousin-supervisor.service.d/", section)

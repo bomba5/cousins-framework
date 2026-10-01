@@ -171,3 +171,27 @@ class TestEachUnit(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReadmeMatchesInstall(unittest.TestCase):
+    """The README's install and remove steps match docs/install.md: the
+    supervisor runs the console and the loops daemon, so the install
+    enables it and leaves cousin-console.service and cousin-loops.service
+    disabled, and Remove stops the supervisor too."""
+
+    def _block(self, heading):
+        import re
+        readme = (_UNITS / "README.md").read_text()
+        section = readme.split("\n## %s\n" % heading, 1)[1].split("\n## ", 1)[0]
+        return "\n".join(re.findall(r"```\n(.*?)```", section, re.S))
+
+    def test_the_install_enables_the_supervisor_not_the_two_units(self):
+        block = self._block("Install as user units")
+        enables = [line for line in block.splitlines() if "enable --now" in line]
+        self.assertTrue(any("cousin-supervisor.service" in line for line in enables), enables)
+        for unit in ("cousin-loops.service", "cousin-console.service"):
+            self.assertFalse(any(unit in line for line in enables), (unit, enables))
+
+    def test_remove_stops_the_supervisor(self):
+        block = self._block("Remove")
+        self.assertIn("cousin-supervisor.service", block)

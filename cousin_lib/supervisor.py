@@ -1591,6 +1591,23 @@ def _print_status(body):
               " and, with --yes, removes them)")
 
 
+def _seed_house_rules(root):
+    """The install's house rules into shared/ before any runner boots
+    (docs/house-rules.md). Here because the supervisor is the one start
+    every install kind has: the container's command and a bare host's
+    unit, and no cousin runs without it. A failure is one line, never a
+    refused start: the rules are a default, not a dependency."""
+    from cousin_lib import shared_tier
+    try:
+        written = shared_tier.seed_house_rules(root)
+    except OSError as err:
+        print("supervisor: house rules not seeded: %s" % err, file=sys.stderr)
+        return
+    if written:
+        print("supervisor: seeded house rules into shared/: %s" % ", ".join(written),
+              flush=True)
+
+
 def supervisor_main(argv=None):
     """cousin-supervisor run|status|start|stop|reload. Exit codes: run 0
     after SIGTERM/SIGINT, 2 when another supervisor holds the root (or
@@ -1609,6 +1626,7 @@ def supervisor_main(argv=None):
         return 2
     if args.command == "run":
         os.environ["FRAMEWORK_ROOT"] = str(root)     # the flag and the children agree
+        _seed_house_rules(root)
         specs = []
         if not args.no_console:
             specs.append(console_spec(root, args.console_host, args.console_port))

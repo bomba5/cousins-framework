@@ -7,6 +7,16 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Added
 
+- **House rules.** A fresh install comes with seven generic `kind: rule`
+  files every cousin follows (first principles, RFC 2119 wording, SemVer,
+  verify it fires, keep what a boundary discards, state hygiene, process
+  hygiene), shipped under `templates/shared/`. The supervisor seeds them into
+  `shared/` at its start, outside the propose/promote review, with a `seed`
+  row each in `shared/audit.jsonl`; an existing file is never overwritten and
+  a deleted one is never seeded again. An existing install gets the ones it
+  lacks at its first start on this release: delete any you do not want. A
+  Scrum team example sits in `templates/shared/examples/`, not active until
+  copied into `shared/`. See docs/house-rules.md.
 - **An example plugin**, `examples/plugins/hello`: one MCP tool, a small
   service and a console page, the plugin the plugins guide walks through.
 

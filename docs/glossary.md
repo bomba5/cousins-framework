@@ -133,7 +133,8 @@ a one-shot future prompt to a cousin (`cousin-schedule`). See
 
 files every cousin reads, under the framework root's
 `shared/`. A cousin proposes a file; someone else promotes it; the proposer
-and the reviewer are never the same. See [memory.md](memory.md).
+and the reviewer are never the same; the install's
+[house rules](house-rules.md) are seeded into it. See [memory.md](memory.md).
 
 ### side session
 

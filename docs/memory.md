@@ -666,7 +666,12 @@ The files live under the framework root:
 - `shared/<file>.md` is the canonical, shared copy.
 - `shared/proposed/<slug>__<file>.md` are pending proposals.
 - `shared/audit.jsonl` logs every propose, overwrite, promote and
-  reject.
+  reject, and each house rule the install seeded (`seed`).
+
+A fresh install starts with a few canonical rule files already here, the
+[house rules](house-rules.md): the [supervisor](glossary.md#supervisor) seeds them at its start, outside
+the review, like a config default. Each is yours to edit or delete, and a
+deleted one is not seeded again.
 
 First name your reviewers in `config/shared-reviewers.json`. Without it
 every promotion is refused.

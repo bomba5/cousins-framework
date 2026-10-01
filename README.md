@@ -40,6 +40,7 @@ models), plus:
 - a chat store, so you (through the console) and the other cousins can talk to it
 - memory that carries over from one session to the next
 - jobs, loops and heartbeats, so it can work on a schedule
+- **house rules**: a fresh install comes with a few working rules every cousin follows, yours to edit or delete ([house rules](docs/house-rules.md))
 - **plugins**: add tools, a background service and a console page to an install without touching the framework ([plugins](docs/plugins.md))
 
 On top of that there's a web console where you see all of them, chat with
@@ -152,6 +153,7 @@ and how to remove it all again, is in [install](docs/install.md).
 - [Cousins](docs/cousins.md) - making them, starting them, how a cousin
   survives a new session
 - [Memory](docs/memory.md) - what a cousin remembers and how
+- [House rules](docs/house-rules.md) - the rules every cousin follows from day one
 - [Chat](docs/chat.md) - talking to cousins, and cousins talking to each
   other
 - [Telegram](docs/telegram.md) - a cousin's chat on your phone: the bridge and its setup

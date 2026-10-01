@@ -4,10 +4,34 @@
 
 # cousins-framework
 
-I run a small family of Claude Code agents at home. I call them [cousins](docs/glossary.md#cousin). Each
-one has its own name, voice and job, its own memory, and its own chat, and
-they keep all of that when a session ends and a new one starts. This repo is
-the framework that makes that work.
+## Why "cousins"
+
+In Sicily families are big. Not "two kids and a dog" big. Big. And in a big
+family there is always a relative who is strangely good at one thing: the
+uncle who can hear what's wrong with an engine, the aunt who knows which
+doctor to see, the [cousin](docs/glossary.md#cousin) who fixes your laptop
+and judges you for what's on it.
+
+So when you tell a Sicilian you have a problem, you rarely get advice. You
+get a phone number. "You have that issue? You should ask my cousin."
+
+And "cousin" is a generous word. The friend you grew up with is a cousin.
+The guy who helped you move flats fifteen years ago is a cousin. Nobody
+checks the family tree.
+
+That is the whole idea of this project. Instead of one AI assistant
+pretending to know everything, I run a small family of them at home. Each
+[cousin](docs/glossary.md#cousin) has a name, a job and a voice of its own:
+one is the generalist I talk to every day, one knows PCBs and datasheets,
+one cooks. Each keeps its own memory, so it is the same cousin tomorrow as
+it was today. And when a question belongs to someone else, it does what any
+good cousin does: it asks the one who knows.
+
+This repo is the framework underneath them: the memory, the chat, the
+schedules, the web console, and the plumbing that lets a cousin survive the
+end of its session and wake up as itself.
+
+## What a cousin is
 
 A cousin is an agent session (the Claude Agent SDK, or opencode on other
 models), plus:
@@ -16,6 +40,7 @@ models), plus:
 - a chat store, so you (through the console) and the other cousins can talk to it
 - memory that carries over from one session to the next
 - jobs, loops and heartbeats, so it can work on a schedule
+- **plugins**: add tools, a background service and a console page to an install without touching the framework ([plugins](docs/plugins.md))
 
 On top of that there's a web console where you see all of them, chat with
 them, watch them work, and browse their memory.

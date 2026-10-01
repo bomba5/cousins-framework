@@ -182,15 +182,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ## 2.3.6 - 2026-10-01
 
-### Fixed
-
-- **Two timing tests that failed on a slow or loaded runner.** The runner
-  pane's render-cost test took one sample per input against a 100 ms bound
-  and failed on GitHub's runner at 126 ms; it now takes the best of three
-  against 500 ms (1500 ms for the bare inline renderer), still far below
-  the quadratic case it guards against (about 5 s on 80 KB). The
-  supervisor's orphan-reaping test waits up to 60 s for the supervisor to
-  stop instead of 20 s. What each test checks is unchanged.
+Maintenance release; no user-facing changes.
 
 ## 2.3.5 - 2026-10-01
 
@@ -223,12 +215,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   message when the binary is not found, before anything is written.
   docs/install.md makes switching to the opencode image a separate first
   step.
-- **The suite passes without an agent CLI on the host.** The account
-  status, check and login-flow tests hand `status()` their own `run` and
-  the flows a fake `spawn`, but still resolved the real `claude` binary
-  first, so on CI (no `claude` on `PATH`, no `sdk` extra) they failed with
-  "no agent CLI". They now point the CLI lookup at a fake path, as the
-  console's account routes already did. No product change.
 
 ## 2.3.4 - 2026-10-01
 
@@ -284,7 +270,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   polled once more before the runner gives up.
 - The between-turns reader (2.3.2) opened a `background_turn` for a
   subagent's own messages, which the CLI forwards to the parent's stream
-  (seen live: a "turn" that never ended, handed over at the next row). A
+  (a "turn" that never ended, handed over at the next row). A
   background turn is now opened only by the model's own message (no
   `parent_tool_use_id`); task progress and subagent messages open none.
 - An opencode account whose `providers` names `opencode` (opencode's own
@@ -322,13 +308,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   `cousin-spawn --runner opencode` skips the model; the entrypoint's
   first-start checklist no longer suggests an editor the image does not
   have.
-- **Timing tests that failed on a loaded host and passed alone**:
-  the tmux runner, kind switch, job run, SDK backoff and console memory
-  explorer tests now wait for the condition they assert under deadlines a
-  loaded host does not reach, instead of fixed sleeps, wall-clock bounds or
-  counted polls. What each test checks is unchanged. The console test
-  harness waits for the server's serving and events-poller threads before
-  it removes the temp root.
 
 ## 2.3.2 - 2026-10-01
 
@@ -371,12 +350,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
 
 ### Fixed
 
-- **SDK-lane tests wait for what they read**: four more tests read
-  something the runner writes after the event they waited for: a login's
-  `auth` event (after its file), the last turn's pressure check (after its
-  row closes), the failure count (after the idle move) and a side
-  session's `side_restarted` (after the rebuilt side starts). Each waits
-  for the thing itself now. Tests only.
 - **Console start and stop around the supervisor**:
   - A stop with no supervisor running and a runner started by hand still
     holding the lock answered `502 cousin-supervisor refused the stop: no
@@ -411,12 +384,7 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
     `tool_result` not yet) the bound is `tool_idle_timeout_s` (an hour).
   - A live turn's interrupt poll (5 times a second) read the inbox on the
     event loop thread, where a busy inbox (sqlite waits up to 30 s) froze
-    the reader and the hooks; the read runs off the loop. That shifted
-    when a fold is written, and one test that read the turn's threads
-    right after the fold's write, before its echo (where the row joins
-    the turn), failed about 4 runs in 6; it waits for the echo now.
-  - A row with an image and a file attachment is echoed and closed as
-    any other: now pinned by a test.
+    the reader and the hooks; the read runs off the loop.
 - **The runner pane marks where markdown stops**: past the first
   20 000 characters a text is not parsed, and the rest (`.rp-md-rest`) had
   no style, so a raw `**` there looked like a rendering bug. It now sits
@@ -478,9 +446,6 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   variables (`accounts.AUTH_VARS`) and every credential-shaped name
   (`*SECRET*`, `*_KEY`, `*_TOKEN`, `*_PASSWORD`), the rule the runner
   already applies to the cousin's own tools.
-- The sdk runner has a test that a turn the CLI ends with an `is_error`
-  result (no exception, no login or rate-limit signal) closes its rows
-  `failed` and the next row still runs.
 - Semantic memory search: a file's last chunk that would add fewer new
   characters than `chunk_overlap` now joins the chunk before it instead
   of standing alone as a fragment that is mostly overlap; such
@@ -719,7 +684,7 @@ sessions. A cousin.toml `tidy` edited has its prior bytes in
 
 ## 1.24.2 - 2026-09-25
 
-Three runner fixes, each proven by a test that failed before it.
+Three runner fixes.
 
 ### Fixed
 - A new session's id is on file as soon as the SDK's init names it,
@@ -1001,9 +966,8 @@ A documentation sweep, checked against 1.24.0, and a glossary.
 - A peer's message (another cousin, thread `peer:<slug>`) that arrives while
   a turn runs is folded into that turn, as an operator's or a person's is,
   on the `sdk`, `opencode` and `fake` runners. It used to wait for the
-  turn to end, and a turn has no length bound: a coordinator's 13 messages,
-  two of them STOP, sat queued behind one 60-minute turn while the peer
-  duplicated finished work. Meeting, loop and schedule rows still wait for a
+  turn to end, and a turn has no length bound, so a peer's messages (a
+  "stop" among them) could sit queued behind one long turn. Meeting, loop and schedule rows still wait for a
   turn of their own, and a peer already queued when one of those turns
   starts folds into it. The claim order at a turn boundary is unchanged.
   `reply` still never answers a peer thread, and with a peer folded into an
@@ -1016,7 +980,7 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   reads the CLI's output: once that output was full and unread, the CLI
   stopped reading its input, the write blocked, the reader waiting on it
   never drained the output, and hook replies queued behind the transport's
-  write lock timed out, the 18-39 minute stalls. Each turn now has one
+  write lock timed out, stalling the turn. Each turn now has one
   writer task that takes those writes in order (a fold taken before an
   interrupt is written before it) while the reader keeps reading. A folded
   row still counts as delivered only when the CLI echoes it; a write that
@@ -1088,9 +1052,8 @@ A documentation sweep, checked against 1.24.0, and a glossary.
 - A long chat message on the tmux lane no longer reaches the cousin as a bare
   paste. Claude Code reads one keyboard read of more than 800
   characters as a paste and wraps it in a pasted-content block its system
-  prompt tells the model to trust only where the user's own message asks: in
-  one cousin's transcript 41 of 244 inbound messages arrived that way, with
-  nothing typed outside the block. A chat line over 600 bytes, or with a
+  prompt tells the model to trust only where the user's own message asks,
+  with nothing typed outside the block. A chat line over 600 bytes, or with a
   newline, is now preceded by `(Chat <Name>): <Name>'s message follows in
   full below; answer the message, not this line.`, typed as its own
   keystrokes with a short pause before the body. If the body then fails, or
@@ -1261,8 +1224,6 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   HTTP error status, not only on a result flagged as an error: the "model not
   supported" 400 used to pass. It never runs on credentials inherited from the
   invoking shell.
-- A contract test no longer races the runner: it waits for the turn's result
-  event, not only for the row.
 
 ### Changed
 - Requires `claude-agent-sdk` 0.2.159 (bundled CLI 2.1.281), the first that
@@ -1279,9 +1240,6 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   on CLI 2.1.277 and 2.1.281. The account's key or token now reaches the
   commands the CLI starts, the cousin's own Bash included
   (docs/configuration.md, "No subprocess scrub").
-- The live key-lane proof is now `test_a_key_account_runs_its_tools`: a
-  Bash call on a key account must succeed with no permission prompt. It
-  fails with the scrub set and passes without it.
 
 ## 1.18.1 - 2026-09-24
 
@@ -1630,8 +1588,7 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   small `top`. `search()` asked each leg for exactly `top` candidates
   before fusion, so a document ranked just past the cut in BOTH legs
   never reached `_fuse`, although its fused score would have beaten a
-  single-leg hit inside the cut (measured on a real replay: fused
-  0.0326, rank 3 at top=10, absent at top=5). `search()` now asks each
+  single-leg hit inside the cut. `search()` now asks each
   leg for `max(20, 4 * top)` candidates and still cuts the fused
   result to `top`.
 - `captures_for` (and its sibling `read_capture`) called `.get()` on
@@ -1778,12 +1735,6 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   `auth` and the `system` subtypes `resumed`, `fresh`, `resume_failed`,
   `connect_failed`.
 
-### Fixed
-- Two timing-based runner tests (the mid-turn fold, the fake runner's state
-  stream) now wait for the event they assert instead of sleeping.
-- The usage tests evaluate today's date per call, so a suite that crosses
-  UTC midnight no longer compares against yesterday.
-
 ## 1.11.0 - 2026-09-23
 
 ### Added
@@ -1848,9 +1799,6 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   A failed turn is drained to its result so the next turn starts in sync,
   reconnecting with `resume` as the fallback; a runner that cannot connect
   exits 3 for a supervisor to restart. Optional extra `sdk`.
-- Live proofs, opt in with `COUSIN_LIVE_SDK=1`: two related messages through
-  `deliver()` answered in one session, and a message sent during the final
-  answer neither lost nor misattributed.
 
 ### Changed
 - `Inbox` grew `requeue`, `unfinished` and `get`.
@@ -1868,10 +1816,10 @@ A documentation sweep, checked against 1.24.0, and a glossary.
 - A bounded foreground embedding pass is no longer silent. `ensure_index`
   reported `incomplete`, but `search()` branched on `busy` and `failed` only,
   so the flag was produced and never displayed: a semantic leg that had ranked
-  against 24 of 416 chunks returned `notice=None` and its hits came back
-  looking like a complete result over the whole corpus. Measured on a cold
-  home: 5.8% of the corpus. Hits from 6%
-  of a corpus presented as complete are how a confident wrong file gets cited
+  against a small part of the chunks returned `notice=None` and its hits came
+  back looking like a complete result over the whole corpus. Hits from a
+  fraction of a corpus presented as complete are how a confident wrong file
+  gets cited
 
 ### Added
 - `ensure_index`'s report carries `ranked` (current chunks whose stored vector
@@ -1890,16 +1838,15 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   embedding pass (24 chunks) and the loops daemon finishes the rest;
   `ensure_index(wait=False)` meant "do not queue behind another pass", not "do
   not do the work", so with the lock free a single query ran every embedding
-  itself. Harmless while a cousin had a few hundred chunks; indexing the raw
-  store multiplied that by about ten and a cousin's first query after the
-  change sat over three minutes with the embedding service pinned
+  itself. Harmless while a cousin had a few hundred chunks; once the raw store
+  was indexed a cousin's first query could sit for minutes with the embedding
+  service pinned
 
 ### Changed
 - The vector index is SQLite (`memory/vectors.db`, one row per chunk, the
   vector a float32 blob) instead of one JSON object read and parsed in full on
-  every search. Measured on a real cousin: loading the index went from 1283 ms
-  to 69 ms and the file from 16.4 MB to 4.3 MB, against the 938 ms embedding
-  call the index exists to serve. An existing `embeddings.json` is imported
+  every search, which made loading the index cost more than the embedding
+  call it exists to serve. An existing `embeddings.json` is imported
   once on first read and removed
 - A vector store too damaged to open is replaced rather than fatal: the index
   is a cache of what the sources say
@@ -1912,15 +1859,14 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   `cousin-memory decide` and `remember`, the flip's transcript miner, the jobs
   ledger and framework events write, and nothing indexed it: `*.md` only. An
   entry reached recall solely through `distill`, which keeps one truncated
-  line per topic and caps each file at 40 lines. Measured on a real cousin:
-  904 entries over 789 topics survived as 139 lines, so 82% of topics could
-  not be found
+  line per topic and caps each file at 40 lines, so most topics could not be
+  found
 
 ### Changed
 - One result slot is reserved for a curated topic file (`memory/**/*.md`, or
   the harness auto-memory) when the ranking would drop every one of them.
-  Indexing the raw store took curated files from 13 of 45 top-three slots to
-  2 on a real corpus, because BM25's length normalisation puts a short entry
+  Indexing the raw store pushed curated files out of the top results,
+  because BM25's length normalisation puts a short entry
   above a long file that names the term once. The reserved slot is the last,
   so the best match is never displaced; an explicit `--collection` is never
   overridden
@@ -1929,7 +1875,7 @@ A documentation sweep, checked against 1.24.0, and a glossary.
 - The same entry is indexed once however many files hold it. `raw_fold` keeps
   a month in both `<YYYY-MM>-digest.jsonl` and `archive/<YYYY-MM>.jsonl.gz`,
   and the twins carry the same topic and content under different metadata, so
-  one memory returned as two hits (344 duplicates on the benchmark corpus)
+  one memory returned as two hits
 
 ## 1.6.3 - 2026-09-21
 
@@ -1938,7 +1884,7 @@ A documentation sweep, checked against 1.24.0, and a glossary.
   schedules, meetings, the flip, a pending boot) goes through
   `cousin_lib.delivery.deliver()` with a typed, thread-keyed item. The text
   reaching the pane is byte-identical; this is the seam the agent loop runner
-  plugs into (`docs/design/agent-loop-runner.md`)
+  plugs into ([runners](docs/reference/runners.md))
 - The memory recall line travels to the cousin as the item's context instead
   of being glued onto the message text. What the cousin reads is unchanged
 
@@ -1957,13 +1903,7 @@ A documentation sweep, checked against 1.24.0, and a glossary.
 
 ## 1.6.1 - 2026-09-21
 
-### Fixed
-- The boot packet's MCP warning silently depended on the flip assembling the
-  packet before persisting the new session id. Nothing stated or tested that
-  order, and inverting it would have made the warning scope to a session with
-  no log and go quiet forever. Named at the persist site and guarded by
-  `tests.test_flip.TestAssembleSeesTheDyingSessionId`, which was proven to go
-  red under the inversion
+Maintenance release; no user-facing changes.
 
 ## 1.6.0 - 2026-09-21
 
@@ -1985,11 +1925,9 @@ a third state on its public interface. Everything else here is a fix.
   is on file; see 1.6.2 for what it says when none is
 - An attempt whose outcome nobody recorded reads as unrecorded, not as a
   failure, and a failure in wording the parser has no literal for keeps its
-  reason instead of printing "no reason recorded". Measured over 5908 harness
-  logs: 93 files were reported FAILED with no reason; 80 held the reason and
-  13 held no outcome at all
+  reason instead of printing "no reason recorded"
 - The warning no longer claims "Nothing retries it": a harness session
-  reconnects inside itself, which 186 of those logs record
+  reconnects inside itself
 
 ## 1.5.1 - 2026-09-20
 
@@ -2055,8 +1993,7 @@ a third state on its public interface. Everything else here is a fix.
 ## 1.0.3 - 2026-09-19
 
 ### Fixed
-- The flip tests no longer leave a chat server on :8100
-- Install docs and README quick start, from a clean Ubuntu 24.04 re-test
+- Install docs and README quick start, from a clean Ubuntu 24.04 install
 
 ## 1.0.2 - 2026-09-19
 

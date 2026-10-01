@@ -9,7 +9,8 @@ one has its own name, voice and job, its own memory, and its own chat, and
 they keep all of that when a session ends and a new one starts. This repo is
 the framework that makes that work.
 
-A cousin is a Claude Code session in tmux, plus:
+A cousin is an agent session (the Claude Agent SDK, or opencode on other
+models), plus:
 
 - a home directory with its identity (`CLAUDE.md`), memory and notes
 - a chat store, so you (through the console) and the other cousins can talk to it
@@ -17,13 +18,16 @@ A cousin is a Claude Code session in tmux, plus:
 - jobs, loops and heartbeats, so it can work on a schedule
 
 On top of that there's a web console where you see all of them, chat with
-them, watch their terminal, and browse their memory.
+them, watch them work, and browse their memory.
 
 ## What you need
 
-- Linux with Python 3.11 or newer, `tmux`, `git` and systemd
-- [Claude Code](https://claude.com/claude-code), installed and logged in
-  before you start. The quick start below does not install it.
+- Docker with the compose plugin, and git. Or, for a bare host: Linux with
+  Python 3.11 or newer, git and systemd.
+- A model to run on. A Claude account is optional: on opencode's free models
+  a cousin needs no key and no account at all. For Claude, an Anthropic API
+  key or a Claude login ([Claude Code](https://claude.com/claude-code),
+  logged in, on a bare host).
 - Optional: [Ollama](https://ollama.com) with `nomic-embed-text` for
   semantic memory search. Without it, search is keyword only.
 
@@ -31,32 +35,64 @@ them, watch their terminal, and browse their memory.
 
 Read this before the quick start, because it starts as soon as you finish it.
 
-A cousin is a live Claude Code session. It is woken on a schedule, not only
+A cousin is a live agent session. It is woken on a schedule, not only
 when you talk to it: a heartbeat every hour by default, and a [flip](docs/glossary.md#flip) once a day
-that ends its session and starts a new one. Every wake is a [turn](docs/glossary.md#turn) against your
-Claude account, and it keeps happening while you sleep. The console's tokens
+that ends its session and starts a new one. Every wake is a [turn](docs/glossary.md#turn) against the
+account it runs on, and it keeps happening while you sleep. The console's tokens
 page shows what your cousins are actually using; `cousin-loops flips` shows
 when each one flips. Both are adjustable, and a cousin can be told never to
 flip, but the defaults are on.
 
-The agent also runs with `--dangerously-skip-permissions`, which is what makes
-it able to work unattended and means it can do anything your account can do on
-that machine. That is the trade this framework asks you to make. If you are not
-comfortable with an autonomous agent holding a shell on your box, continuously,
-at your expense, this is not for you.
+The agent also runs every tool without asking, which is what makes it able
+to work unattended and means it can do anything its user can do on that
+machine (in the container, on Docker). That is the trade this framework asks
+you to make. If you are not comfortable with an autonomous agent holding a
+shell on your box, continuously, this is not for you.
 
-## Quick start
+## Quick start: Docker, no key, no Claude account
 
 ```
-sudo apt-get install -y python3-venv tmux git    # Debian/Ubuntu
+git clone https://github.com/bomba5/cousins-framework.git
+cd cousins-framework
+cp compose.opencode.yml compose.override.yml     # the image with opencode
+docker compose up -d --build
+docker compose exec framework cousin-console adduser ana
+
+# an opencode account on its free models: no key
+docker compose exec -T framework sh -c 'cat >> config/accounts.toml' <<'EOF'
+[accounts.zen]
+kind = "opencode"
+providers = ["opencode"]
+EOF
+
+# make your first cousin on it and start it
+docker compose exec -T framework cousin-spawn wren --name Wren \
+    --role "helps me around the house" --voice "Short, plain and honest." \
+    --operator ana --runner opencode --account zen \
+    --model opencode/big-pickle --start
+```
+
+Then go to `http://127.0.0.1:8600`, log in as `ana`, and say hi to Wren.
+Most free models let their vendor train on what you send; the
+[install](docs/install.md#a-first-cousin-on-opencodes-free-model) page says
+more, and covers a Claude key or login too.
+
+## Quick start: bare host, Claude Code
+
+With Claude Code installed and logged in (`claude auth login`):
+
+```
+sudo apt-get install -y python3-venv git    # Debian/Ubuntu
 git clone https://github.com/bomba5/cousins-framework.git ~/cousins-framework
 cd ~/cousins-framework
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[mcp]"
-
-# tell the framework how to start Claude Code
-printf '%s\n' "$(command -v claude) --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
+pip install -e ".[mcp,sdk]"
 cp config/harness.toml.claude-code.example config/harness.toml
+cousin-console adduser ana
+
+# the supervisor: the console on 127.0.0.1:8600, the loops daemon and every
+# cousin; keep it running (a second terminal, or systemd as in install)
+cousin-supervisor run &
 
 # make your first cousin and start it
 cousin-spawn wren --name Wren --role "helps me around the house" \
@@ -64,13 +100,9 @@ cousin-spawn wren --name Wren --role "helps me around the house" \
 cousin-mcp approve wren
 cousin-tool-surface
 cousin-spawn wren --start
-
-# open the console
-cousin-console adduser ana
-cousin-console --port 8600
 ```
 
-Then go to `http://localhost:8600`, log in, and say hi to Wren.
+Then go to `http://127.0.0.1:8600`, log in, and say hi to Wren.
 
 That's the short version. The full one, with systemd units, the LAN setup
 and how to remove it all again, is in [install](docs/install.md).

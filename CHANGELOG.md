@@ -18,6 +18,29 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   its key. Most free models let the vendor use the prompts to improve or
   train models (docs/configuration.md names where Zen lists the ones that
   keep nothing).
+- Install docs, from a fresh-clone Docker run. `docs/install.md` now opens
+  the Docker section with a worked cousin on opencode's free model, no key
+  and no Claude account: the opencode image through `compose.override.yml`,
+  an `opencode` account with `providers = ["opencode"]`, and
+  `cousin-spawn --runner opencode --account <name> --model
+  opencode/big-pickle --start`, each command run with
+  `docker compose exec -T`. It says to repeat the same `-f` files on every
+  compose command (a plain `up` falls back to the default image, which has
+  no opencode), that one opencode account serves one cousin, and how to
+  pipe `cousin-console adduser` without a terminal. The spawn dialog does
+  have kind and account fields (the environment only preselects them); the
+  container shows no commit; the build is not reproducible (only the
+  opencode binary is pinned). The bare-host section drops the
+  `config/agent-cmd` steps 2.0.0 removed, installs the `sdk` extra, enables
+  `cousin-supervisor.service` before the first cousin is started (a start
+  needs a running supervisor) and moves the LAN drop-in, update and
+  uninstall steps to it. The README gains a Docker quick start, says a
+  Claude account is optional, and its bare-host quick start runs the
+  supervisor instead of writing `config/agent-cmd`. `compose.yml` names the
+  opencode lane; `docs/reference/runners.md` no longer says
+  `cousin-spawn --runner opencode` skips the model; the entrypoint's
+  first-start checklist no longer suggests an editor the image does not
+  have.
 
 ## 2.3.2 - 2026-10-01
 

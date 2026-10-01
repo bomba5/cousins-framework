@@ -6,7 +6,11 @@
 #   docker compose up -d --build        then open http://127.0.0.1:8600
 #   docker compose logs -f framework    every child's lines, prefixed
 #
-# Auth, one of two lanes:
+# Auth, one of three lanes:
+#   - opencode, no Claude account: the opencode variant (at the end of this
+#     file) and an opencode account in config/accounts.toml. Its free models
+#     need no key (providers = ["opencode"]); it also takes a provider key
+#     you hold, or a local endpoint. Worked example: docs/install.md.
 #   - API key: put the key in secrets/anthropic_api_key (chmod 700 secrets,
 #     chmod 644 the file: the container's user, uid 10001, must read it),
 #     then: cp compose.api-key.yml compose.override.yml
@@ -14,6 +18,8 @@
 #     (a claude-login account in config/accounts.toml; its credentials stay
 #     on the volume).
 # The terms risk of using a subscription login from a container is yours.
+# Started with -f files? Give the same -f files to every later command: a
+# plain `docker compose up -d` reads this file and compose.override.yml only.
 name: cousins-framework
 
 services:

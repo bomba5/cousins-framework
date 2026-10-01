@@ -3,50 +3,150 @@
 There are two ways to install, and this page covers both, and how to take
 each back out. [Install with Docker](#install-with-docker) runs the whole
 framework in one container: the console, the scheduler and every [cousin](glossary.md#cousin), with
-all state on one volume. It needs git and Docker and nothing else, and its
-cousins run on the Agent SDK (`cousin-runner`), not in tmux.
+all state on one volume. It needs git and Docker and nothing else.
 [Install on a bare host](#install-on-a-bare-host) is a checkout with a venv
-and systemd user units, where cousins run as Claude Code sessions in tmux (or
-on the [runner](glossary.md#runner) beside them). The example cousin is `wren` and the console user
+and systemd user units. Either way every cousin runs on a [runner](glossary.md#runner)
+(`cousin-runner`) that `cousin-supervisor` starts: the Claude Agent SDK by
+default, or opencode. The example cousin is `wren` and the console user
 is `ana`.
+
+A Claude account is optional. A cousin on opencode's free models needs no
+key and no account of any kind; the Docker section starts with that one.
 
 ## Install with Docker
 
 You need git and Docker with the compose plugin. I tested with Docker 29 and
 compose 5 on Linux.
 
-The image is 162 MB compressed and about 400 MB on disk. The first `up`
-builds it from the checkout: it pulls the `python:3.13-slim` base and
+The default image is 162 MB compressed and about 400 MB on disk. The first
+`up` builds it from the checkout: it pulls the `python:3.13-slim` base and
 downloads the Agent SDK, whose bundled Claude Code CLI is most of the size.
 Nothing else is pulled unless you turn on a profile or the opencode variant
-(below).
+(below). The build is not reproducible: the base image tag and the Python
+dependencies are not pinned, only the opencode binary is (by its sha256).
 
 ```
 git clone https://github.com/bomba5/cousins-framework.git
 cd cousins-framework
 ```
 
-**Auth, before the first start.** A cousin needs a way to reach the model.
-Pick one lane.
+**Pick one lane before the first start.** A cousin needs a way to reach a
+model:
 
-- An API key: put it in a file beside `compose.yml` and turn on the key
-  override, once:
+- **opencode, with no key and no Claude account.** The opencode variant of
+  the image and an `opencode` account. Its free models (OpenCode Zen's, named
+  `opencode/<model>`) need no key. The same account kind also takes the key
+  of a provider you hold, or a local OpenAI-compatible endpoint (see
+  [accounts.toml](configuration.md#accountstoml)). The worked example is
+  [A first cousin on opencode's free model](#a-first-cousin-on-opencodes-free-model).
+- **An Anthropic API key**, metered:
+  [a cousin on a Claude key or login](#a-cousin-on-a-claude-key-or-login).
+- **A Claude login**, the same section. The terms risk of running cousins on
+  a subscription login, in a container or anywhere else, is yours.
 
-  ```
-  mkdir -p secrets && chmod 700 secrets
-  (umask 022; printf '%s' "<your key>" > secrets/anthropic_api_key)
-  cp compose.api-key.yml compose.override.yml
-  ```
+**Every compose command uses the same files.** compose reads `compose.yml`
+and, when it exists, `compose.override.yml` by itself, but only when you
+give no `-f`. Once you start with `-f` files, give the same `-f` files to
+every later command (`up`, `down`, `exec`, `logs`): a plain
+`docker compose up -d` after a `-f compose.opencode.yml` start recreates the
+container on the default image, which has no opencode binary, and every
+opencode cousin then fails to start and keeps failing. The simplest way
+out is to put your one override in `compose.override.yml` and never use
+`-f` at all, which is what the next section does.
 
-  compose reads `compose.override.yml` by itself. The key file is mode 644
-  inside a 700 directory because the container's user (uid 10001) must read
-  it; on every start the entrypoint copies it to a private file on the volume
-  and declares an `api-key` account, and new cousins use it. A rotated key is
-  picked up at the next start. Both `secrets/` and `compose.override.yml` are
-  in `.gitignore`.
-- A Claude login: skip the key and log in inside the container after the
-  first start (next step). The terms risk of running cousins on a
-  subscription login, in a container or anywhere else, is yours.
+### A first cousin on opencode's free model
+
+From the checkout, with nothing else set up:
+
+```
+cp compose.opencode.yml compose.override.yml
+docker compose up -d --build
+docker compose logs framework
+```
+
+The first start prints a checklist of what to edit, and a warning that the
+console is open because no user exists yet. Add one now; it asks for the
+password twice (at least 8 characters):
+
+```
+docker compose exec framework cousin-console adduser ana
+```
+
+From a script, with no terminal, pipe the password in instead (`-T`: no
+terminal in the container):
+
+```
+printf '%s\n%s\n' "$PW" "$PW" | docker compose exec -T framework cousin-console adduser ana
+```
+
+Declare an `opencode` account on Zen, with no key (the container's
+working directory is the framework root, `/data`, so this is
+`/data/config/accounts.toml`):
+
+```
+docker compose exec -T framework sh -c 'cat >> config/accounts.toml' <<'EOF'
+
+[accounts.zen]
+kind = "opencode"
+providers = ["opencode"]
+EOF
+```
+
+Make the cousin on it and start it:
+
+```
+docker compose exec -T framework cousin-spawn wren --name Wren \
+    --role "helps me around the house" --voice "Short, plain and honest." \
+    --operator ana --runner opencode --account zen \
+    --model opencode/big-pickle --start
+#   created wren at /data/cousins/wren
+#   started wren
+docker compose exec -T framework cousin-supervisor status
+#   a runner:wren row, running
+```
+
+Open `http://127.0.0.1:8600/`, log in as `ana`, open Wren and send it a
+message. The reply comes in the [thread](glossary.md#thread).
+
+- `--runner opencode` is required: `compose.yml` sets
+  `COUSIN_DEFAULT_RUNNER=sdk` for a cousin that names no runner.
+- `--model` is required on opencode, as `<provider>/<model>`; there is no
+  default. `opencode/big-pickle` was one of Zen's free models on 2026-10-01;
+  Zen's current list is in its documentation (opencode.ai/docs/zen). Most
+  free models let the vendor use what the cousin sends to train models;
+  [accounts.toml](configuration.md#accountstoml) says which ones keep
+  nothing. `--effort` is refused on opencode, which reads no effort.
+- One opencode account serves one cousin: the runner holds the account
+  while it runs, and a second cousin on the same account is refused at its
+  start. Give each opencode cousin its own account (`[accounts.zen2]`, the
+  same three lines).
+- The console's spawn dialog does the same: pick the `opencode` kind, the
+  `zen` account and type the model.
+- Nothing here costs money, but the cousin still wakes on a schedule (a
+  heartbeat every hour, a [flip](glossary.md#flip) once a day), like every cousin.
+
+### A cousin on a Claude key or login
+
+For the key lane, put the key in a file beside `compose.yml` and turn on the
+key override, once, before the first start:
+
+```
+mkdir -p secrets && chmod 700 secrets
+(umask 022; printf '%s' "<your key>" > secrets/anthropic_api_key)
+cp compose.api-key.yml compose.override.yml
+```
+
+compose reads `compose.override.yml` by itself. The key file is mode 644
+inside a 700 directory because the container's user (uid 10001) must read
+it; on every start the entrypoint copies it to a private file on the volume
+and declares an `api-key` account, and new cousins use it. A rotated key is
+picked up at the next start. Both `secrets/` and `compose.override.yml` are
+in `.gitignore`. To have the opencode variant as well, there are now two
+overrides: name all three files on every command,
+`docker compose -f compose.yml -f compose.api-key.yml -f compose.opencode.yml ...`.
+
+For the login lane, skip the key and log in inside the container after the
+first start (below).
 
 **Start it.**
 
@@ -57,7 +157,7 @@ docker compose logs framework
 
 The first start prints a checklist of what to edit, and a warning that the
 console is open because no user exists yet. Add one now (it asks for the
-password twice):
+password twice; the piped form above works here too):
 
 ```
 docker compose exec framework cousin-console adduser ana
@@ -88,12 +188,19 @@ services:
 Its credentials stay on the volume, under `data/accounts/mine`.
 
 **Spawn a cousin.** Open `http://127.0.0.1:8600/`, log in, and spawn one from
-the console. The spawn dialog sets no runner and no account: the
-container's environment decides. `compose.yml` sets
-`COUSIN_DEFAULT_RUNNER=sdk`, so a cousin made in the container is a runner
-cousin and the console starts it through the [supervisor](glossary.md#supervisor), and
-`COUSIN_DEFAULT_ACCOUNT` (the key override, or the line above) names its
-account. Send it a message.
+the console. The spawn dialog has a kind and an account field, and the
+container's environment only preselects them: `compose.yml` sets
+`COUSIN_DEFAULT_RUNNER=sdk`, so the kind starts on `sdk`, and
+`COUSIN_DEFAULT_ACCOUNT` (the key override, or the line above) is the
+account a blank account field gets. "create cousin" creates it and starts
+it through the [supervisor](glossary.md#supervisor). Send it a message.
+
+A cousin on `host` (no account named, and no `COUSIN_DEFAULT_ACCOUNT`) has
+no login in the container: give it the key or the login account. Its
+"login required" line names `claude auth login` on the container's id,
+which is not the way in the container.
+
+### Running the container
 
 The console's port is published on loopback only. From another machine, use
 an SSH tunnel (`ssh -L 8600:127.0.0.1:8600 <host>`), or publish it on the LAN
@@ -127,15 +234,16 @@ it. Run the framework service on it with the override file:
 docker compose -f compose.yml -f compose.opencode.yml up -d --build
 ```
 
-Add `-f compose.api-key.yml` before the last file to keep the key lane, or
-copy `compose.opencode.yml` to `compose.override.yml` when it is your only
-override. SDK cousins run on it unchanged.
+and the same two `-f` files on every later command. Add
+`-f compose.api-key.yml` before the last file to keep the key lane, or copy
+`compose.opencode.yml` to `compose.override.yml` when it is your only
+override (then no `-f` at all). SDK cousins run on it unchanged.
 
-Stop and start with `docker compose down` and `docker compose up -d`: every
-cousin, message and session is on the `framework-data` volume and survives,
-and a cousin you stopped stays stopped until you start it.
-`docker compose down -v` deletes the volume, and with it everything. Running
-it day to day, backups and upgrades are in
+Stop and start with `docker compose down` and `docker compose up -d` (with
+your `-f` files, if you use any): every cousin, message and session is on
+the `framework-data` volume and survives, and a cousin you stopped stays
+stopped until you start it. `docker compose down -v` deletes the volume,
+and with it everything. Running it day to day, backups and upgrades are in
 [operations](operations.md#the-container).
 
 ## Install on a bare host
@@ -145,9 +253,10 @@ cousin answering chat, and back again. I wrote it against Ubuntu 24.04; any
 Linux with the same pieces works with its own package names.
 
 When you're done you have: the checkout (which is also the framework root),
-a venv inside it, one cousin under `cousins/wren`, its Claude Code session in
-a tmux session called `wren`, and a handful of systemd user units that keep
-running whether or not you're logged in.
+a venv inside it, one cousin under `cousins/wren` on the default `sdk` runner
+kind, and a handful of systemd user units that keep running whether or not
+you're logged in: `cousin-supervisor`, which runs the console, the loops
+daemon and every cousin's runner, and two timers.
 
 ### What you need
 
@@ -155,23 +264,26 @@ running whether or not you're logged in.
   arrived in 3.11. Ubuntu 24.04 ships 3.12.
 - **python3-venv.** Ubuntu won't let pip install into the system Python, so
   the framework lives in a venv.
-- **tmux.** Every cousin's agent runs in a tmux session. Starting, flipping,
-  delivering chat messages and the console's terminal view all go through
-  it.
+- **tmux**, only for the `tmux` runner kind, which drives an interactive
+  Claude Code in a tmux pane. The default `sdk` kind and `opencode` use no
+  tmux.
 - **git.** For the clone. The console also reads the commit it's running
   from it.
-- **A systemd user manager.** The loops daemon, the console and the timers
-  run as user units. You can skip systemd and run the commands by hand, but
+- **A systemd user manager.** The supervisor and the timers run as user
+  units. You can skip systemd and run the commands by hand, but
   then nothing recurring happens while you're away.
-- **Claude Code.** The agent. The framework starts whatever command
-  `config/agent-cmd` holds, but it writes Claude Code's project files for
-  every cousin (`.claude/settings.json`, `.mcp.json`) and ships a Claude Code
-  preset, so that's what this page installs.
+- **Claude Code**, to log in. The default runner kind, `sdk`, runs the
+  Claude Agent SDK (the `sdk` extra below), which brings its own Claude Code
+  CLI. A cousin on the host's login (`host`, the default account) uses the
+  login Claude Code keeps in `~/.claude`, so this page installs Claude Code
+  to log in once. A cousin on opencode needs no Claude Code (end of step 4).
 - **curl.** For the Claude Code and Ollama installers. Usually already there.
-- **The `mcp` Python package** (optional extra, pulled in by
-  `pip install -e ".[mcp]"`). It's what lets a cousin use its tools over MCP.
-  Spawn wires MCP up for every cousin, so install it unless you know you
-  won't use it. Everything else in the framework is standard library.
+- **The `sdk` and `mcp` Python extras**, pulled in by
+  `pip install -e ".[mcp,sdk]"`. `sdk` is the Claude Agent SDK the default
+  runner kind runs on; without it a cousin on `sdk` fails to start with
+  "claude-agent-sdk is not installed". `mcp` is what lets a cousin use its
+  tools over MCP. Spawn wires MCP up for every cousin, so install it unless
+  you know you won't use it. Everything else in the framework is standard library.
 - **Ollama with `nomic-embed-text`** (optional). Gives memory search a
   semantic leg. Without it, search is keyword only.
 - **A browser with internet access** for the console. The page loads React,
@@ -195,7 +307,7 @@ git clone https://github.com/bomba5/cousins-framework.git ~/cousins-framework
 cd ~/cousins-framework
 python3 -m venv .venv
 . .venv/bin/activate
-pip install -e ".[mcp]"
+pip install -e ".[mcp,sdk]"
 ```
 
 The package isn't on PyPI. Always install from the checkout.
@@ -231,14 +343,10 @@ curl -fsSL https://claude.ai/install.sh | bash     # puts claude in ~/.local/bin
 ~/.local/bin/claude                                 # log in once, then /exit
 ```
 
-Log in once (interactively, or with `claude auth login`) before any cousin
-starts. A cousin started before that sits on Claude Code's first-run screens
-(the theme picker, then the login menu) in its tmux session. With the preset below, the console marks it "needs attention" and
-the framework types nothing into that pane: chat messages, heartbeats,
-scheduled prompts and a [flip](glossary.md#flip)'s boot text are all skipped with a
-`tmux delivery SKIPPED` line in the log. The chat message is stored, but the
-cousin never sees it. Without the preset there's nothing to recognise the
-menu by, and all of that gets typed into it, where it can pick options.
+Log in once (interactively, or with `claude auth login`) before a cousin on
+`host` starts. A cousin that starts with no login runs no [turn](glossary.md#turn): its runner
+says "login required" with the command to run (in the console and
+`cousin-chat list`) and waits, as described under Re-login below.
 
 A runner cousin can run on an account of its own instead (see
 [configuration](configuration.md#accountstoml)). The first login per account
@@ -265,38 +373,32 @@ resumes on its own once the credentials change, or delete
 `cousins/<slug>/data/login-required.json` to make it try now (the way out of a
 billing stop, where no credential changes).
 
-Now tell the framework how to start the agent. Use the absolute path, so it
-resolves under systemd's PATH as well as yours:
+Then copy the Claude Code preset:
 
 ```
-printf '%s\n' "$HOME/.local/bin/claude --dangerously-skip-permissions --model {model} --effort {effort} --session-id {session_id}" > config/agent-cmd
 cp config/harness.toml.claude-code.example config/harness.toml
 ```
 
-`--dangerously-skip-permissions` lets the cousin run every tool without
-asking, which is what an unattended cousin needs. It means what it says: the
-cousin can do anything your account can. Leave it out if you'd rather answer
-permission prompts yourself in the console's terminal view or with
-`tmux attach -t wren`. `{model}`, `{effort}` and `{session_id}` are filled in
-on every start; see [configuration](configuration.md#agent-cmd).
+Without `config/harness.toml`, a lot quietly stays off: transcript mining at
+[flip](glossary.md#flip), the harness memory collection in search, the console's token
+counts, `cousin-mcp approve`, and the spawn dialog's model and effort
+preselection ([configuration](configuration.md#harnesstoml)). There is no
+agent command to write: 2.0.0 removed `config/agent-cmd`, and every runner
+kind starts its own agent.
 
-To try the framework without a Claude login (a test VM, a demo), give it a
-stand-in agent that reads its terminal, so what the framework types lands
-somewhere you can check:
+A cousin runs every tool without asking (an `sdk` cousin's session runs in
+`bypassPermissions`, the `tmux` kind's CLI with
+`--dangerously-skip-permissions`), which is what an unattended cousin needs. It means
+what it says: the cousin can do anything your user can. What it may not do
+is its `policy.toml` ([configuration](configuration.md#policytoml)).
 
-```
-printf '%s\n' 'bash -lc "cat > $HOME/agent-input.txt"' > config/agent-cmd
-```
-
-A chat message then shows up in `~/agent-input.txt` as
-`[now: 2026-01-01 12:00 UTC] (Chat ana): ...`. Don't use something like
-`sleep infinity`: it never reads the terminal, the boot text fills the
-input buffer and later messages go nowhere.
-
-Without `config/harness.toml`, a lot quietly stays off: token counts in the
-console, transcript mining at flip, the transcript-size guard, the harness
-memory search collection, `cousin-mcp approve`, the `{model}`/`{effort}`
-defaults and the "needs attention" flag. Copy the preset.
+To run a cousin with no Claude login at all, put it on opencode's free
+models: the `opencode` binary on `PATH` (or its absolute path in
+`COUSIN_OPENCODE_BIN`), the `zen` account from
+[the Docker example](#a-first-cousin-on-opencodes-free-model) in
+`config/accounts.toml`, and `--runner opencode --account zen --model
+opencode/big-pickle` on the `cousin-spawn` line in step 7. This page does
+not install opencode.
 
 ### 5. Optional: semantic search with Ollama
 
@@ -320,12 +422,57 @@ CPU without AVX one chunk took 32 seconds to embed, and a timeout shorter than
 one chunk makes every search wait it out and then fall back to keyword. With
 a GPU or a modern CPU, 30 is plenty.
 
-### 6. Make the first cousin
+### 6. The systemd units
 
-Before you do: from here on this costs money and runs unattended. A cousin is
-a live Claude Code session woken on a schedule, not only when you talk to it.
-The defaults are a heartbeat every hour and a flip once a day, and every wake
-is a turn against your account. The console's tokens page shows what they are
+The supervisor has to run before any cousin can start: `cousin-spawn
+--start` and the console's start button both ask it, and with none running
+the start fails.
+
+```
+ROOT="$PWD"
+USER_BIN="$PWD/.venv/bin"
+SYSTEM_PATH="$(systemctl --user show-environment | sed -n 's/^PATH=//p')"
+mkdir -p ~/.config/systemd/user
+for unit in systemd/*.service systemd/*.timer; do
+  sed -e "s|{{ROOT}}|$ROOT|g" \
+      -e "s|{{USER_BIN}}|$USER_BIN|g" \
+      -e "s|{{SYSTEM_PATH}}|$SYSTEM_PATH|g" \
+      "$unit" > ~/.config/systemd/user/"$(basename "$unit")"
+done
+! grep -l '{{' ~/.config/systemd/user/cousin-*   # prints nothing when every placeholder was replaced
+systemctl --user daemon-reload
+cousin-console adduser ana
+systemctl --user enable --now cousin-supervisor.service
+systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer
+loginctl enable-linger "$USER"
+```
+
+`cousin-supervisor.service` runs the console (on `127.0.0.1:8600`), the
+loops daemon and one runner per cousin. The loop also renders
+`cousin-console.service` and `cousin-loops.service`, the same two daemons
+as separate units: leave them disabled, never enabled beside the
+supervisor (two consoles would serve one root; see
+[systemd/README.md](../systemd/README.md)).
+
+Add the user before the console starts. Until the first user exists the
+console has no login at all: anyone the network guard lets in can use it. By
+default it listens on loopback only, so in practice that's anyone on this
+machine. `cousin-console adduser` doesn't need the console running. It asks
+for the password twice (at least 8 characters) and never takes it as an
+argument. For a scripted install, pipe it: `printf '%s\n%s\n' "$PW" "$PW" |
+cousin-console adduser ana` (Python warns that it can't hide the input; the
+password is set). Login is enforced from the moment the users file exists, no
+restart needed.
+
+`loginctl enable-linger` keeps your user units running after you log out. If
+it's refused, run it with `sudo`.
+
+### 7. Make the first cousin
+
+Before you do: from here on this can cost money and runs unattended. A
+cousin is woken on a schedule, not only when you talk to it. The defaults
+are a heartbeat every hour and a flip once a day, and every wake is a
+[turn](glossary.md#turn) against the account it runs on. The console's tokens page shows what they are
 using, `cousin-loops flips` shows when each one flips, and
 `context_beat_seconds` and `flip_at` in a cousin's `cousin.toml` change both
 (`flip_at = "never"` opts a cousin out of the daily flip entirely). Start with
@@ -343,65 +490,34 @@ cousin-spawn wren --start
   from the template, `STATUS.md`, `MEMORY.md`, the MCP registry and
   `.mcp.json`. `--role` and `--voice` are required. `--operator` is the
   name you'll chat as; the cousin's `send` tool can reach that name. Leave it
-  out for a cousin with no operator.
+  out for a cousin with no operator. With no `--runner` and no `--account`
+  it is an `sdk` cousin on `host`.
 - `cousin-mcp approve` marks the home as trusted in `~/.claude.json` and
   enables the cousin's `cousin` MCP server, so Claude Code doesn't stop on
   its trust prompt. The file exists once Claude Code has run once.
 - `cousin-tool-surface` writes `data/tool-surface.md`, which the boot packet
   quotes. Without it the first boot is marked degraded. The daily timer keeps
   it fresh after this.
-- `cousin-spawn wren --start` starts the tmux session.
-  On a cousin that's already running it does nothing. Before it touches
-  anything it checks that tmux and the agent command resolve, and stops with
-  the reason if either doesn't.
+- `cousin-spawn wren --start` asks the running supervisor to start Wren's
+  runner. On a cousin that's already running it does nothing. With no
+  supervisor running it fails (exit 1) and the home is kept: start the
+  supervisor (step 6) and run it again.
 
 More on all of this in [cousins](cousins.md).
-
-### 7. The systemd units
-
-```
-ROOT="$PWD"
-USER_BIN="$PWD/.venv/bin"
-SYSTEM_PATH="$(systemctl --user show-environment | sed -n 's/^PATH=//p')"
-mkdir -p ~/.config/systemd/user
-for unit in systemd/*.service systemd/*.timer; do
-  sed -e "s|{{ROOT}}|$ROOT|g" \
-      -e "s|{{USER_BIN}}|$USER_BIN|g" \
-      -e "s|{{SYSTEM_PATH}}|$SYSTEM_PATH|g" \
-      "$unit" > ~/.config/systemd/user/"$(basename "$unit")"
-done
-! grep -l '{{' ~/.config/systemd/user/cousin-*   # prints nothing when every placeholder was replaced
-systemctl --user daemon-reload
-cousin-console adduser ana
-systemctl --user enable --now cousin-loops.service cousin-console.service
-systemctl --user enable --now cousin-sweep.timer cousin-tool-surface.timer
-loginctl enable-linger "$USER"
-```
-
-Add the user before the console starts. Until the first user exists the
-console has no login at all: anyone the network guard lets in can use it. By
-default it listens on loopback only, so in practice that's anyone on this
-machine. `cousin-console adduser` doesn't need the console running. It asks
-for the password twice (at least 8 characters) and never takes it as an
-argument. For a scripted install, pipe it: `printf '%s\n%s\n' "$PW" "$PW" |
-cousin-console adduser ana` (Python warns that it can't hide the input; the
-password is set). Login is enforced from the moment the users file exists, no
-restart needed.
-
-`loginctl enable-linger` keeps your user units running after you log out. If
-it's refused, run it with `sudo`.
 
 ### 8. Open the console
 
 ```
-journalctl --user -u cousin-console.service -n 5
-#   cousin-console: serving <root> on 127.0.0.1:8600
+journalctl --user -u cousin-supervisor.service -n 20
+#   console | cousin-console: serving <root> on 127.0.0.1:8600
 ```
 
-If the line ends with `(auth not configured: cousin-console adduser <name>)`,
-the console started before the user existed. Login is enforced anyway; the
-suffix only goes away on the next restart. On a machine that had the console
-before, `-n 5` can also show lines from earlier runs: look at the newest.
+The supervisor prefixes each child's lines with its name (`console`,
+`loops`, `runner:wren`). If the console's line ends with
+`(auth not configured: cousin-console adduser <name>)`, the console started
+before the user existed. Login is enforced anyway; the suffix only goes away
+on the next restart. On a machine that had the console before, the journal
+can also show lines from earlier runs: look at the newest.
 
 Open `http://127.0.0.1:8600/` on the machine itself, or tunnel from another
 one:
@@ -410,29 +526,35 @@ one:
 ssh -L 8600:127.0.0.1:8600 ana@192.0.2.10     # then open http://127.0.0.1:8600/
 ```
 
-Log in, open Wren and send a message. The card should say running with no
-"needs attention" line, and the reply shows up in the [thread](glossary.md#thread).
+Log in, open Wren and send a message. The card should say running, and the
+reply shows up in the [thread](glossary.md#thread).
 
 ### Reaching the console from the LAN
 
-Give the unit a drop-in. Re-running step 7 overwrites the unit files but
-leaves drop-ins alone.
+Give the supervisor's unit a drop-in. Re-running step 6 overwrites the unit
+files but leaves drop-ins alone.
 
 ```
-mkdir -p ~/.config/systemd/user/cousin-console.service.d
-cat > ~/.config/systemd/user/cousin-console.service.d/lan.conf <<'EOF'
+mkdir -p ~/.config/systemd/user/cousin-supervisor.service.d
+cat > ~/.config/systemd/user/cousin-supervisor.service.d/lan.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=%h/cousins-framework/.venv/bin/cousin-console --host 0.0.0.0 --port 8600
+ExecStart=%h/cousins-framework/.venv/bin/cousin-supervisor run --console-host 0.0.0.0 --console-port 8600
 EOF
-systemctl --user daemon-reload && systemctl --user restart cousin-console
+systemctl --user daemon-reload && systemctl --user restart cousin-supervisor
 ```
+
+Restarting the supervisor restarts every running cousin too; each resumes
+its session.
 
 This is plain HTTP, so passwords and chat cross the network in the clear.
 Create the user first. The network guard only lets in loopback and the
 private ranges (10/8, 172.16/12, 192.168/16); `config/net-allowlist.json`
-adds more. For anything beyond a LAN you trust, put TLS in front and add
-`--secure-cookie` to that `ExecStart`.
+adds more. For anything beyond a LAN you trust, put TLS in front. The
+supervisor hands its console only the host and the port, so a console with
+`--secure-cookie` runs as its own unit, `cousin-console.service`, beside a
+supervisor started with `--no-console` (see
+[systemd/README.md](../systemd/README.md)).
 
 Cousins on other machines need the console reachable too, since their nodes
 call it. That's off until `config/hive.toml` turns it on; see
@@ -440,9 +562,11 @@ call it. That's off until `config/hive.toml` turns it on; see
 
 ### After a reboot
 
-The units come back on their own (that's what linger is for). The cousins'
-tmux sessions don't: nothing restarts an agent by itself. Start each one,
-from the console's start button or:
+The units come back on their own (that's what linger is for), and the
+supervisor starts every cousin with it, each resuming its session, except
+one you stopped (it stays stopped until you start it) or one with
+`[agent] auto_start = false`. Start those from the console's start button
+or:
 
 ```
 cousin-spawn wren --start
@@ -454,23 +578,27 @@ cousin-spawn wren --start
 cd ~/cousins-framework
 git pull
 . .venv/bin/activate
-pip install -e ".[mcp]"          # picks up new commands; harmless otherwise
+pip install -e ".[mcp,sdk]"      # picks up new commands; harmless otherwise
 cousin-tool-surface               # the timer would do it by 06:00, this is now
 systemctl --user daemon-reload
-systemctl --user restart cousin-loops.service cousin-console.service
+systemctl --user restart cousin-supervisor.service
 ```
 
 The `pip install` matters when the update adds a new `cousin-*` command:
 an editable install only creates wrappers for the commands it knew about.
-If `systemd/` changed in the pull, re-run the `sed` loop from step 7 before
+If `systemd/` changed in the pull, re-run the `sed` loop from step 6 before
 the `daemon-reload`.
 
-Restarting the console or the loops daemon restarts only that daemon. A
-runner cousin is the supervisor's child, not theirs, and keeps running.
-Running cousins keep the old code until they're restarted or flipped. A flip
+Restarting the supervisor restarts the console, the loops daemon and every
+running cousin, each resuming its session. To restart only the console or
+the loops daemon, ask the supervisor: `cousin-supervisor stop --name console
+&& cousin-supervisor start --name console` (or `--name loops`); the cousins
+keep running. Running cousins keep the old code until they're restarted or
+flipped. A flip
 picks up everything new; see [cousins](cousins.md). The console's top bar
 shows the version and commit the console process is running, so a pull
-without a restart is visible there.
+without a restart is visible there. (In the container the commit is blank:
+the image carries no `.git`.)
 
 An install upgraded from 1.x still has the old chat server units. 2.0.0 runs
 no chat server, so disable them once, for each slug that had one, and delete
@@ -491,24 +619,21 @@ The reverse, in order. Back up first if you might want the cousins again:
 [operations](operations.md#backups)).
 
 ```
-systemctl --user disable --now cousin-loops.service cousin-console.service \
+systemctl --user disable --now cousin-supervisor.service \
+    cousin-loops.service cousin-console.service \
     cousin-sweep.timer cousin-tool-surface.timer
 rm -rf ~/.config/systemd/user/cousin-*        # -r: the LAN drop-in is a directory
 rm -f ~/.local/share/systemd/timers/stamp-cousin-*   # the timers' last-run stamps
 systemctl --user daemon-reload
 systemctl --user reset-failed
 
-# every cousin: the tmux session
-for home in ~/cousins-framework/cousins/*/; do
-  slug=$(basename "$home")
-  tmux kill-session -t "$slug" 2>/dev/null
-done
+# the tmux kind's panes, if any cousin ran on it (its own tmux socket)
+tmux -S ~/cousins-framework/run/tmux.sock kill-server 2>/dev/null
 
 rm -rf ~/cousins-framework     # checkout, venv, config, every cousin home
 ```
 
-If a cousin's tmux session has a different name, it's `[chat] tmux_session`
-in its `cousin.toml`. Turn linger off only if nothing else of yours needs it:
+Turn linger off only if nothing else of yours needs it:
 `loginctl disable-linger "$USER"`.
 
 Claude Code and Ollama are separate products with their own uninstall.

@@ -242,9 +242,11 @@ none is a contract item:
 - **A local endpoint model has no context limit** unless its account sets
   `endpoint_context`: without it neither the runner's context-pressure
   [rollover](../glossary.md#rollover) nor opencode's own compaction happens, only the daily cadence.
-- **`cousin-spawn --runner opencode` writes no `[agent] model`** and does not
-  check the account's lane when the cousin is created; the runner refuses the
-  start (exit 2) until both are right.
+- **`cousin-spawn --runner opencode` has no default model:** `--model
+  <provider>/<model>` is required, and so is an `opencode` account
+  (`--account`). Spawn checks both, and the model against the account's
+  providers, before it writes anything, and refuses (exit 2) without them;
+  `--effort` is refused too (this kind reads no effort).
 - **Log in while the cousin is stopped.** `cousin-account login --provider`
   writes `auth.json` atomically but takes no lock against a running
   `opencode serve` refreshing an OAuth token in the same file.

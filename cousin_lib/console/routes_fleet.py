@@ -853,7 +853,7 @@ def register():
             raise HttpError(400, "%s is required" % key)
         value = req.body.get(key)
         try:
-            spawn.persist_identity(home, key, value)
+            value = spawn.persist_identity(home, key, value)
         except spawn.SpawnError as err:
             raise HttpError(400, str(err))
         req.server.emit("cousins-refresh", fleet_rows(req.server))

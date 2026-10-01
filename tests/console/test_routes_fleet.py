@@ -860,6 +860,18 @@ class TestIdentityEditors(ConsoleCase):
         last = [d for k, d in seen if k == "cousins-refresh"][-1]
         self.assertEqual(last[0]["heartbeat"], 7200)
 
+    def test_the_retired_both_scope_answers_with_what_was_written(self):
+        # `both` is read as `shared` and written as `shared`; the answer
+        # says `shared`, never the word that was sent
+        import tomllib as _toml
+        home = self.cousin("wren")
+        self.serve()
+        status, body = self.post("/api/cousins/wren/memory-scope", {"memory_scope": "both"})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["memory_scope"], "shared")
+        self.assertEqual(_toml.loads((home / "cousin.toml").read_text())["memory"]["scope"],
+                         "shared")
+
     def test_invalid_values_are_400_and_leave_the_file_untouched(self):
         home = self.cousin("wren", operator="Testa")
         before = (home / "cousin.toml").read_bytes()

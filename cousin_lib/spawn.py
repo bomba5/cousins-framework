@@ -959,7 +959,8 @@ def persist_identity(home, key, value):
     """Set one identity key in cousin.toml after check_identity_value:
     a targeted edit that keeps comments and every other table,
     re-parsed and round-trip checked before the atomic rename, so a
-    refused value leaves the file as it was."""
+    refused value leaves the file as it was. Returns the value written
+    (a retired memory scope is written as its replacement)."""
     from cousin_lib.console.toml_edit import write_key
     if key == "memory_scope":
         value = normalize_scope(value)
@@ -970,6 +971,7 @@ def persist_identity(home, key, value):
     except (ValueError, tomllib.TOMLDecodeError) as err:
         raise SpawnError("%s.%s could not be written: %s"
                          % (table, toml_key, err))
+    return value
 
 
 def _resolve_root(home, root):

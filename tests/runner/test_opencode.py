@@ -15,6 +15,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.parse import urlsplit
 
 from cousin_lib import accounts
@@ -888,6 +889,45 @@ class TestTurns(OpencodeCase):
         self.assertEqual([p.get("retry") for p in self.payloads(r, "auth")][-2:],
                          ["manual retry", None])
         self.assertTrue(self.payloads(r, "auth")[-1]["restored"])
+
+    def long_backoff(self):
+        """The real backoff's far end: the next full look is 300 s away."""
+        from cousin_lib.runner import auth as runner_auth
+        for name in ("BACKOFF_BASE_S", "BACKOFF_CAP_S"):
+            patch = mock.patch.object(runner_auth, name, 300.0)
+            patch.start(); self.addCleanup(patch.stop)
+
+    def test_a_deleted_login_file_retries_within_a_second_whatever_the_backoff(self):
+        home = self.home()
+        self.long_backoff()
+        r = self.started(self.runner([[("AUTH_401",)], [("text", "back")]], home=home))
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: r.login_required()))
+        time.sleep(0.3)
+        (home / "data" / "login-required.json").unlink()   # the manual retry, or login --via
+        t = time.monotonic()
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 5))
+        self.assertLess(time.monotonic() - t, 2.5)
+        self.assertIn("manual retry", [p.get("retry") for p in self.payloads(r, "auth")])
+
+    def test_a_changed_auth_json_retries_within_a_second_whatever_the_backoff(self):
+        home = self.home(model="openai/gpt-x")
+        account = self.account(endpoint=None, endpoint_model=None, providers=("openai",))
+        auth_json = Path(account.data_dir).joinpath(*accounts.AUTH_JSON)
+        auth_json.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        auth_json.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k1"}}))
+        auth_json.chmod(0o600)
+        self.long_backoff()
+        r = self.started(self.runner([[("AUTH_401",)], [("text", "back")]], home=home,
+                                     account=account))
+        a = r.enqueue(_op("one"))
+        self.assertTrue(_wait(lambda: r.login_required()))
+        time.sleep(0.3)
+        auth_json.write_text(json.dumps({"openai": {"type": "api", "key": "fake-k2"}}))
+        t = time.monotonic()
+        self.assertTrue(_wait(lambda: self.outcome(r, a) == "delivered", 5))
+        self.assertLess(time.monotonic() - t, 2.5)
+        self.assertIn("credentials changed", [p.get("retry") for p in self.payloads(r, "auth")])
 
     def test_a_login_file_left_by_an_earlier_runner_clears_on_the_first_good_result(self):
         home = self.home()

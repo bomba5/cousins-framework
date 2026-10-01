@@ -450,6 +450,67 @@ class TestRunnerWaitsForALogin(HermeticCase):
         auth.clear_login_required(self.home)              # the operator's manual retry
         self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered"))
 
+    def long_backoff(self):
+        """The real backoff's far end: the next full look is 300 s away."""
+        for name in ("BACKOFF_BASE_S", "BACKOFF_CAP_S"):
+            patch = mock.patch.object(auth, name, 300.0)
+            patch.start(); self.addCleanup(patch.stop)
+
+    def blocked(self, **kw):
+        from tests.runner.test_sdk import init_msg, result
+        r = self.build(first_turn=[init_msg(), _said("authentication_failed", LOGGED_OUT),
+                                   result(is_error=True)], **kw)
+        self.long_backoff()
+        r.start()
+        rec = self.op(r)
+        self.assertTrue(_wait(lambda: auth.read_login_required(self.home) is not None))
+        time.sleep(0.3)
+        self.assertEqual(len(self.clients), 1)
+        return r, rec
+
+    def retries(self, r):
+        return [e["retry"] for e in self.events(r, "auth") if "retry" in e]
+
+    def test_a_changed_credential_retries_within_a_second_whatever_the_backoff(self):
+        r, rec = self.blocked()
+        self.mark = ("m", 2)                              # a login finished between two looks
+        t = time.monotonic()
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered", 5))
+        self.assertLess(time.monotonic() - t, 2.5)
+        self.assertEqual(self.retries(r), ["credentials changed"])
+
+    def test_a_deleted_login_file_retries_within_a_second_whatever_the_backoff(self):
+        r, rec = self.blocked()
+        auth.clear_login_required(self.home)              # the manual retry, or login --via
+        t = time.monotonic()
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered", 5))
+        self.assertLess(time.monotonic() - t, 2.5)
+        self.assertEqual(self.retries(r), ["manual retry"])
+
+    def test_a_retry_that_failed_for_another_reason_waits_for_the_next_change(self):
+        """The quick look wakes on a change since the LAST look, not since the
+        failure: a retry that cannot connect for another reason is not
+        retried every second on the same credential."""
+        r, rec = self.blocked()
+        inner = r.client_factory
+
+        def factory(options):
+            client = inner(options)
+
+            async def down(prompt=None):
+                raise RuntimeError("the CLI did not start")
+            client.connect = down
+            return client
+        r.client_factory = factory
+        self.mark = ("m", 2)
+        self.assertTrue(_wait(lambda: len(self.clients) == 2, 5))
+        time.sleep(2.5)
+        self.assertEqual(len(self.clients), 2)            # one retry, then the backoff
+        self.assertTrue(r.login_required())
+        r.client_factory = inner
+        self.mark = ("m", 3)                              # the next change wakes it again
+        self.assertTrue(_wait(lambda: r.inbox.get(rec.inbox_id)["outcome"] == "delivered", 5))
+
     def test_the_account_not_taking_effect_is_an_auth_event_not_a_block(self):
         key = accounts.Account("metered", "anthropic-key", None, None, secret_value="k-test")
         r = self.build(account=key); r.start()                          # the scripted init says "none"

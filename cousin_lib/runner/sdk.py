@@ -359,6 +359,9 @@ class SdkRunner:
     backoff_after = 3
     backoff_base_s = 1.0
     backoff_cap_s = 30.0
+    # how often a runner waiting for a login reads the cheap signals (the
+    # credential mark, the login file) between two full looks
+    login_poll_s = 1.0
     # A login retry failing this many times in a row for another reason
     # gives up the session on file and starts fresh (_login_retry_failed).
     RETRY_FAILURES_TO_FRESH = 3
@@ -1126,12 +1129,14 @@ class SdkRunner:
         reads logged in (status proves presence): only a new credential
         moves it. Back to idle on a connect; the next good result clears
         the file (R19). The mark and the status it compares against were
-        read at the failure (_login_required), each look moves the status."""
+        read at the failure (_login_required), each look moves the status.
+        Between two looks the cheap signals (the mark, the file) are read
+        every login_poll_s: a change since the last look ends the wait at
+        once, so a login finished mid-backoff is seen within a second."""
         again, seen = None, self._login_file_seen
+        base = self._login_mark             # what the quick reads compare against
         while not self._stop.is_set() and self._login_blocked:
-            deadline = time.monotonic() + auth.backoff_s(self._login_attempt)
-            while not self._stop.is_set() and time.monotonic() < deadline:
-                await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+            await self._login_wait(auth.backoff_s(self._login_attempt), base, seen)
             if self._stop.is_set():
                 return
             self._login_attempt += 1
@@ -1143,7 +1148,7 @@ class SdkRunner:
                    else "logged in" if (now_in and not self._login_was_in)
                    else "manual retry" if (seen and not present)
                    else again)
-            self._login_was_in, seen = now_in, present
+            self._login_was_in, seen, base = now_in, present, mark
             if why is None:
                 continue                    # nothing the operator did yet: no connect, no turn
             refusals = self._login_refusals
@@ -1164,11 +1169,32 @@ class SdkRunner:
             # file half written, a CLI that did not start, a session gone): the
             # next look retries, and the file says why
             if self._login_refusals != refusals:
-                again = None
+                again, base = None, self._login_mark
             else:
                 again = why
                 self._login_retry_failed()
             seen = self._login_file_seen
+
+    async def _login_wait(self, seconds, base, seen):
+        """Sleep up to `seconds` (the backoff), reading the cheap signals
+        every login_poll_s: the credential mark (a stat and a small hash)
+        and whether data/login-required.json is there. Return early when the
+        mark moved from `base` (the last look's) or the file `seen` there is
+        gone (the manual retry, or `login --via` waking this cousin). The
+        look that follows decides; `claude auth status` stays on the
+        backoff (it starts the CLI)."""
+        deadline = time.monotonic() + seconds
+        poll_at = time.monotonic() + self.login_poll_s
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+            if time.monotonic() < poll_at:
+                continue
+            poll_at = time.monotonic() + self.login_poll_s
+            if seen and not (self.home / auth.LOGIN_FILE).exists():
+                return
+            mark = await asyncio.to_thread(auth.credential_mark, self.account, self.root)
+            if mark != base:
+                return
 
     async def _login_retry(self):
         """One reconnect after the operator's fix; True when a client

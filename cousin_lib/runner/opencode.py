@@ -490,6 +490,9 @@ class OpencodeRunner:
     # how long a stopping runner waits for its aborted turn's idle
     stop_grace_s = 2.0
     reader_backoff_s = 0.5
+    # how often a runner waiting for a login reads its auth.json mark and
+    # the login file between two looks
+    login_poll_s = 1.0
     mcp_timeout_s = 10.0
     connect_timeout_s = 10.0
     plugin_timeout_s = PLUGIN_TIMEOUT_S
@@ -1932,11 +1935,21 @@ class OpencodeRunner:
     def _await_login(self):
         """Every 1, 2, 4 ... 300 s look: the account's auth.json changed, or
         the operator deleted data/login-required.json (the manual retry).
-        No turn is spent on a look; the next good result clears the file."""
+        Between two looks both are read every login_poll_s (a stat and a
+        small hash), and a change ends the wait at once: a login finished
+        mid-backoff is seen within a second. No turn is spent on a look;
+        the next good result clears the file."""
         deadline = time.monotonic() + auth.backoff_s(self._login_attempt)
+        poll_at = time.monotonic() + self.login_poll_s
         while not self._stop.is_set() and time.monotonic() < deadline:
             self._stop.wait(min(0.05, max(0.0, deadline - time.monotonic())))
             self._pump()
+            if time.monotonic() < poll_at:
+                continue
+            poll_at = time.monotonic() + self.login_poll_s
+            if ((self._login_file_seen and not (self.home / auth.LOGIN_FILE).exists())
+                    or self._credential_mark() != self._login_mark):
+                break
         if self._stop.is_set():
             return
         self._login_attempt += 1

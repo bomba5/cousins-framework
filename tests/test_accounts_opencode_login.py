@@ -284,6 +284,17 @@ class TestRefusals(OcLoginCase):
 
 
 class TestOAuthFlow(OcLoginCase):
+    def test_a_good_oauth_login_via_a_cousin_wakes_it_when_its_file_names_the_account(self):
+        from cousin_lib.runner import auth
+        auth.write_login_required(self.home, host="h", account="keyed", kind="opencode",
+                                  reason=auth.LOGIN, detail="HTTP 401", action="log in")
+        path = self.home / auth.LOGIN_FILE
+        with mock.patch.object(accounts, "opencode_login_flow", return_value={"ok": True}):
+            rc, out, err = self.cli("login", "keyed", "--provider", "openai", "--method",
+                                    HEADLESS, "--via", "wren", tty=True)
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(path.exists())
+
     def flow(self, fake, relay=None, provider="openai", method=HEADLESS, name="keyed"):
         self.relayed = []
 

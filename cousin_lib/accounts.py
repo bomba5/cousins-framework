@@ -1486,7 +1486,31 @@ def _login_cmd(args, account, root):
         restore()
     print("%s %s: %s" % (args.cmd, account.name,
                          "ok" if out["ok"] else out.get("reason", "failed")))
+    if out["ok"] and args.via:
+        _wake_via(root, args.via, account.name)
     return 0 if out["ok"] else 4
+
+
+def _wake_via(root, slug, account_name):
+    """After a good login through cousin `slug`: clear its
+    data/login-required.json when the file names this account, which its
+    runner reads as the manual retry (it looks at once, not at the next
+    backoff step). Another account's file, or another cousin's, stays."""
+    from cousin_lib.runner import auth
+    home = Path(root) / "cousins" / slug
+    data = auth.read_login_required(home)
+    if not data or data.get("account") != account_name:
+        return False
+    try:
+        cleared = auth.clear_login_required(home)
+    except OSError as err:
+        print("cousin-account: could not clear %s's %s: %s (delete it to retry)"
+              % (slug, auth.LOGIN_FILE, err), file=sys.stderr)
+        return False
+    if cleared:
+        print("cousin-account: cleared %s's %s: it retries now" % (slug, auth.LOGIN_FILE),
+              file=sys.stderr)
+    return cleared
 
 
 def _via_operator(args, root):
@@ -1566,6 +1590,8 @@ def _opencode_login_cmd(args, account, root):
     finally:
         restore()
     print("login %s: %s" % (account.name, "ok" if out["ok"] else out.get("reason", "failed")))
+    if out["ok"] and args.via:
+        _wake_via(root, args.via, account.name)
     return 0 if out["ok"] else 4
 
 

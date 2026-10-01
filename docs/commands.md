@@ -88,7 +88,10 @@ instead; for an hour after, a second or late code there is discarded the same
 way. A code pasted through Telegram stays in Telegram's own message history:
 it is single-use and tied to that login flow, but you may delete the message.
 Do not answer a login notice you did not
-start yourself. Without `--via` the URL is printed and the code is asked for
+start yourself. A good login with `--via` also deletes that cousin's
+`data/login-required.json` when the file names this account, so a runner
+waiting for the login retries at once (see
+[configuration](configuration.md#datalogin-requiredjson)). Without `--via` the URL is printed and the code is asked for
 at the terminal. `--timeout` is the window for the code in seconds (600; it
 must be positive). Exit 0 done, 4 the flow failed (the line says why, in
 the CLI's own words when it gave any), 2 refused (inside a cousin, no
@@ -126,7 +129,8 @@ one instruction line (a device code to enter, or "complete authorization in
 your browser") and then waits; nothing is pasted back. Those are printed, or
 with `--via <slug>` posted to that cousin's operator in its chat (no code
 capture is armed), and the login counts once the account's `auth.json` holds
-the provider, not when the screen says so. A method that asks for an API
+the provider, not when the screen says so; a good one wakes the `--via`
+cousin as `login --via` does. A method that asks for an API
 key, or asks another question first, ends the flow and says so. A browser
 method redirects to `localhost` on the host, so it only completes from a
 browser on the host; a device-code method completes from any device.

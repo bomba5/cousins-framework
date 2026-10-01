@@ -307,8 +307,15 @@ looks at the account's credential file (its mtime and a hash, held in memory)
 and at `claude auth status` (no model call), and reconnects only when the
 credentials changed, the status went from logged out to logged in, or you
 deleted the file. A revoked login still reads logged in, so for it only new
-credentials (or deleting the file) move the runner. Deleting the file is the
+credentials (or deleting the file) move the runner. Between two looks it
+reads the cheap signals about once a second (the credential file's mark, and
+whether the login file is still there), so a changed credential or a deleted
+file is noticed within about a second however long the backoff has grown;
+`claude auth status` stays on the backoff. Deleting the file is the
 manual retry, and the way out of a billing stop, where no credential changes.
+A good `cousin-account login <name> --via <slug>` (or `token ... --via
+<slug>`) deletes that cousin's file when it names the account, so the cousin
+retries at once; another cousin's file, or one naming another account, stays.
 A retry that fails for another reason (a secret file half written, a session
 that is gone) puts that error into the file's `detail` and is tried again at
 the next look; after three such failures in a row the runner gives up the

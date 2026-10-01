@@ -518,6 +518,47 @@ class TestOperatorOnly(LoginCase):
         self.assertEqual(len(texts), 1); self.assertIn(URL, texts[0])
         self.assertNotIn(CODE, "".join(texts) + err)
 
+    def login_file(self, home, account):
+        from cousin_lib.runner import auth
+        auth.write_login_required(home, host="h", account=account, kind="claude-login",
+                                  reason=auth.LOGIN, detail="Not logged in", action="log in")
+        return home / auth.LOGIN_FILE
+
+    def test_a_good_login_via_a_cousin_wakes_it_when_its_file_names_the_account(self):
+        testa = self.root / "cousins" / "testa"; (testa / "data").mkdir(parents=True)
+        mine, other = self.login_file(self.home, "fleet"), self.login_file(testa, "fleet")
+
+        def flow(account, root, *, relay, await_code, timeout):
+            self.assertTrue(mine.exists())               # cleared only after the login
+            return {"ok": True}
+        with mock.patch.object(accounts, "login_flow", side_effect=flow):
+            rc, err = self.main("login", "fleet", "--via", "wren")
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(mine.exists())                  # the runner's manual retry
+        self.assertTrue(other.exists())                  # another cousin is not the via
+        self.assertIn("wren", err)
+
+    def test_login_via_leaves_a_file_for_another_account_or_after_a_failed_login(self):
+        path = self.login_file(self.home, "nightly")
+        with mock.patch.object(accounts, "login_flow", return_value={"ok": True}):
+            self.assertEqual(self.main("login", "fleet", "--via", "wren")[0], 0)
+        self.assertTrue(path.exists())                   # names another account
+        path = self.login_file(self.home, "fleet")
+        with mock.patch.object(accounts, "login_flow",
+                               return_value={"ok": False, "reason": "not logged in"}):
+            self.assertEqual(self.main("login", "fleet", "--via", "wren")[0], 4)
+        self.assertTrue(path.exists())                   # no login, no retry
+        with mock.patch.object(accounts, "login_flow", return_value={"ok": True}):
+            self.assertEqual(self.main("login", "fleet")[0], 0)
+        self.assertTrue(path.exists())                   # no --via, no cousin named
+
+    def test_a_good_token_via_a_cousin_wakes_it_too(self):
+        path = self.login_file(self.home, "nightly")
+        with mock.patch.object(accounts, "token_flow", return_value={"ok": True}):
+            rc, err = self.main("token", "nightly", "--via", "wren")
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(path.exists())
+
     def test_a_relay_that_fails_leaves_nothing_armed(self):
         def flow(account, root, *, relay, await_code, timeout):
             with self.assertRaises(RuntimeError):

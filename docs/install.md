@@ -386,7 +386,8 @@ install script can gate on it. Add `--validate` for one smallest model [turn](gl
 Re-login: when a login expires or is revoked, a key or token stops working, or
 an account's billing stops it, the runner says so in the console,
 `cousin-chat list` and Telegram, and waits. Run the action it names. It
-resumes on its own once the credentials change, or delete
+resumes on its own within about a second of the credentials changing (a
+good `login --via <slug>` also wakes that cousin at once), or delete
 `cousins/<slug>/data/login-required.json` to make it try now (the way out of a
 billing stop, where no credential changes).
 

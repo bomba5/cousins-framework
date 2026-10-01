@@ -3,6 +3,26 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## Unreleased
+
+### Fixed
+- **A runner waiting for a login notices the fix within about a second.**
+  It looked at the account only on the doubling backoff (1, 2, 4 ... 300
+  seconds), so a login finished between two looks waited up to minutes and
+  the cousin stayed `errored`. Between two looks the `sdk` and `opencode`
+  runners now read the cheap signals about once a second: the credential
+  file's mark (a stat and a small hash) and whether
+  `data/login-required.json` is still there. A changed credential or a
+  deleted file ends the wait at once; `claude auth status`, which starts
+  the CLI, stays on the backoff, and a retry that fails for another reason
+  is not repeated every second on the same credential.
+- **A good `cousin-account login <name> --via <slug>` wakes that cousin.**
+  The `--via` cousin's `data/login-required.json` is deleted when it names
+  the account just logged in (also `token ... --via` and an opencode OAuth
+  `--method ... --via`), so its runner retries at once, as on a manual
+  retry. Only after a good login, only the `--via` cousin's file, and
+  never a file naming another account.
+
 ## 2.3.4 - 2026-10-01
 
 ### Fixed

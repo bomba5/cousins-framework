@@ -133,7 +133,8 @@ def _accepts(fn, name):
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
               request_rollover=None, live_threads=None, reply_gate=True,
-              watch=None, policy_changed=None, thread_for_prompt=None):
+              watch=None, policy_changed=None, thread_for_prompt=None,
+              memory_watch=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -163,6 +164,10 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     REPLY_GATE_REASON. The CLI marks the Stop that follows a block
     `stop_hook_active`, and that one always passes, so the gate costs at
     most one more model step and can never loop.
+    memory_watch: a memory_watch.MemoryWatch; each submitted prompt
+    checks it, and memory written from outside the session (the console,
+    the review gate, dreaming) reaches the model as a runner note after
+    the config note and before recall. Per runner, like `watch`.
     thread_for_prompt: `f(prompt) -> thread id or None`; a submitted
     prompt resets the answered state of its own thread only, so a peer's
     message folded into an operator turn does not undo the operator's
@@ -312,6 +317,18 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         stream.append("config_change", {"files": [name for name, _, _ in changes]})
         return text
 
+    async def memory_note():
+        """The runner note for memory written from outside since the last
+        prompt, or ""."""
+        if memory_watch is None:
+            return ""
+        entries = await asyncio.to_thread(memory_watch.check)
+        if not entries:
+            return ""
+        from cousin_lib.runner import memory_watch as mw
+        stream.append("memory_update", {"entries": len(entries)})
+        return mw.note(entries)
+
     async def recall_text(prompt):
         if CONTEXT_MARK in prompt:
             # the item already carries its recall context
@@ -349,7 +366,13 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             changed = ""
             stream.append("hook", {"event": "UserPromptSubmit",
                                    "error": "config check: %s: %s" % (type(err).__name__, err)})
-        text = "\n\n".join(t for t in (changed, await recall_text(prompt)) if t)
+        try:
+            written = await memory_note()
+        except Exception as err:  # noqa: BLE001 - a broken check must not cost recall
+            written = ""
+            stream.append("hook", {"event": "UserPromptSubmit",
+                                   "error": "memory check: %s: %s" % (type(err).__name__, err)})
+        text = "\n\n".join(t for t in (changed, written, await recall_text(prompt)) if t)
         if not text:
             return {}
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",

@@ -73,6 +73,26 @@ def _diff(old, new, name):
     return text
 
 
+def _live_keys_only(old, new):
+    """[(key, new value)] when the only difference between two cousin.toml
+    texts is [agent] keys that apply without a restart (agent_settings:
+    "restart": False, the dreaming keys); else []."""
+    import tomllib
+    from cousin_lib import agent_settings
+    try:
+        before, after = tomllib.loads(old or ""), tomllib.loads(new or "")
+    except tomllib.TOMLDecodeError:
+        return []
+    a_before = dict(before.pop("agent", None) or {})
+    a_after = dict(after.pop("agent", None) or {})
+    if before != after:
+        return []
+    keys = sorted(k for k in set(a_before) | set(a_after) if a_before.get(k) != a_after.get(k))
+    if not keys or any(agent_settings.SCHEMA.get(k, {}).get("restart", True) for k in keys):
+        return []
+    return [(k, a_after.get(k)) for k in keys]
+
+
 def note(changes, live_policy, parse_policy):
     """(note text or "", new live policy). `live_policy` is the Policy the
     session enforces now; `parse_policy(text)` builds one (raising on a
@@ -109,6 +129,10 @@ def note(changes, live_policy, parse_policy):
             if not (added or removed or skipped):
                 line += " Nothing it enforces changed."
             parts.append(line)
+        elif name == "cousin.toml" and _live_keys_only(old, new):
+            parts.append("- cousin.toml changed: %s. These apply without a restart (the"
+                         " loops daemon reads them every tick)." % ", ".join(
+                             "[agent] %s = %r" % (k, v) for k, v in _live_keys_only(old, new)))
         else:
             parts.append("- %s changed. It is read when the runner starts: a restart applies"
                          " it, and until then this session runs on the old file." % name)

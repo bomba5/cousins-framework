@@ -77,6 +77,21 @@ class TestNote(HomeCase):
         self.assertEqual(live, Policy())
 
 
+class TestLiveKeys(HomeCase):
+    def test_a_dreaming_change_says_it_needs_no_restart(self):
+        watch = config_watch.ConfigWatch(self.home, self.root)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[agent]\ndreaming = "nightly"\n')
+        text, _ = config_watch.note(watch.check(), Policy(), Policy.parse)
+        self.assertIn("[agent] dreaming = 'nightly'", text)
+        self.assertIn("apply without a restart", text)
+        # a key the runner reads at start still says restart
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[agent]\ndreaming = "nightly"\nmodel = "x"\n')
+        text, _ = config_watch.note(watch.check(), Policy(), Policy.parse)
+        self.assertIn("a restart applies", text)
+
+
 class TestHooksApplyIt(HomeCase):
     def test_a_policy_edit_denies_at_the_next_prompt(self):
         stream = EventStream(self.home, "cfg-test")

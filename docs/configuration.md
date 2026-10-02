@@ -911,7 +911,9 @@ count, and a reply sent before a new prompt was submitted (a message folded
 into the running turn) does not cover that prompt. Only operator and person
 threads are gated (`HUMAN_KINDS` in `runner/hooks.py`). Each block is a `gate`
 event in the runner's stream, with the payload `{"gate": "reply", "threads":
-[...]}`. `false` turns the gate off.
+[...]}`. `false` turns the gate off. A value that is not `true` or `false` (a
+quoted `"false"`) is refused at runner start, exit 2: `cousin-runner:
+cousin.toml [agent] reply_gate must be true or false, got 'false'`.
 
 The runner records `usage` on every `result` event in its stream (the SDK's
 own `ResultMessage.usage` dict: at least `input_tokens`, `output_tokens`,

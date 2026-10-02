@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.7.0 - 2026-10-02
+
+### Added
+
+- **Memory written from outside reaches a live session.** The sdk runner
+  keeps how far each raw memory day file had grown when the session
+  started. At each submitted prompt, entries appended since then by
+  someone other than the session (a console write, a review-gate verdict,
+  a dreaming pass) reach the model as one `[runner] memory written since
+  this session started, not by you` note, each with its entry id, said
+  once, at most 12 entries and 2500 characters (what is left out is
+  counted). The session's own writes are never echoed back to it.
+
+### Fixed
+
+- **The config note no longer says a restart is needed for the dreaming
+  keys.** A `cousin.toml` change that only touches `[agent] dreaming` or
+  `dreaming_at` now says they apply without a restart.
+
 ## 3.6.1 - 2026-10-02
 
 ### Fixed

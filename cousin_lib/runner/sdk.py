@@ -37,8 +37,8 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import (auth, config_watch, envelope, extract, hooks, restart_note,
-                               rollover, tool_ledger, tools, wake)
+from cousin_lib.runner import (auth, config_watch, envelope, extract, hooks, memory_watch,
+                               restart_note, rollover, tool_ledger, tools, wake)
 from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -514,6 +514,7 @@ class SdkRunner:
         # new hooks, and they must keep the baseline and the tightened
         # policy (config_watch), never fall back to the start's.
         self.config_watch = config_watch.ConfigWatch(self.home, self.root)
+        self.memory_watch = memory_watch.MemoryWatch(self.home)
         from cousin_lib.runner.session_store import SqliteSessionStore
         self.session_store = SqliteSessionStore(self.home)
         # The rollover (rollover.py): the handoff tool hands its summary to
@@ -594,7 +595,8 @@ class SdkRunner:
                                        thread_for_prompt=self._thread_for_prompt,
                                        reply_gate=bool(self._agent_value("reply_gate", True)),
                                        watch=self.config_watch,
-                                       policy_changed=self._policy_tightened)
+                                       policy_changed=self._policy_tightened,
+                                       memory_watch=self.memory_watch)
         # The composed prompt (prompt.py): byte-stable across generations,
         # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first

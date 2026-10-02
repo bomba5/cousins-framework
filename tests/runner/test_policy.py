@@ -257,11 +257,11 @@ class TestThePerimeterAtTheGate(HermeticCase):
 
     def test_outside_the_framework_root_a_subagent_writes_its_own_files(self):
         # another repository, and a framework checkout's own templates
-        for path in ("/home/u/other-repo/shared/notes.md", "/home/u/other-repo/config/law.md",
-                     "/home/u/cf-wt/x/templates/shared/reference_rules.md"):
+        for path in ("/srv/other-repo/shared/notes.md", "/srv/other-repo/config/law.md",
+                     "/srv/cf-wt/x/templates/shared/reference_rules.md"):
             out = self._gate(agent_id="sub-1", tool_name="Write", tool_input={"file_path": path})
             self.assertEqual(out, {}, path)
-        out = self._gate(agent_id="sub-1", tool_name="Bash", cwd="/home/u/other-repo",
+        out = self._gate(agent_id="sub-1", tool_name="Bash", cwd="/srv/other-repo",
                          tool_input={"command": "echo x > shared/notes.md"})
         self.assertEqual(out, {})
         # the same relative write from inside the root is refused

@@ -241,7 +241,7 @@ class TestUnderTheRoot(unittest.TestCase):
         # a shell expands ~ before it writes: so does the check
         with mock.patch.dict(os.environ, {"HOME": "/srv"}):
             self.assertIsNotNone(p.protected_reason("~/cf/config/law.md", root=root))
-        with mock.patch.dict(os.environ, {"HOME": "/home/u"}):
+        with mock.patch.dict(os.environ, {"HOME": "/var/lib/someone"}):
             self.assertIsNone(p.protected_reason("~/cf/config/law.md", root=root))
         # no root given: shape alone, as before
         self.assertIsNotNone(p.protected_reason("/elsewhere/shared/a.md"))

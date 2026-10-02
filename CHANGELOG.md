@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.4.0 - 2026-10-02
+
+### Added
+
+- **Config edited under a live session is announced at the next prompt.**
+  The sdk runner keeps config/law.md, policy.toml, cousin.toml and .mcp.json
+  as the session started. At each submitted prompt, anything changed reaches
+  the model as one `[runner] configuration changed` note ahead of recall.
+  A law change carries its diff (the system prompt keeps the old text until
+  the next generation; the new text wins). cousin.toml and .mcp.json say a
+  restart applies them.
+
+### Changed
+
+- **A policy.toml edit tightens a live session at once and never loosens
+  it.** What the edit adds (a denied tool, a command pattern, an ask, the
+  outbound filter back on) is enforced from the next prompt. What it removes
+  stays enforced until the next runner start, so a model cannot loosen its
+  own rules by editing the file. An entry that would deny the handoff is
+  left out, and a file that no longer parses keeps the session on the policy
+  it has; the note says the next start will refuse it.
+
 ## 3.3.0 - 2026-10-02
 
 ### Added

@@ -17,10 +17,12 @@ guardrail against a known command line, not a sandbox: the same effect
 can be spelled another way. Deny the tool itself with `deny_tools` when
 the risk is the tool, not the shape of one command.
 
-The file lives in the home it governs, so the model can rewrite it; a
-rewrite takes effect at the next start, never mid-session. An operator
-who needs it immutable makes it read-only to the cousin's user or owns
-it."""
+The file lives in the home it governs, so the model can rewrite it. A
+rewrite mid-session only ever TIGHTENS the live session (`tightened_by`:
+entries it adds apply at the next prompt, config_watch); anything it
+removes takes effect at the next start, never mid-session, so a model
+cannot loosen its own rules by editing the file. An operator who needs
+it immutable makes it read-only to the cousin's user or owns it."""
 import re
 import tomllib
 from dataclasses import dataclass
@@ -92,6 +94,43 @@ class Policy:
             raise PolicyError("%s: outbound_filter must be true or false" % FILE)
         return cls(deny_tools=_str_list(data, "deny_tools"), deny_bash_patterns=tuple(patterns),
                    ask=_str_list(data, "ask"), outbound_filter=flag, source=source)
+
+    def tightened_by(self, other):
+        """The policy a live session moves to when policy.toml changes to
+        `other` mid-session: this one plus everything `other` adds (the
+        union), never minus anything. A removal would let the model loosen
+        its own rules by editing the file, so removals wait for the next
+        start; an addition that would deny the handoff is left out (the
+        console refuses such an edit too). Returns (policy, added, removed,
+        skipped), each a list of "key: entry" strings."""
+        pats = [p.pattern for p in self.deny_bash_patterns]
+        other_pats = [p.pattern for p in other.deny_bash_patterns]
+        added, removed, skipped = [], [], []
+        merged = {}
+        for key, mine, theirs in (("deny_tools", list(self.deny_tools), list(other.deny_tools)),
+                                  ("deny_bash_patterns", pats, other_pats),
+                                  ("ask", list(self.ask), list(other.ask))):
+            out = list(mine)
+            for entry in theirs:
+                if entry in mine:
+                    continue
+                if key != "deny_bash_patterns" and self._named((entry,), HANDOFF_TOOL):
+                    skipped.append("%s: %s" % (key, entry))
+                    continue
+                out.append(entry)
+                added.append("%s: %s" % (key, entry))
+            removed += ["%s: %s" % (key, e) for e in mine if e not in theirs]
+            merged[key] = tuple(out)
+        if self.outbound_filter and not other.outbound_filter:
+            removed.append("outbound_filter: true")
+        elif other.outbound_filter and not self.outbound_filter:
+            added.append("outbound_filter: true")
+        live = Policy(deny_tools=merged["deny_tools"],
+                      deny_bash_patterns=tuple(re.compile(p) for p in merged["deny_bash_patterns"]),
+                      ask=merged["ask"],
+                      outbound_filter=self.outbound_filter or other.outbound_filter,
+                      source=other.source)
+        return live, added, removed, skipped
 
     def _named(self, names, tool):
         tool = str(tool or "")

@@ -32,9 +32,14 @@ writing side:
   audits), `self_portrait.commit_candidate` and the body-swap's identity
   trade (`lifecycle._swap_bodies`).
 
-Shape, not root: the check is pure and offline, so the Bash chokepoint
-can apply it to a parsed write target without resolving an install, and a
-cousin in a worktree is held to the same rule as one in the live home.
+Shape, under the root: the check is pure and offline (paths are
+normalised, never resolved), so the Bash chokepoint can apply it to a
+parsed write target cheaply. A caller that knows the framework root
+(the tool gate does) passes it, and only paths under that root are
+protected: a subagent working in another repository, or editing a
+framework checkout's templates/shared/, writes its own files. A
+relative path with no known working directory is checked by shape
+alone, which errs toward refusing.
 
 What it does not do:
 
@@ -106,10 +111,32 @@ def _parts(path):
     return tuple(p for p in Path(text).as_posix().split("/") if p)
 
 
-def protected_reason(path):
+def _outside(path, root, cwd):
+    """True when `path` is certainly not under the framework `root`: an
+    absolute path (or a relative one joined to `cwd`) normalised without
+    touching the filesystem. A relative path with no cwd is not known to
+    be outside, so it is checked by shape alone (the safe direction)."""
+    text = str(path or "").strip()
+    if root is None or not text:
+        return False
+    if not os.path.isabs(text):
+        if not cwd:
+            return False
+        text = os.path.join(str(cwd), text)
+    full = os.path.normpath(text)
+    base = os.path.normpath(str(root))
+    return not (full == base or full.startswith(base.rstrip("/") + "/"))
+
+
+def protected_reason(path, *, root=None, cwd=None):
     """Why `path` is protected, or None when it is not. The reason names
     the surface and its owner, because a refusal a caller cannot act on
-    is a refusal the caller routes around."""
+    is a refusal the caller routes around. With `root` (the framework
+    root), a path outside it is never protected: a subagent working in
+    another repository, or in a framework checkout's templates/shared/,
+    writes its own files."""
+    if _outside(path, root, cwd):
+        return None
     parts = _parts(path)
     if not parts:
         return None
@@ -237,13 +264,13 @@ def write_targets(tool_name, tool_input):
     return []
 
 
-def check_tool(tool_name, tool_input):
+def check_tool(tool_name, tool_input, *, root=None, cwd=None):
     """The refusal for a tool call that would WRITE a protected surface,
     or None. One reason per call: the first path, not every path, because
     the caller turns this into a deny message and a list of them reads
     like a policy document."""
     for path in write_targets(tool_name, tool_input):
-        reason = protected_reason(path)
+        reason = protected_reason(path, root=root, cwd=cwd)
         if reason is not None:
             return ("memory perimeter: %s may not write %s: %s"
                     % (tool_name or "this tool", path, reason))

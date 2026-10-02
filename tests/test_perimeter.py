@@ -222,3 +222,22 @@ class TestTheLawSurvivesFit(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestUnderTheRoot(unittest.TestCase):
+    """With the framework root known, only paths under it are protected."""
+
+    def test_root_limits_the_shapes(self):
+        from cousin_lib import perimeter as p
+        root = "/srv/cf"
+        self.assertIsNotNone(p.protected_reason("/srv/cf/config/law.md", root=root))
+        self.assertIsNotNone(p.protected_reason("/srv/cf/shared/a.md", root=root))
+        self.assertIsNone(p.protected_reason("/srv/cfx/shared/a.md", root=root))
+        self.assertIsNone(p.protected_reason("/elsewhere/shared/a.md", root=root))
+        # relative: joined to the cwd when known, else by shape alone
+        self.assertIsNone(p.protected_reason("shared/a.md", root=root, cwd="/elsewhere"))
+        self.assertIsNotNone(p.protected_reason("shared/a.md", root=root, cwd="/srv/cf"))
+        self.assertIsNotNone(p.protected_reason("shared/a.md", root=root))
+        self.assertIsNotNone(p.protected_reason("../cf/config/law.md", root=root,
+                                                cwd="/srv/cf/cousins"))
+        # no root given: shape alone, as before
+        self.assertIsNotNone(p.protected_reason("/elsewhere/shared/a.md"))

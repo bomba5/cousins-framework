@@ -15,10 +15,12 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   gate: Write, Edit, MultiEdit and NotebookEdit by their exact path, and
   Bash by the paths it writes to (a redirect, the destination of cp or mv,
   tee, rm, `sed -i`, `dd of=`, and so on), which is best-effort. Reading
-  those files is never refused. The primary session keeps the operator's
-  own edits; policy.toml can close those too. `shared/proposed/` (where a
-  cousin proposes to the shared tier) and the portrait candidate stay
-  writable.
+  those files is never refused, and only paths under the framework root
+  count: a subagent working in another repository writes its own files.
+  The primary session keeps the operator's own edits (policy.toml can deny
+  Write and Edit only as whole tools, and Bash commands by pattern).
+  `shared/proposed/` (where a cousin proposes to the shared tier) and the
+  portrait candidate stay writable.
 
 ### Changed
 

@@ -75,7 +75,7 @@ def _kind(thread):
     return str(thread).partition(":")[0]
 
 
-def gate(policy, payload):
+def gate(policy, payload, *, root=None):
     """The PreToolUse decision for one hook payload, `(decision,
     reason)`: the memory perimeter for a background pass, then a
     subagent's reply that names no thread, then policy.toml decides. The
@@ -88,14 +88,18 @@ def gate(policy, payload):
     yet, so that is a requirement on that design and not a fact about it.
     The primary session keeps its operator-directed edits, because editing
     the law and committing a portrait is the operator's own work and is
-    routine; an operator who wants those closed on the primary session too
-    writes the paths into policy.toml. Reads are never refused: a
+    routine. (policy.toml can deny Write and Edit only as whole tools, and
+    Bash commands by pattern; it has no per-path rule.) With `root`, only
+    paths under the framework root are protected, so a subagent working in
+    another repository is never refused its own files. Reads are never
+    refused: a
     subagent reads the law and the shared rules as a matter of course. The
     deny is per call and names the path, so it reads as a boundary
     rather than a failure."""
     tool_name, tool_input = payload.get("tool_name"), payload.get("tool_input")
     if payload.get("agent_id"):
-        refusal = perimeter.check_tool(tool_name, tool_input)
+        refusal = perimeter.check_tool(tool_name, tool_input, root=root,
+                                       cwd=payload.get("cwd"))
         if refusal:
             return "deny", refusal
         if tool_name == REPLY_TOOL:
@@ -240,7 +244,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                 note_reply(payload)
             # A call the policy denies never runs: no job row, no rewrite.
             if event == "PreToolUse" and policy is not None \
-                    and gate(live["policy"], payload)[0] != "allow":
+                    and gate(live["policy"], payload, root=root)[0] != "allow":
                 return {}
             # The recorder checks `cancelled` before it registers a row: once
             # the hook has answered without it, a late row would be one nobody
@@ -363,7 +367,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                                  % path.relative_to(home)}
 
     def on_policy(payload):
-        decision, reason = gate(live["policy"], payload)
+        decision, reason = gate(live["policy"], payload, root=root)
         if decision == "allow":
             return {}
         event = {"tool": payload.get("tool_name"), "decision": decision, "reason": reason}

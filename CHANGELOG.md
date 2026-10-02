@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## 3.1.0 - 2026-10-02
+## 3.2.0 - 2026-10-02
 
 ### Added
 
@@ -13,9 +13,24 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   The second stop always passes, so the gate costs at most one more model
   step and never loops. A subagent's reply does not count; with two live
   threads each needs its own. It is on by default; `[agent] reply_gate =
-  false` in cousin.toml turns it off; a value that is not true or false
-  (a quoted `"false"`) is refused at runner start. The runner's event stream records
-  each block as a `gate` event.
+  false` in cousin.toml turns it off; a value that is not true or false (a
+  quoted `"false"`) is refused at runner start. The runner's event stream
+  records each block as a `gate` event.
+
+## 3.1.0 - 2026-10-02
+
+### Added
+
+- **A scheduled prompt says what it is and when it fired.** It arrives as
+  `[cousin-schedule] #<id>, set <time>, due <time>, fired <time> (on time |
+  N min late)`, then the prompt verbatim. The header says it is the cousin's
+  own scheduled prompt and nobody is waiting on the turn. A job that fires 30
+  minutes or more late (the cousin or the loops daemon was down) is still
+  delivered, never dropped, and says that what it was set for may already be
+  settled.
+- **A cousin holds at most 20 pending scheduled prompts.** `cousin-schedule
+  add` and the `schedule` tool refuse the 21st until one fires or is
+  cancelled, so a runaway self-scheduling loop stops there.
 
 ## 3.0.0 - 2026-10-01
 

@@ -326,9 +326,22 @@ Times: `in N` with `s`, `m` (the default), `h` or `d`; `tomorrow HH:MM`;
 or a date and time like `2026-10-01T08:00`, `2026-10-01 08:00` or only
 `2026-10-01`, in local time. A time in the past is refused.
 
-The loops daemon delivers a due prompt on its next tick, as
-`[cousin-schedule] <prompt>`, once the cousin is up. If the cousin is
-down or delivery fails, the prompt stays pending and is tried again.
+The loops daemon delivers a due prompt on its next tick, once the
+cousin is up, under a header that says when it was set, when it was due
+and when it fired:
+
+```
+[cousin-schedule] #3, set 2026-09-18 15:02 CEST, due 2026-09-18 15:32 CEST, fired 2026-09-18 15:32 CEST (on time). Your own scheduled prompt: nobody is waiting on this turn unless the prompt says so.
+
+Check whether the backup finished.
+```
+
+If the cousin is down or delivery fails, the prompt stays pending and is
+tried again. A prompt that fires 30 minutes or more late still arrives,
+and its header says that what it was set for may already be settled.
+A cousin holds at most 20 pending prompts; `add` refuses the 21st until
+one fires or is cancelled. See
+[the loops reference](reference/loops.md#one-shots) for the exact header.
 Without a daemon, `cousin-schedule tick` fires everything due by hand.
 The store is `data/scheduled.db` under the framework root; each cousin
 only sees and cancels its own.

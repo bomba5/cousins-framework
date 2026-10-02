@@ -116,7 +116,8 @@ class TestTick(ScheduleCase):
         n = tick(now_ts=past, deliver=lambda slug, prompt: fired.append(
             (slug, prompt)))
         self.assertEqual(n, 1)
-        self.assertEqual(fired, [("wren", "due job")])
+        self.assertEqual([s for s, _ in fired], ["wren"])
+        self.assertTrue(fired[0][1].endswith("\n\ndue job"), fired)
         # A second tick must not re-fire.
         self.assertEqual(
             tick(now_ts=past, deliver=lambda s, p: fired.append((s, p))), 0
@@ -223,3 +224,49 @@ class TestDefaultDeliver(ScheduleCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEnvelope(ScheduleCase):
+    """A due job says what it is and how late it fired, and the store
+    caps how many a cousin may hold pending."""
+
+    def test_on_time_header_then_the_prompt_verbatim(self):
+        from cousin_lib.schedule import annotate
+        text = annotate(7, "check the kettle\nsecond line", created_ts=1000,
+                        target_ts=4600, now_ts=4630)
+        header, _, body = text.partition("\n\n")
+        self.assertEqual(body, "check the kettle\nsecond line")
+        self.assertTrue(header.startswith("#7, set "), header)
+        self.assertIn("(on time)", header)
+        self.assertIn("nobody is waiting on this turn", header)
+        self.assertNotIn("may already be settled", header)
+
+    def test_late_is_said_and_stale_warns(self):
+        from cousin_lib.schedule import annotate
+        late = annotate(1, "p", created_ts=0, target_ts=1000, now_ts=1000 + 5 * 60)
+        self.assertIn("(5 min late)", late)
+        self.assertNotIn("may already be settled", late)
+        stale = annotate(1, "p", created_ts=0, target_ts=1000, now_ts=1000 + 3 * 3600)
+        self.assertIn("(180 min late)", stale)
+        self.assertIn("may already be settled", stale)
+
+    def test_a_late_job_is_still_delivered(self):
+        # at-least-once: lateness is reported, never a silent drop
+        fired = []
+        self._main(["add", "in 1s", "late job"])
+        n = tick(now_ts=int(datetime.now().timestamp()) + 4 * 3600,
+                 deliver=lambda s, p: fired.append(p))
+        self.assertEqual(n, 1)
+        self.assertIn("may already be settled", fired[0])
+        self.assertTrue(fired[0].endswith("\n\nlate job"))
+
+    def test_pending_jobs_are_capped_per_cousin(self):
+        from cousin_lib import schedule
+        for i in range(schedule.MAX_PENDING):
+            schedule.add("wren", "in 2h", "job %d" % i)
+        with self.assertRaisesRegex(ValueError, "cap"):
+            schedule.add("wren", "in 2h", "one too many")
+        schedule.add("kite", "in 2h", "another cousin is not capped by wren's")
+        first = schedule.list_entries("wren")[0]["id"]
+        schedule.cancel(first, slug="wren")
+        schedule.add("wren", "in 2h", "room again after a cancel")

@@ -591,6 +591,7 @@ class SdkRunner:
                                        body_for_prompt=self._body_for_prompt,
                                        request_rollover=self._request_rollover,
                                        live_threads=lambda: self.tool_context.turn.snapshot()[1],
+                                       thread_for_prompt=self._thread_for_prompt,
                                        reply_gate=bool(self._agent_value("reply_gate", True)),
                                        watch=self.config_watch,
                                        policy_changed=self._policy_tightened)
@@ -808,12 +809,7 @@ class SdkRunner:
         for a row on a thread that is not operator or person chat (recall
         is only for those) and for a prompt no row
         matches. Runs on the loop thread, the only writer of `_sent`."""
-        prompt = (prompt or "").strip()
-        sent = [(row, text.strip()) for row, text in self._sent]
-        match = next((row for row, text in reversed(sent) if text == prompt), None)
-        if match is None:
-            prefixed = [(len(text), row) for row, text in sent if text and prompt.startswith(text)]
-            match = max(prefixed, key=lambda pair: pair[0])[1] if prefixed else None
+        match = self._row_for_prompt(prompt)
         if match is None:
             return ""
         try:
@@ -821,6 +817,23 @@ class SdkRunner:
         except DeliveryError:
             return ""
         return (match.get("body") or "") if kind in SURFACE_KINDS else ""
+
+    def _row_for_prompt(self, prompt):
+        """The row written this runner turn whose envelope text is the
+        prompt (see _body_for_prompt), or None."""
+        prompt = (prompt or "").strip()
+        sent = [(row, text.strip()) for row, text in self._sent]
+        match = next((row for row, text in reversed(sent) if text == prompt), None)
+        if match is None:
+            prefixed = [(len(text), row) for row, text in sent if text and prompt.startswith(text)]
+            match = max(prefixed, key=lambda pair: pair[0])[1] if prefixed else None
+        return match
+
+    def _thread_for_prompt(self, prompt):
+        """The thread id of the row the prompt carries, or None (the reply
+        gate resets only that thread's answered state)."""
+        match = self._row_for_prompt(prompt)
+        return match.get("thread_id") if match else None
 
     def _on_state(self, old, new, detail):
         self.stream.append("state", {"from": old, "to": new, "detail": detail})

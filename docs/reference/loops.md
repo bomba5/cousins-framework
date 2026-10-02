@@ -107,7 +107,7 @@ What the cousin gets:
   The heartbeat always comes first, then the loops in file order;
 - a manual fire: `[Framework scheduler: manual fire]` then `### <name>` and the prompt;
 - a trigger file: `[Framework scheduler: ready-file trigger]` then `### <name>` and the prompt;
-- a one-shot: `[cousin-schedule] <prompt>`;
+- a one-shot: `[cousin-schedule] #<id>, set <time>, due <time>, fired <time> (on time | N min late). ...`, a blank line, then the prompt (see [One-shots](#one-shots));
 - a flip warning: `[cousin-flip] wrap up tool calls - flip in 5 minutes`, and so on.
 
 Nothing is recorded as fired until the row is in the inbox. If the put fails (the inbox can't be opened or written), the loops stay due, the heartbeat's file changes stay unreported, the trigger file stays, the one-shot stays pending, and the next tick tries again. The flip side: if the daemon dies between the put and saving its state, the same thing is delivered again. So everything here is at least once. Write loop prompts that don't mind running twice now and then; heartbeats already don't.
@@ -187,9 +187,21 @@ cousin-schedule cancel 12
 
 `when` is `in N[s|m|h|d]` (a bare number means minutes), `tomorrow HH:MM`, or a local date or datetime (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, with `T` or a space, seconds optional). A time in the past is refused.
 
-Step 4 of each tick delivers every pending job whose time has come, as `[cousin-schedule] <prompt>`. A job for a cousin that's down stays pending, quietly, until the cousin is back. A failed delivery keeps the job pending and reports it. The job is marked `fired` only after delivery, so after a crash you may get it twice but never zero times.
+A cousin holds at most 20 pending one-shots. `add` refuses the 21st (`<slug> already has 20 pending scheduled prompts (the cap); cancel one first`) until one fires or is cancelled, so a runaway loop of a cousin scheduling itself stops there. The `schedule` tool and the console's `POST /api/cousins/<slug>/schedules` refuse it the same way.
 
-`cousin-schedule tick` fires due jobs by hand, for an install without the daemon. It doesn't check whether the cousin's runner is up: it puts each due prompt into the cousin's inbox and marks the job fired once the put succeeded, so a cousin that is down gets it when its runner starts. A cousin with no `[agent] runner`, or an inbox that can't be written, keeps the job pending and the error is printed.
+Step 4 of each tick delivers every pending job whose time has come. A job for a cousin that's down stays pending, quietly, until the cousin is back. A failed delivery keeps the job pending and reports it. The job is marked `fired` only after delivery, so after a crash you may get it twice but never zero times.
+
+A due job arrives as one header line, a blank line, then the prompt as it was written:
+
+```
+[cousin-schedule] #12, set 2026-10-01 21:10 CEST, due 2026-10-02 06:30 CEST, fired 2026-10-02 06:30 CEST (on time). Your own scheduled prompt: nobody is waiting on this turn unless the prompt says so.
+
+remind ana about the dentist
+```
+
+The times are local, to the minute. A job fired less than two minutes after its time is `on time`; later, it says `N min late` (whole minutes). One that fires 30 minutes or more late (the cousin or the daemon was down) is still delivered, never dropped, and its header adds: `It fired late (the cousin or the daemon was down), so what it was set for may already be settled: check before acting on it.`
+
+`cousin-schedule tick` fires due jobs by hand, for an install without the daemon. It delivers the same header and prompt, without the `[cousin-schedule] ` prefix (the message comes in on the `schedule` thread). It doesn't check whether the cousin's runner is up: it puts each due prompt into the cousin's inbox and marks the job fired once the put succeeded, so a cousin that is down gets it when its runner starts. A cousin with no `[agent] runner`, or an inbox that can't be written, keeps the job pending and the error is printed.
 
 ## Worker cousins
 

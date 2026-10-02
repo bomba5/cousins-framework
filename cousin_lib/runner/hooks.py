@@ -10,7 +10,8 @@ A hook never raises into the SDK: the failure becomes a `hook` event.
 | PostToolUse, PostToolUseFailure | recorder (job close, activity line)       |
 | SubagentStop                    | recorder (background agent close)         |
 | UserPromptSubmit                | recall -> additionalContext, `recall`     |
-| Stop                            | session checkpoint, `checkpoint`          |
+| Stop                            | session checkpoint, `checkpoint`; the     |
+|                                 | reply gate (`gate` event, may block once) |
 | PreCompact                      | pre-compact checkpoint, `checkpoint`;     |
 |                                 | then a rollover request (request_rollover) |
 | Notification, PermissionRequest | `permission`; running -> waiting_permission |
@@ -58,6 +59,18 @@ PERMISSION_NOTIFICATION = "permission_prompt"
 # under the key "cousin" (sdk.py, options()).
 REPLY_TOOL = "mcp__cousin__reply"
 SUBAGENT_REPLY_REASON = "a subagent must name the thread it answers"
+# The thread kinds where a person waits on the chat surface: a turn on one
+# that ends without `reply` is sent back once by the reply gate.
+HUMAN_KINDS = ("operator", "person")
+REPLY_GATE_REASON = (
+    "You are ending this turn without calling reply on %s, so the person who"
+    " wrote sees nothing on the chat surface. If an answer is due, call reply"
+    " now. If none is (an acknowledgement, a message that needs no answer),"
+    " just end the turn again: this check runs once per turn.")
+
+
+def _kind(thread):
+    return str(thread).partition(":")[0]
 
 
 def gate(policy, payload):
@@ -96,7 +109,8 @@ def _accepts(fn, name):
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
-              request_rollover=None, watch=None, policy_changed=None):
+              request_rollover=None, live_threads=None, reply_gate=True,
+              watch=None, policy_changed=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -119,6 +133,13 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     request_rollover: a callable(reason); PreCompact calls it once, after
     its checkpoint, so a compaction the CLI is about to do becomes a
     rollover at the next turn boundary. Run on a worker thread.
+    live_threads: `f() -> tuple of thread ids` the live turn answers
+    (turn.snapshot's threads); with `reply_gate` (cousin.toml [agent]
+    reply_gate, default on) a Stop whose live operator or person
+    threads got no successful `reply` this turn is blocked once with
+    REPLY_GATE_REASON. The CLI marks the Stop that follows a block
+    `stop_hook_active`, and that one always passes, so the gate costs at
+    most one more model step and can never loop.
     watch: a config_watch.ConfigWatch; each submitted prompt checks it,
     and a change reaches the model as a runner note in that prompt's
     additionalContext (ahead of recall). A policy.toml edit tightens the
@@ -138,6 +159,28 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     lock = lock if lock is not None else contextlib.nullcontext()
     # the policy the gate enforces: the start's, tightened by any edit since
     live = {"policy": policy}
+    # The reply gate's state for the turn in flight: the threads a reply
+    # named (lowercased), and whether one named none (the implicit thread).
+    replied = {"threads": set(), "implicit": False}
+
+    def note_reply(payload):
+        if payload.get("tool_name") != REPLY_TOOL or payload.get("agent_id"):
+            return
+        tool_input = payload.get("tool_input")
+        thread = tool_input.get("thread") if isinstance(tool_input, dict) else None
+        if str(thread or "").strip():
+            replied["threads"].add(str(thread).strip().lower())
+        else:
+            replied["implicit"] = True
+
+    def unanswered():
+        """The live operator/person threads no reply covered this turn."""
+        if not reply_gate or live_threads is None:
+            return []
+        human = [t for t in live_threads() if _kind(t) in HUMAN_KINDS]
+        if replied["implicit"] and len(human) == 1:
+            return []
+        return [t for t in human if t.lower() not in replied["threads"]]
 
     def guarded(name, fn, fail_closed=False):
         """Every hook fails open but the gate: an exception becomes a
@@ -174,6 +217,8 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
 
     def recorder_for(event):
         async def record(payload):
+            if event == "PostToolUse":
+                note_reply(payload)
             # A call the policy denies never runs: no job row, no rewrite.
             if event == "PreToolUse" and policy is not None \
                     and gate(live["policy"], payload)[0] != "allow":
@@ -258,6 +303,10 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         return text or ""
 
     async def on_prompt(payload):
+        # a new prompt (a turn's first row or one folded in) is answered
+        # afresh: a reply sent before it does not cover it
+        replied["threads"].clear()
+        replied["implicit"] = False
         prompt = payload.get("prompt") or ""
         try:
             changed = await config_note()
@@ -274,6 +323,13 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     async def on_stop(payload):
         path = await asyncio.to_thread(cp.write_session_checkpoint, home, slug=slug)
         stream.append("checkpoint", {"kind": "session", "path": str(path)})
+        missing = [] if payload.get("stop_hook_active") else unanswered()
+        if missing:
+            stream.append("gate", {"gate": "reply", "threads": missing})
+            return {"decision": "block",
+                    "reason": REPLY_GATE_REASON % " and ".join(missing)}
+        replied["threads"].clear()
+        replied["implicit"] = False
         return {}
 
     async def on_precompact(payload):

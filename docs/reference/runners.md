@@ -121,6 +121,60 @@ runs against each. A runner may DECLARE an item it cannot meet in
 writes the list into the `runner` event at start, and the console shows it on
 the cousin's card and its chat header. Nothing is skipped silently.
 
+## A turn cut by a restart
+
+A stop or a death can cut a turn in the middle. What happens to that turn's
+message depends on which:
+
+- **A death.** The next start's sweep finds the rows the dead runner had
+  claimed and puts them back in the inbox, so the message is delivered
+  again.
+- **A stop.** The runner interrupts the turn, and an interrupted turn's rows
+  are closed as delivered, so the message is not delivered again.
+
+Either way the runner marks `data/runner-restart.json` (with `requeued:
+true` after a death's sweep), and the next session's first line, on the
+`system` thread from `runner`, says what happened. A resumed session is told
+the runner restarted, or names the requested stop or restart that cut the
+turn, and to continue where it was. A fresh session (the saved one could not
+be resumed) has nothing of the cut turn in its transcript; the `sdk` kind
+gives it a line only when that turn ran tools.
+
+So that a restart does not run a push or a send twice, the `sdk` kind's
+primary session keeps the live turn's tool calls in `data/turn-tools.jsonl`.
+A turn's start rewrites the file with the turn's first inbox row id and its
+first message (cut to 600 characters). Then each call adds a line when it
+starts and one when its result comes. Read-only tools (`Read`, `Grep`,
+`Glob`, `LS`, `WebFetch`, `WebSearch`, `TodoWrite`, `ToolSearch`,
+`BashOutput`, `NotebookRead`) are left out. The file is never emptied at a
+turn's result, since an interrupted turn ends in one too; the next start
+empties it after using it.
+
+The next start appends those calls to its line: the last 12, with how many
+came before, each cut to 160 characters. A call is `finished`, `failed`, or
+`STARTED, NO RESULT: it may or may not have happened` when it was cut in
+flight. After a death, a fresh session gets:
+
+```
+[runner] a restart cut your last turn before this session began (at 2026-10-02T12:30:05+00:00: the last runner died with a row claimed). This is a new session, so you cannot see that turn.
+
+Before the cut, that turn had already run these tool calls (most recent last). The message it was answering is delivered again after this line: do not repeat what already ran, and check the state of anything marked NO RESULT before running it again.
+- Bash `git push origin docs/notes` (finished)
+- mcp__cousin__send `The notes branch is up.` (STARTED, NO RESULT: it may or may not have happened)
+```
+
+After a stop, the list says instead that the message is not delivered
+again, to continue its work if still due without repeating what already
+ran, and quotes it: `The message was: "Push the notes branch and tell ana it
+is up."`. After a death whose recorded turn has every row closed, the file
+belongs to an older, finished turn (the runner died between claiming a row
+and starting its turn), and no list is given.
+
+The stream's `system` event with subtype `restart_note` says whether the
+session was resumed and how many calls were recorded. Side sessions keep no
+list and get no line. The `tmux` kind writes the same mark and has its own
+restart line, with no list of calls; the `opencode` kind gives no line.
+
 ## The kinds
 
 | kind | agent loop | account kinds | what it is for |
@@ -290,6 +344,9 @@ runs), which the contract does not cover.
   file (see [policy.toml on the opencode lane](../configuration.md#policytoml-on-the-opencode-lane)).
 - Tool calls (with their arguments), subagent jobs and checkpoints are
   recorded by the runner from opencode's event stream, not by hooks.
+- There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
+  hook (see [configuration](../configuration.md#agent-runner)), so a turn
+  here can end on an operator or person thread without a `reply`.
 - Usage is recorded in `data/usage.db` with lane `opencode`, one row per
   result, and announced as a `usage` event, as on the SDK lane: the tokens
   the provider reported to opencode, every answer of the turn summed once,
@@ -413,6 +470,9 @@ none is a contract item:
   `data/run/tmux-context.md` (a private file, see "The system prompt is a
   private file" above); a resume or a kind switch gets a short pointer
   instead, never the full block again (`runner/prompt.py`).
+- There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
+  hook, so a turn in the pane can end on an operator or person thread
+  without a `reply`.
 
 ## Known gaps on tmux
 

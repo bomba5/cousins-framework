@@ -899,6 +899,22 @@ the model does not write within 5 minutes becomes an emergency handoff built
 from the session transcript and marked `degraded_state: true`; the generation
 still ends.
 
+`reply_gate` (`true` or `false`, default `true`) applies to the `sdk` lane
+only. When a turn that answers an operator or person
+[thread](glossary.md#thread) ends without a successful `reply` on that thread,
+the runner's `Stop` hook sends it back once with the reason: answer now, or
+end the turn again if no answer is due. The stop after that always passes, so
+the gate costs at most one more model step and never loops. A `reply` that
+names no thread covers the turn only when one operator or person thread is
+live; with two, each needs a reply naming it. A subagent's reply does not
+count, and a reply sent before a new prompt was submitted (a message folded
+into the running turn) does not cover that prompt. Only operator and person
+threads are gated (`HUMAN_KINDS` in `runner/hooks.py`). Each block is a `gate`
+event in the runner's stream, with the payload `{"gate": "reply", "threads":
+[...]}`. `false` turns the gate off. A value that is not `true` or `false` (a
+quoted `"false"`) is refused at runner start, exit 2: `cousin-runner:
+cousin.toml [agent] reply_gate must be true or false, got 'false'`.
+
 The runner records `usage` on every `result` event in its stream (the SDK's
 own `ResultMessage.usage` dict: at least `input_tokens`, `output_tokens`,
 `cache_creation_input_tokens` and `cache_read_input_tokens`; `None` when the

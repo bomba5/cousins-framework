@@ -207,7 +207,13 @@ restarted, that was not the operator, continue where you were. A stop that
 was asked for (the console's stop, `cousin-supervisor stop`) is named as
 that stop instead, and the console's restart as a requested restart, with
 the same "continue where you were"
-(`data/runner-restart.json` marks it; a fresh start just drops the mark). It runs until
+(`data/runner-restart.json` marks it). A fresh start drops the mark,
+unless the cut turn ran tools: then the `sdk` kind gives the fresh session
+a line too. On the `sdk` kind either line lists the tool calls the cut turn
+had made, from `data/turn-tools.jsonl`, as finished, failed or started with
+no result, and says whether its message comes again: after a death it does,
+after a stop it does not (see
+[runners](reference/runners.md#a-turn-cut-by-a-restart)). It runs until
 SIGTERM or SIGINT, then stops the runner with a 30 second timeout
 (`runner.main.STOP_TIMEOUT_S`). `--once`
 exits instead when the inbox is drained and no turn is running, on SIGTERM or
@@ -556,7 +562,8 @@ cousin-loops fire wren context-heartbeat
 
 `cousin-schedule` queues a one-shot prompt for a future time. Subcommands:
 `add WHEN PROMPT` (`in 30m`, `tomorrow 06:30`, or an ISO date), `list
-[--all]`, `cancel ID`, `tick`.
+[--all]`, `cancel ID`, `tick`. A cousin holds at most 20 pending; `add`
+refuses the 21st (exit 2).
 
 ```
 cousin-schedule add "tomorrow 09:00" "Check that the backup ran."

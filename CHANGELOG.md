@@ -3,7 +3,7 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
-## 3.1.0 - 2026-10-02
+## 3.4.0 - 2026-10-02
 
 ### Added
 
@@ -24,6 +24,53 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   own rules by editing the file. An entry that would deny the handoff is
   left out, and a file that no longer parses keeps the session on the policy
   it has; the note says the next start will refuse it.
+
+## 3.3.0 - 2026-10-02
+
+### Added
+
+- **A restart does not make a cousin repeat what its cut turn already did.**
+  The sdk runner writes each tool call of the live turn to
+  `data/turn-tools.jsonl` as it sees it (read-only tools left out). When a
+  stop or a death cuts a turn, the next start's runner line lists those
+  calls: finished, failed, or started with no result (it may or may not have
+  happened). After a death the cut turn's rows are requeued and the line
+  says the message comes again; after a stop they are closed as delivered,
+  and the line quotes the message instead. Either way a push or a send is
+  not run twice.
+- **A fresh session is told too.** A session that could not be resumed has
+  nothing of the cut turn in its transcript. When that turn had run tools,
+  it now gets the line (`a restart cut your last turn before this session
+  began`) instead of nothing.
+
+## 3.2.0 - 2026-10-02
+
+### Added
+
+- **The reply gate.** On the sdk lane, a turn on operator or person chat
+  that ends without a successful `reply` on that thread is sent back once
+  with the reason: answer now, or end the turn again if no answer is due.
+  The second stop always passes, so the gate costs at most one more model
+  step and never loops. A subagent's reply does not count; with two live
+  threads each needs its own. It is on by default; `[agent] reply_gate =
+  false` in cousin.toml turns it off; a value that is not true or false (a
+  quoted `"false"`) is refused at runner start. The runner's event stream
+  records each block as a `gate` event.
+
+## 3.1.0 - 2026-10-02
+
+### Added
+
+- **A scheduled prompt says what it is and when it fired.** It arrives as
+  `[cousin-schedule] #<id>, set <time>, due <time>, fired <time> (on time |
+  N min late)`, then the prompt verbatim. The header says it is the cousin's
+  own scheduled prompt and nobody is waiting on the turn. A job that fires 30
+  minutes or more late (the cousin or the loops daemon was down) is still
+  delivered, never dropped, and says that what it was set for may already be
+  settled.
+- **A cousin holds at most 20 pending scheduled prompts.** `cousin-schedule
+  add` and the `schedule` tool refuse the 21st until one fires or is
+  cancelled, so a runaway self-scheduling loop stops there.
 
 ## 3.0.0 - 2026-10-01
 

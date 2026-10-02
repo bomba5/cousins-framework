@@ -32,14 +32,18 @@ writing side:
   audits), `self_portrait.commit_candidate` and the body-swap's identity
   trade (`lifecycle._swap_bodies`).
 
-Shape, under the root: the check is pure and offline (paths are
+Anchored on the root: the check is pure and offline (paths are
 normalised, never resolved), so the Bash chokepoint can apply it to a
 parsed write target cheaply. A caller that knows the framework root
-(the tool gate does) passes it, and only paths under that root are
-protected: a subagent working in another repository, or editing a
-framework checkout's templates/shared/, writes its own files. A
-relative path with no known working directory is checked by shape
-alone, which errs toward refusing.
+(the tool gate does) passes it, and the three surfaces are then exact
+places: <root>/config/law.md, <root>/shared/<name>.md and
+<root>/cousins/<slug>/self-portrait.md. Anything else is the caller's
+own file: another repository, and a checkout's templates/shared/ even
+when the checkout is the root (the default install). Without a root, or
+for a relative path with no known working directory, the check falls
+back to the shapes alone, which errs toward refusing. The framework's
+own writers call assert_writable without a root: they only write inside
+an install.
 
 What it does not do:
 
@@ -111,42 +115,67 @@ def _parts(path):
     return tuple(p for p in Path(text).as_posix().split("/") if p)
 
 
-def _outside(path, root, cwd):
-    """True when `path` is certainly not under the framework `root`: an
-    absolute path (or a relative one joined to `cwd`) normalised without
-    touching the filesystem. A relative path with no cwd is not known to
-    be outside, so it is checked by shape alone (the safe direction)."""
+_LAW_REASON = ("config/law.md is the Framework Law: operator-owned, seeded"
+               " once at install and read by every cousin on the host")
+_PORTRAIT_REASON = ("self-portrait.md is the committed portrait: authored by the"
+                    " operator, and a candidate in .self-portrait-candidate.md"
+                    " is the writable side of it")
+
+
+def _shared_reason(name):
+    return ("shared/%s is canonical shared memory: a cousin proposes to"
+            " shared/proposed/ and a configured reviewer promotes it" % name)
+
+
+def _under_root(path, root, cwd):
+    """The path's parts relative to the framework `root` (an absolute
+    path, or a relative one joined to `cwd`, normalised without touching
+    the filesystem); None when it is not under the root, and "shape"
+    when it cannot be placed (no root given, or a relative path with no
+    cwd): the caller then checks by shape alone, the safe direction."""
     text = str(path or "").strip()
     if root is None or not text:
-        return False
+        return "shape"
+    if text.startswith("~"):
+        text = os.path.expanduser(text)      # the shell expands it before writing
     if not os.path.isabs(text):
         if not cwd:
-            return False
+            return "shape"
         text = os.path.join(str(cwd), text)
     full = os.path.normpath(text)
     base = os.path.normpath(str(root))
-    return not (full == base or full.startswith(base.rstrip("/") + "/"))
+    if not (full == base or full.startswith(base.rstrip("/") + "/")):
+        return None
+    return tuple(p for p in os.path.relpath(full, base).split(os.sep) if p and p != ".")
 
 
 def protected_reason(path, *, root=None, cwd=None):
     """Why `path` is protected, or None when it is not. The reason names
     the surface and its owner, because a refusal a caller cannot act on
     is a refusal the caller routes around. With `root` (the framework
-    root), a path outside it is never protected: a subagent working in
-    another repository, or in a framework checkout's templates/shared/,
-    writes its own files."""
-    if _outside(path, root, cwd):
+    root) the three surfaces are anchored where an install keeps them:
+    <root>/config/law.md, <root>/shared/<name>.md and
+    <root>/cousins/<slug>/self-portrait.md. Anything else is the
+    caller's own file, a checkout's templates/shared/ included (the
+    default install's checkout IS the root)."""
+    placed = _under_root(path, root, cwd)
+    if placed is None:
+        return None
+    if placed != "shape":
+        if placed == LAW_TAIL:
+            return _LAW_REASON
+        if len(placed) == 3 and placed[0] == "cousins" and placed[2] == PORTRAIT_NAME:
+            return _PORTRAIT_REASON
+        if len(placed) == 2 and placed[0] == SHARED_DIR and placed[1].endswith(".md"):
+            return _shared_reason(placed[1])
         return None
     parts = _parts(path)
     if not parts:
         return None
     if parts[-len(LAW_TAIL):] == LAW_TAIL:
-        return ("config/law.md is the Framework Law: operator-owned, seeded"
-                " once at install and read by every cousin on the host")
+        return _LAW_REASON
     if parts[-1] == PORTRAIT_NAME:
-        return ("self-portrait.md is the committed portrait: authored by the"
-                " operator, and a candidate in .self-portrait-candidate.md"
-                " is the writable side of it")
+        return _PORTRAIT_REASON
     if SHARED_DIR not in parts[:-1]:
         return None
     idx = max(i for i, p in enumerate(parts[:-1]) if p == SHARED_DIR)
@@ -157,9 +186,7 @@ def protected_reason(path, *, root=None, cwd=None):
         return None                     # proposed/ is the entry path; examples/ is furniture
     if len(tail) != 1 or not tail[0].endswith(".md"):
         return None
-    return ("shared/%s is canonical shared memory: a cousin proposes to"
-            " shared/proposed/ and a configured reviewer promotes it"
-            % tail[0])
+    return _shared_reason(tail[0])
 
 
 def assert_writable(path, *, writer=None):

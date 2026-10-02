@@ -1,7 +1,9 @@
 """perimeter: the shapes a write may not take, the writers that check
 them, and the tool chokepoint that turns one into a deny."""
 import inspect
+import os
 import unittest
+from unittest import mock
 
 from cousin_lib import (boot, distill, memory, memory_trash, perimeter,
                         raw_fold, reinforce, self_portrait, shared_tier)
@@ -234,10 +236,29 @@ class TestUnderTheRoot(unittest.TestCase):
         self.assertIsNone(p.protected_reason("shared/a.md", root=root, cwd="/elsewhere"))
         self.assertIsNotNone(p.protected_reason("shared/a.md", root=root, cwd="/srv/cf"))
         self.assertIsNotNone(p.protected_reason("shared/a.md", root=root))
-        self.assertIsNotNone(p.protected_reason("../cf/config/law.md", root=root,
+        self.assertIsNotNone(p.protected_reason("../config/law.md", root=root,
                                                 cwd="/srv/cf/cousins"))
+        # a shell expands ~ before it writes: so does the check
+        with mock.patch.dict(os.environ, {"HOME": "/srv"}):
+            self.assertIsNotNone(p.protected_reason("~/cf/config/law.md", root=root))
+        with mock.patch.dict(os.environ, {"HOME": "/home/u"}):
+            self.assertIsNone(p.protected_reason("~/cf/config/law.md", root=root))
         # no root given: shape alone, as before
         self.assertIsNotNone(p.protected_reason("/elsewhere/shared/a.md"))
+
+    def test_anchored_where_an_install_keeps_them(self):
+        # the default install's checkout IS the root: its templates are free
+        from cousin_lib import perimeter as p
+        root = "/srv/cf"
+        free = ["/srv/cf/templates/shared/first-principles.md", "/srv/cf/templates/law.md",
+                "/srv/cf/shared/proposed/bart__x.md", "/srv/cf/cousins/wren/notes/self-portrait.md",
+                "/srv/cf/docs/config/law.md"]
+        for path in free:
+            self.assertIsNone(p.protected_reason(path, root=root), path)
+        self.assertIsNone(p.protected_reason("templates/shared/a.md", root=root, cwd=root))
+        for path in ("/srv/cf/config/law.md", "/srv/cf/shared/reference_a.md",
+                     "/srv/cf/cousins/wren/self-portrait.md"):
+            self.assertIsNotNone(p.protected_reason(path, root=root), path)
 
 
 if __name__ == "__main__":

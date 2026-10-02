@@ -187,7 +187,7 @@ class TestThePerimeterAtTheGate(HermeticCase):
     def test_a_subagent_bash_that_names_the_law_is_denied(self):
         self.assertIn("memory perimeter", self._denied(
             agent_id="dream-1", tool_name="Bash",
-            tool_input={"command": "cat >> ~/cf/config/law.md"}))
+            tool_input={"command": "cat >> " + self.R + "/config/law.md"}))
 
     def test_a_subagent_write_to_a_portrait_or_shared_memory_is_denied(self):
         for path in (self.R + "/cousins/wren/self-portrait.md",
@@ -217,19 +217,19 @@ class TestThePerimeterAtTheGate(HermeticCase):
                                  "%s %s" % (tool, path))
 
     def test_a_subagent_may_read_a_protected_path_through_a_shell(self):
-        for command in ("cat ~/cf/config/law.md",
-                        "grep -n 'private cousin' ~/cf/config/law.md",
+        for command in ("cat " + self.R + "/config/law.md",
+                        "grep -n 'private cousin' " + self.R + "/config/law.md",
                         "git diff -- config/law.md",
-                        "cat ~/cf/shared/reference_house-style.md",
-                        "sed s/private/PUBLIC/ ~/cf/cousins/wren/self-portrait.md"):
+                        "cat " + self.R + "/shared/reference_house-style.md",
+                        "sed s/private/PUBLIC/ " + self.R + "/cousins/wren/self-portrait.md"):
             self.assertEqual(self._gate(agent_id="dream-1", tool_name="Bash",
                                         tool_input={"command": command}), {},
                              command)
 
     def test_a_subagent_may_not_write_a_protected_path_through_a_shell(self):
-        for command in ("echo x >> ~/cf/config/law.md",
-                        "sed -i s/private/PUBLIC/ ~/cf/cousins/wren/self-portrait.md",
-                        "cp /tmp/x ~/cf/shared/reference_house-style.md"):
+        for command in ("echo x >> " + self.R + "/config/law.md",
+                        "sed -i s/private/PUBLIC/ " + self.R + "/cousins/wren/self-portrait.md",
+                        "cp /tmp/x " + self.R + "/shared/reference_house-style.md"):
             self.assertIn("memory perimeter",
                           self._denied(agent_id="dream-1", tool_name="Bash",
                                        tool_input={"command": command}), command)

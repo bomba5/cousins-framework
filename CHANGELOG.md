@@ -3,6 +3,31 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.5.0 - 2026-10-02
+
+### Added
+
+- **The memory perimeter, in code.** Three surfaces are now refused to
+  every agent-initiated write: `config/law.md`, a cousin's committed
+  `self-portrait.md`, and a canonical file in the shared tier
+  (`shared/*.md`). The framework's own memory writers refuse them
+  outright. A subagent's tool calls are refused by the runner's PreToolUse
+  gate: Write, Edit, MultiEdit and NotebookEdit by their exact path, and
+  Bash by the paths it writes to (a redirect, the destination of cp or mv,
+  tee, rm, `sed -i`, `dd of=`, and so on), which is best-effort. Reading
+  those files is never refused. The primary session keeps the operator's
+  own edits; policy.toml can close those too. `shared/proposed/` (where a
+  cousin proposes to the shared tier) and the portrait candidate stay
+  writable.
+
+### Changed
+
+- **The law is never cut from a boot packet.** It was capped at 800 tokens
+  per layer and lost its last rules when it grew past that, without saying
+  so. The law is now a hard layer with no cap; a packet that cannot fit it
+  says LAW INCOMPLETE and records a framework event, and an empty law
+  counts as a degraded layer.
+
 ## 3.4.0 - 2026-10-02
 
 ### Added

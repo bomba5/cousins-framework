@@ -103,3 +103,51 @@ class TestHooksApplyIt(HomeCase):
                       out["hookSpecificOutput"]["additionalContext"])
         denied = run(cbs["PreToolUse:policy"](call, "t", {}))
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+class TestTheRunnerKeepsIt(HomeCase):
+    """A rollover or a reconnect builds new hooks (options() per connect):
+    they start from the tightened policy, the watch keeps its baseline, and
+    the tools read the outbound filter from the same policy."""
+
+    def setUp(self):
+        super().setUp()
+        try:
+            import claude_agent_sdk  # noqa: F401
+        except ImportError:
+            self.skipTest("claude-agent-sdk not installed")
+        import os
+        from unittest import mock
+        p = mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root),
+                                         "COUSIN_HOME": str(self.home)})
+        p.start(); self.addCleanup(p.stop)
+        (self.home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\nname = "Wren"\n[agent]\nrunner = "sdk"\n')
+        (self.home / "policy.toml").write_text("outbound_filter = false\n")
+
+    def prompt_and_gate(self, opts, command):
+        cbs = {ev: [h for m in ms for h in m.hooks] for ev, ms in opts.hooks.items()}
+        run = asyncio.run
+        for cb in cbs["UserPromptSubmit"]:
+            run(cb({"hook_event_name": "UserPromptSubmit", "prompt": "next"}, None, {}))
+        call = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": {"command": command}}
+        outs = [run(cb(call, "t", {})) for cb in cbs["PreToolUse"]]
+        return any((o or {}).get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+                   for o in outs)
+
+    def test_a_live_tightening_survives_a_new_connect(self):
+        from cousin_lib.runner.sdk import SdkRunner
+        r = SdkRunner(self.home)
+        first = r.options()
+        self.assertFalse(r.tool_context.policy.outbound_filter)
+        (self.home / "policy.toml").write_text(
+            'outbound_filter = true\ndeny_bash_patterns = ["git\\\\s+push"]\n')
+        self.assertTrue(self.prompt_and_gate(first, "git push origin main"))
+        # the tools read the tightened policy: the outbound filter is on
+        self.assertTrue(r.tool_context.policy.outbound_filter)
+        self.assertIs(r.policy, r.tool_context.policy)
+        # a rollover / reconnect: new hooks, same live policy, no new note
+        second = r.options()
+        self.assertTrue(self.prompt_and_gate(second, "git push origin main"))
+        self.assertEqual(r.config_watch.check(), [])

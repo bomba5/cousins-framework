@@ -96,7 +96,7 @@ def _accepts(fn, name):
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
-              request_rollover=None, watch=None):
+              request_rollover=None, watch=None, policy_changed=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -122,7 +122,12 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     watch: a config_watch.ConfigWatch; each submitted prompt checks it,
     and a change reaches the model as a runner note in that prompt's
     additionalContext (ahead of recall). A policy.toml edit tightens the
-    live policy at once (Policy.tightened_by), never loosens it."""
+    live policy at once (Policy.tightened_by), never loosens it.
+    policy_changed: a callable(policy) told each time `watch` tightened the
+    live policy; the runner keeps it (its next connect's hooks start from
+    it, and its tools read the outbound filter from it). Pass the watch
+    and keep the policy per runner, not per connect: a fresh watch's
+    baseline is the already-edited file, so it would see no change."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home, root)
@@ -227,8 +232,10 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         current = live["policy"] if live["policy"] is not None else Policy()
         text, tightened = config_watch.note(
             changes, current, lambda t: Policy.parse(t, source=os.path.join(str(home), FILE)))
-        if live["policy"] is not None:
+        if live["policy"] is not None and tightened is not live["policy"]:
             live["policy"] = tightened
+            if policy_changed is not None:
+                policy_changed(tightened)
         stream.append("config_change", {"files": [name for name, _, _ in changes]})
         return text
 

@@ -510,6 +510,10 @@ class SdkRunner:
                                               root=self.root, turn=self.turn,
                                               policy=self.policy, stream=self.stream,
                                               registry=registry, session=session)
+        # One per runner, not per connect: a rollover or a reconnect builds
+        # new hooks, and they must keep the baseline and the tightened
+        # policy (config_watch), never fall back to the start's.
+        self.config_watch = config_watch.ConfigWatch(self.home, self.root)
         from cousin_lib.runner.session_store import SqliteSessionStore
         self.session_store = SqliteSessionStore(self.home)
         # The rollover (rollover.py): the handoff tool hands its summary to
@@ -538,6 +542,13 @@ class SdkRunner:
             return cfg.slug, cfg.name
         except Exception:  # noqa: BLE001 - a thin toml still runs; the dir names it
             return self.home.name, self.home.name.capitalize()
+
+    def _policy_tightened(self, policy):
+        """A policy.toml edit tightened the live policy (hooks, config_watch):
+        the runner keeps it, so the next connect's hooks start from it, and
+        the tools (the outbound filter) read the same object."""
+        self.policy = policy
+        self.tool_context.policy = policy
 
     def _agent_table(self):
         """cousin.toml [agent], or {} when unreadable (a thin toml still
@@ -579,7 +590,8 @@ class SdkRunner:
                                        policy=self.policy, lock=self._lock,
                                        body_for_prompt=self._body_for_prompt,
                                        request_rollover=self._request_rollover,
-                                       watch=config_watch.ConfigWatch(self.home, self.root))
+                                       watch=self.config_watch,
+                                       policy_changed=self._policy_tightened)
         # The composed prompt (prompt.py): byte-stable across generations,
         # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first

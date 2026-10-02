@@ -187,25 +187,41 @@ operator act, into `memory/imported/`) and the `MEMORY.md` index compaction
 
 ## The perimeter
 
-Three files are not memory, and no write from an agent reaches them:
-`config/law.md` (the [Framework Law](../ceremony.md#the-system-prompt)),
-a cousin's committed `self-portrait.md` (the authored identity; the
-candidate beside it, `.self-portrait-candidate.md`, is the writable side
-of it) and a canonical file in `shared/` (a cousin proposes into
-`shared/proposed/` and a configured reviewer promotes it).
+Three files are not memory, and the framework keeps agent-initiated writes
+off them: `config/law.md` (the [Framework
+Law](ceremony.md#the-system-prompt)), a cousin's committed
+`self-portrait.md` (the authored identity; the candidate beside it,
+`.self-portrait-candidate.md`, is the writable side of it) and a canonical
+file in `shared/` (a cousin proposes into `shared/proposed/` and a
+configured reviewer promotes it).
 
-`cousin_lib/perimeter.py` holds those three shapes, and every writer that
-touches the disk checks the path it was handed against them before it
-writes: a distiller, a dreamer or a raw fold pointed at the wrong home
-refuses rather than writes. On the runner's tool surface the same shapes
-are a deny, and only for a background pass: a hook payload carrying
-`agent_id` (every subagent, the dreaming pass included) cannot write
-them, while the primary session can, because an operator edits the law
-and commits a portrait himself. An operator who wants that closed on the
-primary session too writes the paths into `deny_bash_patterns` in
-[configuration](configuration.md). A Bash command is matched on its
-text, so a path behind a variable or a glob is not seen; `Edit`, `Write`
-and `NotebookEdit` name their path exactly.
+`cousin_lib/perimeter.py` holds those three shapes. They are matched on
+the end of the path, never on a root: any `config/law.md`, any file named
+`self-portrait.md` and any `*.md` directly under a directory named
+`shared` (outside `shared/proposed/` and `shared/examples/`), wherever it
+is. The framework's own memory writers check the path they were handed
+before they write (`memory._append_raw`, `distill`, `raw_fold`,
+`reinforce.record`, `memory_trash`, `self_portrait.write_candidate_text`,
+`shared_tier.propose`), so one pointed at the wrong home refuses rather
+than writes.
+
+On the `sdk` [lane](glossary.md#lane)'s tool surface the same shapes are a
+deny, and only for a subagent: a `PreToolUse` payload carrying `agent_id`
+cannot write them, while the primary session can, because editing the law
+and committing a portrait is the operator's own work. Reads always pass.
+`Write`, `Edit`, `MultiEdit` and `NotebookEdit` are checked on the path
+they name. A Bash command is checked on its write targets as written
+(redirects, the destination of `cp`, `mv`, `install` and `ln`, the
+arguments of `tee`, `rm`, `unlink`, `truncate`, `chmod`, `chown`, `shred`
+and `touch`, `sed -i` files and `dd of=`, in each command of a chain), so
+a path behind a variable, a glob, `find -exec` or a relative `cd` is not
+seen: that half is best-effort. The `opencode` and `tmux` lanes have no
+such gate.
+
+To close more on the primary session too, `policy.toml` has no rule per
+path: `deny_bash_patterns` can match a path in a Bash command, and `Write`
+or `Edit` can only be denied as whole tools (`deny_tools`). See
+[policy.toml](configuration.md#policytoml).
 
 The install's law seed, the console's law editor, `commit_candidate` and
 the body-swap's identity trade are operator-initiated and outside the

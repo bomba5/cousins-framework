@@ -1244,10 +1244,16 @@ What it is and is not:
   nothing. The recorder (a subagent's or a background shell's job row) checks
   the policy itself and records nothing for a call the policy denies or asks
   about.
-- Beside policy.toml, one rule is built in: a subagent's `reply` that names no
-  `thread` is denied ("a subagent must name the thread it answers"), because
-  the turn's implicit thread belongs to the turn the subagent runs in, not to
-  the subagent.
+- Beside policy.toml, two rules are built in, both for a subagent only (a
+  call whose hook input carries `agent_id`), and both checked before the
+  file:
+  - the [memory perimeter](memory.md#the-perimeter): a write to
+    `config/law.md`, a `self-portrait.md` or a canonical `shared/*.md` is
+    denied (`memory perimeter: <tool> may not write <path>: <why>`); reads
+    pass, and Bash is checked on its write targets, best-effort;
+  - a `reply` that names no `thread` is denied ("a subagent must name the
+    thread it answers"), because the turn's implicit thread belongs to the
+    turn the subagent runs in, not to the subagent.
 
 #### policy.toml on the opencode lane
 
@@ -1276,7 +1282,8 @@ differences:
   and its change note do not reach this lane.
 - opencode's own permission config is allow-all and any interactive ask it
   still raises is rejected at once (an `error` event), so a turn never waits.
-- The subagent `reply` rule above is not enforced on this lane.
+- The subagent `reply` rule and the memory perimeter above are not
+  enforced on this lane.
 
 ### Config changed under a live session
 

@@ -1216,9 +1216,13 @@ What it is and is not:
 - The patterns are a guardrail, not a sandbox. They stop a command line you
   can name; the same effect can be spelled another way (a script, another
   interpreter, an editor tool). When the risk is the tool, deny the tool.
-- The file lives in the home it governs, so the model can rewrite it. A
-  rewrite takes effect at the next start, never mid-session. An operator who
-  needs it immutable makes it read-only to the cousin's user, or owns it.
+- The file lives in the home it governs, so the model can rewrite it. On
+  the `sdk` lane a rewrite only ever tightens the live session: what it adds
+  is enforced from the next prompt, and what it removes waits for the next
+  runner start, so a model cannot loosen its own rules by editing the file
+  (see [Config changed under a live session](#config-changed-under-a-live-session)).
+  An operator who needs it immutable makes it read-only to the cousin's user,
+  or owns it.
 - The CLI runs every `PreToolUse` callback that matches a call concurrently,
   and a deny from any of them wins; the order of the callbacks sequences
   nothing. The recorder (a subagent's or a background shell's job row) checks
@@ -1252,8 +1256,48 @@ differences:
   command; the runner says which pattern at start. Write patterns in the
   common subset.
 - The policy file is read once, when opencode loads the plugin: a rewrite of
-  `policy.toml` applies at the next start, as on the SDK lane.
+  `policy.toml` applies at the next start. The SDK lane's live tightening
+  and its change note do not reach this lane.
 - opencode's own permission config is allow-all and any interactive ask it
   still raises is rejected at once (an `error` event), so a turn never waits.
 - The subagent `reply` rule above is not enforced on this lane.
 
+### Config changed under a live session
+
+The runner reads `config/law.md`, `policy.toml`, `cousin.toml` and
+`.mcp.json` when it starts, and the system prompt stays as it was for the
+whole generation. On the `sdk` lane the runner also keeps the text of those
+four files as the session started, and at each submitted prompt compares
+them. When one changed, that prompt's context gets one runner note, ahead of
+recall, and the stream gets a `config_change` event naming the files:
+
+```
+[runner] configuration changed since this session started:
+- policy.toml changed. In force now: deny_bash_patterns: git\s+push. Removed, but still enforced until the next runner start (a session never loosens its own policy): deny_tools: WebFetch.
+- cousin.toml changed. It is read when the runner starts: a restart applies it, and until then this session runs on the old file.
+```
+
+- **`config/law.md`.** The note carries the change as a unified diff (at most
+  60 lines and 3000 characters, then a pointer to the file). The system
+  prompt keeps the old text until the next generation; where the two
+  differ, the new text wins. A removed law is said too: the next generation
+  boots without one.
+- **`policy.toml`.** The live session moves to the union of the policy it
+  has and the new file, never less. What the edit adds to `deny_tools`,
+  `deny_bash_patterns` or `ask` is enforced from that prompt. What it removes
+  stays enforced until the next runner start. An addition that would deny
+  `mcp__cousin__handoff` is left out, and the note says so (the console
+  refuses that edit too). `outbound_filter` is never switched off live. A
+  file that no longer parses leaves the session on the policy it has, and the
+  note says the next runner start will refuse it until it is fixed. The
+  tightened policy is the runner's, not the session's: it holds across a
+  rollover or a reconnect of the same runner, and `reply` and `send` read
+  the same `outbound_filter`.
+- **`cousin.toml` and `.mcp.json`.** Read at start only: the note says a
+  restart applies them.
+
+Each change is said once per runner: the next prompt, and the next session
+after a rollover, compare against what the last check saw. A rollover's new
+session is composed from the files as they are now, so it boots with the new
+law. A check that fails is a `hook` error event, and recall still runs. The
+`opencode` and `tmux` lanes have no change note and no live tightening.

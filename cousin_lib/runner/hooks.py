@@ -4,7 +4,9 @@ A hook never raises into the SDK: the failure becomes a `hook` event.
 
 | event                           | callback                                  |
 |---------------------------------|-------------------------------------------|
-| PreToolUse:policy (no matcher)  | policy.toml deny/ask, `policy`; ask -> deny |
+| PreToolUse:policy (no matcher)  | memory perimeter (a background pass),    |
+|                                 | policy.toml deny/ask, `policy`;           |
+|                                 | ask -> deny                               |
 | PreToolUse (Agent|Task|Bash)    | recorder, only when the policy allows;    |
 |                                 | its updatedInput output or {}             |
 | PostToolUse, PostToolUseFailure | recorder (job close, activity line)       |
@@ -39,7 +41,7 @@ import inspect
 import os
 import threading
 
-from cousin_lib import recording
+from cousin_lib import perimeter, recording
 from cousin_lib.runner.envelope import CONTEXT_MARK
 
 RECORD_EVENTS = ("PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStop")
@@ -75,14 +77,28 @@ def _kind(thread):
 
 def gate(policy, payload):
     """The PreToolUse decision for one hook payload, `(decision,
-    reason)`: a subagent's reply that names no thread is denied, then
-    policy.toml decides. The policy callback enforces it and the
-    recorder consults it, so the two never disagree."""
+    reason)`: the memory perimeter for a background pass, then a
+    subagent's reply that names no thread, then policy.toml decides. The
+    policy callback enforces it and the recorder consults it, so the two
+    never disagree.
+
+    The perimeter applies when the payload carries `agent_id`: that is a
+    subagent, which is what a background pass is - the dreaming pass
+    included, since it runs as one. The primary session keeps its
+    operator-directed edits (an operator edits config/law.md and commits
+    the portrait himself, routinely) and an operator who wants those
+    closed on the primary session too writes the paths into policy.toml.
+    The deny is per call and names the path, so it reads as a boundary
+    rather than a failure."""
     tool_name, tool_input = payload.get("tool_name"), payload.get("tool_input")
-    if payload.get("agent_id") and tool_name == REPLY_TOOL:
-        thread = tool_input.get("thread") if isinstance(tool_input, dict) else None
-        if not str(thread or "").strip():
-            return "deny", SUBAGENT_REPLY_REASON
+    if payload.get("agent_id"):
+        refusal = perimeter.check_tool(tool_name, tool_input)
+        if refusal:
+            return "deny", refusal
+        if tool_name == REPLY_TOOL:
+            thread = tool_input.get("thread") if isinstance(tool_input, dict) else None
+            if not str(thread or "").strip():
+                return "deny", SUBAGENT_REPLY_REASON
     return policy.decide(tool_name, tool_input)
 
 

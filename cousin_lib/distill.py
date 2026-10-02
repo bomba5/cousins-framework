@@ -36,7 +36,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import memory, memory_lock
+from cousin_lib import memory, memory_lock, perimeter
 
 DEFAULT_MAX_LINES = 40
 DEFAULT_SINCE_DAYS = 3650
@@ -224,6 +224,9 @@ def _distill(home, *, max_lines, since_days):
               "obsolete": obsolete}
     ddir = memory.distilled_dir(home)
     for fname in memory.DISTILLED_FILES:
+        # Before the first byte: the distiller runs on every boot and on
+        # every dreamer pass, and it is the writer with the most reach.
+        perimeter.assert_writable(ddir / fname, writer="distill._distill")
         ranked = sorted(per_file.get(fname, []),
                         key=lambda t: (t[0], -t[1], -t[2]))[:max_lines]
         lines = [t[3] for t in ranked]

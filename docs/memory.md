@@ -185,6 +185,33 @@ is often one of those. Outside the lock: `cousin-memory import-auto` (an
 operator act, into `memory/imported/`) and the `MEMORY.md` index compaction
 (`compact --target index`), which write no store the lock covers.
 
+## The perimeter
+
+Three files are not memory, and no write from an agent reaches them:
+`config/law.md` (the [Framework Law](../ceremony.md#the-system-prompt)),
+a cousin's committed `self-portrait.md` (the authored identity; the
+candidate beside it, `.self-portrait-candidate.md`, is the writable side
+of it) and a canonical file in `shared/` (a cousin proposes into
+`shared/proposed/` and a configured reviewer promotes it).
+
+`cousin_lib/perimeter.py` holds those three shapes, and every writer that
+touches the disk checks the path it was handed against them before it
+writes: a distiller, a dreamer or a raw fold pointed at the wrong home
+refuses rather than writes. On the runner's tool surface the same shapes
+are a deny, and only for a background pass: a hook payload carrying
+`agent_id` (every subagent, the dreaming pass included) cannot write
+them, while the primary session can, because an operator edits the law
+and commits a portrait himself. An operator who wants that closed on the
+primary session too writes the paths into `deny_bash_patterns` in
+[configuration](configuration.md). A Bash command is matched on its
+text, so a path behind a variable or a glob is not seen; `Edit`, `Write`
+and `NotebookEdit` name their path exactly.
+
+The install's law seed, the console's law editor, `commit_candidate` and
+the body-swap's identity trade are operator-initiated and outside the
+perimeter, as is the shared tier's own reviewer boundary, which is the
+stronger rule and lives in `shared_tier`.
+
 ## Truth levels
 
 Every raw entry carries a truth level, so the cousin (and you) can tell

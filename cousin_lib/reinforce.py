@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import memory_lock
+from cousin_lib import memory_lock, perimeter
 
 MAX_BONUS = 0.15
 HALF_LIFE_DAYS = 14.0
@@ -131,6 +131,13 @@ def record(home, paths, *, query=None):
         now = time.time()
         log = _log_path(home)
         log.parent.mkdir(parents=True, exist_ok=True)
+        # Reinforcement records what was read, so its log is a memory
+        # file by the same rule as any other. The refusal stops the write,
+        # which is the property; `memory_search._record` is fail-open by
+        # design and swallows the exception, so this surfaces as a missing
+        # bonus on a mis-rooted home, never as a broken search.
+        perimeter.assert_writable(log, writer="reinforce.record")
+        perimeter.assert_writable(_counts_path(home), writer="reinforce.record")
         # the log's rotation and the counts are read-modify-write: one
         # writer at a time per home (memory_lock), or a session loses the
         # other's recall

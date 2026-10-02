@@ -151,6 +151,79 @@ class TestHookEnforcement(HermeticCase):
         self.assertEqual(out, {})
 
 
+class TestThePerimeterAtTheGate(HermeticCase):
+    """The tool chokepoint, through the real callbacks: a background pass
+    (any payload with `agent_id`, which is what the dreaming pass carries)
+    cannot write the law, a committed portrait or canonical shared memory;
+    the primary session can, because an operator edits those himself."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = _home(self)
+        self.stream = EventStream(self.home, "wren")
+        self.cbs = hooks.callbacks(self.home, slug="wren",
+                                   root=self.home.parent.parent,
+                                   machine=StateMachine(), stream=self.stream,
+                                   policy=policy.Policy())
+        self.base = {"session_id": "s", "transcript_path": "/dev/null",
+                     "cwd": str(self.home), "hook_event_name": "PreToolUse",
+                     "tool_use_id": "t"}
+
+    def _gate(self, **kw):
+        return asyncio.run(self.cbs["PreToolUse:policy"]({**self.base, **kw}, "t", {}))
+
+    def _denied(self, **kw):
+        spec = self._gate(**kw)["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny")
+        return spec["permissionDecisionReason"]
+
+    def test_a_subagent_write_to_the_law_is_denied(self):
+        reason = self._denied(agent_id="dream-1", tool_name="Write",
+                              tool_input={"file_path": "/home/bomba/cf/config/law.md"})
+        self.assertIn("memory perimeter", reason)
+        self.assertIn("config/law.md", reason)
+
+    def test_a_subagent_bash_that_names_the_law_is_denied(self):
+        self.assertIn("memory perimeter", self._denied(
+            agent_id="dream-1", tool_name="Bash",
+            tool_input={"command": "cat >> ~/cf/config/law.md"}))
+
+    def test_a_subagent_write_to_a_portrait_or_shared_memory_is_denied(self):
+        for path in ("/home/bomba/cf/cousins/wren/self-portrait.md",
+                     "/home/bomba/cf/shared/reference_house-style.md"):
+            self.assertIn("memory perimeter", self._denied(
+                agent_id="dream-1", tool_name="Write",
+                tool_input={"file_path": path}))
+
+    def test_a_subagent_write_to_its_own_memory_is_allowed(self):
+        for path in ("/home/bomba/cf/cousins/wren/memory/raw/2026-10-02.jsonl",
+                     "/home/bomba/cf/cousins/wren/notes/plan.md",
+                     "/home/bomba/cf/shared/proposed/wren__reference_h.md"):
+            self.assertEqual(self._gate(agent_id="dream-1", tool_name="Write",
+                                        tool_input={"file_path": path}), {})
+
+    def test_the_primary_session_keeps_its_operator_directed_edits(self):
+        # Bart edits config/law.md on Jhonata's instruction; the perimeter
+        # is about background passes, not about the operator's own hands.
+        self.assertEqual(self._gate(
+            tool_name="Write",
+            tool_input={"file_path": "/home/bomba/cf/config/law.md"}), {})
+
+    def test_the_refusal_is_recorded_as_a_policy_event(self):
+        self._denied(agent_id="dream-1", tool_name="Write",
+                     tool_input={"file_path": "/home/bomba/cf/config/law.md"})
+        events = [e["payload"] for e in self.stream.tail() if e["kind"] == "policy"]
+        self.assertEqual(events[0]["decision"], "deny")
+        self.assertEqual(events[0]["agent_id"], "dream-1")
+
+    def test_a_perimeter_deny_does_not_wait_for_an_operator(self):
+        # An ask parks the session in waiting_permission; a perimeter
+        # refusal is not a question, so the machine never moves.
+        self._denied(agent_id="dream-1", tool_name="Write",
+                     tool_input={"file_path": "/home/bomba/cf/config/law.md"})
+        self.assertFalse([e for e in self.stream.tail() if e["kind"] == "state"])
+
+
 class _RaisingPolicy:
     """A policy stub whose decide() always raises, to prove the hook
     fails closed rather than swallowing the error into an allow."""

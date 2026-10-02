@@ -13,6 +13,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cousin_lib import perimeter
 from cousin_lib.config import CousinConfig, FrameworkConfig
 from cousin_lib.trace import traced_cli
 
@@ -168,6 +169,10 @@ def propose(file, body, *, slug, reason="", force=False):
         raise FileExistsError(
             "proposal already exists at %s; pass force to replace"
             % target)
+    # proposed/ is the one shared path a cousin may write (see
+    # perimeter.SHARED_SUBDIRS); this check is what keeps it that way when
+    # someone widens the protected set or hands propose a canonical name.
+    perimeter.assert_writable(target, writer="shared_tier.propose")
     target.write_text(body)
     _audit("propose-overwrite" if exists else "propose", slug, file, {
         "proposal": target.name,

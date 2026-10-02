@@ -33,7 +33,7 @@ writing side:
   trade (`lifecycle._swap_bodies`).
 
 Shape, not root: the check is pure and offline, so the Bash chokepoint
-can apply it to a path-like token without resolving an install, and a
+can apply it to a parsed write target without resolving an install, and a
 cousin in a worktree is held to the same rule as one in the live home.
 
 What it does not do:
@@ -41,11 +41,17 @@ What it does not do:
 - It is not the shared tier's boundary. `shared_tier._check_reviewer` is,
   and that one is stronger: no configuration expresses it away. This
   module only stops a writer from landing a file it should not have.
-- It cannot see a Bash command that hides the path behind a variable, a
-  glob or `find -exec`. `check_tool`'s command scan is path matching on
-  the command text and is therefore BEST-EFFORT; Edit, Write and
-  NotebookEdit name their path exactly and are not. An operator who
-  wants Bash covered too writes `deny_bash_patterns` in policy.toml.
+- It is about WRITES. A subagent reads the law, its portrait and the
+  shared rules as a matter of course, so Read, Grep and Glob name no
+  target here and `cat`, `grep` and `git diff --` on a protected path
+  pass. Edit, Write, MultiEdit and NotebookEdit name their path exactly
+  and are not best-effort.
+- It cannot see every Bash write. `check_tool` parses redirects,
+  destinations and the arguments of the commands that write, so a write
+  hidden behind a variable, a glob or `find -exec` is not seen, and a
+  command that does not tokenise loses its redirect. That scan is
+  therefore BEST-EFFORT, and an operator who wants Bash covered too
+  writes `deny_bash_patterns` in policy.toml.
 - It does not make the primary session unable to edit its own law or
   portrait. Operator-directed edits are legitimate and frequent; the
   rule this enforces is that a BACKGROUND pass cannot make them. So the
@@ -54,6 +60,7 @@ What it does not do:
   `assert_writable` unconditionally, because a framework writer is
   agent-initiated by definition.
 """
+import os
 import shlex
 from pathlib import Path
 
@@ -62,9 +69,25 @@ PORTRAIT_NAME = "self-portrait.md"
 SHARED_DIR = "shared"
 SHARED_SUBDIRS = ("proposed", "examples")
 
-# Tools that name their target path as an exact field.
+# Tools that WRITE the path they name. Read, Grep and Glob name paths too
+# and are absent on purpose: a subagent reads the law and the shared rules
+# as a matter of course, and a perimeter that refuses the read is a
+# perimeter that gets switched off.
+WRITE_PATH_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# The fields those tools carry their path in.
 PATH_FIELDS = ("file_path", "notebook_path")
 BASH_FIELD = "command"
+# Shell: a redirect's target is a write; `>` `>>` `>|` are what a command
+# writes through, `>&` only duplicates a descriptor.
+REDIRECTS = (">", ">>", ">|", ">&")
+SEGMENT_SEPARATORS = (";", "&&", "||", "|", "&")
+# Commands whose LAST positional argument is the destination, so `cp
+# config/law.md /tmp/x` is a read and passes while `cp /tmp/x
+# shared/a.md` is a write and does not.
+DESTINATION_COMMANDS = ("cp", "mv", "install", "ln")
+# Commands whose every positional argument is a write target.
+ARGUMENT_COMMANDS = ("tee", "rm", "unlink", "truncate", "chmod", "chown",
+                     "shred", "touch")
 
 
 class PerimeterRefused(Exception):
@@ -126,35 +149,87 @@ def assert_writable(path, *, writer=None):
                            % (where, path, reason))
 
 
-def _tokens(command):
-    """Path-like tokens in a shell command, best-effort: `shlex` split,
-    with the punctuation a command wraps its arguments in stripped. A
-    token that is not a path (a flag, a string literal with no slash)
-    simply never matches a protected shape."""
+def _shell_tokens(command):
+    """`shlex` split with punctuation as its own tokens, so a redirect is
+    visible as one: `cat >> f` is three tokens, not two. A command that
+    does not tokenise (an unclosed quote) falls back to whitespace, which
+    loses the redirect and therefore the write - the direction a
+    best-effort check should fail in, and the reason this is documented
+    as best-effort rather than called sound."""
+    lex = shlex.shlex(str(command or ""), posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = "#"
     try:
-        raw = shlex.split(str(command or ""), comments=False, posix=True)
+        return list(lex)
     except ValueError:
-        raw = str(command or "").split()
-    out = []
-    for token in raw:
-        cleaned = token.strip("\"'`|&;<>(){}[]*?!$,=:\\")
-        cleaned = cleaned.lstrip("-")
-        if cleaned:
-            out.append(cleaned)
+        return str(command or "").split()
+
+
+def _segments(tokens):
+    """`tokens` split at the operators that start a new command, so
+    `mv a b; rm c` is checked as the two commands it is."""
+    out, current = [], []
+    for token in tokens:
+        if token in SEGMENT_SEPARATORS:
+            if current:
+                out.append(current)
+            current = []
+        else:
+            current.append(token)
+    if current:
+        out.append(current)
     return out
 
 
-def tool_paths(tool_name, tool_input):
-    """The paths one tool call names. Edit, Write, NotebookEdit and every
-    other path tool carry an exact field, so their entry is the path and
-    not a guess. Bash carries a command, so its entries are path-like
-    tokens: path matching on the command text, best-effort by
-    construction, which is why the module docstring calls it that."""
+def _positional(args):
+    return [a for a in args if not a.startswith("-")]
+
+
+def _bash_write_targets(command):
+    """The paths a shell command would WRITE: redirect targets, the
+    destination of cp/mv/install/ln, the arguments of tee/rm/chmod and
+    friends, the files `sed -i` edits, and dd's `of=`.
+
+    Everything else in the command line is a read and is not returned, so
+    `cat config/law.md`, `grep -n rule config/law.md` and `git diff --
+    config/law.md` all pass. A write the command hides behind a variable
+    (`L=...; cp $L /tmp/x`) is not seen: this is path matching on the
+    command text, and the docstring's Bash caveat is the whole of it."""
+    targets = []
+    for segment in _segments(_shell_tokens(command)):
+        if not segment:
+            continue
+        for index, token in enumerate(segment[:-1]):
+            if token in REDIRECTS and token != ">&":
+                targets.append(segment[index + 1])
+        name = os.path.basename(segment[0])
+        args = segment[1:]
+        if name in DESTINATION_COMMANDS:
+            positional = _positional(args)
+            if positional:
+                targets.append(positional[-1])
+        elif name in ARGUMENT_COMMANDS:
+            targets.extend(_positional(args))
+        elif name == "sed" and any(a.startswith("-i") for a in args):
+            # The first positional is the script, not a file.
+            targets.extend(_positional(args)[1:])
+        elif name == "dd":
+            targets.extend(a[3:] for a in args if a.startswith("of="))
+    return [t for t in targets if t]
+
+
+def write_targets(tool_name, tool_input):
+    """The paths one tool call would WRITE. The path tools name them in an
+    exact field, so their entry is the path and not a guess; Bash carries
+    a command, so its entries are the write targets parsed out of the
+    command text. Every other tool returns nothing, reads included."""
     name = str(tool_name or "")
     if not isinstance(tool_input, dict):
         return []
     if name == "Bash":
-        return _tokens(tool_input.get(BASH_FIELD))
+        return _bash_write_targets(tool_input.get(BASH_FIELD))
+    if name not in WRITE_PATH_TOOLS:
+        return []
     for field in PATH_FIELDS:
         value = tool_input.get(field)
         if isinstance(value, str) and value.strip():
@@ -163,11 +238,11 @@ def tool_paths(tool_name, tool_input):
 
 
 def check_tool(tool_name, tool_input):
-    """The refusal for a tool call that would write a protected surface,
+    """The refusal for a tool call that would WRITE a protected surface,
     or None. One reason per call: the first path, not every path, because
     the caller turns this into a deny message and a list of them reads
     like a policy document."""
-    for path in tool_paths(tool_name, tool_input):
+    for path in write_targets(tool_name, tool_input):
         reason = protected_reason(path)
         if reason is not None:
             return ("memory perimeter: %s may not write %s: %s"

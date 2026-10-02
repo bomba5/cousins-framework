@@ -83,12 +83,15 @@ def gate(policy, payload):
     never disagree.
 
     The perimeter applies when the payload carries `agent_id`: that is a
-    subagent, which is what a background pass is - the dreaming pass
-    included, since it runs as one. The primary session keeps its
-    operator-directed edits (an operator edits config/law.md and commits
-    the portrait himself, routinely) and an operator who wants those
-    closed on the primary session too writes the paths into policy.toml.
-    The deny is per call and names the path, so it reads as a boundary
+    subagent. #166's background pass MUST run as one, or call
+    perimeter.assert_writable at its own writers - the pass is not designed
+    yet, so that is a requirement on that design and not a fact about it.
+    The primary session keeps its operator-directed edits, because editing
+    the law and committing a portrait is the operator's own work and is
+    routine; an operator who wants those closed on the primary session too
+    writes the paths into policy.toml. Reads are never refused: a
+    subagent reads the law and the shared rules as a matter of course. The
+    deny is per call and names the path, so it reads as a boundary
     rather than a failure."""
     tool_name, tool_input = payload.get("tool_name"), payload.get("tool_input")
     if payload.get("agent_id"):

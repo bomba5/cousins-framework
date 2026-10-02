@@ -202,6 +202,37 @@ class TestThePerimeterAtTheGate(HermeticCase):
             self.assertEqual(self._gate(agent_id="dream-1", tool_name="Write",
                                         tool_input={"file_path": path}), {})
 
+    def test_a_subagent_may_read_every_protected_surface(self):
+        # The reads a background pass actually makes: the law, the shared
+        # rules, the portrait it is supposed to be holding to. A perimeter
+        # that refuses these is one an operator switches off.
+        for tool, field in (("Read", "file_path"), ("Grep", "path"),
+                            ("Read", "file_path"), ("Read", "file_path")):
+            for path in ("/home/bomba/cf/config/law.md",
+                         "/home/bomba/cf/cousins/wren/self-portrait.md",
+                         "/home/bomba/cf/shared/reference_house-style.md"):
+                self.assertEqual(self._gate(agent_id="dream-1", tool_name=tool,
+                                            tool_input={field: path}), {},
+                                 "%s %s" % (tool, path))
+
+    def test_a_subagent_may_read_a_protected_path_through_a_shell(self):
+        for command in ("cat ~/cf/config/law.md",
+                        "grep -n 'private cousin' ~/cf/config/law.md",
+                        "git diff -- config/law.md",
+                        "cat ~/cf/shared/reference_house-style.md",
+                        "sed s/private/PUBLIC/ ~/cf/cousins/wren/self-portrait.md"):
+            self.assertEqual(self._gate(agent_id="dream-1", tool_name="Bash",
+                                        tool_input={"command": command}), {},
+                             command)
+
+    def test_a_subagent_may_not_write_a_protected_path_through_a_shell(self):
+        for command in ("echo x >> ~/cf/config/law.md",
+                        "sed -i s/private/PUBLIC/ ~/cf/cousins/wren/self-portrait.md",
+                        "cp /tmp/x ~/cf/shared/reference_house-style.md"):
+            self.assertIn("memory perimeter",
+                          self._denied(agent_id="dream-1", tool_name="Bash",
+                                       tool_input={"command": command}), command)
+
     def test_the_primary_session_keeps_its_operator_directed_edits(self):
         # Bart edits config/law.md on Jhonata's instruction; the perimeter
         # is about background passes, not about the operator's own hands.

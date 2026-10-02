@@ -80,25 +80,69 @@ class TestAssertWritable(unittest.TestCase):
         self.assertTrue(issubclass(perimeter.PerimeterRefused, Exception))
 
 
-class TestToolPaths(unittest.TestCase):
-    def test_the_path_tools_name_their_path(self):
-        for tool, field in (("Write", "file_path"), ("Edit", "file_path"),
-                            ("MultiEdit", "file_path"),
-                            ("NotebookEdit", "notebook_path")):
-            out = perimeter.tool_paths(tool, {field: "/tmp/x.md"})
+class TestWriteTargets(unittest.TestCase):
+    def test_the_path_tools_name_the_path_they_write(self):
+        for tool in ("Write", "Edit", "MultiEdit"):
+            out = perimeter.write_targets(tool, {"file_path": "/tmp/x.md"})
             self.assertEqual(out, ["/tmp/x.md"], tool)
+        self.assertEqual(
+            perimeter.write_targets("NotebookEdit", {"notebook_path": "/tmp/x.ipynb"}),
+            ["/tmp/x.ipynb"])
 
-    def test_bash_is_tokenised(self):
-        out = perimeter.tool_paths("Bash", {"command": "sed -i s/a/b/ /srv/config/law.md"})
-        self.assertIn("/srv/config/law.md", out)
+    def test_a_read_tool_names_no_target_at_all(self):
+        # The defect this exists to hold: a perimeter that refuses the read
+        # is a perimeter an operator switches off.
+        for tool in ("Read", "Grep", "Glob", "LS", "NotebookRead",
+                     "mcp__cousin__reply"):
+            for field in ("file_path", "path", "notebook_path", "pattern"):
+                self.assertEqual(
+                    perimeter.write_targets(tool, {field: "/srv/config/law.md"}),
+                    [], tool)
+
+    def test_bash_reads_of_a_protected_path_are_not_write_targets(self):
+        for command in ("cat /srv/config/law.md",
+                        "cat /srv/self-portrait.md",
+                        "cat /srv/shared/reference_house-style.md",
+                        "grep -n rule /srv/config/law.md",
+                        "git diff -- config/law.md",
+                        "sed s/a/b/ config/law.md",
+                        "cp config/law.md /tmp/x",
+                        "wc -l shared/reference_house-style.md",
+                        "rg -l private /srv/cousins/chico"):
+            self.assertIsNone(perimeter.check_tool("Bash", {"command": command}),
+                              command)
+
+    def test_bash_writes_of_a_protected_path_are_write_targets(self):
+        for command in ("echo x > config/law.md",
+                        "echo x >> /srv/config/law.md",
+                        "tee /srv/config/law.md",
+                        "tee -a config/law.md",
+                        "sed -i s/a/b/ config/law.md",
+                        "sed -i.bak s/a/b/ config/law.md",
+                        "cp /tmp/x shared/a.md",
+                        "mv /tmp/x shared/a.md",
+                        "rm self-portrait.md",
+                        "chmod 644 /srv/config/law.md",
+                        "dd of=config/law.md bs=1",
+                        "cat > /srv/config/law.md; echo done"):
+            self.assertIsNotNone(perimeter.check_tool("Bash", {"command": command}),
+                                 command)
+
+    def test_a_redirect_that_duplicates_a_descriptor_is_not_a_write(self):
+        self.assertIsNone(perimeter.check_tool(
+            "Bash", {"command": "cat /srv/config/law.md 2>&1"}))
+
+    def test_each_segment_of_a_chained_command_is_checked(self):
+        self.assertIsNotNone(perimeter.check_tool(
+            "Bash", {"command": "cd /tmp && rm config/law.md"}))
 
     def test_a_malformed_command_does_not_raise(self):
-        out = perimeter.tool_paths("Bash", {"command": 'echo "unclosed'})
-        self.assertIsInstance(out, list)
+        self.assertIsInstance(
+            perimeter.write_targets("Bash", {"command": 'echo "unclosed'}), list)
 
     def test_a_tool_with_no_path_field_yields_nothing(self):
-        self.assertEqual(perimeter.tool_paths("Read", {"file_path": ""}), [])
-        self.assertEqual(perimeter.tool_paths("mcp__cousin__reply", None), [])
+        self.assertEqual(perimeter.write_targets("Write", {"file_path": ""}), [])
+        self.assertEqual(perimeter.write_targets("mcp__cousin__reply", None), [])
 
 
 class TestCheckTool(unittest.TestCase):
@@ -107,11 +151,9 @@ class TestCheckTool(unittest.TestCase):
         self.assertIn("Write may not write", reason)
         self.assertIn("memory perimeter", reason)
 
-    def test_a_bash_command_that_names_the_law_is_refused(self):
+    def test_a_bash_command_that_writes_the_law_is_refused(self):
         self.assertIsNotNone(perimeter.check_tool(
             "Bash", {"command": "echo x >> ~/cf/config/law.md"}))
-        self.assertIsNotNone(perimeter.check_tool(
-            "Bash", {"command": "L=/srv/config/law.md; rm $L"}))
 
     def test_an_ordinary_write_is_not(self):
         self.assertIsNone(perimeter.check_tool(

@@ -899,6 +899,65 @@ def schedule_index_refresh(now, report, *, homes, refresh=_refresh_one,
         state["thread"].start()
 
 
+# Dreaming (dreaming.py): a cousin whose [agent] dreaming is on gets a pass
+# when one is due. One worker runs one pass at a time, each in a child
+# process of its own (a pass scrubs auth variables, process-wide), so the
+# tick never waits on a model.
+_dream_worker = {"thread": None, "queue": [], "inflight": set(), "done": []}
+
+
+def _dream_one(home, root, trigger):
+    from cousin_lib import dreaming
+    return dreaming.run_child(home, root, trigger)
+
+
+def schedule_dreams(now, report, *, homes, root, run=_dream_one, background=True):
+    """Queue each home a pass is due for (dreaming.due) and make sure one
+    worker drains the queue. Finished passes land in report["dreamed"] on
+    the next tick, as (slug, verdict)."""
+    import threading
+    from datetime import datetime
+    from cousin_lib import dreaming
+
+    state = _dream_worker
+    report.setdefault("dreamed", [])
+    while state["done"]:
+        report["dreamed"].append(state["done"].pop(0))
+    when = datetime.fromtimestamp(now).astimezone()
+    for slug, home in homes:
+        if slug in state["inflight"]:
+            continue
+        try:
+            trigger = dreaming.due(home, when)
+        except Exception as err:  # noqa: BLE001 - one home never stops the rest
+            report["errors"].append("dreaming %s: %s" % (slug, err))
+            continue
+        if trigger:
+            state["inflight"].add(slug)
+            state["queue"].append((slug, home, trigger))
+
+    def drain():
+        while state["queue"]:
+            slug, home, trigger = state["queue"].pop(0)
+            try:
+                out = run(home, root, trigger)
+            except Exception as err:  # noqa: BLE001 - one pass never stops the rest
+                out = {"result": "error", "error": str(err)}
+            finally:
+                state["inflight"].discard(slug)
+            state["done"].append((slug, out))
+
+    if not background:
+        drain()
+        while state["done"]:
+            report["dreamed"].append(state["done"].pop(0))
+        return
+    thread = state["thread"]
+    if state["queue"] and (thread is None or not thread.is_alive()):
+        state["thread"] = threading.Thread(target=drain, name="dreaming", daemon=True)
+        state["thread"].start()
+
+
 def _default_do_flip(slug, reason="flip"):
     from cousin_lib.flip import flip
     return flip(slug, reason=reason)
@@ -933,7 +992,7 @@ def _keep_distilled(slug, home, report):
 
 
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
-         index_refresh=False):
+         index_refresh=False, dreams=False):
     """One scheduler tick, per docs/reference/loops.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
     commit-after-delivery, request consumption, one-shot firing
@@ -1028,6 +1087,15 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 if c.type != "worker"])
         except Exception as err:
             report["errors"].append("index refresh: %s" % err)
+    if dreams:
+        try:
+            root = FrameworkConfig.from_env().root
+            schedule_dreams(now, report, root=root, homes=[
+                (c.slug, root / "cousins" / c.slug)
+                for c in FrameworkConfig.from_env().list_cousins()
+                if c.type != "worker"])
+        except Exception as err:
+            report["errors"].append("dreaming: %s" % err)
     try:
         from cousin_lib import meetings
         report["meetings"] = meetings.tick(deliver=deliver, now=now)
@@ -1223,9 +1291,13 @@ def loops_main(argv=None):
         count = 0
         while True:
             report = tick(deliver=_default_deliver,
-                          is_alive=_default_is_alive, index_refresh=True)
+                          is_alive=_default_is_alive, index_refresh=True,
+                          dreams=True)
             for slug, out in report.get("indexed", []):
                 print("cousin-loops: index %s: %s" % (slug, out),
+                      file=sys.stderr)
+            for slug, out in report.get("dreamed", []):
+                print("cousin-loops: dreaming %s: %s" % (slug, json.dumps(out)),
                       file=sys.stderr)
             for error in report["errors"]:
                 print("cousin-loops: %s" % error, file=sys.stderr)

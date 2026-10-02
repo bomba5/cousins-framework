@@ -135,6 +135,14 @@ def bump_generation(home):
         mark_generation_start(home, generation=generation)
     except OSError:
         pass        # generation_started falls back to generation.txt
+    try:
+        # a cousin dreaming "rollover" gets a pass after each generation:
+        # the loops daemon picks the request up at its next tick
+        from cousin_lib import dreaming
+        if dreaming.settings(home)["mode"] == "rollover":
+            dreaming.request(home)
+    except OSError:
+        pass        # a missed request is a missed pass, never a failed bump
     return generation
 
 

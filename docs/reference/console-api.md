@@ -809,6 +809,18 @@ Body `{"verdicts": {"<id>": "keep"|"drop"}, "why"?}` (`why` at most 500 characte
 
 Body `{"action": "distill"|"compact-raw"|"compact-index"|"reindex", "dry_run"?}`. Runs as the cousin's long operation of kind `memory-<action>` (`202 {"ok": true, "op"}`, `409` while another operation, a flip or a clean stop runs; follow it at [`GET /api/cousins/<slug>/op`](#get-apicousinsslugop)). `distill` rebuilds `memory/distilled/`, `compact-raw` folds old daily raw files (lossless), `compact-index` retires the oldest MEMORY.md pointers over the budget (`dry_run: true` only reports `would_retire`), `reindex` rebuilds the keyword index and, when configured, the semantic one. The op's result carries the library's report.
 
+### `GET /api/memory/<slug>/dreams`
+
+`{"settings": {"mode", "at"}, "passes": [pass, ...]}`: the cousin's dreaming setting (`[agent] dreaming`, `off` when unset or unknown) and its passes newest first (at most 50), from `data/dreams/*.jsonl`. A pass is `{"pass_id", "started", "ended"?, "trigger", "model", "budget", "result", "tokens"?, "summary"?, "error"?, "changes": [{"op", "topic", "entry_ids", "mark_id", "why"}], "undone"?, "undone_by"?}`. `result` is `done`, `no_change`, `budget`, `error`, or, for a pass with no end record, `running`, or `lost` once it is past the pass timeout.
+
+### `POST /api/memory/<slug>/dreams/run`
+
+One dreaming pass now, whatever the setting, as the cousin's long operation of kind `memory-dream` (`202 {"ok": true, "op"}`, `409` while another operation runs). The pass runs in a child process on the cousin's account. The op's result is `{"ok": true, "pass": {"pass_id", "result", "tokens", "changes"}}`; a pass whose result is `error` fails the op. A `memory-change` event follows.
+
+### `POST /api/memory/<slug>/dreams/undo`
+
+Body `{"pass_id"}`. Reverses one pass's changes (`dreaming.undo`), recorded as by the logged-in user, then rebuilds the distilled views. `200 {"ok": true, "reverted": [change, ...]}` and a `memory-change` event; `400` for an unknown pass, one that changed nothing, or one already undone.
+
 ### `GET /api/memory/<slug>/portrait`
 
 `{"candidate", "committed", "candidate_exists", "committed_exists", "backup_exists", "candidate_sha", "diff"}`: the reviewed identity layer (`self-portrait.md`), its candidate (`.self-portrait-candidate.md`) and the unified diff between them. `candidate_sha` is the first 16 hex characters of the candidate's SHA-256.

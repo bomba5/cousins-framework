@@ -278,6 +278,7 @@ function MemoryExplorer({ slug }) {
     ["op-review", "review gate", badges.held == null ? "keep or drop held entries" : `${badges.held} held`],
     ["op-history", "history", "a topic's claims"],
     ["op-maintain", "maintenance", "distill, compact, reindex"],
+    ["op-dreams", "dreaming", "background passes and what each changed"],
     ["op-portrait", "self-portrait", "diff, edit, commit"],
     ["op-moments", "capsules and callbacks", "read-only"],
   ];
@@ -377,6 +378,7 @@ function MemoryExplorer({ slug }) {
         {layer === "op-review" && <ReviewQueue slug={slug} reload={tick} flash={flash} onChanged={changed} />}
         {layer === "op-history" && <TopicHistory slug={slug} topic={historyTopic} reload={tick} onRetire={retireClaim} operator={isOperator} />}
         {layer === "op-maintain" && <MemoryMaintenance slug={slug} ov={ov} flash={flash} onChanged={changed} />}
+        {layer === "op-dreams" && <DreamsView slug={slug} reload={tick} flash={flash} onChanged={changed} operator={isOperator} />}
         {layer === "op-portrait" && <SelfPortrait slug={slug} flash={flash} onChanged={changed} />}
         {layer === "op-moments" && <MomentsList slug={slug} reload={tick} />}
         {layer === "decisions" && <DecisionList slug={slug} reload={tick} onRemove={remove} />}
@@ -1279,6 +1281,87 @@ function MemoryMaintenance({ slug, ov, flash, onChanged }) {
                 <button className="btn primary" disabled={running} onClick={() => start(m.action)}>{m.title} now</button>
               )}
             </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Dreaming (cousin_lib/dreaming.py): the cousin's setting, a pass on
+// demand, and every pass newest first with what it changed. A pass is
+// reversible: undo retires what it added and the marks it made.
+const DREAM_RESULT_TONE = { done: "ok", no_change: "", budget: "warn", error: "bad", lost: "bad", running: "" };
+
+function DreamsView({ slug, reload, flash, onChanged, operator }) {
+  const [tick, setTick] = React.useState(0);
+  const [data, , err] = useMemoryJson(`/api/memory/${slug}/dreams`, reload + tick);
+  const [op, reloadOp] = useLongOp(slug);
+  const mine = op && op.kind === "memory-dream" ? op : null;
+  const running = op && op.status === "running";
+  const last = React.useRef(null);
+  React.useEffect(() => {
+    if (!mine) return;
+    const key = mine.id + ":" + mine.status;
+    if (last.current && last.current !== key && mine.status !== "running") { setTick(t => t + 1); onChanged && onChanged(); }
+    last.current = key;
+  }, [mine && mine.id, mine && mine.status]);
+  if (!data) return <Pending data={data} err={err} />;
+  const cfg = data.settings || {};
+  const run = async () => {
+    const { r, d } = await safeSend("POST", `/api/memory/${slug}/dreams/run`, {});
+    if (!r.ok || !d.ok) { flash({ ok: false, msg: `dreaming not started: ${d.error || r.status}` }); return; }
+    reloadOp();
+  };
+  const undo = async (passId) => {
+    const { r, d } = await safeSend("POST", `/api/memory/${slug}/dreams/undo`, { pass_id: passId });
+    if (!r.ok || !d.ok) { flash({ ok: false, msg: `undo failed: ${d.error || r.status}` }); return; }
+    flash({ ok: true, msg: `pass ${passId} undone: ${(d.reverted || []).length} change(s) reversed` });
+    setTick(t => t + 1); onChanged && onChanged();
+  };
+  const passes = data.passes || [];
+  return (
+    <div className="mx-list-wrap" data-dreams>
+      <div className="panel mx-card">
+        <div className="panel-hdr"><span className="title">setting</span>
+          <span className="muted">{cfg.mode === "off" ? "off" : cfg.mode === "nightly" ? `nightly at ${cfg.at}` : "after each rollover"}</span></div>
+        <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="mx-sub" style={{ marginTop: 0 }}>
+            A pass is a short Sonnet session with memory tools only (no files, no shell), up to 32k tokens.
+            It merges duplicates, retires stale claims and settles contradictions, never touching L0-L2.
+            Turn it on or off in the cousin's Agent settings (dreaming, dreaming_at).
+          </div>
+          {mine && <LongOpStatus slug={slug} kind="memory-dream" />}
+          {operator && (
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn primary" disabled={running} onClick={run}>dream now</button>
+            </div>
+          )}
+        </div>
+      </div>
+      {passes.length === 0 && <div className="mx-empty">no passes yet</div>}
+      {passes.map(p => (
+        <div key={p.pass_id} className="panel mx-card" data-dream={p.pass_id}>
+          <div className="panel-hdr">
+            <span className="title">{fmtWhen(p.started)} · {p.trigger}</span>
+            <span className={"muted " + (DREAM_RESULT_TONE[p.result] || "")}>
+              {p.result}{p.undone ? " · undone" : ""} · {(p.changes || []).length} change(s){p.tokens != null ? ` · ${p.tokens} tokens` : ""}
+            </span>
+          </div>
+          <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {p.summary && <div className="mx-sub" style={{ marginTop: 0 }}>{p.summary}</div>}
+            {p.error && <div className="mx-sub bad" style={{ marginTop: 0 }}>{p.error}</div>}
+            {(p.changes || []).map((c, i) => (
+              <div key={i} className="mx-sub" style={{ marginTop: 0, fontFamily: "var(--mono)" }}>
+                {c.op} · {c.topic || "-"}{c.why ? ` · ${c.why}` : ""}{(c.entry_ids || []).length ? ` · ${(c.entry_ids || []).join(", ")}` : ""}
+              </div>
+            ))}
+            {operator && (p.changes || []).length > 0 && !p.undone && (
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <ConfirmButton className="btn danger" label="undo" confirmLabel="confirm: reverse this pass"
+                               onConfirm={() => undo(p.pass_id)} />
+              </div>
+            )}
           </div>
         </div>
       ))}

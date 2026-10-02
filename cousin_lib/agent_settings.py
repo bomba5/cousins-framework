@@ -43,7 +43,9 @@ _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # key -> spec. lanes: the kinds that read the key (ALL: every runner kind).
 # readonly: shown, never written here. restart: every [agent] key is read
-# when the runner starts, so every change applies at the next start.
+# when the runner starts, so every change applies at the next start; a
+# key with "restart": False is read elsewhere each time (the dreaming
+# keys: the loops daemon, every tick).
 SCHEMA = {
     "runner": {"type": "choice", "lanes": ALL, "readonly": True,
                "hint": "the lane; switching it is a migration (cousin-migrate)"},
@@ -77,6 +79,13 @@ SCHEMA = {
     "commit_attribution": {"type": "bool", "lanes": ALL, "default": None,
                            "hint": "the harness's own attribution on commits and PRs;"
                                    " unset is the install default"},
+    # dreaming.py: a background memory pass; the pass runs in a process of
+    # its own on the cousin's account, so every runner kind can have it
+    "dreaming": {"type": "choice", "lanes": ALL, "default": "off", "restart": False,
+                 "hint": "a background pass that consolidates memory: off, nightly"
+                         " at dreaming_at, or after each rollover"},
+    "dreaming_at": {"type": "time", "lanes": ALL, "default": "03:00", "restart": False,
+                    "hint": "host time of the nightly dreaming pass, HH:MM"},
     # The tmux kind's own key: its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},
@@ -211,6 +220,14 @@ def _check_value(key, value, lane, home):
         if not isinstance(value, str) or not value:
             raise ValueError("must be an account name")
         return value
+    if kind == "choice":
+        allowed = _choices(key, lane, None) or []
+        if value not in allowed:
+            raise ValueError("must be one of %s" % ", ".join(allowed))
+        return value
+    if kind == "time":
+        from cousin_lib import dreaming
+        return dreaming.check_time(value)
     if kind == "sessions":
         from cousin_lib.runner import sessions
         try:
@@ -329,6 +346,9 @@ def _cross(root, agent, home=None):
 def _choices(key, lane, root):
     if key == "runner":
         return kinds()
+    if key == "dreaming":
+        from cousin_lib import dreaming
+        return list(dreaming.MODES)
     if key == "effort":
         from cousin_lib.config import EFFORT_LEVELS
         return list(EFFORT_LEVELS)
@@ -419,7 +439,7 @@ def describe(home, root):
                 value = default
         row = {"value": value, "set": key in agent, "default": default,
                "type": spec["type"], "readonly": bool(spec.get("readonly")),
-               "hint": spec.get("hint", ""), "restart": True}
+               "hint": spec.get("hint", ""), "restart": spec.get("restart", True)}
         if spec.get("deprecated"):
             row["deprecated"] = True
         if "min" in spec:
@@ -439,6 +459,12 @@ def describe(home, root):
         out["settings"][key] = row
     out["errors"] = _cross(root, agent, home)
     return out
+
+
+def needs_restart(changed):
+    """A write of these keys needs a runner restart to apply: any key
+    the runner reads at start (every key but the "restart": False ones)."""
+    return any(SCHEMA.get(k, {}).get("restart", True) for k in changed)
 
 
 def check_table(root, agent, home=None):

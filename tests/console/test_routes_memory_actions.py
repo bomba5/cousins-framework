@@ -305,6 +305,9 @@ class Maintenance(ActionsCase):
         self.assertEqual(op["result"]["semantic"], "off")
 
     def test_compact_raw_and_the_index_preview(self):
+        # setUp's fixed-date day file ages past the 30-day window on the
+        # calendar; fold only the 2020 file so the count holds on any date.
+        (self.home / "memory" / "raw" / "2026-09-01.jsonl").unlink()
         _raw(self.home, "2020-01-05.jsonl", [
             {"topic": "old", "content": "long ago", "truth_level": "L2_TOOL",
              "timestamp": "2020-01-05T10:00:00+00:00"}])

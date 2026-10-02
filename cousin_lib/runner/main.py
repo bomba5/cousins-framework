@@ -574,7 +574,7 @@ def _serve(runner, once):
             try:
                 earlier = restart_note.read(runner.home) or {}
                 restart_note.mark(runner.home, "the last runner died with a row claimed",
-                                  held=earlier.get("held"))
+                                  held=earlier.get("held"), requeued=True)
             except OSError:
                 pass
         # Before start: the head of this process's stream says what runs

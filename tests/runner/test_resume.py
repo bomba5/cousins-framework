@@ -455,6 +455,9 @@ class TestToolLedgerOnRestart(TestRestartNote):
     def ledger(self):
         return self.home / "data" / "turn-tools.jsonl"
 
+    def ledger_text(self):
+        return self.ledger().read_text() if self.ledger().exists() else ""
+
     def test_a_resumed_session_is_told_what_the_cut_turn_ran(self):
         from claude_agent_sdk import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
         (self.home / "data" / "runner-session.json").write_text(
@@ -484,12 +487,21 @@ class TestToolLedgerOnRestart(TestRestartNote):
         self.assertIn("mcp__cousin__send", body)
         self.assertIn("STARTED, NO RESULT", body)
         self.assertNotIn("Read", body)                    # read-only: no line
-        self.assertTrue(_wait(lambda: not self.ledger().exists()), "taken once")
+        # a stop closes the cut turn's row as delivered: it is not coming
+        # again, so the line says so and quotes the message
+        self.assertEqual(r2.inbox.get(1)["state"], "done")
+        self.assertEqual([row["id"] for row in self.rows(r2) if row["id"] != 1
+                          and not self.is_note(row)], [])
+        self.assertIn("is not delivered again", body)
+        self.assertIn('"push and tell sage"', body)
+        # taken once: the next turn's begin starts the file afresh
+        self.assertTrue(_wait(lambda: "tu-send" not in self.ledger_text()), "taken once")
 
     def test_a_fresh_session_gets_the_line_when_the_cut_turn_ran_tools(self):
         from cousin_lib.runner import tool_ledger
         self.mark().write_text(json.dumps({"at": "2026-10-02T11:00:00+00:00",
                                            "why": "the last runner died with a row claimed"}))
+        tool_ledger.begin(self.home, [{"id": 99, "body": "ship it"}])
         tool_ledger.started(self.home, "tu-1", "Bash", {"command": "git push origin main"})
         tool_ledger.finished(self.home, "tu-1")
         r = self.runner([init_msg(session="s-new"), assistant(text="ok"),
@@ -500,5 +512,43 @@ class TestToolLedgerOnRestart(TestRestartNote):
         body = next(row["body"] for row in self.rows(r)
                     if "before this session began" in (row["body"] or ""))
         self.assertIn("`git push origin main` (finished)", body)
-        self.assertIn("do not repeat what already ran", body)
-        self.assertTrue(_wait(lambda: not self.mark().exists() and not self.ledger().exists()))
+        # no `requeued` on the mark: a stop's, so the message is quoted
+        self.assertIn('The message was: "ship it"', body)
+        self.assertTrue(_wait(lambda: not self.mark().exists()
+                              and '"tu-1"' not in self.ledger_text()))
+
+    def test_after_a_death_the_line_says_the_message_comes_again(self):
+        from cousin_lib.runner import tool_ledger
+        self.mark().write_text(json.dumps({"at": "2026-10-02T11:00:00+00:00", "requeued": True,
+                                           "why": "the last runner died with a row claimed"}))
+        r = self.runner([init_msg(session="s-new"), assistant(text="ok"),
+                         result(session="s-new")])
+        cut = r.inbox.put(Item("operator:priya", "chat", "ship it", sender="Priya"))
+        tool_ledger.begin(self.home, [{"id": cut, "body": "ship it"}])
+        tool_ledger.started(self.home, "tu-1", "Bash", {"command": "git push origin main"})
+        r.start()
+        self.assertTrue(_wait(lambda: any("before this session began" in (row["body"] or "")
+                                          for row in self.rows(r))), self.rows(r))
+        body = next(row["body"] for row in self.rows(r)
+                    if "before this session began" in (row["body"] or ""))
+        self.assertIn("delivered again after this line", body)
+        self.assertIn("STARTED, NO RESULT", body)
+
+    def test_a_ledger_from_an_older_finished_turn_is_not_listed(self):
+        # a death between a claim and the ledger's begin: the ledger still
+        # holds the previous turn, whose rows are all done
+        from cousin_lib.runner import tool_ledger
+        self.mark().write_text(json.dumps({"at": "2026-10-02T11:00:00+00:00", "requeued": True,
+                                           "why": "the last runner died with a row claimed"}))
+        r = self.runner([init_msg(session="s-new"), assistant(text="ok"),
+                         result(session="s-new")])
+        old = r.inbox.put(Item("operator:priya", "chat", "older", sender="Priya"))
+        r.inbox.claim_id(old); r.inbox.done(old, "delivered")
+        tool_ledger.begin(self.home, [{"id": old, "body": "older"}])
+        tool_ledger.started(self.home, "tu-1", "Bash", {"command": "git push origin main"})
+        tool_ledger.finished(self.home, "tu-1")
+        r.start()
+        self.assertTrue(_wait(lambda: not self.mark().exists()))
+        time.sleep(0.3)
+        self.assertFalse(any("before this session began" in (row["body"] or "")
+                             for row in self.rows(r)), self.rows(r))

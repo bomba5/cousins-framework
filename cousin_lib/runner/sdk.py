@@ -1238,7 +1238,7 @@ class SdkRunner:
                 return
             # the cut turn's tool calls: a fresh session has none of them in
             # its transcript, so it gets the line too when there are any
-            ran = tool_ledger.lines(self.home)
+            ran = self._cut_turn_calls(note)
             if resumed or ran:
                 body = restart_note.body(note) if resumed else restart_note.fresh_body(note)
                 if ran:
@@ -1254,6 +1254,23 @@ class SdkRunner:
         except Exception as exc:  # noqa: BLE001 - a lost line must not stop the start
             self.stream.append("error", {"error": "restart note: %s: %s"
                                          % (type(exc).__name__, exc)})
+
+    def _cut_turn_calls(self, note):
+        """The restart line's list of the cut turn's tool calls (tool_ledger),
+        or "". A death's sweep requeued the cut turn's rows (note
+        `requeued`): its message comes again. A ledger whose turn rows are
+        all closed then belongs to an older, finished turn (a death between
+        a claim and the ledger's begin): no list. A stop closes the cut
+        turn's rows as delivered: the list quotes the message instead."""
+        ledger_turn = tool_ledger.turn(self.home)
+        if ledger_turn is None:
+            return ""
+        states = [(self.inbox.get(i) or {}).get("state") for i in ledger_turn.get("ids") or []]
+        if note.get("requeued"):
+            if states and all(s == "done" for s in states):
+                return ""
+            return tool_ledger.lines(self.home, comes_again=True)
+        return tool_ledger.lines(self.home, comes_again=False)
 
     # -- the loop ------------------------------------------------------------
     def _run_loop(self):
@@ -2088,7 +2105,7 @@ class SdkRunner:
                 self._live = True
                 self.machine.to("running", "turn")
             self.turn.begin(first)
-            self._ledger(tool_ledger.clear)
+            self._ledger(tool_ledger.begin, [first])
             self._turn_started_at = time.time()
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],

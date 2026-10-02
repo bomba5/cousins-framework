@@ -7,14 +7,18 @@ there, and a FRESH session has none of them: it would run the whole turn
 again, a `git push` or a sent message included. So the primary runner
 writes each tool call of the live turn here as it sees it in the message
 stream (sdk._note_tools): one line when the call starts, one when its
-result arrives. The file is emptied when a turn begins (never at a
-result: an interrupted turn ends in one too), and after the next start
-has put it in its line, so what a restart finds is exactly the last
-turn's, and only a cut turn leaves the restart mark that shows it.
+result arrives. A turn's `begin` starts the file afresh with the turn's
+row ids and first message (never a result: an interrupted turn ends in
+one too), and the next start empties it after using it, so what a
+restart finds is the last turn's, and the row ids say whether it is the
+turn that was cut.
 
 The next start puts `lines()` into the session's first runner line:
 what finished, and what started with no result (it may or may not have
-happened). Read-only tools are left out: repeating them costs nothing."""
+happened). What happens to the message decides the wording: a death
+requeues the cut turn's rows (main.py's sweep), so the message comes
+again; a stop closes them as delivered, so it does not, and the line
+quotes it. Read-only tools are left out: repeating them costs nothing."""
 import json
 import os
 from pathlib import Path
@@ -25,6 +29,7 @@ READ_ONLY = frozenset({"Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch",
                        "TodoWrite", "ToolSearch", "BashOutput", "NotebookRead"})
 SUMMARY_CHARS = 160
 MAX_LINES = 12
+BODY_CHARS = 600
 
 
 def _path(home):
@@ -51,6 +56,26 @@ def _append(home, record):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def begin(home, rows):
+    """A turn begins: the file starts afresh with its row ids and first
+    message, so a restart can tell this turn's calls from an older one's."""
+    clear(home)
+    body = str((rows[0] or {}).get("body") or "") if rows else ""
+    if len(body) > BODY_CHARS:
+        body = body[:BODY_CHARS - 3] + "..."
+    _append(home, {"event": "turn", "ids": [r.get("id") for r in rows if r], "body": body})
+
+
+def turn(home):
+    """{"ids", "body"} of the turn the file belongs to, or None."""
+    try:
+        first = _path(home).read_text(encoding="utf-8").split("\n", 1)[0]
+        rec = json.loads(first)
+    except (FileNotFoundError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) and rec.get("event") == "turn" else None
 
 
 def started(home, tool_use_id, name, tool_input):
@@ -96,9 +121,12 @@ def calls(home):
     return out
 
 
-def lines(home):
+def lines(home, *, comes_again):
     """The cut turn's calls as text for the restart note, or "" when there
-    were none. The last MAX_LINES calls only, with how many came before."""
+    were none. The last MAX_LINES calls only, with how many came before.
+    `comes_again`: the turn's rows were requeued (a death), so its message
+    is delivered again; otherwise (a stop) it was closed as delivered, and
+    the line quotes it."""
     found = calls(home)
     if not found:
         return ""
@@ -107,10 +135,19 @@ def lines(home):
             "open": "STARTED, NO RESULT: it may or may not have happened"}
     rows = ["- %s `%s` (%s)" % (c["tool"], c["summary"], word.get(c["state"], c["state"]))
             for c in shown]
-    head = ("Before the cut, that turn had already run these tool calls (most recent"
-            " last). The message it was answering is delivered again: do not repeat"
-            " what already ran, and check the state of anything marked NO RESULT"
-            " before running it again.")
+    head = "Before the cut, that turn had already run these tool calls (most recent last)."
+    if comes_again:
+        head += (" The message it was answering is delivered again after this line: do"
+                 " not repeat what already ran, and check the state of anything marked"
+                 " NO RESULT before running it again.")
+    else:
+        body = (turn(home) or {}).get("body") or ""
+        head += (" That turn's message is not delivered again (a stop closes it as"
+                 " delivered). If its work is still due, continue it without repeating"
+                 " what already ran, and check the state of anything marked NO RESULT"
+                 " first.")
+        if body:
+            head += " The message was: %s" % json.dumps(body, ensure_ascii=False)
     if len(found) > len(shown):
         head += " (%d earlier calls not shown.)" % (len(found) - len(shown))
     return head + "\n" + "\n".join(rows)

@@ -1247,9 +1247,9 @@ What it is and is not:
 - Beside policy.toml, two rules are built in, both for a subagent only (a
   call whose hook input carries `agent_id`), and both checked before the
   file:
-  - the [memory perimeter](memory.md#the-perimeter): a write to
-    `config/law.md`, a `self-portrait.md` or a canonical `shared/*.md` is
-    denied (`memory perimeter: <tool> may not write <path>: <why>`); reads
+  - the [memory perimeter](memory.md#the-perimeter): a write to the
+    install's `config/law.md`, a cousin's committed `self-portrait.md` or a
+    canonical `shared/<name>.md` is denied (`memory perimeter: <tool> may not write <path>: <why>`); reads
     pass, and Bash is checked on its write targets, best-effort;
   - a `reply` that names no `thread` is denied ("a subagent must name the
     thread it answers"), because the turn's implicit thread belongs to the

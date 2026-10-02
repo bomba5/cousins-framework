@@ -195,17 +195,21 @@ Law](ceremony.md#the-system-prompt)), a cousin's committed
 file in `shared/` (a cousin proposes into `shared/proposed/` and a
 configured reviewer promotes it).
 
-`cousin_lib/perimeter.py` holds those three shapes. They are matched on
-the end of the path, and only under the framework root: a `config/law.md`,
-a file named `self-portrait.md` and a `*.md` directly under a directory
-named `shared` (outside `shared/proposed/` and `shared/examples/`). A path
-outside the root is never protected, so a subagent working in another
-repository writes its own files. A relative path is joined to the call's
-working directory; with none, it is checked by its shape alone. The
-framework's own memory writers, which only ever write inside an install,
-check the path they were handed by its shape before they write
-(`memory._append_raw`, `distill`, `raw_fold`, `reinforce.record`,
-`memory_trash`, `self_portrait.write_candidate_text`,
+`cousin_lib/perimeter.py` holds those three shapes. They protect the law,
+canonical shared files and committed portraits where the install keeps
+them: `<root>/config/law.md`, `<root>/shared/<name>.md` and
+`<root>/cousins/<slug>/self-portrait.md`, under the framework root.
+Anything else is free, `shared/proposed/`, `templates/law.md` and a
+checkout's `templates/shared/` included (in a default install the checkout
+is the root), and so is every path in another repository. A relative path
+is joined to the call's working directory and a leading `~` is expanded,
+as the shell would. With no root, or a relative path with no working
+directory, the check falls back to the shapes alone (any `config/law.md`,
+any `self-portrait.md`, any `*.md` directly under a `shared` directory),
+which errs toward refusing. The framework's own memory writers, which only
+ever write inside an install, check the path they were handed by its shape
+before they write (`memory._append_raw`, `distill`, `raw_fold`,
+`reinforce.record`, `memory_trash`, `self_portrait.write_candidate_text`,
 `shared_tier.propose`), so one pointed at the wrong home refuses rather
 than writes.
 

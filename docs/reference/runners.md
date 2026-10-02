@@ -347,10 +347,11 @@ runs), which the contract does not cover.
 - There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
   hook (see [configuration](../configuration.md#agent-runner)), so a turn
   here can end on an operator or person thread without a `reply`.
-- The [memory perimeter](../memory.md#the-perimeter) is not on the tool
-  gate: the policy plugin enforces policy.toml only, so a subagent here is
-  not refused a write to `config/law.md`, a `self-portrait.md` or a
-  canonical `shared/*.md`. The framework's own memory writers still refuse.
+- The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
+  the policy plugin enforces policy.toml only, so a subagent here is not
+  refused a write to the install's `config/law.md`, a cousin's committed
+  `self-portrait.md` or a canonical `shared/<name>.md`. The framework's own
+  memory writers still refuse.
 - Usage is recorded in `data/usage.db` with lane `opencode`, one row per
   result, and announced as a `usage` event, as on the SDK lane: the tokens
   the provider reported to opencode, every answer of the turn summed once,
@@ -477,11 +478,11 @@ none is a contract item:
 - There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
   hook, so a turn in the pane can end on an operator or person thread
   without a `reply`.
-- The [memory perimeter](../memory.md#the-perimeter) is not on the tool
-  gate: the pane has no live `PreToolUse` veto (see "Known gaps on tmux"),
-  so a subagent in the pane is not refused a write to `config/law.md`, a
-  `self-portrait.md` or a canonical `shared/*.md`. The framework's own
-  memory writers still refuse.
+- The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
+  the pane has no live `PreToolUse` veto (see "Known gaps on tmux"), so a
+  subagent in the pane is not refused a write to the install's
+  `config/law.md`, a cousin's committed `self-portrait.md` or a canonical
+  `shared/<name>.md`. The framework's own memory writers still refuse.
 
 ## Known gaps on tmux
 

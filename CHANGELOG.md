@@ -13,7 +13,8 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   The second stop always passes, so the gate costs at most one more model
   step and never loops. A subagent's reply does not count; with two live
   threads each needs its own. It is on by default; `[agent] reply_gate =
-  false` in cousin.toml turns it off. The runner's event stream records
+  false` in cousin.toml turns it off; a value that is not true or false
+  (a quoted `"false"`) is refused at runner start. The runner's event stream records
   each block as a `gate` event.
 
 ## 3.0.0 - 2026-10-01

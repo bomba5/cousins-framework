@@ -13,6 +13,7 @@ import time
 import unittest
 from unittest import mock
 
+from cousin_lib import trace
 from cousin_lib.boot import (
     TOTAL_MAX_CHARS,
     _truncate,
@@ -171,6 +172,64 @@ class TestAssemble(BootCase):
             }) + "\n")
         pkt = assemble("wren", self.home, generation=1)
         self.assertIn("STALE WARNING", pkt["text"])
+
+
+class TestTheLawIsAHardLayer(BootCase):
+    """The law reaches a packet whole or the packet says so. It used to be
+    cut to 3200 chars by the per-layer cap that runs above the overflow
+    loop, so a packet could carry rules 1-8 and drop 9-14 - including the
+    two that keep one cousin's memory out of another's."""
+
+    def _law(self, text):
+        (self.root / "config").mkdir(exist_ok=True)
+        (self.root / "config" / "law.md").write_text(text)
+
+    def test_the_whole_law_reaches_the_packet(self):
+        self._healthy_home()
+        law = "".join("%d. rule %d that a cousin must read.\n" % (i, i)
+                      for i in range(1, 60))
+        self._law(law)
+        pkt = assemble("wren", self.home, generation=1)
+        self.assertIn("14. rule 14 that a cousin must read.", pkt["text"])
+        self.assertNotIn("truncated, law", pkt["text"])
+        self.assertEqual(pkt["incomplete_layers"], [])
+        self.assertNotIn("law", pkt["degraded_sections"])
+
+    def test_a_law_too_long_for_the_total_is_reported_not_trimmed(self):
+        self._healthy_home()
+        law = "rule. " * 9000
+        self._law(law)
+        pkt = assemble("wren", self.home, generation=1)
+        self.assertIn("LAW INCOMPLETE", pkt["text"])
+        self.assertIn("read the whole of it at", pkt["text"])
+        self.assertIn(law.strip(), pkt["text"])
+        self.assertNotIn("truncated, law", pkt["text"])
+        self.assertEqual(pkt["incomplete_layers"], ["law"])
+
+    def test_the_overflow_is_in_the_trace_ledger_not_only_the_packet(self):
+        self._healthy_home()
+        self._law("rule. " * 9000)
+        assemble("wren", self.home, generation=1)
+        summary = trace.summary_for_boot("wren", root=self.root)
+        self.assertIn("LAW INCOMPLETE", summary)
+
+    def test_a_home_with_no_law_file_boots_degraded_and_says_so(self):
+        # An install whose seed never ran is the worst boot there is; it
+        # was filed as somebody else's problem and reported nowhere.
+        self._healthy_home()
+        (self.root / "config" / "law.md").unlink()
+        pkt = assemble("wren", self.home, generation=1)
+        self.assertIn("law", pkt["degraded_sections"])
+        self.assertIn("DEGRADED layers: law", pkt["text"])
+
+    def test_the_law_is_still_inside_the_total_when_the_total_allows(self):
+        self._healthy_home()
+        (self.home / "self-portrait.md").write_text(
+            "# P\n## Voice\n" + "portrait words " * 3000)
+        (self.home / "data" / "handoff.md").write_text("h " * 20000)
+        pkt = assemble("wren", self.home, generation=1)
+        self.assertLessEqual(pkt["chars"], TOTAL_MAX_CHARS)
+        self.assertIn("Framework Law", pkt["text"])
 
 
 if __name__ == "__main__":

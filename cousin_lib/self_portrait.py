@@ -9,6 +9,7 @@ identity nobody reviewed does not boot.
 import json
 import re
 from pathlib import Path
+from cousin_lib import perimeter
 from cousin_lib.trace import traced_cli
 
 SECTIONS = [
@@ -158,6 +159,11 @@ def write_candidate_text(path, text):
     import os
     import secrets
     path = Path(path)
+    # The path arrives from the caller, and the committed portrait is the
+    # one file here an agent must never write (law rule 3: the persona is
+    # authored by the operator, never improvised at runtime). The candidate
+    # beside it is writable by design - that is what synthesizing is.
+    perimeter.assert_writable(path, writer="self_portrait.write_candidate_text")
     tmp = path.with_name("%s.%s.tmp" % (path.name, secrets.token_hex(6)))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                  0o644)

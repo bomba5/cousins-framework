@@ -151,6 +151,125 @@ class TestHookEnforcement(HermeticCase):
         self.assertEqual(out, {})
 
 
+class TestThePerimeterAtTheGate(HermeticCase):
+    """The tool chokepoint, through the real callbacks: a background pass
+    (any payload with `agent_id`, which is what the dreaming pass carries)
+    cannot write the law, a committed portrait or canonical shared memory;
+    the primary session can, because the operator edits those."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = _home(self)
+        self.stream = EventStream(self.home, "wren")
+        self.cbs = hooks.callbacks(self.home, slug="wren",
+                                   root=self.home.parent.parent,
+                                   machine=StateMachine(), stream=self.stream,
+                                   policy=policy.Policy())
+        self.R = str(self.home.parent.parent)
+        self.base = {"session_id": "s", "transcript_path": "/dev/null",
+                     "cwd": str(self.home), "hook_event_name": "PreToolUse",
+                     "tool_use_id": "t"}
+
+    def _gate(self, **kw):
+        return asyncio.run(self.cbs["PreToolUse:policy"]({**self.base, **kw}, "t", {}))
+
+    def _denied(self, **kw):
+        spec = self._gate(**kw)["hookSpecificOutput"]
+        self.assertEqual(spec["permissionDecision"], "deny")
+        return spec["permissionDecisionReason"]
+
+    def test_a_subagent_write_to_the_law_is_denied(self):
+        reason = self._denied(agent_id="dream-1", tool_name="Write",
+                              tool_input={"file_path": self.R + "/config/law.md"})
+        self.assertIn("memory perimeter", reason)
+        self.assertIn("config/law.md", reason)
+
+    def test_a_subagent_bash_that_names_the_law_is_denied(self):
+        self.assertIn("memory perimeter", self._denied(
+            agent_id="dream-1", tool_name="Bash",
+            tool_input={"command": "cat >> " + self.R + "/config/law.md"}))
+
+    def test_a_subagent_write_to_a_portrait_or_shared_memory_is_denied(self):
+        for path in (self.R + "/cousins/wren/self-portrait.md",
+                     self.R + "/shared/reference_house-style.md"):
+            self.assertIn("memory perimeter", self._denied(
+                agent_id="dream-1", tool_name="Write",
+                tool_input={"file_path": path}))
+
+    def test_a_subagent_write_to_its_own_memory_is_allowed(self):
+        for path in (self.R + "/cousins/wren/memory/raw/2026-10-02.jsonl",
+                     self.R + "/cousins/wren/notes/plan.md",
+                     self.R + "/shared/proposed/wren__reference_h.md"):
+            self.assertEqual(self._gate(agent_id="dream-1", tool_name="Write",
+                                        tool_input={"file_path": path}), {})
+
+    def test_a_subagent_may_read_every_protected_surface(self):
+        # The reads a background pass actually makes: the law, the shared
+        # rules, the portrait it is supposed to be holding to. A perimeter
+        # that refuses these is one an operator switches off.
+        for tool, field in (("Read", "file_path"), ("Grep", "path"),
+                            ("Read", "file_path"), ("Read", "file_path")):
+            for path in (self.R + "/config/law.md",
+                         self.R + "/cousins/wren/self-portrait.md",
+                         self.R + "/shared/reference_house-style.md"):
+                self.assertEqual(self._gate(agent_id="dream-1", tool_name=tool,
+                                            tool_input={field: path}), {},
+                                 "%s %s" % (tool, path))
+
+    def test_a_subagent_may_read_a_protected_path_through_a_shell(self):
+        for command in ("cat " + self.R + "/config/law.md",
+                        "grep -n 'private cousin' " + self.R + "/config/law.md",
+                        "git diff -- config/law.md",
+                        "cat " + self.R + "/shared/reference_house-style.md",
+                        "sed s/private/PUBLIC/ " + self.R + "/cousins/wren/self-portrait.md"):
+            self.assertEqual(self._gate(agent_id="dream-1", tool_name="Bash",
+                                        tool_input={"command": command}), {},
+                             command)
+
+    def test_a_subagent_may_not_write_a_protected_path_through_a_shell(self):
+        for command in ("echo x >> " + self.R + "/config/law.md",
+                        "sed -i s/private/PUBLIC/ " + self.R + "/cousins/wren/self-portrait.md",
+                        "cp /tmp/x " + self.R + "/shared/reference_house-style.md"):
+            self.assertIn("memory perimeter",
+                          self._denied(agent_id="dream-1", tool_name="Bash",
+                                       tool_input={"command": command}), command)
+
+    def test_the_primary_session_keeps_its_operator_directed_edits(self):
+        # Bart edits config/law.md on Jhonata's instruction; the perimeter
+        # is about background passes, not about the operator's own hands.
+        self.assertEqual(self._gate(
+            tool_name="Write",
+            tool_input={"file_path": self.R + "/config/law.md"}), {})
+
+    def test_the_refusal_is_recorded_as_a_policy_event(self):
+        self._denied(agent_id="dream-1", tool_name="Write",
+                     tool_input={"file_path": self.R + "/config/law.md"})
+        events = [e["payload"] for e in self.stream.tail() if e["kind"] == "policy"]
+        self.assertEqual(events[0]["decision"], "deny")
+        self.assertEqual(events[0]["agent_id"], "dream-1")
+
+    def test_a_perimeter_deny_does_not_wait_for_an_operator(self):
+        # An ask parks the session in waiting_permission; a perimeter
+        # refusal is not a question, so the machine never moves.
+        self._denied(agent_id="dream-1", tool_name="Write",
+                     tool_input={"file_path": self.R + "/config/law.md"})
+        self.assertFalse([e for e in self.stream.tail() if e["kind"] == "state"])
+
+    def test_outside_the_framework_root_a_subagent_writes_its_own_files(self):
+        # another repository, and a framework checkout's own templates
+        for path in ("/srv/other-repo/shared/notes.md", "/srv/other-repo/config/law.md",
+                     "/srv/cf-wt/x/templates/shared/reference_rules.md"):
+            out = self._gate(agent_id="sub-1", tool_name="Write", tool_input={"file_path": path})
+            self.assertEqual(out, {}, path)
+        out = self._gate(agent_id="sub-1", tool_name="Bash", cwd="/srv/other-repo",
+                         tool_input={"command": "echo x > shared/notes.md"})
+        self.assertEqual(out, {})
+        # the same relative write from inside the root is refused
+        self.assertIn("memory perimeter", self._denied(
+            agent_id="sub-1", tool_name="Bash", cwd=self.R,
+            tool_input={"command": "echo x > shared/reference_rules.md"}))
+
+
 class _RaisingPolicy:
     """A policy stub whose decide() always raises, to prove the hook
     fails closed rather than swallowing the error into an allow."""

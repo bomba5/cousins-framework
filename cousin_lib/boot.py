@@ -15,6 +15,15 @@ each earned against a real incident in an earlier version:
 - Degraded detection is per-layer explicit logic, never a substring
   scan over section text: the scan flagged healthy cousins every
   morning on legitimate fallback strings.
+- The law is a HARD layer: fit() never cuts it, at any maximum and at
+  any total. A number for it would be wrong the day someone adds a
+  rule, and a truncated law is a cousin that boots having never read the
+  rules that bind it - including the two that keep one cousin's memory
+  out of another's. A law that does not fit the total is reported, not
+  trimmed (`LAW INCOMPLETE`), which is what the per-layer cap used to
+  do silently: the cap was applied by the loop that runs before the
+  overflow loop, so the one layer TRUNCATE_ORDER excludes was still cut
+  by the layer above it.
 """
 import hashlib
 import json
@@ -32,6 +41,9 @@ CHARS_PER_TOKEN = 4
 TOTAL_MAX_CHARS = 8000 * CHARS_PER_TOKEN
 
 LAYER_BUDGETS = {
+    # The law is in here for the record only: HARD_LAYERS takes it out of
+    # both cut passes below, so its floor is never used and its maximum
+    # is never applied. See HARD_LAYERS and the module docstring.
     "law": (500 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
     # Operator rules every cousin follows, in full, then a one-line
     # index of the rest of the shared tier.
@@ -46,6 +58,12 @@ LAYER_BUDGETS = {
     # characters, and the first overflow victim.
     "tool_surface": (300, 1500),
 }
+
+# Layers fit() may never cut, per-layer or by overflow. A law trimmed to
+# fit is a cousin that never read rules 9-14, and the total ceiling is
+# then reported as LAW INCOMPLETE rather than met by amputating the one
+# layer whose content is the framework's own.
+HARD_LAYERS = ("law",)
 
 # Overflow victims first to last; law is never truncated.
 TRUNCATE_ORDER = [
@@ -174,10 +192,14 @@ def fit(sections, budgets, order, total_max):
     minimum, one per pass, until the total fits or every victim is at
     its minimum. Pure: returns a new dict and never mutates `sections`;
     a layer `budgets` does not name is never touched (the runner's law).
-    The module docstring's three rules hold here, and both the boot
+    A layer in `HARD_LAYERS` is never cut, so the caller's only job for
+    one is to report it: `hard_overflow`.
+    The module docstring's rules hold here, and both the boot
     packet and the runner's state digest call this, so they cannot drift."""
     out = dict(sections)
     for name, (_min, max_chars) in budgets.items():
+        if name in HARD_LAYERS:
+            continue
         if name in out and len(out[name]) > max_chars:
             out[name] = _truncate(out[name], max_chars, name)
     while sum(len(v) for v in out.values()) > total_max:
@@ -191,6 +213,15 @@ def fit(sections, budgets, order, total_max):
         else:
             break  # everything at minimum; cannot shrink further
     return out
+
+
+def hard_overflow(sections, total_max):
+    """`[(layer, chars)]` for every hard layer still over the total after
+    the soft layers have given everything they can, so the caller can say
+    so out loud. Called after fit(), which is what makes the answer
+    true; before it, every layer looks like an offender."""
+    return [(name, len(sections[name])) for name in HARD_LAYERS
+            if name in sections and len(sections[name]) > total_max]
 
 
 def _root(root=None):
@@ -455,10 +486,17 @@ def _shared():
 def _is_degraded(name, content, sections):
     """Per-layer explicit rules; see the module docstring for why this
     is never a substring scan."""
-    if name in ("law", "shared", "trace_summary", "memories"):
-        # A missing law file is an install problem, not a per-cousin
-        # gap; the trace idle marker and empty memories are a new
-        # cousin's legitimate starting condition.
+    if name == "law":
+        # Empty is the whole of it: an absent law file is an install
+        # problem (seed_law never ran, or was deleted), and a cousin
+        # booting with no Framework Law is the worst boot there is, so it
+        # is reported rather than filed as somebody else's problem. A law
+        # too LONG for the packet is a different failure and is reported
+        # as LAW INCOMPLETE from assemble, where the fitted sizes are.
+        return not content
+    if name in ("shared", "trace_summary", "memories"):
+        # The trace idle marker and empty memories are a new cousin's
+        # legitimate starting condition, not a gap.
         return False
     if name == "self_portrait":
         return not content or content.startswith(
@@ -572,6 +610,10 @@ def assemble(slug, home, *, generation=None):
                 if _is_degraded(k, v, sections)]
     total_max = TOTAL_MAX_CHARS - len(REQUIRED_BOOT_ACTIONS) - 600
     sections = fit(sections, LAYER_BUDGETS, TRUNCATE_ORDER, total_max)
+    # After fit, unlike the per-layer degraded list above: a hard layer's
+    # size only means anything once the soft layers have given everything
+    # they can, and the one question is whether it fits at all.
+    incomplete = hard_overflow(sections, total_max)
     body = [
         "BOOT PACKET FOR COUSIN: %s" % slug,
         "Generation: %d" % generation,
@@ -581,6 +623,13 @@ def assemble(slug, home, *, generation=None):
     ]
     if degraded:
         body.append("DEGRADED layers: %s" % ", ".join(sorted(degraded)))
+    for layer, chars in incomplete:
+        body.append(
+            "%s INCOMPLETE: the %s layer is %d chars and this packet's "
+            "budget is %d. It is reported, never trimmed (a trimmed law is "
+            "a law half read), so read the whole of it at %s before "
+            "anything else; every other layer in this packet is complete."
+            % (layer.upper(), layer, chars, total_max, _law_path()))
     warning = _mcp_warning(home)
     if warning:
         body.append(warning)
@@ -601,6 +650,10 @@ def assemble(slug, home, *, generation=None):
     body.append("")
     body.append(REQUIRED_BOOT_ACTIONS)
     text = "\n".join(body)
+    for layer, chars in incomplete:
+        trace.log_call(slug, "boot", result_summary="%s INCOMPLETE: %s is"
+                       " %d chars over a %d-char budget"
+                       % (layer.upper(), layer, chars, total_max))
     return {
         "text": text,
         "chars": len(text),
@@ -608,4 +661,5 @@ def assemble(slug, home, *, generation=None):
         "hashes": hashes,
         "generation": generation,
         "degraded_sections": sorted(degraded),
+        "incomplete_layers": [name for name, _chars in incomplete],
     }

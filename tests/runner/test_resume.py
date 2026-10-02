@@ -445,3 +445,60 @@ class TestRestartNote(HermeticCase):
         self.assertTrue(_wait(lambda: not self.mark().exists()))
         time.sleep(0.3)
         self.assertEqual([row for row in self.rows(r) if self.is_note(row)], [])
+
+
+class TestToolLedgerOnRestart(TestRestartNote):
+    """A turn cut mid-way had already run tools. The next session is told
+    which, so the message delivered again does not repeat a push or a send;
+    a fresh session (nothing of that turn in its transcript) is told too."""
+
+    def ledger(self):
+        return self.home / "data" / "turn-tools.jsonl"
+
+    def test_a_resumed_session_is_told_what_the_cut_turn_ran(self):
+        from claude_agent_sdk import AssistantMessage, ToolResultBlock, ToolUseBlock, UserMessage
+        (self.home / "data" / "runner-session.json").write_text(
+            json.dumps({"session_id": "s-live", "lane": "login"}))
+        pushed = AssistantMessage(content=[ToolUseBlock(
+            id="tu-push", name="Bash", input={"command": "git push origin feat/x"})],
+            model="claude-test")
+        done = UserMessage(content=[ToolResultBlock(tool_use_id="tu-push", content="ok")])
+        sending = AssistantMessage(content=[
+            ToolUseBlock(id="tu-read", name="Read", input={"file_path": "/x"}),
+            ToolUseBlock(id="tu-send", name="mcp__cousin__send",
+                         input={"to": "sage", "text": "branch is up"})], model="claude-test")
+        r1 = self.runner([init_msg(session="s-live"), pushed, done, sending, "HANG",
+                          result(session="s-live")])
+        r1.start()
+        r1.enqueue(Item("operator:priya", "chat", "push and tell sage", sender="Priya"))
+        self.assertTrue(_wait(lambda: self.ledger().exists()
+                              and "tu-send" in self.ledger().read_text()))
+        r1.stop(timeout=5)
+        r2 = self.runner([init_msg(session="s-live"), assistant(text="ok"),
+                          result(session="s-live")])
+        r2.start()
+        self.assertTrue(_wait(lambda: any(self.is_note(row) for row in self.rows(r2))),
+                        self.rows(r2))
+        body = next(row for row in self.rows(r2) if self.is_note(row))["body"]
+        self.assertIn("`git push origin feat/x` (finished)", body)
+        self.assertIn("mcp__cousin__send", body)
+        self.assertIn("STARTED, NO RESULT", body)
+        self.assertNotIn("Read", body)                    # read-only: no line
+        self.assertTrue(_wait(lambda: not self.ledger().exists()), "taken once")
+
+    def test_a_fresh_session_gets_the_line_when_the_cut_turn_ran_tools(self):
+        from cousin_lib.runner import tool_ledger
+        self.mark().write_text(json.dumps({"at": "2026-10-02T11:00:00+00:00",
+                                           "why": "the last runner died with a row claimed"}))
+        tool_ledger.started(self.home, "tu-1", "Bash", {"command": "git push origin main"})
+        tool_ledger.finished(self.home, "tu-1")
+        r = self.runner([init_msg(session="s-new"), assistant(text="ok"),
+                         result(session="s-new")])
+        r.start()
+        self.assertTrue(_wait(lambda: any("before this session began" in (row["body"] or "")
+                                          for row in self.rows(r))), self.rows(r))
+        body = next(row["body"] for row in self.rows(r)
+                    if "before this session began" in (row["body"] or ""))
+        self.assertIn("`git push origin main` (finished)", body)
+        self.assertIn("do not repeat what already ran", body)
+        self.assertTrue(_wait(lambda: not self.mark().exists() and not self.ledger().exists()))

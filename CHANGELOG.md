@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.1.0 - 2026-10-02
+
+### Added
+
+- **A restart does not make a cousin repeat what its cut turn already did.**
+  The sdk runner writes each tool call of the live turn to
+  `data/turn-tools.jsonl` as it sees it (read-only tools left out). When a
+  stop or a death cuts a turn, the next start's runner line lists those
+  calls: finished, failed, or started with no result (it may or may not have
+  happened), and says the message comes again, so a push or a send is not
+  run twice.
+- **A fresh session is told too.** A session that could not be resumed has
+  nothing of the cut turn in its transcript. When that turn had run tools,
+  it now gets the line (`a restart cut your last turn before this session
+  began`) instead of nothing.
+
 ## 3.0.0 - 2026-10-01
 
 The first public release. It removes the commands, flags and routes the

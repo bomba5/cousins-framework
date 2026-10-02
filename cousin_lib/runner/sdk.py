@@ -37,7 +37,7 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import auth, envelope, extract, hooks, restart_note, rollover, tools, wake
+from cousin_lib.runner import auth, envelope, extract, hooks, restart_note, rollover, tool_ledger, tools, wake
 from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -1236,12 +1236,21 @@ class SdkRunner:
             note = restart_note.read(self.home)
             if note is None:
                 return
-            if resumed:
+            # the cut turn's tool calls: a fresh session has none of them in
+            # its transcript, so it gets the line too when there are any
+            ran = tool_ledger.lines(self.home)
+            if resumed or ran:
+                body = restart_note.body(note) if resumed else restart_note.fresh_body(note)
+                if ran:
+                    body += "\n\n" + ran
                 self.inbox.put(Item(thread_id="system", source=restart_note.SOURCE,
-                                    body=restart_note.body(note), sender="runner"))
+                                    body=body, sender="runner"))
                 self.stream.append("system", {"subtype": "restart_note", "at": note.get("at"),
-                                              "why": note.get("why"), "held": note.get("held")})
+                                              "why": note.get("why"), "held": note.get("held"),
+                                              "resumed": bool(resumed),
+                                              "tools": len(tool_ledger.calls(self.home))})
             restart_note.clear(self.home)
+            tool_ledger.clear(self.home)
         except Exception as exc:  # noqa: BLE001 - a lost line must not stop the start
             self.stream.append("error", {"error": "restart note: %s: %s"
                                          % (type(exc).__name__, exc)})
@@ -1838,6 +1847,9 @@ class SdkRunner:
         tool_result closes it, a result closes them all (the CLI's turn is
         over)."""
         if isinstance(msg, sdk.ResultMessage):
+            # the ledger stays: an interrupt ends in a result too, and the
+            # cut turn's calls are what the next start must see. The next
+            # turn's begin empties it.
             self._open_tools.clear()
             return
         content = getattr(msg, "content", None)
@@ -1846,8 +1858,23 @@ class SdkRunner:
         for block in content:
             if isinstance(block, sdk.ToolUseBlock):
                 self._open_tools.add(block.id)
+                self._ledger(tool_ledger.started, block.id, block.name,
+                             getattr(block, "input", None))
             elif isinstance(block, sdk.ToolResultBlock):
                 self._open_tools.discard(block.tool_use_id)
+                self._ledger(tool_ledger.finished, block.tool_use_id,
+                             error=bool(getattr(block, "is_error", False)))
+
+    def _ledger(self, fn, *args, **kw):
+        """The primary's turn ledger (tool_ledger): what a restart must not
+        repeat. A side session has no restart note to put it in. A write
+        that fails is recorded and the turn goes on."""
+        if not self.takes_restart_note:
+            return
+        try:
+            fn(self.home, *args, **kw)
+        except OSError as exc:
+            self.stream.append("error", {"error": "tool ledger: %s" % exc})
 
     def _match_echo(self, sdk, msg, open_rows, echoed):
         """The open row this UserMessage echoes, or None."""
@@ -2061,6 +2088,7 @@ class SdkRunner:
                 self._live = True
                 self.machine.to("running", "turn")
             self.turn.begin(first)
+            self._ledger(tool_ledger.clear)
             self._turn_started_at = time.time()
             self.stream.append("turn_start", {"inbox_ids": [first["id"]],
                                               "bodies": [first["body"]],

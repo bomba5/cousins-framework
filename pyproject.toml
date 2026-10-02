@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cousins-framework"
-version = "3.0.0"
+version = "3.1.0"
 description = "Persistent, co-located AI agents: identity, memory, lifecycle, inter-agent chat"
 readme = "README.md"
 requires-python = ">=3.11"

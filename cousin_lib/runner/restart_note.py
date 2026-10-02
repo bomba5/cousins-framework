@@ -10,7 +10,9 @@ mark in the home, and the next runner that RESUMES the session takes it and
 puts one line first on the system thread: the runner restarted, that was
 not the operator, continue where you were. A fresh session has nothing
 interrupted in it (the digest carries the state), so a fresh start only
-drops the mark.
+drops the mark, unless the cut turn had run tools (tool_ledger): then
+it gets `fresh_body` and the list, since its message comes again and a
+push or a send must not run twice.
 
 A stop the operator asked for (console, cousin-supervisor stop) writes
 run/held BEFORE it signals the runner, so a stop that finds the hold marks
@@ -87,6 +89,17 @@ def requested_restart(held):
     "restart". An unreadable hold is a stop's."""
     who = str(held).strip().split(" ", 1)[-1]
     return who.endswith("restart")
+
+
+FRESH_MARKER = "[runner] a restart cut your last turn before this session began"
+
+
+def fresh_body(note):
+    """The line a FRESH session gets when the cut turn had run tools
+    (tool_ledger): it has nothing of that turn in its transcript."""
+    return (FRESH_MARKER + " (at %s: %s). This is a new session, so you cannot see that"
+            " turn; its message comes again after this line."
+            % (note.get("at", "unknown"), note.get("held") or note.get("why", "a restart")))
 
 
 def body(note):

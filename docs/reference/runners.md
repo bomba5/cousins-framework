@@ -290,6 +290,9 @@ runs), which the contract does not cover.
   file (see [policy.toml on the opencode lane](../configuration.md#policytoml-on-the-opencode-lane)).
 - Tool calls (with their arguments), subagent jobs and checkpoints are
   recorded by the runner from opencode's event stream, not by hooks.
+- There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
+  hook (see [configuration](../configuration.md#agent-runner)), so a turn
+  here can end on an operator or person thread without a `reply`.
 - Usage is recorded in `data/usage.db` with lane `opencode`, one row per
   result, and announced as a `usage` event, as on the SDK lane: the tokens
   the provider reported to opencode, every answer of the turn summed once,
@@ -413,6 +416,9 @@ none is a contract item:
   `data/run/tmux-context.md` (a private file, see "The system prompt is a
   private file" above); a resume or a kind switch gets a short pointer
   instead, never the full block again (`runner/prompt.py`).
+- There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
+  hook, so a turn in the pane can end on an operator or person thread
+  without a `reply`.
 
 ## Known gaps on tmux
 

@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.2.0 - 2026-10-02
+
+### Added
+
+- **The reply gate.** On the sdk lane, a turn on operator or person chat
+  that ends without a successful `reply` on that thread is sent back once
+  with the reason: answer now, or end the turn again if no answer is due.
+  The second stop always passes, so the gate costs at most one more model
+  step and never loops. A subagent's reply does not count; with two live
+  threads each needs its own. It is on by default; `[agent] reply_gate =
+  false` in cousin.toml turns it off; a value that is not true or false (a
+  quoted `"false"`) is refused at runner start. The runner's event stream
+  records each block as a `gate` event.
+
 ## 3.1.0 - 2026-10-02
 
 ### Added

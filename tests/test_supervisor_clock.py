@@ -21,6 +21,13 @@ import unittest
 from tests._hermetic import HermeticCase
 
 ONE_SHOT = "Wren, call Testa back about the seedlings."
+
+
+def _is_shot(body):
+    # the provenance prefix, the job's header line, then the prompt verbatim
+    return body.startswith("[cousin-schedule] #") and body.endswith("\n\n" + ONE_SHOT)
+
+
 LOOP_PROMPT = "Wren, water the tomatoes."
 DEADLINE_S = 20.0
 
@@ -155,7 +162,7 @@ class TestTheClock(_ClockCase):
         if self.proc.poll() is not None:
             self.fail("the supervisor exited with %s:\n%s" % (self.proc.returncode, self.log()))
         bodies = [r[2] for r in self.inbox()]
-        return ("[cousin-schedule] " + ONE_SHOT) in bodies and LOOP_PROMPT in bodies
+        return any(_is_shot(b) for b in bodies) and LOOP_PROMPT in bodies
 
     def test_a_one_shot_and_a_loop_land_in_the_runner_inbox_on_schedule(self):
         self.assertTrue(_wait_for(self.both_landed),
@@ -171,7 +178,7 @@ class TestTheClock(_ClockCase):
         self.assertLessEqual(fired_at, target + 10)
         time.sleep(3)                   # three more ticks: nothing fires twice
         rows = self.inbox()
-        shots = [r for r in rows if r[2] == "[cousin-schedule] " + ONE_SHOT]
+        shots = [r for r in rows if _is_shot(r[2])]
         loops = [r for r in rows if r[2] == LOOP_PROMPT]
         self.assertEqual(len(shots), 1, rows)
         self.assertEqual(len(loops), 1, rows)

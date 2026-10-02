@@ -45,6 +45,17 @@ class TestRunnerFor(HermeticCase):
         self.assertEqual(rc, 2)
         self.assertIn("runner", stderr.getvalue())
 
+    def test_a_quoted_reply_gate_is_refused_at_start(self):
+        # "false" in quotes is truthy: it would leave the gate on, silently
+        home = temp_home(self, runner="fake")
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text()
+                                          + 'reply_gate = "false"\n')
+        with self.assertRaisesRegex(runner_main.RunnerError, "reply_gate must be true or false"):
+            runner_main.runner_for(home)
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text()
+                                          .replace('reply_gate = "false"', "reply_gate = false"))
+        self.assertEqual(type(runner_main.runner_for(home)).__name__, "FakeRunner")
+
 
 class TestReadKey(HermeticCase):
     def test_a_key_file_outside_any_framework_root_is_a_config_error(self):

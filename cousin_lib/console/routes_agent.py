@@ -429,7 +429,8 @@ def change_agent(server, slug, home, changes, *, answer):
             op.stage("write", "done", ", ".join(changed) or "nothing changed")
             if changed:
                 _refresh(server)
-            out = {"ok": True, "changed": changed, "restart_required": bool(changed)}
+            out = {"ok": True, "changed": changed,
+                   "restart_required": agent_settings.needs_restart(changed)}
             if note:
                 out["note"] = note
             return out
@@ -470,8 +471,9 @@ def register():
         changes = _changes_of(req)
 
         def answer(changed, note):
+            from cousin_lib import agent_settings
             out = {"ok": True, "slug": slug, "changed": changed,
-                   "restart_required": bool(changed),
+                   "restart_required": agent_settings.needs_restart(changed),
                    "agent": describe_agent(home, server.root)}
             if note:
                 out["note"] = note

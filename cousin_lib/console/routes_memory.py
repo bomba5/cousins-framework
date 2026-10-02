@@ -681,6 +681,53 @@ def _register_actions():
             _maintain_work(req.server, slug, home, action, dry_run),
             params={"action": action, "dry_run": dry_run})
 
+    @router.route("GET", "/api/memory/{slug}/dreams")
+    def dreams(req, slug):
+        """The cousin's dreaming setting and its passes, newest first
+        (dreaming.passes: what each read, changed and spent)."""
+        from cousin_lib import dreaming
+        home = cousin_home(req.server, slug)
+        return 200, {"settings": dreaming.settings(home),
+                     "passes": dreaming.passes(home)}
+
+    @router.route("POST", "/api/memory/{slug}/dreams/run")
+    def dream_now(req, slug):
+        """One pass now, whatever the setting, as the cousin's long
+        operation: the operator's way to try dreaming on one cousin."""
+        from cousin_lib import dreaming
+        home = cousin_home(req.server, slug)
+
+        def work(op):
+            op.stage("dreaming", "running")
+            out = dreaming.run_child(home, req.server.root, "manual")
+            if out.get("result") == "error":
+                raise longop.OpError(out.get("error") or "the pass failed")
+            op.stage("dreaming", "done", "%s, %s change(s)" % (out.get("result"),
+                                                             out.get("changes", 0)))
+            req.server.emit("memory-change", {"slug": slug, "action": "dream"})
+            return {"ok": True, "pass": out}
+        return longop.start_response(req.server, slug, "memory-dream", work, params={})
+
+    @router.route("POST", "/api/memory/{slug}/dreams/undo")
+    def dream_undo(req, slug):
+        """{"pass_id"}: reverse one pass's changes (dreaming.undo), recorded
+        as by the logged-in user, then regenerate the distilled views."""
+        from cousin_lib import distill, dreaming
+        home = cousin_home(req.server, slug)
+        pass_id = req.body.get("pass_id")
+        if not isinstance(pass_id, str) or not pass_id.strip():
+            raise HttpError(400, "pass_id must be a pass id string")
+        try:
+            reverted = dreaming.undo(home, pass_id, by=_who(req))
+        except ValueError as err:
+            raise HttpError(400, str(err))
+        try:
+            distill.distill(home)
+        except Exception:  # noqa: BLE001 - the undo is written; the floor catches up
+            pass
+        req.server.emit("memory-change", {"slug": slug, "action": "dream-undo"})
+        return 200, {"ok": True, "reverted": reverted}
+
     @router.route("GET", "/api/memory/{slug}/portrait")
     def portrait(req, slug):
         return 200, _portrait_state(cousin_home(req.server, slug))

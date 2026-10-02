@@ -212,6 +212,7 @@ function AgentField({ name, row, rule, value, onChange, disabled }) {
                onChange={e => onChange(e.target.value === "" ? null : Number(e.target.value))} />
       );
     case "effort":
+    case "choice":
     case "account": {
       const choices = row.choices || [];
       return (
@@ -257,6 +258,11 @@ function AgentField({ name, row, rule, value, onChange, disabled }) {
         </div>
       );
     }
+    case "time":
+      return (
+        <input className="txt" type="time" value={value ?? ""} disabled={disabled} style={{ width: 110 }}
+               onChange={e => onChange(e.target.value === "" ? null : e.target.value)} />
+      );
     case "env_list":
       return <AgentEnvList value={value} onChange={onChange} disabled={disabled} denyPrefixes={row.deny_prefixes} />;
     default:

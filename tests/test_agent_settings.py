@@ -84,7 +84,7 @@ class Describe(_Case):
     def test_the_fake_lane_has_no_model(self):
         d = agent_settings.describe(self.cousin('runner = "fake"\n'), self.root)
         self.assertEqual(set(d["settings"]), {"runner", "account", "auto_start",
-                                              "commit_attribution"})
+                                              "commit_attribution", "dreaming", "dreaming_at"})
 
     def test_a_tmux_cousin_is_the_legacy_lane_with_no_agent_settings(self):
         d = agent_settings.describe(self.cousin(None), self.root)
@@ -109,7 +109,7 @@ class Describe(_Case):
         self.assertIn("tmux", d["kinds"])
         self.assertEqual(set(d["settings"]),
                          {"runner", "account", "auto_start", "model", "effort", "env_allow",
-                          "commit_attribution"})
+                          "commit_attribution", "dreaming", "dreaming_at"})
         self.assertEqual(d["settings"]["env_allow"]["value"], ["LANG"])
         self.assertEqual(d["settings"]["effort"]["value"], "high")
         self.assertEqual(d["settings"]["account"]["choices"], ["host", "fleet"])   # no key account

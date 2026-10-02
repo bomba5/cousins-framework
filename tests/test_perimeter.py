@@ -220,9 +220,6 @@ class TestTheLawSurvivesFit(unittest.TestCase):
         self.assertNotIn("law", boot.TRUNCATE_ORDER)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class TestUnderTheRoot(unittest.TestCase):
     """With the framework root known, only paths under it are protected."""
 
@@ -241,3 +238,7 @@ class TestUnderTheRoot(unittest.TestCase):
                                                 cwd="/srv/cf/cousins"))
         # no root given: shape alone, as before
         self.assertIsNotNone(p.protected_reason("/elsewhere/shared/a.md"))
+
+
+if __name__ == "__main__":
+    unittest.main()

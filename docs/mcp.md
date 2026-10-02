@@ -12,11 +12,16 @@ Every cousin spawned by the framework comes with five tools:
 
 | Tool | Runs | Commands |
 |---|---|---|
-| `memory` | `cousin-memory` | `search`, `decide`, `remember`, `obsolete`, `recall`, `activity` |
+| `memory` | `cousin-memory` | `search`, `decide`, `remember`, `why`, `obsolete`, `recall`, `activity` |
 | `send` | `cousin-chat send` or `cousin-reply` | picked by the destination |
 | `job` | `cousin-job` | `start`, `run`, `done`, `fail`, `list`, `show` |
 | `schedule` | `cousin-schedule` | `add`, `list`, `cancel` |
 | `meeting` | `cousin-meeting` | `say`, `pass`, `minutes`, `show` ([meetings](meetings.md)) |
+
+A cousin's tools come from its own `mcp-registry.toml`, copied from the
+install's at spawn. `why`, and `derived_from` on `remember` and `decide`,
+are in the shipped `config/mcp-registry.toml.example` since 3.8.0; a cousin
+spawned before that has them only once its own copy is updated.
 
 A call names the command and its arguments:
 

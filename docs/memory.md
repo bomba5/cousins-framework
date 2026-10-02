@@ -53,6 +53,7 @@ Everything below is relative to the cousin home.
 | Imported auto-memory | `memory/imported/auto/*.md`, `.manifest.json`, `.baseline.json` | `cousin-memory import-auto --apply` | search (collection `memory`), `import-auto --verify` |
 | Search indexes | `memory/fts_index.db`, `memory/vectors.db` | search, `reindex` | search |
 | Recall log | `memory/.recall-log.jsonl`, `memory/.recall-counts.json` | every search | search ranking, explorer |
+| Recall receipts | `data/recall-receipts.jsonl` (rotated to `.1` past 2 MB) | every proactive recall on the `sdk` [lane](glossary.md#lane) | you, after the fact |
 | Trash | `memory/.trash/` | removals from the console explorer | `cousin-memory trash restore` |
 | Legacy | `legacy/` | a migration (the old home, archived whole) | the explorer only |
 
@@ -117,6 +118,7 @@ cousin-memory decide TOPIC DECISION REASONING [--level L] [--cite SRC]
 cousin-memory remember TOPIC FACT [--level L] [--cite SRC]
 cousin-memory activity "what I'm doing now"
 cousin-memory recall [KEYWORD] [--last N]
+cousin-memory why ID
 ```
 
 `decide` appends to `data/decisions.jsonl` and also writes a raw entry
@@ -146,6 +148,26 @@ still answer from what raw memory already holds; one line goes to
 stderr and no mark is written, so the next read tries again.
 `consolidate` runs the backfill unguarded, since it is a command you run
 and a loud failure there is the right one.
+
+### What an entry was built from
+
+`remember` and `decide` take `--derived-from ID` (repeatable; the memory
+tool's `derived_from` list): the ids of the raw entries a claim was built
+from. An id is the 12 hex characters `history`, `why` and a recall line
+show; anything else is refused. `why ID` walks one hop each way:
+
+```
+cousin-memory why cdaa66b17209
+#   -> cdaa66b17209 [L3_COUSIN_CONCLUSION] backups: verify the snapshot after 02:30
+#      built from:
+#        ad5d2cfaab7a [L2_TOOL] backups: the NAS snapshot runs at 02:00
+#      built on by: nothing
+```
+
+It also names the mark that retired the entry, if one did. Nothing is
+inherited along the hop: each entry keeps its own truth level, so a
+conclusion built from a tool fact is still a conclusion. `--json` prints
+the same as one object.
 
 If the decision text has backticks or `$(...)` in it, don't pass it as
 arguments: your shell runs them before `decide` sees the text. Use the
@@ -213,7 +235,7 @@ before they write (`memory._append_raw`, `distill`, `raw_fold`,
 `shared_tier.propose`), so one pointed at the wrong home refuses rather
 than writes.
 
-On the `sdk` [lane](glossary.md#lane)'s tool surface the same shapes are a
+On the `sdk` lane's tool surface the same shapes are a
 deny, and only for a subagent: a `PreToolUse` payload carrying `agent_id`
 cannot write them, while the primary session can, because editing the law
 and committing a portrait is the operator's own work. Reads always pass.
@@ -704,6 +726,37 @@ thresholds are the `[recall]` table in `config/embedding.toml`
 proactive_recall = true        # false turns it off for this cousin
 recall_keyword_only = false
 ```
+
+Every proactive recall leaves a receipt in `data/recall-receipts.jsonl`,
+one JSON line: the message it searched for (the first 200 characters), what
+it `returned` and what it `excluded`, each with its name, collection, path,
+similarity and, for a raw entry, its id, and for an excluded hit the reason
+(`similarity 0.31 below [recall] min_score 0.45`). A recall that never
+searched says why in `gate` (too short, or no semantic leg with
+keyword-only recall off). So a recall that surfaced the wrong claim, or
+hid the right one, can be traced afterwards. The file moves to
+`recall-receipts.jsonl.1` past 2 MB. A receipt that cannot be written
+never costs the recall. `cousin-memory recall` is a command you run, not a
+proactive recall, and leaves none.
+
+### Memory written from outside a live session
+
+The digest a session starts from is built once. On the `sdk` lane the
+runner also notes how far each raw day file had grown when it started, and
+at each submitted prompt reads only what was appended since. Entries
+written from outside the session reach it as one note in that prompt's
+context, ahead of recall, each with its entry id and said once per runner:
+
+```
+[runner] memory written since this session started, not by you (it is not in your digest; where it disagrees with the digest, this is newer):
+```
+
+From outside means a console write, a review-gate verdict, a dreaming
+pass, or an obsolete mark made from the console. The session's own
+`remember`, `decide` and `obsolete`, its job events and the turn
+extractor are never echoed back. A note holds at most 12 entries and 2500
+characters; what is left out is counted and stays readable through
+`recall`.
 
 ## The shared tier
 

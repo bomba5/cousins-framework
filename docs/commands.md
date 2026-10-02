@@ -400,8 +400,9 @@ cousin-migrate tidy --all --yes
 | subcommand | does |
 |---|---|
 | `search QUERY [--top N] [--collection memory\|notes\|harness] [--json]` | keyword search, plus semantic when embeddings are configured |
-| `remember TOPIC FACT [--level L] [--cite SRC]` | one fact into raw memory with its truth level |
-| `decide TOPIC DECISION REASONING [--level L] [--cite SRC] [--stdin]` | log a decision (and a raw copy of it) |
+| `remember TOPIC FACT [--level L] [--cite SRC] [--derived-from ID]...` | one fact into raw memory with its truth level; `--derived-from` (repeatable) names the entry ids it was built from |
+| `decide TOPIC DECISION REASONING [--level L] [--cite SRC] [--derived-from ID]... [--stdin]` | log a decision (and a raw copy of it); `--derived-from` as for `remember` |
+| `why ID [--json]` | one raw entry by its id, what it was built from and what was built from it, and the mark that retired it, if any: one hop each way. Exit 1 for an id no raw entry has |
 | `obsolete TOPIC --why REASON [--force] [--entry ID]` | retire a topic (L5): out of the [distilled](glossary.md#distilled) views, history kept; with `--entry`, retire one of its claims by its id and keep the topic |
 | `tensions [--json]` | topics whose live claims disagree: an authored topic with two or more live claims of different content, each claim's id, and how to settle it (retire one with `obsolete --entry`) |
 | `history TOPIC` | a topic's claims, oldest first: each one's id, when it became valid, and `live` or when an obsolete mark retired it (valid time is derived from raw, never written back) |

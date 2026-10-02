@@ -36,6 +36,7 @@ import asyncio
 import contextlib
 import functools
 import inspect
+import os
 import threading
 
 from cousin_lib import recording
@@ -108,7 +109,8 @@ def _accepts(fn, name):
 
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
-              request_rollover=None, live_threads=None, reply_gate=True):
+              request_rollover=None, live_threads=None, reply_gate=True,
+              watch=None, policy_changed=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -137,7 +139,16 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     threads got no successful `reply` this turn is blocked once with
     REPLY_GATE_REASON. The CLI marks the Stop that follows a block
     `stop_hook_active`, and that one always passes, so the gate costs at
-    most one more model step and can never loop."""
+    most one more model step and can never loop.
+    watch: a config_watch.ConfigWatch; each submitted prompt checks it,
+    and a change reaches the model as a runner note in that prompt's
+    additionalContext (ahead of recall). A policy.toml edit tightens the
+    live policy at once (Policy.tightened_by), never loosens it.
+    policy_changed: a callable(policy) told each time `watch` tightened the
+    live policy; the runner keeps it (its next connect's hooks start from
+    it, and its tools read the outbound filter from it). Pass the watch
+    and keep the policy per runner, not per connect: a fresh watch's
+    baseline is the already-edited file, so it would see no change."""
     from cousin_lib.runner import checkpoints as _cp
     cp = checkpoints or _cp
     recall = recall or default_recall(home, root)
@@ -146,6 +157,8 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     takes_cancel = _accepts(recorder, "cancelled")
     body_for_prompt = body_for_prompt or (lambda prompt: prompt)
     lock = lock if lock is not None else contextlib.nullcontext()
+    # the policy the gate enforces: the start's, tightened by any edit since
+    live = {"policy": policy}
     # The reply gate's state for the turn in flight: the threads a reply
     # named (lowercased), and whether one named none (the implicit thread).
     replied = {"threads": set(), "implicit": False}
@@ -208,7 +221,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                 note_reply(payload)
             # A call the policy denies never runs: no job row, no rewrite.
             if event == "PreToolUse" and policy is not None \
-                    and gate(policy, payload)[0] != "allow":
+                    and gate(live["policy"], payload)[0] != "allow":
                 return {}
             # The recorder checks `cancelled` before it registers a row: once
             # the hook has answered without it, a late row would be one nobody
@@ -251,27 +264,57 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
             except Exception:  # noqa: BLE001 - the stream itself failed
                 pass
 
+    async def config_note():
+        """The runner note for config changed since the last prompt, or
+        "". A policy.toml change tightens `live` here."""
+        if watch is None:
+            return ""
+        changes = await asyncio.to_thread(watch.check)
+        if not changes:
+            return ""
+        from cousin_lib.runner import config_watch
+        from cousin_lib.runner.policy import FILE, Policy
+        current = live["policy"] if live["policy"] is not None else Policy()
+        text, tightened = config_watch.note(
+            changes, current, lambda t: Policy.parse(t, source=os.path.join(str(home), FILE)))
+        if live["policy"] is not None and tightened is not live["policy"]:
+            live["policy"] = tightened
+            if policy_changed is not None:
+                policy_changed(tightened)
+        stream.append("config_change", {"files": [name for name, _, _ in changes]})
+        return text
+
+    async def recall_text(prompt):
+        if CONTEXT_MARK in prompt:
+            # the item already carries its recall context
+            stream.append("recall", {"hits": 0, "skipped": "context present"})
+            return ""
+        body = body_for_prompt(prompt) or ""
+        if not body.strip():
+            # nothing to search for: a peer, loop or schedule row
+            stream.append("recall", {"hits": 0, "skipped": "empty body"})
+            return ""
+        try:
+            text, n = await asyncio.wait_for(asyncio.to_thread(recall, body), RECALL_BUDGET_S)
+        except asyncio.TimeoutError:
+            stream.append("recall", {"hits": 0, "timed_out": True})
+            return ""
+        stream.append("recall", {"hits": n})
+        return text or ""
+
     async def on_prompt(payload):
         # a new prompt (a turn's first row or one folded in) is answered
         # afresh: a reply sent before it does not cover it
         replied["threads"].clear()
         replied["implicit"] = False
         prompt = payload.get("prompt") or ""
-        if CONTEXT_MARK in prompt:
-            # the item already carries its recall context
-            stream.append("recall", {"hits": 0, "skipped": "context present"})
-            return {}
-        body = body_for_prompt(prompt) or ""
-        if not body.strip():
-            # nothing to search for: a peer, loop or schedule row
-            stream.append("recall", {"hits": 0, "skipped": "empty body"})
-            return {}
         try:
-            text, n = await asyncio.wait_for(asyncio.to_thread(recall, body), RECALL_BUDGET_S)
-        except asyncio.TimeoutError:
-            stream.append("recall", {"hits": 0, "timed_out": True})
-            return {}
-        stream.append("recall", {"hits": n})
+            changed = await config_note()
+        except Exception as err:  # noqa: BLE001 - a broken check must not cost recall
+            changed = ""
+            stream.append("hook", {"event": "UserPromptSubmit",
+                                   "error": "config check: %s: %s" % (type(err).__name__, err)})
+        text = "\n\n".join(t for t in (changed, await recall_text(prompt)) if t)
         if not text:
             return {}
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
@@ -301,7 +344,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
                                  % path.relative_to(home)}
 
     def on_policy(payload):
-        decision, reason = gate(policy, payload)
+        decision, reason = gate(live["policy"], payload)
         if decision == "allow":
             return {}
         event = {"tool": payload.get("tool_name"), "decision": decision, "reason": reason}

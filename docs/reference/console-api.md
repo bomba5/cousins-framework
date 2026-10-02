@@ -964,7 +964,7 @@ The same for one cousin (`?all=1` for its history, 100 at most).
 
 ### `POST /api/cousins/<slug>/schedules`
 
-`{"when": "in 30m" | "tomorrow 06:30" | "YYYY-MM-DDTHH:MM", "prompt"}`: `schedule.add`. `201 {"ok": true, "schedule"}`; `400` a time that does not parse or is past, an empty prompt, or one over 8000 characters.
+`{"when": "in 30m" | "tomorrow 06:30" | "YYYY-MM-DDTHH:MM", "prompt"}`: `schedule.add`. `201 {"ok": true, "schedule"}`; `400` a time that does not parse or is past, an empty prompt, one over 8000 characters, or a cousin that already has 20 pending (the cap).
 
 ### `POST /api/cousins/<slug>/schedules/<id>/cancel`
 

@@ -16,7 +16,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cousin_lib import memory, memory_lock
+from cousin_lib import memory, memory_lock, perimeter
 
 DEFAULT_KEEP_DAYS = 30
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
@@ -97,6 +97,12 @@ def _fold_month(home, month, files, report, hidden=frozenset()):
     dpath = digest_path(home, month)
     digest = _load_digest(dpath)
     archive = archive_dir(home) / ("%s.jsonl.gz" % month)
+    # The fold deletes: `path.unlink()` at the end takes raw days out of
+    # the home. It is held to the same perimeter as every other writer,
+    # so a home pointed at the wrong root cannot lose a file that is not
+    # its own memory.
+    perimeter.assert_writable(dpath, writer="raw_fold._fold_month")
+    perimeter.assert_writable(archive, writer="raw_fold._fold_month")
     with gzip.open(archive, "at") as out:
         for path in files:
             raw = path.read_text()

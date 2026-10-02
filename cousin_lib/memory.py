@@ -22,7 +22,7 @@ import zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from cousin_lib import memory_lock
+from cousin_lib import memory_lock, perimeter
 from cousin_lib.trace import traced_cli
 
 # decisions.jsonl grows monotonically; past the threshold the older
@@ -177,6 +177,11 @@ def _append_raw(home, entry):
         **entry,
     }
     path = raw_dir / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+    # The perimeter is the framework's own check, on every raw write: no
+    # dreamer, distiller or conscience keeps a private cousin's file out of
+    # reach by convention. `mark_obsolete` and `record_event` land here, so
+    # one check covers the three producers. See perimeter.py.
+    perimeter.assert_writable(path, writer="memory._append_raw")
     with memory_lock.write_lock(home), open(path, "a") as fh:
         fh.write(json.dumps(entry) + "\n")
     return entry

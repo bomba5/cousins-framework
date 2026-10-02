@@ -48,7 +48,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cousin_lib import memory_lock
+from cousin_lib import memory_lock, perimeter
 from cousin_lib.home_files import PathRefused, resolve_in
 
 TRASH_NAME = ".trash"
@@ -150,6 +150,10 @@ def _rewrite(home, path, mutate):
     the file changed while the new content was prepared (an appender
     wrote a line); the check and the replace hold the home's memory write
     lock, so no append lands between them and none is lost."""
+    # The one chokepoint for trashing and restoring lines and files: the
+    # caller's `rel` is validated by _check_file/_check_line_file, and
+    # this is what holds the result to the perimeter as well.
+    perimeter.assert_writable(path, writer="memory_trash._rewrite")
     for _ in range(_REWRITE_TRIES):
         before = path.stat()
         raw = path.read_bytes().decode("utf-8", "replace")

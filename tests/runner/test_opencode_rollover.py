@@ -140,9 +140,10 @@ class TestRollover(OpencodeCase):
         self.assertEqual((r.opencode_session, boot.read_generation(r.home)), (old, g0))
         self.assertEqual(json.loads((r.home / "data" / "runner-session.json").read_text())
                          ["session_id"], old)
-        self.assertTrue(_wait(lambda: r.state() == "idle"))
-        states = [s["to"] for s in self.payloads(r, "state")]
-        self.assertEqual(states[-3:], ["rolling_over", "errored", "idle"])
+        # The state flips before its event row lands: wait on the events.
+        states = lambda: [s["to"] for s in self.payloads(r, "state")]
+        self.assertTrue(_wait(lambda: states()[-1:] == ["idle"]), states())
+        self.assertEqual(states()[-3:], ["rolling_over", "errored", "idle"])
         rec = r.enqueue(_op("still here"))
         self.assertTrue(_wait(lambda: self.outcome(r, rec) == "delivered"))
         self.assertIn(old, self.prompts()[-1]["path"])

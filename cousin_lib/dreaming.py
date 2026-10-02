@@ -17,7 +17,8 @@ stays as the second line.
 
 The memory side is `cousin_lib.dream_memory`, the contract below:
 
-    slice_for(home, *, chars) -> Slice   # .text, .through, .empty
+    slice_for(home, *, chars) -> Slice   # .text, .through (opaque,
+                                         # JSON), .empty, .coverage
     prompt(slice) -> str                 # the doctrine and the slice
     OPERATIONS                           # [{"name", "description",
                                          #   "inputSchema", "fn"}]
@@ -206,6 +207,9 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
     try:
         piece = ops.slice_for(home, chars=SLICE_CHARS)
         end["through_before"] = getattr(piece, "through", None)
+        # what a bounded slice saw and left out (topics seen / left, new
+        # entries): the record never claims more coverage than it had
+        end["coverage"] = getattr(piece, "coverage", None)
         if getattr(piece, "empty", False):
             end.update(result="no_change", tokens=0, summary="nothing new since the last pass")
             return end

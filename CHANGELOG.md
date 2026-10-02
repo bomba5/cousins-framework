@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.6.1 - 2026-10-02
+
+### Fixed
+
+- **The reply gate no longer blocks an answered turn when a peer's
+  message folds into it.** Every submitted prompt reset the answered state
+  of every thread, so a peer message folded into an operator's turn after
+  the reply sent the turn back to answer the operator again. A prompt now
+  resets only its own thread; one the runner cannot place still resets
+  them all.
+
 ## 3.6.0 - 2026-10-02
 
 ### Added

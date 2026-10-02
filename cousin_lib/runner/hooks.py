@@ -133,7 +133,7 @@ def _accepts(fn, name):
 def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
               checkpoints=None, body_for_prompt=None, lock=None, policy=None,
               request_rollover=None, live_threads=None, reply_gate=True,
-              watch=None, policy_changed=None):
+              watch=None, policy_changed=None, thread_for_prompt=None):
     """The callbacks by hook event name, plain `async def cb(input,
     tool_use_id, context)` functions: no SDK types, so tests drive them
     directly. `build_hooks` wraps them in HookMatchers.
@@ -163,6 +163,11 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     REPLY_GATE_REASON. The CLI marks the Stop that follows a block
     `stop_hook_active`, and that one always passes, so the gate costs at
     most one more model step and can never loop.
+    thread_for_prompt: `f(prompt) -> thread id or None`; a submitted
+    prompt resets the answered state of its own thread only, so a peer's
+    message folded into an operator turn does not undo the operator's
+    reply. With no such function, or a prompt it cannot place, every
+    thread is reset.
     watch: a config_watch.ConfigWatch; each submitted prompt checks it,
     and a change reaches the model as a runner note in that prompt's
     additionalContext (ahead of recall). A policy.toml edit tightens the
@@ -327,9 +332,16 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
 
     async def on_prompt(payload):
         # a new prompt (a turn's first row or one folded in) is answered
-        # afresh: a reply sent before it does not cover it
-        replied["threads"].clear()
-        replied["implicit"] = False
+        # afresh: a reply sent before it does not cover its thread; the
+        # other threads keep what they were answered
+        own = thread_for_prompt(payload.get("prompt") or "") if thread_for_prompt else None
+        if own is None:
+            replied["threads"].clear()
+            replied["implicit"] = False
+        else:
+            replied["threads"].discard(str(own).lower())
+            if _kind(own) in HUMAN_KINDS:
+                replied["implicit"] = False
         prompt = payload.get("prompt") or ""
         try:
             changed = await config_note()

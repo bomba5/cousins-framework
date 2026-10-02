@@ -567,12 +567,13 @@ class TestReplyGate(HooksCase):
     """A turn on operator or person chat that ends without `reply` is sent
     back once; the Stop after the block always passes."""
 
-    def gated(self, threads, *, gate=True):
+    def gated(self, threads, *, gate=True, thread_for_prompt=None):
         self.live = list(threads)
         return hooks.callbacks(self.home, slug="wren", root=self.root,
                                machine=self.machine, stream=self.stream,
                                recorder=lambda payload, cancelled=None: None,
-                               live_threads=lambda: tuple(self.live), reply_gate=gate)
+                               live_threads=lambda: tuple(self.live), reply_gate=gate,
+                               thread_for_prompt=thread_for_prompt)
 
     def stop(self, cbs, active=False):
         return _run(cbs["Stop"](self._base("Stop", stop_hook_active=active), None, {}))
@@ -622,4 +623,18 @@ class TestReplyGate(HooksCase):
         self.reply(cbs)
         self.assertEqual(self.stop(cbs), {})
         _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="next"), None, {}))
+        self.assertEqual(self.stop(cbs)["decision"], "block")
+
+    def test_a_peer_folded_in_does_not_undo_the_operators_reply(self):
+        owner = {"go on": "operator:ana", "kestrel here": "peer:kestrel"}
+        cbs = self.gated(["operator:ana"], thread_for_prompt=owner.get)
+        prompt = lambda text: _run(cbs["UserPromptSubmit"](
+            self._base("UserPromptSubmit", prompt=text), None, {}))
+        prompt("go on")
+        self.reply(cbs)
+        self.live.append("peer:kestrel")
+        prompt("kestrel here")                     # folded into the operator's turn
+        self.assertEqual(self.stop(cbs), {})
+        # but a second operator message folded in needs its own answer
+        prompt("go on")
         self.assertEqual(self.stop(cbs)["decision"], "block")

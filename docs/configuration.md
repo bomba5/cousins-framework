@@ -1317,7 +1317,9 @@ recall, and the stream gets a `config_change` event naming the files:
   rollover or a reconnect of the same runner, and `reply` and `send` read
   the same `outbound_filter`.
 - **`cousin.toml` and `.mcp.json`.** Read at start only: the note says a
-  restart applies them.
+  restart applies them. The exception is a `cousin.toml` change that only
+  touches keys that apply without a restart (`[agent] dreaming` and
+  `dreaming_at`): the note names them and says they already apply.
 
 Each change is said once per runner: the next prompt, and the next session
 after a rollover, compare against what the last check saw. A rollover's new

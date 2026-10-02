@@ -3,6 +3,23 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.6.0 - 2026-10-02
+
+### Added
+
+- **Dreaming, the harness.** A background pass that consolidates a
+  cousin's memory, off unless the operator turns it on: `[agent] dreaming`
+  is `off` (the default), `nightly` (at `[agent] dreaming_at`, default
+  03:00 host time) or `rollover` (after each generation), set on the
+  console's Agent panel, and applied without a restart. The loops daemon
+  runs due passes one at a time. A pass is its own short Sonnet session in
+  a child process on the cousin's account, with no built-in tools at all,
+  only memory operations, under a 32k-token budget. Each pass leaves a
+  record in `data/dreams/`, and the memory page's **dreaming** view lists
+  the passes with their changes, runs one on demand, and undoes one. The
+  memory operations themselves (`dream_memory`) follow; until they land, a
+  pass ends in `error` and changes nothing.
+
 ## 3.5.0 - 2026-10-02
 
 ### Added

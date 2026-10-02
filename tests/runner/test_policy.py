@@ -179,7 +179,7 @@ class TestThePerimeterAtTheGate(HermeticCase):
 
     def test_a_subagent_write_to_the_law_is_denied(self):
         reason = self._denied(agent_id="dream-1", tool_name="Write",
-                              tool_input={"file_path": "/home/bomba/cf/config/law.md"})
+                              tool_input={"file_path": "/srv/cf/config/law.md"})
         self.assertIn("memory perimeter", reason)
         self.assertIn("config/law.md", reason)
 
@@ -189,16 +189,16 @@ class TestThePerimeterAtTheGate(HermeticCase):
             tool_input={"command": "cat >> ~/cf/config/law.md"}))
 
     def test_a_subagent_write_to_a_portrait_or_shared_memory_is_denied(self):
-        for path in ("/home/bomba/cf/cousins/wren/self-portrait.md",
-                     "/home/bomba/cf/shared/reference_house-style.md"):
+        for path in ("/srv/cf/cousins/wren/self-portrait.md",
+                     "/srv/cf/shared/reference_house-style.md"):
             self.assertIn("memory perimeter", self._denied(
                 agent_id="dream-1", tool_name="Write",
                 tool_input={"file_path": path}))
 
     def test_a_subagent_write_to_its_own_memory_is_allowed(self):
-        for path in ("/home/bomba/cf/cousins/wren/memory/raw/2026-10-02.jsonl",
-                     "/home/bomba/cf/cousins/wren/notes/plan.md",
-                     "/home/bomba/cf/shared/proposed/wren__reference_h.md"):
+        for path in ("/srv/cf/cousins/wren/memory/raw/2026-10-02.jsonl",
+                     "/srv/cf/cousins/wren/notes/plan.md",
+                     "/srv/cf/shared/proposed/wren__reference_h.md"):
             self.assertEqual(self._gate(agent_id="dream-1", tool_name="Write",
                                         tool_input={"file_path": path}), {})
 
@@ -208,9 +208,9 @@ class TestThePerimeterAtTheGate(HermeticCase):
         # that refuses these is one an operator switches off.
         for tool, field in (("Read", "file_path"), ("Grep", "path"),
                             ("Read", "file_path"), ("Read", "file_path")):
-            for path in ("/home/bomba/cf/config/law.md",
-                         "/home/bomba/cf/cousins/wren/self-portrait.md",
-                         "/home/bomba/cf/shared/reference_house-style.md"):
+            for path in ("/srv/cf/config/law.md",
+                         "/srv/cf/cousins/wren/self-portrait.md",
+                         "/srv/cf/shared/reference_house-style.md"):
                 self.assertEqual(self._gate(agent_id="dream-1", tool_name=tool,
                                             tool_input={field: path}), {},
                                  "%s %s" % (tool, path))
@@ -238,11 +238,11 @@ class TestThePerimeterAtTheGate(HermeticCase):
         # is about background passes, not about the operator's own hands.
         self.assertEqual(self._gate(
             tool_name="Write",
-            tool_input={"file_path": "/home/bomba/cf/config/law.md"}), {})
+            tool_input={"file_path": "/srv/cf/config/law.md"}), {})
 
     def test_the_refusal_is_recorded_as_a_policy_event(self):
         self._denied(agent_id="dream-1", tool_name="Write",
-                     tool_input={"file_path": "/home/bomba/cf/config/law.md"})
+                     tool_input={"file_path": "/srv/cf/config/law.md"})
         events = [e["payload"] for e in self.stream.tail() if e["kind"] == "policy"]
         self.assertEqual(events[0]["decision"], "deny")
         self.assertEqual(events[0]["agent_id"], "dream-1")
@@ -251,7 +251,7 @@ class TestThePerimeterAtTheGate(HermeticCase):
         # An ask parks the session in waiting_permission; a perimeter
         # refusal is not a question, so the machine never moves.
         self._denied(agent_id="dream-1", tool_name="Write",
-                     tool_input={"file_path": "/home/bomba/cf/config/law.md"})
+                     tool_input={"file_path": "/srv/cf/config/law.md"})
         self.assertFalse([e for e in self.stream.tail() if e["kind"] == "state"])
 
 

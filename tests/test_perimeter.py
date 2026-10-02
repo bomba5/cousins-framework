@@ -10,7 +10,7 @@ from tests._hermetic import HermeticCase
 
 class TestShapes(unittest.TestCase):
     def test_the_law_is_protected_however_it_is_spelled(self):
-        for path in ("/home/bomba/cf/config/law.md",
+        for path in ("/srv/cf/config/law.md",
                      "config/law.md", "./config/law.md",
                      "/srv/framework/config/law.md"):
             self.assertIsNotNone(perimeter.protected_reason(path), path)
@@ -19,45 +19,45 @@ class TestShapes(unittest.TestCase):
         # The seed reads templates/law.md on every install; protecting it
         # would refuse the install itself.
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/templates/law.md"))
+            "/srv/cf/templates/law.md"))
 
     def test_a_committed_portrait_is_protected_and_its_candidate_is_not(self):
         self.assertIsNotNone(perimeter.protected_reason(
-            "/home/bomba/cf/cousins/chico/self-portrait.md"))
+            "/srv/cf/cousins/chico/self-portrait.md"))
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/cousins/chico/.self-portrait-candidate.md"))
+            "/srv/cf/cousins/chico/.self-portrait-candidate.md"))
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/cousins/chico/.self-portrait.md.bak"))
+            "/srv/cf/cousins/chico/.self-portrait.md.bak"))
 
     def test_canonical_shared_memory_is_protected(self):
         self.assertIsNotNone(perimeter.protected_reason(
-            "/home/bomba/cf/shared/reference_operator-style.md"))
+            "/srv/cf/shared/reference_operator-style.md"))
         self.assertIsNotNone(perimeter.protected_reason("shared/rules.md"))
 
     def test_the_proposal_path_stays_open(self):
         # propose() is the tier's single agent-side entry path; protecting
         # it would refuse every cousin's share of the fleet's memory.
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/shared/proposed/chico__reference_h.md"))
+            "/srv/cf/shared/proposed/chico__reference_h.md"))
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/shared/examples/scratch.md"))
+            "/srv/cf/shared/examples/scratch.md"))
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/shared/audit.jsonl"))
+            "/srv/cf/shared/audit.jsonl"))
 
     def test_ordinary_memory_is_not_protected(self):
         for path in ("memory/raw/2026-10-02.jsonl",
                      "memory/distilled/notes.md",
-                     "/home/bomba/cf/cousins/chico/memory/raw/2026-10-02.jsonl",
-                     "/home/bomba/cf/data/decision.jsonl",
-                     "/home/bomba/cf/config/policy.toml",
-                     "/home/bomba/cf/cousins/chico/notes/plan.md"):
+                     "/srv/cf/cousins/chico/memory/raw/2026-10-02.jsonl",
+                     "/srv/cf/data/decision.jsonl",
+                     "/srv/cf/config/policy.toml",
+                     "/srv/cf/cousins/chico/notes/plan.md"):
             self.assertIsNone(perimeter.protected_reason(path), path)
 
     def test_a_path_below_a_shared_subdirectory_is_not_canonical(self):
         # Only the file directly in shared/ is canonical; a nested one
         # belongs to the subdirectory's own surface.
         self.assertIsNone(perimeter.protected_reason(
-            "/home/bomba/cf/shared/proposed/nested/deep.md"))
+            "/srv/cf/shared/proposed/nested/deep.md"))
 
     def test_an_empty_or_absurd_path_is_not_protected(self):
         for path in ("", "   ", None, "/"):
@@ -73,7 +73,7 @@ class TestAssertWritable(unittest.TestCase):
         self.assertIn("config/law.md is the Framework Law", str(caught.exception))
 
     def test_a_permitted_path_comes_back_for_the_caller_to_use(self):
-        path = "/home/bomba/cf/memory/raw/2026-10-02.jsonl"
+        path = "/srv/cf/memory/raw/2026-10-02.jsonl"
         self.assertEqual(perimeter.assert_writable(path), path)
 
     def test_the_refusal_is_an_exception_a_caller_can_catch_by_name(self):
@@ -157,7 +157,7 @@ class TestCheckTool(unittest.TestCase):
 
     def test_an_ordinary_write_is_not(self):
         self.assertIsNone(perimeter.check_tool(
-            "Write", {"file_path": "/home/bomba/cf/cousins/chico/notes/a.md"}))
+            "Write", {"file_path": "/srv/cf/cousins/chico/notes/a.md"}))
         self.assertIsNone(perimeter.check_tool(
             "Bash", {"command": "git status"}))
 

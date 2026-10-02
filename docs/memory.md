@@ -209,8 +209,8 @@ and `NotebookEdit` name their path exactly.
 
 The install's law seed, the console's law editor, `commit_candidate` and
 the body-swap's identity trade are operator-initiated and outside the
-perimeter, as is the shared tier's own reviewer boundary, which is the
-stronger rule and lives in `shared_tier`.
+perimeter, as is the [shared tier](glossary.md#shared-tier)'s own reviewer
+boundary, which is the stronger rule and lives in `shared_tier`.
 
 ## Truth levels
 

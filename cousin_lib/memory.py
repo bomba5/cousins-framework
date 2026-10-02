@@ -14,8 +14,8 @@ import fcntl
 import gzip
 import hashlib
 import json
-import re
 import os
+import re
 import shlex
 import sys
 import zlib
@@ -445,6 +445,46 @@ def mark_obsolete(home, topic, why, *, by=None, force=False,
     return _append_raw(home, mark)
 
 
+def why(home, eid):
+    """One entry and one hop around it: what it was built from (its
+    `derived_from`, each resolved or marked missing), what was built from
+    it (entries naming it), and the mark that retired it, if any. KeyError
+    for an id no raw entry has. Nothing is inherited along the hop: each
+    entry keeps its own truth level."""
+    entries = _all_raw(home)
+    by_id = {entry_id(e): e for e in entries}
+    if eid not in by_id:
+        raise KeyError(eid)
+    entry = by_id[eid]
+    built_from = [dict(by_id[d], id=d) if d in by_id else {"id": d, "missing": True}
+                  for d in entry.get("derived_from") or []]
+    used_by = [dict(e, id=entry_id(e)) for e in entries
+               if eid in (e.get("derived_from") or [])]
+    info = next((row for row in validity(home) if row["id"] == eid), {})
+    return {"entry": dict(entry, id=eid), "derived_from": built_from, "used_by": used_by,
+            "retired_by": info.get("retired_by"), "valid_to": info.get("valid_to")}
+
+
+def format_why(out):
+    def line(e):
+        if e.get("missing"):
+            return "  %s (not in raw memory)" % e["id"]
+        text = " ".join(str(e.get("content") or "").split())
+        return "  %s [%s] %s: %s" % (e["id"], e.get("truth_level", "?"), e.get("topic", "?"),
+                                    text[:200])
+    entry = out["entry"]
+    lines = ["%s [%s] %s: %s" % (entry["id"], entry.get("truth_level", "?"),
+                                 entry.get("topic", "?"),
+                                 " ".join(str(entry.get("content") or "").split()))]
+    if out.get("retired_by"):
+        lines.append("retired by %s (%s)" % (out["retired_by"], out.get("valid_to") or "?"))
+    lines.append("built from:" if out["derived_from"] else "built from: nothing recorded")
+    lines += [line(e) for e in out["derived_from"]]
+    lines.append("built on by:" if out["used_by"] else "built on by: nothing")
+    lines += [line(e) for e in out["used_by"]]
+    return "\n".join(lines)
+
+
 def _rotate_decisions_if_needed(path):
     """Rotate an oversized decisions log; returns the archive path if
     rotation happened. Append-mode archive: same-day re-rotation is
@@ -498,6 +538,12 @@ def parse_decide_stdin(text):
     return chunks[0], chunks[1], chunks[2]
 
 
+def _derived_args(p):
+    p.add_argument("--derived-from", dest="derived_from", action="append", metavar="ID",
+                   default=None, help="an entry id this was built from (repeat for"
+                                      " more); `why ID` walks it")
+
+
 def _level_args(p):
     p.add_argument("--level", default="conclusion",
                    help="truth level: %s (default conclusion); operator"
@@ -517,7 +563,31 @@ _DECIDE_USAGE = (
 
 # ------------------------------------------------ library (the one implementation)
 
-def decide(home, topic, decision, reasoning, *, level=None, cite=None):
+_ENTRY_ID = re.compile(r"^[0-9a-f]{12}$")
+
+
+def check_derived(derived_from):
+    """`derived_from` as a list of entry ids (12 hex characters, entry_id's
+    shape), or ValueError. None and [] mean none. One hop only: what this
+    entry was built from, never a chain or a confidence inherited along it."""
+    if derived_from in (None, "", []):
+        return []
+    if isinstance(derived_from, str):
+        derived_from = [derived_from]
+    if not isinstance(derived_from, (list, tuple)):
+        raise ValueError("derived_from must be a list of entry ids")
+    out = []
+    for value in derived_from:
+        value = str(value or "").strip()
+        if not _ENTRY_ID.match(value):
+            raise ValueError("derived_from: %r is not an entry id (12 hex characters,"
+                             " as `history` and `why` list them)" % value)
+        if value not in out:
+            out.append(value)
+    return out
+
+
+def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_from=None):
     """Log a decision with its reasoning. Raises ValueError for a missing
     part or a level error. Returns the line the CLI prints. Mirrors the
     old CLI's non-`--stdin` path exactly: no stripping here - padding
@@ -531,6 +601,7 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None):
     resolved, err = resolve_level(level, cite)
     if err:
         raise ValueError(err)
+    derived = check_derived(derived_from)
     entry = {"timestamp": datetime.now().astimezone().isoformat(),
              "topic": topic, "decision": decision, "reasoning": reasoning}
     decisions = home / "data" / "decisions.jsonl"
@@ -549,23 +620,29 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None):
             _append_raw(home, {"topic": topic,
                                "content": "%s - why: %s" % (decision, reasoning),
                                "truth_level": resolved, "source": "decision",
-                               **({"cite": cite} if cite else {})})
+                               **({"cite": cite} if cite else {}),
+                               **({"derived_from": derived} if derived else {})})
         except OSError as err:
             lines.append("warning: raw-memory bridge failed (%s); decision logged anyway" % err)
     return "\n".join(lines)
 
 
-def remember(home, topic, fact, *, level=None, cite=None):
-    """One durable fact into raw memory. Raises ValueError. Returns the line."""
+def remember(home, topic, fact, *, level=None, cite=None, derived_from=None):
+    """One durable fact into raw memory. Raises ValueError. Returns the line.
+    `derived_from`: the entry ids it was built from (check_derived), one hop;
+    `why` walks it."""
     topic, fact = str(topic or "").strip(), str(fact or "").strip()
     if not (topic and fact):
         raise ValueError("remember needs a topic and a fact")
     resolved, err = resolve_level(level, cite)
     if err:
         raise ValueError(err)
+    derived = check_derived(derived_from)
     entry = {"topic": topic, "content": fact, "truth_level": resolved, "source": "remember"}
     if cite:
         entry["cite"] = cite
+    if derived:
+        entry["derived_from"] = derived
     _append_raw(Path(home), entry)
     return "Remembered [%s] (%s): %s" % (topic, resolved, fact)
 
@@ -833,7 +910,8 @@ def _cmd_decide(args):
         return 2
     try:
         print(decide(home, topic, decision, reasoning,
-                     level=getattr(args, "level", None), cite=getattr(args, "cite", None)))
+                     level=getattr(args, "level", None), cite=getattr(args, "cite", None),
+                     derived_from=getattr(args, "derived_from", None)))
     except ValueError as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
@@ -849,10 +927,24 @@ def _cmd_remember(args):
               " --cite SOURCE]", file=sys.stderr)
         return 2
     try:
-        print(remember(home, args.topic, args.fact, level=args.level, cite=args.cite))
+        print(remember(home, args.topic, args.fact, level=args.level, cite=args.cite,
+                       derived_from=getattr(args, "derived_from", None)))
     except ValueError as err:
         print("error: %s" % err, file=sys.stderr)
         return 2
+    return 0
+
+
+def _cmd_why(args):
+    """One entry, what it was built from and what was built from it."""
+    home = _home(args)
+    try:
+        out = why(home, args.id)
+    except KeyError:
+        print("error: no raw entry with id %s (cousin-memory history TOPIC lists ids)"
+              % args.id, file=sys.stderr)
+        return 1
+    print(json.dumps(out, default=str) if args.json else format_why(out))
     return 0
 
 
@@ -1216,6 +1308,7 @@ def memory_main(argv=None):
                         " separated by a line that is exactly '---'"
                         " (a quoted heredoc cannot be shell-expanded)")
     _level_args(p)
+    _derived_args(p)
     p.set_defaults(func=_cmd_decide)
     p = sub.add_parser(
         "remember",
@@ -1224,7 +1317,15 @@ def memory_main(argv=None):
     p.add_argument("topic", nargs="?")
     p.add_argument("fact", nargs="?")
     _level_args(p)
+    _derived_args(p)
     p.set_defaults(func=_cmd_remember)
+    p = sub.add_parser(
+        "why",
+        help="one entry by its id, what it was built from (derived_from) and"
+             " what was built from it: one hop each way, nothing inherited")
+    p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=_cmd_why)
     p = sub.add_parser(
         "obsolete",
         help="mark a topic superseded (L5_OBSOLETE): the distiller drops"

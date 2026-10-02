@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.8.0 - 2026-10-02
+
+### Added
+
+- **One-hop derivation.** `remember` and `decide` take `derived_from`, the
+  entry ids a claim was built from (`cousin-memory remember ...
+  --derived-from ID`, repeatable; the memory tool's `derived_from` list).
+  `cousin-memory why ID` (and the memory tool's `why`) shows the entry,
+  what it was built from, what was built from it, and the mark that
+  retired it: one hop each way, and nothing inherited along it (each entry
+  keeps its own truth level).
+- **Recall's read receipt.** Every proactive recall appends to
+  `data/recall-receipts.jsonl` what it returned and what it left out, each
+  with its similarity and, for a raw entry, its id, and the reason a hit
+  was excluded or a recall was gated. A recall that surfaced the wrong
+  claim, or hid the right one, can be traced afterwards. The file rotates
+  past 2 MB.
+
+The shipped `config/mcp-registry.toml.example` carries `why` and
+`derived_from`. A cousin's own registry copy, made at spawn, gets them
+when it is updated.
+
 ## 3.7.0 - 2026-10-02
 
 ### Added

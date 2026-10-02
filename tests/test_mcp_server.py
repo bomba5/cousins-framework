@@ -180,7 +180,7 @@ class SchemaCase(unittest.TestCase):
         self.assertEqual(schema["required"], ["command"])
         self.assertEqual(sorted(schema["properties"]["command"]["enum"]),
                          ["activity", "decide", "obsolete", "recall", "remember",
-                          "search"])
+                          "search", "why"])
         self.assertEqual(schema["properties"]["query"]["type"], "string")
         self.assertIn("search", schema["properties"]["query"]["description"])
         self.assertFalse(schema["additionalProperties"])

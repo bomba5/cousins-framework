@@ -41,6 +41,8 @@ cite = { type = "string", optional = true, description = "where it comes from: c
 why = { type = "string", description = "what superseded the topic (obsolete); required, non-empty" }
 force = { type = "boolean", description = "mark a topic that has no raw entries yet (obsolete)" }
 entry = { type = "string", optional = true, description = "retire one claim of the topic by its id, from `tensions` or `history`; the topic stays (obsolete)" }
+derived_from = { type = "array", items = "string", optional = true, description = "entry ids this was built from, one hop (decide, remember); `why` walks it" }
+id = { type = "string", description = "an entry id, from `history` or a recall line (why)" }
 keyword = { type = "string", optional = true, description = "what to recall; empty lists the newest entries (recall)" }
 last = { type = "integer", description = "how many entries (recall)" }
 text = { type = "string", description = "what you are doing now (activity)" }
@@ -51,13 +53,17 @@ options = { top = "--top", collection = "--collection", json = "--json" }
 
 [tools.memory.commands.decide]
 argv = ["decide", "--stdin"]
-options = { level = "--level", cite = "--cite" }
+options = { level = "--level", cite = "--cite", derived_from = "--derived-from" }
 stdin = ["topic", "decision", "reasoning"]
 stdin_sep = "---"
 
 [tools.memory.commands.remember]
 argv = ["remember", "{topic}", "{fact}"]
-options = { level = "--level", cite = "--cite" }
+options = { level = "--level", cite = "--cite", derived_from = "--derived-from" }
+
+[tools.memory.commands.why]
+argv = ["why", "{id}"]
+options = { json = "--json" }
 
 [tools.memory.commands.obsolete]
 argv = ["obsolete", "{topic}"]

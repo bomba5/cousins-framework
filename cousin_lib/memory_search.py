@@ -1121,19 +1121,85 @@ def recall_entries(home, text, *, config=None, root=None):
     if not configured and not config.recall_keyword_only:
         # no semantic leg: a keyword match on an OR-joined query is too
         # loose to interrupt with; the cousin opts in per install
+        _receipt(home, text, gate="no semantic leg and keyword-only recall is off")
         return []
     if len(text.strip()) < int(thresholds["min_chars"]):
+        _receipt(home, text, gate="shorter than [recall] min_chars")
         return []
     hits, _notice = search(text, top=int(thresholds["top"]), home=home, root=root)
-    kept = []
+    kept, returned, excluded = [], [], []
     for hit in hits:
+        row = _receipt_row(home, hit, root)
         if configured:
             similarity = hit.get("similarity")
             if similarity is None or similarity < float(thresholds["min_score"]):
+                excluded.append(dict(row, reason="similarity %s below [recall] min_score %s"
+                                     % ("none" if similarity is None else round(similarity, 3),
+                                        thresholds["min_score"])))
                 continue
+        returned.append(row)
         kept.append("%s (%s:%s)" % (_hit_name(hit), hit.get("collection"),
                                     _hit_relpath(home, hit, root)))
+    _receipt(home, text, returned=returned, excluded=excluded)
     return kept
+
+
+# Proactive recall's read receipt: for every prompt it ran on, what it
+# returned and what it left out, and why. A recall that surfaced the wrong
+# claim, or hid the right one, is diagnosable after the fact instead of
+# invisible. data/recall-receipts.jsonl, rotated to .1 past RECEIPT_BYTES.
+RECEIPT_BYTES = 2 * 1024 * 1024
+RECEIPT_QUERY_CHARS = 200
+
+
+def receipts_path(home):
+    return Path(home) / "data" / "recall-receipts.jsonl"
+
+
+def _receipt_row(home, hit, root):
+    row = {"name": _hit_name(hit), "collection": hit.get("collection"),
+           "path": _hit_relpath(home, hit, root)}
+    if hit.get("similarity") is not None:
+        row["similarity"] = round(float(hit["similarity"]), 4)
+    if hit.get("collection") == "raw":
+        entry = raw_entry(hit["path"])
+        if entry:
+            from cousin_lib.memory import entry_id
+            row["id"] = entry_id(entry)
+    return row
+
+
+def _receipt(home, text, *, gate=None, returned=(), excluded=()):
+    """Append one receipt; a receipt that cannot be written never costs
+    the recall."""
+    record = {"ts": time.time(), "query": " ".join(str(text or "").split())[:RECEIPT_QUERY_CHARS],
+              "returned": list(returned), "excluded": list(excluded)}
+    if gate:
+        record["gate"] = gate
+    path = receipts_path(home)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > RECEIPT_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def receipts(home, *, last=20):
+    """The newest `last` receipts, newest first."""
+    try:
+        lines = receipts_path(home).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    out = []
+    for line in reversed(lines[-last:]):
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
 
 
 def recall_line(entries):

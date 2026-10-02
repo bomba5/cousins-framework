@@ -89,13 +89,24 @@ def _m_decide(ctx, a):
     from cousin_lib import memory
     return memory.decide(ctx.home, _str(a, "topic").strip(), _str(a, "decision").strip(),
                          _str(a, "reasoning").strip(), level=a.get("level"),
-                         cite=a.get("cite"))
+                         cite=a.get("cite"), derived_from=a.get("derived_from"))
 
 
 def _m_remember(ctx, a):
     from cousin_lib import memory
     return memory.remember(ctx.home, a.get("topic"), a.get("fact"),
-                           level=a.get("level"), cite=a.get("cite"))
+                           level=a.get("level"), cite=a.get("cite"),
+                           derived_from=a.get("derived_from"))
+
+
+def _m_why(ctx, a):
+    from cousin_lib import memory
+    eid = _str(a, "id").strip()
+    try:
+        out = memory.why(ctx.home, eid)
+    except KeyError:
+        raise ValueError("no raw entry with id %s (`history` lists ids)" % eid)
+    return json.dumps(out, default=str) if a.get("json") else memory.format_why(out)
 
 
 def _m_obsolete(ctx, a):
@@ -461,7 +472,8 @@ def _t_delete(ctx, a):
 
 HANDLERS = {
     "memory": {"search": _m_search, "decide": _m_decide, "remember": _m_remember,
-               "obsolete": _m_obsolete, "recall": _m_recall, "activity": _m_activity},
+               "obsolete": _m_obsolete, "recall": _m_recall, "activity": _m_activity,
+               "why": _m_why},
     "job": {"start": _j_start, "run": _j_run, "done": _j_done, "fail": _j_fail,
             "list": _j_list, "show": _j_show},
     "schedule": {"add": _s_add, "list": _s_list, "cancel": _s_cancel},

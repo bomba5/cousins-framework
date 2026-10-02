@@ -37,7 +37,8 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import auth, envelope, extract, hooks, restart_note, rollover, tools, wake
+from cousin_lib.runner import (auth, config_watch, envelope, extract, hooks, restart_note,
+                               rollover, tools, wake)
 from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -577,7 +578,8 @@ class SdkRunner:
                                        machine=self.machine, stream=self.stream,
                                        policy=self.policy, lock=self._lock,
                                        body_for_prompt=self._body_for_prompt,
-                                       request_rollover=self._request_rollover)
+                                       request_rollover=self._request_rollover,
+                                       watch=config_watch.ConfigWatch(self.home, self.root))
         # The composed prompt (prompt.py): byte-stable across generations,
         # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first

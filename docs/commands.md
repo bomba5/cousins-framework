@@ -562,7 +562,8 @@ cousin-loops fire wren context-heartbeat
 
 `cousin-schedule` queues a one-shot prompt for a future time. Subcommands:
 `add WHEN PROMPT` (`in 30m`, `tomorrow 06:30`, or an ISO date), `list
-[--all]`, `cancel ID`, `tick`.
+[--all]`, `cancel ID`, `tick`. A cousin holds at most 20 pending; `add`
+refuses the 21st (exit 2).
 
 ```
 cousin-schedule add "tomorrow 09:00" "Check that the backup ran."

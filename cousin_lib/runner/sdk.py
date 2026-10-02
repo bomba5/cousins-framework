@@ -577,7 +577,9 @@ class SdkRunner:
                                        machine=self.machine, stream=self.stream,
                                        policy=self.policy, lock=self._lock,
                                        body_for_prompt=self._body_for_prompt,
-                                       request_rollover=self._request_rollover)
+                                       request_rollover=self._request_rollover,
+                                       live_threads=lambda: self.tool_context.turn.snapshot()[1],
+                                       reply_gate=bool(self._agent_value("reply_gate", True)))
         # The composed prompt (prompt.py): byte-stable across generations,
         # so a rollover and a restart keep the cache.
         # With snapshot=True a resumed session keeps the prompt it first

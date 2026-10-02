@@ -80,6 +80,40 @@ def parse_when(when, *, now=None):
     )
 
 
+# A cousin may hold this many pending one-shots; `add` refuses the next.
+# A runaway self-scheduling loop stops here instead of filling the store.
+MAX_PENDING = 20
+
+# A fire this many seconds after its target is reported as late; the
+# daemon ticks every 30 s, so anything under two minutes is on time.
+ON_TIME_S = 120
+
+# Past this, the header also says the reason it was set may be settled.
+STALE_S = 30 * 60
+
+
+def _clock(ts):
+    return datetime.fromtimestamp(ts).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+
+
+def annotate(job_id, prompt, *, created_ts, target_ts, now_ts):
+    """The text a due job is delivered as: one header line, a blank
+    line, then the prompt verbatim. The header tells the turn what it is
+    (its own scheduled prompt, not a person), when it was set, when it
+    was due and how late it fired. A late job is still delivered: the
+    contract is at-least-once (see `tick`), so lateness is said, never
+    turned into a silent drop."""
+    late = now_ts - target_ts
+    when = "on time" if late < ON_TIME_S else "%d min late" % (late // 60)
+    header = ("#%d, set %s, due %s, fired %s (%s). Your own scheduled prompt:"
+              " nobody is waiting on this turn unless the prompt says so."
+              % (job_id, _clock(created_ts), _clock(target_ts), _clock(now_ts), when))
+    if late >= STALE_S:
+        header += (" It fired late (the cousin or the daemon was down), so what it"
+                   " was set for may already be settled: check before acting on it.")
+    return header + "\n\n" + prompt
+
+
 def _print_error(job_id, err):
     print("cousin-schedule: job #%d delivery failed,"
           " kept pending: %s" % (job_id, err), file=sys.stderr)
@@ -105,8 +139,9 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
     callers must never assume the delivered line equals the scheduled
     string byte-for-byte.
 
-    `deliver(cousin, prompt)` receives the RAW prompt; adding the
-    provenance prefix is the deliverer's job (`_default_deliver` here,
+    `deliver(cousin, prompt)` receives the prompt as `annotate` builds
+    it (a header line with the job's times, then the scheduled text);
+    adding the provenance prefix is the deliverer's job (`_default_deliver` here,
     the loops daemon's adapter there). Any exception it raises keeps
     that job pending and is reported through `on_error(job_id, err)`;
     so does an explicit `False` return (`_default_deliver` returns the
@@ -120,14 +155,16 @@ def tick(*, now_ts=None, deliver, on_error=_print_error):
     conn = _db()
     try:
         rows = conn.execute(
-            "SELECT id, cousin, prompt FROM scheduled_jobs"
+            "SELECT id, cousin, prompt, created_at, target_ts FROM scheduled_jobs"
             " WHERE status='pending' AND target_ts<=? ORDER BY target_ts",
             (now_ts,),
         ).fetchall()
         fired = 0
-        for job_id, cousin, prompt in rows:
+        for job_id, cousin, prompt, created_ts, target_ts in rows:
+            text = annotate(job_id, prompt, created_ts=created_ts,
+                            target_ts=target_ts, now_ts=now_ts)
             try:
-                if deliver(cousin, prompt) is False:
+                if deliver(cousin, text) is False:
                     raise RuntimeError("delivery not accepted")
             except Exception as err:
                 on_error(job_id, err)
@@ -162,6 +199,12 @@ def add(slug, when, prompt, *, now=None):
         raise ValueError("empty prompt")
     conn = _db()
     try:
+        (pending,) = conn.execute(
+            "SELECT count(*) FROM scheduled_jobs WHERE cousin=? AND status='pending'",
+            (slug,)).fetchone()
+        if pending >= MAX_PENDING:
+            raise ValueError("%s already has %d pending scheduled prompts (the cap);"
+                             " cancel one first" % (slug, pending))
         cur = conn.execute(
             "INSERT INTO scheduled_jobs (cousin, target_ts, prompt, created_at)"
             " VALUES (?, ?, ?, ?)", (slug, ts, prompt, int(now_dt.timestamp())))

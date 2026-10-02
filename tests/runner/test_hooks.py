@@ -561,3 +561,65 @@ class TestPreCompactRequestsARollover(HermeticCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReplyGate(HooksCase):
+    """A turn on operator or person chat that ends without `reply` is sent
+    back once; the Stop after the block always passes."""
+
+    def gated(self, threads, *, gate=True):
+        self.live = list(threads)
+        return hooks.callbacks(self.home, slug="wren", root=self.root,
+                               machine=self.machine, stream=self.stream,
+                               recorder=lambda payload, cancelled=None: None,
+                               live_threads=lambda: tuple(self.live), reply_gate=gate)
+
+    def stop(self, cbs, active=False):
+        return _run(cbs["Stop"](self._base("Stop", stop_hook_active=active), None, {}))
+
+    def reply(self, cbs, thread=None, agent_id=None):
+        tool_input = {"text": "hi"} if thread is None else {"text": "hi", "thread": thread}
+        payload = self._base("PostToolUse", tool_name=hooks.REPLY_TOOL, tool_input=tool_input,
+                             tool_use_id="r", tool_response={})
+        if agent_id:
+            payload["agent_id"] = agent_id
+        _run(cbs["PostToolUse"](payload, "r", {}))
+
+    def test_an_unanswered_operator_turn_is_blocked_once(self):
+        cbs = self.gated(["operator:jhonata"])
+        out = self.stop(cbs)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("operator:jhonata", out["reason"])
+        self.assertEqual([e["payload"]["threads"] for e in self.stream.tail()
+                          if e["kind"] == "gate"], [["operator:jhonata"]])
+        # the CLI marks the next Stop stop_hook_active: it passes, no loop
+        self.assertEqual(self.stop(cbs, active=True), {})
+
+    def test_an_implicit_reply_on_the_only_human_thread_passes(self):
+        cbs = self.gated(["operator:jhonata"])
+        self.reply(cbs)
+        self.assertEqual(self.stop(cbs), {})
+
+    def test_two_human_threads_need_a_named_reply_each(self):
+        cbs = self.gated(["operator:jhonata", "person:merete"])
+        self.reply(cbs, thread="operator:Jhonata")
+        out = self.stop(cbs)
+        self.assertIn("person:merete", out["reason"])
+        self.assertNotIn("operator:jhonata", out["reason"])
+
+    def test_peer_schedule_and_loop_turns_are_not_gated(self):
+        cbs = self.gated(["peer:sage", "schedule", "loop:daemon"])
+        self.assertEqual(self.stop(cbs), {})
+
+    def test_a_subagent_reply_does_not_count_and_the_gate_can_be_off(self):
+        cbs = self.gated(["operator:jhonata"])
+        self.reply(cbs, agent_id="sub-1")
+        self.assertEqual(self.stop(cbs)["decision"], "block")
+        self.assertEqual(self.stop(self.gated(["operator:jhonata"], gate=False)), {})
+
+    def test_a_reply_does_not_carry_over_into_the_next_prompt(self):
+        cbs = self.gated(["operator:jhonata"])
+        self.reply(cbs)
+        self.assertEqual(self.stop(cbs), {})
+        _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="next"), None, {}))
+        self.assertEqual(self.stop(cbs)["decision"], "block")

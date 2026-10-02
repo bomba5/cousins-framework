@@ -196,12 +196,16 @@ file in `shared/` (a cousin proposes into `shared/proposed/` and a
 configured reviewer promotes it).
 
 `cousin_lib/perimeter.py` holds those three shapes. They are matched on
-the end of the path, never on a root: any `config/law.md`, any file named
-`self-portrait.md` and any `*.md` directly under a directory named
-`shared` (outside `shared/proposed/` and `shared/examples/`), wherever it
-is. The framework's own memory writers check the path they were handed
-before they write (`memory._append_raw`, `distill`, `raw_fold`,
-`reinforce.record`, `memory_trash`, `self_portrait.write_candidate_text`,
+the end of the path, and only under the framework root: a `config/law.md`,
+a file named `self-portrait.md` and a `*.md` directly under a directory
+named `shared` (outside `shared/proposed/` and `shared/examples/`). A path
+outside the root is never protected, so a subagent working in another
+repository writes its own files. A relative path is joined to the call's
+working directory; with none, it is checked by its shape alone. The
+framework's own memory writers, which only ever write inside an install,
+check the path they were handed by its shape before they write
+(`memory._append_raw`, `distill`, `raw_fold`, `reinforce.record`,
+`memory_trash`, `self_portrait.write_candidate_text`,
 `shared_tier.propose`), so one pointed at the wrong home refuses rather
 than writes.
 

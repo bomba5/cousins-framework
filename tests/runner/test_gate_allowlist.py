@@ -62,7 +62,10 @@ TABLE = (
     ("A4", ("config/law.md",), ALLOW, REFUSE, REFUSE),
     ("A5", ("shared/reference_house-style.md",), ALLOW, REFUSE, REFUSE),
     ("A6", ("shared/proposed/wren__reference_h.md",), ALLOW, ALLOW, ALLOW),
-    ("A7", ("shared/proposed/sam__reference_h.md",), ALLOW, ALLOW, ALLOW),
+    # G2: a subagent proposes only under its own name
+    ("A7", ("shared/proposed/sam__reference_h.md",
+            "shared/proposed/reference_h.md",
+            "shared/proposed/nested/deep.md"), ALLOW, REFUSE, ALLOW),
     ("A8", ("shared/audit.jsonl",), ALLOW, ALLOW, ALLOW),
     ("A9", ("cousins/wren/policy.toml",
             "cousins/wren/cousin.toml",
@@ -287,8 +290,10 @@ class TestCoverage(GateCase):
             if s != REFUSE:
                 continue
             for rel in paths:
+                # what the gate asks for a subagent
                 reason = perimeter.protected_reason(self.path(rel), root=str(self.R),
-                                                    cwd=str(self.home))
+                                                    cwd=str(self.home), home=self.home,
+                                                    slug=SLUG)
                 hits = [n for n, rx in producers.items() if reason and rx.match(reason)]
                 self.assertTrue(hits, "%s %s: %r matches no producer" % (row, rel, reason))
                 for name in hits:

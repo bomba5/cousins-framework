@@ -77,6 +77,7 @@ LAW_TAIL = ("config", "law.md")
 PORTRAIT_NAME = "self-portrait.md"
 SHARED_DIR = "shared"
 SHARED_SUBDIRS = ("proposed", "examples")
+PROPOSED_DIR = "proposed"
 
 # Tools that WRITE the path they name. Read, Grep and Glob name paths too
 # and are absent on purpose: a subagent reads the law and the shared rules
@@ -127,6 +128,29 @@ def _shared_reason(name):
             " shared/proposed/ and a configured reviewer promotes it" % name)
 
 
+def _proposal_reason(where, owner, slug):
+    return ("%s is %s: %s's proposals go to shared/proposed/%s__<name>.md"
+            " (cousin-shared propose --slug %s)" % (where, owner, slug, slug, slug))
+
+
+def _who_writes(placed, slug):
+    """The rows that depend on who writes, for a path already placed under
+    the root: why the cousin `slug`'s subagent may not write it, or None.
+    Only the tool gate asks (protected_reason with `home` or `slug`)."""
+    if placed[:2] == (SHARED_DIR, PROPOSED_DIR):
+        if len(placed) == 3 and placed[2].startswith(slug + "__"):
+            return None                 # its own proposal: the entry path
+        where = "/".join(placed)
+        if len(placed) == 3 and "__" in placed[2]:
+            owner = "%s's proposal" % placed[2].partition("__")[0]
+        elif len(placed) == 2:
+            owner = "the review queue, every cousin's proposals"
+        else:
+            owner = "in the review queue under no cousin's name"
+        return _proposal_reason(where, owner, slug)
+    return None
+
+
 def _under_root(path, root, cwd):
     """The path's parts relative to the framework `root` (an absolute
     path, or a relative one joined to `cwd`, normalised without touching
@@ -159,9 +183,11 @@ def protected_reason(path, *, root=None, cwd=None, home=None, slug=None):
     caller's own file, a checkout's templates/shared/ included (the
     default install's checkout IS the root).
 
-    `home` and `slug` name the cousin whose session is writing. The tool
-    gate passes them for a subagent; a framework writer (assert_writable)
-    never does."""
+    `home` and `slug` name the cousin whose session is writing (`slug`
+    defaults to the home's directory name). The tool gate passes them for
+    a subagent, and with a root they add the rows that depend on who
+    writes: another cousin's proposal in shared/proposed/ is refused. A
+    framework writer (assert_writable) never passes them."""
     placed = _under_root(path, root, cwd)
     if placed is None:
         return None
@@ -172,7 +198,10 @@ def protected_reason(path, *, root=None, cwd=None, home=None, slug=None):
             return _PORTRAIT_REASON
         if len(placed) == 2 and placed[0] == SHARED_DIR and placed[1].endswith(".md"):
             return _shared_reason(placed[1])
-        return None
+        slug = slug or (Path(str(home)).name if home else None)
+        if not slug:
+            return None
+        return _who_writes(placed, slug)
     parts = _parts(path)
     if not parts:
         return None

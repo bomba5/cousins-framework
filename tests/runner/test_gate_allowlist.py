@@ -68,12 +68,14 @@ TABLE = (
             "shared/proposed/nested/deep.md"), ALLOW, REFUSE, ALLOW),
     # G4: the tier's record is the framework's to append (shared_tier._audit)
     ("A8", ("shared/audit.jsonl",), ALLOW, REFUSE, ALLOW),
+    # G3: what the next start reads is the operator's to change
     ("A9", ("cousins/wren/policy.toml",
             "cousins/wren/cousin.toml",
             "cousins/wren/.mcp.json",
             "cousins/wren/mcp-registry.toml",
             "cousins/wren/chat-hooks.json",
-            "cousins/wren/.claude/settings.json"), ALLOW, ALLOW, NA),
+            "cousins/wren/.claude/settings.json",
+            "cousins/wren/.claude"), ALLOW, REFUSE, NA),
     ("A10", ("cousins/sam/memory/raw/2026-10-03.jsonl",
              "cousins/sam/STATUS.md",
              "cousins/sam/notes/plan.md",

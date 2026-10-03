@@ -765,7 +765,7 @@ def handoff(ctx, args):
         raise ValueError("handoff needs %s" % ", ".join(missing))
     home = Path(ctx.home)
     (home / "data").mkdir(parents=True, exist_ok=True)
-    written, errors, learned = [], [], 0
+    written, errors, notes, learned = [], [], [], 0
     status_path = home / "STATUS.md"
     # newline="" both ways: the cousin's line endings are its own bytes too
     old = ""
@@ -786,9 +786,12 @@ def handoff(ctx, args):
         written.append("data/active-threads.md")
     for item in args.get("learned") or []:
         try:
-            memory.remember(home, item.get("topic"), item.get("fact"),
-                            level=item.get("level"), cite=item.get("cite"))
+            line = memory.remember(home, item.get("topic"), item.get("fact"),
+                                   level=item.get("level"), cite=item.get("cite"))
             learned += 1
+            # an uncited level written lower (law 10) is said, as `remember` says it
+            notes += ["memory %r: %s" % (item.get("topic"), n)
+                      for n in str(line or "").splitlines()[1:] if n.startswith("demoted:")]
         except (ValueError, AttributeError) as err:
             errors.append("memory %r: %s" % ((item or {}).get("topic"), err))
     (home / "data" / "handoff.md").write_text(
@@ -800,11 +803,13 @@ def handoff(ctx, args):
     memory.record_event(home, "framework", "framework:handoff",
                         "handoff written: %s" % ", ".join(written), "runner")
     summary = {"position": args["position"], "next_action": args["next_action"],
-               "written": written, "learned": learned, "errors": errors}
+               "written": written, "learned": learned, "notes": notes, "errors": errors}
     if getattr(ctx, "on_handoff", None) is not None:
         ctx.on_handoff(summary)
     line = "handoff written: %s; %d %s" % (", ".join(written), learned,
                                             "memory" if learned == 1 else "memories")
+    if notes:
+        line += "; %s" % "; ".join(notes)
     if errors:
         line += "; %d error%s: %s" % (len(errors), "" if len(errors) == 1 else "s",
                                       "; ".join(errors))

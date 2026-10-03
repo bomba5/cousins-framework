@@ -994,6 +994,77 @@ text. If the file changed since the explorer read it, the removal looks
 for the hash; if the line is gone the console answers 409 instead of
 removing the wrong one.
 
+## Export and import
+
+`cousin-memory export` packs a cousin's memory into one tar.gz;
+`cousin-memory import` brings it into another home, on this host or
+another.
+
+```
+cousin-memory --home cousins/wren export --out /tmp/wren-memory.tar.gz
+cousin-memory import /tmp/wren-memory.tar.gz --home cousins/kestrel
+#   -> dry run, nothing written: 41 write, ... re-run with --yes to import
+cousin-memory import /tmp/wren-memory.tar.gz --home cousins/kestrel --yes
+cousin-memory import /tmp/wren-memory.tar.gz --home cousins/kestrel --merge --yes
+```
+
+**The rule: entries move byte for byte.** An entry's id is a hash of its
+own stored timestamp, topic and content, and obsolete marks,
+`derived_from` and the dreaming journals all name entries by that id. The
+raw fold keeps ids because it copies day files into the archives
+unchanged. An exporter or importer that parsed a line and wrote it out
+again, or stamped it anew, would give it another id and orphan every mark
+and derivation that names it. So nothing is re-serialized: files travel
+as their bytes, archives as their compressed bytes, and a merge compares
+and appends lines as bytes.
+
+What moves:
+
+- `memory/raw/*.jsonl` (day files and monthly digests) and
+  `memory/raw/archive/*.jsonl.gz`, the archives not recompressed;
+- the knowledge files `memory/*.md`, `memory/distilled/`,
+  `memory/imported/` and `memory/.trash/` (the decisions backfill reads
+  the trash, so a removal is not undone in the new home);
+- `memory/.dream-ledger.json` and `data/dreams/` (the passes and their
+  journals);
+- `data/decisions.jsonl` and its rotated archives, and
+  `data/template-sync.json` when the home has one.
+
+What is rebuilt instead, and listed as excluded in the bundle with the
+reason: the search indexes (`fts_index.db`, `vectors.db`,
+`embeddings.json`), the recall log and counts, the distiller's stamp, the
+decisions backfill's mark, and lock and temporary files. `MEMORY.md`, at
+the home's root, is not part of the bundle.
+
+The bundle holds a `MANIFEST.json`: format version, framework version,
+source slug, when it was made, and per file its path, kind (`lines`,
+`archive` or `file`), size and sha256, plus the excluded list.
+
+Import, in order:
+
+1. Every file is checked against the manifest (size and sha256), and
+   every path must be one export writes. Any mismatch refuses the whole
+   bundle, exit 2, before a byte is written.
+2. A home that already has raw memory is refused (exit 2) unless
+   `--merge`. A freshly spawned home may already hold a framework line.
+3. Without `--yes` it prints the plan and writes nothing.
+4. Per file: one missing here is written as its bytes; one identical is
+   skipped. A `lines` file gets the lines this home doesn't hold yet,
+   appended unchanged to the file they came from (for raw, "held" means
+   anywhere in raw, archives included, so a day this home already folded
+   is not added twice). An archive of the same name with other bytes is
+   refused, never merged. A whole file that differs stays as this home
+   has it and is reported `kept`; a distilled stub is replaced.
+5. The distiller runs, as after a trash restore; the search index sees
+   the new files on its next search.
+
+Lines are compared as bytes, not as JSON. A line that differs from one
+already here only in whitespace is a different line and is appended:
+deciding that two byte strings are the same entry would need a canonical
+form, which is a re-serialization. The two share an id, so marks and
+derivations naming it still resolve. Merging the same bundle twice adds
+nothing.
+
 ## Small extras
 
 - `cousin-callback tag "ana named the espresso machine Gustav" --cycle 3 --category banter`

@@ -1269,6 +1269,37 @@ def _cmd_import_auto(args):
     return 0
 
 
+def _cmd_export(args):
+    """The home's memory as one tar.gz, byte for byte (memory_export)."""
+    from cousin_lib import memory_export
+    home = _home(args)
+    try:
+        manifest = memory_export.export(home, args.out)
+    except FileExistsError as err:
+        print("error: %s" % err, file=sys.stderr)
+        return 2
+    size = sum(f["size"] for f in manifest["files"])
+    print("exported %d file(s), %d bytes, of %s to %s (%d left out: rebuilt, not moved)"
+          % (len(manifest["files"]), size, manifest["source"], args.out,
+             len(manifest["excluded"])))
+    return 0
+
+
+def _cmd_import(args):
+    """A memory export into this home: every file checked against the
+    manifest first, a dry run unless --yes (memory_export)."""
+    from cousin_lib import memory_export
+    home = _home(args)
+    try:
+        report = memory_export.import_bundle(home, args.bundle, merge=args.merge,
+                                             apply=args.yes)
+    except (memory_export.BundleError, memory_export.ImportRefused) as err:
+        print("error: %s" % err, file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=1) if args.json else memory_export.format_import(report))
+    return 0
+
+
 def _cmd_trash(args):
     from cousin_lib import memory_trash
 
@@ -1409,6 +1440,27 @@ def memory_main(argv=None):
                    help="with --apply: how many of the newest logged queries the"
                         " baseline replays")
     p.set_defaults(func=_cmd_import_auto)
+    p = sub.add_parser(
+        "export",
+        help="the home's memory (raw, archives, knowledge files, distilled,"
+             " dreams, decisions) as one tar.gz with a MANIFEST.json of sha256"
+             " sums; every file byte for byte, indexes left out")
+    p.add_argument("--out", required=True, help="the tar.gz to write (never overwritten)")
+    p.set_defaults(func=_cmd_export)
+    p = sub.add_parser(
+        "import",
+        help="bring a memory export into a home: refused on any sha256 mismatch"
+             " and into a home that has raw memory unless --merge; a dry run"
+             " unless --yes; distills afterwards")
+    p.add_argument("bundle", help="the tar.gz cousin-memory export wrote")
+    p.add_argument("--home", default=argparse.SUPPRESS,
+                   help="the home to import into (default: COUSIN_HOME)")
+    p.add_argument("--merge", action="store_true",
+                   help="into a home with raw memory: append, byte for byte, the"
+                        " lines it does not hold yet")
+    p.add_argument("--yes", action="store_true", help="really import")
+    p.add_argument("--json", action="store_true", help="print the report as JSON")
+    p.set_defaults(func=_cmd_import)
     p = sub.add_parser(
         "consolidate",
         help="list recurring topics, then rebuild memory/distilled/"

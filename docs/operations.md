@@ -256,6 +256,7 @@ systemctl --user list-units 'cousin-*'
 systemctl --user list-timers 'cousin-*'
 cousin-loops status
 cousin-supervisor status
+cousin-health
 ```
 
 ## Logs
@@ -271,6 +272,55 @@ cousin-supervisor status
 | a cousin's Telegram bridge | `cousins/<slug>/data/telegram.log` |
 | background jobs | `data/job-logs/` under the root, or `cousin-job tail <id>` |
 | what a loop fired, and when | `data/loops-fires.jsonl` under the root |
+
+## Health
+
+The loops daemon's log says what failed on each tick; it doesn't say that
+the same thing has failed on every tick for an hour. After each tick the
+daemon writes that to `data/health.json` under the root: one entry per
+component, with its state (`ok` or `failing`), how many times in a row it
+failed (`fails`), when the streak started (`since`), the last ok and the
+last failure, the last error (one line, at most 300 characters) and when it
+was last seen. One ok result resets the streak.
+
+| key | what |
+|---|---|
+| `tick` | the tick itself (when it raises, the daemon exits and the supervisor restarts it) |
+| `cousin:<slug>` | the walk over one cousin: it raised, or its `[[loops]]` don't load |
+| `loop:<slug>\|<name>` | a loop's due check; for a [worker](glossary.md#worker) cousin, its firing (a missing `config/worker-cmd` fails) |
+| `delivery:<slug>` | a delivery to the cousin (the coalesced beat and loops, a ready file) |
+| `distill:<slug>` | keeping the [distilled](glossary.md#distilled) views level with raw |
+| `requests` | fire requests; fails when one ended `failed` this tick |
+| `schedules` | one-shot schedules; fails when a due job was kept pending by an error |
+| `index-refresh`, `index:<slug>` | queueing the memory index refresh, and one home's finished refresh |
+| `dream-due:<slug>`, `dreaming:<slug>` | whether a dreaming pass is due, and each finished pass: `error` or `lost` fails, `done`, `no_change` and `budget` are ok |
+| `dreaming` | queueing the dreaming passes |
+| `meetings` | the meetings step |
+
+A finished index refresh or dreaming pass is recorded when it finishes, not
+on every tick, so a pass that failed last night stays failing until the next
+one. A component not seen for 7 days (a loop or a cousin that was removed)
+is dropped from the file.
+
+`cousin-health` reads it, failing components first, then a count of the
+ok ones (`--all` lists them, `--json` prints everything). It also asks the
+supervisor, as `cousin-supervisor status` does, and lists every child that
+is not `running`; with no supervisor it says "supervisor not reachable".
+It exits 1 when anything is failing, so a timer or a monitoring check can
+call it.
+
+```
+$ cousin-health
+FAIL  dreaming:wren  119x since 2026-10-03 01:00:47  ImportError: cannot import name 'slice_for'
+FAIL  runner:kestrel  backoff since 2026-10-03T06:12:09+00:00  exited (code 1)
+31 ok, 2 failing
+```
+
+The console shows the same as a red count in its top bar
+([`GET /api/health`](reference/console-api.md#get-apihealth)). A failing
+component whose last result is older than ten minutes is marked "not seen
+since": nothing checks it any more (a stopped cousin), and its last word
+stands.
 
 ## The daily flip
 
@@ -444,6 +494,8 @@ recover.
   journal (the `loops | ` lines) say why. After a fix, a loop that was due fires once on the next tick.
 
 **A loop "never fires"**
+- Check: `cousin-health`. A delivery or a loop that keeps failing shows as
+  `delivery:<slug>` or `loop:<slug>|<name>`, with the count and the error.
 - Check: the loops daemon's journal. A loop only counts as fired once its
   text was delivered, so a loop that never fires is usually a delivery that
   keeps failing, and every failure is logged there. A cousin.toml that

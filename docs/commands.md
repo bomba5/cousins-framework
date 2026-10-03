@@ -574,6 +574,19 @@ twice). Under `cousin-supervisor` that exit leaves its loops child waiting in
 cousin-loops fire wren context-heartbeat
 ```
 
+`cousin-health` prints what has been failing and for how long: the loops
+daemon's per-component record (`data/health.json`), failing components
+first with their count of consecutive failures, since when and the last
+error, then a count of the ok ones, plus any supervisor child that is not
+`running`. `--all` lists the ok components too, `--json` prints everything.
+Exit 0 when nothing is failing, 1 when something is, 2 on bad usage. See
+[operations](operations.md#health).
+
+```
+cousin-health
+cousin-health --json
+```
+
 `cousin-schedule` queues a one-shot prompt for a future time. Subcommands:
 `add WHEN PROMPT` (`in 30m`, `tomorrow 06:30`, or an ISO date), `list
 [--all]`, `cancel ID`, `tick`. A cousin holds at most 20 pending; `add`

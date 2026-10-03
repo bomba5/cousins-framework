@@ -341,6 +341,57 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// The topbar's health indicator: GET /api/health (cousin_lib/health.py),
+// polled. Nothing failing shows nothing; otherwise a red count that opens
+// the list of failing components (key, consecutive failures, since when,
+// the last error) and supervisor children that are not running.
+const HEALTH_POLL_MS = 30000;
+
+function healthWhen(ts) {
+  if (!ts) return "-";
+  return new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function HealthBadge() {
+  const [h, setH] = useStateApp(null);
+  const [open, setOpen] = useStateApp(false);
+  useEffectApp(() => {
+    let cancelled = false;
+    const load = () => apiGet("/api/health").then(d => { if (!cancelled && d) setH(d); });
+    load();
+    const id = setInterval(load, HEALTH_POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+  if (!h || !h.failing_count) return null;
+  const children = (h.supervisor && h.supervisor.failing) || [];
+  return (
+    <span className="health-badge" data-health-badge>
+      <button className="btn ghost health-count" onClick={() => setOpen(v => !v)}
+              title={`${h.failing_count} failing (cousin-health)`}>
+        <span className="led red" /> {h.failing_count} failing
+      </button>
+      {open && (
+        <div className="health-list" data-health-list>
+          {h.failing.map(r => (
+            <div key={r.key} className="health-row">
+              <b>{r.key}</b> {r.fails}x since {healthWhen(r.since)}
+              {r.quiet ? ` (not seen since ${healthWhen(r.seen)})` : ""}
+              {r.error && <div className="health-error">{r.error}</div>}
+            </div>
+          ))}
+          {children.map(c => (
+            <div key={c.name} className="health-row">
+              <b>{c.name}</b> {c.state} since {c.since || "-"}
+              {c.reason && <div className="health-error">{c.reason}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function App() {
   // Query-param overrides for deep links and embedding:
   //   ?view=chat            land on the chat view, not overview
@@ -580,6 +631,7 @@ function App() {
         <span className="brand">cousins<span className="dim">//</span>console</span>
         {build && <span className="build">{build.repo_url ? <a href={build.repo_url} title={build.repo_url} target="_blank" rel="noopener noreferrer">v{build.version}</a> : `v${build.version}`}{build.commit ? " " : ""}{build.commit ? (build.commit_url ? <a href={build.commit_url} title={build.commit_url} target="_blank" rel="noopener noreferrer">{build.commit}</a> : build.commit) : ""}</span>}
         <span className="spacer" />
+        <HealthBadge />
         <button
           className="btn ghost"
           onClick={() => {

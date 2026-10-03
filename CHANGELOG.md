@@ -3,6 +3,17 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.9.0 - 2026-10-03
+
+### Added
+
+- **Dreaming memory pass.** A bounded background pass (`cousin_lib/dream_memory`) can read a slice of memory, propose changes through a small toolset (`merge`, `retire`, `settle`, `remember`), record each operation's ids in a journal and support undo. The pass writes only `memory/` and `data/dreams/`, cannot touch protected paths, never retires L0-L2 claims, and enforces slice discipline with a cursor. The slice is taken as `{month, lines}` and the pass only ever acts on claims named by an id its own slice showed it, never on anything stamped after it began. Includes a 59-test suite.
+- **`cousin_memory.remember_entry` (`cousin_lib.memory.remember_entry`).** The raw entry a `remember` writes, as written. `remember` is now a formatting wrapper over it, so there is one storage format for a claim and one place that validates `derived_from`, `level` and `source`. `remember` and `remember_entry` both take a `source`, so a writer that is not the operator's own memory tool (a dreaming pass writes `dream`) no longer has to leave its claim stamped `remember`. A caller that journals what it changed needs the entry rather than the printed line, because `entry_id` is a sha1 over the entry's own timestamp, topic and content.
+
+### Changed
+
+- **A dreaming pass records what it built from.** `merge` with `fact` stamps the consolidated claim with the ids of the claims it retired; `remember` takes an optional `derived_from`. The claim is written through `memory.remember_entry`, so `why <id>` walks back from a dream-written claim to its sources with no special-casing. Retirement stays restricted to L3/L4 (a pass never retires what the operator, the framework or a tool said); derivation is open at any truth level, because a pass concluding something out of what the operator said is the most legitimate thing it can do. Nothing is inherited along the hop: the claim keeps the level the pass wrote it at. A source must still be in the slice, live, and stamped before the pass began. Undo takes the derivation with the entry: `memory_trash` moves whole raw lines, so a retracted claim leaves no `derived_from` pointing at it.
+
 ## 3.8.1 - 2026-10-03
 
 ### Fixed
@@ -54,6 +65,32 @@ when it is updated.
 - **The config note no longer says a restart is needed for the dreaming
   keys.** A `cousin.toml` change that only touches `[agent] dreaming` or
   `dreaming_at` now says they apply without a restart.
+- **The memory side of a dreaming pass** (`cousin_lib/dream_memory.py`),
+  the library `cousin_lib/dreaming.py` drives. `slice_for(home, chars)`
+  hands out the next bounded slice of raw memory - the lines no pass has
+  taken, plus the live claims of the topics they touch and the open
+  `tensions` among them - and reports what it covered and what it left
+  out. `prompt(slice)` is the doctrine: prefer no change over a new
+  claim, report an unresolved conflict instead of picking a side,
+  discard uncommitted work. `OPERATIONS` are the four tools the pass is
+  given (`merge`, `retire`, `settle`, `remember`), and their refusals
+  are in code, not in the prompt: a pass may only touch claims its own
+  slice showed it, by id, and may never touch an operator, framework or
+  tool claim whatever the model asks for. `begin` / `commit` / `abandon`
+  are the attempt token in `memory/.dream-ledger.json`, so a pass that
+  died is neither re-applied nor silently skipped, and `undo(home,
+  pass_id, changes)` reverses a pass by trashing its own lines. The
+  cursor is `{"month", "lines"}` and refuses to be a timestamp (raw
+  entries carry write time, so an out-of-order stamp would re-dream
+  forever) or an entry id (`entry_id` is a sha1 over the entry's text
+  and carries no order). Every change is journalled with an fsync after
+  the write it describes landed, so a lost pass is still readable.
+  Nothing runs it by itself: a pass starts only when the operator turns
+  dreaming on for a cousin, which is off by default.
+- `memory_trash.can_trash_line(rel)`: whether a line may be moved into
+  a trash batch. The gzip archive is forensic and is never rewritten;
+  `dream_memory.undo` asks first, so one untrashable line cannot fail a
+  whole batch.
 
 ## 3.6.1 - 2026-10-02
 

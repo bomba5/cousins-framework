@@ -627,10 +627,19 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_f
     return "\n".join(lines)
 
 
-def remember(home, topic, fact, *, level=None, cite=None, derived_from=None):
-    """One durable fact into raw memory. Raises ValueError. Returns the line.
-    `derived_from`: the entry ids it was built from (check_derived), one hop;
-    `why` walks it."""
+def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=None,
+                   source="remember"):
+    """The raw entry a `remember` writes, as written (timestamp stamped),
+    or ValueError. Every writer that journals what it changed needs the
+    entry, not the line: `entry_id` is a sha1 over the entry's own stamp,
+    topic and content, so it cannot be recomputed from the text asked
+    for. `source` says which door the claim came in by - a dreaming pass
+    writes `dream`, so a claim that reads as the operator's word is not
+    left carrying a line that says `remember`.
+
+    `derived_from`: the entry ids this claim was built from (check_derived),
+    one hop, nothing inherited along it. `why` walks it.
+    """
     topic, fact = str(topic or "").strip(), str(fact or "").strip()
     if not (topic and fact):
         raise ValueError("remember needs a topic and a fact")
@@ -638,13 +647,23 @@ def remember(home, topic, fact, *, level=None, cite=None, derived_from=None):
     if err:
         raise ValueError(err)
     derived = check_derived(derived_from)
-    entry = {"topic": topic, "content": fact, "truth_level": resolved, "source": "remember"}
+    entry = {"topic": topic, "content": fact, "truth_level": resolved, "source": source}
     if cite:
         entry["cite"] = cite
     if derived:
         entry["derived_from"] = derived
-    _append_raw(Path(home), entry)
-    return "Remembered [%s] (%s): %s" % (topic, resolved, fact)
+    return _append_raw(Path(home), entry)
+
+
+def remember(home, topic, fact, *, level=None, cite=None, derived_from=None,
+             source="remember"):
+    """One durable fact into raw memory. Raises ValueError. Returns the line.
+    `derived_from`: the entry ids it was built from (check_derived), one hop;
+    `why` walks it."""
+    entry = remember_entry(home, topic, fact, level=level, cite=cite,
+                           derived_from=derived_from, source=source)
+    return "Remembered [%s] (%s): %s" % (entry["topic"], entry["truth_level"],
+                                         entry["content"])
 
 
 RECALL_ALL = 50           # a keyword recall with last=0 ("all") still stops somewhere

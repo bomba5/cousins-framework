@@ -71,6 +71,12 @@ class TestVerify(unittest.TestCase):
         self.assertIn("shard records [1], expected 1..2 once each", problems)
         self.assertIn("b is in no shard", problems)
 
+    def test_records_from_two_pythons_fail(self):
+        records = self.records()
+        records[0]["python"], records[1]["python"] = "3.11", "3.12"
+        self.assertEqual(suite.verify(records, 2),
+                         ["the records come from more than one Python (3.11, 3.12)"])
+
     def test_a_failed_shard_fails(self):
         records = self.records()
         records[1].update(ok=False, failures=1, errors=0)

@@ -59,8 +59,12 @@ class TwoCousins(HermeticCase):
             mcp_server.shipped_default_registry(REPO), "t")
         self.wren = self._cousin("wren", "private", MARK)
         self.sam = self._cousin("sam", "shared", OWN)
-        shared_tier.propose(PROPOSAL, "---\ndescription: ledger codes %s\n---\n"
-                            "The codes are %s.\n" % (MARK, MARK), slug="wren")
+        # law 11 now refuses a proposal from a private cousin, so this is
+        # one written before that check: the pending file, as propose left it
+        proposed = shared / "proposed"
+        proposed.mkdir(exist_ok=True)
+        (proposed / ("wren__%s" % PROPOSAL)).write_text(
+            "---\ndescription: ledger codes %s\n---\nThe codes are %s.\n" % (MARK, MARK))
 
     def _cousin(self, slug, scope, word):
         """A home with `word` in every place a cousin keeps content."""
@@ -110,6 +114,7 @@ class TwoCousins(HermeticCase):
 
 class TestBootSurfaces(TwoCousins):
     def test_the_system_prompt_carries_none_of_the_other_cousins_content(self):
+        # enforces: law 12
         def compose(home):
             return prompt.compose_system_prompt(home, root=self.root, registry=self.registry,
                                                 version="1.0.0")
@@ -117,12 +122,14 @@ class TestBootSurfaces(TwoCousins):
         self.assertIn(OWN, compose(self.sam))
 
     def test_the_tmux_context_block_carries_none_of_it(self):
+        # enforces: law 12
         def block(home):
             return prompt.compose_context_block(home, root=self.root, registry=self.registry,
                                                 version="1.0.0")
         self.assertIsolated("tmux context block", block(self.sam), block(self.wren))
 
     def test_the_state_digest_carries_none_of_it(self):
+        # enforces: law 12
         def digest(home):
             return prompt.state_digest(home, root=self.root, slug=home.name,
                                        generation=2)["text"]
@@ -131,6 +138,7 @@ class TestBootSurfaces(TwoCousins):
         self.assertIn(OWN, sam)
 
     def test_the_trace_summary_is_the_cousins_own(self):
+        # enforces: law 12
         sam = trace.summary_for_boot("sam", root=self.root)
         self.assertIsolated("trace summary", sam, trace.summary_for_boot("wren", root=self.root))
         self.assertIn(OWN, sam)
@@ -138,6 +146,7 @@ class TestBootSurfaces(TwoCousins):
 
 class TestRetrieval(TwoCousins):
     def test_search_finds_nothing_of_the_other_cousin(self):
+        # enforces: law 12
         for collection in (None, "memory", "notes", "harness", "raw"):
             def hits(home):
                 found, _notice = memory_search.search(MARK, top=20, home=home,
@@ -150,6 +159,7 @@ class TestRetrieval(TwoCousins):
                 self.assertNotIn(str(self.wren), str(hit["path"]))
 
     def test_the_runner_search_tool_finds_nothing_of_it(self):
+        # enforces: law 12
         def search(home, **extra):
             return tools._m_search(self.ctx(home), dict({"query": MARK, "top": 20}, **extra))
         self.assertIsolated("search tool", search(self.sam), search(self.wren))
@@ -160,6 +170,7 @@ class TestRetrieval(TwoCousins):
         self.assertNotIn(MARK, own)
 
     def test_the_runner_recall_tool_recalls_nothing_of_it(self):
+        # enforces: law 12
         for keyword in (MARK, "ledger", ""):
             def recall(home):
                 text = tools._m_recall(self.ctx(home), {"keyword": keyword, "last": 50})
@@ -168,6 +179,7 @@ class TestRetrieval(TwoCousins):
         self.assertIn(OWN, tools._m_recall(self.ctx(self.sam), {"keyword": "", "last": 50}))
 
     def test_prompt_time_recall_surfaces_nothing_of_it(self):
+        # enforces: law 12
         body = "where is the %s ledger and the vault phrase kept" % MARK
         sam_text, _n = hooks.default_recall(self.sam, self.root)(body)
         wren_text, _n = hooks.default_recall(self.wren, self.root)(body)
@@ -190,11 +202,13 @@ class TestSharedTier(TwoCousins):
                                          version="1.0.0")])
 
     def test_a_private_cousin_never_nominates_its_memory(self):
+        # enforces: law 12
         plan = shared_tier.plan_bulk_propose(self.wren, "wren")
         self.assertFalse(plan["eligible"])
         self.assertEqual(plan["propose"], [])
 
     def test_a_pending_proposal_reaches_no_shared_read_until_promoted(self):
+        # enforces: law 12
         self.assertNotIn(MARK, self.other())
         self.assertNotIn(PROPOSAL, shared_tier.list_shared()["canonical"])
         shared_tier.promote(PROPOSAL, proposer="wren", by="ana")
@@ -205,6 +219,7 @@ class TestSharedTier(TwoCousins):
         shared/; a name that leaves shared/ (a `..` or an absolute path)
         must not read another cousin's home. The console's content route
         already refuses such a name."""
+        # enforces: law 12
         for name in ("../cousins/wren/notes/plan.md",
                      "../cousins/wren/memory/reference_vault.md",
                      str(self.wren / "STATUS.md")):

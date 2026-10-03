@@ -380,7 +380,7 @@ cousins):
 ```toml
 [tools.tracker]
 command = "cousin-tracker"
-description = "The install's list of work in flight: list items, add one, move one to a new state."
+description = "The install's list of work in flight: list items, add one, move one to a new state, add a dated note, read an item's history."
 
 [tools.tracker.properties]
 title = { type = "string" }
@@ -388,6 +388,8 @@ domain = { type = "string", optional = true, description = "grouping key, e.g. i
 tag = { type = "array", items = "string", optional = true }
 id = { type = "integer", description = "item id" }
 state = { type = "string", enum = ["open", "active", "blocked", "done", "dropped"] }
+add_note = { type = "string", optional = true, description = "a status line appended to the notes, dated and signed (update)" }
+history = { type = "boolean", optional = true, description = "also every change to the item, oldest first (show)" }
 
 [tools.tracker.commands.list]
 argv = ["list", "--json"]
@@ -399,7 +401,21 @@ options = { domain = "--domain", tag = "--tag" }
 
 [tools.tracker.commands.state]
 argv = ["state", "{id}", "{state}", "--json"]
+
+[tools.tracker.commands.update]
+argv = ["update", "{id}"]
+options = { state = "--state", add_note = "--add-note" }
+
+[tools.tracker.commands.show]
+argv = ["show", "{id}"]
+options = { history = "--history" }
 ```
+
+The `update` command above offers `--add-note` and not `--notes` on
+purpose: `--notes` replaces the whole text, so a cousin posting a status
+line with it erases the spec and the earlier lines another wrote. The
+old text is kept in the item's history either way, but `--add-note` is
+the one to hand a cousin.
 
 Then check it and try a call before the cousin does:
 

@@ -1,5 +1,7 @@
 # Plugins
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 A [plugin](glossary.md#plugin) adds something to an install that the framework does not ship: a
 set of tools for a [cousin](glossary.md#cousin), a long-running service, a page in the console,
 or any mix of the three. The framework knows how to run plugins; it ships

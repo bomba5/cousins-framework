@@ -1,5 +1,7 @@
 # Runners reference
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 What a [runner](../glossary.md#runner) is, the kinds the framework ships, how to pick one, and what
 each kind does with every item of the runner contract. For the keys, read
 [configuration](../configuration.md); for `cousin-runner` and its exit codes,

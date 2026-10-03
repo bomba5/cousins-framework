@@ -5,9 +5,10 @@ and each one that fails only prints a line to the daemon's log. A thing
 that fails on every tick for an hour is then a hundred identical lines
 nobody reads. This module keeps the count instead: `<root>/data/health.json`,
 one entry per component key, written once per tick by the daemon
-(loops.loops_main) from the tick report's `health` list, and by each
-runner at its start (its `harness:<slug>` row, runner/main.harness_at_start;
-the writers take turns under data/health.json.lock):
+(loops.loops_main) from the tick report's `health` list, by each
+runner at its start (its `harness:<slug>` row, runner/main.harness_at_start)
+and at each turn start while a daily cost cap is set (its `cap:<slug>` row,
+runner/cost_cap.py); the writers take turns under data/health.json.lock:
 
     {"<key>": {"state": "ok" | "failing", "fails": <consecutive failures>,
                "since": <ts of the first failure in the current streak, or null>,

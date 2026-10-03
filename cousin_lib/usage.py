@@ -75,7 +75,7 @@ def record(home, *, client_id, session_id, result, lane):
             cost = cumulative - (prev[0] if prev else 0.0)
             if cost < 0:
                 cost = cumulative
-            row = {"ts": now, "day": datetime.fromtimestamp(now, timezone.utc).date().isoformat(),
+            row = {"ts": now, "day": utc_day(now),
                    "client_id": str(client_id), "session_id": session_id or "",
                    "total": total, "output": output,
                    "cache_read": int(u.get("cache_read_input_tokens") or 0),
@@ -91,6 +91,29 @@ def record(home, *, client_id, session_id, result, lane):
         return row
     except Exception as err:  # noqa: BLE001 - usage never fails a turn
         return {"error": "%s: %s" % (type(err).__name__, err)}
+
+
+def utc_day(now=None):
+    """The UTC calendar day of `now` (epoch seconds, default the clock):
+    the `day` column's key."""
+    now = time.time() if now is None else now
+    return datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+
+
+def spent_today(home, now=None):
+    """The sum of cost_usd over the current UTC day's rows, in USD; 0.0
+    with no usage.db (a cousin whose runner writes none, or no turn yet)
+    and when the store cannot be read. A dreaming pass and any other side
+    session that writes no row here is not in it."""
+    if not (Path(home) / "data" / "usage.db").exists():
+        return 0.0
+    try:
+        with _db(home) as conn:
+            row = conn.execute("SELECT SUM(cost_usd) FROM usage WHERE day = ?",
+                               (utc_day(now),)).fetchone()
+    except sqlite3.Error:
+        return 0.0
+    return float(row[0] or 0.0)
 
 
 def day_totals(home, *, days=14):

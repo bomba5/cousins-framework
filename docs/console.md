@@ -761,6 +761,14 @@ an `sdk` or `opencode` cousin's come from its own `data/usage.db` and need
 nothing (an opencode cousin's are the tokens its provider reported). Without
 either the page says that instead of showing zeros.
 
+An `sdk` or `opencode` cousin's card also shows dollars: today, over the 14
+days, and one bar per day (its amount on hover), the sum of `cost_usd` in its
+`usage.db` (on a login, the API-equivalent price the SDK reports). A cousin
+read from transcripts shows none. With an [`[agent]
+daily_cost_cap_usd`](configuration.md#agent-daily_cost_cap_usd) set, the card
+shows **cap today**, spent of the limit, red once it is reached; the cap is
+set on the cousin's agent panel.
+
 ## Tracker
 
 The install-wide list of work in flight, the same list `cousin-tracker`

@@ -3,6 +3,29 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.20.0 - 2026-10-03
+
+### Added
+
+- **`cousin-memory export` and `cousin-memory import` move a cousin's
+  memory byte for byte.** Export writes one tar.gz: raw day files, digests
+  and monthly archives (the archives not recompressed), the knowledge
+  files, `memory/distilled/`, `memory/imported/`, `memory/.trash/`, the
+  dream ledger and `data/dreams/`, the decisions log and its archives, and
+  `data/template-sync.json`, with a `MANIFEST.json` holding the format and
+  framework versions, the source slug, when, and each file's path, kind,
+  size and sha256. Search indexes, recall logs, the distiller's stamp and
+  the backfill's mark are left out and listed with the reason. Import
+  checks every file against the manifest first and refuses on any
+  mismatch, refuses a home that already has raw memory unless `--merge`,
+  and is a dry run unless `--yes`. A merge appends, as their bytes, the
+  lines the home doesn't hold to the file they came from, compares lines
+  as bytes and never as JSON, refuses an archive of the same name with
+  other bytes and leaves a whole file that differs as the home has it.
+  The distiller runs afterwards. Nothing is re-serialized or re-stamped,
+  so every entry id, obsolete mark and `derived_from` resolves the same
+  in the new home.
+
 ## 3.19.0 - 2026-10-03
 
 ### Added

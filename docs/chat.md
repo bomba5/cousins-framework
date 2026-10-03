@@ -209,7 +209,9 @@ chat history and inbox directly, from the sender's own process, as a
 `cousin-chat send wren ...`. A cousin with no runner is refused, exit 1
 ([above](#where-a-message-goes)). The sender name is the sending cousin's
 `name`. `--from` may only respell it (the cousin's own `name` or slug, case
-and spaces aside): any other name is refused, exit 2, and nothing is sent.
+and spaces aside): any other name is refused, exit 2, and nothing is sent. To an
+external peer `--from` may still be a free-form display name ("Wren of
+testbed"): the receiving install checks it.
 So is a sender name that is the target's operator or one the framework
 writes itself (`fw-hook`, `runner`): a cousin's message never reaches the
 operator-only paths, such as correction capture.

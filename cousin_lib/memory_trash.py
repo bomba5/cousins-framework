@@ -145,6 +145,15 @@ def _check_file(home, rel, allow_legacy):
     return rel, path
 
 
+def can_trash_line(rel):
+    """True when a line at `rel` may be moved into a trash batch: a
+    memory/raw/<name>.jsonl daily file or monthly digest. The gzip
+    archive is the forensic tier and is never rewritten. A caller that
+    would rather ask than catch PathRefused (dream_memory.undo) asks
+    first, so one untrashable line cannot fail a whole batch."""
+    return bool(_RAW_LINE_RE.match(str(rel or "")))
+
+
 def _rewrite(home, path, mutate):
     """Apply mutate(lines) -> lines to a file atomically. Retried when
     the file changed while the new content was prepared (an appender

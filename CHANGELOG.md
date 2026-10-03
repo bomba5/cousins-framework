@@ -3,6 +3,19 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.10.3 - 2026-10-03
+
+### Fixed
+
+- **Dreaming resumes inside a monthly archive at the right day.** When
+  raw fold folded the day file a dreaming cursor named, the next pass
+  started at the beginning of that month's archive and read the whole
+  month again; a first pass whose starting day had been folded early (a
+  compact with fewer hot days than 30) skipped the archive and never
+  dreamed those days. Both now start at the first archived line stamped on
+  or after the day before (`dream_memory._archive_offset`): at most a day
+  is read again, and nothing is skipped.
+
 ## 3.10.2 - 2026-10-03
 
 ### Fixed

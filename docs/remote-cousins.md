@@ -153,18 +153,28 @@ Then move the file yourself (scp, a USB stick, whatever) and run the
 install line on the node. The token is never printed; it's only in the
 archive. Keep `--out` outside any git tree.
 
-Without `--token`, it mints the token in this root's queen store
+Without `--token-file`, it mints the token in this root's queen store
 (`shared/hive/hive.db`). Minting is idempotent per slug: building the
 same slug again reuses its live token, so a rebuilt archive doesn't lock
 out a node that's already deployed. A slug whose tokens are all revoked
 gets a new one.
+
+A token minted on another queen goes in by file or on standard input,
+never on the command line, where every local user can read it (`ps`):
+
+```sh
+cousin-spawn-node kestrel --token-file /tmp/build/kestrel.token \
+    --queen-url http://192.0.2.10:8600 --name Kestrel --role "watches the greenhouse" \
+    --out /tmp/build
+```
 
 | flag | what it does |
 |---|---|
 | `slug` | the node's identity on the queen |
 | `--queen-url URL` | required. The queen as the node will reach it, not as you reach it from here |
 | `--name N`, `--role R` | required. Rendered into the node's `CLAUDE.md` |
-| `--token T` | use a token already minted on another queen instead of minting one here |
+| `--token-file PATH` | use a token already minted on another queen instead of minting one here, read from `PATH` (`-` reads standard input) |
+| `--token T` | deprecated: the same, with the token on the command line, where every local user can read it. Still works, with a one-line warning on stderr |
 | `--tell-home` | sets `TELL_HOME=1` in `node.env`: `[tell-home: ...]` reaches the queen's `home_cousin` (see [node.env](#nodeenv)); off when absent |
 | `--agent-cmd CMD` | the brain command to put in `node.env`; empty means the placeholder |
 | `--port N` | the node's chat port, default 8210 |
@@ -338,10 +348,15 @@ checks the node's token and refuses a replayed message. It works the
 same in the container.
 
 ```sh
-# from anywhere holding a token
-cousin-hive send --queen http://192.0.2.10:8600 --token hive_... --to kestrel --id m1 "are you there"
-cousin-hive recall --queen http://192.0.2.10:8600 --token hive_... "greenhouse"
+# from anywhere holding a token: in a file (`-` reads stdin) ...
+cousin-hive send --queen http://192.0.2.10:8600 --token-file ~/.hive-token --to kestrel --id m1 "are you there"
+# ... or in HIVE_TOKEN, as a node's node.env sets it
+cousin-hive recall --queen http://192.0.2.10:8600 "greenhouse"
 ```
+
+`--token T` still works but is deprecated: the token is on the command
+line, where every local user can read it, and it prints a one-line
+warning on stderr.
 
 ## When things go wrong
 
@@ -478,8 +493,12 @@ http://<this machine>:8101`.
 | `cousin-hive revoke <slug>` | turn off every live token of the slug |
 | `cousin-hive forget <slug>` | remove a revoked node's token and node rows |
 | `cousin-hive import-legacy --tokens F [--memory-dir D] [--shared-slugs a,b]` | import an older queen |
-| `cousin-hive send --queen URL --token T --to SLUG --id ID BODY` | send a message over the hive |
-| `cousin-hive recall --queen URL --token T QUERY` | recall memories |
+| `cousin-hive send --queen URL [--token-file PATH] --to SLUG --id ID BODY` | send a message over the hive; the token from `PATH` (`-`: stdin), else `HIVE_TOKEN` |
+| `cousin-hive recall --queen URL [--token-file PATH] QUERY` | recall memories; the token as for `send` |
+
+`send` and `recall` still take `--token T`, deprecated (the token is on
+the command line, readable by every local user; a one-line warning says
+so).
 
 The queen-side commands (`mint`, `serve`, `nodes`, `revoke`, `forget`,
 `import-legacy`) find the store through `FRAMEWORK_ROOT` (or the root your `COUSIN_HOME` sits under), at

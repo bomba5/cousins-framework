@@ -6,6 +6,7 @@ held to what the CLI really shows."""
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import stat
 import subprocess
@@ -136,11 +137,12 @@ class TestStart(PaneCase):
         self.assertIn("-c", new)
         self.assertEqual(new[new.index("-c") + 1], "/h/wren")
         command = new[-1]
-        self.assertTrue(command.startswith("exec env -i "), command)
-        self.assertIn('${HOME+"HOME=$HOME"}', command)
-        self.assertIn('${TERM+"TERM=$TERM"}', command)
-        self.assertNotIn("/h ", command)
-        self.assertIn("/abs/tmux_launch.py", command)
+        words = shlex.split(command)
+        self.assertEqual(words[:6], ["exec", sys.executable, "-I", "-S", "-c", tp.KEEP_ONLY])
+        self.assertEqual(words[6], "HOME,LANG,PATH,TERM")
+        self.assertEqual(words[7:], ["/abs/python3", "/abs/tmux_launch.py", "--home", "/h/wren",
+                                     "--", "claude"])
+        self.assertNotIn("=", words[6])
         self.assertTrue(any("window-size" in c and "manual" in c for c in self.calls()))
 
     def test_no_value_ever_reaches_the_tmux_command_line(self):
@@ -178,6 +180,42 @@ class TestStart(PaneCase):
         self.assertIn("kill-session", self.subs())
         os.environ["FAKE_TMUX_HAS"] = "1"
         self.assertFalse(self.pane.alive())
+
+
+class TestKeepOnly(unittest.TestCase):
+    """The pane's command run by /bin/sh, as tmux runs it: the program gets
+    the named variables with the shell's values and nothing else. Every
+    word is quoted, so the shell expands nothing: the argv each exec gets
+    is the command's own words, names only (`env -i NAME=value` held the
+    values on its argv until its exec)."""
+
+    PROBE = "import json,os,sys;json.dump(dict(os.environ),open(sys.argv[1],'w'))"
+
+    def run_pane(self, names, shell_env):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        out = pathlib.Path(tmp.name) / "probe.json"
+        command = tp.env_command(names, [sys.executable, "-c", self.PROBE, str(out)])
+        proc = subprocess.run(["/bin/sh", "-c", command], env=shell_env,
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(out.read_text()), command
+
+    def test_only_the_named_variables_reach_the_program_with_the_shells_values(self):
+        env, command = self.run_pane(["HOME", "LANG", "FAKE_UNSET"], {
+            "HOME": "/h/secret-home", "LANG": "C.UTF-8", "TERM": "screen",
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "FAKE_PLAIN": "s3cr3t-value", "PYTHONPATH": "/nowhere"})
+        env.pop("LC_CTYPE", None)                  # python may coerce the locale
+        self.assertEqual(env, {"HOME": "/h/secret-home", "LANG": "C.UTF-8", "TERM": "screen"})
+        self.assertNotIn("$", command)
+        self.assertNotIn("/h/secret-home", command)
+        self.assertNotIn("s3cr3t-value", command)
+
+    def test_an_empty_value_is_kept_and_an_unset_name_left_out(self):
+        env, _ = self.run_pane(["HOME", "FAKE_UNSET"], {"HOME": "", "PATH": "/usr/bin:/bin"})
+        self.assertEqual(env.get("HOME"), "")
+        self.assertNotIn("FAKE_UNSET", env)
 
 
 class TestScreen(PaneCase):

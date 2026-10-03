@@ -285,7 +285,9 @@ the console.)
   it reads and offers "copy the install default here".
 - **Servers** (`<home>/.mcp.json`): stdio servers (command, args, env) and
   http or sse servers (url, headers). The runner passes these to the agent CLI
-  on its command line, which any user on the host can read, so a value that
+  in a private file, never on its command line, but `.mcp.json` is plain text
+  the model can read and edit, and a stdio server's args are on its own
+  command line, which any user on the host can read, so a value that
   looks like a secret is refused and the panel offers the `${VAR}` reference
   to write instead; set the variable in the runner's environment. A literal
   secret already in the file is never shown. The `cousin` entry and entries

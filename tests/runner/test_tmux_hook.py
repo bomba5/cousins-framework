@@ -184,7 +184,7 @@ class TestDatagram(Case):
 
 class TestPaneEnvironment(Case):
     """M-a: the hook runs as the CLI's child, in the environment the
-    launcher built (`env -i` plus the allowlist): no PYTHONPATH, no
+    launcher built (the allowlist, KEEP_ONLY): no PYTHONPATH, no
     FRAMEWORK_ROOT, no COUSIN_*."""
 
     def launcher_env(self):

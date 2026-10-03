@@ -542,7 +542,9 @@ above. Each is stated, none is hidden, and none is a contract item except
   tmux-kind cousin's pane lives on one tmux server, one socket
   (`<framework root>/run/tmux.sock`, `TmuxRunner._make_pane`), each in its
   own session (`tmux-<home.name>`); the pane's own process environment is
-  isolated per pane (`exec env -i`), but the server process itself, and
+  isolated per pane (`tmux_pane.KEEP_ONLY`: an `env -i` that takes the
+  allowlisted names, never their values, so no value is on any argv in the
+  pane), but the server process itself, and
   the `run/` directory it lives in (chmod 0700 on every pane start), are one
   and the same for every tmux cousin on the host.
 - **A trailing `;` in the typed first line is lost.** The first line goes

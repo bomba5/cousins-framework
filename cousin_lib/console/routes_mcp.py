@@ -13,10 +13,11 @@ answers an `etag` (the file's hash) that the write must send back: a file
 changed meanwhile (the model can rewrite all of these) is 409, never
 overwritten.
 
-Secrets: the runner hands .mcp.json's servers to the agent CLI on its
-command line, which every user on the host can read, so a value that looks
-like a secret is refused and the answer names the `${VAR}` reference to
-write instead; a literal already in the file is never answered (it reads
+Secrets: .mcp.json is plain text the model can read and edit, and a stdio
+server's args are on its own command line, which every user on the host can
+read (the runner hands the servers to the agent CLI in a private file,
+never on the CLI's command line), so a value that looks like a secret is
+refused and the answer names the `${VAR}` reference to write instead; a literal already in the file is never answered (it reads
 as masked, and a save must replace it). A reference to an account variable
 is refused too: the runner skips such a server.
 

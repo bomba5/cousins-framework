@@ -68,13 +68,15 @@ class TestRecallFromARunnerToolEnvironment(HermeticCase):
         self.assertEqual(env["FRAMEWORK_ROOT"], str(root))
         # the child imports this checkout, not whatever the venv installed
         env["PYTHONPATH"] = str(_REPO_ROOT)
+        # the token on stdin, never on the child's argv
         proc = subprocess.run(
             [sys.executable, "-m", "cousin_lib.hive", "recall",
              "--queen", "http://127.0.0.1:%d" % queen.port,
-             "--token", token, "greenhouse"],
-            cwd=str(home), env=env, capture_output=True, text=True,
-            timeout=30)
+             "--token-file", "-", "greenhouse"],
+            input=token + "\n", cwd=str(home), env=env, capture_output=True,
+            text=True, timeout=30)
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")
         self.assertEqual(proc.stdout, "- the greenhouse vent opens at 28C\n")
 
 

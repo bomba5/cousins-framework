@@ -452,6 +452,21 @@ class TestRescan(_Case):
         self.assertEqual((row["pid"], row["restarts"]), (wren, 0))
         self.assertIn("supervisor: reload: added runner:sam", self.log())
 
+    def test_a_burst_of_signals_never_hangs_the_supervisor(self):
+        # a handler runs on the main thread between two of its bytecodes;
+        # one that took the loop's wake lock while the loop held it (inside
+        # its wait or clear) waited for itself forever, and the SIGTERM
+        # after it never stopped the supervisor. A burst lands in that
+        # window every time; a single SIGTERM only now and then.
+        proc = self.supervise()
+        for _ in range(2000):
+            proc.send_signal(signal.SIGHUP)
+            time.sleep(0.0005)
+        self.assertTrue(_wait_for(self.status, timeout=10),
+                        "the supervisor stopped answering:\n%s" % self.log())
+        proc.send_signal(signal.SIGTERM)
+        self.assertEqual(proc.wait(20), 0)
+
     def test_reload_clears_failing_and_removes_a_cousin_that_left_the_lane(self):
         _cousin(self.root, "wren", "fake")
         sam = _cousin(self.root, "sam", "fake")

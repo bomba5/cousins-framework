@@ -806,15 +806,18 @@ class Supervisor:
         run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(run_dir, 0o700)        # as accounts.py makes it: the socket's only guard
         lock_fd = self._take_lock()
-        stop = threading.Event()
+        stop = _Flag()
 
+        # Flags only, no lock. A handler runs on the main thread, between
+        # two of its bytecodes; when those are inside _wake.wait() or
+        # _wake.clear() the main thread holds _wake's lock, and a
+        # _wake.set() here would wait for itself forever (a SIGTERM that
+        # never stops the supervisor). The loop sees a flag within a tick.
         def _stop(signum, frame):
             stop.set()
-            self._wake.set()
 
         def _hup(signum, frame):
             self._reload_requested = True
-            self._wake.set()
 
         server = None
         previous = {}
@@ -1311,6 +1314,20 @@ class Supervisor:
     def status(self):
         return {"ok": True, "pid": os.getpid(), "started": self.started,
                 "children": {name: child.row() for name, child in self.children.items()}}
+
+
+class _Flag:
+    """A stop flag a signal handler can set: threading.Event.set() takes
+    a lock, which a handler must not (see serve)."""
+
+    def __init__(self):
+        self._set = False
+
+    def set(self):
+        self._set = True
+
+    def is_set(self):
+        return self._set
 
 
 class _Answer:

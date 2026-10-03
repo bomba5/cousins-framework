@@ -96,6 +96,10 @@ class TimedResult(unittest.TextTestResult):
             self.durations[test.id()] = time.perf_counter() - began
 
 
+# The id unittest gives a module that raised SkipTest at import.
+SKIPPED_MODULE = "unittest.loader.ModuleSkipped."
+
+
 def discover():
     """(every module with tests by name, the suites that are not a module:
     an import that failed, a module skipped whole, discovery's errors)."""
@@ -204,7 +208,16 @@ def cmd_check(args):
         print("shard %d/%d: %d modules, %.0fs recorded" % (i, args.of, len(shard), seconds))
     problems = coverage_problems(modules, shards)
     problems += ["discovery: %s" % e.strip().splitlines()[-1] for e in errors]
-    problems += ["%s did not load as a module" % t.id() for s in strays for t in _cases(s)]
+    # A module that skips itself whole (an optional dependency missing, as
+    # the sdk modules are without claude-agent-sdk) is reported, not a
+    # problem: each shard runs it and records the skip. A module that
+    # failed to import is a problem.
+    stray_ids = [t.id() for s in strays for t in _cases(s)]
+    skipped = [i for i in stray_ids if i.startswith(SKIPPED_MODULE)]
+    if skipped:
+        print("%d modules skip themselves here (each shard records the skip)" % len(skipped))
+    problems += ["%s did not load as a module" % i for i in stray_ids
+                 if not i.startswith(SKIPPED_MODULE)]
     for line in problems:
         print("::error title=test shards::%s" % line, file=sys.stderr)
     return 1 if problems else 0

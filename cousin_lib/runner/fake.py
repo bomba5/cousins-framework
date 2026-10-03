@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import wake
+from cousin_lib.runner import cost_cap, wake
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, folds_into_turn
 from cousin_lib.runner.inbox import Inbox
 from cousin_lib.runner.state import StateMachine
@@ -135,7 +135,14 @@ class FakeRunner:
                     self.inbox.done(rows[0]["id"], FAILED, NO_TURN)
                     continue
                 try:
-                    (self._rollover_row if rows[0]["source"] == "flip" else self._turn)(rows[0])
+                    row = rows[0]
+                    if row["source"] != "flip":
+                        # the daily cost cap, read now: a refused row is closed
+                        row = cost_cap.admit(self.home, row, inbox=self.inbox,
+                                             stream=self.stream, root=self.root)
+                        if row is None:
+                            continue
+                    (self._rollover_row if row["source"] == "flip" else self._turn)(row)
                 except Exception as exc:  # noqa: BLE001 - the success tail can still raise
                     # after its rows are already closed; `[]` because nothing here is
                     # safe to re-close (see `_fail_turn`'s docstring)

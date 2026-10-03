@@ -94,6 +94,9 @@ def load_cursors(home):
     if data.get("login_notified_since"):
         # the login notice already sent (relay_login_notice): once per `since`
         state["login_notified_since"] = str(data["login_notified_since"])
+    if data.get("cap_notified_day"):
+        # the cost cap notice already sent (relay_cap_notice): once per UTC day
+        state["cap_notified_day"] = str(data["cap_notified_day"])
     return state
 
 
@@ -473,6 +476,26 @@ def relay_login_notice(cfg, state, *, tg_send_text):
     return True
 
 
+def relay_cap_notice(cfg, state, *, tg_send_text):
+    """Once per UTC day of data/cost-cap.json (runner/cost_cap.py, written
+    the first time the daily cost cap refuses a turn that day), and only
+    on that day: one line to every operator. True when it sent, so the caller saves the cursors
+    (`cap_notified_day`)."""
+    from cousin_lib import usage
+    from cousin_lib.runner import cost_cap
+    data = cost_cap.read_notice(cfg.home)
+    if not data or state.get("cap_notified_day") == data.get("day") \
+            or data.get("day") != usage.utc_day():
+        return False    # a day already told, or one that is over
+    text = ("%s: daily cost cap reached, $%.2f of $%.2f today (UTC). Loop, peer and schedule"
+            " turns are refused until the UTC day ends; chat from a person still runs."
+            % (cfg.slug, float(data.get("spent") or 0), float(data.get("limit") or 0)))
+    for chat_id in sorted(cfg.operator_ids):
+        tg_send_text(chat_id=chat_id, text=text)
+    state["cap_notified_day"] = data.get("day")
+    return True
+
+
 def run_bridge(home, *, poll_interval=5):
     """The daemon: long-poll Telegram for operator messages, relay the
     cousin's replies back. No inbound port; outbound HTTPS only. A
@@ -526,6 +549,12 @@ def run_bridge(home, *, poll_interval=5):
                 save_cursors(cfg.home, state)
         except Exception as err:
             print("cousin-telegram: login notice error, retrying: %s"
+                  % _describe(err), file=sys.stderr)
+        try:
+            if relay_cap_notice(cfg, state, tg_send_text=tg_send_text):
+                save_cursors(cfg.home, state)
+        except Exception as err:
+            print("cousin-telegram: cost cap notice error, retrying: %s"
                   % _describe(err), file=sys.stderr)
         time.sleep(poll_interval)
 

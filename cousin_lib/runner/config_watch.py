@@ -76,7 +76,7 @@ def _diff(old, new, name):
 def _live_keys_only(old, new):
     """[(key, new value)] when the only difference between two cousin.toml
     texts is [agent] keys that apply without a restart (agent_settings:
-    "restart": False, the dreaming keys); else []."""
+    "restart": False, the dreaming keys and the daily cost cap); else []."""
     import tomllib
     from cousin_lib import agent_settings
     try:
@@ -131,7 +131,8 @@ def note(changes, live_policy, parse_policy):
             parts.append(line)
         elif name == "cousin.toml" and _live_keys_only(old, new):
             parts.append("- cousin.toml changed: %s. These apply without a restart (the"
-                         " loops daemon reads them every tick)." % ", ".join(
+                         " loops daemon reads the dreaming keys every tick, the runner the"
+                         " daily cost cap at every turn start)." % ", ".join(
                              "[agent] %s = %r" % (k, v) for k, v in _live_keys_only(old, new)))
         else:
             parts.append("- %s changed. It is read when the runner starts: a restart applies"

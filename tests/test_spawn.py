@@ -4,9 +4,11 @@ Tested against real temporary framework roots; nothing is mocked below
 the CLI's own seams.
 """
 import json
+import os
 import re
 import pathlib
 import shutil
+import stat
 import tempfile
 import tomllib
 import unittest
@@ -116,6 +118,37 @@ class TestCreateCousin(CreateCase):
             with self.assertRaises(SpawnError):
                 self._create(root)
         self.assertFalse((root / "cousins" / "wren").exists())
+
+    def test_the_new_home_is_0700_whatever_the_umask(self):
+        # Closed to other users on the host from birth; an open umask
+        # (0) must not leave it readable by group or other.
+        root = self._framework_root()
+        old = os.umask(0)
+        try:
+            out = self._create(root)
+        finally:
+            os.umask(old)
+        self.assertEqual(stat.S_IMODE(out["home"].stat().st_mode), 0o700)
+
+    def test_a_home_that_appears_before_the_mkdir_is_not_removed(self):
+        # The home is made outside the cleanup: a directory another
+        # process put there after the collision check is not ours, and a
+        # refused create leaves it as it was.
+        root = self._framework_root()
+        home = root / "cousins" / "wren"
+        real_mkdir = pathlib.Path.mkdir
+
+        def racing_mkdir(path, *args, **kw):
+            if path == home:
+                real_mkdir(path)
+                (path / "theirs.txt").write_text("x")
+            return real_mkdir(path, *args, **kw)
+
+        with mock.patch.object(pathlib.Path, "mkdir", racing_mkdir):
+            with self.assertRaises(SpawnError) as ctx:
+                self._create(root)
+        self.assertIn("cannot create", str(ctx.exception))
+        self.assertTrue((home / "theirs.txt").is_file())
 
 def _legacy_home(root, slug="wren"):
     """A 1.x legacy home, written by hand: cousin.toml with no [agent]

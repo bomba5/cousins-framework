@@ -23,7 +23,7 @@ export COUSIN_HOME=$FRAMEWORK_ROOT/cousins/wren
 
 ## Running cousins
 
-`cousin-spawn` creates a cousin from the template (home, `cousin.toml`,
+`cousin-spawn` creates a cousin from the template (home, mode 0700, `cousin.toml`,
 `CLAUDE.md`, MCP registration, harness hooks) and can start it. With `--start`
 alone on an existing cousin it starts it; `--runner sdk|fake|opencode|tmux` and `--account <name>` name its runner kind
 and account (`[agent] runner` and `account`, defaulting to `COUSIN_DEFAULT_RUNNER`,
@@ -223,7 +223,7 @@ runner holding the cousin's lock, it kills that cousin's pane (exit 0 whether
 or not one was there) instead of leaving an unsupervised turn running; with a
 runner holding the lock it refuses and says to stop the runner instead, which
 kills the pane itself when it was told to hold it. One runner per cousin: it holds a lock on
-`<home>/run/runner.lock` for its life. It reads `policy.toml` at start; a
+`<home>/run/runner.lock` for its life (a missing `run/` is made 0700 first). It reads `policy.toml` at start; a
 malformed policy is rc 2, and so is an MCP registry that does not parse or
 names a command the runner has no in-process handler for. `--home` may be
 relative: the runner makes it absolute and exports `COUSIN_HOME` (the home)
@@ -314,7 +314,12 @@ a `failing` child is started again, nothing else healthy is touched. `--no-conso
 `--console-host` (`127.0.0.1`), `--console-port` (8600) and `--loops-interval`
 (30) shape what it runs; `--root R` picks the install, else `FRAMEWORK_ROOT`,
 else the checkout you are in. One supervisor per install: it holds
-`run/supervisor.lock`, and a second one exits 2.
+`run/supervisor.lock`, and a second one exits 2. It sets umask 077 before
+it writes or starts anything, and every child inherits it, so what the
+install creates from then on is readable by its own user only. That closes
+new files to other users on the host (and to a different uid, such as a
+container's user reading a bind mount); every cousin runs as this one user,
+so it does not separate cousins from each other.
 
 The running supervisor answers on `run/supervisor.sock` (the `run/` directory
 is private to its user). `status [--json]` lists every child with its state
@@ -674,6 +679,29 @@ cousin-backup --home cousins/wren --dest /var/backups/cousins
 
 ```
 cousin-sweep compact --target both
+```
+
+`cousin-doctor` checks the install for what to fix by hand and prints the
+fix; it changes nothing. `cousin-doctor` runs every check, `cousin-doctor
+homes` one; `--json` prints the results as JSON. Exit 0 all ok, 1 something
+to fix, 2 bad usage. The one check today:
+
+- `homes`: every cousin home (a directory under `cousins/` with a
+  `cousin.toml`) whose mode has a group or other bit, each with the line that
+  closes it, `chmod 700 <home>`. `cousin-spawn` makes new homes 0700; this
+  finds the ones an older release made. Every cousin runs as one user, so a
+  0700 home is closed to other users on the host and to anything running as
+  another uid (a container's user, a second account), not to the other
+  cousins. When a directory above the homes is already closed to group and
+  other (a 0700 `$HOME`), the check names it: the homes are out of other
+  users' reach today, and the chmod keeps them so if that directory opens.
+
+```
+cousin-doctor
+#   WARN  homes: 1 of 2 cousin homes open to group or other
+#         to fix, run:
+#           chmod 700 /srv/cousins-framework/cousins/wren    # now 0755
+#         scope: every cousin runs as this one user, so 0700 homes close them ...
 ```
 
 `cousin-tool-surface` writes `data/tool-surface.md`, one line per command from

@@ -51,7 +51,8 @@ python3 -m unittest tests.console.test_hive_console -k revoke
 ```
 
 The full run is about 4800 tests. How long it takes depends on the host
-(about ten minutes on a 2-core VM). That's the same command CI runs.
+(about ten minutes on a 2-core VM). CI runs the same tests, split into
+shards (see [CI](#ci)).
 
 To see where the time goes, run the whole suite timed:
 
@@ -105,12 +106,23 @@ those. Don't make up a name on the spot; that's how real ones slip in.
 ## CI
 
 `.github/workflows/ci.yml` runs on every push and pull request, on
-Python 3.11, 3.12 and 3.13:
+Python 3.11, 3.12 and 3.13. Each version runs the suite in three shards
+side by side, each a set of whole test modules:
 
 ```sh
 pip install -e .
-python -m unittest discover -s tests
+python .github/scripts/suite.py check --of 3       # every module in exactly one shard
+python .github/scripts/suite.py run --shard 1 --of 3 --result shard-1.json
 ```
+
+The split puts the slowest modules first, each on the shard with the
+least time so far, by the module times in `.github/test-timings.json`; a
+module that file does not name yet counts as a typical one. Refresh the
+file with `suite.py time --write` when the split drifts out of balance
+(each shard prints its slowest modules at the end of its log). The job
+named `test (3.x)` is the one branch protection requires: it reads the
+three shards' records and passes only if all three passed and, together,
+ran every discovered module exactly once.
 
 The gate's generic checks run inside the suite (see below), so CI gates
 every commit. Your denylist of real names is never in CI, since it can't

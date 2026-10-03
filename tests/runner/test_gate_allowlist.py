@@ -66,7 +66,8 @@ TABLE = (
     ("A7", ("shared/proposed/sam__reference_h.md",
             "shared/proposed/reference_h.md",
             "shared/proposed/nested/deep.md"), ALLOW, REFUSE, ALLOW),
-    ("A8", ("shared/audit.jsonl",), ALLOW, ALLOW, ALLOW),
+    # G4: the tier's record is the framework's to append (shared_tier._audit)
+    ("A8", ("shared/audit.jsonl",), ALLOW, REFUSE, ALLOW),
     ("A9", ("cousins/wren/policy.toml",
             "cousins/wren/cousin.toml",
             "cousins/wren/.mcp.json",

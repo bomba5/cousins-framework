@@ -78,6 +78,7 @@ PORTRAIT_NAME = "self-portrait.md"
 SHARED_DIR = "shared"
 SHARED_SUBDIRS = ("proposed", "examples")
 PROPOSED_DIR = "proposed"
+AUDIT_NAME = "audit.jsonl"
 
 # Tools that WRITE the path they name. Read, Grep and Glob name paths too
 # and are absent on purpose: a subagent reads the law and the shared rules
@@ -128,6 +129,11 @@ def _shared_reason(name):
             " shared/proposed/ and a configured reviewer promotes it" % name)
 
 
+_AUDIT_REASON = ("shared/audit.jsonl is the shared tier's append-only record:"
+                 " the framework writes it on every propose and promote, never a"
+                 " subagent; a change to the tier goes through cousin-shared propose")
+
+
 def _proposal_reason(where, owner, slug):
     return ("%s is %s: %s's proposals go to shared/proposed/%s__<name>.md"
             " (cousin-shared propose --slug %s)" % (where, owner, slug, slug, slug))
@@ -137,6 +143,8 @@ def _who_writes(placed, slug):
     """The rows that depend on who writes, for a path already placed under
     the root: why the cousin `slug`'s subagent may not write it, or None.
     Only the tool gate asks (protected_reason with `home` or `slug`)."""
+    if placed == (SHARED_DIR, AUDIT_NAME):
+        return _AUDIT_REASON
     if placed[:2] == (SHARED_DIR, PROPOSED_DIR):
         if len(placed) == 3 and placed[2].startswith(slug + "__"):
             return None                 # its own proposal: the entry path
@@ -186,7 +194,8 @@ def protected_reason(path, *, root=None, cwd=None, home=None, slug=None):
     `home` and `slug` name the cousin whose session is writing (`slug`
     defaults to the home's directory name). The tool gate passes them for
     a subagent, and with a root they add the rows that depend on who
-    writes: another cousin's proposal in shared/proposed/ is refused. A
+    writes: another cousin's proposal in shared/proposed/ and the tier's
+    shared/audit.jsonl are refused. A
     framework writer (assert_writable) never passes them."""
     placed = _under_root(path, root, cwd)
     if placed is None:

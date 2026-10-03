@@ -39,7 +39,7 @@ from cousin_lib.template import TemplateError, render_template
 from cousin_lib.trace import traced_cli
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
-# a new home's mode: its owner's alone
+# a new home's mode: its owner's alone (cousin-doctor homes finds older ones)
 HOME_MODE = 0o700
 # A [runtime] value renders into the agent command and is then split
 # by shlex: anything a shell would treat as more than one word, or as

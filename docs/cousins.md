@@ -102,7 +102,9 @@ see [remote cousins](remote-cousins.md).
 The home is created mode 0700, whatever the umask: other users on the
 host, and anything running as another uid, cannot list or read it. Every
 cousin runs as the same user, so this does not keep one cousin out of
-another's home. A home made by an older release keeps its mode.
+another's home. A home made by an older release keeps its mode;
+[`cousin-doctor homes`](commands.md#maintenance) lists each one open to
+group or other with the `chmod 700` that closes it.
 
 What spawn writes besides the identity files:
 

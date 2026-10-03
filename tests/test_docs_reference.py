@@ -9,6 +9,15 @@
 (c) Every relative link and anchor in a tracked Markdown file resolves.
 (d) A released CHANGELOG section is the text its own tag shipped,
     except a correction listed in tests/data/changelog_corrections.txt.
+(e) Every [project.scripts] entry is in docs/commands.md's class table
+    exactly once, with one of the five classes.
+(f) Every page under docs/ (docs/reference/ aside) is linked from exactly
+    one of the README's next-steps groups, getting-started.md first.
+(g) Every page linked under "Optional" carries the marker line under its
+    H1, and no page under "Start here" does.
+(h) docs/getting-started.md is within its line budget and names no
+    command whose class is optional, internal or developer before its
+    last H2 (the section that lists what is optional).
 
 Each check is a plain function over its inputs, so the red cases below
 feed it synthetic text; the real-tree tests call the same function on
@@ -28,6 +37,10 @@ CONFIGURATION = ROOT / "docs" / "configuration.md"
 CONSOLE_API = ROOT / "docs" / "reference" / "console-api.md"
 CHANGELOG = ROOT / "CHANGELOG.md"
 CORRECTIONS = ROOT / "tests" / "data" / "changelog_corrections.txt"
+COMMANDS = ROOT / "docs" / "commands.md"
+README = ROOT / "README.md"
+GETTING_STARTED = ROOT / "docs" / "getting-started.md"
+PYPROJECT = ROOT / "pyproject.toml"
 
 # A fence opens or closes only on a line that starts (up to 3 spaces in)
 # with ``` or ~~~. A ```` ```mermaid ```` inside a prose line is a code
@@ -345,6 +358,146 @@ def tag_versions():
     return found
 
 
+# -- (e) a class for every command in docs/commands.md -----------------------
+
+CLASS_TABLE = "## Which commands you need"
+CLASSES = ("core", "optional", "cousin", "internal", "developer")
+CLASS_ROW = re.compile(r"^\|\s*`(cousin-[a-z0-9-]+)`\s*\|\s*([^|]*?)\s*\|")
+
+
+def command_rows(doc):
+    """[(command, class)] of the class table's rows, in order."""
+    rows = []
+    for line in prose(_section(doc, CLASS_TABLE)).split("\n"):
+        m = CLASS_ROW.match(line)
+        if m:
+            rows.append((m.group(1), m.group(2)))
+    return rows
+
+
+def class_table_problems(scripts, rows):
+    """One line per script missing from the table or in it more than once,
+    per row with a class that is not one of CLASSES, and per row naming
+    no installed script."""
+    bad, seen = [], {}
+    for command, cls in rows:
+        seen.setdefault(command, []).append(cls)
+        if cls not in CLASSES:
+            bad.append("%s: class %r is not one of %s" % (command, cls, ", ".join(CLASSES)))
+    for script in sorted(scripts):
+        found = seen.get(script, [])
+        if not found:
+            bad.append("%s: not in the class table" % script)
+        elif len(found) > 1:
+            bad.append("%s: in the class table %d times (%s)"
+                       % (script, len(found), ", ".join(found)))
+    for command in sorted(set(seen) - set(scripts)):
+        bad.append("%s: in the class table, not an installed script" % command)
+    return bad
+
+
+def installed_scripts():
+    import tomllib
+    return set(tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["scripts"])
+
+
+# -- (f) and (g) the README's groups, and the optional marker -----------------
+
+NEXT_STEPS = "## Where to go next"
+GROUPS = ("Start here", "Optional", "Reference")
+OPTIONAL_MARKER = "*Optional: nothing on this page is needed to run a cousin.*"
+
+
+def readme_groups(readme):
+    """{group: [repo-relative .md path, ...]} for each `### <group>` under
+    the next-steps section, in link order; a link's anchor is dropped and
+    a directory link is left out."""
+    section = _section(readme, NEXT_STEPS)
+    out = {}
+    for group in GROUPS:
+        body = _section(section, "### " + group)
+        paths = []
+        for _number, target in links(body):
+            path = target.partition("#")[0]
+            if path.endswith(".md") and not SCHEME.match(path):
+                paths.append(os.path.normpath(path))
+        out[group] = paths
+    return out
+
+
+def grouping_problems(pages, groups, first="docs/getting-started.md"):
+    """`pages`: the docs/*.md pages (repo-relative). One line per page in
+    no group or in more than one, per group missing, and when `first` is
+    not the first link under "Start here"."""
+    bad = []
+    for group in GROUPS:
+        if not groups.get(group):
+            bad.append("group %r: missing or empty" % group)
+    for page in sorted(pages):
+        found = [g for g in GROUPS if page in groups.get(g, [])]
+        if not found:
+            bad.append("%s: in no README group" % page)
+        elif len(found) > 1:
+            bad.append("%s: in %d README groups (%s)" % (page, len(found), ", ".join(found)))
+    start = groups.get("Start here") or [None]
+    if start[0] != first:
+        bad.append("%s: not the first link under Start here (%s is)" % (first, start[0]))
+    return bad
+
+
+def under_h1(text):
+    """The first non-blank line after the page's H1, or None."""
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            for rest in lines[i + 1:]:
+                if rest.strip():
+                    return rest.strip()
+            return None
+    return None
+
+
+def marker_problems(groups, texts):
+    """`texts`: {path: page text}. One line per Optional page without the
+    marker under its H1, and per Start here page with it."""
+    bad = []
+    for page in groups.get("Optional", []):
+        if under_h1(texts[page]) != OPTIONAL_MARKER:
+            bad.append("%s: listed as Optional, no marker under its H1" % page)
+    for page in groups.get("Start here", []):
+        if under_h1(texts[page]) == OPTIONAL_MARKER:
+            bad.append("%s: listed under Start here, marked optional" % page)
+    return bad
+
+
+# -- (h) docs/getting-started.md ----------------------------------------------
+
+GETTING_STARTED_BUDGET = 350
+COMMAND_NAME = re.compile(r"(?<![\w-])cousin-[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+def getting_started_problems(text, classes, budget=GETTING_STARTED_BUDGET):
+    """`classes`: {command: class}. One line when the page is over budget,
+    and one per non-core command named before the last H2 (code blocks
+    included: a command in an example is a command to run). A name that
+    is not a command (a unit, a file) is not checked."""
+    bad = []
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines = lines[:-1]
+    if len(lines) > budget:
+        bad.append("%d lines, over the budget of %d" % (len(lines), budget))
+    h2 = [i for i, line in enumerate(prose(text).split("\n")) if line.startswith("## ")]
+    end = h2[-1] if h2 else len(lines)
+    for number, line in enumerate(lines[:end], 1):
+        for name in COMMAND_NAME.findall(line):
+            cls = classes.get(name)
+            if cls is not None and cls != "core":
+                bad.append("line %d: %s is %s, not core; name it in the last section"
+                           % (number, name, cls))
+    return bad
+
+
 # -- the real tree -------------------------------------------------------------
 
 class AgentKeysDocumented(unittest.TestCase):
@@ -416,6 +569,38 @@ class ReleasedChangelogUnchanged(unittest.TestCase):
         self.assertEqual(changelog_drift(head, at_tag, corrections), [],
                          "a released section changed: revert it, or list the "
                          "correction in tests/data/changelog_corrections.txt")
+
+
+class CommandClasses(unittest.TestCase):
+    def test_every_script_has_one_class(self):
+        scripts = installed_scripts()
+        rows = command_rows(COMMANDS.read_text(encoding="utf-8"))
+        self.assertGreater(len(scripts), 30, "pyproject's scripts look empty")
+        self.assertEqual(class_table_problems(scripts, rows), [],
+                         "fix the table under %r in docs/commands.md" % CLASS_TABLE)
+
+
+class ReadmeGroups(unittest.TestCase):
+    def setUp(self):
+        self.groups = readme_groups(README.read_text(encoding="utf-8"))
+
+    def test_every_page_is_in_exactly_one_group(self):
+        pages = ["docs/" + p.name for p in sorted((ROOT / "docs").glob("*.md"))]
+        self.assertIn("docs/getting-started.md", pages)
+        self.assertEqual(grouping_problems(pages, self.groups), [])
+
+    def test_optional_pages_carry_the_marker_and_start_here_pages_do_not(self):
+        texts = {p: (ROOT / p).read_text(encoding="utf-8")
+                 for g in GROUPS for p in self.groups[g]}
+        self.assertEqual(marker_problems(self.groups, texts), [])
+
+
+class GettingStarted(unittest.TestCase):
+    def test_within_budget_and_core_commands_only_before_the_optional_section(self):
+        classes = dict(command_rows(COMMANDS.read_text(encoding="utf-8")))
+        self.assertIn("cousin-runner", classes)
+        text = GETTING_STARTED.read_text(encoding="utf-8")
+        self.assertEqual(getting_started_problems(text, classes), [])
 
 
 # -- the red cases ---------------------------------------------------------------
@@ -585,6 +770,120 @@ class ChangelogRed(unittest.TestCase):
             self.assertEqual(len(version), 3)
             self.assertRegex(commit, r"^[0-9a-f]{7,40}$")
             self.assertTrue(reason.strip())
+
+
+class CommandClassesRed(unittest.TestCase):
+    DOC = ("# Commands\n\n## Which commands you need\n\n"
+           "| command | class | what |\n|---|---|---|\n"
+           "| `cousin-spawn` | core | make one |\n"
+           "| `cousin-runner` | internal | drives one |\n\n"
+           "## Running cousins\n\n| `cousin-wren` | core | outside the table |\n")
+    SCRIPTS = {"cousin-spawn", "cousin-runner"}
+
+    def test_the_synthetic_table_is_green(self):
+        rows = command_rows(self.DOC)
+        self.assertEqual(rows, [("cousin-spawn", "core"), ("cousin-runner", "internal")])
+        self.assertEqual(class_table_problems(self.SCRIPTS, rows), [])
+
+    def test_a_script_missing_from_the_table_fails(self):
+        rows = command_rows(self.DOC)
+        self.assertEqual(class_table_problems(self.SCRIPTS | {"cousin-wren"}, rows),
+                         ["cousin-wren: not in the class table"])
+
+    def test_a_script_with_two_classes_fails(self):
+        doc = self.DOC.replace("\n\n## Running", "\n| `cousin-spawn` | cousin | again |\n\n## Running")
+        self.assertEqual(class_table_problems(self.SCRIPTS, command_rows(doc)),
+                         ["cousin-spawn: in the class table 2 times (core, cousin)"])
+
+    def test_an_unknown_class_and_a_row_for_no_script_fail(self):
+        doc = self.DOC.replace("| internal |", "| plumbing |")
+        self.assertEqual(class_table_problems(self.SCRIPTS, command_rows(doc)),
+                         ["cousin-runner: class 'plumbing' is not one of "
+                          "core, optional, cousin, internal, developer"])
+        self.assertEqual(class_table_problems({"cousin-spawn"}, command_rows(self.DOC)),
+                         ["cousin-runner: in the class table, not an installed script"])
+
+
+class ReadmeGroupsRed(unittest.TestCase):
+    README = ("# x\n\n## Where to go next\n\n### Start here\n\n"
+              "- [Getting started](docs/getting-started.md)\n- [Chat](docs/chat.md#replying)\n\n"
+              "### Optional\n\n- [Telegram](docs/telegram.md)\n\n"
+              "### Reference\n\n- [Commands](docs/commands.md)\n- [ref](docs/reference/)\n\n"
+              "## License\n\n[Chat](docs/chat.md)\n")
+    PAGES = ["docs/getting-started.md", "docs/chat.md", "docs/telegram.md", "docs/commands.md"]
+    MARKED = "# Telegram\n\n" + OPTIONAL_MARKER + "\n\nBody.\n"
+
+    def texts(self):
+        out = {p: "# Page\n\nBody.\n" for p in self.PAGES}
+        out["docs/telegram.md"] = self.MARKED
+        return out
+
+    def test_the_synthetic_readme_is_green(self):
+        groups = readme_groups(self.README)
+        self.assertEqual(groups["Start here"], ["docs/getting-started.md", "docs/chat.md"])
+        self.assertEqual(grouping_problems(self.PAGES, groups), [])
+        self.assertEqual(marker_problems(groups, self.texts()), [])
+
+    def test_a_page_in_no_group_fails(self):
+        groups = readme_groups(self.README)
+        self.assertEqual(grouping_problems(self.PAGES + ["docs/meetings.md"], groups),
+                         ["docs/meetings.md: in no README group"])
+
+    def test_a_page_in_two_groups_fails(self):
+        readme = self.README.replace("- [Telegram](docs/telegram.md)\n",
+                                     "- [Telegram](docs/telegram.md)\n- [Chat](docs/chat.md)\n")
+        self.assertEqual(grouping_problems(self.PAGES, readme_groups(readme)),
+                         ["docs/chat.md: in 2 README groups (Start here, Optional)"])
+
+    def test_getting_started_must_come_first(self):
+        readme = self.README.replace(
+            "- [Getting started](docs/getting-started.md)\n- [Chat](docs/chat.md#replying)\n",
+            "- [Chat](docs/chat.md#replying)\n- [Getting started](docs/getting-started.md)\n")
+        self.assertEqual(grouping_problems(self.PAGES, readme_groups(readme)),
+                         ["docs/getting-started.md: not the first link under Start here "
+                          "(docs/chat.md is)"])
+
+    def test_an_optional_page_without_the_marker_fails(self):
+        texts = self.texts()
+        texts["docs/telegram.md"] = "# Telegram\n\nBody.\n\n" + OPTIONAL_MARKER + "\n"
+        self.assertEqual(marker_problems(readme_groups(self.README), texts),
+                         ["docs/telegram.md: listed as Optional, no marker under its H1"])
+
+    def test_a_start_here_page_with_the_marker_fails_but_a_marked_section_passes(self):
+        texts = self.texts()
+        texts["docs/chat.md"] = self.MARKED.replace("Telegram", "Chat")
+        self.assertEqual(marker_problems(readme_groups(self.README), texts),
+                         ["docs/chat.md: listed under Start here, marked optional"])
+        texts["docs/chat.md"] = "# Chat\n\nCore.\n\n## Extras\n\n" + OPTIONAL_MARKER + "\n"
+        self.assertEqual(marker_problems(readme_groups(self.README), texts), [])
+
+
+class GettingStartedRed(unittest.TestCase):
+    CLASSES = {"cousin-health": "core", "cousin-runner": "internal",
+               "cousin-telegram": "optional", "cousin-spawn": "core",
+               "cousin-spawn-node": "optional"}
+    PAGE = ("# Getting started\n\n## Healthy\n\nRun `cousin-health`; see\n"
+            "`cousin-supervisor.service` and cousins-framework.\n\n```\ncousin-spawn wren\n```\n\n"
+            "## What is optional\n\n- `cousin-telegram`, `cousin-spawn-node`, `cousin-runner`\n")
+
+    def test_core_commands_before_and_any_command_in_the_last_section_pass(self):
+        self.assertEqual(getting_started_problems(self.PAGE, self.CLASSES), [])
+
+    def test_an_internal_command_outside_the_last_section_fails(self):
+        page = self.PAGE.replace("Run `cousin-health`", "Run `cousin-runner`")
+        self.assertEqual(getting_started_problems(page, self.CLASSES),
+                         ["line 5: cousin-runner is internal, not core; "
+                          "name it in the last section"])
+
+    def test_the_longest_name_counts_and_a_code_block_is_checked(self):
+        page = self.PAGE.replace("cousin-spawn wren", "cousin-spawn-node wren")
+        self.assertEqual(getting_started_problems(page, self.CLASSES),
+                         ["line 9: cousin-spawn-node is optional, not core; "
+                          "name it in the last section"])
+
+    def test_a_page_over_budget_fails(self):
+        self.assertEqual(getting_started_problems(self.PAGE, self.CLASSES, budget=5),
+                         ["14 lines, over the budget of 5"])
 
 
 if __name__ == "__main__":

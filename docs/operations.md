@@ -402,6 +402,11 @@ session. To restart one cousin's runner on the new code instead, use the
 console's restart button, or `cousin-supervisor stop <slug>` then
 `start <slug>`; the steps are in [install](install.md#update).
 
+An upgrade leaves `config/law.md` and the seeded house rules in `shared/` as
+they are, since they may hold your edits. `cousin-shared templates --full`
+shows where they differ from what the new version ships
+([house rules](house-rules.md#how-they-arrive)); nothing is merged for you.
+
 An install upgraded from 1.x disables the units 1.x had for its per-cousin
 chat servers and session starts once, since 2.0.0 runs neither:
 

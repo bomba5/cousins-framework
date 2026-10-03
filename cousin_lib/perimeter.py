@@ -149,7 +149,7 @@ def _under_root(path, root, cwd):
     return tuple(p for p in os.path.relpath(full, base).split(os.sep) if p and p != ".")
 
 
-def protected_reason(path, *, root=None, cwd=None):
+def protected_reason(path, *, root=None, cwd=None, home=None, slug=None):
     """Why `path` is protected, or None when it is not. The reason names
     the surface and its owner, because a refusal a caller cannot act on
     is a refusal the caller routes around. With `root` (the framework
@@ -157,7 +157,11 @@ def protected_reason(path, *, root=None, cwd=None):
     <root>/config/law.md, <root>/shared/<name>.md and
     <root>/cousins/<slug>/self-portrait.md. Anything else is the
     caller's own file, a checkout's templates/shared/ included (the
-    default install's checkout IS the root)."""
+    default install's checkout IS the root).
+
+    `home` and `slug` name the cousin whose session is writing. The tool
+    gate passes them for a subagent; a framework writer (assert_writable)
+    never does."""
     placed = _under_root(path, root, cwd)
     if placed is None:
         return None
@@ -291,13 +295,13 @@ def write_targets(tool_name, tool_input):
     return []
 
 
-def check_tool(tool_name, tool_input, *, root=None, cwd=None):
+def check_tool(tool_name, tool_input, *, root=None, cwd=None, home=None, slug=None):
     """The refusal for a tool call that would WRITE a protected surface,
     or None. One reason per call: the first path, not every path, because
     the caller turns this into a deny message and a list of them reads
-    like a policy document."""
+    like a policy document. `home` and `slug` are protected_reason's."""
     for path in write_targets(tool_name, tool_input):
-        reason = protected_reason(path, root=root, cwd=cwd)
+        reason = protected_reason(path, root=root, cwd=cwd, home=home, slug=slug)
         if reason is not None:
             return ("memory perimeter: %s may not write %s: %s"
                     % (tool_name or "this tool", path, reason))

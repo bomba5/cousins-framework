@@ -79,6 +79,22 @@ class TestVerify(unittest.TestCase):
             ids = [t.id() for s in found for t in s]
         self.assertEqual(ids, [suite.SKIPPED_MODULE + "test_gone"])
 
+    def test_a_shard_with_a_skipped_module_writes_its_record(self):
+        # unittest drops each test from its suite once run, so the record
+        # must not read the strays after the run
+        import tempfile
+        from unittest import mock
+        skipped = unittest.TestSuite([unittest.loader._make_skipped_test(
+            "test_gone", unittest.SkipTest("no optional dependency"), unittest.TestSuite)])
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(suite, "discover", return_value=({}, [skipped], [])):
+            out = pathlib.Path(tmp, "r.json")
+            args = mock.Mock(shard=1, of=1, result=str(out))
+            self.assertEqual(suite.cmd_run(args), 0)
+            record = json.loads(out.read_text())
+        self.assertEqual(record["strays"], [suite.SKIPPED_MODULE + "test_gone"])
+        self.assertEqual(record["skipped"], 1)
+
     def test_a_clean_run_has_no_problems(self):
         self.assertEqual(suite.verify(self.records(), 2), [])
 

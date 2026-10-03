@@ -4,7 +4,8 @@ Each check is a function of the framework root that only reads and
 returns a result: its name, whether it is ok, a one-line summary, the
 items it found, the shell lines that fix them (printed, never run) and
 notes. CHECKS names them in the order they run; `cousin-doctor` runs
-every one, `cousin-doctor <name>...` the ones named.
+every one, `cousin-doctor <name>...` the ones named, and `--cousin SLUG`
+limits each to that one cousin.
 
 homes. Every cousin home (a directory under `<root>/cousins/` with a
 cousin.toml) whose mode has a group or other bit is listed with the
@@ -14,7 +15,15 @@ every cousin runs as one user, so a 0700 home closes it to other users
 on the host and to anything running as another uid (a container's
 user, a second account), not one cousin to another. When a directory
 above the homes is already closed to group and other (a 0700 `$HOME`),
-other users cannot reach the homes today, and the check says so."""
+other users cannot reach the homes today, and the check says so.
+
+identity. Each line of a cousin's identity text (the authored part of
+CLAUDE.md, self-portrait.md, the open loops of STATUS.md) that
+contradicts a fact the framework owns: a terminal-lane CLI on a runner
+lane, a billing claim against the account's kind, a peer said to be
+unable to message it when it can, an mcp__cousin__ tool the registry
+does not serve. Each finding names the file, the line, the fact and its
+source, and the fix (cousin_lib/identity_lint.py)."""
 import argparse
 import json
 import os
@@ -35,15 +44,16 @@ def _mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
-def cousin_homes(root):
+def cousin_homes(root, cousin=None):
     """The homes under <root>/cousins/: each directory with a cousin.toml,
-    sorted by name. A cousin.toml is not parsed: a home with a broken
-    one is still a home to close."""
+    sorted by name, or only the one named `cousin`. A cousin.toml is not
+    parsed: a home with a broken one is still a home to close."""
     base = Path(root) / "cousins"
     if not base.is_dir():
         return []
     return [entry for entry in sorted(base.iterdir())
-            if entry.is_dir() and (entry / "cousin.toml").is_file()]
+            if entry.is_dir() and (entry / "cousin.toml").is_file()
+            and (cousin is None or entry.name == cousin)]
 
 
 def closed_above(path):
@@ -64,9 +74,9 @@ def _homes(n):
     return "%d cousin home%s" % (n, "" if n == 1 else "s")
 
 
-def check_homes(root):
+def check_homes(root, cousin=None):
     root = Path(os.path.abspath(root))
-    homes = cousin_homes(root)
+    homes = cousin_homes(root, cousin)
     items, fixes, errors = [], [], []
     for home in homes:
         try:
@@ -96,17 +106,28 @@ def check_homes(root):
             "items": items, "fixes": fixes, "errors": errors, "notes": notes}
 
 
-CHECKS = {"homes": check_homes}
+def check_identity(root, cousin=None):
+    """The identity check (cousin_lib/identity_lint.py). Every home is
+    read for its peer facts; only `cousin`'s identity, when named."""
+    from cousin_lib import identity_lint
+    root = Path(os.path.abspath(root))
+    return identity_lint.check_identity(root, cousin_homes(root), cousin)
 
 
-def run_checks(root, names=None):
-    return [CHECKS[name](root) for name in (names or list(CHECKS))]
+CHECKS = {"homes": check_homes, "identity": check_identity}
+
+
+def run_checks(root, names=None, cousin=None):
+    return [CHECKS[name](root, cousin=cousin) for name in (names or list(CHECKS))]
 
 
 def render(result):
     """A result as the lines cousin-doctor prints."""
     lines = ["%-5s %s: %s" % ("OK" if result["ok"] else "WARN", result["check"], result["summary"])]
     lines += ["      %s" % e for e in result["errors"]]
+    if result["check"] == "identity" and result["items"]:
+        from cousin_lib import identity_lint
+        lines += ["      %s" % line for line in identity_lint.render_items(result["items"])]
     if result["fixes"]:
         lines.append("      to fix, run:")
         lines += ["        %s" % f for f in result["fixes"]]
@@ -115,8 +136,9 @@ def render(result):
 
 
 def doctor_main(argv=None):
-    """cousin-doctor [check ...] [--json] [--root R]. Exit codes: 0 every
-    check ok, 1 a check found something to fix, 2 usage or no root."""
+    """cousin-doctor [check ...] [--cousin SLUG] [--json] [--root R]. Exit
+    codes: 0 every check ok, 1 a check found something to fix, 2 usage,
+    no root or no such cousin."""
     from cousin_lib.config import FrameworkConfig, MissingConfigError
     parser = argparse.ArgumentParser(
         prog="cousin-doctor",
@@ -125,6 +147,8 @@ def doctor_main(argv=None):
         epilog="exit status: 0 all ok, 1 something to fix, 2 bad usage")
     parser.add_argument("checks", nargs="*", metavar="check",
                         help="run only these (default: all): %s" % ", ".join(CHECKS))
+    parser.add_argument("--cousin", metavar="SLUG", default=None,
+                        help="check only this cousin (a directory under cousins/)")
     parser.add_argument("--json", action="store_true", help="print the results as JSON")
     parser.add_argument("--root", default=None, help="framework root (else FRAMEWORK_ROOT)")
     args = parser.parse_args(argv)
@@ -136,7 +160,11 @@ def doctor_main(argv=None):
     except MissingConfigError as err:
         print("cousin-doctor: %s" % err, file=sys.stderr)
         return 2
-    results = run_checks(root, args.checks)
+    if args.cousin is not None and not cousin_homes(root, args.cousin):
+        print("cousin-doctor: no cousin %r under %s" % (args.cousin, Path(root) / "cousins"),
+              file=sys.stderr)
+        return 2
+    results = run_checks(root, args.checks, cousin=args.cousin)
     if args.json:
         print(json.dumps(results, indent=1))
     else:

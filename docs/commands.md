@@ -751,8 +751,9 @@ cousin-sweep compact --target both
 
 `cousin-doctor` checks the install for what to fix by hand and prints the
 fix; it changes nothing. `cousin-doctor` runs every check, `cousin-doctor
-homes` one; `--json` prints the results as JSON. Exit 0 all ok, 1 something
-to fix, 2 bad usage. The one check today:
+homes` one; `--cousin SLUG` limits each check to that cousin; `--json` prints
+the results as JSON. Exit 0 all ok, 1 something to fix, 2 bad usage or no
+such cousin. The checks:
 
 - `homes`: every cousin home (a directory under `cousins/` with a
   `cousin.toml`) whose mode has a group or other bit, each with the line that
@@ -770,6 +771,55 @@ cousin-doctor
 #         to fix, run:
 #           chmod 700 /srv/cousins-framework/cousins/wren    # now 0755
 #         scope: every cousin runs as this one user, so 0700 homes close them ...
+```
+
+- `identity`: each line of a cousin's identity text that contradicts a fact
+  the framework owns, with the file, the line number, the line, the fact and
+  where it comes from, and the fix. The identity text is the authored part of
+  `CLAUDE.md` (the title line, the Identity and Voice sections and everything
+  below the template marker, less any paragraph that is the template's word for
+  word: the part the runner puts in the system prompt), `self-portrait.md`, and
+  the live open-loops section of `STATUS.md`. Four rules:
+  - `lane`: on a runner lane (`[agent] runner` is sdk, opencode or tmux), a
+    `cousin-*` command that a served tool replaces: `cousin-reply` is the
+    `reply` tool, and the rest come from the cousin's MCP registry (each
+    enabled tool command's CLI and subcommand, so `cousin-chat send` is `send`
+    and `cousin-memory decide` is the `memory` tool's `decide`). A command whose
+    tool the registry does not serve is the fallback and is not reported.
+  - `billing`: a phrase claiming a subscription ("on a personal subscription",
+    "no company key") on an API-key account, or an API key ("on the company
+    API key", "billed per token") on a subscription login. The account is the
+    one the runner uses: `[agent] account` and `config/accounts.toml`, or
+    `[agent] api_key_file`.
+  - `peer`: "Wren cannot message me" (or reach, contact, ...) about a
+    registered cousin whose registry serves `send`, when both are peer-visible
+    and this cousin takes delivery on a runner lane.
+  - `tool`: an `mcp__cousin__<name>` the cousin's registry does not serve.
+
+  A line is not reported when the phrase is negated or dated in its sentence
+  (not, never, no longer, used to, was, replied, logged), names a fallback or
+  a condition, or claims both ways. A `lane` line about a command's syntax
+  (its `--help`, arguments, flags, shape, usage) is not reported either. A
+  line that names two commands to state a distinction (only, vs, not, but ...),
+  says what "reaches you via" a command, or gives a command to the operator or
+  to peers ("`cousin-reply` = operator") is reported with a fix that keeps the
+  distinction: "rewrite the distinction in tool terms: `cousin-reply` ->
+  the `mcp__cousin__reply` tool, `cousin-chat send` -> the `mcp__cousin__send`
+  tool". A fact that cannot be read (an unknown account, a registry that does
+  not parse) skips its rule with a note.
+
+  A long line is shown cut to 200 characters around the matched phrase, with
+  `...` on each side cut; `--json` gives the phrase itself as `match`. The
+  summary counts findings per rule; when one claim is repeated (the same rule
+  and phrase in one cousin, say in `CLAUDE.md` and in the self-portrait), it
+  also counts the distinct claims: `billing 4 (1 distinct)`.
+
+```
+cousin-doctor identity --cousin wren
+#   WARN  identity: 1 line contradicts the framework in 1 of 1 cousin (lane 1)
+#         cousins/wren/CLAUDE.md:5 [lane] Log choices with `cousin-memory decide --stdin`.
+#           fact: wren runs on the sdk runner (cousin.toml [agent] runner), where ...
+#           fix:  use the `mcp__cousin__memory` tool's `decide` command instead of `cousin-memory decide`
 ```
 
 `cousin-tool-surface` writes `data/tool-surface.md`, one line per command from

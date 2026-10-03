@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.0 - 2026-10-03
+
+### Added
+
+- **`cousin-doctor identity` checks a cousin's identity text against the
+  facts the framework owns.** It reads the authored part of `CLAUDE.md`, the
+  self-portrait and the open loops of `STATUS.md`, and reports each line that
+  contradicts the cousin's lane (a `cousin-*` command a served tool replaces,
+  mapped from the registry), its account (a subscription or API-key claim
+  against the account kind), its peers (a cousin said to be unable to message
+  it when it can) or its tools (an `mcp__cousin__` tool the registry does not
+  serve), with the line number, the fact and its source, and the fix. Negated,
+  dated, conditional and fallback lines are not reported.
+- **`cousin-doctor --cousin SLUG`** limits every check to one cousin.
+
 ## 3.25.1 - 2026-10-03
 
 ### Changed

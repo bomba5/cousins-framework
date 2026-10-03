@@ -242,8 +242,12 @@ def cmd_run(args):
 # -- the checks -----------------------------------------------------------
 
 def compose(*args, input=None, check=True, timeout=300):
-    proc = subprocess.run(["docker", "compose"] + list(args), input=input,
-                          capture_output=True, text=True, timeout=timeout)
+    try:
+        proc = subprocess.run(["docker", "compose"] + list(args), input=input,
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # a hung exec names its command, not a bare traceback
+        raise StepError("docker compose %s: no answer in %ds" % (" ".join(args), timeout))
     if check and proc.returncode != 0:
         raise StepError("docker compose %s: exit %d: %s"
                         % (" ".join(args), proc.returncode,
@@ -342,6 +346,7 @@ def cmd_login(args):
     console = Console()
     # Refused is the check, not the status: the console under the
     # supervisor answers a route's own refusal with 500, not its 401.
+    # Tighten to 401 in the fix for that (route errors under python -m).
     wrong, _ = console.call("POST", "/api/auth/login",
                             {"user": USER, "password": _password() + "-wrong"})
     status, me = console.call("GET", "/api/auth/me")
@@ -359,7 +364,10 @@ def cmd_login(args):
 def stream_events():
     proc = in_framework("cousin-watch", COUSIN, "--json", "--tail", "0", check=False)
     if proc.returncode != 0:
-        return []
+        # a stream not written yet is exit 0 with no lines; anything else is
+        # the tool failing, and must not read as "the turn never came"
+        raise StepError("cousin-watch %s: exit %d: %s" % (
+            COUSIN, proc.returncode, (proc.stderr or proc.stdout).strip()[-400:]))
     events = []
     for line in proc.stdout.splitlines():
         try:

@@ -622,6 +622,20 @@ def _name_removed_keys(runner):
           file=sys.stderr)
 
 
+def _name_lane_gaps(runner):
+    """A kind with no tool gate (perimeter.UNGATED_KINDS) says so at
+    start: one `system` `perimeter` event and one stderr line. A warning,
+    never a refusal: the cousin runs."""
+    from cousin_lib import perimeter
+    kind = getattr(runner, "kind", None)
+    line = perimeter.lane_warning(kind)
+    if line is None:
+        return
+    runner.stream.append("system", {"subtype": "perimeter", "kind": kind,
+                                    "level": "warning", "line": line})
+    print("cousin-runner: %s" % line, file=sys.stderr)
+
+
 def _serve(runner, once, harness=None):
     stop = threading.Event()
 
@@ -674,6 +688,7 @@ def _serve(runner, once, harness=None):
             runner.stream.append("harness", dict(harness, level="info" if harness["ok"]
                                                  else "warning"))
         _name_removed_keys(runner)
+        _name_lane_gaps(runner)
         runner.start()
         policy = getattr(runner, "policy", None)
         if policy is not None:

@@ -407,7 +407,8 @@ needs a person asks for one instead of inventing it:
   the message box is disabled and says why.
 - `--level operator` in `cousin-memory` is only ever written by hand with a
   `--cite`, so with no operator that level stays empty.
-- The state digest notes the missing operator calibration.
+- The state digest leaves out its Operator Calibration section when there is
+  no calibration yet; nothing stands in for it.
 - An uncommitted self-portrait stays a candidate; nothing commits it for
   you. Shared-tier promotions need a reviewer in
   `config/shared-reviewers.json` and refuse without one.

@@ -33,6 +33,8 @@ tag = { type = "array", items = "string", optional = true }
 id = { type = "integer" }
 state = { type = "string", enum = ["open", "active", "blocked", "done", "dropped"] }
 notes = { type = "string", optional = true }
+add_note = { type = "string", optional = true }
+history = { type = "boolean", optional = true }
 
 [tools.tracker.commands.add]
 argv = ["add", "{title}", "--json"]
@@ -40,7 +42,7 @@ options = { domain = "--domain", tag = "--tag" }
 
 [tools.tracker.commands.update]
 argv = ["update", "{id}"]
-options = { title = "--title", domain = "--domain", state = "--state", notes = "--notes" }
+options = { title = "--title", domain = "--domain", state = "--state", notes = "--notes", add_note = "--add-note" }
 
 [tools.tracker.commands.state]
 argv = ["state", "{id}", "{state}"]
@@ -51,6 +53,7 @@ options = { domain = "--domain", state = "--state" }
 
 [tools.tracker.commands.show]
 argv = ["show", "{id}"]
+options = { history = "--history" }
 
 [tools.tracker.commands.delete]
 argv = ["delete", "{id}"]
@@ -281,6 +284,22 @@ class TestRegistryGatedDispatch(HermeticCase):
         ctx = _ctx(self, turn)
         ctx.registry = _registry_with_tracker(ctx.root)
         return ctx
+
+    def test_tracker_add_note_and_show_history_run_as_the_cousin(self):
+        ctx = self._gated()
+        text, err = tools.call(ctx, "tracker", {"command": "add", "title": "port"})
+        self.assertFalse(err, text)
+        text, err = tools.call(ctx, "tracker", {"command": "update", "id": 1,
+                                                "add_note": "started"})
+        self.assertFalse(err, text)
+        text, err = tools.call(ctx, "tracker", {"command": "show", "id": 1,
+                                                "history": True})
+        self.assertFalse(err, text)
+        self.assertRegex(text, r"notes +: \d{4}-\d\d-\d\d \d\d:\d\d UTC wren: started")
+        self.assertIn('wren: created "port"', text)
+        self.assertIn("wren: notes += ", text)
+        text, _ = tools.call(ctx, "tracker", {"command": "show", "id": 1})
+        self.assertNotIn("history", text)
 
     def test_a_disabled_tool_is_refused(self):
         ctx = self._gated()

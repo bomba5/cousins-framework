@@ -44,6 +44,32 @@ class TestTracker(ConsoleCase):
         ops = [d["op"] for k, d in seen if k == "tracker-change"]
         self.assertEqual(ops, ["add", "add", "update", "delete"])
 
+    def test_show_returns_the_history_and_add_note_appends(self):
+        self.serve()
+        _, body = self.post("/api/tracker", {"title": "port",
+                                             "notes": "the spec"})
+        ident = body["item"]["id"]
+        status, body = self.post("/api/tracker/%d" % ident,
+                                 {"add_note": "started", "state": "active"})
+        self.assertEqual(status, 200, body)
+        lines = body["item"]["notes"].split("\n")
+        self.assertEqual(lines[0], "the spec")
+        self.assertTrue(lines[1].endswith(" UTC operator: started"), lines)
+        self.assertEqual(self.post("/api/tracker/%d" % ident,
+                                   {"add_note": 3})[0], 400)
+        self.assertEqual(self.post("/api/tracker", {"title": "t",
+                                                    "add_note": "x"})[0], 200)
+        self.post("/api/tracker/%d" % ident, {"notes": "replaced"})
+        status, body = self.get("/api/tracker/%d" % ident)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["item"]["notes"], "replaced")
+        fields = [(c["field"], c["who"]) for c in body["history"]]
+        self.assertEqual(fields, [("created", "operator"),
+                                  ("state", "operator"),
+                                  ("notes", "operator"),
+                                  ("notes", "operator")])
+        self.assertTrue(body["history"][-1]["old"].startswith("the spec\n"))
+
 
 if __name__ == "__main__":
     unittest.main()

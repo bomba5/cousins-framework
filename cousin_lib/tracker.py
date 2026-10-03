@@ -9,6 +9,12 @@ mutation runs under BEGIN IMMEDIATE, so cousins and the console can
 write at the same time without a "database is locked" escaping. Ids
 are AUTOINCREMENT: a deleted id is never handed out again, so a link
 to #3 in a note or a chat line cannot come to mean another item.
+
+Every change to an item is kept in the history table next to it: the
+field, its old and new value, who made the change and when. A
+replacement of the notes keeps the old notes there, and add_note
+appends a dated line instead of replacing. History rows outlive their
+item, so a deleted item can still be read back from its last row.
 """
 import argparse
 import json
@@ -24,6 +30,9 @@ STATES = ("open", "active", "blocked", "done", "dropped")
 CLOSED = ("done", "dropped")
 FIELDS = ("id", "title", "domain", "state", "tags", "owner", "notes",
           "created_at", "updated_at")
+# The fields a change is recorded for; the history table also holds a
+# "created" row per item and a "deleted" row carrying the whole item.
+EDITABLE = ("title", "domain", "state", "tags", "owner", "notes")
 
 
 class TrackerError(ValueError):
@@ -76,6 +85,21 @@ def _db(root):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_state ON items(state)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_domain ON items(domain)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_owner ON items(owner)")
+    # Added in place: a store created before the history table gains it
+    # on its next open, with no history for what happened before. No
+    # foreign key: a row outlives its item on purpose.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS history ("
+        " id      INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " item_id INTEGER NOT NULL,"
+        " field   TEXT NOT NULL,"
+        " old     TEXT,"
+        " new     TEXT,"
+        " who     TEXT NOT NULL DEFAULT '',"
+        " at      TEXT NOT NULL)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_history_item ON history(item_id, id)")
     return conn
 
 
@@ -115,6 +139,26 @@ def _default_owner():
         return ""
 
 
+def _who(who):
+    """Who a change is recorded under: the given name, else the cousin
+    slug from COUSIN_HOME, else 'operator'."""
+    if who:
+        return str(who)
+    return _default_owner() or "operator"
+
+
+def _record(conn, item_id, field, old, new, who, at):
+    conn.execute(
+        "INSERT INTO history (item_id, field, old, new, who, at)"
+        " VALUES (?, ?, ?, ?, ?, ?)", (item_id, field, old, new, who, at))
+
+
+def note_line(text, who, at=None):
+    """The dated line add_note appends: 'YYYY-MM-DD HH:MM UTC who: text'."""
+    stamp = at or datetime.now(timezone.utc)
+    return "%s UTC %s: %s" % (stamp.strftime("%Y-%m-%d %H:%M"), who, text)
+
+
 def _fetch(conn, item_id):
     row = conn.execute("SELECT * FROM items WHERE id=?",
                        (item_id,)).fetchone()
@@ -124,8 +168,9 @@ def _fetch(conn, item_id):
 
 
 def add(title, *, domain="", state="open", tags=(), owner=None, notes="",
-        root=None):
-    """Insert an item and return it in the full item shape."""
+        who=None, root=None):
+    """Insert an item and return it in the full item shape. A "created"
+    history row records who added it."""
     title = (title or "").strip()
     if not title:
         raise TrackerError("title required")
@@ -141,6 +186,7 @@ def add(title, *, domain="", state="open", tags=(), owner=None, notes="",
             (title, domain or "", state, json.dumps(_clean_tags(tags)),
              owner, notes or "", now, now),
         )
+        _record(conn, cur.lastrowid, "created", None, title, _who(who), now)
         item = _fetch(conn, cur.lastrowid)
         conn.execute("COMMIT")
         return item
@@ -149,33 +195,63 @@ def add(title, *, domain="", state="open", tags=(), owner=None, notes="",
 
 
 def update(item_id, *, title=None, domain=None, state=None, tags=None,
-           owner=None, notes=None, root=None):
-    """Change the named fields only; None means untouched. Raises
-    ItemNotFound for a missing id and TrackerError when nothing is
-    named or the state is not one of STATES."""
-    sets, args = [], []
+           owner=None, notes=None, add_note=None, add_tags=None, who=None,
+           root=None):
+    """Change the named fields only; None means untouched. notes
+    replaces the notes; add_note appends one dated line to them (after
+    the replacement, when both are given). tags replaces the tag list;
+    add_tags appends to it. Every field whose value changes gets a
+    history row with the old and new value, under `who` (default: the
+    cousin slug from COUSIN_HOME, else 'operator'). Raises ItemNotFound
+    for a missing id and TrackerError when nothing is named, the title
+    or the note is blank, or the state is not one of STATES."""
+    named = {}
     if title is not None:
         title = title.strip()
         if not title:
             raise TrackerError("title required")
-        sets.append("title=?"); args.append(title)
+        named["title"] = title
     if domain is not None:
-        sets.append("domain=?"); args.append(domain)
+        named["domain"] = domain
     if state is not None:
-        sets.append("state=?"); args.append(_check_state(state))
+        named["state"] = _check_state(state)
     if tags is not None:
-        sets.append("tags=?"); args.append(json.dumps(_clean_tags(tags)))
+        named["tags"] = _clean_tags(tags)
     if owner is not None:
-        sets.append("owner=?"); args.append(owner)
+        named["owner"] = owner
     if notes is not None:
-        sets.append("notes=?"); args.append(notes)
-    if not sets:
+        named["notes"] = notes
+    if add_note is not None:
+        add_note = str(add_note).strip()
+        if not add_note:
+            raise TrackerError("note text required")
+    if not named and add_note is None and not add_tags:
         raise TrackerError("nothing to update")
-    sets.append("updated_at=?"); args.append(_now())
+    who = _who(who)
+    now = _now()
     conn = _db(root)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _fetch(conn, item_id)
+        current = _fetch(conn, item_id)
+        if add_tags:
+            named["tags"] = _clean_tags(
+                list(named.get("tags", current["tags"])) + list(add_tags))
+        if add_note is not None:
+            base = named.get("notes", current["notes"]).rstrip("\n")
+            line = note_line(add_note, who)
+            named["notes"] = base + "\n" + line if base.strip() else line
+        sets, args = [], []
+        for field in EDITABLE:
+            if field not in named:
+                continue
+            old, new = current[field], named[field]
+            if field == "tags":
+                old, new = json.dumps(old), json.dumps(new)
+            sets.append("%s=?" % field)
+            args.append(new)
+            if old != new:
+                _record(conn, item_id, field, old, new, who, now)
+        sets.append("updated_at=?"); args.append(now)
         conn.execute("UPDATE items SET %s WHERE id=?" % ", ".join(sets),
                      args + [item_id])
         item = _fetch(conn, item_id)
@@ -189,9 +265,9 @@ def update(item_id, *, title=None, domain=None, state=None, tags=None,
         conn.close()
 
 
-def set_state(item_id, state, *, root=None):
+def set_state(item_id, state, *, who=None, root=None):
     """Move an item to one of STATES and return it."""
-    return update(item_id, state=_check_state(state), root=root)
+    return update(item_id, state=_check_state(state), who=who, root=root)
 
 
 def list_items(domain=None, state=None, tag=None, *, owner=None, root=None):
@@ -231,16 +307,79 @@ def show(item_id, *, root=None):
         conn.close()
 
 
-def delete(item_id, *, root=None):
-    """Remove an item; True if a row went, False if none matched."""
+def delete(item_id, *, who=None, root=None):
+    """Remove an item; True if a row went, False if none matched. The
+    item's history stays, ending in a "deleted" row whose old value is
+    the whole item as JSON."""
     conn = _db(root)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        cur = conn.execute("DELETE FROM items WHERE id=?", (item_id,))
+        try:
+            item = _fetch(conn, item_id)
+        except ItemNotFound:
+            conn.execute("ROLLBACK")
+            return False
+        conn.execute("DELETE FROM items WHERE id=?", (item_id,))
+        _record(conn, item_id, "deleted",
+                json.dumps(item, sort_keys=True), None, _who(who), _now())
         conn.execute("COMMIT")
-        return cur.rowcount > 0
+        return True
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
     finally:
         conn.close()
+
+
+def history(item_id, *, root=None):
+    """The item's changes, oldest first: dicts with id, item_id, field,
+    old, new, who, at. A tags change carries lists, not JSON text. An
+    id with no rows (unknown, or older than the history table) gives
+    an empty list."""
+    conn = _db(root)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM history WHERE item_id=? ORDER BY id",
+            (item_id,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for row in rows:
+        entry = dict(row)
+        if entry["field"] == "tags":
+            for key in ("old", "new"):
+                try:
+                    entry[key] = json.loads(entry[key] or "[]")
+                except ValueError:
+                    pass
+        out.append(entry)
+    return out
+
+
+def _indent(text):
+    return "\n".join("      " + line for line in (text or "").split("\n"))
+
+
+def format_change(entry):
+    """One history entry as text: 'YYYY-MM-DD HH:MM UTC who: what'. A
+    replaced or deleted value is printed in full below its line, so the
+    text is the record and not only a pointer to it."""
+    head = "%s UTC %s: " % (entry["at"][:16].replace("T", " "), entry["who"])
+    field, old, new = entry["field"], entry["old"], entry["new"]
+    if field == "created":
+        return head + "created %s" % json.dumps(new)
+    if field == "deleted":
+        return head + "deleted; the item was:\n" + _indent(old)
+    if field == "notes":
+        old, new = old or "", new or ""
+        if new.startswith(old):
+            return head + "notes += " + new[len(old):].lstrip("\n")
+        if not new:
+            return head + "notes cleared; were:\n" + _indent(old)
+        return (head + "notes replaced; were:\n" + _indent(old)
+                + "\n    now:\n" + _indent(new))
+    return head + "%s %s -> %s" % (field, json.dumps(old), json.dumps(new))
 
 
 # ---- CLI -------------------------------------------------------------
@@ -264,17 +403,10 @@ def _cmd_add(args):
 
 
 def _cmd_update(args):
-    tags = None
-    if args.tag:
-        tags = list(args.tag)
-    if args.add_tag:
-        current = show(args.id, root=args.root)
-        if current is None:
-            raise ItemNotFound(args.id)
-        tags = (tags if tags is not None else current["tags"]) + list(args.add_tag)
     item = update(args.id, title=args.title, domain=args.domain,
-                  state=args.state, tags=tags, owner=args.owner,
-                  notes=args.notes, root=args.root)
+                  state=args.state, tags=list(args.tag) if args.tag else None,
+                  add_tags=args.add_tag, owner=args.owner, notes=args.notes,
+                  add_note=args.add_note, root=args.root)
     _print_item(item, args.json)
     return 0
 
@@ -308,17 +440,40 @@ def _cmd_list(args):
 
 def _cmd_show(args):
     item = show(args.id, root=args.root)
+    changes = history(args.id, root=args.root) if args.history else None
     if item is None:
+        if changes:
+            # Deleted: the trail (its last row holds the item) is the
+            # way back, so print it before refusing.
+            _print_history(None, changes, args.json)
         raise ItemNotFound(args.id)
-    if args.json:
+    if changes is not None:
+        _print_history(item, changes, args.json)
+    elif args.json:
         _print_item(item, True)
     else:
-        for key in FIELDS:
-            value = item[key]
-            if key == "tags":
-                value = ", ".join(value) if value else "-"
-            print("  %-10s: %s" % (key, value))
+        _print_fields(item)
     return 0
+
+
+def _print_fields(item):
+    for key in FIELDS:
+        value = item[key]
+        if key == "tags":
+            value = ", ".join(value) if value else "-"
+        print("  %-10s: %s" % (key, value))
+
+
+def _print_history(item, changes, as_json):
+    if as_json:
+        print(json.dumps({"item": item, "history": changes}, indent=2,
+                         sort_keys=True))
+        return
+    if item is not None:
+        _print_fields(item)
+    print("  %-10s:%s" % ("history", "" if changes else " (none recorded)"))
+    for entry in changes:
+        print("    " + format_change(entry))
 
 
 def _cmd_delete(args):
@@ -360,7 +515,11 @@ def tracker_main(argv=None):
     p.add_argument("--tag", action="append", help="replace the tag list")
     p.add_argument("--add-tag", action="append", help="append a tag")
     p.add_argument("--owner")
-    p.add_argument("--notes")
+    p.add_argument("--notes", help="replace the notes (the old text stays"
+                                   " in the history)")
+    p.add_argument("--add-note", metavar="TEXT",
+                   help="append a dated line to the notes; use this for"
+                        " status updates")
     common(p)
     p = sub.add_parser("state", help="move an item to a state")
     p.add_argument("id", type=int)
@@ -374,6 +533,8 @@ def tracker_main(argv=None):
     common(p)
     p = sub.add_parser("show", help="one item, every field")
     p.add_argument("id", type=int)
+    p.add_argument("--history", action="store_true",
+                   help="also print every change to the item, oldest first")
     common(p)
     p = sub.add_parser("delete", help="remove an item (ids never recycle)")
     p.add_argument("id", type=int)

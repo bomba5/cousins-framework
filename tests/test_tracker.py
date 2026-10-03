@@ -24,6 +24,8 @@ from cousin_lib.tracker import (
     add,
     db_path,
     delete,
+    format_change,
+    history,
     list_items,
     set_state,
     show,
@@ -211,6 +213,121 @@ class TestConcurrency(TrackerCase):
         self.assertEqual(len({i["id"] for i in items}), 40)
 
 
+class TestHistory(TrackerCase):
+    def test_a_replaced_note_is_kept_with_who_and_when(self):
+        item = add("port", notes="the spec")
+        with mock.patch.dict(os.environ):
+            del os.environ["COUSIN_HOME"]
+            update(item["id"], notes="status: half done")
+        changes = history(item["id"])
+        self.assertEqual([c["field"] for c in changes], ["created", "notes"])
+        self.assertEqual(changes[0]["who"], "testa")
+        self.assertEqual((changes[1]["old"], changes[1]["new"],
+                          changes[1]["who"]),
+                         ("the spec", "status: half done", "operator"))
+        self.assertTrue(changes[1]["at"])
+
+    def test_every_editable_field_is_recorded_old_and_new(self):
+        item = add("a", domain="d1", tags=["x"], owner="o1")
+        update(item["id"], title="b", domain="d2", state="active",
+               tags=["y"], owner="o2", notes="n", who="someone")
+        changes = {c["field"]: (c["old"], c["new"], c["who"])
+                   for c in history(item["id"])[1:]}
+        self.assertEqual(changes, {
+            "title": ("a", "b", "someone"),
+            "domain": ("d1", "d2", "someone"),
+            "state": ("open", "active", "someone"),
+            "tags": (["x"], ["y"], "someone"),
+            "owner": ("o1", "o2", "someone"),
+            "notes": ("", "n", "someone"),
+        })
+
+    def test_an_unchanged_value_records_nothing(self):
+        item = add("same", notes="n")
+        update(item["id"], title="same", notes="n", state="open")
+        self.assertEqual([c["field"] for c in history(item["id"])],
+                         ["created"])
+
+    def test_add_note_appends_a_dated_signed_line(self):
+        item = add("port", notes="the spec")
+        first = update(item["id"], add_note="  started  ", state="active")
+        lines = first["notes"].split("\n")
+        self.assertEqual(lines[0], "the spec")
+        self.assertRegex(lines[1],
+                         r"^\d{4}-\d\d-\d\d \d\d:\d\d UTC testa: started$")
+        second = update(item["id"], add_note="blocked on disk", who="other")
+        self.assertEqual(second["notes"].split("\n")[:2], lines)
+        self.assertTrue(second["notes"].endswith(" UTC other: blocked on disk"))
+        self.assertEqual(add("bare")["id"], 2)
+        self.assertRegex(update(2, add_note="x")["notes"],
+                         r"^\d{4}-\d\d-\d\d \d\d:\d\d UTC testa: x$")
+        with self.assertRaises(TrackerError):
+            update(item["id"], add_note="   ")
+        with self.assertRaises(ItemNotFound):
+            update(404, add_note="x")
+
+    def test_notes_and_add_note_together_replace_then_append(self):
+        item = add("port", notes="old")
+        changed = update(item["id"], notes="new", add_note="line")
+        self.assertTrue(changed["notes"].startswith("new\n"))
+        self.assertTrue(changed["notes"].endswith("testa: line"))
+        self.assertEqual(history(item["id"])[-1]["old"], "old")
+
+    def test_add_tags_appends_inside_the_update(self):
+        item = add("t", tags=["a"])
+        self.assertEqual(update(item["id"], add_tags=["b", "a"])["tags"],
+                         ["a", "b"])
+        self.assertEqual(update(item["id"], tags=["c"],
+                                add_tags=["d"])["tags"], ["c", "d"])
+
+    def test_delete_keeps_the_trail_and_the_item(self):
+        item = add("gone", notes="keep me")
+        self.assertTrue(delete(item["id"], who="someone"))
+        last = history(item["id"])[-1]
+        self.assertEqual((last["field"], last["who"]), ("deleted", "someone"))
+        self.assertEqual(json.loads(last["old"])["notes"], "keep me")
+        self.assertEqual(history(404), [])
+
+    def test_a_store_from_before_the_history_table_gains_it(self):
+        path = db_path(self.root)
+        path.parent.mkdir(parents=True)
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " title TEXT NOT NULL, domain TEXT NOT NULL DEFAULT '',"
+            " state TEXT NOT NULL DEFAULT 'open',"
+            " tags TEXT NOT NULL DEFAULT '[]',"
+            " owner TEXT NOT NULL DEFAULT '',"
+            " notes TEXT NOT NULL DEFAULT '',"
+            " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        conn.execute(
+            "INSERT INTO items (title, notes, created_at, updated_at)"
+            " VALUES ('old item', 'old spec', 't0', 't0')")
+        conn.commit()
+        conn.close()
+        self.assertEqual(show(1)["notes"], "old spec")
+        self.assertEqual(history(1), [])
+        update(1, notes="replaced")
+        self.assertEqual([(c["field"], c["old"]) for c in history(1)],
+                         [("notes", "old spec")])
+        show(1)  # a second open of the migrated store is a no-op
+        self.assertEqual(len(history(1)), 1)
+
+    def test_format_change_shows_appends_and_full_replacements(self):
+        at = "2030-01-02T03:04:05+00:00"
+        base = {"at": at, "who": "w"}
+        self.assertEqual(
+            format_change(dict(base, field="state", old="open", new="done")),
+            '2030-01-02 03:04 UTC w: state "open" -> "done"')
+        self.assertEqual(
+            format_change(dict(base, field="notes", old="a", new="a\nb")),
+            "2030-01-02 03:04 UTC w: notes += b")
+        text = format_change(dict(base, field="notes", old="spec\nmore",
+                                  new="status"))
+        self.assertIn("notes replaced; were:\n      spec\n      more", text)
+        self.assertIn("now:\n      status", text)
+
+
 class TestCli(TrackerCase):
     def test_add_prints_the_id_and_json_prints_the_envelope(self):
         rc, out, _ = self._main(["add", "map the tree", "--domain",
@@ -243,6 +360,50 @@ class TestCli(TrackerCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out), {"ok": True, "deleted": 1})
         self.assertIsNone(show(1))
+
+    def test_add_note_appends_and_notes_replaces(self):
+        self._main(["add", "port", "--notes", "the spec"])
+        rc, _, _ = self._main(["update", "1", "--add-note", "started",
+                               "--state", "active"])
+        self.assertEqual(rc, 0)
+        notes = show(1)["notes"]
+        self.assertTrue(notes.startswith("the spec\n"))
+        self.assertRegex(notes, r"\n\d{4}-\d\d-\d\d \d\d:\d\d UTC testa: started$")
+        rc, _, _ = self._main(["update", "1", "--notes", "replaced"])
+        self.assertEqual((rc, show(1)["notes"]), (0, "replaced"))
+        self.assertEqual(history(1)[-1]["old"], notes)
+        self.assertEqual(self._main(["update", "1", "--add-note", " "])[0], 2)
+
+    def test_show_history_prints_changes_oldest_first(self):
+        self._main(["add", "port", "--notes", "the spec"])
+        self._main(["state", "1", "active"])
+        self._main(["update", "1", "--notes", "status"])
+        rc, plain, _ = self._main(["show", "1"])
+        self.assertNotIn("history", plain)
+        rc, out, _ = self._main(["show", "1", "--history"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith(plain))
+        tail = out[len(plain):]
+        self.assertLess(tail.index('created "port"'),
+                        tail.index('state "open" -> "active"'))
+        self.assertLess(tail.index("active"), tail.index("notes replaced"))
+        self.assertIn("      the spec", tail)
+        rc, out, _ = self._main(["show", "1", "--history", "--json"])
+        data = json.loads(out)
+        self.assertEqual(data["item"]["notes"], "status")
+        self.assertEqual([c["field"] for c in data["history"]],
+                         ["created", "state", "notes"])
+        rc, out, _ = self._main(["show", "1", "--json"])
+        self.assertEqual(set(json.loads(out)), {"item"})
+
+    def test_show_history_of_a_deleted_item_prints_the_trail_and_exits_one(self):
+        self._main(["add", "gone", "--notes", "keep me"])
+        self._main(["delete", "1"])
+        rc, out, err = self._main(["show", "1", "--history"])
+        self.assertEqual(rc, 1)
+        self.assertIn("not found", err)
+        self.assertIn("deleted; the item was:", out)
+        self.assertIn("keep me", out)
 
     def test_list_filters_and_json_envelope(self):
         self._main(["add", "one", "--domain", "infra", "--tag", "x"])

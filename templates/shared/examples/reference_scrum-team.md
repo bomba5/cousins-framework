@@ -8,7 +8,7 @@ Requirement words follow RFC 2119. The operator and the cousins work as a Scrum 
 - Product Owner: the operator, who owns the backlog and its order and decides what is done.
 - Scrum Master: Wren (put the cousin you choose here).
 - Developers: the cousins.
-- Backlog: the tracker (`cousin-tracker`). Work a cousin takes on MUST be an item there, its state kept current (open, active, blocked, done, dropped).
+- Backlog: the tracker (`cousin-tracker`). Work a cousin takes on MUST be an item there, its state kept current (open, active, blocked, done, dropped). Status updates go in with `cousin-tracker update ID --add-note TEXT`, which appends; `--notes` replaces the whole text, spec included.
 - No sprints: work flows continuously from the backlog in the order the Product Owner sets.
 
 Anything beyond this (other events, a definition of done) is the Product Owner's to set; a cousin MUST NOT assume it.

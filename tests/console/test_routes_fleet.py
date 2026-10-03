@@ -523,7 +523,8 @@ class TestTokens(ConsoleCase):
         self.assertEqual(len(series), 14)
         # cache_creation only splits cache_creation_input_tokens by TTL:
         # it is not added a second time.
-        self.assertEqual(series[-1], {"day": today, "total": 115, "output": 5})
+        # a transcript has tokens, no dollars: cost_usd is null for it
+        self.assertEqual(series[-1], {"day": today, "total": 115, "output": 5, "cost_usd": None})
         self.assertEqual(self.get("/api/cousins")[1]["cousins"][0]
                          ["tokensSpent"], 115)
         # Incremental: an appended line adds to the same day.

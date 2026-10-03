@@ -66,6 +66,8 @@ SITES = (
     ('cousin_lib/console/tokens.py', 'return any(_runner_kind(c.home) in OWN_USAGE_KINDS', 'kinds'),
     ('cousin_lib/console/tokens.py', 'if _runner_kind(home) in USAGE_DB_KINDS:', 'kinds'),
     ('cousin_lib/console/tokens.py', 'if _runner_kind(home) == "tmux":', 'kinds'),
+    ('cousin_lib/console/tokens.py', 'return _runner_kind(home) in USAGE_DB_KINDS', 'kinds'),
+    ('cousin_lib/console/tokens.py', 'limit = cost_cap.limit_of(home) if _runner_kind(home) in lanes else 0.0', 'kinds'),
     ('cousin_lib/delivery.py', 'A cousin whose `[agent] runner` names a runner kind (`RUNNER_KINDS`)', 'kinds'),
     ('cousin_lib/delivery.py', '`failed`, and `lane_refusal(home)` is the one line every entry point', 'refusal'),
     ('cousin_lib/delivery.py', 'RUNNER_KINDS = ("sdk", "fake", "opencode", "tmux")', 'kinds'),

@@ -57,7 +57,7 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, recording, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
-from cousin_lib.runner import auth, checkpoints, envelope, opencode_guard, opencode_http
+from cousin_lib.runner import auth, checkpoints, cost_cap, envelope, opencode_guard, opencode_http
 from cousin_lib.runner import tools, wake
 from cousin_lib.runner import policy as _policy
 from cousin_lib.runner import rollover as _rollover
@@ -1190,6 +1190,16 @@ class OpencodeRunner:
                     if row["source"] == INTERRUPT:
                         self.inbox.done(row["id"], FAILED, NO_TURN)
                         continue
+                    if row["source"] != "flip":
+                        try:
+                            # the daily cost cap, read now: a refused row is closed
+                            row = cost_cap.admit(self.home, row, inbox=self.inbox,
+                                                 stream=self.stream, root=self.root)
+                        except Exception as exc:  # noqa: BLE001 - never a silent death
+                            self._recover_from(exc)
+                            continue
+                        if row is None:
+                            continue
                     if not self._guard_turn(row):
                         break
                     try:

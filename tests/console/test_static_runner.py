@@ -1,7 +1,8 @@
 """Static-file contract for the runner cousin's views: the chat page's
 pane is the reasoning stream for a runner cousin and the tmux terminal for
 any other, the fleet card shows the runner's state and what it declares
-unsupported, and the tokens view shows the cache hit rate. The routes it
+unsupported, and the tokens view shows the cache hit rate, the dollars per
+day and the daily cost cap. The routes it
 calls are the spec's (the chat module's own test checks every route
 against docs/reference/console-api.md)."""
 import json
@@ -737,6 +738,25 @@ class TestFleetAndTokens(unittest.TestCase):
         self.assertIn("row.cache", body)
         self.assertRegex(body, r'label="cache today"')
         self.assertRegex(body, r'label="cache 14 days"')
+
+    def test_the_tokens_view_shows_dollars_per_day_and_the_cap(self):
+        views = (_STATIC / "views.jsx").read_text()
+        body = views[views.index("function TokensView("):views.index("function Stat(")]
+        self.assertIn("p.cost_usd", body)                   # GET /api/tokens, per day
+        self.assertRegex(body, r'label="\$ today"')
+        self.assertRegex(body, r'label="\$ 14 days"')
+        self.assertIn("data-cost-days", body)               # one bar per day, its $ on hover
+        self.assertIn("row.cap", body)
+        self.assertIn("cap.spent_today", body)
+        self.assertIn("cap.limit", body)
+        # red once spent reaches the limit
+        self.assertRegex(body, r"over \? \"var\(--red\)\"")
+
+    def test_the_agent_panel_edits_a_dollar_amount(self):
+        agent = (_STATIC / "agent.jsx").read_text()
+        field = agent[agent.index("function AgentField("):agent.index("function AgentSettingsPanel(")]
+        self.assertIn('case "usd":', field)
+        self.assertIn('min="0"', field[field.index('case "usd":'):])
 
 
 if __name__ == "__main__":

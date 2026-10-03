@@ -1006,6 +1006,51 @@ writes `data/dream.request`, and the next tick runs a pass when that
 request is newer than the last pass. The console's **dreaming** view runs a
 pass on demand whatever the setting.
 
+### [agent] daily_cost_cap_usd
+
+A cap on what a cousin spends in a UTC day, in US dollars, off unless you
+set it.
+
+| key | default | meaning |
+|---|---|---|
+| `daily_cost_cap_usd` | `0` | US dollars a UTC day; `0` is off. A number, `0` or more (the console refuses anything else); a value in `cousin.toml` that is not one reads as off, and the cousin's `cap:<slug>` health row says why. The `sdk`, `opencode` and `fake` lanes. |
+
+The measure is the sum of `cost_usd` over the day's rows of the cousin's
+`data/usage.db`, the same figure the console's tokens view shows per day. On
+a login (a subscription account) it is the API-equivalent price the Agent
+SDK reports, not a bill, and it is the measure all the same; on an API key
+it is the API's figure, and on `opencode` the cost opencode reports for the
+tokens its provider counted. Not counted: a dreaming pass and any other side
+session that writes no `usage.db` row. The `tmux` kind writes no `usage.db`
+(its pane's transcripts carry tokens, no dollars), so it has nothing to
+measure against and does not read the key.
+
+The runner reads the key at every turn start, from `cousin.toml` as it is
+then, so a change applies to the next turn without a restart. Before a turn
+starts, with the cap set:
+
+- under the cap the turn runs, and the cousin's `cap:<slug>` row in the
+  [health record](operations.md#health) is ok;
+- at or over it, a turn whose first message is on an operator or person
+  thread (`operator:<name>`, `person:<name>`) runs all the same. Its message
+  carries one runner note at the head of its context block (`[runner] daily
+  cost cap reached: $4.10 of $4.00 today (UTC); this turn runs because a
+  person sent it.`) and the stream gets a `cap` event, `{"limit", "spent",
+  "over": true, "allowed": "person", "inbox_id", "thread_id"}`;
+- at or over it, any other turn (a loop, a peer, a schedule, a meeting, a
+  system row) does not start. Its message is closed `failed` with the detail
+  `daily cost cap reached: spent $4.10 of $4.00 today (UTC)` (a peer that
+  waited reads that), the stream gets a `cap` event with `"refused": true`,
+  and `cap:<slug>` is failing with the same line. The first refusal of a
+  UTC day writes `data/cost-cap.json` (`{"day", "slug", "limit", "spent",
+  "since"}`), which the [Telegram bridge](#telegram) sends to the operators
+  once, that day.
+
+The cap is decided on a turn's first message: a message folded into a turn
+already running is never refused. A flip, the boot digest a new session
+starts with, and an interrupt are never refused. The day turns at 00:00
+UTC, and with it the measure.
+
 ### [agent.sessions]
 
 Side sessions: a [thread](glossary.md#thread) kind that gets a session of its own, beside the
@@ -1382,8 +1427,9 @@ recall, and the stream gets a `config_change` event naming the files:
   the same `outbound_filter`.
 - **`cousin.toml` and `.mcp.json`.** Read at start only: the note says a
   restart applies them. The exception is a `cousin.toml` change that only
-  touches keys that apply without a restart (`[agent] dreaming` and
-  `dreaming_at`): the note names them and says they already apply.
+  touches keys that apply without a restart (`[agent] dreaming`,
+  `dreaming_at` and `daily_cost_cap_usd`): the note names them and says
+  they already apply.
 
 Each change is said once per runner: the next prompt, and the next session
 after a rollover, compare against what the last check saw. A rollover's new

@@ -57,6 +57,7 @@ whether the message came from Telegram or from the console.
 | out | an image reply (`cousin-reply --image`, `cousin-image`) | `sendPhoto`, uploaded as a file (`_tg_upload`), with the reply text as the caption | works (0.11.0) |
 | out | a video reply (`cousin-reply --video`, `cousin-video`) | `sendVideo`, with the caption | works (0.11.0) |
 | out | a voice reply (`cousin-voice`, an mp3) | `sendAudio`, with the caption (`_upload_spec`). It arrives as an audio file, not as a Telegram voice note | code path present, not live-tested |
+| out | the daily cost cap refused a turn (`data/cost-cap.json`, [configuration](configuration.md#agent-daily_cost_cap_usd)) | one `sendMessage` to every operator, once per UTC day and only on that day (`relay_cap_notice`) | works |
 
 Outbound attachments ride the reply row: `cousin-reply --image` or
 `--video`, and the media commands, record `attachment_kind` and

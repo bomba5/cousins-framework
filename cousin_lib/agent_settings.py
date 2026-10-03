@@ -45,7 +45,7 @@ _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # readonly: shown, never written here. restart: every [agent] key is read
 # when the runner starts, so every change applies at the next start; a
 # key with "restart": False is read elsewhere each time (the dreaming
-# keys: the loops daemon, every tick).
+# keys: the loops daemon, every tick; the cost cap: the runner, every turn).
 SCHEMA = {
     "runner": {"type": "choice", "lanes": ALL, "readonly": True,
                "hint": "the lane; switching it is a migration (cousin-migrate)"},
@@ -91,6 +91,13 @@ SCHEMA = {
                          " at dreaming_at, or after each rollover"},
     "dreaming_at": {"type": "time", "lanes": ALL, "default": "03:00", "restart": False,
                     "hint": "host time of the nightly dreaming pass, HH:MM"},
+    # runner/cost_cap.py: read from cousin.toml at every turn start. The
+    # lanes whose runner writes usage.db (cost_usd); the tmux kind writes
+    # none, so it has nothing to measure the cap against.
+    "daily_cost_cap_usd": {"type": "usd", "lanes": ("sdk", "opencode", "fake"), "default": 0,
+                           "restart": False,
+                           "hint": "US dollars a UTC day (usage.db's cost_usd); over it only"
+                                   " chat from a person runs. 0 is off"},
     # The tmux kind's own key: its pane's environment allowlist.
     "env_allow": {"type": "env_list", "lanes": ("tmux",), "default": [],
                   "hint": "variables the agent may inherit; the hard deny still wins"},
@@ -233,6 +240,9 @@ def _check_value(key, value, lane, home):
     if kind == "time":
         from cousin_lib import dreaming
         return dreaming.check_time(value)
+    if kind == "usd":
+        from cousin_lib.runner import cost_cap
+        return cost_cap.check_value(value)
     if kind == "sessions":
         from cousin_lib.runner import sessions
         try:

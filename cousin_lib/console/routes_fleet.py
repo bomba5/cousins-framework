@@ -1002,7 +1002,8 @@ def register():
         for config in FrameworkConfig(server.root).list_cousins():
             rows.append({"slug": config.slug, "name": config.name,
                          "series": tokens.series(server, config.home),
-                         "cache": tokens.cache(server, config.home)})
+                         "cache": tokens.cache(server, config.home),
+                         "cap": tokens.cap(config.home)})
         return 200, {"available": True, "cousins": rows}
 
 

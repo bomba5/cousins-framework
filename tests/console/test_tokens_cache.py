@@ -143,9 +143,41 @@ class TestRoute(Fleet):
                                                            body={}))
         self.assertEqual(status, 200)
         row = body["cousins"][0]
-        self.assertEqual(set(row["series"][-1]), {"day", "total", "output"})
+        self.assertEqual(set(row["series"][-1]), {"day", "total", "output", "cost_usd"})
         self.assertEqual(row["cache"]["rate"], 0.9)
         self.assertEqual(len(row["cache"]["days"]), tokens.SERIES_DAYS)
+        self.assertEqual(row["cap"], {"limit": None, "spent_today": 0.0})   # off by default
+
+    def _route(self):
+        from types import SimpleNamespace
+        from cousin_lib.console import router, routes_fleet
+        router.clear()
+        routes_fleet.register()
+        status, body = router.dispatch("GET", "/api/tokens",
+                                       req=SimpleNamespace(server=self.server, query={},
+                                                           body={}))
+        self.assertEqual(status, 200)
+        return {row["slug"]: row for row in body["cousins"]}
+
+    def test_the_route_carries_dollars_per_day_and_the_cap(self):
+        home = self._cousin("wren", "sdk")
+        (home / "cousin.toml").write_text((home / "cousin.toml").read_text()
+                                          + "daily_cost_cap_usd = 2.5\n")
+        for cumulative in (0.75, 2.0):     # one client: rows of 0.75 and 1.25
+            usage.record(home, client_id="c", session_id="s",
+                         result={"usage": _usage(10, 90, 0), "total_cost_usd": cumulative},
+                         lane="login")
+        row = self._route()["wren"]
+        self.assertEqual(row["series"][-1]["cost_usd"], 2.0)
+        self.assertEqual([p["cost_usd"] for p in row["series"][:-1]],
+                         [0.0] * (tokens.SERIES_DAYS - 1))
+        self.assertEqual(row["cap"], {"limit": 2.5, "spent_today": 2.0})
+
+    def test_a_cousin_with_no_dollar_measure_says_null(self):
+        self._cousin("kestrel", "tmux")     # its pane's transcripts: tokens, no dollars
+        row = self._route()["kestrel"]
+        self.assertTrue(all(p["cost_usd"] is None for p in row["series"]))
+        self.assertEqual(row["cap"], {"limit": None, "spent_today": None})
 
 
 if __name__ == "__main__":

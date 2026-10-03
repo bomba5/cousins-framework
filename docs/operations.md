@@ -297,6 +297,7 @@ was last seen. One ok result resets the streak.
 | `dreaming` | queueing the dreaming passes |
 | `meetings` | the meetings step |
 | `harness:<slug>` | written by the cousin's runner at its start, not by the daemon: whether what it runs (the Agent SDK and its CLI, `claude` on PATH, opencode) is the version `config/harness.lock.toml` names; failing names the installed and the locked version ([configuration](configuration.md#agent-strict_harness)) |
+| `cap:<slug>` | written by the cousin's runner at each turn start while `[agent] daily_cost_cap_usd` is set: ok under the cap, failing at or over it (`daily cost cap reached: spent $X.XX of $Y.YY today (UTC)`) or when the value is not a number of dollars ([configuration](configuration.md#agent-daily_cost_cap_usd)) |
 
 A finished index refresh or dreaming pass is recorded when it finishes, not
 on every tick, so a pass that failed last night stays failing until the next

@@ -365,6 +365,19 @@ runs), which the contract does not cover.
   the idle that answers it; the end after that always passes. A turn settled
   after an event-stream reconnect is not gated, since the replies sent in
   the gap were not seen.
+- A run that keeps making the same call is bounded. The same tool with the
+  same arguments made 3 times in one run gets one prompt from the runner
+  (a `gate` event with `"gate": "repeat"`, `"action": "nudge"`): stop
+  repeating, do what is owed once another way or end the turn. A call that
+  reaches 3 again after that aborts the run (`"action": "end"`), which
+  settles as an interruption: the rows the model received close, the rest
+  go back to the queue. `cousin_handoff` counts by name whatever its
+  arguments, since a handoff is written once; a file write (`edit`,
+  `write`, `apply_patch`) is progress, and the counts start again after
+  it. The handoff turn of a rollover is not bounded this way (its deadline
+  is). The `handoff` tool itself is not refused outside a rollover, on
+  either lane: its description asks for it "when a system message asks for
+  your handoff or before you stop".
 - The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
   the policy plugin enforces policy.toml only, so a subagent here is not
   refused a write to the install's `config/law.md`, a cousin's committed

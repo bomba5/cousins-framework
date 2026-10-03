@@ -1,17 +1,18 @@
 """Console routes for the kind switch and migration (docs/reference/console-api.md,
-"Kind switch and migration"): cousin-migrate's plan, apply, check and
-rollback, and the kind switch (`--to sdk|tmux`), through the
-migrate library only. migrate.py owns the steps: nothing here changes how
-a step runs, it only watches the steps go by.
+"Kind switch and migration"): cousin-migrate's kind switch (`--to sdk|tmux`:
+plan, apply, rollback) and check, through the migrate library only. A plan,
+apply or rollback without a kind is refused before anything runs: 2.0.0
+keeps no conversion from the legacy tmux lane. migrate.py owns the steps:
+nothing here changes how a step runs, it only watches the steps go by.
 
 apply and rollback change a live cousin, so each is a long operation
 (console/longop.py) with its steps as stages, and one at a time across
-the whole fleet (the runbook's rule: one cousin at a time). A plan or a
-check with `validate` spends one model turn, so it is a long operation
-too; without it, it answers at once.
+the whole fleet (the runbook's rule: one cousin at a time). A check with
+`validate` spends one model turn, so it is a long operation too; without
+it, it answers at once.
 
 The stages come from the library's own records as they are written
-(data/migration.json, data/kind-switch.json): each live action the
+(data/kind-switch.json): each live action the
 library is handed is wrapped, so when the next one is called the steps
 before it are read back and reported, and the one starting is shown
 running. The switch's verify is watched while it runs: when the tmux
@@ -285,48 +286,6 @@ def _watch_pane(op, home, poll, stage="verify"):
 
 # ---- the work ---------------------------------------------------------------
 
-def _apply_work(server, home, account, validate):
-    root = server.root
-    live = _live(server)
-
-    def work(op):
-        st = _Stages(op, lambda: migrate.read_record(home))
-        op.stage("plan", "running", "the checks%s" % (" and one model turn" if validate else ""))
-        wrapped = dict(live)
-
-        def close(slug, root_):
-            op.stage("plan", "done", "ready")
-            st.running("close", "the clean stop: the handoff, then the session ends")
-            return live["close"](slug, root_)
-
-        def import_auto(home_, root_):
-            st.running("import")
-            return live["import_auto"](home_, root_)
-
-        def start(home_, root_):
-            st.running("start")
-            return live["start"](home_, root_)
-
-        def verify(*a, **kw):
-            st.running("verify")
-            return live["verify"](*a, **kw)
-
-        wrapped.update(close=close, import_auto=import_auto, start=start, verify=verify)
-        try:
-            rec = migrate.apply(home, root=root, account=account, validate=validate, **wrapped)
-        except migrate.MigrateError as err:
-            raise longop.OpError(str(err))
-        st.sync()
-        out = {"ok": rec.get("state") == "migrated", "state": rec.get("state"),
-               "warnings": rec.get("warnings") or []}
-        if not out["ok"]:
-            last = (rec.get("steps") or [{}])[-1]
-            out["error"] = "step %s failed: %s; roll back from the migration panel" % (
-                last.get("step"), last.get("detail"))
-        return out
-    return work
-
-
 def _switch_work(server, home, to):
     root = server.root
     live = _switch_live(server)
@@ -395,29 +354,6 @@ def _switch_crashed(home, st, err):
     return "the kind switch " + reason
 
 
-def _rollback_work(server, home, force):
-    root = server.root
-    live = _live(server)
-
-    def work(op):
-        st = _Stages(op, lambda: migrate.read_record(home))
-        wrapped = dict(live)
-        for name, stage in (("stop", "stop"), ("reload", "reload"),
-                            ("start_tmux", "start_tmux"), ("release", "release")):
-            def wrap(*a, _fn=live[name], _stage=stage, **kw):
-                st.running(_stage, key="rollback_steps")
-                return _fn(*a, **kw)
-            wrapped[name] = wrap
-        try:
-            rec = migrate.rollback(home, root=root, force=force, **wrapped)
-        except migrate.MigrateError as err:
-            raise longop.OpError(str(err))
-        st.sync("rollback_steps")
-        return {"ok": True, "state": rec.get("state"),
-                "waiting_at_rollback": rec.get("waiting_at_rollback")}
-    return work
-
-
 def _switch_rollback_work(server, home, to):
     root = server.root
     live = _switch_live(server)
@@ -482,57 +418,31 @@ def register():
     def plan(req, slug):
         server = req.server
         home = _home(server, slug)
-        to, account, validate = _options(req.body)
-        if to:
-            p = migrate.switch_plan(home, root=server.root, to=to, **_switch_live(server))
-            return 200, {"ok": True, "plan": p}
-        _no_kind(home)
-        live = _live(server)
-        if not validate:
-            try:
-                p = migrate.plan(home, root=server.root, account=account, **live)
-            except migrate.MigrateError as err:
-                raise HttpError(400, str(err))
-            return 200, {"ok": True, "plan": p}
-
-        def work(op):
-            op.stage("validate", "running", "the checks and one smallest model turn")
-            try:
-                p = migrate.plan(home, root=server.root, account=account, validate=True, **live)
-            except migrate.MigrateError as err:
-                raise longop.OpError(str(err))
-            check = next((c for c in p["checks"] if c["check"] == "validate"), None)
-            op.stage("validate", "done" if check and check["ok"] else "failed",
-                     check and check["detail"])
-            return {"ok": True, "plan": p}
-        return longop.start_response(server, slug, "migrate-plan", work,
-                                     params={"account": account, "validate": True})
+        to = _options(req.body)[0]      # an account or validate with it is a 400
+        if not to:
+            _no_kind(home)
+        p = migrate.switch_plan(home, root=server.root, to=to, **_switch_live(server))
+        return 200, {"ok": True, "plan": p}
 
     @router.route("POST", "/api/cousins/{slug}/migrate/apply")
     def apply(req, slug):
         server = req.server
         home = _home(server, slug)
-        to, account, validate = _options(req.body)
+        to = _options(req.body)[0]      # an account or validate with it is a 400
         if not to:
             _no_kind(home)
-        _confirmed(req.body, "the kind switch" if to else "the migration")
+        _confirmed(req.body, "the kind switch")
         busy = running_migration(server)
         if busy:
             raise HttpError(409, "a %s runs on %s: one migration or kind switch at a time"
                             % (busy["kind"], busy["slug"]), busy=True)
-        if to:
-            live = _switch_live(server)
-            _need_supervisor(live["supervisor_up"], server.root)
-            steps = list(migrate.SWITCH_STEPS[to])
-            steps[steps.index("toml") + 1:steps.index("toml") + 1] = ["cursor"]
-            steps[steps.index("start") + 1:steps.index("start") + 1] = ["notice"]
-            return _start_exclusive(server, slug, "kind-switch", _switch_work(server, home, to),
-                                    {"to": to, "steps": steps, "by": req.user})
-        _need_supervisor(_live(server)["supervisor_up"], server.root)
-        return _start_exclusive(server, slug, "migrate",
-                                _apply_work(server, home, account, validate),
-                                {"account": account, "validate": validate, "by": req.user,
-                                 "steps": ["plan"] + list(migrate.STEPS)})
+        live = _switch_live(server)
+        _need_supervisor(live["supervisor_up"], server.root)
+        steps = list(migrate.SWITCH_STEPS[to])
+        steps[steps.index("toml") + 1:steps.index("toml") + 1] = ["cursor"]
+        steps[steps.index("start") + 1:steps.index("start") + 1] = ["notice"]
+        return _start_exclusive(server, slug, "kind-switch", _switch_work(server, home, to),
+                                {"to": to, "steps": steps, "by": req.user})
 
     @router.route("POST", "/api/cousins/{slug}/migrate/check")
     def check(req, slug):
@@ -563,23 +473,15 @@ def register():
             _no_kind(home)
         force = _bool(body, "force")
         _confirmed(body, "the rollback")
-        if which == "switch":
-            to = _to(body)
-            if not to:
-                raise HttpError(400, "to must name the kind the switch came from")
-            if force:
-                raise HttpError(400, "the kind switch's rollback takes no force")
-            _need_supervisor(_switch_live(server)["supervisor_up"], server.root)
-            return _start_exclusive(server, slug, "kind-switch-rollback",
-                                    _switch_rollback_work(server, home, to),
-                                    {"to": to, "by": req.user})
-        if force and body.get("force_confirm") is not True:
-            raise HttpError(400, "force rolls back with inbox rows nobody will read: it asks a"
-                                 " second time (force_confirm)")
-        _need_supervisor(_live(server)["supervisor_up"], server.root)
-        return _start_exclusive(server, slug, "migrate-rollback",
-                                _rollback_work(server, home, force),
-                                {"force": force, "by": req.user})
+        to = _to(body)
+        if not to:
+            raise HttpError(400, "to must name the kind the switch came from")
+        if force:
+            raise HttpError(400, "the kind switch's rollback takes no force")
+        _need_supervisor(_switch_live(server)["supervisor_up"], server.root)
+        return _start_exclusive(server, slug, "kind-switch-rollback",
+                                _switch_rollback_work(server, home, to),
+                                {"to": to, "by": req.user})
 
 
 register()

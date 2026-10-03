@@ -826,7 +826,7 @@ def persist_agent_values(home, changes, *, root=None):
     its own, then the table as a whole: the account on this lane, an
     opencode model against its account); an sdk model then passes one
     smallest turn on the cousin's own account (the runner's
-    validate_account: NEVER_UNRUN), run in a child process
+    validate_account: a model the CLI cannot run is never written), run in a child process
     (validate_turn_out_of_process) on the effort being written with it;
     and agent_settings.apply writes every change in one atomic write. A
     tmux model is written as given (no pane here to run a turn in).

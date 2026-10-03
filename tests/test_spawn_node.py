@@ -7,6 +7,7 @@ always built under a temp dir, never in the tree (it is a binary the
 gate would refuse).
 """
 import contextlib
+import gc
 import io
 import os
 import pathlib
@@ -58,6 +59,9 @@ class SpawnNodeCase(unittest.TestCase):
             return tar.extractfile(name).read().decode()
 
     def _main(self, argv):
+        # finalize what earlier tests left behind first: a ResourceWarning
+        # from their garbage, collected mid-call, would land in this capture
+        gc.collect()
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = spawn_node_main(argv)

@@ -3,6 +3,28 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.23.0 - 2026-10-03
+
+### Added
+
+- **The gate's allow list is one tested table**
+  (`tests/runner/test_gate_allowlist.py`): each surface, each actor
+  (primary session, subagent, framework writer) and each way of writing.
+  Every read of every path in it must pass, and the known Bash blind
+  spots are pinned as allows, so a fix flips them on purpose.
+- **An opencode or tmux runner says "no perimeter on this lane" at
+  start**, as a stderr line and a `system` `perimeter` event; the cousin
+  still runs.
+
+### Security
+
+- **On the sdk lane a subagent may no longer write** another cousin's
+  proposal in `shared/proposed/`, the tier's `shared/audit.jsonl`, its own
+  cousin's `policy.toml`, `cousin.toml`, `.mcp.json`, `mcp-registry.toml`,
+  `chat-hooks.json`, `.claude/settings.json` or
+  `.claude/settings.local.json`, or anything under another cousin's home.
+  The primary session and the framework's writers are unchanged.
+
 ## 3.22.0 - 2026-10-03
 
 ### Added

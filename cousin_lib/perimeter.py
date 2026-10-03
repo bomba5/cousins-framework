@@ -32,6 +32,21 @@ writing side:
   audits), `self_portrait.commit_candidate` and the body-swap's identity
   trade (`lifecycle._swap_bodies`).
 
+Who writes. The tool gate also hands over the writing cousin's home and
+slug for a subagent, and four more surfaces are then refused to it, all
+anchored on the root (protected_reason's `home`/`slug`):
+
+| surface                               | why                                   |
+|---------------------------------------|---------------------------------------|
+| `shared/proposed/` but `<slug>__*`    | another cousin's proposal             |
+| `shared/audit.jsonl`                  | the tier's record; `shared_tier._audit` appends it |
+| OWN_CONFIG in its own home            | what the next session may do (policy.toml, ...) |
+| `cousins/<other>/**`                  | another cousin's home                 |
+
+So the first two exclusions above hold for the framework's writers and
+the primary session, not for a subagent. A framework writer never passes
+`home` or `slug`, so assert_writable checks the three shapes only.
+
 Anchored on the root: the check is pure and offline (paths are
 normalised, never resolved), so the Bash chokepoint can apply it to a
 parsed write target cheaply. A caller that knows the framework root
@@ -77,6 +92,17 @@ LAW_TAIL = ("config", "law.md")
 PORTRAIT_NAME = "self-portrait.md"
 SHARED_DIR = "shared"
 SHARED_SUBDIRS = ("proposed", "examples")
+PROPOSED_DIR = "proposed"
+AUDIT_NAME = "audit.jsonl"
+COUSINS_DIR = "cousins"
+# A cousin's own configuration, relative to its home: what its next start
+# reads (policy.toml's denies, the MCP servers, the CLI's settings) or
+# what runs on another sender's message (chat-hooks.json). A background
+# pass that rewrote one would loosen the session after it.
+OWN_CONFIG = (("policy.toml",), ("cousin.toml",), (".mcp.json",),
+              ("mcp-registry.toml",), ("chat-hooks.json",),
+              (".claude", "settings.json"), (".claude", "settings.local.json"),
+              (".claude",))
 
 # Tools that WRITE the path they name. Read, Grep and Glob name paths too
 # and are absent on purpose: a subagent reads the law and the shared rules
@@ -97,6 +123,24 @@ DESTINATION_COMMANDS = ("cp", "mv", "install", "ln")
 # Commands whose every positional argument is a write target.
 ARGUMENT_COMMANDS = ("tee", "rm", "unlink", "truncate", "chmod", "chown",
                      "shred", "touch")
+
+
+# The runner kinds with no tool gate: the perimeter's shapes are checked
+# only by the sdk lane's PreToolUse callback (runner.hooks.gate). The
+# runner says so at start (runner.main), so the gap is named where it
+# starts to matter and not only in docs/memory.md.
+UNGATED_KINDS = ("opencode", "tmux")
+
+
+def lane_warning(kind):
+    """The start-up line for a runner kind with no perimeter, or None."""
+    if kind not in UNGATED_KINDS:
+        return None
+    return ("no perimeter on this lane: the %s kind has no tool gate, so a"
+            " subagent's write to the law, a portrait, canonical shared memory,"
+            " the cousin's own configuration or another cousin's home is not"
+            " refused; only the framework's own writers check it"
+            " (docs/memory.md, The perimeter)" % kind)
 
 
 class PerimeterRefused(Exception):
@@ -127,6 +171,53 @@ def _shared_reason(name):
             " shared/proposed/ and a configured reviewer promotes it" % name)
 
 
+_AUDIT_REASON = ("shared/audit.jsonl is the shared tier's append-only record:"
+                 " the framework writes it on every propose and promote, never a"
+                 " subagent; a change to the tier goes through cousin-shared propose")
+
+
+def _config_reason(name, slug):
+    return ("%s is %s's own configuration, which decides what its sessions may"
+            " do: the operator changes it, not a background pass. Note the change"
+            " in memory/ or notes/ and ask the operator" % (name, slug))
+
+
+def _home_reason(where, owner, slug):
+    return ("%s is in %s's home: only %s's own sessions and the framework"
+            " write there. %s writes its own home; to reach %s, send it a"
+            " message (cousin-chat send %s)" % (where, owner, owner, slug, owner, owner))
+
+
+def _proposal_reason(where, owner, slug):
+    return ("%s is %s: %s's proposals go to shared/proposed/%s__<name>.md"
+            " (cousin-shared propose --slug %s)" % (where, owner, slug, slug, slug))
+
+
+def _who_writes(placed, slug, own):
+    """The rows that depend on who writes, for a path already placed under
+    the root: why the cousin `slug`'s subagent may not write it, or None.
+    `own` is its home's parts under the root. Only the tool gate asks
+    (protected_reason with `home` or `slug`)."""
+    if placed[:len(own)] == own and placed[len(own):] in OWN_CONFIG:
+        return _config_reason("/".join(placed[len(own):]), slug)
+    if len(placed) >= 2 and placed[0] == COUSINS_DIR and placed[:len(own)] != own:
+        return _home_reason("/".join(placed), placed[1], slug)
+    if placed == (SHARED_DIR, AUDIT_NAME):
+        return _AUDIT_REASON
+    if placed[:2] == (SHARED_DIR, PROPOSED_DIR):
+        if len(placed) == 3 and placed[2].startswith(slug + "__"):
+            return None                 # its own proposal: the entry path
+        where = "/".join(placed)
+        if len(placed) == 3 and "__" in placed[2]:
+            owner = "%s's proposal" % placed[2].partition("__")[0]
+        elif len(placed) == 2:
+            owner = "the review queue, every cousin's proposals"
+        else:
+            owner = "in the review queue under no cousin's name"
+        return _proposal_reason(where, owner, slug)
+    return None
+
+
 def _under_root(path, root, cwd):
     """The path's parts relative to the framework `root` (an absolute
     path, or a relative one joined to `cwd`, normalised without touching
@@ -149,7 +240,7 @@ def _under_root(path, root, cwd):
     return tuple(p for p in os.path.relpath(full, base).split(os.sep) if p and p != ".")
 
 
-def protected_reason(path, *, root=None, cwd=None):
+def protected_reason(path, *, root=None, cwd=None, home=None, slug=None):
     """Why `path` is protected, or None when it is not. The reason names
     the surface and its owner, because a refusal a caller cannot act on
     is a refusal the caller routes around. With `root` (the framework
@@ -157,7 +248,16 @@ def protected_reason(path, *, root=None, cwd=None):
     <root>/config/law.md, <root>/shared/<name>.md and
     <root>/cousins/<slug>/self-portrait.md. Anything else is the
     caller's own file, a checkout's templates/shared/ included (the
-    default install's checkout IS the root)."""
+    default install's checkout IS the root).
+
+    `home` and `slug` name the cousin whose session is writing (`slug`
+    defaults to the home's directory name). The tool gate passes them for
+    a subagent, and with a root they add the rows that depend on who
+    writes: another cousin's proposal in shared/proposed/, the tier's
+    shared/audit.jsonl, the cousin's own configuration (OWN_CONFIG) and
+    anything in another cousin's home (<root>/cousins/<other>/) are
+    refused. A
+    framework writer (assert_writable) never passes them."""
     placed = _under_root(path, root, cwd)
     if placed is None:
         return None
@@ -168,7 +268,13 @@ def protected_reason(path, *, root=None, cwd=None):
             return _PORTRAIT_REASON
         if len(placed) == 2 and placed[0] == SHARED_DIR and placed[1].endswith(".md"):
             return _shared_reason(placed[1])
-        return None
+        slug = slug or (Path(str(home)).name if home else None)
+        if not slug:
+            return None
+        own = _under_root(home, root, None) if home else None
+        if not isinstance(own, tuple) or not own:
+            own = (COUSINS_DIR, slug)
+        return _who_writes(placed, slug, own)
     parts = _parts(path)
     if not parts:
         return None
@@ -291,13 +397,13 @@ def write_targets(tool_name, tool_input):
     return []
 
 
-def check_tool(tool_name, tool_input, *, root=None, cwd=None):
+def check_tool(tool_name, tool_input, *, root=None, cwd=None, home=None, slug=None):
     """The refusal for a tool call that would WRITE a protected surface,
     or None. One reason per call: the first path, not every path, because
     the caller turns this into a deny message and a list of them reads
-    like a policy document."""
+    like a policy document. `home` and `slug` are protected_reason's."""
     for path in write_targets(tool_name, tool_input):
-        reason = protected_reason(path, root=root, cwd=cwd)
+        reason = protected_reason(path, root=root, cwd=cwd, home=home, slug=slug)
         if reason is not None:
             return ("memory perimeter: %s may not write %s: %s"
                     % (tool_name or "this tool", path, reason))

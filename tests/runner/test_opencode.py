@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from cousin_lib import accounts
 from cousin_lib.delivery import Item
-from cousin_lib.runner import opencode, opencode_http
+from cousin_lib.runner import hooks, opencode, opencode_http
 from cousin_lib.runner.base import RunnerError
 from cousin_lib.runner.opencode import OpencodeRunner
 from cousin_lib.runner.opencode_http import OpencodeServer
@@ -171,12 +171,17 @@ def _result_append_fails_once(r):
 
 
 class OpencodeCase(HermeticCase):
-    def home(self, *, model="local/m1", extra=""):
+    def home(self, *, model="local/m1", extra="", reply_gate=False):
+        """A cousin on opencode. The reply gate is off unless asked for:
+        it sends a text-only answer back once, which would consume a
+        script of its own in every test that is not about it."""
         home = temp_home(self, runner="opencode")
         self.root = home.parent.parent
         toml = (home / "cousin.toml").read_text()
         if model:
             toml += 'model = "%s"\n' % model
+        if not reply_gate:
+            toml += "reply_gate = false\n"
         (home / "cousin.toml").write_text(toml + extra)
         return home
 
@@ -1023,6 +1028,89 @@ class TestTurns(OpencodeCase):
 # excludes `reasoning`, `cache.write` is the cache creation
 SPENT = {"total": 30, "input": 11, "output": 3, "reasoning": 2, "cache": {"read": 10, "write": 4}}
 TOOL_THEN_ANSWER = [("tool", "cousin_memory", {"command": "search"}, "found"), ("text", "done")]
+
+
+class TestReplyGate(OpencodeCase):
+    """The sdk lane's reply gate at the opencode idle: a good run on
+    operator or person chat with no successful `cousin_reply` is sent back
+    once, in the same turn; the end after that always passes."""
+    ASKED = hooks.reply_gate_reason(["operator:ana"])
+
+    def gated(self, scripts, *, reply_gate=True):
+        return self.started(self.runner(scripts, home=self.home(reply_gate=reply_gate)))
+
+    def finished(self, r, receipt):
+        self.assertTrue(_wait(lambda: self.settled(r, receipt) is not None, 8))
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        self.assertTrue(self.factory.fake.settle())
+        time.sleep(0.3)                 # long enough for a second send-back to show
+        return self.outcome(r, receipt)
+
+    def sent(self):
+        return [q["body"]["parts"][0]["text"] for q in self.prompts()]
+
+    def test_a_text_only_answer_is_sent_back_once_and_the_reply_lands(self):
+        r = self.gated([[("text", "Hi again. What do you need?")],
+                        [("tool", "cousin_reply", {"text": "Hi again. What do you need?"},
+                          "replied to ana (#1)"), ("text", "sent")]])
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(len(self.sent()), 2)
+        self.assertEqual(self.sent()[1], self.ASKED)
+        self.assertEqual(self.payloads(r, "gate"), [{"gate": "reply", "threads": ["operator:ana"]}])
+        kinds = [k for k in self.kinds(r) if k in ("turn_start", "text", "gate", "tool", "result")]
+        self.assertEqual(kinds, ["turn_start", "text", "gate", "tool", "text", "result"])
+        results = self.payloads(r, "result")
+        self.assertEqual(len(results), 1, "the send-back is the same turn")
+        self.assertEqual(results[0]["inbox_ids"], [a.inbox_id])
+        self.assertFalse(results[0]["is_error"])
+        self.assertIsNone(self.payloads(r, "user")[1]["echo_of"])
+
+    def test_a_turn_that_replies_at_once_is_not_sent_back(self):
+        r = self.gated([[("tool", "cousin_reply", {"text": "hello"}, "replied to ana (#1)"),
+                         ("text", "done")]])
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(len(self.sent()), 1)
+        self.assertEqual(self.payloads(r, "gate"), [])
+
+    def test_an_ignored_send_back_ends_the_turn_and_is_never_repeated(self):
+        r = self.gated([[("text", "noted")], [("text", "no answer is due")]])
+        a = r.enqueue(_op("fyi, the build is green", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(self.sent()[1:], [self.ASKED])
+        self.assertEqual(len(self.payloads(r, "gate")), 1)
+        self.assertEqual(len(self.payloads(r, "result")), 1)
+        # the next turn is gated afresh
+        b = r.enqueue(_op("and now?", "ana"))
+        self.assertEqual(self.finished(r, b), "delivered")
+        self.assertEqual(len(self.payloads(r, "gate")), 2)
+
+    def test_a_failed_reply_does_not_count(self):
+        r = self.gated([[("tool_error", "cousin_reply", {"text": "hi"}, "ValueError: no thread"),
+                         ("text", "tried")],
+                        [("tool", "cousin_reply", {"text": "hi", "thread": "operator:ana"},
+                          "ValueError: an outbound filter refused it"), ("text", "again")]])
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(self.sent()[1:], [self.ASKED])
+        self.assertEqual(len(self.payloads(r, "gate")), 1)
+
+    def test_the_gate_off_never_sends_back(self):
+        r = self.gated([[("text", "Hi again.")]], reply_gate=False)
+        a = r.enqueue(_op("hi", "ana"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        self.assertEqual(len(self.sent()), 1)
+        self.assertEqual(self.payloads(r, "gate"), [])
+
+    def test_peer_and_loop_turns_are_not_gated(self):
+        r = self.gated([[("text", "noted, Kestrel")], [("text", "tick")]])
+        a = r.enqueue(Item("peer:kestrel", "chat", "hello", sender="Kestrel"))
+        self.assertEqual(self.finished(r, a), "delivered")
+        b = r.enqueue(Item("loop:heartbeat", "loop", "tick", sender="loop"))
+        self.assertEqual(self.finished(r, b), "delivered")
+        self.assertEqual(len(self.sent()), 2)
+        self.assertEqual(self.payloads(r, "gate"), [])
 
 
 class TestUsage(OpencodeCase):

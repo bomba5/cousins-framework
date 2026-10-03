@@ -62,7 +62,8 @@ PERMISSION_NOTIFICATION = "permission_prompt"
 REPLY_TOOL = "mcp__cousin__reply"
 SUBAGENT_REPLY_REASON = "a subagent must name the thread it answers"
 # The thread kinds where a person waits on the chat surface: a turn on one
-# that ends without `reply` is sent back once by the reply gate.
+# that ends without `reply` is sent back once by the reply gate (here on
+# the sdk lane, in opencode.py's _on_idle on the opencode lane).
 HUMAN_KINDS = ("operator", "person")
 REPLY_GATE_REASON = (
     "You are ending this turn without calling reply on %s, so the person who"
@@ -73,6 +74,62 @@ REPLY_GATE_REASON = (
 
 def _kind(thread):
     return str(thread).partition(":")[0]
+
+
+def unanswered_threads(live, replied, implicit):
+    """The reply gate's decision, the same on every lane that has one: the
+    live operator or person threads (`live`, thread ids in turn order) no
+    successful reply this turn covered. `replied` holds the thread ids a
+    reply named, lowercased; `implicit` is whether a reply named none,
+    which covers the turn only while exactly one such thread is live."""
+    human = [t for t in live if _kind(t) in HUMAN_KINDS]
+    if implicit and len(human) == 1:
+        return []
+    return [t for t in human if str(t).lower() not in replied]
+
+
+def reply_gate_reason(missing):
+    """The send-back text for the unanswered threads `missing`."""
+    return REPLY_GATE_REASON % " and ".join(missing)
+
+
+class ReplyLedger:
+    """The reply gate's state for the turn in flight: the threads a
+    successful reply named (lowercased), and whether one named none (the
+    implicit thread). Each lane feeds it its own way (the sdk lane from
+    PostToolUse, the opencode lane from a completed `cousin_reply` part
+    of the session's own event stream); neither feeds a subagent's."""
+
+    def __init__(self):
+        self.threads = set()
+        self.implicit = False
+
+    def note(self, tool_input):
+        """One successful `reply` call with these arguments."""
+        thread = tool_input.get("thread") if isinstance(tool_input, dict) else None
+        if str(thread or "").strip():
+            self.threads.add(str(thread).strip().lower())
+        else:
+            self.implicit = True
+
+    def prompted(self, thread=None):
+        """A new prompt is answered afresh: a reply sent before it does not
+        cover its thread `thread`; the other threads keep what they were
+        answered. With no thread (a prompt nobody can place) every thread
+        is reset."""
+        if thread is None:
+            self.clear()
+            return
+        self.threads.discard(str(thread).lower())
+        if _kind(thread) in HUMAN_KINDS:
+            self.implicit = False
+
+    def clear(self):
+        self.threads.clear()
+        self.implicit = False
+
+    def unanswered(self, live):
+        return unanswered_threads(live, self.threads, self.implicit)
 
 
 def gate(policy, payload, *, root=None):
@@ -192,28 +249,19 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
     lock = lock if lock is not None else contextlib.nullcontext()
     # the policy the gate enforces: the start's, tightened by any edit since
     live = {"policy": policy}
-    # The reply gate's state for the turn in flight: the threads a reply
-    # named (lowercased), and whether one named none (the implicit thread).
-    replied = {"threads": set(), "implicit": False}
+    # The reply gate's state for the turn in flight
+    replied = ReplyLedger()
 
     def note_reply(payload):
         if payload.get("tool_name") != REPLY_TOOL or payload.get("agent_id"):
             return
-        tool_input = payload.get("tool_input")
-        thread = tool_input.get("thread") if isinstance(tool_input, dict) else None
-        if str(thread or "").strip():
-            replied["threads"].add(str(thread).strip().lower())
-        else:
-            replied["implicit"] = True
+        replied.note(payload.get("tool_input"))
 
     def unanswered():
         """The live operator/person threads no reply covered this turn."""
         if not reply_gate or live_threads is None:
             return []
-        human = [t for t in live_threads() if _kind(t) in HUMAN_KINDS]
-        if replied["implicit"] and len(human) == 1:
-            return []
-        return [t for t in human if t.lower() not in replied["threads"]]
+        return replied.unanswered(live_threads())
 
     def guarded(name, fn, fail_closed=False):
         """Every hook fails open but the gate: an exception becomes a
@@ -352,13 +400,7 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         # afresh: a reply sent before it does not cover its thread; the
         # other threads keep what they were answered
         own = thread_for_prompt(payload.get("prompt") or "") if thread_for_prompt else None
-        if own is None:
-            replied["threads"].clear()
-            replied["implicit"] = False
-        else:
-            replied["threads"].discard(str(own).lower())
-            if _kind(own) in HUMAN_KINDS:
-                replied["implicit"] = False
+        replied.prompted(own)
         prompt = payload.get("prompt") or ""
         try:
             changed = await config_note()
@@ -384,10 +426,8 @@ def callbacks(home, *, slug, root, machine, stream, recall=None, recorder=None,
         missing = [] if payload.get("stop_hook_active") else unanswered()
         if missing:
             stream.append("gate", {"gate": "reply", "threads": missing})
-            return {"decision": "block",
-                    "reason": REPLY_GATE_REASON % " and ".join(missing)}
-        replied["threads"].clear()
-        replied["implicit"] = False
+            return {"decision": "block", "reason": reply_gate_reason(missing)}
+        replied.clear()
         return {}
 
     async def on_precompact(payload):

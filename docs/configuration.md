@@ -902,20 +902,26 @@ the model does not write within 5 minutes becomes an emergency handoff built
 from the session transcript and marked `degraded_state: true`; the generation
 still ends.
 
-`reply_gate` (`true` or `false`, default `true`) applies to the `sdk` lane
-only. When a turn that answers an operator or person
-[thread](glossary.md#thread) ends without a successful `reply` on that thread,
-the runner's `Stop` hook sends it back once with the reason: answer now, or
-end the turn again if no answer is due. The stop after that always passes, so
-the gate costs at most one more model step and never loops. A `reply` that
-names no thread covers the turn only when one operator or person thread is
-live; with two, each needs a reply naming it. A subagent's reply does not
-count, and a reply sent before a new prompt was submitted (a message folded
-into the running turn) does not cover that prompt. Only operator and person
-threads are gated (`HUMAN_KINDS` in `runner/hooks.py`). Each block is a `gate`
-event in the runner's stream, with the payload `{"gate": "reply", "threads":
-[...]}`. `false` turns the gate off. A value that is not `true` or `false` (a
-quoted `"false"`) is refused at runner start, exit 2: `cousin-runner:
+`reply_gate` (`true` or `false`, default `true`) applies to the `sdk` and
+`opencode` lanes; the `tmux` lane has no reply gate. When a turn that answers
+an operator or person [thread](glossary.md#thread) is about to end without a
+successful `reply` on that thread, the runner sends the model back once, in
+the same session and the same turn, with the reason: answer now with `reply`,
+or end the turn again if no answer is due. The end after that always passes,
+so the gate costs at most one more model step and never loops. On `sdk` the
+send-back is the `Stop` hook's block; on `opencode` it is one more prompt sent
+at the run's `session.idle`, and the turn's inbox rows close at the idle that
+answers it, so a text-only answer still gets its chance to reach the chat
+surface. Both lanes decide the same way (`hooks.unanswered_threads` in
+`runner/hooks.py`). A `reply` that names no thread covers the turn only when
+one operator or person thread is live; with two, each needs a reply naming it.
+A failed `reply` and a subagent's reply do not count, and a reply sent before
+a new prompt was taken in (a message folded into the running turn) does not
+cover that prompt. Only operator and person threads are gated (`HUMAN_KINDS`
+in `runner/hooks.py`). Each send-back is a `gate` event in the runner's
+stream, with the payload `{"gate": "reply", "threads": [...]}`. `false` turns
+the gate off. A value that is not `true` or `false` (a quoted `"false"`) is
+refused at runner start, exit 2: `cousin-runner:
 cousin.toml [agent] reply_gate must be true or false, got 'false'`.
 
 The runner records `usage` on every `result` event in its stream (the SDK's

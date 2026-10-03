@@ -469,11 +469,11 @@ class TestToolLedgerOnRestart(TestRestartNote):
         sending = AssistantMessage(content=[
             ToolUseBlock(id="tu-read", name="Read", input={"file_path": "/x"}),
             ToolUseBlock(id="tu-send", name="mcp__cousin__send",
-                         input={"to": "sage", "text": "branch is up"})], model="claude-test")
+                         input={"to": "kestrel", "text": "branch is up"})], model="claude-test")
         r1 = self.runner([init_msg(session="s-live"), pushed, done, sending, "HANG",
                           result(session="s-live")])
         r1.start()
-        r1.enqueue(Item("operator:priya", "chat", "push and tell sage", sender="Priya"))
+        r1.enqueue(Item("operator:priya", "chat", "push and tell kestrel", sender="Priya"))
         self.assertTrue(_wait(lambda: self.ledger().exists()
                               and "tu-send" in self.ledger().read_text()))
         r1.stop(timeout=5)
@@ -493,7 +493,7 @@ class TestToolLedgerOnRestart(TestRestartNote):
         self.assertEqual([row["id"] for row in self.rows(r2) if row["id"] != 1
                           and not self.is_note(row)], [])
         self.assertIn("is not delivered again", body)
-        self.assertIn('"push and tell sage"', body)
+        self.assertIn('"push and tell kestrel"', body)
         # taken once: the next turn's begin starts the file afresh
         self.assertTrue(_wait(lambda: "tu-send" not in self.ledger_text()), "taken once")
 

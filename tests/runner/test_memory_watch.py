@@ -4,6 +4,7 @@ import asyncio
 import json
 import pathlib
 import tempfile
+from datetime import datetime
 
 from cousin_lib import memory
 from cousin_lib.runner import hooks, memory_watch
@@ -24,8 +25,13 @@ class WatchCase(HermeticCase):
         (self.home / "cousin.toml").write_text('[cousin]\nslug = "wren"\n')
         memory.remember(self.home, "kestrel", "nests on the roof")      # before the session
 
+    def today(self):
+        # the file memory.remember writes now: the watch reads files in name
+        # order, so a fixed date sorts before or after it depending on the day
+        return self.home / "memory" / "raw" / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+
     def raw_line(self, entry):
-        day = self.home / "memory" / "raw" / "2026-10-02.jsonl"
+        day = self.today()
         day.parent.mkdir(parents=True, exist_ok=True)
         with open(day, "a") as f:
             f.write(json.dumps(entry) + "\n")
@@ -54,7 +60,7 @@ class TestWatch(WatchCase):
 
     def test_a_half_written_line_waits_and_a_folded_file_is_rebaselined(self):
         watch = memory_watch.MemoryWatch(self.home)
-        day = self.home / "memory" / "raw" / "2026-10-02.jsonl"
+        day = self.today()
         entry = {"topic": "t", "content": "c", "cite": "console user ana", "truth_level": "L3"}
         with open(day, "a") as f:
             f.write(json.dumps(entry)[:10])                     # a writer mid-line

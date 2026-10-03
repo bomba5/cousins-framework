@@ -33,7 +33,12 @@ an abort is an interruption, anything else fails the turn. The reply
 gate (`[agent] reply_gate`, hooks.unanswered_threads, the sdk lane's
 decision) runs at that idle: a good run whose operator or person rows
 got no successful `cousin_reply` gets one more prompt with the reason,
-and its rows close at the idle that answers it.
+and its rows close at the idle that answers it. A run that makes the
+same call REPEAT_LIMIT times gets one nudge the same way, and one that
+reaches the limit again is aborted (an interruption). A run with no event
+for `idle_timeout_s` is settled failed, `tool_idle_timeout_s` while a tool
+call is running (opencode is silent while a command works); a call still
+running when its turn ends is recorded as an interrupted failure.
 
 The policy veto lives in the plugin pack: the runner renders
 policy.toml as `<data dir>/cousin-policy.json`, names it to opencode in
@@ -137,6 +142,25 @@ OPENCODE_OUTPUT_MAX = 32000
 # tool(s)/ (code in the server, which GET /config does not list), so the dir
 # is an allowlist: anything else there refuses the start.
 CONFIG_DIR_OWN = frozenset((".gitignore", "node_modules", "package-lock.json"))
+# The loop bound, per run: the same call (the same tool with the same
+# arguments) made REPEAT_LIMIT times gets one nudge into the run; a call
+# that reaches the limit again after the nudge ends the turn as an
+# interruption. A tool in REPEAT_BY_NAME counts by its name alone (the
+# handoff is written once, whatever it says); a file write is progress, and
+# the counts start again after it.
+REPEAT_LIMIT = 3
+REPEAT_BY_NAME = (_policy.HANDOFF_TOOL,)
+PROGRESS_TOOLS = ("Edit", "Write", "apply_patch")
+
+
+def repeat_nudge_text(tool, count, *, by_name=False):
+    """What the runner tells a model that keeps making the same call."""
+    what = "called `%s` %d times in this turn" % (tool, count)
+    if not by_name:
+        what += " with the same arguments"
+    return ("[runner] You have %s. Repeating a call does not make progress. Stop calling it:"
+            " if something is still owed, do it once another way; otherwise end your turn"
+            " now. One more repeat and the runner ends this turn." % what)
 
 
 def tool_name(name):
@@ -490,6 +514,7 @@ class _Run:
         self.pending_at = None
         self.emitted = set()
         self.open_parts = {}        # part id -> [kind, text]: streaming, not yet complete
+        self.open_tools = {}        # call id -> (part, state): running, no result seen yet
         self.last_event = time.monotonic()
         self.over = False
         self.results = 0
@@ -498,6 +523,8 @@ class _Run:
         self.replied = hooks.ReplyLedger()  # the reply gate: what this run's replies covered
         self.gated = False          # the gate sent its one send-back (or tried to)
         self.follow_up = None       # that send-back's _Sent
+        self.repeats = {}           # the loop bound: call key -> times made in this run
+        self.nudge = None           # the loop bound's one nudge (_Sent), once sent
         self.deadline = None
 
     def unclosed(self):
@@ -521,6 +548,12 @@ class OpencodeRunner:
     # how often a runner waiting for a login reads its auth.json mark and
     # the login file between two looks
     login_poll_s = 1.0
+    # The idle bound while a tool call is running (its part seen `running`,
+    # no `completed` or `error` yet): opencode sends nothing while a tool
+    # works, so a long command is not a stalled stream. The SDK lane's
+    # tool_idle_timeout_s; idle_timeout_s bounds every other wait.
+    tool_idle_timeout_s = 3600.0
+    repeat_limit = REPEAT_LIMIT
     mcp_timeout_s = 10.0
     connect_timeout_s = 10.0
     plugin_timeout_s = PLUGIN_TIMEOUT_S
@@ -1238,6 +1271,9 @@ class OpencodeRunner:
                 self.machine.to("errored", message)
         self.turn.end()
         self.stream.append("error", {"error": message})
+        run = self._run
+        if run is not None:
+            self._close_open_tools(run, message)
         with self._lock:
             self._live = False
             self._run = None
@@ -1343,6 +1379,7 @@ class OpencodeRunner:
             if run.error is None:
                 run.error = ("failed", "%s: %s" % (type(exc).__name__, exc))
         finally:
+            self._close_open_tools(run, self._ended_why(run))
             with self._lock:
                 self._live = False
                 self._run = None
@@ -1547,8 +1584,12 @@ class OpencodeRunner:
             self.stream.append("tool", {"id": call, "name": part.get("tool"),
                                         "input": state.get("input") or {}})
             self._record("PreToolUse", part, state)
+            self._check_repeat(run, part, state)
+        if status == "running" and (call, "result") not in run.emitted:
+            run.open_tools[call] = (part, state)
         if status in ("completed", "error") and (call, "result") not in run.emitted:
             run.emitted.add((call, "result"))
+            run.open_tools.pop(call, None)
             text = state.get("output") if status == "completed" else state.get("error")
             self.stream.append("tool_result", {"tool_use_id": call,
                                                "is_error": status == "error",
@@ -1564,7 +1605,62 @@ class OpencodeRunner:
             self._record("PostToolUse" if status == "completed" else "PostToolUseFailure",
                          part, state)
 
-    def _record(self, event, part, state):
+    def _check_repeat(self, run, part, state):
+        """The loop bound (REPEAT_LIMIT): a call made the limit's number of
+        times in this run gets one nudge, sent into the run as the reply
+        gate's send-back is; a call that reaches the limit after the nudge
+        aborts the run, which settles as an interruption (rows the model
+        received close, the rest go back). The handoff turn is not bounded:
+        its deadline is."""
+        if run.quiet or self.repeat_limit <= 0:
+            return
+        name = sdk_tool_name(part.get("tool"))
+        if name in PROGRESS_TOOLS:
+            run.repeats.clear()
+            return
+        by_name = name in REPEAT_BY_NAME
+        args = state.get("input") if isinstance(state.get("input"), dict) else {}
+        key = (name,) if by_name else (name, json.dumps(args, sort_keys=True, default=str))
+        count = run.repeats[key] = run.repeats.get(key, 0) + 1
+        if count < self.repeat_limit:
+            return
+        event = {"gate": "repeat", "tool": part.get("tool"), "count": count}
+        if run.nudge is None:
+            self.stream.append("gate", dict(event, action="nudge"))
+            text = repeat_nudge_text(part.get("tool"), count, by_name=by_name)
+            try:
+                run.nudge = self._send(run, None, text)
+            except Exception as exc:  # noqa: BLE001 - not sent: the next repeat ends the turn
+                run.nudge = False
+                self.stream.append("error", {"error": "repeat nudge: %s: %s"
+                                             % (type(exc).__name__, exc)})
+            return
+        if self._interrupt_requested:
+            return
+        self.stream.append("gate", dict(event, action="end"))
+        self._abort()
+
+    def _close_open_tools(self, run, why):
+        """A turn that ends with a tool call still running (the runner's own
+        bound, a stop, the server gone) never sees the call's result: opencode
+        settles the part after the turn is over, when no run reads it. Each
+        such call is closed here as an interrupted failure, its `tool_result`
+        on the stream and its activity line written, so a cut call is never
+        missing from the record."""
+        for call, (part, state) in list(run.open_tools.items()):
+            run.open_tools.pop(call, None)
+            if (call, "result") in run.emitted:
+                continue
+            run.emitted.add((call, "result"))
+            error = "the turn ended while the call was running (%s); its result was not seen" % why
+            try:
+                self.stream.append("tool_result", {"tool_use_id": call, "is_error": True,
+                                                   "text": error[:TEXT_CHARS]})
+            except Exception:  # noqa: BLE001 - the record below still runs
+                pass
+            self._record("PostToolUseFailure", part, dict(state, error=error), interrupt=True)
+
+    def _record(self, event, part, state, *, interrupt=None):
         """One tool part as the SDK lane's hook payload, to the recording
         library (activity line, subagent job for `task`), with its arguments.
         A PreToolUse the policy denies is not recorded (hooks.recorder_for's
@@ -1581,7 +1677,8 @@ class OpencodeRunner:
             payload["tool_response"] = state.get("output")
         elif event == "PostToolUseFailure":
             payload["error"] = state.get("error")
-            payload["is_interrupt"] = bool(self._interrupt_requested)
+            payload["is_interrupt"] = bool(self._interrupt_requested if interrupt is None
+                                           else interrupt)
         try:
             self.recorder(payload)
         except Exception as exc:  # noqa: BLE001 - a recorder never fails the turn
@@ -1640,9 +1737,9 @@ class OpencodeRunner:
         an idle with nothing announced is ignored."""
         if run is None or not self._live or run.over:
             return
-        if run.follow_up is not None and not run.follow_up.echoed \
+        if any(s and not s.echoed for s in (run.follow_up, run.nudge)) \
                 and run.error is None and not self._interrupt_requested:
-            return          # the gate's send-back is not stored yet: its idle ends the turn
+            return          # a send-back is not stored yet: its idle ends the turn
         if any(s.echoed and not s.closed for s in run.sent) and not self._gate_reply(run):
             self._settle(run)
 
@@ -1760,7 +1857,18 @@ class OpencodeRunner:
             finally:
                 self._end_turn(run)
 
+    def _ended_why(self, run):
+        """Why a turn ended, in a few words, for a call it cut."""
+        if run.error is not None and run.error[0] != "aborted":
+            return str(run.error[1])
+        if self._stop.is_set():
+            return "the runner stopped"
+        if self._interrupt_requested or run.error is not None:
+            return "interrupted"
+        return "the turn was over"
+
     def _end_turn(self, run):
+        self._close_open_tools(run, self._ended_why(run))
         self.turn.end()
         with self._lock:
             self._live = False
@@ -1817,14 +1925,18 @@ class OpencodeRunner:
     def _bounds(self, run, now):
         """A turn that cannot end by itself is settled failed: an error with
         no prompt announced (opencode never stored it: no idle follows), no
-        event for `idle_timeout_s`, or the server gone. True when settled."""
+        event for `idle_timeout_s` (`tool_idle_timeout_s` while a tool call
+        is running: a tool is silent while it works), or the server gone.
+        True when settled."""
+        idle_s = self.tool_idle_timeout_s if run.open_tools else self.idle_timeout_s
         if run.pending_error is not None and now - run.pending_at >= self.error_grace_s:
             run.error, run.pending_error = run.pending_error, None
         elif run.deadline is not None and now >= run.deadline:
             run.error = ("failed", "handoff timeout (%.0fs)" % self.handoff_deadline_s)
             self._abort(quiet=True)
-        elif now - run.last_event >= self.idle_timeout_s:
-            run.error = ("failed", "no event from opencode for %.0fs" % self.idle_timeout_s)
+        elif now - run.last_event >= idle_s:
+            run.error = ("failed", "no event from opencode for %.0fs%s"
+                         % (idle_s, " with a tool call running" if run.open_tools else ""))
             self._abort(quiet=True)
         elif self._server is not None and not self._server.alive():
             run.error = ("failed", "opencode serve exited during the turn")

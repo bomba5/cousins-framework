@@ -208,7 +208,11 @@ chat history and inbox directly, from the sender's own process, as a
 `chat` item on the `peer:wren` thread, and Kestrel answers with
 `cousin-chat send wren ...`. A cousin with no runner is refused, exit 1
 ([above](#where-a-message-goes)). The sender name is the sending cousin's
-`name`; `--from` overrides it.
+`name`. `--from` may only respell it (the cousin's own `name` or slug, case
+and spaces aside): any other name is refused, exit 2, and nothing is sent.
+So is a sender name that is the target's operator or one the framework
+writes itself (`fw-hook`, `runner`): a cousin's message never reaches the
+operator-only paths, such as correction capture.
 
 The two paths don't mix, and picking the wrong one fails quietly:
 

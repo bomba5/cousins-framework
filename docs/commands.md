@@ -697,9 +697,17 @@ that also hosts a live install. `--mode triage` prints a one-line manifest
 per hit instead of the gate's file:line report. Exit 0 clean, 1 a hit (gate
 mode only).
 
+`--commits RANGE` scans what a push publishes besides the tree: every
+commit message in the range (the same names, addresses, paths and secret
+shapes), any `Co-authored-by` trailer, and, with `--expect-author 'NAME
+<EMAIL>'`, any author or committer who is somebody else. Run it before a
+push; exit 2 when git refuses the range.
+
 ```
 cousin-gate --root /tmp/publish --denylist ~/private/denylist.txt
 cousin-gate --root . --denylist denylist.txt --git-visible
+cousin-gate --root . --denylist denylist.txt --commits origin/main..HEAD \
+    --expect-author 'Ana Example <ana@example.invalid>'
 ```
 
 ## Removed in 3.0.0

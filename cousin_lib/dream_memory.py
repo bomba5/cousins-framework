@@ -64,6 +64,7 @@ import os
 import re
 import time
 import zlib
+from datetime import date, timedelta
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -159,13 +160,37 @@ def _read_lines(path):
                                                      type(err).__name__, err))
 
 
+def _archive_offset(path, day):
+    """The first line of a monthly archive written on or after the day
+    before `day` (YYYY-MM-DD), by the lines' own timestamps: raw_fold
+    appends whole day files in day order, so a folded day starts at about
+    that line. A day of slack, because a day file is named by local time
+    and its lines are stamped in UTC: a pass resumed here dreams again at
+    most a day it had already read, and never skips one it had not. An
+    archive with no readable timestamps is read from its start."""
+    try:
+        floor = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+    except ValueError:
+        return 0
+    stamped = False
+    for i, line in enumerate(_read_lines(path)):
+        try:
+            when = str(json.loads(line).get("timestamp") or "")[:10]
+        except (ValueError, AttributeError):
+            continue
+        if not when:
+            continue
+        stamped = True
+        if when >= floor:
+            return i
+    return len(_read_lines(path)) if stamped else 0
+
+
 def _index_of(files, month):
     """Where in `files` a cursor's stem points: the file itself; else,
-    for a day raw_fold folded away, the start of its month's archive (it
-    sorts before the day, and where the day's lines sit inside it is not
-    known: re-dreaming the month costs tokens, skipping it would lose the
-    day's lines past the cursor); else the first file past it; else
-    len(files): the cursor is past the end of the store."""
+    for a day raw_fold folded away, its month's archive (`_resume` finds
+    the day inside it); else the first file past it; else len(files):
+    the cursor is past the end of the store."""
     for i, (stem, _rel, _path) in enumerate(files):
         if stem == month:
             return i
@@ -185,9 +210,13 @@ def _resume(files, through):
     if not through:
         return 0, 0
     index = _index_of(files, through["month"])
-    if index >= len(files) or files[index][0] != through["month"]:
-        return index, 0            # the file it named is folded away
-    return index, through["lines"]
+    if index < len(files) and files[index][0] == through["month"]:
+        return index, through["lines"]
+    if index < len(files) and len(through["month"]) == 10 \
+            and files[index][0] == through["month"][:7]:
+        # the day it named is folded into this archive
+        return index, _archive_offset(files[index][2], through["month"])
+    return index, 0
 
 
 # ---- the ledger --------------------------------------------------------------
@@ -487,6 +516,11 @@ def slice_for(home, *, chars=40000, since=None):
             since = cursor({"month": since, "lines": 0}, what="since")["month"]
             index = next((i for i, f in enumerate(files) if _key(f[0]) >= since),
                          len(files))
+            folded = next((i for i, f in enumerate(files) if f[0] == since[:7]), None)
+            if len(since) == 10 and folded is not None:
+                # days of since's month folded early (a compact with fewer
+                # hot days than the floor): start inside that archive
+                index, first = folded, _archive_offset(files[folded][2], since)
         rendered, ids, topics = [], set(), set()
         stems, last, machine, unread = [], None, 0, 0
         used, shown, cut, consumed = 0, 0, "end", 0

@@ -1,71 +1,22 @@
-"""cousin-migrate: move one cousin from the legacy tmux lane to the SDK runner
-(the runbook is docs/migrating.md).
+"""cousin-migrate: switch a runner cousin between the sdk and tmux kinds,
+measure a cousin on its runner, and tidy away the keys 2.0.0 no longer
+reads (the runbook is docs/migrating.md).
 
-Nothing here runs on its own. A merge, an upgrade or a boot never
-migrates a cousin: only the operator's `cousin-migrate apply <slug>
---yes` does, one cousin at a time, and `cousin-migrate rollback <slug>
---yes` undoes it.
+Nothing here runs on its own: only the operator's command does, one
+cousin at a time.
 
-  plan      the checks and the steps; writes nothing (the default look).
-            Its `mcp` line names the .mcp.json servers the runner will
-            load (the file stays; `cousin` in it is skipped).
-            The cousin must be RUNNING on the tmux lane: migrating a
-            stopped cousin would start it (the supervisor starts every
-            runner cousin), so it is started first or left alone.
-  apply     the steps, in order, stopping at the first that fails:
-              close    a clean stop of the tmux session (the caller's `close`
-                       action: the handoff, the transcript mined, the generation
-                       bumped; _live() wires none, the legacy lane's clean stop
-                       is gone); a handoff not written during the close is a
-                       warning with its age (handoff_freshness)
-              handover the tmux lane's transcript path(s) recorded in
-                       data/previous-transcript.json (handover.py): the
-                       working conversation does not carry, and the runner's
-                       first fresh session is handed the path. Never fails:
-                       a transcript that cannot be found is recorded missing
-              import   the agent CLI's own auto-memory folded in
-                       (memory_import.apply: idempotent, a baseline first)
-              toml     cousin.toml [agent] runner = "sdk", the account, and
-                       what the tmux lane's [runtime] carries (the
-                       runner reads only [agent]): model and effort, and
-                       for the key mode (agent_auth.MODE_API_KEY) an
-                       anthropic-key account <slug>-key made from the
-                       cousin's own key file
-                       (an existing [agent] key wins); only once the tmux
-                       session is still down
-              start    the review gate's cursor
-                       opened afresh (what the cousin wrote on the tmux lane
-                       is not the gate's), the supervisor asked to start
-                       the runner, and the cousin's chat server started (the
-                       supervisor runs none: a peer's `cousin-chat send`,
-                       an MCP send and a hive tell-home all reach the inbox
-                       through it)
-              verify   the runner child stays `running` and holds its lock
-                       for STABLE_S, and the chat server answers /health for
-                       the slug
-            data/migration.json holds the prior cousin.toml, its exact
-            bytes and mode, before the first step, every step's outcome,
-            the handover record and the warnings
-  rollback  undo exactly the steps that ran, and refuse what would be
-            unsafe: a record already rolled back, inbox rows still
-            waiting (nobody reads the inbox on the tmux lane) or an inbox
-            that cannot be read (both unless --force), a runner that is not
-            down after its stop. When `toml` ran: stop the runner, wait
-            until it is down, put the saved bytes and mode back, have the
-            supervisor rescan. The handover record (and a consumed one) is
-            removed. A key account the migration made is
-            removed with its secret when no other cousin names it (else
-            kept, and why). Then the tmux session started,
-            since the cousin was running when `apply` began, unless it
-            already runs; last, the supervisor's hold on the runner
-            (`run/held`, which its stop wrote) is released: a tmux cousin
-            carries none. A step that fails is recorded and reported.
+  plan      --to sdk|tmux: the kind switch's checks and steps; writes
+            nothing. Without --to it is refused: 2.0.0 keeps no
+            conversion from the legacy tmux lane (no_kind_line).
+  apply     --to sdk|tmux --yes: the switch's steps, in order, stopping at
+            the first that fails, recorded in data/kind-switch.json.
+  rollback  --to <the kind it came from> --yes: undo a switch.
   check     the exit criterion over the runner's own records since the
-            migration (or --since): inbox rows that never reached done,
-            tool calls with no recorded result, recorder hooks that failed,
-            the runner's model, effort and account against the cousin's
-            [runtime] (a MISMATCH is not ok), and whether the chat server
-            answers
+            migration or switch (or --since): inbox rows that never
+            reached done, tool calls with no recorded result, recorder
+            hooks that failed, the runner's model, effort and account
+            against the cousin's [runtime] (a MISMATCH is not ok), and,
+            with --validate, one smallest model turn
   tidy      (2.0.0) the keys 2.0.0 no longer reads (removed_keys),
             removed from one cousin's cousin.toml (`tidy <slug>`) or from
             every cousin's and the install's config/harness.toml,
@@ -81,18 +32,10 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             server for this home; the pid file is removed. A cousin with
             no runner kind is refused: tidy is not a conversion.
 
-The supervisor interface assumed: a stop through spawn.stop_cousin waits until the child is
-down (up to 35 s) unless told otherwise; `start {slug}` clears the stop's
-hold marker; `reload` never restarts a stopped child; snapshot()'s
-children rows carry `state` (running, backoff, failing, stopped); a
-runner's exit 5 (another runner holds the lock) reads `backoff`.
-
 Every live action is a keyword argument (the tests inject all of them);
-_live() gives the real ones."""
+_live() and _switch_live() give the real ones."""
 import argparse
 import base64
-import contextlib
-import importlib.util
 import json
 import os
 import re
@@ -106,14 +49,15 @@ from pathlib import Path
 from cousin_lib import removed_keys
 from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds
 
+# A 1.x migration's record and its steps: the migration itself is gone, but
+# `check` still dates from a record it left, and the console's GET
+# .../migrate still serves both.
 RECORD = "data/migration.json"
 STEPS = ("close", "handover", "import", "toml", "start", "verify")
 STALE_S = 3600.0          # an inbox row not done after this long is a lost message
 TOOL_GRACE_S = 600.0      # a tool call this recent may still be running
 VERIFY_S = 90.0           # how long verify waits for a stable runner
 TRUST_WAIT_S = 600.0      # how long a kind switch's verify waits for the operator at the pane's trust dialog
-STABLE_S = 10.0           # how long the runner must stay up to count as started
-DOWN_S = 60.0             # how long rollback waits for a stopped runner to let go of its lock
 
 
 class MigrateError(Exception):
@@ -141,79 +85,15 @@ def read_record(home):
     return data if isinstance(data, dict) else None
 
 
-def _write_record(home, rec):
-    path = Path(home) / RECORD
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(rec, indent=1) + "\n")
-    os.replace(tmp, path)
-
-
-# ------------------------------------------------------------ plan
+# ------------------------------------------------------------ checks
 
 def _check(name, ok, detail):
     return {"check": name, "ok": bool(ok), "detail": detail}
 
 
-HANDOFF = "data/handoff.md"
-
-
-def _age(seconds):
-    seconds = max(0.0, float(seconds))
-    if seconds < 120:
-        return "%ds" % seconds
-    if seconds < 7200:
-        return "%dm" % (seconds // 60)
-    if seconds < 172800:
-        return "%.1fh" % (seconds / 3600)
-    return "%.1fd" % (seconds / 86400)
-
-
-def _handoff_mtime_ns(home):
-    try:
-        return (Path(home) / HANDOFF).stat().st_mtime_ns
-    except OSError:
-        return None
-
-
-def handoff_age(home, now=None):
-    """How old data/handoff.md is now, as text, or None when there is none."""
-    try:
-        mtime = (Path(home) / HANDOFF).stat().st_mtime
-    except OSError:
-        return None
-    return _age((time.time() if now is None else now) - mtime)
-
-
-def handoff_freshness(home, before_ns, stages=()):
-    """(fresh, detail, warning or None) after the close: the runner starts
-    from the handoff, so it must be one written during this close (its
-    mtime moved past `before_ns`, the mtime before the close; None when
-    there was no file). The clean stop waits for exactly that, else
-    writes an emergency handoff; a cousin whose session was already gone
-    gets neither, which this catches."""
-    after = _handoff_mtime_ns(home)
-    if after is None:
-        return False, "no %s after the close" % HANDOFF, (
-            "no %s after the close: the runner starts from STATUS.md and memory alone"
-            % HANDOFF)
-    if before_ns is not None and after <= before_ns:
-        age = handoff_age(home)
-        return False, "%s not written during the close (%s old)" % (HANDOFF, age), (
-            "%s was not written during the close: it is %s old, and the runner starts"
-            " from it" % (HANDOFF, age))
-    names = {st.get("stage"): st for st in stages or () if isinstance(st, dict)}
-    if "emergency_handoff" in names:
-        return True, "handoff written during the close (the framework's emergency one)", (
-            "the handoff is the framework's emergency one: the cousin did not write it"
-            " in time, so the runner starts from a degraded handoff")
-    clean = (names.get("wait_handoff") or {}).get("wrote_clean")
-    return True, "handoff written during the close%s" % (" (clean)" if clean else ""), None
-
-
 # ------------------------------------------------------------ what [runtime] carries
 
 CARRIED = ("model", "effort")      # [runtime] key -> the same [agent] key
-KEY_SUFFIX = "-key"                # the per-cousin key account: <slug>-key
 
 
 def _cousin_toml(home):
@@ -249,294 +129,6 @@ def tmux_values(home, root):
     return out
 
 
-def _key_env(root):
-    """The variable the tmux lane's key file names (config/harness.toml
-    [auth.api_key] key_env), else ANTHROPIC_API_KEY."""
-    from cousin_lib import agent_auth
-    cfg = agent_auth.api_key_config(root)
-    return cfg["key_env"] if cfg else "ANTHROPIC_API_KEY"
-
-
-def _cousin_key(home, root):
-    """The key from the cousin's own <home>/.secrets/api-key.env, read by
-    agent_auth.read_key (every check it makes). MigrateError naming the
-    file and the problem, never the content."""
-    from cousin_lib import agent_auth
-    try:
-        return agent_auth.read_key(home, _key_env(root))
-    except agent_auth.AuthError as err:
-        raise MigrateError(str(err))
-
-
-def carry(home, root, account=None):
-    """What `apply`'s toml step carries from the tmux lane's [runtime] into
-    the runner lane's [agent] (the runner reads only [agent]):
-
-      values   {key: value} to write: model, effort, account
-      rows     [{key, action (carry, kept, create, reuse, none), detail}]
-      create   the key account to make, {name, secret_file (root-relative),
-               write_secret, add_table}, or None
-      error    why the carry cannot be done (a blocker), or None
-
-    An existing [agent] key wins and is reported, as does an explicit
-    --account. `[runtime] auth` in the key mode (agent_auth.MODE_API_KEY)
-    becomes the anthropic-key account <slug>-key, made from the cousin's
-    own key file; a key file
-    that is missing or malformed is an error, never the host login. The
-    key itself is never in what this returns."""
-    from cousin_lib import accounts, agent_auth
-    home, root = Path(home), Path(root)
-    agent = _agent(home)
-    values, rows = {}, []
-    out = {"values": values, "rows": rows, "create": None, "error": None}
-    try:
-        effective = tmux_values(home, root)
-    except MigrateError as err:
-        out["error"] = str(err)
-        return out
-    for key in CARRIED:
-        value, source = effective[key]
-        if agent.get(key) is not None:
-            rows.append({"key": key, "action": "kept", "detail": "[agent] %s %r kept%s" % (
-                key, agent[key], "" if value is None or value == agent[key] else
-                " over %s %r" % (source, value))})
-        elif value is not None:
-            values[key] = value
-            rows.append({"key": key, "action": "carry",
-                         "detail": "%s %r -> [agent] %s" % (source, value, key)})
-        else:
-            rows.append({"key": key, "action": "none",
-                         "detail": "no %s configured: the CLI's default, as on the tmux lane"
-                                   % key})
-    try:
-        mode = agent_auth.read_mode(home)
-    except agent_auth.AuthError as err:
-        out["error"] = str(err)
-        return out
-    if mode != agent_auth.MODE_API_KEY:
-        rows.append({"key": "account", "action": "none", "detail":
-                     "[runtime] auth %r: %s" % (mode, "--account %s" % account if account else
-                                                "[agent] account %r kept" % agent["account"]
-                                                if agent.get("account") else "the host login")})
-        return out
-    auth = "[runtime] auth %r" % mode
-    if account:
-        rows.append({"key": "account", "action": "kept", "detail":
-                     "--account %s given: %s not carried (the operator's choice)" % (account, auth)})
-        return out
-    for existing in ("account", "api_key_file"):
-        if agent.get(existing):
-            rows.append({"key": "account", "action": "kept", "detail":
-                         "[agent] %s %r kept over %s" % (existing, agent[existing], auth)})
-            return out
-    slug = home.name
-    name = slug + KEY_SUFFIX
-    no_host = " (never the host login in its place)"
-    if not accounts._NAME.match(name):
-        out["error"] = ("%s: the account name %r does not match %s; add one to"
-                        " config/accounts.toml and pass --account%s"
-                        % (auth, name, accounts._NAME.pattern, no_host))
-        return out
-    try:
-        key = _cousin_key(home, root)
-        known = accounts.load(root)
-    except (MigrateError, accounts.AccountsError) as err:
-        out["error"] = "%s: %s%s" % (auth, err, no_host)
-        return out
-    rel = "%s/%s" % (accounts.SECRETS_DIR, name)
-    create = {"name": name, "secret_file": rel, "write_secret": True, "add_table": True}
-    if name in known:
-        acct = known[name]
-        if acct.kind != "anthropic-key":
-            out["error"] = ("%s: config/accounts.toml already has %s of kind %s, not"
-                            " anthropic-key%s" % (auth, name, acct.kind, no_host))
-            return out
-        create.update(add_table=False, secret_file=os.path.relpath(acct.secret_file, root))
-        try:
-            held = accounts._read_secret(acct)
-        except accounts.SecretMissing:
-            held = None
-        except accounts.AccountsError as err:
-            out["error"] = "%s: %s%s" % (auth, err, no_host)
-            return out
-        if held is not None and held != key:
-            out["error"] = ("%s: account %s already holds a different key than %s%s"
-                            % (auth, name, agent_auth.key_file(home), no_host))
-            return out
-        create["write_secret"] = held is None
-    else:
-        # no table, but a secret may already sit at the path: never
-        # overwritten, and never removed by a rollback (not ours)
-        try:
-            held = accounts._read_secret(accounts.Account(
-                name, "anthropic-key", None, root / rel, implicit=True))
-        except accounts.SecretMissing:
-            held = None
-        except accounts.AccountsError as err:
-            out["error"] = "%s: %s is already there and unusable: %s%s" % (
-                auth, rel, err, no_host)
-            return out
-        if held is not None and held != key:
-            out["error"] = ("%s: %s already holds a different key than %s%s"
-                            % (auth, rel, agent_auth.key_file(home), no_host))
-            return out
-        create["write_secret"] = held is None
-    values["account"] = name
-    if create["add_table"] or create["write_secret"]:
-        out["create"] = create
-        rows.append({"key": "account", "action": "create", "detail":
-                     "%s -> [agent] account %r, an anthropic-key account made from %s"
-                     " (%s)" % (auth, name, agent_auth.key_file(home), "; ".join(
-                         (["secret %s, 0600" % create["secret_file"]] if create["write_secret"]
-                          else ["secret %s already holds this key: kept, not ours"
-                                % create["secret_file"]])
-                         + (["its table appended to config/accounts.toml"]
-                            if create["add_table"] else [])))})
-    else:
-        rows.append({"key": "account", "action": "reuse", "detail":
-                     "%s -> [agent] account %r (already in config/accounts.toml with this"
-                     " key)" % (auth, name)})
-    return out
-
-
-def _appendix(text, name, secret_rel):
-    """What appending [accounts.<name>] to `text` adds, exactly: the block,
-    after one blank line when the file has content. The file's own bytes
-    are never touched, so removing this suffix gives them back."""
-    block = '[accounts.%s]\nkind = "anthropic-key"\nsecret_file = %s\n' % (
-        name, json.dumps(secret_rel))
-    if not text:
-        return block
-    return ("\n" if text.endswith("\n") else "\n\n") + block
-
-
-def _write_accounts(root, text, mode):
-    """config/accounts.toml atomically with `mode`; never a file that does
-    not parse."""
-    tomllib.loads(text)
-    path = Path(root) / "config" / "accounts.toml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".toml.tmp")
-    tmp.write_text(text)
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
-
-
-def _append_account(root, name, text, appended, mode):
-    """config/accounts.toml becomes `text` + `appended`; the result must
-    load with the new account. (Read-modify-write with no lock: two
-    migrations at the same instant could lose a table; parked.)"""
-    from cousin_lib import accounts
-    _write_accounts(root, text + appended, mode)
-    if name not in accounts.load(root):
-        raise MigrateError("config/accounts.toml does not load %s after the write" % name)
-
-
-def make_account(home, root, create, record=lambda done: None):
-    """The key account `carry` planned: the secret (the cousin's key, one
-    line, 0600 in a 0700 directory, through accounts' private writer) and
-    the config/accounts.toml table. `record(done)` is called BEFORE each
-    sub-step (its state `planned`) and after it (`written`), so a rollback
-    after a failure half-way removes exactly what exists. What it did,
-    never the key."""
-    from cousin_lib import accounts
-    root = Path(root)
-    done = {"name": create["name"], "secret_file": create["secret_file"], "secret": None,
-            "table": None}
-    if create["write_secret"]:
-        done["secret"] = "planned"
-        record(done)
-        accounts._write_secret(root / create["secret_file"], _cousin_key(home, root))
-        done["secret"] = "written"
-        record(done)
-    if create["add_table"]:
-        path = root / "config" / "accounts.toml"
-        try:
-            text, mode, existed = path.read_text(), path.stat().st_mode & 0o7777, True
-        except FileNotFoundError:
-            text, mode, existed = "", 0o644, False
-        appended = _appendix(text, create["name"], create["secret_file"])
-        done["table"] = {"appended": appended, "created_file": not existed, "state": "planned"}
-        record(done)
-        _append_account(root, create["name"], text, appended, mode)
-        done["table"]["state"] = "written"
-        record(done)
-    return done
-
-
-def _users_of(root, name, but):
-    """The cousins under <root>/cousins whose cousin.toml names account
-    `name`, except `but`."""
-    out = []
-    for toml in sorted((Path(root) / "cousins").glob("*/cousin.toml")):
-        if toml.parent.name == but:
-            continue
-        try:
-            agent = tomllib.loads(toml.read_text()).get("agent") or {}
-        except (OSError, tomllib.TOMLDecodeError):
-            continue
-        if agent.get("account") == name:
-            out.append(toml.parent.name)
-    return out
-
-
-def drop_account(home, root, made):
-    """Rollback's half of make_account, for what exists of it (a sub-step
-    `planned` may or may not have happened). Kept, and why, when another
-    cousin names the account. The table: exactly the bytes appended are
-    taken out, the rest of the file byte for byte (a file the migration
-    created and left empty is removed); kept when those bytes are no
-    longer there. The secret: removed unless the table stayed or an
-    account in config/accounts.toml still resolves to its path. The
-    cousin's own key file is never touched."""
-    from cousin_lib import accounts
-    root = Path(root)
-    name = made["name"]
-    users = _users_of(root, name, Path(home).name)
-    if users:
-        return "account %s kept: %s use it" % (name, ", ".join(users))
-    parts = []
-    table = made.get("table")
-    if table:
-        path = root / "config" / "accounts.toml"
-        try:
-            text = path.read_text()
-        except FileNotFoundError:
-            text = None
-        at = -1 if text is None else text.rfind(table["appended"])
-        if at >= 0:
-            new = text[:at] + text[at + len(table["appended"]):]
-            if not new and table.get("created_file"):
-                path.unlink()
-            else:
-                _write_accounts(root, new, path.stat().st_mode & 0o7777)
-            parts.append("its table")
-        elif table.get("state") == "written":
-            return ("account %s kept: its table in config/accounts.toml changed since the"
-                    " migration" % name)
-    if made.get("secret") in ("planned", "written"):
-        secret = root / made["secret_file"]
-        try:
-            holders = [a.name for a in accounts.load(root).values()
-                       if a.secret_file is not None and Path(a.secret_file) == secret]
-        except accounts.AccountsError as err:
-            return "account %s: %s removed; its secret kept (%s)" % (
-                name, " and ".join(parts) or "nothing", err)
-        if holders:
-            return "account %s: %s removed; its secret kept: %s use it" % (
-                name, " and ".join(parts) or "nothing", ", ".join(holders))
-        try:
-            secret.unlink()
-            parts.append("its secret")
-        except FileNotFoundError:
-            pass
-    return "account %s: %s removed (no other cousin uses it)" % (
-        name, " and ".join(parts) or "nothing")
-
-
-NEVER_UNRUN = "a model the runner's CLI can't run is never written"
-
-
 def runner_cli():
     """The CLI the runner's SDK starts, read without running anything: the
     SDK prefers its bundled binary, whose version it records. A model the
@@ -556,30 +148,6 @@ def runner_cli():
             % sdk_version)
 
 
-def _validate_account(home, root, name, moved):
-    """The Account the runner will run on, for one validating turn before
-    it exists: the key account `carry` will make holds the key in memory
-    only (never written by a plan)."""
-    from cousin_lib import accounts
-    home, root = Path(home), Path(root)
-    if moved["create"] is not None:
-        return accounts.Account(name, "anthropic-key", None,
-                                root / moved["create"]["secret_file"], implicit=True,
-                                secret_value=_cousin_key(home, root))
-    if name == accounts.HOST:
-        return accounts.for_cousin(home, root)       # the host, or [agent] api_key_file
-    return accounts.load(root)[name]
-
-
-def _dir_note(name, moved):
-    """What --validate leaves behind for a key account: the account's own
-    config dir (accounts.account_env makes it; no secret goes there)."""
-    if moved["create"] is None and "account" not in moved["values"]:
-        return ""
-    return (" (--validate makes data/accounts/%s, the account's login-free config dir;"
-            " no secret is written there)" % name)
-
-
 def _validate(validator, account, root, model, effort):
     """(ok, detail) of ONE smallest model turn on a throwaway client
     (sdk.validate_account): the model, effort and account the runner
@@ -595,110 +163,7 @@ def _validate(validator, account, root, model, effort):
     return rc == 0, "%s (%s)" % (line, what)
 
 
-def plan(home, *, root, account=None, auth_check, supervisor_up, sdk_ok, tmux_alive,
-         validate=False, validator=None, cli_version=None, **_unused):
-    """{"slug", "checks": [...], "steps", "ready", "carry", "cli"}; writes
-    nothing. A model to be written makes the plan not ready until
-    `validate` ran one model turn with it and passed (NEVER_UNRUN)."""
-    from cousin_lib import accounts, handover, memory_import
-    home, root = Path(home), Path(root)
-    checks = []
-    agent = _agent(home)
-    runner = agent.get("runner")
-    lane_ok = runner not in RUNNER_KINDS
-    if lane_ok:
-        lane_detail = "on the tmux lane"
-    elif runner == "tmux":
-        lane_detail = ("[agent] runner = \"tmux\" is the tmux runner kind, not the legacy tmux"
-                       " lane: it is already on the runner lane; switch kinds with --to sdk")
-    else:
-        lane_detail = "already on the runner lane ([agent] runner = %r)" % runner
-    checks.append(_check("lane", lane_ok, lane_detail))
-    running = lane_ok and tmux_alive(home)
-    if lane_ok:
-        checks.append(_check("running", running, "its tmux session is up" if running else
-                             "it is stopped: start it first (a migrated cousin runs; the"
-                             " supervisor starts every runner cousin)"))
-    rec = read_record(home)
-    open_rec = rec is not None and rec.get("state") in ("applying", "failed", "migrated")
-    checks.append(_check("record", not open_rec, "no migration in progress" if not open_rec else
-                         "%s says %s: `cousin-migrate rollback` first" % (RECORD, rec.get("state"))))
-    moved = carry(home, root, account)
-    checks.append(_check("carry", moved["error"] is None, moved["error"] or "; ".join(
-        r["detail"] for r in moved["rows"])))
-    name = (account or moved["values"].get("account") or agent.get("account")
-            or accounts.HOST)
-    if moved["create"] is not None:
-        checks.append(_check("account", True, (
-            "account %r is made at apply from the cousin's key file; the auth check runs"
-            " after it (`cousin-runner --home %s --check-auth`)" % (name, home))))
-    else:
-        try:
-            known = accounts.load(root)
-            if name != accounts.HOST and name not in known:
-                raise accounts.AccountsError("account %r is not in config/accounts.toml" % name)
-            code, line = auth_check(home, root, name)
-            checks.append(_check("account", code == 0, line))
-        except accounts.AccountsError as err:
-            checks.append(_check("account", False, str(err)))
-    cli = (cli_version or runner_cli)()
-    checks.append(_check("cli", True, "the runner's CLI: %s" % cli))
-    model = moved["values"].get("model") or agent.get("model")
-    effort = moved["values"].get("effort") or agent.get("effort")
-    blocked = [c["check"] for c in checks if not c["ok"]]
-    notes = [handover.COST_LINE]
-    age = handoff_age(home)
-    notes.append("%s is %s old now; the close asks for a new one and waits for it"
-                 % (HANDOFF, age) if age is not None else
-                 "no %s yet; the close asks for one and waits for it" % HANDOFF)
-    if validate and blocked:
-        checks.append(_check("validate", False, "not run: fix %s first; %s"
-                             % (", ".join(blocked), NEVER_UNRUN)))
-    elif validate:
-        try:
-            ok, line = _validate(validator, _validate_account(home, root, name, moved), root,
-                                 model, effort)
-        except (MigrateError, accounts.AccountsError, KeyError) as err:
-            ok, line = False, "validate: %s" % err
-        checks.append(_check("validate", ok, "%s%s; %s" % (line, _dir_note(name, moved),
-                                                          NEVER_UNRUN)))
-    elif "model" in moved["values"] or "effort" in moved["values"]:
-        checks.append(_check("validate", False, (
-            "[agent] %s would be written unvalidated: run with --validate (one smallest"
-            " model turn on %s)%s; %s" % (" and ".join(
-                "%s %r" % (k, moved["values"][k]) for k in CARRIED if k in moved["values"]),
-                cli, _dir_note(name, moved), NEVER_UNRUN))))
-    up = supervisor_up(root)
-    checks.append(_check("supervisor", up, "a cousin-supervisor answers for %s" % root if up else
-                         "no cousin-supervisor runs for %s: start it (`cousin-supervisor run`,"
-                         " or its unit)" % root))
-    has_sdk = sdk_ok()
-    checks.append(_check("sdk", has_sdk, "claude-agent-sdk is installed" if has_sdk else
-                         "claude-agent-sdk is not installed: pip install -e '.[sdk]'"))
-    try:
-        rows = memory_import.plan(home, root=root)
-        conflicts = [r["name"] for r in rows if r["action"] == "conflict"]
-        todo = sum(r["action"] in ("import", "update") for r in rows)
-        checks.append(_check("import", not conflicts,
-                             "%d auto-memory file(s) to fold in" % todo if not conflicts else
-                             "merge by hand first (`cousin-memory import-auto`): %s"
-                             % ", ".join(conflicts)))
-    except Exception as err:  # noqa: BLE001 - ManifestError, an unreadable source
-        checks.append(_check("import", False, "%s: %s" % (type(err).__name__, err)))
-    # the home's .mcp.json stays where it is; the runner reads it and skips
-    # `cousin` (it serves its own in-process). Names only, never a blocker.
-    from cousin_lib.runner import mcp_config
-    try:
-        checks.append(_check("mcp", True, mcp_config.describe(home)))
-    except Exception as err:  # noqa: BLE001 - the runner treats it as not fatal too
-        checks.append(_check("mcp", True, "%s not read: %s" % (mcp_config.FILE,
-                                                                type(err).__name__)))
-    return {"slug": home.name, "account": name, "checks": checks, "steps": list(STEPS),
-            "ready": all(c["ok"] for c in checks), "carry": moved, "cli": cli,
-            "notes": notes}
-
-
-# ------------------------------------------------------------ apply
+# ------------------------------------------------------------ cousin.toml
 
 def set_agent_keys(text, values):
     """cousin.toml's text with [agent] `values` set, the rest untouched:
@@ -733,133 +198,7 @@ def _write_toml(home, data, mode):
     os.replace(tmp, path)
 
 
-def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_alive,
-          validate=False, **checks):
-    """Run the steps; the record, with state `migrated` or `failed`.
-    MigrateError when the plan is not ready (nothing is written then):
-    among others, a model to be written that `validate` did not pass in
-    this very run (NEVER_UNRUN)."""
-    from cousin_lib import accounts, handover
-    home, root = Path(home), Path(root)
-    p = plan(home, root=root, account=account, tmux_alive=tmux_alive, validate=validate,
-             **checks)
-    if not p["ready"]:
-        raise MigrateError("not ready: %s" % "; ".join(
-            c["detail"] for c in p["checks"] if not c["ok"]))
-    path = home / "cousin.toml"
-    prior = path.read_bytes()
-    mode = path.stat().st_mode & 0o7777
-    rec = {"slug": home.name, "state": "applying", "started_at": _now(), "account": p["account"],
-           "was_running": True, "prior_toml_b64": base64.b64encode(prior).decode("ascii"),
-           "prior_mode": mode, "steps": [], "warnings": [], "cli": p["cli"],
-           "validated": next((c["detail"] for c in p["checks"] if c["check"] == "validate"),
-                             None)}
-    _write_record(home, rec)
-    values = {"runner": "sdk"}
-    # [runtime] model/effort/auth, carried: the runner reads only [agent]
-    for key in CARRIED:
-        if key in p["carry"]["values"]:
-            values[key] = p["carry"]["values"][key]
-    if p["account"] != accounts.HOST:
-        values["account"] = p["account"]
-
-    def still_down():
-        if tmux_alive(home):
-            raise MigrateError("the tmux session is up again (a flip, a schedule or a"
-                               " console start): stop it, then roll back and apply again")
-
-    def run(step):
-        if step == "close":
-            before = _handoff_mtime_ns(home)
-            out = close(home.name, root)
-            if not out.get("ok"):
-                return False, out.get("error") or "the clean stop failed"
-            _fresh, detail, warning = handoff_freshness(home, before, out.get("stages"))
-            if warning:
-                rec["warnings"].append(warning)
-            return True, "closed cleanly; %s" % detail
-        if step == "handover":
-            got = handover.record(home, root, ended_at=_now())
-            rec["handover"] = got
-            paths = [t["path"] for t in got["transcripts"]]
-            return True, "%s: %s%s" % (handover.RECORD, ", ".join(paths) or "no transcript",
-                                       "; missing: %s" % got["missing"] if got["missing"]
-                                       else "")
-        if step == "import":
-            return True, json.dumps(import_auto(home, root))
-        if step == "toml":
-            still_down()
-            made = ""
-            if p["carry"]["create"] is not None:
-                # before cousin.toml names it: a runner never starts on an
-                # account that is not there yet
-                def record(done):
-                    rec["account_created"] = done
-                    _write_record(home, rec)
-                done = make_account(home, root, p["carry"]["create"], record)
-                made = "; account %s made (%s)" % (done["name"], ", ".join(
-                    (["secret %s, 0600" % done["secret_file"]] if done["secret"] else [])
-                    + (["its table"] if done["table"] else [])))
-            text = set_agent_keys(prior.decode("utf-8"), values)
-            _write_toml(home, text.encode("utf-8"), mode)
-            kept = [r["detail"] for r in p["carry"]["rows"] if r["action"] == "kept"]
-            return True, "[agent] %s%s%s" % (
-                ", ".join("%s = %r" % kv for kv in values.items()), made,
-                "; " + "; ".join(kept) if kept else "")
-        if step == "start":
-            still_down()
-            from cousin_lib import review_gate
-            review_gate.begin(home, reset=True)
-            start(home, root)
-            return True, ("the supervisor was asked to start runner:%s and the chat server"
-                          " was started" % home.name)
-        out = verify(home, root)
-        return bool(out.get("ok")), out.get("detail") or ""
-
-    for step in STEPS:
-        try:
-            ok, detail = run(step)
-        except Exception as err:  # noqa: BLE001 - a step's failure is recorded, then we stop
-            ok, detail = False, "%s: %s" % (type(err).__name__, err)
-        rec["steps"].append({"step": step, "ok": ok, "detail": detail, "at": _now()})
-        if not ok:
-            rec["state"] = "failed"
-            _write_record(home, rec)
-            return rec
-        _write_record(home, rec)
-    rec["state"], rec["migrated_at"] = "migrated", _now()
-    _write_record(home, rec)
-    return rec
-
-
-def verify_runner(home, root, *, snapshot, alive, health, stable_s=STABLE_S, timeout=VERIFY_S,
-                  sleep=time.sleep, clock=time.monotonic):
-    """The default verify: the supervisor's `runner:<slug>` row reads
-    `running` and the runner holds the cousin's lock, unbroken for
-    `stable_s` (a runner that exits at once - a lock held by another
-    runner, a missing secret, a broken policy - never passes), then the
-    chat server answers /health for the slug."""
-    name = "runner:%s" % Path(home).name
-    deadline = clock() + timeout
-    since, state = None, None
-    while clock() < deadline:
-        row = ((snapshot(root) or {}).get("children") or {}).get(name) or {}
-        state = row.get("state")
-        if state == "running" and alive(home):
-            since = since if since is not None else clock()
-            if clock() - since >= stable_s:
-                break
-        else:
-            since = None
-        sleep(1.0)
-    else:
-        return {"ok": False, "detail": "%s did not stay running for %ds within %ds (last: %s)"
-                % (name, stable_s, timeout, state)}
-    ok, detail = health(home)
-    return {"ok": ok, "detail": ("%s running %ds; " % (name, stable_s)) + detail}
-
-
-# ------------------------------------------------------------ rollback
+# ------------------------------------------------------------ the runner's inbox
 
 def _inbox_rows(home):
     """[(state, outcome, created_at)] read-only; [] when there is no inbox;
@@ -875,129 +214,6 @@ def _inbox_rows(home):
             conn.close()
     except sqlite3.Error:
         return None
-
-
-def _runner_session_files(home):
-    """The runner lane's session state in a home: data/runner-session.json,
-    each side session's data/runner-session-<kind>.json, and the restart
-    mark (restart_note)."""
-    data = Path(home) / "data"
-    found = sorted(data.glob("runner-session*.json"))
-    mark = data / "runner-restart.json"
-    return found + ([mark] if mark.exists() else [])
-
-
-def _remove_all(paths):
-    gone = []
-    for path in paths:
-        try:
-            path.unlink()
-            gone.append(path.name)
-        except FileNotFoundError:
-            pass
-    return gone
-
-def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, release,
-             force=False, sleep=time.sleep, clock=time.monotonic,
-             **_unused):
-    """Back to the tmux lane, undoing only what `apply` did. Process
-    actions follow what IS, not what was recorded: the runner is stopped
-    only while the file still names the runner lane (it differs from the
-    saved bytes) or a runner still holds the lock, and the file is
-    restored only while it differs. A retry after a failed rollback
-    therefore never stops the tmux session the first attempt restored
-    (spawn.stop_cousin on a tmux-lane file is the tmux lane's stop), and
-    the steps a failed attempt completed (recorded as `rollback_done`)
-    are not run again. An interrupted `apply` can have written the file
-    and not recorded it: the bytes decide."""
-    home, root = Path(home), Path(root)
-    rec = read_record(home)
-    if rec is None or "prior_toml_b64" not in rec:
-        raise MigrateError("no %s with the prior cousin.toml: nothing to roll back" % RECORD)
-    if rec.get("state") == "rolled_back":
-        raise MigrateError("already rolled back at %s; nothing to undo" % rec.get("rolled_back_at"))
-    ran = {s["step"] for s in rec.get("steps", []) if s.get("ok")}
-    prior = base64.b64decode(rec["prior_toml_b64"])
-    differs = (home / "cousin.toml").read_bytes() != prior
-    flipped = "toml" in ran or differs         # the runner lane existed at some point
-    done = set(rec.get("rollback_done") or ())
-    rows = _inbox_rows(home)
-    if rows is None and not force:
-        raise MigrateError("data/inbox.db cannot be read, so whether rows wait is unknown;"
-                           " look at it, or pass --force")
-    waiting = sum(1 for state, _o, _c in rows or () if state != "done")
-    if waiting and not force:
-        raise MigrateError("%d inbox row(s) still wait for the runner; on the tmux lane nobody"
-                           " reads them. Let them finish, or pass --force" % waiting)
-    steps = []
-
-    def step(name, fn, detail=None, once=True):
-        # `once`: a step a failed attempt completed is not run again; the
-        # stop and the restore follow the state instead (once=False)
-        if once and name in done:
-            return None
-        try:
-            out = fn()
-        except Exception as err:  # noqa: BLE001 - recorded, then the operator decides
-            rec.setdefault("rollback_attempts", []).append(
-                {"at": _now(), "failed": name, "error": "%s: %s" % (type(err).__name__, err),
-                 "steps": steps})
-            _write_record(home, rec)
-            raise MigrateError("rollback step %s failed: %s: %s (recorded in %s)"
-                               % (name, type(err).__name__, err, RECORD))
-        steps.append({"step": name, "detail": detail(out) if detail else "done", "at": _now()})
-        done.add(name)
-        rec["rollback_done"] = sorted(done)
-        _write_record(home, rec)
-        return out
-
-    if differs or runner_alive(home):
-        step("stop", lambda: stop(home, root), json.dumps, once=False)
-        deadline = clock() + DOWN_S
-        while runner_alive(home) and clock() < deadline:
-            sleep(1.0)
-        if runner_alive(home):
-            rec.setdefault("rollback_attempts", []).append(
-                {"at": _now(), "refused": "the runner still holds its lock after %ds" % DOWN_S})
-            _write_record(home, rec)
-            raise MigrateError("the runner still holds its lock after %ds; nothing restored."
-                               " Stop it (`cousin-supervisor stop %s`), then roll back again"
-                               % (DOWN_S, home.name))
-    if differs:
-        step("restore", lambda: _write_toml(home, prior, int(rec["prior_mode"])),
-             lambda _: "cousin.toml as it was, byte for byte", once=False)
-    if rec.get("account_created"):
-        step("account", lambda: drop_account(home, root, rec["account_created"]), str)
-    if flipped:
-        step("reload", lambda: reload(root))
-    if "close" in ran or flipped:
-        if rec.get("was_running"):
-            if tmux_alive(home):
-                steps.append({"step": "start_tmux", "detail": "its tmux session is already up",
-                              "at": _now()})
-            else:
-                step("start_tmux", lambda: start_tmux(home, root))
-    else:
-        steps.append({"step": "none", "detail": "close never ran: nothing was changed",
-                      "at": _now()})
-    from cousin_lib import handover
-    if any((home / rel).exists() for rel in (handover.RECORD, handover.CONSUMED)):
-        step("handover", lambda: handover.remove(home),
-             lambda gone: "removed %s" % ", ".join(gone), once=False)
-    # What the runner lane kept of its session (the primary's and the
-    # side sessions' records, the restart mark) goes with it: a
-    # re-migration after this rollback starts a fresh session, with the
-    # handover first, instead of resuming the old runner session
-    lane_files = _runner_session_files(home)
-    if lane_files:
-        step("runner_session", lambda: _remove_all(lane_files),
-             lambda gone: "removed %s" % ", ".join(gone), once=False)
-    step("release", lambda: release(home),
-         lambda _: "no runner hold left on the tmux cousin (run/held)")
-    rec.update(state="rolled_back", rolled_back_at=_now(), rollback_steps=steps,
-               waiting_at_rollback=waiting)
-    _write_record(home, rec)
-    return rec
 
 
 # ------------------------------------------------------------ check
@@ -1164,52 +380,16 @@ def chat_health(home):
 
 
 def _live():
-    from cousin_lib import accounts, delivery, flip, memory_import, spawn, supervisor
-    from cousin_lib.config import CousinConfig
-
-    def auth_check(home, root, name):
-        acct = accounts.load(root).get(name) or accounts.Account(
-            accounts.HOST, "claude-login", None, None, implicit=True)
-        return accounts._check_account(acct, root, via=Path(home).name)
-
-    def tmux_alive(home):
-        return flip._session_alive(CousinConfig.load(home).tmux_session, "tmux", None)
-
-    def import_auto(home, root):
-        rows = memory_import.apply(home, root=root)
-        counts = {}
-        for r in rows:
-            counts[r["action"]] = counts.get(r["action"], 0) + 1
-        return counts
-
-    def start(home, root):
-        spawn.start_cousin(home, root=root)
-
-    def reload(root):
-        try:
-            supervisor.request(root, "reload")
-        except supervisor.SupervisorUnavailable:
-            pass
+    """The live actions `check` and the console's migrate view still use:
+    whether a supervisor runs, and the one-turn validator."""
+    from cousin_lib import supervisor
 
     def validator(account, root, *, model=None, effort=None):
         from cousin_lib.runner import sdk
         return sdk.validate_account(account, root, model=model, effort=effort)
 
-    return dict(
-        auth_check=auth_check,
-        validator=validator,
-        supervisor_up=lambda root: supervisor.snapshot(root) is not None,
-        sdk_ok=lambda: importlib.util.find_spec("claude_agent_sdk") is not None,
-        tmux_alive=tmux_alive,
-        import_auto=import_auto,
-        start=start,
-        verify=lambda home, root: verify_runner(home, root, snapshot=supervisor.snapshot,
-                                                alive=delivery.is_alive, health=chat_health),
-        stop=lambda home, root: spawn.stop_cousin(home, root=root),
-        runner_alive=delivery.is_alive,
-        release=supervisor.release,
-        reload=reload,
-        start_tmux=lambda home, root: spawn.start_cousin(home, root=root))
+    return dict(validator=validator,
+                supervisor_up=lambda root: supervisor.snapshot(root) is not None)
 
 
 # ------------------------------------------------------------ the kind switch

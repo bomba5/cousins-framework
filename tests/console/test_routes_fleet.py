@@ -651,7 +651,7 @@ class TestModelAndEffort(ConsoleCase):
         self.assertEqual(self.post("/api/cousins/wren/effort", {"effort": "ultra"})[0], 400)
 
     def test_a_runner_cousins_model_is_validated_by_one_turn_before_it_is_written(self):
-        """As migrate does (NEVER_UNRUN): one smallest turn with the model on
+        """A model the CLI cannot run is never written: one smallest turn with the model on
         the cousin's own account, in a child process (the turn's scrub
         of os.environ is process-wide); a failure is the API's words,
         nothing written. The console never runs the turn itself. The

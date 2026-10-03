@@ -112,6 +112,21 @@ builds the image from the checkout, runs the runner contract suite
 host against that image (`COUSIN_DOCKER=1`), and fails if the compressed
 image is over its size budget (`docker/image-size.sh`, 240 MB).
 
+`.github/workflows/quickstart.yml` runs the README's Docker quick start as
+written. `.github/scripts/quickstart.py` extracts the one code block under
+"Quick start: Docker" (the README stays the only copy), drops the `git
+clone` and `cd` lines, and runs it under a pty that types the console
+password at `adduser`'s prompts. Then it checks that the container is
+healthy, that `ana` can log in, that a "hi" reaches `wren`, and that a
+memory entry survives `docker compose restart` and `down` + `up -d`. On
+every push and pull request (tier 1) the spawn line's opencode
+[lane](glossary.md#lane) becomes `--runner fake`, so no model runs and the
+check is the fake [turn](glossary.md#turn). On every `v*` tag (tier 2) the
+block runs literally on opencode's free model and needs a real reply. Each
+edit the extractor makes has to match exactly once, so if you change the
+quick start block, the job fails until
+`quickstart.py` agrees with it.
+
 ## The image's pins
 
 The Dockerfile's inputs are pinned, so a build of one checkout installs the

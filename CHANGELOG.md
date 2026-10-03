@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.12.0 - 2026-10-03
+
+### Added
+
+- **A drop at the review gate says why.** The runner's reviewer now
+  answers each held entry with a verdict and a short reason
+  (`{"<id>": {"verdict": "drop", "why": "..."}}`), and a drop's obsolete
+  mark records it as "the review gate's reviewer: <reason>". Before, every
+  drop said only "the review gate's reviewer", so the entry's owner could
+  not tell a duplicate from status chatter from a misread (a fresh,
+  correct decision was dropped with no reason given). The reason is model
+  output kept as data: one line, at most 200 characters. The older bare
+  `{"<id>": "keep"}` reply is still read, and a reply with no usable
+  reason keeps the old text. `review_gate.settle` takes either a verdict
+  or `{"verdict", "why"}` per id.
+
 ## 3.11.0 - 2026-10-03
 
 ### Added

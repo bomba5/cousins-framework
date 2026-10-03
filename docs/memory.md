@@ -365,7 +365,10 @@ wrote itself. That guard is best effort: it looks at the process's
 ancestors, so a process detached from the tree (`setsid`, `nohup`) is not
 recognised, and any raw line that records a release releases the entry.
 A new session's boot packet says how many entries are held. Each verdict records who gave it. A drop retires the entry
-the same way `obsolete --entry` does. The framework's own log
+the same way `obsolete --entry` does. A drop by the runner's reviewer
+carries its reason in the mark's `why` ("the review gate's reviewer: a
+duplicate of ..."); a reply with no usable reason leaves the bare "the
+review gate's reviewer". The framework's own log
 (`episode:`, `job:`, `framework:`) is not gated: its writers already cap
 how much they write.
 
@@ -792,7 +795,11 @@ authored topics since it last looked (`cousin_lib/review_gate.py`). Over
 them in the background, at most 20 entries per call: each call has no
 tools and keeps no session, and runs on
 the cousin's own account, on `[memory] review_model` or else the
-cousin's own model (`SdkRunner._model_review`). The next message does
+cousin's own model (`SdkRunner._model_review`). It answers each entry
+with a verdict and a reason of a few words (`{"<id>": {"verdict": "keep"
+or "drop", "why": "..."}}`; the older bare `{"<id>": "keep"}` is read
+too); a drop's reason, at most 200 characters on one line, goes into
+its obsolete mark. The next message does
 not wait for it. Its usage is recorded like a turn's. The outcome is a
 `review_gate` event in the runner's [stream](glossary.md#stream): how many were held, kept,
 dropped and still pending, and the error if the review failed (`cancelled`

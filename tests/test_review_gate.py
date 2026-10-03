@@ -273,6 +273,72 @@ class TestADropIsOneLine(HermeticCase):
                          (memory.OBSOLETE_LEVEL, rows[0]["id"], "drop"))
 
 
+class TestADropSaysWhy(HermeticCase):
+    """The reviewer's reason goes into the drop's mark, so the entry's
+    owner can tell a duplicate from chatter from a misread."""
+
+    def _drop_line(self, home, entry_id):
+        lines = [json.loads(l) for p in memory.raw_dir(home).glob("*.jsonl")
+                 for l in p.read_text().splitlines()]
+        [line] = [l for l in lines if l.get("released") == entry_id]
+        return line
+
+    def test_a_drop_s_mark_carries_the_reviewer_s_reason(self):
+        home = _home(self)
+        _write(home, 4)
+        reply = {}
+
+        def reviewer(rows):
+            text = json.dumps({r["id"]: ({"verdict": "drop", "why": "repeats ledger fact 1"}
+                                         if r["topic"] == "ledger fact 0" else "keep")
+                               for r in rows})
+            reply.update(review_gate.parse_verdicts(text, [r["id"] for r in rows]))
+            return reply
+        out = review_gate.gate(home, reviewer=reviewer)
+        self.assertEqual(sorted(out["verdicts"].values()), ["drop", "keep", "keep", "keep"])
+        [dropped] = [k for k, v in out["verdicts"].items() if v == "drop"]
+        line = self._drop_line(home, dropped)
+        self.assertEqual(line["why"], "the review gate's reviewer: repeats ledger fact 1")
+        self.assertEqual(line["content"], "obsolete: the review gate's reviewer: repeats ledger fact 1")
+        self.assertEqual(line["truth_level"], memory.OBSOLETE_LEVEL)
+
+    def test_no_reason_or_a_garbage_one_keeps_today_s_text(self):
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        verdicts = {rows[0]["id"]: "drop",
+                    rows[1]["id"]: {"verdict": "drop"},
+                    rows[2]["id"]: {"verdict": "drop", "why": {"nested": "x"}},
+                    rows[3]["id"]: {"verdict": "drop", "why": " \n\t "}}
+        done, errors = review_gate.settle(home, rows, verdicts,
+                                          why="the review gate's reviewer", model=True)
+        self.assertEqual((len(done), errors), (4, {}))
+        for r in rows:
+            self.assertEqual(self._drop_line(home, r["id"])["why"], "the review gate's reviewer")
+
+    def test_a_long_reason_is_capped_in_the_mark(self):
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        done, _ = review_gate.settle(home, rows[:1],
+                                     {rows[0]["id"]: {"verdict": "drop", "why": "x\ny " * 500}},
+                                     why="the review gate's reviewer", model=True)
+        why = self._drop_line(home, rows[0]["id"])["why"]
+        self.assertEqual(done, {rows[0]["id"]: "drop"})
+        self.assertTrue(why.startswith("the review gate's reviewer: x y x y"))
+        self.assertLessEqual(len(why), len("the review gate's reviewer: ") + review_gate.REASON_CHARS)
+        self.assertNotIn("\n", why)
+
+    def test_a_dict_with_no_valid_verdict_stays_held(self):
+        home = _home(self)
+        _write(home, 4)
+        rows = review_gate.hold_new(home)
+        done, errors = review_gate.settle(home, rows, {
+            rows[0]["id"]: {"why": "a duplicate"}, rows[1]["id"]: {"verdict": "DROP"}})
+        self.assertEqual((done, errors), ({}, {}))
+        self.assertEqual(len(review_gate.pending(home)), 4)
+
+
 def _old(minutes=0):
     return datetime.now(timezone.utc) - timedelta(days=60) + timedelta(minutes=minutes)
 

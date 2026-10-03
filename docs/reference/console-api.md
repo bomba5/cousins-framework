@@ -942,6 +942,25 @@ No login needed. `{"version", "commit", "repo_url", "commit_url"}`. Version and 
 
 Memory and disk in GB (used memory is MemTotal minus MemAvailable, disk is `/`), network in MB/s since the previous call, loopback and container interfaces left out. CPU `pct` is the 1-minute load over the core count. On a system without `/proc` the blocks read as zeros.
 
+### `GET /api/health`
+
+Read-only, behind the login like every other route. What `cousin-health` prints ([operations](../operations.md#health)):
+
+```json
+{"components": {"dreaming:wren": {"state": "failing", "fails": 119, "since": 1790989247.2,
+                                  "last_ok": 1790902847.0, "last_fail": 1790992817.5,
+                                  "error": "ImportError: ...", "seen": 1790992817.5}},
+ "failing": [{"key": "dreaming:wren", "state": "failing", "fails": 119, "since": 1790989247.2,
+              "error": "ImportError: ...", "quiet": false}],
+ "ok": ["cousin:wren", "meetings", "tick"],
+ "supervisor": {"reachable": true, "failing": [{"name": "runner:kestrel", "state": "backoff",
+                                                "since": "2026-10-03T06:12:09+00:00",
+                                                "reason": "exited (code 1)"}]},
+ "failing_count": 2}
+```
+
+`components` is `data/health.json` as the loops daemon wrote it (timestamps in epoch seconds), `failing` its failing entries with their key, the longest streak first, and `quiet` true when the entry was last seen more than ten minutes ago. `supervisor.failing` is every supervisor child not `running`; with no supervisor, `{"reachable": false, "error", "failing": []}`. `failing_count` is both failing lists together: the console's top bar shows it in red when it is not 0.
+
 ### `POST /api/admin/restart/framework`
 
 Restarts the console by exiting. Answers `200 {"ok": true, "target": "console", "supervised": bool, "eta_seconds": 4}`, then exits 75 (`EX_TEMPFAIL`) about 0.6 s later: non-zero on purpose, because the shipped unit restarts on failure only. `supervised` is true when it runs under systemd (it checks `INVOCATION_ID`), whose `Restart=on-failure` brings it back, or under `cousin-supervisor` (`COUSIN_SUPERVISED`), which starts it again at once and does not count the exit against it. If it's false, nothing will start it again: restart means stop.

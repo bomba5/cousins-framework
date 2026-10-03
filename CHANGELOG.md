@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.15.0 - 2026-10-03
+
+### Added
+
+- **The loops daemon keeps a record of what keeps failing.** After each
+  tick it writes `data/health.json`: per component (each cousin's walk, a
+  loop's due check, a delivery, distill, requests, one-shot schedules, the
+  index refresh, each cousin's dreaming passes, meetings, the tick itself)
+  whether it is ok or failing, how many times in a row, since when, and the
+  last error. Before, a pass that failed on every tick for an hour was a
+  line per tick in the daemon's log and nothing else. `cousin-health` prints
+  the failing components first, then a count of the ok ones, plus any
+  supervisor child that is not running; it exits 1 when something is
+  failing. The console serves the same at `GET /api/health` and shows a red
+  count in its top bar that opens the list.
+
 ## 3.14.0 - 2026-10-03
 
 ### Added

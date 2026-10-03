@@ -133,6 +133,34 @@ class StaticFilesBrand(unittest.TestCase):
                               "%s sets a title off the product name" % path.name)
 
 
+class StaticFilesTopBarHealth(unittest.TestCase):
+    """The health indicator in the top bar (app.jsx HealthBadge): nothing
+    when nothing fails, else a red count that lists what does."""
+
+    def setUp(self):
+        self.app = (_STATIC / "app.jsx").read_text(encoding="utf-8")
+        start = self.app.index("function HealthBadge(")
+        self.badge = self.app[start:self.app.index("\nfunction ", start + 1)]
+
+    def test_it_sits_in_the_top_bar(self):
+        bar = self.app[self.app.index('<header className="topbar">'):
+                       self.app.index("</header>")]
+        self.assertIn("<HealthBadge />", bar)
+
+    def test_it_polls_the_route_and_hides_when_nothing_fails(self):
+        self.assertIn('apiGet("/api/health")', self.badge)
+        self.assertIn("setInterval(load, HEALTH_POLL_MS)", self.badge)
+        self.assertIn("if (!h || !h.failing_count) return null;", self.badge)
+
+    def test_it_is_red_and_lists_key_count_since_and_error(self):
+        self.assertIn('className="led red"', self.badge)
+        for token in ("r.key", "r.fails", "healthWhen(r.since)", "r.error",
+                      "c.name", "c.state", "c.reason", "data-health-list"):
+            self.assertIn(token, self.badge, token)
+        css = (_STATIC / "styles.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.topbar \.health-count \{[^}]*color: var\(--red\)")
+
+
 class StaticFilesSterile(unittest.TestCase):
     def test_gate_generic_classes_find_nothing(self):
         terms = []

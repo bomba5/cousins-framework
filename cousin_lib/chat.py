@@ -66,10 +66,13 @@ class SenderRefused(ValueError):
     """The name a send would be shown under is not the sender's own."""
 
 
-def check_sender_name(sender, target, display_name):
+def check_sender_name(sender, target, display_name, *, external=False):
     """The name a peer message is shown under: the sending cousin's own
     `name` unless `--from` gives another spelling of the same cousin (its
-    slug or its name, case- and space-insensitive). Anything else is
+    slug or its name, case- and space-insensitive). To an external peer
+    (`external`) `--from` may still be a free-form display name ("Wren of
+    testbed"): the receiving install runs peer_inbound.check_display on
+    it, and nothing here acts on it. Anything else is
     refused, the same names peer_inbound.check_display keeps from an
     outside sender: a sender is never shown, threaded or treated as the
     target's operator, another cousin or the framework (an operator's
@@ -84,7 +87,7 @@ def check_sender_name(sender, target, display_name):
                normalize_chat_user(sender.name or sender.slug)}
         if not isinstance(display_name, str) \
                 or not _DISPLAY.match(display_name) \
-                or normalize_chat_user(display_name) not in own:
+                or (not external and normalize_chat_user(display_name) not in own):
             raise SenderRefused(
                 "--from %r refused: a cousin sends under its own name or"
                 " slug only (%s)" % (display_name, sender.slug))
@@ -337,7 +340,8 @@ def send_message(fw, sender, dest_slug, text, policy=None, display_name=None,
                 "no cousin %r in the registry or in"
                 " config/external-peers.toml" % dest_slug)
         target = external
-    shown = check_sender_name(sender, target, display_name)
+    shown = check_sender_name(sender, target, display_name,
+                              external=isinstance(target, ExternalPeer))
     if policy is not None:
         policy.check(
             text,

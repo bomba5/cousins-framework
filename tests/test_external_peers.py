@@ -115,14 +115,11 @@ class TestSend(ExternalCase):
         with peer_server() as (url, received):
             self._peers('[peers.kestrel]\nurl = "%s/"\n' % url)
             rc, _out, err = self._main(
-                ["send", "kestrel", "hi", "--from", "wren"])
-            self.assertEqual(rc, 0, err)
-            # --from is the sender's own name or slug, external peer or not
-            rc, _out, err = self._main(
                 ["send", "kestrel", "hi", "--from", "Wren of testbed"])
-            self.assertEqual(rc, 2)
-            self.assertIn("own name or slug", err)
-        self.assertEqual(received, [("/api/send", {"user": "wren",
+        # an external peer may be shown a free-form name: its own install
+        # checks it (peer_inbound.check_display); a local cousin may not
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(received, [("/api/send", {"user": "Wren of testbed",
                                                     "message": "hi"})])
 
     def test_unknown_slug_is_still_an_error(self):

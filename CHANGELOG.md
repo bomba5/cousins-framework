@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.11.0 - 2026-10-03
+
+### Added
+
+- **`cousin-shared templates` says where the seeded files and what ships
+  part.** `config/law.md` and the house rules in `shared/` are seeded once
+  and never touched by an upgrade, so an install never learned that a
+  release changed them. The new subcommand compares each with its template
+  in the installed version and prints one line per file (`same`, `differs`,
+  `missing in install`, `not shipped any more`); `-v`/`--full` adds a
+  unified diff from the install's text to the shipped one. It writes
+  nothing and merges nothing, and exits 1 when any file does not match.
+  The library call is `shared_tier.compare_templates(root)`.
+
 ## 3.10.3 - 2026-10-03
 
 ### Fixed

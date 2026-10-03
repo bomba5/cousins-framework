@@ -197,6 +197,38 @@ class TestTheCursorIsAStructuralRefusal(DreamCase):
                                                   "lines": 7})
 
 
+    def archive(self, month, *rows):
+        """A monthly archive of (day, content) lines, in raw_fold's order."""
+        folder = memory.raw_dir(self.home) / "archive"
+        folder.mkdir(parents=True, exist_ok=True)
+        with gzip.open(folder / ("%s.jsonl.gz" % month), "at") as fh:
+            for day, content in rows:
+                fh.write(json.dumps({"timestamp": "%sT10:00:00+00:00" % day,
+                                     "topic": "kestrel", "content": content,
+                                     "truth_level": "L3_COUSIN_CONCLUSION",
+                                     "source": "remember"}) + "\n")
+
+    def test_a_cursor_in_a_folded_day_resumes_at_that_day_not_the_month(self):
+        self.archive("2026-09", ("2026-09-02", "early month"), ("2026-09-14", "day before"),
+                     ("2026-09-15", "the cursor's day"), ("2026-09-20", "later"))
+        dream_memory._save(self.home, {"schema_version": dream_memory.SCHEMA_VERSION,
+                                       "through": {"month": "2026-09-15", "lines": 1}})
+        piece = dream_memory.slice_for(self.home, chars=40000)
+        # a day of slack before the folded day, never the start of the month
+        self.assertNotIn("early month", piece.text)
+        for kept in ("day before", "the cursor's day", "later"):
+            self.assertIn(kept, piece.text)
+
+    def test_a_first_pass_whose_since_was_folded_early_starts_inside_the_archive(self):
+        # a compact with fewer hot days than the floor folded days after since
+        self.archive("2026-09", ("2026-09-01", "older than since"),
+                     ("2026-09-12", "inside the window"))
+        self.raw("2026-09-25", ("kestrel", "a hot day"))
+        piece = dream_memory.slice_for(self.home, chars=40000, since="2026-09-10")
+        self.assertNotIn("older than since", piece.text)
+        self.assertIn("inside the window", piece.text)
+        self.assertIn("a hot day", piece.text)
+
     def test_new_days_are_dreamed_after_a_walk_that_ended_in_an_archive(self):
         archive = memory.raw_dir(self.home) / "archive"
         archive.mkdir(parents=True)

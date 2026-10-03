@@ -266,18 +266,34 @@ what you said from what it guessed.
 | Level | `--level` | What it's for |
 |---|---|---|
 | `L0_OPERATOR` | `operator` | Something you said. Needs `--cite`. |
-| `L1_FRAMEWORK` | `framework` | Something the framework observed: a flip happened, a loop fired. |
-| `L2_TOOL` | `tool` | A measured result: what a command printed, what a job returned. |
+| `L1_FRAMEWORK` | `framework` | Something the framework observed: a flip happened, a loop fired. Needs `--cite`, else written as `conclusion`. |
+| `L2_TOOL` | `tool` | A measured result: what a command printed, what a job returned. Needs `--cite`, else written as `conclusion`. |
 | `L3_COUSIN_CONCLUSION` | `conclusion` | The cousin's own conclusion. The default. |
 | `L4_COUSIN_HYPOTHESIS` | `hypothesis` | A guess the cousin hasn't checked yet. |
 | `L5_OBSOLETE` | `obsolete` | Something that used to be true and was superseded. Kept for history. |
 
 `--level operator` without `--cite` is refused. It's the strongest claim
 a memory can make, so it has to say where you said it: a chat message
-id, a quote, a date. Operator entries go to
+id, a quote, a date. `--level framework` or `--level tool` without
+`--cite` is written as `conclusion` (L3), as the law's rule 10 says, and
+`decide` or `remember` prints a `demoted:` line saying so. The entries
+the framework writes itself (a flip, a model change, a job that ended)
+keep their level: they don't go through that check. Operator entries go to
 `memory/distilled/operator-calibration.md`, which the boot packet
 carries as its own layer, ahead of everything the cousin concluded on
 its own.
+
+An operator entry is a **standing instruction**, a rule for how the
+cousin works rather than a fact about the world, when its topic carries
+one of the words that would file it under `preferences.md`: "rule:",
+"feedback", "preference", "prefers", "tone", "register" or "style"
+(whole words; `rule: no em dashes`, `feedback: short statuses`). The
+newest entry of each such topic goes into the system prompt, in full,
+under "# Your operator's standing instructions", sorted by topic, and
+stays out of the digest. The system prompt is rebuilt only when a
+session starts, and its bytes change only when one of those entries
+does. Every other operator entry stays in the digest's calibration
+layer. Retiring the topic (`cousin-memory obsolete`) takes a rule out.
 
 ```
 cousin-memory remember "deploy window" "never on Fridays" \
@@ -578,20 +594,24 @@ system prompt, never cut, holds:
    entries in full.
 3. The identity: the authored parts of `CLAUDE.md` and the committed
    self-portrait.
+4. Your standing instructions to this cousin, in full (see
+   [Truth levels](#truth-levels)).
 
 The state digest, the session's first message, has a ceiling of about
 8000 tokens and holds:
 
-4. Operator calibration: `operator-calibration.md`, plus recent
-   corrections.
-5. Active state: the open loops from `STATUS.md` and the latest
+5. Operator calibration: the rest of your L0 entries, newest first, then
+   recent corrections. Up to 2000 tokens; an entry that doesn't fit is
+   left out whole and counted in a closing "N more not shown" line, never
+   cut in the middle.
+6. Active state: the open loops from `STATUS.md` and the latest
    `data/handoff.md`.
-6. Task packet: `data/active-threads.md` and the last three capsules.
-7. Tool trace summary.
-8. Retrieved memories: the other five distilled files, the newest
+7. Task packet: `data/active-threads.md` and the last three capsules.
+8. Tool trace summary.
+9. Retrieved memories: the other five distilled files, the newest
    capsule conclusions, recent raw entries (up to the last 60 lines
    from the newest 14 raw files) and the head of `MEMORY.md`.
-9. Shared reference: a one-line index of the rest of the shared tier.
+10. Shared reference: a one-line index of the rest of the shared tier.
 
 When the digest is too big, the memories are cut first. A
 layer that's missing (no identity, no active

@@ -65,8 +65,9 @@ runs as a turn.
 The system prompt is composed, never copied, and never truncated: the
 framework law, the framework contract (generated from the tool registry, so
 it names exactly the tools the cousin has), the cousin's authored identity
-(the authored parts of its `CLAUDE.md` and its committed self-portrait), and
-the operator rules every cousin shares. The `sdk` kind passes
+(the authored parts of its `CLAUDE.md` and its committed self-portrait), the
+operator rules every cousin shares, and the operator's standing instructions to
+this cousin (its L0 rules, [memory](../memory.md#truth-levels)). The `sdk` kind passes
 `setting_sources=[]`, so the agent CLI inherits no settings file: what the
 cousin has is what the runner passes. The prompt holds nothing volatile (no
 clock, counter or generation; those go in the first message's state digest)
@@ -226,7 +227,8 @@ delivered to it and it does not start, and the refusal names the reason.
 ### The system prompt is a private file
 
 The runner composes the cousin's system prompt (the law, the generated
-contract, the authored identity and self-portrait, the operator rules;
+contract, the authored identity and self-portrait, the operator rules and
+standing instructions;
 `runner/prompt.py`) and never puts it on a command line or in an
 environment variable: an argv is readable by every local user (`ps`,
 `/proc/<pid>/cmdline`). The text is written to a file only the cousin's user

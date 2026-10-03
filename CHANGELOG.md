@@ -3,6 +3,49 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.21.1 - 2026-10-03
+
+### Fixed
+
+- **An uncited framework or tool level is demoted, as law rule 10 says.**
+  `decide` and `remember` (the CLI, the `memory` tool, the console) write
+  a `framework` or `tool` entry that has no `--cite` at `conclusion` (L3)
+  and print one `demoted:` line saying which level was asked and why. The
+  law's "auto-demote" now holds for framework and tool; an uncited
+  `operator` level stays refused, as before, which is stricter than the
+  law. The framework's own entries (`framework:<kind>` state changes, job
+  closes at `tool`) are written by `record_event`, which does not take
+  this path, and keep their level. Law rule 10 is now marked enforced in
+  the rules inventory.
+
+## 3.21.0 - 2026-10-03
+
+### Added
+
+- **The operator's standing instructions are in the system prompt.** An
+  operator-level (L0) entry whose topic or source carries one of the words
+  that file an entry under `preferences.md` ("rule:", "feedback",
+  "preference", "prefers", "tone", "register", "style", whole words) is a
+  rule for how the cousin works. The newest entry of each such topic goes
+  into the system prompt in full, sorted by topic, under "# Your
+  operator's standing instructions", after the operator rules every
+  cousin follows, on the runner and in the tmux kind's context block. It
+  carries topic and text only, so the prompt's bytes change when one of
+  those entries changes and at no other time; a retired topic leaves it.
+  These entries are no longer repeated in the state digest (neither the
+  calibration layer nor the recent raw lines).
+
+### Changed
+
+- **The digest's calibration layer gives way by whole entries.** Its
+  ceiling is 2000 tokens (was 800) and its floor 800 (was 300). It holds
+  the curated text of `operator-calibration.md`, the other operator
+  entries newest first (one line per topic, as in the view), then the
+  recent corrections; what does not fit is left out whole and counted in a
+  closing `- ... N more not shown` line, in place of the old cut in the
+  middle of an entry. `boot.fit` takes an optional per-layer cutter for
+  this; every other layer is cut as before.
+
 ## 3.20.1 - 2026-10-03
 
 ### Changed

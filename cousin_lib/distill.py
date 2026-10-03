@@ -9,6 +9,9 @@ digests raw_fold leaves behind):
   the earlier ones are history ("N entries", "superseded N earlier");
 - classify() picks the file: truth level first (operator-stated goes to
   operator-calibration), then whole-word topic and source keywords;
+  an operator entry whose topic carries a preferences word is also a
+  standing instruction (standing_instruction), which the runner's
+  system prompt carries whole;
 - each file is bounded to max_lines, ranked by entry count then
   recency, except that machine topics (MACHINE_PREFIXES: the transcript
   miners, the jobs ledger, framework state changes) rank after every
@@ -29,7 +32,8 @@ its head already carries the generated block's own header, which means
 an earlier run wrote it and keeping it would duplicate every line.
 
 Consumers: the runner's state digest (runner/prompt.py, runs distill
-before reading the floor) and `cousin-memory distill` / `consolidate`.
+before reading the floor), its system prompt (operator_topics, read-only)
+and `cousin-memory distill` / `consolidate`.
 """
 import re
 from collections import defaultdict
@@ -56,30 +60,50 @@ AUTO_MARKER = ("<!-- distilled:auto - lines below are regenerated from"
 # proof the head is generated, not curated.
 AUTO_HEADER = "_Regenerated from memory/raw by the distiller"
 
+# The words that file an entry under preferences.md. They also split the
+# operator's own entries (standing_instruction): an L0 entry whose topic
+# or source carries one is a rule for how the cousin works.
+PREFERENCE_WORDS = ("feedback", "preference", "prefers", "rule:",
+                    "tone", "register", "style")
+
 _KEYWORDS = (
     ("known-failures.md", ("correction", "corrected", "wrong", "failed",
                            "failure", "bug", "broken", "mistake",
                            "regression", "lesson")),
-    ("preferences.md", ("feedback", "preference", "prefers", "rule:",
-                        "tone", "register", "style")),
+    ("preferences.md", PREFERENCE_WORDS),
     ("project-facts.md", ("reference", "host", "fact", "inventory", "api",
                           "network", "topology", "credential", "config")),
     ("glossary.md", ("glossary", "term:", "definition")),
 )
 
 
+def _has_word(entry, words):
+    """True when the entry's topic or source carries one of `words`,
+    whole-word: "api" must not fire inside "capitalise"."""
+    hay = ("%s %s" % (entry.get("topic", ""), entry.get("source", ""))).lower()
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(word) + r"(?![a-z0-9])", hay)
+               for word in words)
+
+
 def classify(entry):
     """Pick the distilled file for a raw entry."""
     if memory.normalize_level(entry.get("truth_level")) == memory.OPERATOR_LEVEL:
         return "operator-calibration.md"
-    hay = ("%s %s" % (entry.get("topic", ""), entry.get("source", ""))).lower()
     for fname, words in _KEYWORDS:
-        for word in words:
-            # Whole-word match: "api" must not fire inside "capitalise".
-            if re.search(r"(?<![a-z0-9])" + re.escape(word) + r"(?![a-z0-9])",
-                         hay):
-                return fname
+        if _has_word(entry, words):
+            return fname
     return "decisions.md"
+
+
+def standing_instruction(entry):
+    """True for an operator-level entry that is a rule for how the cousin
+    works rather than a fact about the world: its topic or source carries
+    a PREFERENCE_WORDS word (`rule: no em dashes`, `feedback: short
+    statuses`), the words that would have filed it under preferences.md
+    had the operator not said it. The runner puts these in the system
+    prompt, whole, and leaves them out of the digest."""
+    return (memory.normalize_level(entry.get("truth_level")) == memory.OPERATOR_LEVEL
+            and _has_word(entry, PREFERENCE_WORDS))
 
 
 def is_machine_topic(topic):
@@ -166,8 +190,9 @@ def distill(home, *, max_lines=DEFAULT_MAX_LINES,
         return _distill(home, max_lines=max_lines, since_days=since_days)
 
 
-def _distill(home, *, max_lines, since_days):
-    memory.ensure_layout(home)
+def _groups(home, since_days):
+    """(groups, total): the raw candidates by topic, the entries the
+    views leave out already left out, and how many were kept."""
     groups = defaultdict(list)
     total = 0
     raw = memory.list_raw(home, since_days=since_days)
@@ -198,7 +223,45 @@ def _distill(home, *, max_lines, since_days):
             continue
         groups[topic].append(entry)
         total += 1
+    return groups, total
 
+
+def _history(entries):
+    """(count, superseded) of a topic's entries: digests carry their own
+    entry count (folded history)."""
+    count = sum(int(e.get("entries", 1) or 1) for e in entries)
+    distinct = {" ".join(str(e.get("content", "")).split()) for e in entries}
+    return count, len(distinct) - 1
+
+
+def operator_topics(home, *, since_days=DEFAULT_SINCE_DAYS):
+    """The topics operator-calibration.md is built from, newest first
+    (ties by topic): one dict per topic whose newest entry is operator
+    level, {"topic", "entry" (the newest, whole), "ts", "line" (the
+    view's line for it), "rule" (standing_instruction)}. Read-only: no
+    view is written and no lock is taken; a home with no raw memory has
+    none."""
+    home = Path(home)
+    if not memory.raw_dir(home).is_dir():
+        return []
+    groups, _total = _groups(home, since_days)
+    out = []
+    for topic, entries in groups.items():
+        entries.sort(key=_ts)
+        newest = entries[-1]
+        if classify(newest) != "operator-calibration.md":
+            continue
+        count, superseded = _history(entries)
+        out.append({"topic": topic, "entry": newest, "ts": _ts(newest),
+                    "line": _line(newest, count, superseded),
+                    "rule": standing_instruction(newest)})
+    out.sort(key=lambda t: (-t["ts"], t["topic"]))
+    return out
+
+
+def _distill(home, *, max_lines, since_days):
+    memory.ensure_layout(home)
+    groups, total = _groups(home, since_days)
     per_file = defaultdict(list)
     obsolete = 0
     for topic, entries in groups.items():
@@ -211,11 +274,7 @@ def _distill(home, *, max_lines, since_days):
                 == memory.OBSOLETE_LEVEL:
             obsolete += 1
             continue
-        # Digests carry their own entry count (folded history).
-        count = sum(int(e.get("entries", 1) or 1) for e in entries)
-        distinct = {" ".join(str(e.get("content", "")).split())
-                    for e in entries}
-        superseded = len(distinct) - 1
+        count, superseded = _history(entries)
         per_file[classify(newest)].append(
             (is_machine_topic(topic), count, _ts(newest),
              _line(newest, count, superseded)))

@@ -6,7 +6,7 @@ A cousin's session only lasts so long before its context is full. The flip ends 
 
 ## The boot packet
 
-A new session starts from two texts the runner builds from the home. The **system prompt** holds the framework law, the framework contract (the tools the cousin has), the cousin's authored identity and the operator rules. It is never cut and stays the same from one generation to the next ([runners](runners.md)). The **state digest** is the new session's first message: everything that changes. Together they carry the boot packet's layers, described below. The digest looks like this:
+A new session starts from two texts the runner builds from the home. The **system prompt** holds the framework law, the framework contract (the tools the cousin has), the cousin's authored identity, the operator rules and the operator's standing instructions to this cousin. It is never cut and stays the same from one generation to the next ([runners](runners.md)). The **state digest** is the new session's first message: everything that changes. Together they carry the boot packet's layers, described below. The digest looks like this:
 
 ```
 STATE DIGEST FOR COUSIN: wren
@@ -32,11 +32,12 @@ DEGRADED layers: task_packet
 | Framework Law | system prompt | `<root>/config/law.md`, the same for every cousin; seeded from `templates/law.md` on the [supervisor](../glossary.md#supervisor)'s first start | left out. The system prompt is never cut, and `boot.fit()` treats the law as a hard layer it never cuts either |
 | Operator rules | system prompt | `<root>/shared/*.md`, the canonical tier only: entries with `kind: rule`, in full. Never pending proposals | left out, fine: a fresh install has no [shared tier](../glossary.md#shared-tier) |
 | Identity | system prompt | the authored parts of `CLAUDE.md` (the title line, `## Identity`, `## Voice` and what's below the template marker, minus the template's own text), then `<home>/self-portrait.md`, the committed portrait only (a candidate waiting for review doesn't count) | a fixed note that no identity is on disk and none should be invented, **degraded** (`identity`) |
-| Operator Calibration | digest | `memory/distilled/operator-calibration.md`, then the last 15 corrections from `data/corrections.jsonl`, newest first. The portrait's own calibration section is in the identity already | left out |
+| Standing instructions | system prompt | the cousin's L0 entries whose topic carries a preferences word ("rule:", "feedback", "preference", "prefers", "tone", "register", "style"; `distill.standing_instruction`), the newest entry per topic in full, sorted by topic, under "# Your operator's standing instructions" | left out |
+| Operator Calibration | digest | the curated text above the marker in `memory/distilled/operator-calibration.md`, the other L0 entries (one line per topic, the view's line) newest first, then the last 15 corrections from `data/corrections.jsonl`, newest first. Standing instructions are not repeated here. The portrait's own calibration section is in the identity already | left out |
 | Active State | digest | the live `## Open loops` section of STATUS.md, the bare heading the handoff writes (a suffixed `## Open loops (...)` heading is history; see [memory](../memory.md)) (or the first 1500 characters when there's no such section), then the first 1500 characters of `data/handoff.md`. A stale warning goes on top when decisions were logged after STATUS.md was last changed | `(no active state - degraded boot)`, **degraded** |
 | Current Task Packet | digest | `data/active-threads.md` (first 1500 characters) and the last three reasoning capsules from `memory/distilled/reasoning-capsules.md` | `(no in-flight tasks - check STATUS.md)`. Only **degraded** if Active State is empty too |
 | Recent Tool Trace Summary | digest | the cousin's traced CLI calls from the last 24 hours, newest first, up to 30 | `(no substantive tool traces in last 24h)`, fine |
-| Retrieved Memories | digest | the [distilled](../glossary.md#distilled) files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration has its own layer), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/`, and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
+| Retrieved Memories | digest | the [distilled](../glossary.md#distilled) files in `memory/distilled/` (preferences, project facts, decisions, known failures, glossary; calibration has its own layer), the last five capsule conclusions from `memory/capsules.jsonl`, the last 60 entries from the newest 14 files in `memory/raw/` (standing instructions left out: the system prompt has them), and the first 1000 characters of MEMORY.md | empty, fine: a new cousin has no memories |
 | Shared Reference | digest | every other canonical shared entry as one line (file and description), with how to read one (`cousin-shared read <file>`) | left out, fine |
 
 Before it builds the digest, the runner regenerates `memory/distilled/` from `memory/raw/` (the same as `cousin-memory distill`), so the digest always has a fresh view. If that fails, the digest uses whatever distilled files are already there, and if the digest can't be built at all, the last handoff goes in its place, marked degraded.
@@ -53,14 +54,14 @@ The system prompt is never cut. The digest has to fit in 8000 tokens, counted as
 
 | layer | min tokens | max tokens |
 |---|---|---|
-| calibration | 300 | 800 |
+| calibration | 800 | 2000 |
 | active_state | 500 | 1500 |
 | task_packet | 500 | 2000 |
 | trace_summary | 500 | 1500 |
 | memories | 1000 | 4000 |
 | shared (the Shared Reference) | 400 | 1500 |
 
-First every layer is cut to its ceiling. The ceilings add up to more than the total, so if the digest is still too big, layers are cut to their floor one at a time in this order until it fits: memories, trace_summary, calibration, task_packet, active_state, shared. That is `boot.TRUNCATE_ORDER` (memories, trace_summary, calibration, task_packet, active_state, shared, self_portrait) without the layers the digest doesn't carry. A cut layer ends with `... (truncated, <layer>, budget hit)` and the marker counts inside the budget.
+First every layer is cut to its ceiling. The ceilings add up to more than the total, so if the digest is still too big, layers are cut to their floor one at a time in this order until it fits: memories, trace_summary, calibration, task_packet, active_state, shared. That is `boot.TRUNCATE_ORDER` (memories, trace_summary, calibration, task_packet, active_state, shared, self_portrait) without the layers the digest doesn't carry. A cut layer ends with `... (truncated, <layer>, budget hit)` and the marker counts inside the budget. The calibration layer is the exception: it gives way by whole entries, newest kept, and each of its two parts (the calibration, the corrections) ends with `- ... N more not shown` for what it left out.
 
 Degraded is decided before any cutting, from each layer's own rule in the table, never by searching the text.
 

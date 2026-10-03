@@ -44,6 +44,7 @@ class LevelCase(unittest.TestCase):
 
 class TestLevels(LevelCase):
     def test_decide_defaults_to_the_canonical_conclusion(self):
+        # enforces: law 10
         rc, _, _ = self.run_cli("decide", "t", "d", "why")
         self.assertEqual(rc, 0)
         self.assertEqual(self.raw()[-1]["truth_level"], "L3_COUSIN_CONCLUSION")
@@ -54,6 +55,8 @@ class TestLevels(LevelCase):
         self.assertEqual(self.raw()[-1]["truth_level"], "L4_COUSIN_HYPOTHESIS")
 
     def test_operator_level_without_a_citation_is_refused(self):
+        # enforces: law 10
+        # stricter than the law's demotion: refused, not demoted
         rc, _, err = self.run_cli("remember", "tone", "keep it short",
                                   "--level", "operator")
         self.assertEqual(rc, 2)
@@ -68,6 +71,52 @@ class TestLevels(LevelCase):
         self.assertEqual(row["truth_level"], "L0_OPERATOR")
         self.assertEqual(row["cite"], "chat 42")
         self.assertEqual(row["source"], "remember")
+
+    def test_an_uncited_framework_or_tool_level_is_demoted_to_conclusion(self):
+        # enforces: law 10
+        for level, canonical in (("framework", "L1_FRAMEWORK"), ("tool", "L2_TOOL"),
+                                 ("L2_TOOL", "L2_TOOL")):
+            with self.subTest(level=level):
+                rc, out, _ = self.run_cli("remember", "probe", "Kestrel answered",
+                                          "--level", level)
+                self.assertEqual(rc, 0)
+                self.assertEqual(self.raw()[-1]["truth_level"], "L3_COUSIN_CONCLUSION")
+                [note] = [l for l in out.splitlines() if l.startswith("demoted:")]
+                self.assertIn(canonical, note)
+                self.assertIn("--cite", note)
+        rc, out, _ = self.run_cli("decide", "probe", "retry", "it timed out",
+                                  "--level", "tool")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.raw()[-1]["truth_level"], "L3_COUSIN_CONCLUSION")
+        self.assertIn("demoted: L2_TOOL needs --cite", out)
+
+    def test_a_cited_framework_or_tool_level_keeps_it_and_says_nothing(self):
+        # enforces: law 10
+        for level, canonical in (("framework", "L1_FRAMEWORK"), ("tool", "L2_TOOL")):
+            with self.subTest(level=level):
+                rc, out, _ = self.run_cli("remember", "probe", "Kestrel answered",
+                                          "--level", level, "--cite", "ping, 2026-09-30")
+                self.assertEqual(rc, 0)
+                self.assertEqual(self.raw()[-1]["truth_level"], canonical)
+                self.assertNotIn("demoted", out)
+
+    def test_the_tool_path_says_it_too(self):
+        line = memory.remember(self.home, "probe", "Kestrel answered", level="framework")
+        self.assertEqual(line.splitlines()[1],
+                         "demoted: L1_FRAMEWORK needs --cite (a cited source, law 10);"
+                         " written as L3_COUSIN_CONCLUSION")
+        self.assertEqual(self.raw()[-1]["truth_level"], "L3_COUSIN_CONCLUSION")
+
+    def test_the_frameworks_own_entries_keep_their_level(self):
+        # enforces: law 10
+        # the framework's own writes are not the cousin's to demote
+        self.assertTrue(memory.record_event(self.home, "framework", "framework:rollover",
+                                            "generation 4 started", "runner"))
+        self.assertTrue(memory.record_event(self.home, "L2_TOOL", "job:fleet-sync",
+                                            "job #3 done (exit 0): fleet sync", "job"))
+        rows = self.raw()
+        self.assertEqual([r["truth_level"] for r in rows], ["L1_FRAMEWORK", "L2_TOOL"])
+        self.assertTrue(all("cite" not in r for r in rows))
 
     def test_an_unknown_level_is_refused(self):
         rc, _, err = self.run_cli("remember", "t", "f", "--level", "gospel")

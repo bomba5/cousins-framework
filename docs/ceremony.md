@@ -53,8 +53,9 @@ The keys are in the cousin's `cousin.toml` unless named otherwise;
 
 **Costs.** It is input on every [turn](glossary.md#turn): the framework law
 (`config/law.md`), the framework contract, the cousin's authored identity
-(the authored parts of `CLAUDE.md` and its committed self-portrait) and the
-operator rules from the [shared tier](glossary.md#shared-tier), appended to the agent CLI's own preset
+(the authored parts of `CLAUDE.md` and its committed self-portrait), the
+operator rules from the [shared tier](glossary.md#shared-tier) and the operator's
+standing instructions to this cousin ([memory](memory.md#truth-levels)), appended to the agent CLI's own preset
 (`compose_system_prompt` in `cousin_lib/runner/prompt.py`). None of it is
 ever cut. The contract is about 6,100 characters (about 1,500 tokens) with
 every tool of the shipped `config/mcp-registry.toml.example` enabled
@@ -62,8 +63,8 @@ every tool of the shipped `config/mcp-registry.toml.example` enabled
 long as you write them. The prompt is kept byte for byte the same across
 sessions, so after the first turn it is read from the prompt cache, which
 costs a fraction of fresh input. What changes it, and so writes the cache
-again once: an edit to the law, a rule, the authored identity or the
-self-portrait, a tool enabled or disabled in the cousin's registry, or a new
+again once: an edit to the law, a rule, a standing instruction, the authored
+identity or the self-portrait, a tool enabled or disabled in the cousin's registry, or a new
 framework minor version. A running session keeps the prompt it started with;
 an edit lands at the next session.
 
@@ -86,7 +87,7 @@ characters kept for its header (`DIGEST_MAX_CHARS` in
 
 | layer | floor | ceiling |
 |---|---|---|
-| operator calibration | 1,200 | 3,200 |
+| operator calibration | 3,200 | 8,000 |
 | active state (STATUS.md open loops, the handoff) | 2,000 | 6,000 |
 | task packet (active threads, reasoning capsules) | 2,000 | 8,000 |
 | tool trace summary (last 24 hours) | 2,000 | 6,000 |

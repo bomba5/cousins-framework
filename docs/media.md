@@ -1,5 +1,7 @@
 # Media generation
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 [Cousins](glossary.md#cousin) can generate images, voice clips and short videos through a
 service you point them at. It's off until you configure it, and the
 framework doesn't ship or pick a provider. This page covers the config,

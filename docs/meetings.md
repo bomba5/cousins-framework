@@ -1,5 +1,7 @@
 # Meetings
 
+*Optional: nothing on this page is needed to run a cousin.*
+
 A meeting is a chat shared by you and several running [cousins](glossary.md#cousin): for
 brainstorming, coordinating, or cross-reviewing a change. It runs in rounds,
 so it stays a discussion instead of turning into five cousins answering at

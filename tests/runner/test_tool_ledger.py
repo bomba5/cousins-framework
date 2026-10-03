@@ -15,7 +15,7 @@ class TestToolLedger(unittest.TestCase):
     def test_states_follow_start_and_result(self):
         tool_ledger.started(self.home, "a", "Bash", {"command": "git push"})
         tool_ledger.started(self.home, "b", "Write", {"file_path": "/etc/x"})
-        tool_ledger.started(self.home, "c", "mcp__cousin__send", {"to": "sage", "text": "hi"})
+        tool_ledger.started(self.home, "c", "mcp__cousin__send", {"to": "kestrel", "text": "hi"})
         tool_ledger.finished(self.home, "a")
         tool_ledger.finished(self.home, "b", error=True)
         self.assertEqual([(c["tool"], c["state"]) for c in tool_ledger.calls(self.home)],
@@ -51,13 +51,13 @@ class TestToolLedger(unittest.TestCase):
 
     def test_begin_records_the_turn_and_the_wording_follows_the_message(self):
         tool_ledger.started(self.home, "old", "Bash", {"command": "an older turn"})
-        tool_ledger.begin(self.home, [{"id": 7, "body": "push and tell sage"}])
+        tool_ledger.begin(self.home, [{"id": 7, "body": "push and tell kestrel"}])
         tool_ledger.started(self.home, "a", "Bash", {"command": "git push"})
         self.assertEqual(tool_ledger.turn(self.home)["ids"], [7])
         self.assertEqual([c["summary"] for c in tool_ledger.calls(self.home)], ["git push"])
         again = tool_ledger.lines(self.home, comes_again=True)
         self.assertIn("delivered again after this line", again)
-        self.assertNotIn("push and tell sage", again)
+        self.assertNotIn("push and tell kestrel", again)
         closed = tool_ledger.lines(self.home, comes_again=False)
         self.assertIn("is not delivered again", closed)
-        self.assertIn('The message was: "push and tell sage"', closed)
+        self.assertIn('The message was: "push and tell kestrel"', closed)

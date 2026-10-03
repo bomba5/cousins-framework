@@ -235,7 +235,7 @@ class TestThePerimeterAtTheGate(HermeticCase):
                                        tool_input={"command": command}), command)
 
     def test_the_primary_session_keeps_its_operator_directed_edits(self):
-        # Bart edits config/law.md on Jhonata's instruction; the perimeter
+        # A cousin edits config/law.md on the operator's instruction; the perimeter
         # is about background passes, not about the operator's own hands.
         self.assertEqual(self._gate(
             tool_name="Write",

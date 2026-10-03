@@ -623,11 +623,36 @@ def _cmd_start(args):
     return 0
 
 
+def close_refusal(job, slug):
+    """Why `slug` may not close `job`, or None. Closing kills the job's
+    process group and writes its result into the owner's memory, so a
+    cousin closes only the jobs it started (the operator closes any job
+    from the console)."""
+    owner = str(job.get("spawned_by") or "")
+    if owner == slug:
+        return None
+    return ("job #%d refused: it was started by %s, not by %s; a cousin"
+            " closes only its own jobs (the operator closes any job from"
+            " the console)" % (job["id"], owner or "nobody", slug))
+
+
+def _caller_refusal(job):
+    """close_refusal for the cousin COUSIN_HOME names; None in a shell
+    with no cousin home, which acts for no cousin."""
+    if not os.environ.get("COUSIN_HOME"):
+        return None
+    return close_refusal(job, CousinConfig.from_env().slug)
+
+
 def _close_cmd(args, status):
     job = get_job(args.id)
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)
         return 1
+    refused = _caller_refusal(job)
+    if refused:
+        print("cousin-job: %s" % refused, file=sys.stderr)
+        return 3
     # The row is closed first, so a runner whose command dies from the
     # reap below finds it closed and writes nothing over it. Then the
     # processes end: a row that says done over a command still running
@@ -656,6 +681,10 @@ def _cmd_cancel(args):
     if not job:
         print("job #%d not found" % args.id, file=sys.stderr)
         return 1
+    refused = _caller_refusal(job)
+    if refused:
+        print("cousin-job: %s" % refused, file=sys.stderr)
+        return 3
     if job["pid"] and not job.get("pgid"):
         # A row from before process groups were recorded: the runner
         # pid is all there is.

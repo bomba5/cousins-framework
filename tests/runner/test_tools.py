@@ -3,6 +3,7 @@ reply as the only chat.db writer, no subprocess anywhere."""
 import json
 import os
 import pathlib
+import re
 import sqlite3
 import subprocess
 import sys
@@ -365,6 +366,52 @@ class TestServerBuild(HermeticCase):
         ctx = _ctx(self)
         cfg = tools.build_tool_server(ctx, _registry(ctx.root))
         self.assertEqual(cfg["type"], "sdk"); self.assertEqual(cfg["name"], "cousin")
+
+
+class TestJobCloseOwner(HermeticCase):
+    """Closing a job kills its process group and writes its result into
+    the owner's memory: the tool closes only a job the calling cousin
+    started."""
+
+    def _foreign_job(self, ctx):
+        from cousin_lib import jobs
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"],
+                                start_new_session=True)
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        job_id = jobs.register_job(kind="shell", title="theirs", spawned_by="testa")
+        conn = jobs._db()
+        try:
+            conn.execute("UPDATE jobs SET pid=?, pgid=? WHERE id=?", (proc.pid, proc.pid, job_id))
+            conn.commit()
+        finally:
+            conn.close()
+        return job_id, proc
+
+    def test_another_cousins_job_is_refused_and_left_running(self):
+        from cousin_lib import jobs
+        ctx = _ctx(self)
+        job_id, proc = self._foreign_job(ctx)
+        for command in ("done", "fail"):
+            text, err = tools.call(ctx, "job", {"command": command, "id": job_id,
+                                                "summary": "not mine"})
+            self.assertTrue(err, text)
+            self.assertIn("job #%d refused: it was started by testa, not by wren" % job_id, text)
+        job = jobs.get_job(job_id)
+        self.assertEqual((job["status"], job["result_summary"]), ("running", None))
+        self.assertIsNone(proc.poll(), "the other cousin's process was killed")
+        raw = ctx.root / "cousins" / "testa" / "memory" / "raw"
+        self.assertFalse(raw.exists() and any(raw.iterdir()))
+
+    def test_its_own_job_still_closes(self):
+        from cousin_lib import jobs
+        ctx = _ctx(self)
+        text, err = tools.call(ctx, "job", {"command": "start", "kind": "other", "title": "mine"})
+        self.assertFalse(err, text)
+        job_id = int(re.search(r"\d+", text).group())
+        text, err = tools.call(ctx, "job", {"command": "done", "id": job_id, "summary": "ok"})
+        self.assertFalse(err, text)
+        self.assertEqual(jobs.get_job(job_id)["status"], "done")
 
 
 class TestJobLaunchBound(unittest.TestCase):

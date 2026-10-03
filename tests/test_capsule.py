@@ -1,13 +1,13 @@
 """Reasoning capsules: the jsonl store, the markdown mirror under
 memory/distilled, the newest-first listing, the CLI, and the two
-integration points (boot's memories layer; the distiller leaving the
-file alone).
+integration points (the state digest's memories layer; the distiller
+leaving the file alone).
 
 The first block re-expresses an earlier version's own unit tests for
 this module (path, create-on-write, appendable, optional sections,
 empty listing, newest N, rotation). Everything after is this tree's:
 the jsonl round trip, the curated-region rule against the distill
-marker, and the boot packet.
+marker, and the state digest.
 """
 import io
 import json
@@ -19,7 +19,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from cousin_lib import capsule, distill, memory
-from cousin_lib.boot import assemble
+from cousin_lib.runner import prompt
 
 
 class CapsuleCase(unittest.TestCase):
@@ -190,7 +190,7 @@ class TestCuratedRegion(CapsuleCase):
         self.assertEqual(path.read_text(), text)
 
 
-class TestBootPacket(CapsuleCase):
+class TestStateDigest(CapsuleCase):
     def setUp(self):
         super().setUp()
         (self.root / "config").mkdir()
@@ -205,17 +205,19 @@ class TestBootPacket(CapsuleCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def _digest(self):
+        return prompt.state_digest(self.home, root=self.root, slug="testa")["text"]
+
     def _memories_section(self, text):
-        start = text.index("## 8. Retrieved Memories")
-        end = text.index("## 9. Tool Surface")
-        return text[start:end]
+        start = text.index("Retrieved Memories")
+        end = text.find("Shared Reference")
+        return text[start:end if end != -1 else len(text)]
 
     def test_memories_carry_the_newest_five_conclusions(self):
         for i in range(7):
             self._write(conclusion="conclusion number %d" % i,
                         evidence=["e"], topic="t%d" % i)
-        section = self._memories_section(
-            assemble("testa", self.home)["text"])
+        section = self._memories_section(self._digest())
         self.assertIn("## Reasoning capsules", section)
         for i in range(2, 7):
             self.assertIn("conclusion number %d" % i, section)
@@ -226,8 +228,7 @@ class TestBootPacket(CapsuleCase):
         self.assertIn("topic: t6", section)
 
     def test_no_capsules_means_no_block(self):
-        section = self._memories_section(
-            assemble("testa", self.home)["text"])
+        section = self._memories_section(self._digest())
         self.assertNotIn("Reasoning capsules", section)
 
     def test_the_marker_never_reaches_the_packet(self):
@@ -236,7 +237,7 @@ class TestBootPacket(CapsuleCase):
         path.write_text("# Reasoning Capsules\n\n%s\n%s tail_\n"
                         % (distill.AUTO_MARKER, distill.AUTO_HEADER))
         self._write(conclusion="visible")
-        text = assemble("testa", self.home)["text"]
+        text = self._digest()
         self.assertIn("visible", text)
         self.assertNotIn(distill.AUTO_MARKER, text)
 

@@ -1,9 +1,8 @@
-"""Boot packet assembly: budgets, degraded detection, composition.
+"""The boot module: the generation counter and its start record, the
+truncation marker, and the shared tier's rules and index.
 
-The three incident-lessons are pinned as tests: the total ceiling
-governs over per-layer maxima, truncation markers count inside their
-budget, and degraded detection is per-layer logic that never flags a
-healthy cousin.
+The layers' composition, the total ceiling and degraded detection are
+pinned on the state digest that reads them (tests/runner/test_digest.py).
 """
 import json
 import os
@@ -13,15 +12,13 @@ import time
 import unittest
 from unittest import mock
 
-from cousin_lib import trace
 from cousin_lib.boot import (
-    TOTAL_MAX_CHARS,
     _truncate,
-    assemble,
     bump_generation,
     generation_started,
     mark_generation_start,
     read_generation,
+    shared_parts,
 )
 
 
@@ -37,27 +34,6 @@ class BootCase(unittest.TestCase):
                                   {"FRAMEWORK_ROOT": str(self.root)})
         patcher.start()
         self.addCleanup(patcher.stop)
-
-    def _healthy_home(self):
-        (self.home / "STATUS.md").write_text(
-            "# Wren - STATUS\n\n## Open loops\n\n- finish the report\n"
-        )
-        (self.home / "data" / "handoff.md").write_text("# Handoff\nmid-report\n")
-        (self.home / "data" / "active-threads.md").write_text(
-            "# Threads\n- report: drafting\n"
-        )
-        (self.home / "self-portrait.md").write_text(
-            "# Cousin Self-Portrait: wren\n## Voice\nPlain.\n"
-            "## Operator Calibration\nShort statuses.\n"
-        )
-        (self.root / "config").mkdir(exist_ok=True)
-        (self.root / "config" / "law.md").write_text(
-            "1. Persona is authored, never improvised.\n"
-        )
-        (self.root / "data").mkdir(exist_ok=True)
-        (self.root / "data" / "tool-surface.md").write_text(
-            "# Tool Surface\n\n- `cousin-memory` - usage: cousin-memory\n"
-        )
 
 
 class TestGeneration(BootCase):
@@ -117,136 +93,13 @@ class TestTruncate(BootCase):
         self.assertIn("truncated", out)
 
 
-class TestAssemble(BootCase):
-    def test_healthy_home_composes_all_sections_not_degraded(self):
-        self._healthy_home()
-        pkt = assemble("wren", self.home, generation=3)
-        self.assertEqual(pkt["degraded_sections"], [])
-        for header in ("Framework Law", "Self-Portrait",
-                       "Operator Calibration", "Active State",
-                       "Task Packet", "Tool Trace", "Retrieved Memories",
-                       "Required Boot Actions"):
-            self.assertIn(header, pkt["text"])
-        self.assertIn("Generation: 3", pkt["text"])
-        self.assertIn("identity_hash", pkt["text"])
-
-    def test_fresh_home_names_its_real_gaps_and_only_those(self):
-        # Empty memories and empty trace are the starting condition,
-        # never degraded; a missing portrait and missing state are.
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertIn("self_portrait", pkt["degraded_sections"])
-        self.assertIn("active_state", pkt["degraded_sections"])
-        self.assertNotIn("memories", pkt["degraded_sections"])
-        self.assertNotIn("trace_summary", pkt["degraded_sections"])
-
-    def test_task_fallback_with_real_active_state_is_not_degraded(self):
-        self._healthy_home()
-        (self.home / "data" / "active-threads.md").unlink()
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertNotIn("task_packet", pkt["degraded_sections"])
-
-    def test_total_ceiling_governs_over_per_layer_maxima(self):
-        self._healthy_home()
-        # Bloat several layers to their individual maxima.
-        (self.home / "self-portrait.md").write_text(
-            "# P\n## Voice\n" + "portrait words " * 3000)
-        (self.home / "data" / "handoff.md").write_text("h " * 20000)
-        (self.home / "data" / "active-threads.md").write_text("t " * 20000)
-        raw = self.home / "memory" / "raw"
-        raw.mkdir(exist_ok=True)
-        with open(raw / "2026-08-06.jsonl", "w") as fh:
-            for i in range(400):
-                fh.write(json.dumps({"topic": "t%d" % i,
-                                     "content": "m" * 300}) + "\n")
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertLessEqual(pkt["chars"], TOTAL_MAX_CHARS)
-
-    def test_staleness_warning_when_decisions_outrun_status(self):
-        self._healthy_home()
-        old = time.time() - 3600
-        os.utime(self.home / "STATUS.md", (old, old))
-        with open(self.home / "data" / "decisions.jsonl", "w") as fh:
-            fh.write(json.dumps({
-                "timestamp": "2099-01-01T00:00:00+00:00",
-                "topic": "late", "decision": "d", "reasoning": "r",
-            }) + "\n")
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertIn("STALE WARNING", pkt["text"])
-
-
-class TestTheLawIsAHardLayer(BootCase):
-    """The law reaches a packet whole or the packet says so. It used to be
-    cut to 3200 chars by the per-layer cap that runs above the overflow
-    loop, so a packet could carry rules 1-8 and drop 9-14 - including the
-    two that keep one cousin's memory out of another's."""
-
-    def _law(self, text):
-        (self.root / "config").mkdir(exist_ok=True)
-        (self.root / "config" / "law.md").write_text(text)
-
-    def test_the_whole_law_reaches_the_packet(self):
-        self._healthy_home()
-        law = "".join("%d. rule %d that a cousin must read.\n" % (i, i)
-                      for i in range(1, 60))
-        self._law(law)
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertIn("14. rule 14 that a cousin must read.", pkt["text"])
-        self.assertNotIn("truncated, law", pkt["text"])
-        self.assertEqual(pkt["incomplete_layers"], [])
-        self.assertNotIn("law", pkt["degraded_sections"])
-
-    def test_a_law_too_long_for_the_total_is_reported_not_trimmed(self):
-        self._healthy_home()
-        law = "rule. " * 9000
-        self._law(law)
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertIn("LAW INCOMPLETE", pkt["text"])
-        self.assertIn("read the whole of it at", pkt["text"])
-        self.assertIn(law.strip(), pkt["text"])
-        self.assertNotIn("truncated, law", pkt["text"])
-        self.assertEqual(pkt["incomplete_layers"], ["law"])
-
-    def test_the_overflow_is_in_the_trace_ledger_not_only_the_packet(self):
-        self._healthy_home()
-        self._law("rule. " * 9000)
-        assemble("wren", self.home, generation=1)
-        summary = trace.summary_for_boot("wren", root=self.root)
-        self.assertIn("LAW INCOMPLETE", summary)
-
-    def test_a_home_with_no_law_file_boots_degraded_and_says_so(self):
-        # An install whose seed never ran is the worst boot there is; it
-        # was filed as somebody else's problem and reported nowhere.
-        self._healthy_home()
-        (self.root / "config" / "law.md").unlink()
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertIn("law", pkt["degraded_sections"])
-        self.assertIn("DEGRADED layers: law", pkt["text"])
-
-    def test_the_law_is_still_inside_the_total_when_the_total_allows(self):
-        self._healthy_home()
-        (self.home / "self-portrait.md").write_text(
-            "# P\n## Voice\n" + "portrait words " * 3000)
-        (self.home / "data" / "handoff.md").write_text("h " * 20000)
-        pkt = assemble("wren", self.home, generation=1)
-        self.assertLessEqual(pkt["chars"], TOTAL_MAX_CHARS)
-        self.assertIn("Framework Law", pkt["text"])
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-class TestSharedLayer(BootCase):
-    """Operator rules in the shared tier reach every cousin's packet in
-    full; the rest of the tier is an index line each."""
+class TestSharedParts(BootCase):
+    """Operator rules in the shared tier are quoted in full; the rest of
+    the tier is an index line each."""
 
     def _shared(self, name, text):
         (self.root / "shared").mkdir(exist_ok=True)
         (self.root / "shared" / name).write_text(text)
-
-    def _section(self, text):
-        start = text.index("## 2. Shared Rules and Fleet Memory")
-        return text[start:text.index("## 3. Cousin Self-Portrait")]
 
     def test_rules_in_full_references_as_index_lines(self):
         self._shared("reference_first-principles.md",
@@ -255,19 +108,20 @@ class TestSharedLayer(BootCase):
         self._shared("reference_lan-map.md",
                      "---\nname: net\ndescription: the LAN map\n---\n"
                      "the router, the switches and many details\n")
-        section = self._section(assemble("wren", self.home)["text"])
-        self.assertIn("A cousin MUST decompose first.", section)
-        self.assertIn("- `reference_lan-map.md`: the LAN map", section)
-        self.assertNotIn("many details", section)
+        rules, index = shared_parts(self.root)
+        self.assertEqual(rules, ["### reference_first-principles\n"
+                                 "A cousin MUST decompose first."])
+        self.assertEqual(index, ["- `reference_lan-map.md`: the LAN map"])
 
-    def test_pending_proposals_never_reach_the_packet(self):
+    def test_pending_proposals_are_never_read(self):
         (self.root / "shared" / "proposed").mkdir(parents=True)
         (self.root / "shared" / "proposed" / "sam__x.md").write_text(
             "---\nkind: rule\n---\nUNREVIEWED RULE\n")
-        text = assemble("wren", self.home)["text"]
-        self.assertNotIn("UNREVIEWED RULE", text)
+        self.assertEqual(shared_parts(self.root), ([], []))
 
-    def test_no_shared_tier_is_empty_and_not_degraded(self):
-        result = assemble("wren", self.home)
-        self.assertNotIn("shared", result["degraded_sections"])
-        self.assertIn("## 2. Shared Rules and Fleet Memory", result["text"])
+    def test_no_shared_tier_is_empty(self):
+        self.assertEqual(shared_parts(self.root), ([], []))
+
+
+if __name__ == "__main__":
+    unittest.main()

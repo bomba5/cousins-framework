@@ -1,5 +1,5 @@
 """The in-pane launcher. The pane runs
-`exec env -i <env_base> <python> <launcher> --home H [--fresh] -- claude ...`;
+`exec <python> -I -S -c <KEEP_ONLY> <names> <python> <launcher> --home H [--fresh] -- claude ...`;
 the launcher adds the account and the kind's switches, applies the hard
 deny again, and execs the CLI. No secret in any argv."""
 import os

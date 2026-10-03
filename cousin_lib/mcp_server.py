@@ -856,6 +856,20 @@ def refresh_mcp_json(home, *, root, slug):
     Absent: written whole. Not a JSON object: refused, never clobbered.
     Idempotent: a second run writes the same bytes. Returns
     {path, changed}."""
+    path, text, changed = refreshed_mcp_json(home, root=root, slug=slug)
+    if changed:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    return {"path": path, "changed": changed}
+
+
+def refreshed_mcp_json(home, *, root, slug):
+    """(path, text, changed): what refresh_mcp_json would write to
+    <home>/.mcp.json, and whether that differs from the file, without
+    writing anything. Raises RegistrationError as refresh_mcp_json
+    does."""
     home = pathlib.Path(os.path.abspath(home))
     path = home / ".mcp.json"
     fresh = mcp_json(home, slug, root)
@@ -893,12 +907,7 @@ def refresh_mcp_json(home, *, root, slug):
         data = fresh
     text = json.dumps(data, indent=2) + "\n"
     changed = not path.exists() or path.read_text() != text
-    if changed:
-        fd, tmp = tempfile.mkstemp(dir=home, suffix=".tmp")
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    return {"path": path, "changed": changed}
+    return path, text, changed
 
 
 def provision_mcp(home, *, root, slug, operator=None):

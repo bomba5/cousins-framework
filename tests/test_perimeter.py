@@ -25,11 +25,11 @@ class TestShapes(unittest.TestCase):
 
     def test_a_committed_portrait_is_protected_and_its_candidate_is_not(self):
         self.assertIsNotNone(perimeter.protected_reason(
-            "/srv/cf/cousins/chico/self-portrait.md"))
+            "/srv/cf/cousins/kestrel/self-portrait.md"))
         self.assertIsNone(perimeter.protected_reason(
-            "/srv/cf/cousins/chico/.self-portrait-candidate.md"))
+            "/srv/cf/cousins/kestrel/.self-portrait-candidate.md"))
         self.assertIsNone(perimeter.protected_reason(
-            "/srv/cf/cousins/chico/.self-portrait.md.bak"))
+            "/srv/cf/cousins/kestrel/.self-portrait.md.bak"))
 
     def test_canonical_shared_memory_is_protected(self):
         self.assertIsNotNone(perimeter.protected_reason(
@@ -49,10 +49,10 @@ class TestShapes(unittest.TestCase):
     def test_ordinary_memory_is_not_protected(self):
         for path in ("memory/raw/2026-10-02.jsonl",
                      "memory/distilled/notes.md",
-                     "/srv/cf/cousins/chico/memory/raw/2026-10-02.jsonl",
+                     "/srv/cf/cousins/kestrel/memory/raw/2026-10-02.jsonl",
                      "/srv/cf/data/decision.jsonl",
                      "/srv/cf/config/policy.toml",
-                     "/srv/cf/cousins/chico/notes/plan.md"):
+                     "/srv/cf/cousins/kestrel/notes/plan.md"):
             self.assertIsNone(perimeter.protected_reason(path), path)
 
     def test_a_path_below_a_shared_subdirectory_is_not_canonical(self):
@@ -110,7 +110,7 @@ class TestWriteTargets(unittest.TestCase):
                         "sed s/a/b/ config/law.md",
                         "cp config/law.md /tmp/x",
                         "wc -l shared/reference_house-style.md",
-                        "rg -l private /srv/cousins/chico"):
+                        "rg -l private /srv/cousins/kestrel"):
             self.assertIsNone(perimeter.check_tool("Bash", {"command": command}),
                               command)
 
@@ -159,7 +159,7 @@ class TestCheckTool(unittest.TestCase):
 
     def test_an_ordinary_write_is_not(self):
         self.assertIsNone(perimeter.check_tool(
-            "Write", {"file_path": "/srv/cf/cousins/chico/notes/a.md"}))
+            "Write", {"file_path": "/srv/cf/cousins/kestrel/notes/a.md"}))
         self.assertIsNone(perimeter.check_tool(
             "Bash", {"command": "git status"}))
 
@@ -209,13 +209,6 @@ class TestTheLawSurvivesFit(unittest.TestCase):
         out = boot.fit({"law": law, "a": "y" * 200},
                        dict(boot.LAYER_BUDGETS), boot.TRUNCATE_ORDER, 100)
         self.assertEqual(out["law"], law)
-
-    def test_the_overflow_is_reported_rather_than_hidden(self):
-        law = "rule. " * 9000
-        out = boot.fit({"law": law}, dict(boot.LAYER_BUDGETS),
-                       boot.TRUNCATE_ORDER, 1000)
-        self.assertEqual(boot.hard_overflow(out, 1000), [("law", len(law))])
-        self.assertEqual(boot.hard_overflow({"law": "short"}, 1000), [])
 
     def test_the_law_is_the_only_hard_layer_today(self):
         self.assertEqual(tuple(boot.HARD_LAYERS), ("law",))

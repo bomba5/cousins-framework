@@ -32,7 +32,7 @@ nothing else on stdout (SessionStart's and UserPromptSubmit's stdout
 reach the model's context), ignores input it cannot read, and bounds
 every step; HARD_S ends the process whatever it is doing.
 
-It runs in the pane's `env -i` environment (tmux_launch), so it imports
+It runs in the pane's allowlisted environment (tmux_launch), so it imports
 only the standard library at import time, and wake.py when it sends
 (M-a)."""
 import json

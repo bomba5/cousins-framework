@@ -137,8 +137,8 @@ class HandoffBox:
 
 
 def write_emergency_handoff(home, *, name, reason, tail):
-    """flip._write_emergency_handoff's format, from the session store's
-    tail instead of a pane capture: a real signal loss, never the normal flow."""
+    """The framework's emergency handoff, marked degraded, from the session
+    store's tail: a real signal loss, never the normal flow."""
     path = Path(home) / "data" / "handoff.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join([

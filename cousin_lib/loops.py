@@ -141,6 +141,12 @@ def _log_fire(slug, name, now):
                  + "\n")
 
 
+def _health(report, key, ok, error=None):
+    """One result for the health record (cousin_lib.health): the daemon
+    folds report["health"] into data/health.json after each tick."""
+    report.setdefault("health", []).append((key, bool(ok), None if ok else str(error)))
+
+
 def read_fires(*, limit=None):
     """The fire log as dicts, oldest first; unparsable lines skipped.
     limit keeps the newest N."""
@@ -552,7 +558,7 @@ def _fire_worker_loops(config, state, now, report):
     every firing looks failed everywhere loop state is shown - the
     source marked fires successful before the subprocess ran. With no
     worker-cmd configured the loop STAYS DUE and the error names the
-    remediation."""
+    remediation. Returns the errors loading the cousin's loops."""
     import shlex
 
     from cousin_lib import jobs
@@ -568,11 +574,13 @@ def _fire_worker_loops(config, state, now, report):
     for loop in loops:
         key = "%s|%s" % (config.slug, loop["name"])
         if not _loop_due(loop, state["last_fires"].get(key, 0), now):
+            _health(report, "loop:" + key, True)
             continue
         if not template:
             report["errors"].append(
                 "worker loop %s due but no worker command configured;"
                 " write config/worker-cmd (loop stays due)" % key)
+            _health(report, "loop:" + key, False, report["errors"][-1])
             continue
         cmd = [part.replace("{prompt}", loop["prompt"])
                    .replace("{home}", str(home))
@@ -587,13 +595,19 @@ def _fire_worker_loops(config, state, now, report):
         # the detached runner finishes.
         state["last_fires"][key] = now
         report["fired"].append(key)
+        _health(report, "loop:" + key, True)
         try:
             _log_fire(config.slug, loop["name"], now)
         except OSError as err:
             report["errors"].append("fire log: %s" % err)
+    return errors
 
 
 def _consume_requests(state, deliver, errors):
+    """Fire requests (the console's fire button, `cousin-loops fire`,
+    a ready file asking for the beat). Returns ["#id: reason"] for each
+    request this call ended failed."""
+    failed = []
     con = _db()
     try:
         # POSITIVE filter: this consumer claims only the kinds it
@@ -622,6 +636,8 @@ def _consume_requests(state, deliver, errors):
                 if not text:
                     _finish_request(con, row["id"], "failed",
                                     "heartbeat composition failed")
+                    failed.append("#%d: heartbeat composition failed"
+                                  % row["id"])
                     continue
             else:
                 target = next(
@@ -631,6 +647,8 @@ def _consume_requests(state, deliver, errors):
                     _finish_request(con, row["id"], "failed",
                                     "no such loop %r"
                                     % payload.get("loop"))
+                    failed.append("#%d: no such loop %r"
+                                  % (row["id"], payload.get("loop")))
                     continue
                 text = ("[Framework scheduler: manual fire]\n\n"
                         "### %s\n%s" % (target["name"], target["prompt"]))
@@ -641,8 +659,12 @@ def _consume_requests(state, deliver, errors):
             _finish_request(con, row["id"],
                             "done" if ok else "failed",
                             "" if ok else "delivery failed")
+            if not ok:
+                failed.append("#%d: delivery failed for %s"
+                              % (row["id"], slug))
     finally:
         con.close()
+    return failed
 
 
 _WARN_LADDER = (
@@ -796,6 +818,7 @@ def _fire_ready_files(slug, home, loops, state, deliver, now, report):
                           "unknown trigger name %r for %s" % (name, slug))
             continue
         if deliver(slug, text):
+            _health(report, "delivery:" + slug, True)
             if commit is not None:
                 commit()
                 state["last_beat"][slug] = now
@@ -807,10 +830,13 @@ def _fire_ready_files(slug, home, loops, state, deliver, now, report):
                     % (path, err))
             reported.pop(key, None)
             report["ready"].append(key)
-        elif key not in reported:
-            reported[key] = now
-            report["errors"].append(
-                "delivery failed for %s; the file stays" % path)
+        else:
+            _health(report, "delivery:" + slug, False,
+                    "delivery failed for %s; the file stays" % path)
+            if key not in reported:
+                reported[key] = now
+                report["errors"].append(
+                    "delivery failed for %s; the file stays" % path)
 
 
 class _CousinNotAlive(Exception):
@@ -931,7 +957,9 @@ def schedule_dreams(now, report, *, homes, root, run=_dream_one, background=True
             trigger = dreaming.due(home, when)
         except Exception as err:  # noqa: BLE001 - one home never stops the rest
             report["errors"].append("dreaming %s: %s" % (slug, err))
+            _health(report, "dream-due:" + slug, False, err)
             continue
+        _health(report, "dream-due:" + slug, True)
         if trigger:
             state["inflight"].add(slug)
             state["queue"].append((slug, home, trigger))
@@ -956,6 +984,20 @@ def schedule_dreams(now, report, *, homes, root, run=_dream_one, background=True
     if state["queue"] and (thread is None or not thread.is_alive()):
         state["thread"] = threading.Thread(target=drain, name="dreaming", daemon=True)
         state["thread"].start()
+
+
+DREAM_OK = ("done", "no_change", "budget")
+
+
+def dream_outcome(out):
+    """(ok, error) for a finished pass's verdict: done, no_change and
+    budget (a result, not a fault) are ok; error, lost, or anything
+    else is a failure, its error the pass's own."""
+    out = out if isinstance(out, dict) else {}
+    result = out.get("result")
+    if result in DREAM_OK:
+        return True, None
+    return False, out.get("error") or "pass ended %s" % (result or "without a verdict")
 
 
 def _default_do_flip(slug, reason="flip"):
@@ -989,6 +1031,9 @@ def _keep_distilled(slug, home, report):
             report["distilled"].append(slug)
     except Exception as err:  # noqa: BLE001 - never costs the tick
         report["errors"].append("distill failed for %s: %s" % (slug, err))
+        _health(report, "distill:" + slug, False, err)
+        return
+    _health(report, "distill:" + slug, True)
 
 
 def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
@@ -996,21 +1041,31 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
     """One scheduler tick, per docs/reference/loops.md: per-cousin
     exception isolation, liveness gate, coalesced delivery,
     commit-after-delivery, request consumption, one-shot firing
-    (_fire_one_shots), persist. Returns a report."""
+    (_fire_one_shots), persist. Returns a report.
+
+    report["health"] is [(key, ok, error)], one result per component
+    the tick ran (cousin_lib.health folds it into data/health.json):
+    `cousin:<slug>` the cousin's walk (an exception, or loops that do
+    not load), `loop:<slug>|<name>` a loop's due check (a worker's: its
+    firing), `delivery:<slug>` a delivery to the cousin, `distill:<slug>`,
+    `requests`, `schedules`, `index-refresh` and `index:<slug>`,
+    `dream-due:<slug>` and `dreaming:<slug>` (a finished pass: error or
+    lost fails, done, no_change and budget are ok), `meetings`."""
     now = now or time.time()
     state = _load_state()
     report = {"fired": [], "errors": [], "requests": 0, "flips": [],
-              "ready": [], "scheduled": 0, "distilled": []}
+              "ready": [], "scheduled": 0, "distilled": [], "health": []}
     # Expire first: the first tick after downtime must not fire a timed
     # flip or a manual fire that outlived its TTL (it never fires late).
     expire_stale_requests(now=now)
     _walk_timed_flips(state, deliver, timed_flip(do_flip), now, report)
     _fire_daily_flips(state, daily_flip(do_flip), is_alive, now, report)
     for config in FrameworkConfig.from_env().list_cousins():
+        walk_errors = []
         try:
             slug = config.slug
             if config.type == "worker":
-                _fire_worker_loops(config, state, now, report)
+                walk_errors += _fire_worker_loops(config, state, now, report)
                 continue
             home = FrameworkConfig.from_env().root / "cousins" / slug
             _keep_distilled(slug, home, report)
@@ -1018,6 +1073,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 continue
             loops, errors = load_cousin_loops(home)
             report["errors"].extend(errors)
+            walk_errors += errors
             # Trigger files first: each is its own delivery, so its
             # removal maps one-to-one onto a delivery that succeeded.
             _fire_ready_files(slug, home, loops, state, deliver, now,
@@ -1038,7 +1094,9 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                     is_due = _loop_due(loop, state["last_fires"].get(key, 0), now)
                 except Exception as err:  # noqa: BLE001 - one loop never stops the rest
                     report["errors"].append("loop %s: %s" % (key, err))
+                    _health(report, "loop:" + key, False, err)
                     continue
+                _health(report, "loop:" + key, True)
                 if is_due:
                     due.append(loop)
                     sections.append((loop["name"], loop["prompt"]))
@@ -1054,6 +1112,7 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             # Commit-after-delivery: a failed injection leaves the
             # beat's delta unconsumed and every due loop still due.
             if deliver(slug, text):
+                _health(report, "delivery:" + slug, True)
                 if beat_commit is not None:
                     beat_commit()
                     state["last_beat"][slug] = now
@@ -1068,16 +1127,27 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
             else:
                 report["errors"].append(
                     "delivery failed for %s; loops stay due" % slug)
+                _health(report, "delivery:" + slug, False,
+                        report["errors"][-1])
         except Exception as err:
             # Per-cousin isolation: one flaky cousin never starves
             # the rest of the walk.
             report["errors"].append("%s: %s" % (config.slug, err))
-    _consume_requests(state, deliver, report["errors"])
+            walk_errors.append("%s: %s" % (type(err).__name__, err))
+        finally:
+            _health(report, "cousin:" + config.slug, not walk_errors,
+                    walk_errors[0] if walk_errors else None)
+    failed = _consume_requests(state, deliver, report["errors"])
+    _health(report, "requests", not failed, "; ".join(failed or ()))
     try:
         _fire_one_shots(deliver, is_alive, now, report)
     except Exception as err:
         # A broken scheduler store never costs the loops their tick.
         report["errors"].append("one-shots: %s" % err)
+        _health(report, "schedules", False, err)
+    else:
+        kept = [e for e in report["errors"] if e.startswith("scheduled job #")]
+        _health(report, "schedules", not kept, kept[0] if kept else None)
     if index_refresh:
         try:
             root = FrameworkConfig.from_env().root
@@ -1087,6 +1157,12 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 if c.type != "worker"])
         except Exception as err:
             report["errors"].append("index refresh: %s" % err)
+            _health(report, "index-refresh", False, err)
+        else:
+            _health(report, "index-refresh", True)
+        for slug, out in report.get("indexed", []):
+            error = out.get("error") if isinstance(out, dict) else None
+            _health(report, "index:" + slug, not error, error)
     if dreams:
         try:
             root = FrameworkConfig.from_env().root
@@ -1096,12 +1172,20 @@ def tick(*, deliver, is_alive, now=None, do_flip=_default_do_flip,
                 if c.type != "worker"])
         except Exception as err:
             report["errors"].append("dreaming: %s" % err)
+            _health(report, "dreaming", False, err)
+        else:
+            _health(report, "dreaming", True)
+        for slug, out in report.get("dreamed", []):
+            _health(report, "dreaming:" + slug, *dream_outcome(out))
     try:
         from cousin_lib import meetings
         report["meetings"] = meetings.tick(deliver=deliver, now=now)
     except Exception as err:
         # A broken meetings store never costs the loops their tick.
         report["errors"].append("meetings: %s" % err)
+        _health(report, "meetings", False, err)
+    else:
+        _health(report, "meetings", True)
     state["last_tick"] = now
     _save_state(state)
     return report
@@ -1220,6 +1304,17 @@ def hold_loops_lock(root):
     return fd
 
 
+def _record_health(results):
+    """Fold one tick's results into data/health.json; a health write
+    that fails is a line on stderr, never the tick's failure."""
+    import sys
+    try:
+        from cousin_lib import health
+        health.record(FrameworkConfig.from_env().root, results)
+    except Exception as err:  # noqa: BLE001 - the record never costs a tick
+        print("cousin-loops: health record: %s" % err, file=sys.stderr)
+
+
 def loops_main(argv=None):
     """cousin-loops: run the daemon, or inspect its state. Exit codes:
     status returns 0 healthy / 1 down-or-never-run, everything else
@@ -1290,9 +1385,17 @@ def loops_main(argv=None):
     try:
         count = 0
         while True:
-            report = tick(deliver=_default_deliver,
-                          is_alive=_default_is_alive, index_refresh=True,
-                          dreams=True)
+            try:
+                report = tick(deliver=_default_deliver,
+                              is_alive=_default_is_alive, index_refresh=True,
+                              dreams=True)
+            except Exception as err:
+                # The tick's own failure is the one the daemon dies of:
+                # on record before the supervisor restarts it.
+                _record_health([("tick", False, "%s: %s"
+                                 % (type(err).__name__, err))])
+                raise
+            _record_health(report["health"] + [("tick", True, None)])
             for slug, out in report.get("indexed", []):
                 print("cousin-loops: index %s: %s" % (slug, out),
                       file=sys.stderr)

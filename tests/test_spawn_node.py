@@ -291,5 +291,66 @@ class TestCli(SpawnNodeCase):
         self.assertIn("slug", err)
 
 
+class TestTokenOffArgv(SpawnNodeCase):
+    """A token minted on another queen is read from a file or stdin, never
+    taken from the command line, where every local user can read it. The
+    old --token still works, with a one-line deprecation warning."""
+
+    TOKEN = "hive_fake-remote-0b7c"
+    BASE = ["testa", "--queen-url", QUEEN, "--name", "Testa", "--role", "r"]
+
+    def env_token(self):
+        return self._read(self.out / "testa-node.tar.gz", "testa-node/node.env")
+
+    def test_token_file_bakes_that_token_and_mints_none(self):
+        path = self.root / "token"
+        path.write_text(self.TOKEN + "\n")
+        argv = self.BASE + ["--out", str(self.out), "--token-file", str(path)]
+        rc, out, err = self._main(argv)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("HIVE_TOKEN=%s" % self.TOKEN, self.env_token())
+        self.assertFalse([a for a in argv if self.TOKEN in a])
+        self.assertNotIn(self.TOKEN, out)
+        store = HiveStore(self.root / "shared" / "hive")
+        self.addCleanup(store.close)
+        self.assertEqual(
+            store.conn.execute("SELECT COUNT(*) FROM tokens").fetchone()[0], 0)
+
+    def test_token_file_dash_reads_stdin(self):
+        argv = self.BASE + ["--out", str(self.out), "--token-file", "-"]
+        with mock.patch("sys.stdin", io.StringIO(self.TOKEN + "\n")):
+            rc, _, err = self._main(argv)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("HIVE_TOKEN=%s" % self.TOKEN, self.env_token())
+        self.assertFalse([a for a in argv if self.TOKEN in a])
+
+    def test_an_unreadable_or_empty_token_file_is_exit_two_and_nothing_built(self):
+        empty = self.root / "empty"
+        empty.write_text("\n")
+        for path in (str(self.root / "missing"), str(empty)):
+            rc, _, err = self._main(self.BASE + ["--out", str(self.out),
+                                                 "--token-file", path])
+            self.assertEqual(rc, 2, path)
+            self.assertIn("token", err)
+        self.assertFalse((self.out / "testa-node.tar.gz").exists())
+
+    def test_the_old_flag_still_works_and_warns_once(self):
+        rc, _, err = self._main(self.BASE + ["--out", str(self.out),
+                                             "--token", self.TOKEN])
+        self.assertEqual(rc, 0)
+        self.assertIn("HIVE_TOKEN=%s" % self.TOKEN, self.env_token())
+        self.assertEqual(len(err.splitlines()), 1, err)
+        self.assertIn("deprecated", err)
+        self.assertIn("--token-file", err)
+        self.assertNotIn(self.TOKEN, err)
+
+    def test_both_flags_are_a_usage_error(self):
+        path = self.root / "token"
+        path.write_text(self.TOKEN)
+        with self.assertRaises(SystemExit) as ctx:
+            self._main(self.BASE + ["--token", "x", "--token-file", str(path)])
+        self.assertEqual(ctx.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

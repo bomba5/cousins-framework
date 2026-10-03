@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cousins-framework"
-version = "3.12.0"
+version = "3.18.0"
 description = "Persistent, co-located AI agents: identity, memory, lifecycle, inter-agent chat"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,6 +30,7 @@ cousin-transplant = "cousin_lib.lifecycle:transplant_main"
 cousin-self-portrait = "cousin_lib.self_portrait:portrait_main"
 cousin-shared = "cousin_lib.shared_tier:shared_main"
 cousin-loops = "cousin_lib.loops:loops_main"
+cousin-health = "cousin_lib.health:health_main"
 cousin-cycle = "cousin_lib.cycle:cycle_main"
 cousin-session = "cousin_lib.session:session_main"
 cousin-callback = "cousin_lib.callback:callback_main"
@@ -51,13 +52,16 @@ cousin-runner = "cousin_lib.runner.main:runner_main"
 cousin-watch = "cousin_lib.watch:watch_main"
 cousin-supervisor = "cousin_lib.supervisor:supervisor_main"
 cousin-migrate = "cousin_lib.migrate:migrate_main"
+cousin-upgrade = "cousin_lib.upgrade:upgrade_main"
 
 [project.optional-dependencies]
 # Serving MCP needs the reference SDK; everything else in the adapter
 # (registry, schemas, argv assembly, provisioning, approval) is stdlib.
 mcp = ["mcp>=1.2,<2"]
 # The runner's SDK lane. Imported lazily in cousin_lib/runner/sdk.py only.
-sdk = ["claude-agent-sdk>=0.2.159,<0.3"]
+# Exact: the version config/harness.lock.toml names, the one tested (an
+# application, not a library; tests/test_harness_lock.py keeps them equal).
+sdk = ["claude-agent-sdk==0.2.163"]
 
 [tool.setuptools.packages.find]
 include = ["cousin_lib*"]

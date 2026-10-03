@@ -574,6 +574,19 @@ twice). Under `cousin-supervisor` that exit leaves its loops child waiting in
 cousin-loops fire wren context-heartbeat
 ```
 
+`cousin-health` prints what has been failing and for how long: the loops
+daemon's per-component record (`data/health.json`), failing components
+first with their count of consecutive failures, since when and the last
+error, then a count of the ok ones, plus any supervisor child that is not
+`running`. `--all` lists the ok components too, `--json` prints everything.
+Exit 0 when nothing is failing, 1 when something is, 2 on bad usage. See
+[operations](operations.md#health).
+
+```
+cousin-health
+cousin-health --json
+```
+
 `cousin-schedule` queues a one-shot prompt for a future time. Subcommands:
 `add WHEN PROMPT` (`in 30m`, `tomorrow 06:30`, or an ISO date), `list
 [--all]`, `cancel ID`, `tick`. A cousin holds at most 20 pending; `add`
@@ -596,7 +609,9 @@ cousin-tracker add "move the photo archive" --domain infra --tag q4
 `cousin-hive` runs a standalone queen and manages node tokens. Subcommands:
 `serve`, `mint`, `revoke`, `forget`, `nodes`, `send`, `recall`,
 `import-legacy`. `serve` takes `--host` (0.0.0.0), `--port` (8101) and
-`--checkin-seconds`; `send` and `recall` take `--queen URL` and `--token T`;
+`--checkin-seconds`; `send` and `recall` take `--queen URL` and the token
+from `--token-file PATH` (`-` for stdin) or `HIVE_TOKEN` (`--token T` is
+deprecated: it puts the token on the command line);
 `import-legacy` takes the old queen's `--tokens` file. Most installs use the
 console as the queen instead. See
 [remote cousins](remote-cousins.md#cousin-hive) for every flag.
@@ -687,6 +702,73 @@ included), else the one running; `--pyproject PATH` reads or bumps another.
 cousin-version bump patch
 ```
 
+`cousin-upgrade --dry-run` plans moving the install to another release and
+changes nothing: no file is written, the code is not switched, nothing
+restarts. The target is `--to REF` (a tag or any ref), else the newest
+`v<major>.<minor>.<patch>` tag in version order; a target older than the
+running version is refused unless `--to` names it. Every shipped text is read
+from git at the two refs, so the plan holds before the checkout moves. It
+reports the running version and the target, the CHANGELOG headings and bold
+leads in between, whether pyproject's dependencies changed (then `pip install
+-e .` again), the seeded files against the target's templates (as
+`cousin-shared templates`), and for each home: what the registry sync would
+add, which framework values it would migrate (an exact value an earlier
+release shipped; a value the operator edited is never changed), which entries
+the target retired (reported, never removed), whether `.mcp.json` would be
+rewritten, whether a `policy.toml` is there (operator policy, never touched),
+and the CLAUDE.md diff against the target's template. A home with no registry
+is listed as such. A home's starting point is the release
+`data/template-sync.json` records as its last registry sync, else the running
+version. Last come the restarts it would do, in order: the loops daemon, the
+console, each runner (from `cousin-supervisor status`, or from the
+configuration when no supervisor answers), the caller's own runner last and
+detached. A dirty checkout is reported, not refused. `--json` prints the same
+plan as JSON, `-v`/`--full` prints each diff, `--root` picks the install and
+`--checkout` the git checkout to read releases from (default: the one
+running), `--home SLUG` (repeatable) limits the homes. Exit 0 the plan was
+computed, 1 it could not be (no release tag, not a git checkout), 2 refused.
+
+`cousin-upgrade --apply-homes` applies the homes' part of the same plan: each
+home's `mcp-registry.toml` and `.mcp.json` are brought to the target. The
+code is not switched and nothing restarts (that comes in a later release).
+It prints the homes' plan and asks `apply to N homes? [y/N]`; `--yes` skips
+the question, and without a terminal to ask at, `--yes` is required (else
+exit 2, nothing written). Per home:
+
+- The registry is copied to `data/mcp-registry.toml.pre-<version>` before
+  the first write; a copy already there is kept and the new one gets a `.2`
+  (`.3`, ...) suffix.
+- The structural sync adds the tables and keys the release has and the home
+  lacks, and migrates framework values (an exact value an earlier release
+  shipped). A value the home or the operator set is never changed. The
+  entries the release retired are reported and kept; `--prune-retired`
+  removes them (and only them).
+- The file is replaced atomically, then must parse strictly and build every
+  tool definition. If it does not, the old bytes go back and the home is
+  reported failed with the reason.
+- `.mcp.json` is refreshed when it would change (its `cousin` entry, as
+  `cousin-spawn <slug> --repair-settings` does; other servers are kept).
+  CLAUDE.md is reported only; `cousin-spawn <slug> --sync-template` shows its
+  diff and `--apply` writes it.
+- `data/template-sync.json` records `{"to": "<version>", "ref": "<commit>",
+  "at": <epoch seconds>, "registry": "applied" | "in-step" | "failed: <why>"}`,
+  a failed home also `"from"`, the commit it was planned from. The next plan
+  starts the home there: an applied home plans as in step, a failed one is
+  planned again.
+
+A home with no registry is skipped. The report says per home: applied (keys
+added, values migrated, retired entries reported or pruned, the backup), in
+step, skipped or failed. `--home SLUG` limits the set, `--json` prints the
+plan and the results. Exit 0 all done, 1 a home is left for a person (a
+failed registry, a `.mcp.json` that could not be refreshed), 2 refused (no
+`--yes` and no terminal, the question answered no, an unknown `--home`).
+
+```
+cousin-upgrade --dry-run
+cousin-upgrade --dry-run --to v3.17.0 --full
+cousin-upgrade --apply-homes --to v3.18.0 --home wren --yes
+```
+
 `cousin-gate` scans a tree you are about to publish for private addresses,
 home paths, secret shapes, binaries and denylisted terms. `--git-visible`
 scans only what git would publish (tracked files, and untracked ones
@@ -695,9 +777,17 @@ that also hosts a live install. `--mode triage` prints a one-line manifest
 per hit instead of the gate's file:line report. Exit 0 clean, 1 a hit (gate
 mode only).
 
+`--commits RANGE` scans what a push publishes besides the tree: every
+commit message in the range (the same names, addresses, paths and secret
+shapes), any `Co-authored-by` trailer, and, with `--expect-author 'NAME
+<EMAIL>'`, any author or committer who is somebody else. Run it before a
+push; exit 2 when git refuses the range.
+
 ```
 cousin-gate --root /tmp/publish --denylist ~/private/denylist.txt
 cousin-gate --root . --denylist denylist.txt --git-visible
+cousin-gate --root . --denylist denylist.txt --commits origin/main..HEAD \
+    --expect-author 'Ana Example <ana@example.invalid>'
 ```
 
 ## Removed in 3.0.0

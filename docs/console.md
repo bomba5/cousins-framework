@@ -239,7 +239,9 @@ drift from what the runner accepts.
   model), effort, auto start, [rollover](glossary.md#rollover) percentage, side sessions
   (`[agent.sessions]`, `sdk` only; `operator` and `system` always stay on the
   primary), the reply gate (`reply_gate`, `sdk` only; see
-  [configuration](configuration.md#agent-runner)), the opencode keys (`small_model`, `shell_env`,
+  [configuration](configuration.md#agent-runner)), strict harness
+  (`strict_harness`; see [configuration](configuration.md#agent-strict_harness)),
+  the opencode keys (`small_model`, `shell_env`,
   `opencode_models_fetch`; `opencode_bin` read-only) and the tmux kind's
   `env_allow`, shown beside the names the pane always gets and the hard deny
   that always wins. A deprecated `api_key_file` shows a warning. "unset"
@@ -285,7 +287,9 @@ the console.)
   it reads and offers "copy the install default here".
 - **Servers** (`<home>/.mcp.json`): stdio servers (command, args, env) and
   http or sse servers (url, headers). The runner passes these to the agent CLI
-  on its command line, which any user on the host can read, so a value that
+  in a private file, never on its command line, but `.mcp.json` is plain text
+  the model can read and edit, and a stdio server's args are on its own
+  command line, which any user on the host can read, so a value that
   looks like a secret is refused and the panel offers the `${VAR}` reference
   to write instead; set the variable in the runner's environment. A literal
   secret already in the file is never shown. The `cousin` entry and entries

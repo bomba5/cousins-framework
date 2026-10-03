@@ -19,7 +19,6 @@ from cousin_lib.spawn import (
     spawn_main,
     start_cousin,
 )
-from tests._fakes import _FAKE_TMUX
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -131,25 +130,15 @@ def _legacy_home(root, slug="wren"):
 
 
 class TestLegacyStartRefused(CreateCase):
-    """start_cousin refuses a cousin with no [agent] runner by name,
-    before any tmux call."""
+    """start_cousin refuses a cousin with no [agent] runner by name."""
 
-    def test_starting_a_cousin_with_no_runner_is_refused_and_runs_no_tmux(self):
-        import os
-        import stat
+    def test_starting_a_cousin_with_no_runner_is_refused(self):
         from cousin_lib.delivery import lane_refusal
         root = self._framework_root()
         out = {"home": _legacy_home(root)}
-        tmux = root / "tmux"
-        tmux.write_text(_FAKE_TMUX)
-        tmux.chmod(tmux.stat().st_mode | stat.S_IEXEC)
-        log = root / "tmux-calls.log"
-        with mock.patch.dict(os.environ, {"FAKE_TMUX_LOG": str(log),
-                                          "FAKE_TMUX_PANE": str(root / "p")}):
-            with self.assertRaises(SpawnError) as ctx:
-                start_cousin(out["home"], agent_cmd="x", tmux_bin=str(tmux))
+        with self.assertRaises(SpawnError) as ctx:
+            start_cousin(out["home"], root=root)
         self.assertEqual(str(ctx.exception), lane_refusal(out["home"]))
-        self.assertFalse(log.exists() and log.read_text())
 
 
     def test_cousin_spawn_start_refuses_with_exit_2_and_creates_nothing(self):
@@ -738,32 +727,6 @@ class TestResumeFlagGone(CreateCase):
         self.assertFalse((root / "cousins").exists())
 
 
-class PendingBootPacket(unittest.TestCase):
-    """A packet a clean stop left is consumed by the next start: a
-    fresh session (resume_plan declines) with the packet typed in."""
-
-    def setUp(self):
-        import tempfile
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.home = Path(tmp.name) / "cousins" / "wren"
-        (self.home / "data").mkdir(parents=True)
-        (self.home / "cousin.toml").write_text(
-            '[cousin]\nslug = "wren"\nname = "Wren"\n'
-            '[chat]\nport = 8100\ntmux_session = "wren"\n'
-            '[runtime]\nsession_id = "abc-123"\n')
-        self.packet = self.home / "data" / "boot-packet-gen-0002.md"
-        self.packet.write_text("BOOT PACKET FOR COUSIN: wren\n")
-        self.pending = self.home / "data" / "pending-boot.json"
-        self.pending.write_text(json.dumps(
-            {"generation": 2, "packet": str(self.packet)}))
-
-    def test_a_record_whose_packet_is_gone_is_not_pending(self):
-        from cousin_lib.spawn import pending_boot
-        self.assertIsNotNone(pending_boot(self.home))
-        self.packet.unlink()
-        self.assertIsNone(pending_boot(self.home))
-
 class TestTemplateSync(unittest.TestCase):
     """The framework part of CLAUDE.md follows the template; Identity,
     Voice and everything below the marker stay the cousin's own."""
@@ -974,19 +937,20 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
         self.template_sync = template_sync
 
     def _old_registry(self):
-        """The shipped registry with every field _KNOWN_TEXT records
+        """The shipped registry with every description _MIGRATIONS records
         rolled back to the earlier wording it names, the way a cousin
         synced before this fix would still have it."""
         ts = self.template_sync
+        olds = {(table, spec.split(".")[0]): pairs[0][0]
+                for (table, spec), pairs in ts._MIGRATIONS.items()}
         out = []
         for path, body in ts._blocks(self.shipped):
             new_entries = []
             for key, lines in ts._entries(body):
-                old = (ts._KNOWN_TEXT.get("%s.%s" % (path, key))
-                      if path and key else None)
+                old = olds.get((path, key)) if path and key else None
                 if old:
-                    text = ts._DESC.sub(
-                        lambda m, v=old[0]: m.group(1) + json.dumps(v),
+                    text = ts._field("description").sub(
+                        lambda m, v=old: m.group(1) + json.dumps(v),
                         "".join(lines), count=1)
                     lines = [text]
                 new_entries.append((key, lines))
@@ -1002,8 +966,8 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
         self.reg.write_text(self._old_registry())
         before = tomllib.loads(self.reg.read_text())["tools"]["job"]
         self.assertEqual(before["description"],
-                         self.template_sync._KNOWN_TEXT[
-                             "tools.job.description"][0])
+                         self.template_sync._MIGRATIONS[
+                             ("tools.job", "description")][0][0])
         out = self._sync()
         for field in ("tools.job.description", "tools.job.properties.kind",
                      "tools.job.properties.title",
@@ -1025,7 +989,8 @@ class TestRegistrySyncCorrectsShippedText(unittest.TestCase):
     def test_the_cousins_own_wording_is_kept(self):
         text = self._old_registry()
         old_line = "description = %s" % json.dumps(
-            self.template_sync._KNOWN_TEXT["tools.job.description"][0])
+            self.template_sync._MIGRATIONS[
+                ("tools.job", "description")][0][0])
         self.assertIn(old_line, text)
         text = text.replace(
             old_line, 'description = "my own wording for the job tool"', 1)

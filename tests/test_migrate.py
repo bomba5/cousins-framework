@@ -63,7 +63,7 @@ class Live:
                     sdk_ok=lambda: True, tmux_alive=lambda home: self.tmux, close=self.close,
                     import_auto=self.import_auto, start=self.start, verify=self.verify,
                     stop=self.stop, runner_alive=self.runner_alive, reload=self.reload,
-                    start_tmux=self.start_tmux, new_packet=self.new_packet, release=self.release,
+                    start_tmux=self.start_tmux, release=self.release,
                     sleep=lambda s: None, clock=self.clock)
 
     def clock(self):
@@ -123,10 +123,6 @@ class Live:
 
     def release(self, home):
         self.calls.append(("release",))
-
-    def new_packet(self, home):
-        self.calls.append(("packet",))
-        return 7
 
 
 def _tree(path):
@@ -214,7 +210,6 @@ class TestPlan(HermeticCase):
 class TestApply(HermeticCase):
     def test_apply_runs_the_steps_in_order_and_records_the_exact_prior_file(self):
         root, home = _root(self)
-        (home / "data" / "pending-boot.json").write_text('{"generation": 3}')
         live = Live()
         rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
         self.assertEqual(rec["state"], "migrated")
@@ -228,9 +223,6 @@ class TestApply(HermeticCase):
         saved = json.loads((home / migrate.RECORD).read_text())
         self.assertEqual(base64.b64decode(saved["prior_toml_b64"]), TOML.encode())
         self.assertEqual([s["step"] for s in saved["steps"]], list(migrate.STEPS))
-        # the migration day's packet is archived: the runner boots on its digest
-        self.assertFalse((home / "data" / "pending-boot.json").exists())
-        self.assertTrue((home / migrate.PRE_RUNNER_BOOT).exists())
 
     def test_a_tmux_session_that_came_back_stops_apply_before_the_lane_flips(self):
         """A flip or a console start between close and toml."""
@@ -310,7 +302,7 @@ def _stream(home, events):
 
 
 class TestRollback(HermeticCase):
-    def test_a_failed_start_is_rolled_back_to_the_exact_file_on_a_fresh_packet(self):
+    def test_a_failed_start_is_rolled_back_to_the_exact_file(self):
         root, home = _root(self)
         live = Live(start_error="no child")
         rec = migrate.apply(home, root=root, validate=True, account="team", **live.kw())
@@ -319,7 +311,7 @@ class TestRollback(HermeticCase):
         self.assertEqual(back["state"], "rolled_back")
         self.assertEqual((home / "cousin.toml").read_bytes(), TOML.encode())
         self.assertEqual(stat.S_IMODE((home / "cousin.toml").stat().st_mode), 0o640)
-        self.assertEqual(_names(live)[-5:], ["stop", "reload", "packet", "start_tmux", "release"])
+        self.assertEqual(_names(live)[-4:], ["stop", "reload", "start_tmux", "release"])
         self.assertEqual(live.calls[-2][1], TOML.encode())    # tmux starts on the restored file
 
     def test_a_stop_that_answers_stopping_is_waited_out_before_anything_is_restored(self):
@@ -998,16 +990,6 @@ class TestAccountLifecycle(HermeticCase):
             p = migrate.plan(home, root=root, validate=validate, **Live().kw())
             row = [c for c in p["checks"] if c["check"] == "validate"][0]
             self.assertIn("makes data/accounts/wren-key", row["detail"])
-
-
-class TestFreshPacket(HermeticCase):
-    def test_the_rollback_packet_is_the_cousins_state_now(self):
-        """tmux must not boot on the migration day's packet."""
-        root, home = _root(self)
-        gen = migrate.fresh_packet(home)
-        pending = json.loads((home / "data" / "pending-boot.json").read_text())
-        self.assertEqual(pending["generation"], gen)
-        self.assertTrue(pathlib.Path(pending["packet"]).exists())
 
 
 class TestNoLegacyPath(HermeticCase):

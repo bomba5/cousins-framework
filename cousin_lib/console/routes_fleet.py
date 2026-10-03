@@ -431,7 +431,7 @@ def _start_runner(server, slug, config):
         return {"ok": True, "slug": slug, "status": "already running"}
     server.emit("cousin-status", {"slug": slug, "status": "starting"})
     try:
-        spawn.start_cousin(config.home, agent_cmd=None, root=server.root)
+        spawn.start_cousin(config.home, root=server.root)
     except spawn.SpawnError as err:
         status = 503 if isinstance(err, spawn.NoSupervisor) \
             else 409 if isinstance(err, (spawn.StillStopping, spawn.ForeignRunner)) else 500
@@ -638,15 +638,11 @@ def register():
 
     @router.route("POST", "/api/cousins/{slug}/stop")
     def stop(req, slug):
-        """A running cousin stops CLEANLY by default: it is asked for
-        its pre-exit writes and memory, the transcript is mined and the
-        next packet assembled (flip.close_session), in the background,
-        202. {"clean": false} stops at once, as kill does for the
-        session. A cousin that is not running stops at once either
-        way. On the runner lane a clean stop IS the runner's SIGTERM
-        path (it finishes its turn, then stops): the supervisor is asked
+        """On the runner lane a clean stop IS the runner's SIGTERM path
+        (it finishes its turn, then stops): the supervisor is asked
         without waiting, and the answer is 202 `stopping` (200 `stopped`
-        when there was nothing to stop)."""
+        when there was nothing to stop). `clean` must be a boolean and
+        changes nothing: every stop is this one."""
         server = req.server
         config = load_cousin(server, slug)
         hold = _exclusive(server, slug, "stop")
@@ -660,50 +656,6 @@ def register():
             # no legacy tmux lane: _stop refuses a cousin with no runner
             # kind (409) before any tmux call; a worker's stop is a no-op
             return 200, _stop(server, slug)
-            if not clean or not session_alive(server, config):
-                return 200, _stop(server, slug)
-            # A clean stop runs in the background and marks itself busy in
-            # `flips` for as long as it runs (the correct pattern already,
-            # below): release this route's own mark first, inline under
-            # the same lock as the recheck-and-mark that follows, so the
-            # two never see each other's absence - one continuous locked
-            # section, not two, closes the gap between them.
-            lock = server.state.setdefault("flip_lock", threading.Lock())
-            flips = server.state.setdefault("flips", {})
-            with lock:
-                hold.release_locked()
-                current = flips.get(slug)
-                if current and current["status"] == "running":
-                    raise HttpError(409, "a flip or clean stop is already"
-                                         " running")
-                if longop.op_running(server, slug):
-                    raise HttpError(409, "a %s is running on %s"
-                                    % (longop.op_running(server, slug), slug))
-                entry = {"status": "running", "started_at": time.time(),
-                         "kind": "stop"}
-                flips[slug] = entry
-            run_close = server.close_fn or _default_close
-
-            def run():
-                try:
-                    result = run_close(slug, tmux_bin=server.tmux_bin,
-                                       tmux_socket=server.tmux_socket)
-                except Exception as err:  # noqa: BLE001 - reported on the row
-                    result = {"slug": slug, "ok": False, "error": str(err),
-                              "stages": []}
-                entry["result"] = result
-                entry["stages"] = result.get("stages", [])
-                entry["status"] = "done" if result.get("ok") else "failed"
-                server.emit("cousin-status", {
-                    "slug": slug,
-                    "status": "stopped" if result.get("ok") else "stop failed"})
-                server.emit("cousins-refresh", fleet_rows(server))
-
-            server.emit("cousin-status", {"slug": slug, "status": "closing"})
-            threading.Thread(target=run, daemon=True,
-                             name="console-close-%s" % slug).start()
-            return 202, {"ok": True, "slug": slug, "status": "closing",
-                         "started_at": entry["started_at"]}
         finally:
             hold.release()
 
@@ -1057,11 +1009,6 @@ def register():
 def _default_flip(slug, **kw):
     from cousin_lib import flip
     return flip.flip(slug, **kw)
-
-
-def _default_close(slug, **kw):
-    from cousin_lib import flip
-    return flip.close_session(slug, **kw)
 
 
 register()

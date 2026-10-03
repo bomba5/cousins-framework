@@ -33,28 +33,6 @@ from cousin_lib.agent_auth import (AUTH_MODES, DEFAULT_MODE, MODE_API_KEY,
 
 KEY = "kst-test-0123456789abcdefWXYZ"
 
-_FAKE_TMUX = """#!%s
-import os, subprocess, sys
-args = sys.argv[1:]
-with open(os.environ["FAKE_TMUX_LOG"], "a") as fh:
-    fh.write(" ".join(args) + "\\n")
-sub = next((a for a in args if a in ("has-session", "kill-session",
-            "capture-pane", "new-session", "send-keys", "list-panes")), "")
-if sub == "has-session":
-    sys.exit(int(os.environ.get("FAKE_TMUX_HAS", "1")))
-if sub == "capture-pane":
-    try:
-        sys.stdout.write(open(os.environ["FAKE_TMUX_PANE"]).read())
-    except OSError:
-        pass
-if sub == "new-session":
-    # Run the session's command the way tmux would, synchronously, so
-    # the fake agent has written its report when start_cousin returns.
-    i = args.index("/usr/bin/env")
-    subprocess.run(args[i:], check=False)
-sys.exit(0)
-""" % sys.executable
-
 _FAKE_AGENT = """#!%s
 import json, os, sys
 with open(os.environ["FAKE_AGENT_OUT"], "w") as fh:
@@ -111,23 +89,13 @@ class AuthCase(unittest.TestCase):
             "theme": "dark"}))
         (self.root / "config" / "harness.toml").write_text(
             _HARNESS % {"src": self.src, "settings": self.settings})
-        self.tmux = self.root / "tmux"
-        self.tmux.write_text(_FAKE_TMUX)
-        self.tmux.chmod(0o755)
         self.agent = self.root / "fake-agent"
         self.agent.write_text(_FAKE_AGENT)
         self.agent.chmod(0o755)
-        self.log = self.root / "tmux.log"
-        self.pane = self.root / "pane.txt"
         self.out = self.root / "agent-out.json"
-        (self.root / "config" / "agent-cmd").write_text(
-            "%s --model {model} --session-id {session_id}\n" % self.agent)
         patcher = mock.patch.dict(os.environ, {
             "FRAMEWORK_ROOT": str(self.root),
-            "FAKE_TMUX_LOG": str(self.log),
-            "FAKE_TMUX_PANE": str(self.pane),
             "FAKE_AGENT_OUT": str(self.out),
-            "FAKE_TMUX_HAS": "1",
         })
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -137,14 +105,6 @@ class AuthCase(unittest.TestCase):
 
     def write_key(self, text=KEY):
         return agent_auth.write_key(self.home, text, "KESTREL_KEY")
-
-    def start(self, **kw):
-        from cousin_lib.spawn import start_cousin
-        kw.setdefault("agent_cmd", (self.root / "config" / "agent-cmd")
-                      .read_text().strip())
-        start_cousin(self.home, tmux_bin=str(self.tmux), root=self.root,
-                     start_chat_server=lambda home: None, **kw)
-        return json.loads(self.out.read_text())
 
 
 class TestModeNames(AuthCase):
@@ -330,9 +290,8 @@ class TestAgentEnvironment(AuthCase):
 
 
 class TestLaunchThroughTmux(AuthCase):
-    """start_cousin -> tmux -> launcher -> agent, with a fake tmux that
-    runs the session command and a fake agent that reports its argv and
-    environment."""
+    """The launcher -> agent, with a fake agent that reports its argv
+    and environment."""
 
     def test_the_launcher_refuses_on_its_own_too(self):
         # The check binds at exec time, not only in the preflight: a

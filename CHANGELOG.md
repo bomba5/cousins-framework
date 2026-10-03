@@ -3,6 +3,183 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.18.0 - 2026-10-03
+
+### Added
+
+- **`cousin-upgrade --apply-homes` brings each home's registry and
+  `.mcp.json` to a release.** It computes the same plan as `--dry-run`, from
+  git, prints the homes' part and asks (`--yes` skips the question; without
+  a terminal and without `--yes` it exits 2). Per home: the registry is
+  copied to `data/mcp-registry.toml.pre-<version>` first (an existing copy
+  is never overwritten), then the structural sync adds the missing tables
+  and keys and migrates framework values, never a value of the home's own;
+  the result must parse strictly and build its tool definitions, else the
+  old bytes go back and the home is reported failed. `.mcp.json` is
+  refreshed when it would change, CLAUDE.md is still reported only, and the
+  code is not switched and nothing restarts. `--home SLUG` limits the set,
+  `--prune-retired` removes the entries the release retired instead of
+  reporting them. Exit 0 all done, 1 a home is left for a person, 2
+  refused.
+- **Each home records what its registry was synced to.**
+  `data/template-sync.json` holds the release, its commit, when, and
+  whether the registry was applied, in step or failed (with the commit it
+  started from). The plan starts each home there: an applied home plans as
+  in step, a failed one is planned again from where it was.
+
+## 3.17.0 - 2026-10-03
+
+### Added
+
+- **`cousin-upgrade --dry-run` plans an upgrade and changes nothing.** It
+  resolves the target (`--to REF`, else the newest release tag in version
+  order; an older one only when named) and reads every shipped text from git
+  at both refs, so the plan holds before the checkout moves. The report: the
+  changelog headings and bold leads in between, whether the dependencies
+  changed, the seeded files against the target's templates, and for each
+  home the registry keys it would add, the framework values it would migrate
+  and the entries the target retired (reported, never removed), whether
+  `.mcp.json` would be rewritten, `policy.toml` named and left alone, and the
+  CLAUDE.md diff; then the restarts it would do, in order, the caller's own
+  runner last. `--json` prints the same plan. Without `--dry-run` it exits 2:
+  the apply path comes in a later release.
+- **The registry sync takes its texts as arguments.** The shipped registry
+  and the CLAUDE.md template can be given as text (a release's, read from
+  git) instead of the installed files, and the sync reports the entries the
+  release it last synced from had and the new one retired. The table of
+  framework-owned values it may migrate is keyed by table and key with the
+  old and new value, and covers any value, not only a description.
+
+## 3.16.1 - 2026-10-03
+
+### Fixed
+
+- **The console answers a route's refusal with its own status when it
+  runs as `python -m cousin_lib.console.app`**, the way the supervisor
+  and the image start it. The module ran twice, as `__main__` and as the
+  package module the routes import, so the server caught one `HttpError`
+  class and the routes raised the other: a wrong password, a missing
+  field or an unknown cousin came back as a 500. `cousin-console` was not
+  affected.
+
+## 3.16.0 - 2026-10-03
+
+### Added
+
+- **One lockfile for the agent harness.** `config/harness.lock.toml` names
+  the versions the framework is tested with: the Agent SDK, the Claude Code
+  CLI its wheel bundles, opencode and the model ids. The unit suite is red
+  while `docker/requirements.txt`, the Dockerfile's opencode stage, the
+  `sdk` extra, `DEFAULT_MODELS` or the README's opencode model disagree
+  with it, so a harness version changes in a pull request of its own.
+- **The runner checks the harness at start.** `cousin-runner` compares
+  what its kind runs (the installed SDK and its bundled CLI, `claude` on
+  PATH, the opencode binary) with the lock, once: a `harness` stream event
+  with the versions, and the cousin's `harness:<slug>` row in the health
+  record. A mismatch, or a CLI whose version cannot be read ("unpinned
+  CLI"), is a warning naming the installed and the locked version, and the
+  runner starts. The new `[agent] strict_harness = true` (default `false`)
+  refuses it instead, exit 2.
+- **A live harness matrix, opt-in.** `COUSIN_LIVE=1 python -m tests.live`
+  runs real turns on the host's login (the init tool list of a tool-less
+  session, the usage shape with thinking on, the transcript, every locked
+  model, one opencode turn) and prints a "tested with" block for a lock
+  bump's pull request. It never runs in public CI; without the variable
+  every item is a visible skip.
+
+### Install notes
+
+- **The `sdk` extra is pinned exactly.** `pip install -e ".[sdk]"` now
+  installs `claude-agent-sdk==0.2.163`, the version the lock names and the
+  image runs, instead of the newest 0.2.x of the day. A bare host on
+  another SDK version warns at every runner start until it reinstalls.
+
+## 3.15.0 - 2026-10-03
+
+### Added
+
+- **The loops daemon keeps a record of what keeps failing.** After each
+  tick it writes `data/health.json`: per component (each cousin's walk, a
+  loop's due check, a delivery, distill, requests, one-shot schedules, the
+  index refresh, each cousin's dreaming passes, meetings, the tick itself)
+  whether it is ok or failing, how many times in a row, since when, and the
+  last error. Before, a pass that failed on every tick for an hour was a
+  line per tick in the daemon's log and nothing else. `cousin-health` prints
+  the failing components first, then a count of the ok ones, plus any
+  supervisor child that is not running; it exits 1 when something is
+  failing. The console serves the same at `GET /api/health` and shows a red
+  count in its top bar that opens the list.
+
+## 3.14.0 - 2026-10-03
+
+### Added
+
+- **`cousin-gate --commits RANGE` checks what a push publishes besides
+  the tree.** Each commit message in the range is scanned like a file
+  (denylisted names, private addresses, home paths, secret shapes), a
+  `Co-authored-by` trailer is a hit, and `--expect-author` makes any other
+  author or committer one. The author is checked against that identity,
+  not the denylist, because the one legitimate author may be a listed
+  name.
+
+### Changed
+
+- **The tests use the invented cast only.** A few tests and a comment
+  still carried real names from the install they were written on; they
+  now use the cast `docs/development.md` names.
+
+## 3.13.0 - 2026-10-03
+
+### Fixed
+
+- **An sdk cousin's own MCP servers are no longer on the CLI's command
+  line.** The SDK wrote every server inline as `--mcp-config <json>`, so a
+  value written literally in `.mcp.json` (an `env` value, a header) was
+  readable by every local user (`ps`, `/proc/<pid>/cmdline`). The home's
+  and the plugins' servers now go to a private file,
+  `data/run/mcp-config.json` (0600 in a 0700 directory; a side session's
+  is `mcp-config-<kind>.json`), named by a second `--mcp-config`; only
+  `cousin`, a name, stays inline (the SDK serves an in-process server
+  only from there). The file is rewritten at every start and removed when
+  the runner stops. The tmux and opencode lanes never passed servers on
+  an argv.
+- **No value is on an argv when a tmux pane starts.** The pane ran
+  `exec env -i NAME=value ...`, so the allowlisted values sat on `env`'s
+  argv until its exec. The pane's first program is now a tiny
+  `python -I -S -c` (`tmux_pane.KEEP_ONLY`) that takes the names only,
+  keeps those of the login shell's environment, drops the rest and execs
+  the launcher: the same variables and values, none on a command line.
+
+### Added
+
+- **`--token-file PATH` for `cousin-spawn-node`, `cousin-hive send` and
+  `cousin-hive recall`** (`-` reads standard input). `send` and `recall`
+  also read `HIVE_TOKEN` when no token is given, as a node's `node.env`
+  sets it.
+
+### Deprecated
+
+- **`--token T` on `cousin-spawn-node`, `cousin-hive send` and
+  `cousin-hive recall`.** It puts the token on the command line, where
+  every local user can read it. It still works and prints a one-line
+  warning on stderr; removing it is a major change.
+
+## 3.12.1 - 2026-10-03
+
+### Removed
+
+- **The legacy tmux lane's clean stop and boot packet**, unreachable since
+  2.0.0 refuses a cousin with no runner kind before any of it runs:
+  `flip.close_session` and its handoff helpers, the console stop route's
+  background close (`close_fn`), `spawn.start_cousin`'s tmux session code
+  and the pending boot it typed in (`data/pending-boot.json`, never written
+  any more), `cousin-migrate`'s pending-boot write on rollback, and
+  `boot.assemble` with the layers only it read: the tool-surface quote, the
+  MCP warning and the boot actions. `cousin-tool-surface` still writes
+  `data/tool-surface.md` for a cousin to read. No behaviour changes: a
+  runner cousin starts, stops and boots on its system prompt and state
+  digest as before.
+
 ## 3.12.0 - 2026-10-03
 
 ### Added

@@ -336,3 +336,52 @@ class Scanner:
                 continue
             hits.extend(self._scan_file(path, Path(rel).as_posix()))
         return hits
+
+
+_TRAILER_RE = re.compile(r"^\s*co-authored-by\s*:", re.IGNORECASE)
+
+
+def commits_in(root, rev_range):
+    """[(sha, author, committer, message)] for the commits in a git
+    revision range, oldest first. ValueError when git refuses the range."""
+    import subprocess
+    out = subprocess.run(
+        ["git", "-C", str(root), "log", "--reverse",
+         "--format=%H%x00%an <%ae>%x00%cn <%ce>%x00%B%x1e", rev_range],
+        capture_output=True, text=True)
+    if out.returncode != 0:
+        raise ValueError("git log %s: %s" % (rev_range, out.stderr.strip()))
+    found = []
+    for record in out.stdout.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        sha, author, committer, message = record.split("\x00", 3)
+        found.append((sha, author, committer, message))
+    return found
+
+
+def scan_commits(scanner, root, rev_range, expect_author=None):
+    """The gate over what a push publishes besides the tree: each
+    commit's message (names, addresses, home paths, secrets, as in a
+    file), any Co-authored-by trailer, and, with `expect_author`
+    ("Name <email>"), an author or committer that is anybody else. The
+    author is checked against the expected identity, not the denylist:
+    the one legitimate author may well be a denylisted name."""
+    hits = []
+    for sha, author, committer, message in commits_in(root, rev_range):
+        where = "commit:%s" % sha[:12]
+        for hit in scanner.scan_text(message, where):
+            hit.position = "message"
+            hits.append(hit)
+        for lineno, line in enumerate(message.splitlines(), start=1):
+            if _TRAILER_RE.match(line):
+                hits.append(Hit(term="Co-authored-by", file=where, line=lineno, col=1,
+                                context=line.strip(), position="message", kind="trailer"))
+        if expect_author:
+            for field, who in (("author", author), ("committer", committer)):
+                if who != expect_author:
+                    hits.append(Hit(term=who, file=where, line=0, col=0,
+                                    context="%s is %s" % (field, who),
+                                    position=field, kind="identity"))
+    return hits

@@ -3,6 +3,24 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.14.0 - 2026-10-03
+
+### Added
+
+- **`cousin-gate --commits RANGE` checks what a push publishes besides
+  the tree.** Each commit message in the range is scanned like a file
+  (denylisted names, private addresses, home paths, secret shapes), a
+  `Co-authored-by` trailer is a hit, and `--expect-author` makes any other
+  author or committer one. The author is checked against that identity,
+  not the denylist, because the one legitimate author may be a listed
+  name.
+
+### Changed
+
+- **The tests use the invented cast only.** A few tests and a comment
+  still carried real names from the install they were written on; they
+  now use the cast `docs/development.md` names.
+
 ## 3.13.0 - 2026-10-03
 
 ### Fixed

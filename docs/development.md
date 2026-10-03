@@ -230,8 +230,10 @@ mean a file is good; that's still review.
   comes with a test. A bug fix comes with a test that fails without the
   fix.
 - **Generic names in code.** No real people, cousins or hosts in code,
-  comments, tests or docs. Use the cast above everywhere. The gate will
-  catch the rest.
+  comments, tests, docs or commit messages. Use the cast above
+  everywhere. The gate will catch the rest: `cousin-gate --git-visible`
+  for the tree and `cousin-gate --commits origin/main..HEAD` for the
+  messages, both with your denylist from outside the tree.
 - **CLI exit codes.** 0 for success, 1 for a failure while doing the
   work, 2 for bad usage or configuration. Some commands add their own
   (`cousin-reply` uses 3 for a message the outbound filter blocked).

@@ -5,6 +5,7 @@ node cannot claim to be another), scope gates the shared corpus, and
 the client fails toward local when there is no queen. The queen is a
 real server on a loopback port; the node reaches it outbound only.
 """
+import gc
 import json
 import os
 import pathlib
@@ -12,6 +13,7 @@ import tempfile
 import unittest
 import urllib.error
 import urllib.request
+import warnings
 from unittest import mock
 
 from cousin_lib.hive import (
@@ -249,10 +251,15 @@ class TestCliToken(HiveCase):
         out, err = io.StringIO(), io.StringIO()
         env = {k: v for k, v in os.environ.items() if k != "HIVE_TOKEN"}
         env.update(environ or {})
+        # stderr is the CLI's: an earlier test's unclosed connection, collected
+        # while this one runs, must not land in it as a ResourceWarning
+        gc.collect()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                warnings.catch_warnings(), \
                 mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(hive, "hive_recall", fake_recall), \
                 mock.patch("sys.stdin", io.StringIO(stdin)):
+            warnings.simplefilter("ignore", ResourceWarning)
             rc = hive.hive_main(["recall", "--queen", "http://127.0.0.1:9"] + argv + ["q"])
         return rc, seen, err.getvalue()
 

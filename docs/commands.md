@@ -702,6 +702,38 @@ included), else the one running; `--pyproject PATH` reads or bumps another.
 cousin-version bump patch
 ```
 
+`cousin-upgrade --dry-run` plans moving the install to another release and
+changes nothing: no file is written, the code is not switched, nothing
+restarts. The target is `--to REF` (a tag or any ref), else the newest
+`v<major>.<minor>.<patch>` tag in version order; a target older than the
+running version is refused unless `--to` names it. Every shipped text is read
+from git at the two refs, so the plan holds before the checkout moves. It
+reports the running version and the target, the CHANGELOG headings and bold
+leads in between, whether pyproject's dependencies changed (then `pip install
+-e .` again), the seeded files against the target's templates (as
+`cousin-shared templates`), and for each home: what the registry sync would
+add, which framework values it would migrate (an exact value an earlier
+release shipped; a value the operator edited is never changed), which entries
+the target retired (reported, never removed), whether `.mcp.json` would be
+rewritten, whether a `policy.toml` is there (operator policy, never touched),
+and the CLAUDE.md diff against the target's template. A home with no registry
+is listed as such. A home's starting point is the release
+`data/template-sync.json` records as its last registry sync, else the running
+version. Last come the restarts it would do, in order: the loops daemon, the
+console, each runner (from `cousin-supervisor status`, or from the
+configuration when no supervisor answers), the caller's own runner last and
+detached. A dirty checkout is reported, not refused. `--json` prints the same
+plan as JSON, `-v`/`--full` prints each diff, `--root` picks the install and
+`--checkout` the git checkout to read releases from (default: the one
+running). Without `--dry-run` it exits 2: the apply path comes in a later
+release. Exit 0 the plan was computed, 1 it could not be (no release tag, not
+a git checkout), 2 refused.
+
+```
+cousin-upgrade --dry-run
+cousin-upgrade --dry-run --to v3.17.0 --full
+```
+
 `cousin-gate` scans a tree you are about to publish for private addresses,
 home paths, secret shapes, binaries and denylisted terms. `--git-visible`
 scans only what git would publish (tracked files, and untracked ones

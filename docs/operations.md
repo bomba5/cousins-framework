@@ -473,6 +473,14 @@ files ([the units](../systemd/README.md#units-200-removed)).
 `cousin-version` prints the version and commit of the checkout; the
 console's top bar shows the one the console process is running.
 
+`cousin-upgrade --dry-run` shows what an upgrade would do before you do it:
+the changelog between the running version and the newest release tag (or
+`--to <tag>`), whether the dependencies changed, the seeded files, each
+cousin's registry, `.mcp.json` and CLAUDE.md against the new release, and the
+restarts in order. It writes nothing. The apply path (the registry changes,
+the code switch and the restarts) comes in a later release; until then the
+steps above are the upgrade ([commands](commands.md#maintenance)).
+
 ## After a reboot
 
 The units come back by themselves (with linger on). `cousin-supervisor`

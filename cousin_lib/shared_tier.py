@@ -140,7 +140,8 @@ def _lines(path):
         return None
 
 
-def compare_templates(root, *, law_source=None, rules_source=None):
+def compare_templates(root, *, law_source=None, rules_source=None,
+                      shipped=None):
     """Compare each seeded file with the template it was seeded from,
     for an upgrade that shipped new text the install never takes on its
     own (seeding is once ever). Reads only. One row per file, law first:
@@ -148,19 +149,28 @@ def compare_templates(root, *, law_source=None, rules_source=None):
     install", or "not shipped any more" for a seeded file whose template
     is gone) and diff, a unified diff from the install's file to the
     shipped one for "differs" ("" otherwise). A file the operator added
-    to shared/ has no template and no row."""
-    law_source = LAW_TEMPLATE if law_source is None else Path(law_source)
-    rules_source = HOUSE_RULES if rules_source is None else Path(rules_source)
+    to shared/ has no template and no row. `shipped`, when given, is the
+    templates as text instead of files, {"law": text or None, "rules":
+    {name: text}} (cousin-upgrade passes a release's)."""
     root = Path(root)
-    pairs = [(LAW_SEED_NAME, law_source if law_source.is_file() else None)]
-    shipped = {p.name: p for p in rules_source.glob("*.md") if p.is_file()}
+    if shipped is None:
+        law_source = LAW_TEMPLATE if law_source is None else Path(law_source)
+        rules_source = (HOUSE_RULES if rules_source is None
+                        else Path(rules_source))
+        law = law_source if law_source.is_file() else None
+        rules = {p.name: p for p in rules_source.glob("*.md") if p.is_file()}
+        read = _lines
+    else:
+        law, rules = shipped.get("law"), dict(shipped.get("rules") or {})
+        read = lambda text: text.splitlines(keepends=True)
+    pairs = [(LAW_SEED_NAME, law)]
     seeded = {n for n in _seeded(root) if n and "/" not in n}
-    for name in sorted(set(shipped) | seeded):
-        pairs.append(("shared/" + name, shipped.get(name)))
+    for name in sorted(set(rules) | seeded):
+        pairs.append(("shared/" + name, rules.get(name)))
     rows = []
     for rel, template in pairs:
         ours = _lines(root / rel)
-        theirs = _lines(template) if template is not None else None
+        theirs = read(template) if template is not None else None
         if theirs is None:
             if ours is None:
                 continue

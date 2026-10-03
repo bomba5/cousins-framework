@@ -346,9 +346,15 @@ runs), which the contract does not cover.
   file (see [policy.toml on the opencode lane](../configuration.md#policytoml-on-the-opencode-lane)).
 - Tool calls (with their arguments), subagent jobs and checkpoints are
   recorded by the runner from opencode's event stream, not by hooks.
-- There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
-  hook (see [configuration](../configuration.md#agent-runner)), so a turn
-  here can end on an operator or person thread without a `reply`.
+- The reply gate (`[agent] reply_gate`, see
+  [configuration](../configuration.md#agent-runner)) has no `Stop` hook to
+  ride on: the runner applies it at the run's `session.idle`. A good run
+  whose operator or person rows got no successful `cousin_reply` (read from
+  the session's own event stream, so a subagent's does not count) gets one
+  more prompt with the gate's reason, a `gate` event, and its rows close at
+  the idle that answers it; the end after that always passes. A turn settled
+  after an event-stream reconnect is not gated, since the replies sent in
+  the gap were not seen.
 - The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
   the policy plugin enforces policy.toml only, so a subagent here is not
   refused a write to the install's `config/law.md`, a cousin's committed
@@ -477,9 +483,9 @@ none is a contract item:
   `data/run/tmux-context.md` (a private file, see "The system prompt is a
   private file" above); a resume or a kind switch gets a short pointer
   instead, never the full block again (`runner/prompt.py`).
-- There is no reply gate: `[agent] reply_gate` is the SDK runner's `Stop`
-  hook, so a turn in the pane can end on an operator or person thread
-  without a `reply`.
+- There is no reply gate: `[agent] reply_gate` covers the `sdk` and
+  `opencode` lanes only, so a turn in the pane can end on an operator or
+  person thread without a `reply`.
 - The [memory perimeter](../memory.md#the-perimeter) is not on the tool gate:
   the pane has no live `PreToolUse` veto (see "Known gaps on tmux"), so a
   subagent in the pane is not refused a write to the install's

@@ -564,6 +564,11 @@ def _check_attachment(kind, value):
     return path
 
 
+# How a successful reply's result begins: the opencode lane's reply gate
+# reads it, since opencode may report an MCP tool error as a completed call.
+REPLIED = "replied to "
+
+
 def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
     """Write one reply row into this cousin's chat.db, on the thread the
     live turn names. The only chat.db writer on the SDK lane."""
@@ -612,7 +617,7 @@ def reply(ctx, text, *, thread=None, reply_to=None, image=None, video=None):
     finally:
         if store is not None:
             store.close()
-    return "replied to %s (#%d)" % (key, row["id"])
+    return "%s%s (#%d)" % (REPLIED, key, row["id"])
 
 
 # --------------------------------------------------------------- send

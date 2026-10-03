@@ -72,7 +72,7 @@ class Describe(_Case):
         s = d["settings"]
         self.assertEqual(d["lane"], "opencode")
         for key in ("model", "small_model", "shell_env", "opencode_bin",
-                    "opencode_models_fetch", "rollover_at_percent"):
+                    "opencode_models_fetch", "rollover_at_percent", "reply_gate"):
             self.assertIn(key, s, key)
         for key in ("effort", "sessions"):
             self.assertNotIn(key, s, key)

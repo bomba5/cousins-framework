@@ -29,7 +29,11 @@ the same idle; meeting, loop and schedule rows wait for their own turn
 queued behind the running one, so every row sent into an aborted run
 that the model never started is requeued. A `session.error` classifies
 the turn: an auth error puts the rows back and waits for the login,
-an abort is an interruption, anything else fails the turn.
+an abort is an interruption, anything else fails the turn. The reply
+gate (`[agent] reply_gate`, hooks.unanswered_threads, the sdk lane's
+decision) runs at that idle: a good run whose operator or person rows
+got no successful `cousin_reply` gets one more prompt with the reason,
+and its rows close at the idle that answers it.
 
 The policy veto lives in the plugin pack: the runner renders
 policy.toml as `<data dir>/cousin-policy.json`, names it to opencode in
@@ -58,7 +62,7 @@ from pathlib import Path
 from cousin_lib import accounts, boot, recording, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, Item
 from cousin_lib.runner import auth, checkpoints, cost_cap, envelope, opencode_guard, opencode_http
-from cousin_lib.runner import tools, wake
+from cousin_lib.runner import hooks, tools, wake
 from cousin_lib.runner import policy as _policy
 from cousin_lib.runner import rollover as _rollover
 from cousin_lib.runner.base import INTERRUPT, NO_TURN, Receipt, RunnerError, folds_into_turn
@@ -491,6 +495,9 @@ class _Run:
         self.results = 0
         self.fold = True            # the handoff turn folds nothing
         self.quiet = False          # nor does it write a result: no inbox row is its
+        self.replied = hooks.ReplyLedger()  # the reply gate: what this run's replies covered
+        self.gated = False          # the gate sent its one send-back (or tried to)
+        self.follow_up = None       # that send-back's _Sent
         self.deadline = None
 
     def unclosed(self):
@@ -543,6 +550,8 @@ class OpencodeRunner:
         self.small_model = small_model or agent.get("small_model") or self.model
         self.binary = opencode_bin(agent, environ)
         self.models_fetch = agent.get("opencode_models_fetch", True) is not False
+        # the sdk lane's reply gate, here at the idle (_gate_reply)
+        self.reply_gate = bool(agent.get("reply_gate", True))
         self._environ = environ
         self.shell_env = shell_env(self.home, agent, environ)
         self.server_factory = server_factory or _default_server_factory
@@ -1549,6 +1558,9 @@ class OpencodeRunner:
                                               "decision": "deny",
                                               "reason": str(text)[len(DENIED):],
                                               "opencode_tool": part.get("tool")})
+            if status == "completed" and sdk_tool_name(part.get("tool")) == hooks.REPLY_TOOL \
+                    and str(text or "").startswith(tools.REPLIED):
+                run.replied.note(state.get("input"))
             self._record("PostToolUse" if status == "completed" else "PostToolUseFailure",
                          part, state)
 
@@ -1608,6 +1620,8 @@ class OpencodeRunner:
             match.echoed, match.message_id = True, mid
             run.user_ids[mid] = match
             run.pending_error = None        # an error before this was not this prompt's
+            if match.row is not None:       # a row's prompt is answered afresh
+                run.replied.prompted(match.row["thread_id"])
         self.stream.append("user", {"text": text[:TEXT_CHARS],
                                     "echo_of": match.row["id"] if match and match.row else None})
 
@@ -1626,8 +1640,39 @@ class OpencodeRunner:
         an idle with nothing announced is ignored."""
         if run is None or not self._live or run.over:
             return
-        if any(s.echoed and not s.closed for s in run.sent):
+        if run.follow_up is not None and not run.follow_up.echoed \
+                and run.error is None and not self._interrupt_requested:
+            return          # the gate's send-back is not stored yet: its idle ends the turn
+        if any(s.echoed and not s.closed for s in run.sent) and not self._gate_reply(run):
             self._settle(run)
+
+    def _gate_reply(self, run):
+        """The reply gate (the sdk lane's Stop hook, hooks.unanswered_threads):
+        a good run about to end whose operator or person rows got no
+        successful `reply` is sent back once, in the same session and the
+        same runner turn, with hooks.REPLY_GATE_REASON; its rows stay open
+        and close at the idle that answers the send-back. Never twice in one
+        run, so the next end always passes. True when it was sent."""
+        if not self.reply_gate or run.gated or run.quiet \
+                or run.error is not None or self._interrupt_requested or self._stop.is_set():
+            return False
+        live = []
+        for s in run.sent:
+            if s.row is not None and s.echoed and not s.closed \
+                    and s.row["thread_id"] not in live:
+                live.append(s.row["thread_id"])
+        missing = run.replied.unanswered(live)
+        if not missing:
+            return False
+        run.gated = True
+        self.stream.append("gate", {"gate": "reply", "threads": missing})
+        try:
+            run.follow_up = self._send(run, None, hooks.reply_gate_reason(missing))
+        except Exception as exc:  # noqa: BLE001 - not sent: the turn ends as it stands
+            self.stream.append("error", {"error": "reply gate: %s: %s"
+                                         % (type(exc).__name__, exc)})
+            return False
+        return True
 
     def _on_permission(self, p):
         """opencode's permission config is allow-all: an ask that still
@@ -1872,6 +1917,7 @@ class OpencodeRunner:
         if done and any(s.echoed and not s.closed for s in run.sent):
             if last.get("error") and run.error is None:
                 run.error = classify(last["error"])
+            # no reply gate here: the replies sent in the gap were not seen
             self._settle(run)
 
     def _settle(self, run, *, stopping=False):

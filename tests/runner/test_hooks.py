@@ -625,6 +625,19 @@ class TestReplyGate(HooksCase):
         _run(cbs["UserPromptSubmit"](self._base("UserPromptSubmit", prompt="next"), None, {}))
         self.assertEqual(self.stop(cbs)["decision"], "block")
 
+    def test_the_decision_is_one_pure_function_both_lanes_call(self):
+        live = ("operator:ana", "peer:kestrel", "person:Sam")
+        self.assertEqual(hooks.unanswered_threads(live, set(), False),
+                         ["operator:ana", "person:Sam"])
+        self.assertEqual(hooks.unanswered_threads(live, {"person:sam"}, True), ["operator:ana"])
+        self.assertEqual(hooks.unanswered_threads(("operator:ana", "loop:heartbeat"), set(), True),
+                         [])
+        ledger = hooks.ReplyLedger()
+        ledger.note({"text": "hi", "thread": " Operator:Ana "})
+        self.assertEqual(ledger.unanswered(("operator:ana",)), [])
+        ledger.prompted("operator:ana")
+        self.assertEqual(ledger.unanswered(("operator:ana",)), ["operator:ana"])
+
     def test_a_peer_folded_in_does_not_undo_the_operators_reply(self):
         owner = {"go on": "operator:ana", "kestrel here": "peer:kestrel"}
         cbs = self.gated(["operator:ana"], thread_for_prompt=owner.get)

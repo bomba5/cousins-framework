@@ -253,6 +253,75 @@ class TestOption(PromptCase):
         self.assertEqual(sorted(p.name for p in path.parent.iterdir()), [path.name])
 
 
+def _raw(home, topic, content, *, at, level="L0_OPERATOR", **extra):
+    """One raw entry as memory._append_raw writes it, stamped `at`."""
+    import json
+    raw = home / "memory" / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    entry = {"timestamp": at, "topic": topic, "content": content,
+             "truth_level": level, "source": "remember", "cite": "chat 7", **extra}
+    with open(raw / (at[:10] + ".jsonl"), "a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+class TestStandingInstructions(PromptCase):
+    """The operator's rules for this cousin: in the never-trimmed system
+    prompt, whole, and byte-stable while the operator's word stands."""
+
+    RULE = ("Status lines carry the outcome first, then the evidence; " * 20).strip()
+
+    def setUp(self):
+        super().setUp()
+        _raw(self.home, "rule: status lines", self.RULE, at="2026-09-01T10:00:00+00:00")
+        _raw(self.home, "feedback: Mallory threads", "Answer Mallory in the thread she opened.",
+             at="2026-09-02T10:00:00+00:00")
+        _raw(self.home, "deploy window", "Releases go out on Tuesdays.",
+             at="2026-09-03T10:00:00+00:00")
+
+    def test_rules_arrive_whole_after_the_shared_rules(self):
+        text = self.compose()
+        self.assertGreater(len(self.RULE), 220)          # longer than a distilled line keeps
+        self.assertIn("### rule: status lines\n" + self.RULE, text)
+        self.assertIn("Answer Mallory in the thread she opened.", text)
+        self.assertLess(text.index("# Operator rules every cousin follows"),
+                        text.index(prompt.STANDING_TITLE))
+        self.assertLess(text.index("### feedback: Mallory threads"),
+                        text.index("### rule: status lines"))      # sorted by topic
+
+    def test_a_fact_from_the_operator_is_not_a_standing_instruction(self):
+        self.assertNotIn("Releases go out on Tuesdays.", self.compose())
+
+    def test_the_tmux_block_carries_them_too(self):
+        block = prompt.compose_context_block(self.home, root=self.root, registry=self.registry,
+                                             version="1.12.0")
+        self.assertIn(self.RULE, block)
+
+    def test_byte_identical_while_the_calibration_stands(self):
+        first = self.compose()
+        _raw(self.home, "deploy window", "Releases go out on Wednesdays.",
+             at="2026-09-04T10:00:00+00:00")                       # a fact moved, no rule
+        with _clock_at(4_102_444_800.0):
+            second = self.compose()
+        self.assertEqual(first.encode(), second.encode())
+
+    def test_a_new_word_on_a_rule_changes_it_and_a_retired_rule_leaves(self):
+        _raw(self.home, "rule: status lines", "One line, outcome first.",
+             at="2026-09-05T10:00:00+00:00")
+        _raw(self.home, "feedback: Mallory threads", "retired by ana",
+             at="2026-09-06T10:00:00+00:00", level="L5_OBSOLETE")
+        text = self.compose()
+        self.assertIn("### rule: status lines\nOne line, outcome first.", text)
+        self.assertNotIn(self.RULE, text)
+        self.assertNotIn("Mallory", text)
+
+    def test_no_raw_memory_no_section(self):
+        import shutil
+        shutil.rmtree(self.home / "memory")
+        text = self.compose()
+        self.assertNotIn(prompt.STANDING_TITLE, text)
+        self.assertFalse((self.home / "memory").exists())   # composing writes no memory
+
+
 class TestRunnerLaneDoctrine(PromptCase):
     """Authored text written for the tmux lane reaches the runner's
     prompt as identity; the contract ahead of it overrides the CLI habit."""

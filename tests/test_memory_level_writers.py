@@ -278,6 +278,16 @@ class TestJobResults(unittest.TestCase):
         self.assertFalse((self.root / "cousins" / "ghost").exists())
         self.assertEqual(level_rows(self.home, "L2_TOOL"), [])
 
+    def test_a_job_close_keeps_its_tool_level_without_a_cite(self):
+        # enforces: law 10
+        # a job close is the framework's own write, never demoted
+        from cousin_lib import jobs
+        a = jobs.register_job(kind="build", title="no cite")
+        jobs.finish_job(a, status="done", exit_code=0)
+        [row] = raw_rows(self.home)
+        self.assertEqual(row["truth_level"], "L2_TOOL")
+        self.assertNotIn("cite", row)
+
     def test_the_cli_close_path_writes_too(self):
         from cousin_lib import jobs
         a = jobs.register_job(kind="build", title="cli close")

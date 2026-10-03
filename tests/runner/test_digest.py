@@ -130,6 +130,77 @@ class TestDigestOwnRules(DigestCase):
 
 
 
+class TestCalibrationGivesWayByWholeEntries(DigestCase):
+    """The calibration layer: the operator's facts newest first, whole,
+    then "N more not shown"; the operator's rules are in the prompt."""
+
+    def plant(self, n, *, size=200):
+        raw = self.home / "memory" / "raw"; raw.mkdir(parents=True, exist_ok=True)
+        with open(raw / "2026-09-01.jsonl", "a") as fh:
+            for i in range(n):
+                fh.write(json.dumps({
+                    "timestamp": "2026-09-01T%02d:%02d:00+00:00" % (i // 60, i % 60),
+                    "topic": "fact %03d" % i, "content": ("Kestrel fact %03d " % i) + "x" * size,
+                    "truth_level": "L0_OPERATOR", "source": "remember", "cite": "chat %d" % i}) + "\n")
+
+    def section(self, text):
+        return text[text.index("Operator Calibration"):text.index("Active State")]
+
+    def shown(self, section):
+        return [l for l in section.splitlines() if l.startswith("- [L0_OPERATOR]")]
+
+    def test_a_long_calibration_is_never_cut_mid_entry(self):
+        self.healthy(); self.plant(80)
+        section = self.section(self.digest()["text"])
+        self.assertNotIn("budget hit", section)
+        shown = self.shown(section)
+        self.assertTrue(shown)
+        for line in shown:                          # every entry whole: its tags close it
+            self.assertRegex(line, r"\(1 entry, 2026-09-01; topic: fact \d{3}\)$")
+        self.assertIn("Kestrel fact 079", shown[0])  # newest first
+        self.assertIn("- ... %d more not shown" % (80 - len(shown)), section)
+        self.assertLessEqual(len(section), prompt.DIGEST_BUDGETS["calibration"][1] + 100)
+
+    def test_the_cap_is_two_thousand_tokens_and_the_floor_the_old_cap(self):
+        self.assertEqual(boot.LAYER_BUDGETS["calibration"],
+                         (800 * boot.CHARS_PER_TOKEN, 2000 * boot.CHARS_PER_TOKEN))
+
+    def test_an_overflow_pass_also_drops_whole_entries(self):
+        self.healthy(); self.plant(80)
+        raw = self.home / "memory" / "raw"
+        with open(raw / "2026-08-06.jsonl", "w") as fh:
+            for i in range(2000):
+                fh.write(json.dumps({"topic": "t%d" % i, "content": "m" * 200}) + "\n")
+        with mock.patch.object(prompt, "DIGEST_MAX_CHARS", 9000):
+            text = self.digest()["text"]
+        section = self.section(text)
+        self.assertNotIn("calibration (overflow)", text)
+        self.assertLessEqual(len(section), prompt.DIGEST_BUDGETS["calibration"][0] + 100)
+        for line in self.shown(section):
+            self.assertTrue(line.endswith(")"), line)
+        self.assertIn("more not shown", section)
+
+    def test_the_corrections_keep_their_heading_beside_a_long_calibration(self):
+        blocks = [("## operator-calibration.md", ["- fact %d" % i + "y" * 90 for i in range(100)],
+                   ""),
+                  ("# Recent operator corrections (last 2)", ['- [halt] "stop"', '- [x] "no"'], "")]
+        text = prompt.pack_calibration(blocks, 2000)
+        self.assertLessEqual(len(text), 2000)
+        self.assertIn("# Recent operator corrections", text)
+        self.assertEqual(prompt.pack_calibration(blocks, 10), "")
+
+    def test_an_operator_rule_is_not_duplicated_in_the_digest(self):
+        self.healthy()
+        raw = self.home / "memory" / "raw"; raw.mkdir(parents=True, exist_ok=True)
+        with open(raw / "2026-09-02.jsonl", "w") as fh:
+            fh.write(json.dumps({"timestamp": "2026-09-02T09:00:00+00:00",
+                                 "topic": "rule: Toki's reviews", "content": "Review Toki's diffs line by line.",
+                                 "truth_level": "L0_OPERATOR", "source": "remember",
+                                 "cite": "chat 9"}) + "\n")
+        self.assertNotIn("line by line", self.digest()["text"])
+        self.assertIn("line by line", "\n".join(prompt.standing_instructions(self.home)))
+
+
 class TestOpenLoopsReadAsTheWriterWritesThem(DigestCase):
     """The handoff finds STATUS.md's open loops as a whole heading line
     and ends the section at the next level-1 or level-2 heading; the

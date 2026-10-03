@@ -3,6 +3,18 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.20.1 - 2026-10-03
+
+### Changed
+
+- **The shipped law is version 1.3.** Rule 3a now names what the plain
+  professional register leaves out when a cousin boots without its
+  persona (no pet names, no invented intimacy, no flirtation, no
+  in-character flourish), and rule 8 says discretion is for guideline
+  rules only: invariants are carried out by the framework or checked
+  afterwards. An existing install keeps its own `config/law.md`;
+  `cousin-shared templates` shows the difference.
+
 ## 3.20.0 - 2026-10-03
 
 ### Added

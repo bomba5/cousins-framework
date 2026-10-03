@@ -3,6 +3,15 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.21.3 - 2026-10-03
+
+### Fixed
+
+- **A handoff no longer demotes a memory silently.** An entry in the
+  `handoff` tool's `learned` list with a framework or tool level and no
+  cite was written as a conclusion (law 10) without a word; the handoff's
+  result now carries the same `demoted:` line `remember` prints.
+
 ## 3.21.2 - 2026-10-03
 
 ### Fixed

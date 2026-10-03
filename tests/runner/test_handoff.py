@@ -30,6 +30,24 @@ class TestHandoff(HermeticCase):
         raw = "".join(p.read_text() for p in (home / "memory" / "raw").glob("*.jsonl"))
         self.assertIn("exports are UTC", raw)
 
+    def test_an_uncited_level_demoted_in_learned_is_said(self):
+        ctx = _ctx(self)
+        args = dict(ARGS, learned=[{"topic": "bank export", "fact": "exports are UTC",
+                                    "level": "tool"}])
+        text, err = tools.call(ctx, "handoff", args)
+        self.assertFalse(err, text)
+        self.assertIn("1 memory; memory 'bank export': demoted:", text)
+        raw = "".join(p.read_text() for p in (ctx.home / "memory" / "raw").glob("*.jsonl"))
+        self.assertIn("L3_COUSIN_CONCLUSION", raw)
+
+    def test_a_cited_level_says_nothing_more(self):
+        ctx = _ctx(self)
+        args = dict(ARGS, learned=[{"topic": "bank export", "fact": "exports are UTC",
+                                    "level": "tool", "cite": "export header, 2026-03"}])
+        text, err = tools.call(ctx, "handoff", args)
+        self.assertFalse(err, text)
+        self.assertNotIn("demoted", text)
+
     def test_the_handoff_file_is_written_last(self):
         ctx = _ctx(self); order = []
         real_write = type(ctx.home).write_text

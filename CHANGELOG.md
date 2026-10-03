@@ -3,6 +3,20 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.10.0 - 2026-10-03
+
+### Changed
+
+- **A dreaming pass has a budget of 64,000 tokens** (was 32,000). With its
+  memory tools alone a pass over a 40,000-character slice spent about
+  45,000, so every pass ended `budget` and the next was handed the same
+  slice again.
+- **A cousin's first dreaming pass starts 30 days back**
+  (`dreaming.FIRST_PASS_DAYS`; `dream_memory.slice_for` takes `since`).
+  A long history was otherwise walked one slice a night, slower than a
+  busy cousin writes. Older memory is left undreamed. Once a pass has
+  committed, the cursor alone decides where the next slice starts.
+
 ## 3.9.2 - 2026-10-03
 
 ### Fixed

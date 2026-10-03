@@ -17,7 +17,7 @@ stays as the second line.
 
 The memory side is `cousin_lib.dream_memory`, the contract below:
 
-    slice_for(home, *, chars) -> Slice   # .text, .through (opaque,
+    slice_for(home, *, chars, since) -> Slice   # .text, .through (opaque,
                                          # JSON), .empty, .coverage
     prompt(slice) -> str                 # the doctrine and the slice
     OPERATIONS                           # [{"name", "description",
@@ -43,13 +43,16 @@ import tempfile
 import time
 import tomllib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 MODES = ("off", "nightly", "rollover")
 DEFAULT_AT = "03:00"
 DEFAULT_MODEL = "sonnet"
-BUDGET_TOKENS = 32000
+BUDGET_TOKENS = 64000
+# a cousin's first pass starts this many days back: older memory is
+# left undreamed rather than walked a slice a night
+FIRST_PASS_DAYS = 30
 # cache reads bill at a tenth of fresh input: they count at that weight
 CACHE_READ_WEIGHT = 0.1
 MAX_TURNS = 24
@@ -225,7 +228,8 @@ def run_pass(home, root, *, trigger="manual", model=None, budget=BUDGET_TOKENS,
         stale = getattr(ops, "release_stale", None)
         if stale is not None:
             end["released"] = stale(home, PASS_TIMEOUT_S + 60)
-        piece = ops.slice_for(home, chars=SLICE_CHARS)
+        since = (datetime.now() - timedelta(days=FIRST_PASS_DAYS)).strftime("%Y-%m-%d")
+        piece = ops.slice_for(home, chars=SLICE_CHARS, since=since)
         end["through_before"] = getattr(piece, "through", None)
         # what a bounded slice saw and left out (topics seen / left, new
         # entries): the record never claims more coverage than it had

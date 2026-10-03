@@ -217,6 +217,35 @@ class TestTheCursorIsAStructuralRefusal(DreamCase):
         self.assertIn("written after the pass", again.text)
 
 
+    def test_a_first_pass_starts_at_since_and_a_cursor_ignores_it(self):
+        archive = memory.raw_dir(self.home) / "archive"
+        archive.mkdir(parents=True)
+        with gzip.open(archive / "2026-08.jsonl.gz", "wt") as fh:
+            fh.write(json.dumps({"timestamp": "2026-08-20T10:00:00+00:00",
+                                 "topic": "kestrel", "content": "archived claim",
+                                 "truth_level": "L3_COUSIN_CONCLUSION",
+                                 "source": "remember"}) + "\n")
+        self.raw("2026-09-01", ("kestrel", "too old"))
+        self.raw("2026-09-10", ("kestrel", "recent enough"))
+        piece = dream_memory.slice_for(self.home, chars=40000, since="2026-09-05")
+        self.assertNotIn("archived claim", piece.text)
+        self.assertNotIn("too old", piece.text)
+        self.assertIn("recent enough", piece.text)
+        dream_memory.begin(self.home, self.pass_id)
+        dream_memory.commit(self.home, self.pass_id, piece.through)
+        self.raw("2026-09-02", ("kestrel", "a late write to an old day"))
+        # committed: the cursor decides, since is not a floor any more
+        again = dream_memory.slice_for(self.home, chars=40000, since="2026-09-30")
+        self.assertTrue(again.empty)
+        self.raw("2026-09-12", ("kestrel", "new"))
+        self.assertIn("new", dream_memory.slice_for(self.home, chars=40000,
+                                                    since="2026-09-30").text)
+
+    def test_since_must_be_a_day(self):
+        with self.assertRaisesRegex(ValueError, "since"):
+            dream_memory.slice_for(self.home, chars=40000, since="last month")
+
+
 class TestTheAttemptToken(DreamCase):
     def test_begin_without_a_slice_refuses(self):
         self.raw("2026-10-01", ("kestrel", "one"))

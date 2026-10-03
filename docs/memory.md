@@ -506,9 +506,12 @@ through the [perimeter](#the-perimeter), so a pass writes `memory/` and
 `data/dreams/` and nothing else. A refused call writes nothing, and the
 model is told why.
 
-A pass has a budget of 32,000 tokens (cache reads count at a tenth) and
+A pass has a budget of 64,000 tokens (cache reads count at a tenth) and
 at most 24 model turns, and the loops daemon and the console stop it
-after 15 minutes. It ends with one of these results:
+after 15 minutes. A cousin's first pass starts 30 days back
+(`dreaming.FIRST_PASS_DAYS`): older memory is left undreamed rather than
+walked one slice a night. From the first committed pass on, the cursor
+alone decides where the next slice starts. It ends with one of these results:
 
 - `done`: it changed something, and the next pass starts after this slice.
 - `no_change`: nothing to change, or nothing new since the last pass.

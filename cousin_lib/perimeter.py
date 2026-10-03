@@ -148,6 +148,12 @@ def _config_reason(name, slug):
             " in memory/ or notes/ and ask the operator" % (name, slug))
 
 
+def _home_reason(where, owner, slug):
+    return ("%s is in %s's home: only %s's own sessions and the framework"
+            " write there. %s writes its own home; to reach %s, send it a"
+            " message (cousin-chat send %s)" % (where, owner, owner, slug, owner, owner))
+
+
 def _proposal_reason(where, owner, slug):
     return ("%s is %s: %s's proposals go to shared/proposed/%s__<name>.md"
             " (cousin-shared propose --slug %s)" % (where, owner, slug, slug, slug))
@@ -160,6 +166,8 @@ def _who_writes(placed, slug, own):
     (protected_reason with `home` or `slug`)."""
     if placed[:len(own)] == own and placed[len(own):] in OWN_CONFIG:
         return _config_reason("/".join(placed[len(own):]), slug)
+    if len(placed) >= 2 and placed[0] == COUSINS_DIR and placed[:len(own)] != own:
+        return _home_reason("/".join(placed), placed[1], slug)
     if placed == (SHARED_DIR, AUDIT_NAME):
         return _AUDIT_REASON
     if placed[:2] == (SHARED_DIR, PROPOSED_DIR):
@@ -212,8 +220,9 @@ def protected_reason(path, *, root=None, cwd=None, home=None, slug=None):
     defaults to the home's directory name). The tool gate passes them for
     a subagent, and with a root they add the rows that depend on who
     writes: another cousin's proposal in shared/proposed/, the tier's
-    shared/audit.jsonl and the cousin's own configuration (OWN_CONFIG)
-    are refused. A
+    shared/audit.jsonl, the cousin's own configuration (OWN_CONFIG) and
+    anything in another cousin's home (<root>/cousins/<other>/) are
+    refused. A
     framework writer (assert_writable) never passes them."""
     placed = _under_root(path, root, cwd)
     if placed is None:

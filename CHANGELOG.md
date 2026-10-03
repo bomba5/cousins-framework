@@ -3,6 +3,16 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.26.1 - 2026-10-03
+
+### Fixed
+
+- **The supervisor could hang on SIGTERM or SIGHUP.** Its signal handlers
+  set a `threading.Event`, which takes a lock; a signal that arrived while
+  the main thread held that lock (inside its own wait or clear) left the
+  handler waiting on itself, and the supervisor never exited. The handlers
+  now only set flags, which the loop reads within a tick.
+
 ## 3.26.0 - 2026-10-03
 
 ### Added

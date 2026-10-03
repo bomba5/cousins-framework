@@ -9,7 +9,7 @@ import pathlib
 import tempfile
 import time
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest import mock
 
@@ -38,8 +38,9 @@ class FakeOps:
         return {"op": "retire", "topic": "kestrel", "entry_ids": [args["entry_id"]],
                 "mark_id": "m-" + args["entry_id"], "why": args.get("why", "")}
 
-    def slice_for(self, home, *, chars):
+    def slice_for(self, home, *, chars, since=None):
         self.calls.append(("slice", chars))
+        self.since = since
         return SimpleNamespace(text="the slice", through="e42", empty=self.empty)
 
     def prompt(self, piece):
@@ -191,6 +192,9 @@ class TestPass(DreamCase):
         self.assertEqual([c["entry_ids"] for c in end["changes"]], [["abc"]])
         self.assertTrue(client.results[1].isError)        # refused, told as a tool error
         self.assertIn(("commit", "e42"), ops.calls)
+        # a first pass starts FIRST_PASS_DAYS back
+        self.assertEqual(ops.since, (datetime.now() - timedelta(days=dreaming.FIRST_PASS_DAYS))
+                         .strftime("%Y-%m-%d"))
         # a dead pass's attempt is taken back before the slice
         self.assertEqual(ops.calls[0], ("release_stale", dreaming.PASS_TIMEOUT_S + 60))
         self.assertEqual(end["tokens"], 500)              # one response, counted once

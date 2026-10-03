@@ -1329,7 +1329,7 @@ function DreamsView({ slug, reload, flash, onChanged, operator }) {
           <span className="muted">{cfg.mode === "off" ? "off" : cfg.mode === "nightly" ? `nightly at ${cfg.at}` : "after each rollover"}</span></div>
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div className="mx-sub" style={{ marginTop: 0 }}>
-            A pass is a short Sonnet session with memory tools only (no files, no shell), up to 32k tokens.
+            A pass is a short Sonnet session with memory tools only (no files, no shell), up to 64k tokens; the first pass starts 30 days back.
             It merges duplicates, retires stale claims and settles contradictions, never touching L0-L2.
             Turn it on or off in the cousin's Agent settings (dreaming, dreaming_at).
           </div>

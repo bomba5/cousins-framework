@@ -452,12 +452,16 @@ def _render(entry, entry_id):
                                     str(entry.get("topic") or "").strip(), content)
 
 
-def slice_for(home, *, chars=40000):
+def slice_for(home, *, chars=40000, since=None):
     """The next bounded slice of raw memory: the lines no pass has taken
     yet, oldest first, until `chars` of rendered claims are in hand. The
     slice is recorded in the ledger as pending; `begin` freezes it into
     the attempt that bounds the pass. ValueError when a pass is already
     open, or when the budget is not positive.
+
+    `since` (YYYY-MM-DD) bounds a first pass: with nothing committed yet
+    the walk starts at the first file at or after it, and older memory is
+    never dreamed. Once a pass has committed, the cursor alone decides.
 
     A claim longer than the whole budget is taken alone and the coverage
     says `over-budget`: making no progress would leave the cursor stuck,
@@ -479,6 +483,10 @@ def slice_for(home, *, chars=40000):
         files = _files(home)
         through = committed(home)
         index, first = _resume(files, through)
+        if not through and since:
+            since = cursor({"month": since, "lines": 0}, what="since")["month"]
+            index = next((i for i, f in enumerate(files) if _key(f[0]) >= since),
+                         len(files))
         rendered, ids, topics = [], set(), set()
         stems, last, machine, unread = [], None, 0, 0
         used, shown, cut, consumed = 0, 0, "end", 0

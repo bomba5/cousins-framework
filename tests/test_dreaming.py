@@ -224,6 +224,16 @@ class TestPass(DreamCase):
         self.assertEqual(ops.calls[-1][0], "abandon")
         self.assertEqual(dreaming.passes(self.home)[0]["result"], "error")
 
+    def test_a_pass_that_cannot_load_its_memory_side_is_recorded_once(self):
+        self.toml('dreaming = "nightly"\ndreaming_at = "00:00"\n')
+        with mock.patch.object(dreaming, "_memory_ops", side_effect=ImportError("no dream_memory")):
+            end = dreaming.run_pass(self.home, self.root, trigger="nightly")
+        self.assertEqual(end["result"], "error")
+        self.assertIn("no dream_memory", end["error"])
+        # recorded as today's attempt: the loops tick does not run it again
+        self.assertEqual(dreaming.passes(self.home)[0]["result"], "error")
+        self.assertIsNone(dreaming.due(self.home))
+
     def test_a_pass_that_died_without_an_end_shows_as_lost(self):
         dreaming._write(self.home, {"pass_id": "p0", "event": "start",
                                     "started": time.time() - dreaming.PASS_TIMEOUT_S - 120})

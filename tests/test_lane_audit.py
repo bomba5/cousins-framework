@@ -95,7 +95,6 @@ SITES = (
     ('cousin_lib/mcp_server.py', 'return _runner_kind(pathlib.Path(home)) == "tmux"', 'kinds'),
     ('cousin_lib/meetings.py', 'wait = not isinstance(delivery.backend_for(home), delivery.InboxBackend)', 'transport'),
     ('cousin_lib/migrate.py', 'from cousin_lib.delivery import RUNNER_KINDS, lane_refusal  # the one list of runner kinds', 'kinds'),
-    ('cousin_lib/migrate.py', 'lane_ok = runner not in RUNNER_KINDS', 'kinds'),
     ('cousin_lib/migrate.py', 'if agent.get("runner") != "sdk":', 'sdk-only'),
     ('cousin_lib/migrate.py', 'tmux_kind = _agent(home).get("runner") == "tmux"', 'kinds'),
     ('cousin_lib/migrate.py', 'if current not in RUNNER_KINDS:', 'kinds'),

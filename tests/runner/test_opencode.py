@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
@@ -1005,6 +1006,68 @@ class TestTurns(OpencodeCase):
         self.assertEqual(self.outcome(r, a), "delivered")
         gap = [p for p in self.payloads(r, "system") if p.get("subtype") == "event_gap"]
         self.assertEqual(gap, [{"subtype": "event_gap", "settled": True}])
+
+    def test_a_message_folded_during_a_long_silent_tool_call_never_cuts_it(self):
+        """A long command sends no event while it works. The idle bound is
+        not for it (tool_idle_timeout_s is), so a message that lands
+        mid-call folds into the run and the call runs to its end."""
+        long_call = {"command": "python3 -m unittest discover -s tests | tail -25"}
+        r = self.started(self.runner([[("WORK", "bash", long_call, 1.5, "OK"), ("text", "first")],
+                                       [("text", "second")]], idle_timeout_s=0.5))
+        a = r.enqueue(_op("run the suite"))
+        self.assertTrue(_wait(lambda: self.payloads(r, "tool")))
+        b = r.enqueue(_op("how is it going?", "sam"))
+        self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertEqual(self.factory.fake.aborts, [])
+        self.assertEqual([p["text"] for p in self.payloads(r, "tool_result")], ["OK"])
+        result = self.payloads(r, "result")[-1]
+        self.assertEqual(sorted(result["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
+        self.assertEqual((result["interrupted"], result["is_error"]), (False, False))
+
+    def test_a_call_the_tool_bound_cuts_still_gets_its_activity_line(self):
+        """Past tool_idle_timeout_s the turn is settled failed and aborted;
+        opencode settles the part only after the turn is over, so the
+        runner closes the call itself: an interrupted failure, on the
+        stream and in the activity log."""
+        r = self.runner([[("WORK", "bash", {"command": "sleep 120"}, 5.0, "never")]],
+                        idle_timeout_s=0.3)
+        r.tool_idle_timeout_s = 0.8
+        self.started(r)
+        a = r.enqueue(_op("sleep"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        result = self.payloads(r, "result")[-1]
+        self.assertTrue(result["is_error"])
+        self.assertIn("with a tool call running", result["error"])
+        self.assertEqual(self.factory.fake.aborts, [r.opencode_session])
+        call = self.payloads(r, "tool")[0]["id"]
+        self.assertTrue(_wait(lambda: self.payloads(r, "tool_result")))
+        cut = [p for p in self.payloads(r, "tool_result") if p["tool_use_id"] == call]
+        self.assertEqual(len(cut), 1)
+        self.assertTrue(cut[0]["is_error"])
+        self.assertIn("the turn ended while the call was running", cut[0]["text"])
+        log = r.home / "data" / "activity" / ("%s.log" % datetime.now().strftime("%Y-%m-%d"))
+        self.assertTrue(_wait(log.exists))
+        lines = log.read_text().splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("sleep 120", lines[0])
+        self.assertNotRegex(lines[0], r"Bash\s+ok")
+        time.sleep(0.3)         # the part opencode settles late is not recorded twice
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+
+    def test_a_stop_mid_call_records_the_call_once(self):
+        """A stop aborts the run: the call is recorded once, whether
+        opencode's own aborted part arrives in time or the runner closes
+        the call itself."""
+        seen = []
+        r = self.started(self.runner([[("WORK", "bash", {"command": "sleep 120"}, 30.0, "x")]],
+                                     recorder=seen.append))
+        r.enqueue(_op("sleep"))
+        self.assertTrue(_wait(lambda: self.payloads(r, "tool")))
+        r.stop(timeout=5)
+        posts = [p for p in seen if p["hook_event_name"] != "PreToolUse"]
+        self.assertEqual(len(posts), 1, seen)
+        self.assertEqual(posts[0]["tool_name"], "Bash")
 
     def test_stop_during_a_turn_is_bounded_and_stops_everything(self):
         r = self.started(self.runner([[("HANG",)]]))

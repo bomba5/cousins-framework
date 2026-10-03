@@ -345,7 +345,17 @@ runs), which the contract does not cover.
   refuses to run turns until the plugin has acknowledged this start's policy
   file (see [policy.toml on the opencode lane](../configuration.md#policytoml-on-the-opencode-lane)).
 - Tool calls (with their arguments), subagent jobs and checkpoints are
-  recorded by the runner from opencode's event stream, not by hooks.
+  recorded by the runner from opencode's event stream, not by hooks. A call
+  still running when the turn ends (the runner's bound, a stop, the server
+  gone) never gets its result from opencode while a turn reads it, so the
+  runner closes it itself: a failed `tool_result` saying the turn ended
+  while the call was running, and its activity line, recorded as an
+  interruption.
+- A turn with no event from opencode for 600 s is settled failed and
+  aborted; while a tool call is running (its part seen `running`, no result
+  yet) that bound is 3600 s, the SDK lane's, since opencode sends nothing
+  while a command works. A message that lands during a long call folds into
+  the run and never cuts the call.
 - The reply gate (`[agent] reply_gate`, see
   [configuration](../configuration.md#agent-runner)) has no `Stop` hook to
   ride on: the runner applies it at the run's `session.idle`. A good run
@@ -440,8 +450,8 @@ none is a contract item:
   check reads the file again.
 - **A subagent's events do not reset the turn's idle clock.** A `task`
   subagent runs in a child session whose events the runner drops before it
-  notes the turn's last event; a long subagent relies on opencode updating
-  the parent's tool part to stay inside the 600 s idle bound. Not measured
+  notes the turn's last event; while its tool part in the parent is running
+  the turn's bound is the 3600 s one for a running tool call. Not measured
   for a subagent that runs longer than that.
 - **The server's port is picked before the server binds it** (bind, close,
   hand the number over). A collision fails closed: the server exits or its

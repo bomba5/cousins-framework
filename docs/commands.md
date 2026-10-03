@@ -681,6 +681,29 @@ cousin-backup --home cousins/wren --dest /var/backups/cousins
 cousin-sweep compact --target both
 ```
 
+`cousin-doctor` checks the install for what to fix by hand and prints the
+fix; it changes nothing. `cousin-doctor` runs every check, `cousin-doctor
+homes` one; `--json` prints the results as JSON. Exit 0 all ok, 1 something
+to fix, 2 bad usage. The one check today:
+
+- `homes`: every cousin home (a directory under `cousins/` with a
+  `cousin.toml`) whose mode has a group or other bit, each with the line that
+  closes it, `chmod 700 <home>`. `cousin-spawn` makes new homes 0700; this
+  finds the ones an older release made. Every cousin runs as one user, so a
+  0700 home is closed to other users on the host and to anything running as
+  another uid (a container's user, a second account), not to the other
+  cousins. When a directory above the homes is already closed to group and
+  other (a 0700 `$HOME`), the check names it: the homes are out of other
+  users' reach today, and the chmod keeps them so if that directory opens.
+
+```
+cousin-doctor
+#   WARN  homes: 1 of 2 cousin homes open to group or other
+#         to fix, run:
+#           chmod 700 /srv/cousins-framework/cousins/wren    # now 0755
+#         scope: every cousin runs as this one user, so 0700 homes close them ...
+```
+
 `cousin-tool-surface` writes `data/tool-surface.md`, one line per command from
 its `--help`, a list a cousin can read instead of re-discovering its tools.
 `--root` picks the install (else `FRAMEWORK_ROOT`); `--bin` is a directory of

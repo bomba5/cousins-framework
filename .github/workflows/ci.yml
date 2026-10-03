@@ -5,6 +5,15 @@
 # so "the gate runs on every commit" is enforced here, not just
 # asserted. Name-denylisting is the operator's local additions, read
 # from outside the tree by design, and is not part of public CI.
+#
+# Each Python version runs the suite in three shards side by side
+# (.github/scripts/suite.py: whole test modules, cut by the module times
+# in .github/test-timings.json). The `test (3.x)` job of each version is
+# the one branch protection requires: it passes only when all three of
+# its shards passed and, together, ran every discovered module exactly
+# once. It runs whatever happened to the shards (`if: always()`): a
+# required check that is skipped counts as passed, so it must fail
+# instead.
 name: ci
 
 on:
@@ -12,11 +21,14 @@ on:
   pull_request:
 
 jobs:
-  test:
+  shard:
+    name: test (${{ matrix.python-version }}) shard ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+        shard: [1, 2, 3]
     steps:
       # The whole history and its tags: the docs test compares each
       # released CHANGELOG section with the one its own tag shipped.
@@ -28,8 +40,39 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install (no third-party dependencies)
         run: pip install -e .
-      - name: Run the suite (includes the gate self-check)
+      - name: Every test module is in exactly one shard
+        run: python .github/scripts/suite.py check --of 3
+      - name: Run the shard (the gate self-check is in one of them)
         # With the tags fetched, the CHANGELOG check fails rather than skips.
         env:
           COUSIN_REQUIRE_TAGS: "1"
-        run: python -m unittest discover -s tests
+        run: >-
+          python .github/scripts/suite.py run --shard ${{ matrix.shard }} --of 3
+          --result shard-${{ matrix.shard }}.json
+      - name: Keep what the shard ran
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.python-version }}-${{ matrix.shard }}
+          path: shard-${{ matrix.shard }}.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test:
+    name: test (${{ matrix.python-version }})
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shard-${{ matrix.python-version }}-*
+          path: shards
+          merge-multiple: true
+      - name: All three shards passed and ran every module once
+        run: python3 .github/scripts/suite.py verify --of 3 shards

@@ -323,6 +323,18 @@ input properties, and how each subcommand maps to argv. The registry's
 schema, so a broken entry fails. Nothing forces the docs page here; do
 it anyway. `cousin-mcp --selftest` checks a registry by hand.
 
+### A law rule or a house rule
+
+Every numbered rule of `templates/law.md` and every `kind: rule` file in
+`templates/shared/` has a row in the
+[rules inventory](reference/rules-inventory.md), ENFORCED with the tests
+that prove the refusal or PROSE with a note. `tests/test_rules_inventory.py`
+fails on a rule without a row, a row without a rule, a row whose first
+words no longer open its rule, and a named test that does not exist. A
+test that makes a rule a refusal carries `# enforces: law <n>` (or
+`# enforces: house <file>`) inside it, and the row flips to ENFORCED
+naming that test; a marker on a PROSE rule fails the same test.
+
 ### Changing the cousin template
 
 `examples/wren/CLAUDE.md` must be exactly the template rendered with

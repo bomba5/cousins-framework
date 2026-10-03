@@ -198,6 +198,7 @@ class TestWriterList(HermeticCase):
 
 class TestTheLawSurvivesFit(unittest.TestCase):
     def test_a_hard_layer_is_never_cut_to_its_maximum(self):
+        # enforces: law 14
         law = "rule. " * 9000
         out = boot.fit({"law": law, "memories": "y" * 9000},
                        dict(boot.LAYER_BUDGETS), boot.TRUNCATE_ORDER, 10_000)
@@ -211,6 +212,7 @@ class TestTheLawSurvivesFit(unittest.TestCase):
         self.assertEqual(out["law"], law)
 
     def test_the_overflow_is_reported_rather_than_hidden(self):
+        # enforces: law 14
         law = "rule. " * 9000
         out = boot.fit({"law": law}, dict(boot.LAYER_BUDGETS),
                        boot.TRUNCATE_ORDER, 1000)

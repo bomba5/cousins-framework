@@ -38,6 +38,17 @@ an install, written by the [supervisor](glossary.md#supervisor) on its first sta
 rule as the house rules (once, never over an existing file, gone for good
 if you delete it). See [law.md](configuration.md#lawmd).
 
+## Which rules are enforced
+
+Most of these rules, and most of the law, reach the model as text and
+nothing refuses a breach; a few are refused in code. The
+[rules inventory](reference/rules-inventory.md) marks each law rule and
+each house rule ENFORCED (with the tests that prove the refusal) or PROSE
+(with what is partly enforced and how it could be), and
+`tests/test_rules_inventory.py` fails when the table and the rules or the
+tests disagree. When you change a shipped rule, update its row in the same
+commit: the page says how.
+
 ## How they arrive
 
 When the supervisor starts (the container's

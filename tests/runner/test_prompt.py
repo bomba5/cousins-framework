@@ -119,6 +119,7 @@ class TestCompose(PromptCase):
         self.assertIn("Clause 1 of the law", self.compose())   # FRAMEWORK_ROOT points nowhere
 
     def test_the_law_appears_whole_however_long(self):
+        # enforces: law 14
         self.assertGreater(len(LAW), boot.LAYER_BUDGETS["law"][1])  # longer than the packet allows
         self.assertIn(LAW.strip(), self.compose())
         self.assertNotIn("truncated", self.compose())

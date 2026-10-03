@@ -110,6 +110,7 @@ class TestGenerationStart(BootCase):
 
 class TestTruncate(BootCase):
     def test_marker_counts_inside_the_budget(self):
+        # enforces: law 14
         # A marker appended beyond the slice re-triggers the overflow
         # loop on the same victim forever - the flip-hang incident.
         out = _truncate("x" * 500, 100, "layer")
@@ -146,6 +147,7 @@ class TestAssemble(BootCase):
         self.assertNotIn("task_packet", pkt["degraded_sections"])
 
     def test_total_ceiling_governs_over_per_layer_maxima(self):
+        # enforces: law 14
         self._healthy_home()
         # Bloat several layers to their individual maxima.
         (self.home / "self-portrait.md").write_text(
@@ -196,6 +198,7 @@ class TestTheLawIsAHardLayer(BootCase):
         self.assertNotIn("law", pkt["degraded_sections"])
 
     def test_a_law_too_long_for_the_total_is_reported_not_trimmed(self):
+        # enforces: law 14
         self._healthy_home()
         law = "rule. " * 9000
         self._law(law)

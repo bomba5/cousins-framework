@@ -158,7 +158,7 @@ you already had:
 ```
 git fetch --tags
 cousin-upgrade --dry-run             # the plan: what changes, what restarts; writes nothing
-cousin-upgrade --apply-homes --yes   # bring each cousin's tool registry to the release
+cousin-upgrade --apply-homes --yes   # bring each cousin's tool list (its home's mcp-registry.toml) to the release
 cousin-upgrade --switch              # move the code, reinstall, restart in order
 cousin-tool-surface                  # refresh the command list (next section)
 cousin-shared templates              # your law and house rules against the new release
@@ -168,12 +168,12 @@ The dry run reads the newest release tag and prints the changelog up to it,
 whether the dependencies changed, each cousin's changes and the restarts in
 order. Read it before the next two. `--apply-homes` and `--switch` ask
 before they change anything (`--yes` answers for you). `--switch` refuses
-while the checkout
-has changes of yours, and refuses a dependency change unless you add
+while tracked files in the checkout have changes of yours (your
+`config/` and `cousins/` are not tracked and never count), and refuses a dependency change unless you add
 `--deps`; it restarts the loops daemon, the console and each runner one at a
 time and stops at the first that does not come back on the new release,
 printing how to roll back. The supervisor itself keeps its old code until
-you restart it, which the release notes say when to do: under systemd,
+you restart it, which CHANGELOG.md says when to do (the `--dry-run` plan prints that release's entries): under systemd,
 `systemctl --user restart cousin-supervisor.service`; started by hand, stop
 it and run `cousin-supervisor run &` again. Restarting it restarts every
 cousin, and each resumes its session.

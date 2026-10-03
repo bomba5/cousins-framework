@@ -626,6 +626,12 @@ A blocked `cousin-reply` or `cousin-chat send` sends nothing and exits 3,
 naming the word. `COUSIN_FILTER_OVERRIDE=1` in the environment switches the
 filter off for that command.
 
+Shared-memory proposals have a check of their own that needs no file: a
+proposal that names a private cousin (one whose `cousin.toml` says
+`[memory] scope = "private"`, by slug or name, plus the `protected` slugs
+here) is refused ([memory](memory.md#the-shared-tier)).
+`COUSIN_FILTER_OVERRIDE` doesn't switch that one off.
+
 ## law.md
 
 Markdown that every cousin gets at the top of its system prompt, as the

@@ -15,6 +15,7 @@ from unittest import mock
 from cousin_lib.shared_tier import (
     NameRefused,
     PromoteRefused,
+    ProposeRefused,
     diff_proposal,
     list_shared,
     plan_bulk_propose,
@@ -214,6 +215,97 @@ class TestPathShapedNames(TierCase):
     def test_a_bare_name_still_passes(self):
         propose("norms.md", "x\n", slug="wren")
         self.assertIn("x", diff_proposal("norms.md", "wren"))
+
+
+class TestLawElevenOnProposals(TierCase):
+    """Law 11: a private cousin (cousin.toml `[memory] scope =
+    "private"`) is never named in shared memory. Every cousin reads
+    shared/proposed/ and the audit log, so the check runs before a
+    proposal is written, and the refusal never repeats the name."""
+
+    def setUp(self):
+        super().setUp()
+        self._register_cousin("wren", "Wren")
+        home = self.root / "cousins" / "toki"
+        home.mkdir(parents=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "toki"\nname = "Nim"\n'
+            '[memory]\nscope = "private"\n')
+
+    def _refused(self, file="norms.md", body="be kind\n", slug="wren",
+                 reason=""):
+        with self.assertRaises(ProposeRefused) as ctx:
+            propose(file, body, slug=slug, reason=reason)
+        message = str(ctx.exception)
+        self.assertIn("law 11", message)
+        self.assertNotIn("toki", message.lower())
+        self.assertNotIn("nim", message.lower())
+        self.assertFalse((self.root / "shared" / "proposed").exists()
+                         and any((self.root / "shared" / "proposed").iterdir()))
+        self.assertEqual(self._audit_entries(), [])
+        return message
+
+    def test_a_body_naming_a_private_cousin_by_slug_or_name_is_refused(self):
+        for body in ("ask toki first\n", "Ask TOKI.\n", "nim keeps it\n",
+                     "see (Nim)\n"):
+            with self.subTest(body=body):
+                self.assertIn("body", self._refused(body=body))
+
+    def test_the_reason_and_the_file_name_are_checked_too(self):
+        self.assertIn("reason", self._refused(reason="from toki's notes"))
+        self.assertIn("file name", self._refused(file="toki-notes.md"))
+
+    def test_a_private_cousin_does_not_propose_at_all(self):
+        self.assertIn("proposing slug", self._refused(slug="toki"))
+
+    def test_a_longer_word_is_not_a_name(self):
+        propose("norms.md", "the tokio runtime, nimble hands\n", slug="wren")
+        self.assertTrue((self.root / "shared" / "proposed"
+                         / "wren__norms.md").exists())
+
+    def test_unset_or_shared_scope_is_not_a_private_cousin(self):
+        self._register_cousin("sam", "Sam")
+        home = self.root / "cousins" / "ana"
+        home.mkdir(parents=True)
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "ana"\n[memory]\nscope = "shared"\n')
+        propose("norms.md", "sam and ana agree\n", slug="wren")
+
+    def test_the_filter_files_protected_slugs_count_too(self):
+        (self.root / "config" / "outbound-filter.json").write_text(
+            json.dumps({"protected": ["quill"]}))
+        with self.assertRaises(ProposeRefused) as ctx:
+            propose("norms.md", "quill said so\n", slug="wren")
+        self.assertNotIn("quill", str(ctx.exception))
+
+    def test_the_cli_exits_3_and_never_prints_the_name(self):
+        import contextlib
+        import io
+
+        from cousin_lib.shared_tier import shared_main
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), \
+                mock.patch("sys.stdin", io.StringIO("toki knows\n")):
+            rc = shared_main(["propose", "norms.md", "--slug", "wren"])
+        self.assertEqual(rc, 3)
+        self.assertIn("law 11", err.getvalue())
+        self.assertNotIn("toki", (out.getvalue() + err.getvalue()).lower())
+
+    def test_bulk_propose_skips_a_refused_file_and_says_so(self):
+        from cousin_lib.shared_tier import commit_bulk_propose
+        home = self.root / "cousins" / "wren"
+        (home / "memory").mkdir()
+        (home / "cousin.toml").write_text(
+            '[cousin]\nslug = "wren"\n[memory]\nscope = "shared"\n')
+        (home / "memory" / "project_a.md").write_text(
+            "shareable: true\n\nfine\n")
+        (home / "memory" / "project_b.md").write_text(
+            "shareable: true\n\nNim helped\n")
+        plan = plan_bulk_propose(home, "wren")
+        self.assertEqual(commit_bulk_propose(plan, "wren"), 1)
+        self.assertEqual([f for f, _ in plan["refused"]], ["project_b.md"])
+        self.assertEqual(list_shared()["pending"], ["wren__project_a.md"])
 
 
 class TestBulkPropose(TierCase):

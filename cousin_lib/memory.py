@@ -1262,6 +1262,8 @@ def _cmd_propose_shared(args):
               % (len(plan["propose"]), len(plan["skipped"])))
         return 0
     count = commit_bulk_propose(plan, slug)
+    for fname, reason in plan.get("refused", ()):
+        print("  refused  %s  (%s)" % (fname, reason))
     print("proposed %d file(s) into the review queue; nothing landed"
           " in canonical" % count)
     return 0

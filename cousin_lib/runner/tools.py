@@ -407,7 +407,8 @@ def _t_add(ctx, a):
     from cousin_lib import tracker
     item = tracker.add(_str(a, "title"), domain=_str(a, "domain"),
                        state=_str(a, "state") or "open", tags=_tags(a.get("tag")) or (),
-                       owner=ctx.slug, notes=_str(a, "notes"), root=ctx.root)
+                       owner=ctx.slug, notes=_str(a, "notes"), who=ctx.slug,
+                       root=ctx.root)
     return _item_text(item, bool(a.get("json")))
 
 
@@ -415,13 +416,15 @@ def _t_update(ctx, a):
     from cousin_lib import tracker
     item = tracker.update(_int(a, "id", "update"), title=a.get("title"),
                           domain=a.get("domain"), state=a.get("state"),
-                          tags=_tags(a.get("tag")), notes=a.get("notes"), root=ctx.root)
+                          tags=_tags(a.get("tag")), notes=a.get("notes"),
+                          add_note=a.get("add_note"), who=ctx.slug, root=ctx.root)
     return _item_text(item, bool(a.get("json")))
 
 
 def _t_state(ctx, a):
     from cousin_lib import tracker
-    item = tracker.set_state(_int(a, "id", "state"), _str(a, "state"), root=ctx.root)
+    item = tracker.set_state(_int(a, "id", "state"), _str(a, "state"), who=ctx.slug,
+                             root=ctx.root)
     if a.get("json"):
         return _item_text(item, True)
     return "#%d -> %s" % (item["id"], item["state"])
@@ -450,9 +453,12 @@ def _t_show(ctx, a):
     from cousin_lib import tracker
     item_id = _int(a, "id", "show")
     item = tracker.show(item_id, root=ctx.root)
+    changes = tracker.history(item_id, root=ctx.root) if a.get("history") else None
     if item is None:
         raise tracker.ItemNotFound(item_id)
     if a.get("json"):
+        if changes is not None:
+            return json.dumps({"item": item, "history": changes}, indent=2, sort_keys=True)
         return _item_text(item, True)
     lines = []
     for key in tracker.FIELDS:
@@ -460,13 +466,16 @@ def _t_show(ctx, a):
         if key == "tags":
             value = ", ".join(value) if value else "-"
         lines.append("  %-10s: %s" % (key, value))
+    if changes is not None:
+        lines.append("  %-10s:%s" % ("history", "" if changes else " (none recorded)"))
+        lines.extend("    " + tracker.format_change(e) for e in changes)
     return "\n".join(lines)
 
 
 def _t_delete(ctx, a):
     from cousin_lib import tracker
     item_id = _int(a, "id", "delete")
-    if not tracker.delete(item_id, root=ctx.root):
+    if not tracker.delete(item_id, who=ctx.slug, root=ctx.root):
         raise tracker.ItemNotFound(item_id)
     if a.get("json"):
         return json.dumps({"ok": True, "deleted": item_id})

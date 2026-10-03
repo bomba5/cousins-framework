@@ -360,10 +360,11 @@ with nothing running behind them for weeks.
 cousin-tracker add "migrate the chat archive" --domain infra --tag q4
 #   -> #1 migrate the chat archive [open] domain=infra
 cousin-tracker state 1 active
-cousin-tracker update 1 --notes "waiting on the disk swap" --state blocked
+cousin-tracker update 1 --add-note "waiting on the disk swap" --state blocked
 cousin-tracker update 1 --add-tag disk
 cousin-tracker list --state blocked
 cousin-tracker show 1 --json
+cousin-tracker show 1 --history
 cousin-tracker state 1 done
 cousin-tracker delete 1
 ```
@@ -375,9 +376,26 @@ it. `list` filters by `--domain`, `--state`, `--tag` and `--owner` and
 shows open work first, most recently touched first. Every command takes
 `--json` and `--root`.
 
+Use `--add-note` for status updates. It appends one line to the notes,
+dated and signed, `YYYY-MM-DD HH:MM UTC <who>: <text>`, and leaves the
+rest alone. `--notes` replaces the whole text: a status line written
+with it erases the spec and every line another cousin wrote before. With
+both, the replacement happens first and the note is appended to it.
+
+Every change is recorded in the item's history: the field (title,
+domain, state, tags, owner, notes), its old and new value, who made it
+(the cousin in `COUSIN_HOME`, else `operator`; the console's logged-in
+user for a change made there) and when, plus a row for the item's
+creation and one for its deletion. `show ID --history` prints the item
+and then its changes, oldest first; a replaced notes text is printed in
+full, so it can be copied back. `show ID` without it prints what it
+always did. The history outlives the item: `show ID --history` on a
+deleted item prints the trail, whose last row holds the whole item, and
+exits 1. A store from before the history table gains it the first time
+it is opened, with no history for what came before.
+
 Ids are never reused: a deleted #3 stays gone, so a note that mentions
-#3 keeps meaning the same thing. There's no history, only the current
-state; if you want the trail, log a decision when you move an item.
+#3 keeps meaning the same thing.
 
 The store is `data/tracker.db` under the framework root. The console's
 Tracker view reads and edits the same file, and the CLI works with no

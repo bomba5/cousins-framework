@@ -608,10 +608,17 @@ cousin-schedule add "tomorrow 09:00" "Check that the backup ran."
 
 `cousin-tracker` is the install-wide list of work in flight. Subcommands:
 `add`, `update`, `state ID open|active|blocked|done|dropped`, `list`, `show`,
-`delete`.
+`delete`. Post a status update with `update ID --add-note TEXT`, which
+appends a dated, signed line to the notes; `update ID --notes TEXT`
+replaces the whole notes text, spec and earlier lines included. Every
+change is kept in the item's history (`show ID --history`, oldest first),
+so a replaced text can be read back. See
+[the tracker](jobs-and-loops.md#the-tracker).
 
 ```
 cousin-tracker add "move the photo archive" --domain infra --tag q4
+cousin-tracker update 1 --add-note "half copied, rest tonight"
+cousin-tracker show 1 --history
 ```
 
 ## Remote cousins

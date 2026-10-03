@@ -156,7 +156,7 @@ show.
 | `cousin-reply` | post a reply to your own chat surface | `cousin-reply --user <name> <<'EOF' ...` |
 | `cousin-memory` | durable memory: search, decisions, activity | `cousin-memory search "topic"` · `cousin-memory decide "t" "d" "why"` |
 | `cousin-job` | track sub-agents and background commands (subagents and backgrounded Bash calls are tracked for you by hooks); for a tracked shell command prefer the `job` tool's `run`, this CLI is the fallback | `cousin-job start subagent "<title>"` · `cousin-job done <id>` · `cousin-job start shell "<title>" -- <cmd>` |
-| `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker list --state blocked` |
+| `cousin-tracker` | the framework-wide list of in-flight work: what is open, active, blocked, done or dropped, and whose it is | `cousin-tracker add "<title>" --domain <d> --tag <t>` · `cousin-tracker state <id> active` · `cousin-tracker update <id> --add-note "<status>"` (status updates; `--notes` replaces the whole text) · `cousin-tracker show <id> --history` · `cousin-tracker list --state blocked` |
 | `cousin-meeting` | meetings: a chat with the user and several cousins, in rounds; speak only on your turn | `cousin-meeting say <id> "<text>"` · `cousin-meeting pass <id>` · `cousin-meeting show <id>` |
 | `cousin-schedule` | one-shot future prompts to yourself | `cousin-schedule add "in 30m" "<prompt>"` |
 | `cousin-spawn` | create a new cousin from this template | operator-driven; do not spawn cousins unasked |

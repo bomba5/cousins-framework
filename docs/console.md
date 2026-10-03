@@ -776,7 +776,12 @@ edits. Filter by owner, state and domain; open items come first, then
 closed ones, most recently updated first. "add" takes a title, domain,
 state, owner, tags and notes. Each row has "edit" (all fields, state
 included: open, active, blocked, done, dropped) and a delete button. Ids
-never get reused.
+never get reused. The edit panel has an "add note" box, which appends a
+dated line signed with your login, and below it the item's history,
+oldest first. Saving sends only the fields you changed, so a note a
+cousin appended while the panel was open survives unless you edited the
+notes box too; editing that box replaces the notes, and the old text
+stays in the history.
 
 ## Meetings
 

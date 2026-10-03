@@ -916,11 +916,11 @@ Body `{"title", "domain"?, "state"?, "tags"?, "owner"?, "notes"?}`. `title` requ
 
 ### `GET /api/tracker/<id>`
 
-`{"item"}` or `404`.
+`{"item", "history"}` or `404`. `history` is the item's changes, oldest first: `{"id", "item_id", "field", "old", "new", "who", "at"}`, `field` one of the item's editable fields or `created` / `deleted`; a `tags` row carries lists, every other value is a string or null.
 
 ### `POST /api/tracker/<id>`
 
-Any subset of the fields. `{"ok": true, "item"}`. `400` bad state, `404` unknown id.
+Any subset of the fields, plus `add_note` (a string appended to the notes as a dated line signed with the session user, else `operator`; after the replacement when `notes` is also given). `notes` replaces the whole text. Each changed field is recorded in the history under the same name. `{"ok": true, "item"}`. `400` bad state or blank `add_note`, `404` unknown id.
 
 ### `DELETE /api/tracker/<id>`
 

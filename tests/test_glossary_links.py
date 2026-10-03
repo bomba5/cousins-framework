@@ -30,6 +30,10 @@ IGNORE = {
     "lane": (r"\blogin lane\b", r"\btwo lanes\b", r"\bpick one lane\b", r"\bkey lane\b"),
     "worker": (r"\bits worker ended\b",),
 }
+# The fixed line that marks an optional page or section
+# (tests/test_docs_reference.py finds it by its exact text): a sign, not
+# prose, so the "cousin" in it is not a first use.
+OPTIONAL_MARKER = "*Optional: nothing on this page is needed to run a cousin.*"
 LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]*)\)")
 CODE = re.compile(r"`[^`]*`")
 
@@ -59,7 +63,7 @@ def _word(term):
 def prose_lines(text):
     """(index, line) of the lines that are prose: outside fences, outside a
     generated region (`<!-- x:begin ... -->` to `<!-- x:end -->`, which its
-    generator rewrites), not headings."""
+    generator rewrites), not headings, not the optional marker."""
     fence = generated = False
     for i, line in enumerate(text.split("\n")):
         stripped = line.lstrip()
@@ -71,7 +75,7 @@ def prose_lines(text):
         if stripped.startswith("```"):
             fence = not fence
             continue
-        if fence or stripped.startswith("#"):
+        if fence or stripped.startswith("#") or stripped == OPTIONAL_MARKER:
             continue
         yield i, line
 
@@ -115,6 +119,11 @@ class TestGlossaryLinks(unittest.TestCase):
                     missing.append("%s:%d %s: %s" % (page.relative_to(ROOT), found[0] + 1,
                                                      term, line.strip()[:80]))
         self.assertEqual(missing, [], "link the first use to glossary.md#<term>")
+
+    def test_the_optional_marker_is_not_a_first_use(self):
+        text = "# Page\n\n%s\n\nA [cousin](glossary.md#cousin).\n" % OPTIONAL_MARKER
+        self.assertEqual(first_use(text, "cousin")[0], 4)
+        self.assertEqual(first_use(text.replace("*Optional", "Optional"), "cousin")[0], 2)
 
     def test_glossary_links_name_an_entry(self):
         heads = {anchor(h) for h in re.findall(r"(?m)^### (.+)$", GLOSSARY.read_text())}

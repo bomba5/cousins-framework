@@ -38,8 +38,8 @@ from pathlib import Path
 
 from cousin_lib import accounts, boot, handover, review_gate, session, usage
 from cousin_lib.delivery import DELIVERED, FAILED, QUEUED, DeliveryError, Item, parse_thread
-from cousin_lib.runner import (auth, config_watch, envelope, extract, hooks, memory_watch,
-                               restart_note, rollover, tool_ledger, tools, wake)
+from cousin_lib.runner import (auth, config_watch, cost_cap, envelope, extract, hooks,
+                               memory_watch, restart_note, rollover, tool_ledger, tools, wake)
 from cousin_lib.runner.base import (INTERRUPT, NO_TURN, SURFACE_KINDS, Receipt, RunnerError,
                                      folds_into_turn)
 from cousin_lib.runner.inbox import Inbox
@@ -1421,6 +1421,15 @@ class SdkRunner:
                         self.inbox.done(rows[0]["id"], FAILED, NO_TURN)
                         continue
                     try:
+                        if rows[0]["source"] != "flip":
+                            # the daily cost cap, read now (cost_cap): a refused
+                            # row is closed and no turn runs
+                            row = await asyncio.to_thread(cost_cap.admit, self.home, rows[0],
+                                                          inbox=self.inbox, stream=self.stream,
+                                                          root=self.root)
+                            if row is None:
+                                continue
+                            rows[0] = row
                         if rows[0]["source"] == "flip":
                             ok = await self._rollover_row(rows[0])
                         elif await self._boundary(rows[0]):

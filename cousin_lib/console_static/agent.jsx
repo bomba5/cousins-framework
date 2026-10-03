@@ -211,6 +211,13 @@ function AgentField({ name, row, rule, value, onChange, disabled }) {
                value={value ?? ""} style={{ width: 90 }}
                onChange={e => onChange(e.target.value === "" ? null : Number(e.target.value))} />
       );
+    case "usd":
+      // US dollars a UTC day, 0 is off; a negative value is refused by the route
+      return (
+        <input className="txt" type="number" min="0" step="0.01" disabled={disabled}
+               value={value ?? ""} style={{ width: 90 }}
+               onChange={e => onChange(e.target.value === "" ? null : Number(e.target.value))} />
+      );
     case "effort":
     case "choice":
     case "account": {

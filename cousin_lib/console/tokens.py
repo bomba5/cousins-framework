@@ -173,7 +173,8 @@ def _day_buckets(server, home, *, days=SERIES_DAYS):
     from cousin_lib.delivery import _runner_kind
     if _runner_kind(home) in USAGE_DB_KINDS:
         return {day: {"total": b["total"], "output": b["output"], "read": b["cache_read"],
-                      "creation": b["cache_creation"], "input": b["input"]}
+                      "creation": b["cache_creation"], "input": b["input"],
+                      "cost": b["cost_usd"]}
                 for day, b in usage.day_totals(home, days=days).items()}
     state = server.state.setdefault("tokens", {})
     files = state.setdefault(str(home), {})
@@ -205,9 +206,17 @@ def _day_buckets(server, home, *, days=SERIES_DAYS):
 
 
 def day_totals(server, home, *, days=SERIES_DAYS):
-    """{day: {"total", "output"}} for one cousin (_day_buckets)."""
-    return {day: {"total": b["total"], "output": b["output"]}
+    """{day: {"total", "output", "cost_usd"}} for one cousin (_day_buckets);
+    cost_usd is None where the usage came from a transcript (no USD figure)."""
+    return {day: {"total": b["total"], "output": b["output"], "cost_usd": b.get("cost")}
             for day, b in _day_buckets(server, home, days=days).items()}
+
+
+def measures_cost(home):
+    """True for a cousin whose runner writes usage.db, the one USD measure
+    (cost_usd: the SDK's or opencode's figure, an estimate on a login)."""
+    from cousin_lib.delivery import _runner_kind
+    return _runner_kind(home) in USAGE_DB_KINDS
 
 
 def _rate(read, creation, inp):
@@ -246,15 +255,36 @@ def _today():
 
 
 def series(server, home, *, days=SERIES_DAYS):
+    """One row per day, oldest first: {"day", "total", "output",
+    "cost_usd"}; cost_usd is the day's sum in USD (0.0 on a day with no
+    usage), None for a cousin with no USD measure (measures_cost)."""
     totals = day_totals(server, home)
+    measured = measures_cost(home)
     today = _today()
     out = []
     for back in range(days - 1, -1, -1):
         day = (today - timedelta(days=back)).isoformat()
-        bucket = totals.get(day, {"total": 0, "output": 0})
+        bucket = totals.get(day, {"total": 0, "output": 0, "cost_usd": 0.0})
+        cost = bucket.get("cost_usd")
         out.append({"day": day, "total": bucket["total"],
-                    "output": bucket["output"]})
+                    "output": bucket["output"],
+                    "cost_usd": (round(float(cost or 0.0), 6) if measured else None)})
     return out
+
+
+def cap(home):
+    """{"limit", "spent_today"} for one cousin: limit the [agent]
+    daily_cost_cap_usd in force (runner/cost_cap.py), None when off or not
+    read on the cousin's lane; spent_today the current UTC day's USD
+    (usage.spent_today), None for a cousin with no USD measure."""
+    from cousin_lib import agent_settings, usage
+    from cousin_lib.delivery import _runner_kind
+    from cousin_lib.runner import cost_cap
+    lanes = agent_settings.SCHEMA[cost_cap.KEY]["lanes"]
+    limit = cost_cap.limit_of(home) if _runner_kind(home) in lanes else 0.0
+    spent = usage.spent_today(home) if measures_cost(home) or limit else None
+    return {"limit": limit or None,
+            "spent_today": None if spent is None else round(spent, 6)}
 
 
 def today_total(server, home):

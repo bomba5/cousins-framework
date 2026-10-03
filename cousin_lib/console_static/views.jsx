@@ -1016,6 +1016,18 @@ function TokensView({ cousins: allCousins }) {
     return row && row.cache ? row.cache : { rate: null, days: [] };
   };
   const fmtRate = (r) => (r == null ? "-" : Math.round(r * 100) + "%");
+  // The daily cost cap ([agent] daily_cost_cap_usd): limit null when off.
+  const capFor = (slug) => {
+    const row = (tok?.cousins || []).find(c => c.slug === slug);
+    return row && row.cap ? row.cap : { limit: null, spent_today: null };
+  };
+  // USD per day from the cousin's usage.db (cost_usd, an estimate on a
+  // login); null for a cousin with no USD measure, shown as "-"
+  const fmtUsd = (v) => (v == null ? "-" : "$" + Number(v).toFixed(2));
+  const costToday = (series) => {
+    const last = series.length ? series[series.length - 1] : null;
+    return last ? last.cost_usd : null;
+  };
   const fleetSeries = React.useMemo(() => {
     const byDay = {};
     for (const c of (tok?.cousins || [])) {
@@ -1025,6 +1037,10 @@ function TokensView({ cousins: allCousins }) {
     return Object.keys(byDay).sort().map(day => ({ day, total: byDay[day] }));
   }, [tok, cousins]);
   const fleetTwoWeeks = fleetSeries.reduce((s, p) => s + p.total, 0);
+  const usdRows = (tok?.cousins || [])
+    .filter(c => cousins.some(x => x.slug === c.slug) && costToday(c.series || []) != null);
+  const fleetUsdToday = usdRows.length
+    ? usdRows.reduce((s, c) => s + (Number(costToday(c.series)) || 0), 0) : null;
 
   return (
     <div className="wrap-pad">
@@ -1044,6 +1060,7 @@ function TokensView({ cousins: allCousins }) {
           <div data-token-row style={{ display: "flex", gap: 32, alignItems: "center", marginBottom: 16 }}>
             <Stat label="spent today" value={fmtTokens(totalSpent)} />
             <Stat label="last 14 days" value={fmtTokens(fleetTwoWeeks)} />
+            <Stat label="$ today" value={fmtUsd(fleetUsdToday)} />
             <div style={{ flex: 1 }} />
             {fleetSeries.length > 1 && <Spark data={fleetSeries.map(p => p.total)} width={220} height={40} />}
           </div>
@@ -1057,6 +1074,11 @@ function TokensView({ cousins: allCousins }) {
           const output = series.reduce((s, p) => s + (p.output || 0), 0);
           const cache = cacheFor(c.slug);
           const cacheToday = cache.days.length ? cache.days[cache.days.length - 1].rate : null;
+          const usd = series.some(p => p.cost_usd != null);
+          const usdTwoWeeks = series.reduce((s, p) => s + (Number(p.cost_usd) || 0), 0);
+          const cap = capFor(c.slug);
+          const over = cap.limit != null && cap.spent_today != null && cap.spent_today >= cap.limit;
+          const usdMax = Math.max(...series.map(p => Number(p.cost_usd) || 0), cap.limit || 0, 0.01);
           return (
             <div className="panel" key={c.slug}>
               <div className="panel-hdr">
@@ -1077,7 +1099,30 @@ function TokensView({ cousins: allCousins }) {
                       ? <Spark data={series.map(p => p.total)} width={100} height={28} />
                       : <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-3)" }}>no series</span>}
                   </div>
+                  {usd && <Stat small label="$ today" value={fmtUsd(costToday(series))} />}
+                  {usd && <Stat small label="$ 14 days" value={fmtUsd(usdTwoWeeks)} />}
+                  {cap.limit != null && (
+                    <div data-cost-cap className="stat-cell" title="[agent] daily_cost_cap_usd: over it only chat from a person runs">
+                      <div className="eyebrow">cap today</div>
+                      <div className="stat-value" style={{ fontSize: 15, color: over ? "var(--red)" : undefined }}>
+                        {fmtUsd(cap.spent_today)} / {fmtUsd(cap.limit)}
+                      </div>
+                    </div>
+                  )}
                 </div>
+                {usd && (
+                  <div data-cost-days style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 24, marginTop: 10 }}>
+                    {series.map(p => {
+                      const v = Number(p.cost_usd) || 0;
+                      const red = cap.limit != null && v >= cap.limit;
+                      return (
+                        <div key={p.day} title={`${p.day}: ${fmtUsd(p.cost_usd)}`}
+                             style={{ flex: 1, minHeight: 1, height: `${Math.max(4, (v / usdMax) * 100)}%`,
+                                      background: red ? "var(--red)" : "var(--fg-3)", opacity: v ? 0.8 : 0.25 }} />
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           );

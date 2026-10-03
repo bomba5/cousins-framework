@@ -3,6 +3,55 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.20.0 - 2026-10-03
+
+### Added
+
+- **`cousin-memory export` and `cousin-memory import` move a cousin's
+  memory byte for byte.** Export writes one tar.gz: raw day files, digests
+  and monthly archives (the archives not recompressed), the knowledge
+  files, `memory/distilled/`, `memory/imported/`, `memory/.trash/`, the
+  dream ledger and `data/dreams/`, the decisions log and its archives, and
+  `data/template-sync.json`, with a `MANIFEST.json` holding the format and
+  framework versions, the source slug, when, and each file's path, kind,
+  size and sha256. Search indexes, recall logs, the distiller's stamp and
+  the backfill's mark are left out and listed with the reason. Import
+  checks every file against the manifest first and refuses on any
+  mismatch, refuses a home that already has raw memory unless `--merge`,
+  and is a dry run unless `--yes`. A merge appends, as their bytes, the
+  lines the home doesn't hold to the file they came from, compares lines
+  as bytes and never as JSON, refuses an archive of the same name with
+  other bytes and leaves a whole file that differs as the home has it.
+  The distiller runs afterwards. Nothing is re-serialized or re-stamped,
+  so every entry id, obsolete mark and `derived_from` resolves the same
+  in the new home.
+
+## 3.19.0 - 2026-10-03
+
+### Added
+
+- **A daily cost cap per cousin, `[agent] daily_cost_cap_usd`.** US
+  dollars a UTC day, off at `0` (the default), on the `sdk`, `opencode` and
+  `fake` lanes. The measure is the day's `cost_usd` in the cousin's
+  `data/usage.db` (on a login, the API-equivalent price the SDK reports).
+  The runner reads the key at every turn start, so a change applies without
+  a restart. At or over the cap a turn started by an operator or a person
+  runs, with a runner note in its message and a `cap` stream event; any
+  other turn (loop, peer, schedule, meeting, system) does not start: its
+  message is closed `failed` with `daily cost cap reached: spent $X.XX of
+  $Y.YY today (UTC)`, a `cap` event says it was refused, the cousin's
+  `cap:<slug>` health row is failing, and the first refusal of the day
+  writes `data/cost-cap.json`, which the Telegram bridge sends to the
+  operators once that day. A message folded into a running turn, a flip,
+  the boot digest and an interrupt are never refused. A dreaming pass and
+  other side sessions that write no `usage.db` row are not counted; the
+  `tmux` kind writes none and does not read the key.
+- **Dollars per day in the console's tokens view.** `GET /api/tokens`
+  carries `cost_usd` per day (null for a cousin with no dollar measure) and
+  per cousin `cap: {"limit", "spent_today"}`. The view shows dollars today,
+  over 14 days and per day, and the cap's spent and limit today, red once
+  it is reached. The agent panel edits the cap.
+
 ## 3.18.0 - 2026-10-03
 
 ### Added

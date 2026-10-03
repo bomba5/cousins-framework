@@ -416,6 +416,8 @@ cousin-migrate tidy --all --yes
 | `reindex` | rebuild the search indexes from scratch |
 | `propose-shared [--commit]` | nominate shareable memories for the [shared tier](glossary.md#shared-tier) |
 | `trash [list]`, `trash restore ID` | list and restore memories removed in the console |
+| `export --out PATH` | the home's memory as one tar.gz with a `MANIFEST.json` (size and sha256 per file): raw days, digests and archives, knowledge files, distilled, dreams, decisions, every file byte for byte; indexes left out. Never overwrites PATH. See [export and import](memory.md#export-and-import) |
+| `import PATH [--home H] [--merge] [--yes] [--json]` | bring an export into a home: exit 2 on any sha256 mismatch, into a home that has raw memory without `--merge`, or for an archive of the same name with other bytes; `--merge` appends, as their bytes, the lines the home doesn't hold; a dry run unless `--yes`; distills afterwards |
 
 Truth levels for `--level` are `operator`, `framework`, `tool`,
 `conclusion` (the default), `hypothesis` and `obsolete`. `--level operator`

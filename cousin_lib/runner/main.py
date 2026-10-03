@@ -80,6 +80,7 @@ ERRORED_GIVE_UP_S = 10.0
 # built from: cousin-supervisor waits STOP_TIMEOUT_S + 5 before SIGKILL.
 STOP_TIMEOUT_S = 30.0
 
+RUN_DIR_MODE = 0o700  # <home>/run/ when hold_lock creates it
 LOCK_HELD_EXIT = 5    # another runner holds <home>/run/runner.lock
 LOCK_TAKE_S = 1.0     # hold_lock retries this long: an older probe (flock) holds the lock for microseconds
 
@@ -346,7 +347,9 @@ def hold_lock(home):
     the flock for microseconds."""
     path = Path(home) / "run" / "runner.lock"
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # made 0700 (the owner's alone) when this creates it; an existing
+        # run/ keeps its mode, and its home's mode is what closes it
+        path.parent.mkdir(mode=RUN_DIR_MODE, parents=True, exist_ok=True)
         fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     except OSError as err:
         raise RunnerError("cannot open the runner lock %s: %s" % (path, err))

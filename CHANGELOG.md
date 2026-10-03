@@ -3,6 +3,25 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.22.0 - 2026-10-03
+
+### Added
+
+- **`cousin-doctor`**, with one check, `homes`: every cousin home open to
+  group or other, each with the `chmod 700 <home>` that closes it. It only
+  reads, and says what it buys: on one uid, homes closed to other host
+  users and other uids, not one cousin to another.
+
+### Changed
+
+- **New homes are 0700.** `cousin-spawn` creates the home 0700 whatever
+  the umask; the runner makes a missing `run/` 0700 before taking its
+  lock. Existing homes keep their mode (`cousin-doctor homes` lists them).
+- **The supervisor runs under umask 077**, set before it seeds or starts
+  anything and inherited by the console, the loops daemon, the runners and
+  their tools. In Docker, files the container writes to a bind mount are
+  no longer readable by a different host uid.
+
 ## 3.21.3 - 2026-10-03
 
 ### Fixed

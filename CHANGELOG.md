@@ -3,6 +3,22 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.23.2 - 2026-10-03
+
+### Fixed
+
+- **opencode: a long tool call is no longer cut at 600 s.** The runner's
+  no-event bound settled the turn failed and aborted the session after
+  600 s of silence, and opencode is silent while a command runs; a message
+  folded in only looked like the cause. While a call runs the bound is now
+  3600 s, as on the sdk lane, and a call still running when a turn ends
+  gets its activity line and job close, recorded as an interruption.
+- **opencode: a run that keeps making the same tool call is bounded.** At
+  three identical calls (a handoff counts by name; a file write resets the
+  count) the runner sends one nudge, and a further repeat ends the turn as
+  an interruption without losing rows. Each step is a `gate` event with
+  `"gate": "repeat"`.
+
 ## 3.23.1 - 2026-10-03
 
 ### Security

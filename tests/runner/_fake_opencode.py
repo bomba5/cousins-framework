@@ -32,6 +32,12 @@ run out a turn says "ok". Steps:
   ("reasoning", s)                    a reasoning part, streamed as deltas
   ("tool", name, input, output)       pending -> running {input} -> completed
   ("tool_error", name, input, error)  pending -> running {input} -> error
+  ("WORK", name, input, seconds, output)  running {input}, then silence for
+                                      `seconds` (a long command: no event
+                                      while it works), then completed; an
+                                      abort in the silence completes it with
+                                      the measured bash tail ("User aborted
+                                      the command")
   ("ASK", name, input, output)        running, then permission.asked; waits
                                       for POST /permission/{id}/reply
   ("SLOW", seconds)                   silence; ends early on abort
@@ -90,7 +96,7 @@ AUTH_401 = {"name": "APIError", "data": {
         "message": "Incorrect API key provided", "type": "invalid_request_error",
         "code": "invalid_api_key"}}),
     "metadata": {"url": "http://127.0.0.1:9/v1/chat/completions"}}}
-_ARITY = {"text": 2, "reasoning": 2, "tool": 4, "tool_error": 4, "ASK": 4, "SLOW": 2,
+_ARITY = {"text": 2, "reasoning": 2, "tool": 4, "tool_error": 4, "ASK": 4, "WORK": 5, "SLOW": 2,
           "HANG": 1, "FAIL": 3, "AUTH_401": 1, "PARTIAL": 2, "PREP": 2, "COMPACT": 1}
 PLUGIN_NAME = "cousin-policy.js"
 POLICY_ENV = "COUSIN_POLICY_FILE"
@@ -474,7 +480,7 @@ class FakeOpencode:
         self._part_updated(sid, part)
 
     def _tool(self, sid, state, info, step):
-        kind, name, args, result = step
+        kind, name, args, result = step[0], step[1], step[2], step[-1]
         self._open_step(sid, state, info)
         part = {"id": self._id("prt"), "sessionID": sid, "messageID": info["id"], "type": "tool",
                 "tool": name, "callID": "call_%d" % (_now_ms() * 1000 + next(self._ids) % 1000),
@@ -483,7 +489,11 @@ class FakeOpencode:
         started = _now_ms()
         part["state"] = {"status": "running", "input": args, "time": {"start": started}}
         self._part_updated(sid, part)
-        ok = kind == "tool"
+        ok = kind in ("tool", "WORK")
+        if kind == "WORK" and self._sleep(state, step[3]):
+            if self._closing.is_set():
+                return False
+            result = "(no output)\n\n<metadata>\nUser aborted the command\n</metadata>"
         if kind == "ASK":
             reply = self._ask(sid, state, info, part, name, args)
             if reply is None:
@@ -542,7 +552,7 @@ class FakeOpencode:
                 self._stream_part(sid, state, info, kind, step[1])
             elif kind == "PARTIAL":
                 self._stream_part(sid, state, info, "text", step[1], leave_open=True)
-            elif kind in ("tool", "tool_error", "ASK"):
+            elif kind in ("tool", "tool_error", "ASK", "WORK"):
                 if not self._tool(sid, state, info, step):
                     break
                 self._finish(sid, state, info, "tool-calls")

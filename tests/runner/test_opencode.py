@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
@@ -1006,6 +1007,68 @@ class TestTurns(OpencodeCase):
         gap = [p for p in self.payloads(r, "system") if p.get("subtype") == "event_gap"]
         self.assertEqual(gap, [{"subtype": "event_gap", "settled": True}])
 
+    def test_a_message_folded_during_a_long_silent_tool_call_never_cuts_it(self):
+        """A long command sends no event while it works. The idle bound is
+        not for it (tool_idle_timeout_s is), so a message that lands
+        mid-call folds into the run and the call runs to its end."""
+        long_call = {"command": "python3 -m unittest discover -s tests | tail -25"}
+        r = self.started(self.runner([[("WORK", "bash", long_call, 1.5, "OK"), ("text", "first")],
+                                       [("text", "second")]], idle_timeout_s=0.5))
+        a = r.enqueue(_op("run the suite"))
+        self.assertTrue(_wait(lambda: self.payloads(r, "tool")))
+        b = r.enqueue(_op("how is it going?", "sam"))
+        self.assertTrue(_wait(lambda: len(self.prompts()) == 2))
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertEqual(self.factory.fake.aborts, [])
+        self.assertEqual([p["text"] for p in self.payloads(r, "tool_result")], ["OK"])
+        result = self.payloads(r, "result")[-1]
+        self.assertEqual(sorted(result["inbox_ids"]), sorted([a.inbox_id, b.inbox_id]))
+        self.assertEqual((result["interrupted"], result["is_error"]), (False, False))
+
+    def test_a_call_the_tool_bound_cuts_still_gets_its_activity_line(self):
+        """Past tool_idle_timeout_s the turn is settled failed and aborted;
+        opencode settles the part only after the turn is over, so the
+        runner closes the call itself: an interrupted failure, on the
+        stream and in the activity log."""
+        r = self.runner([[("WORK", "bash", {"command": "sleep 120"}, 5.0, "never")]],
+                        idle_timeout_s=0.3)
+        r.tool_idle_timeout_s = 0.8
+        self.started(r)
+        a = r.enqueue(_op("sleep"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        result = self.payloads(r, "result")[-1]
+        self.assertTrue(result["is_error"])
+        self.assertIn("with a tool call running", result["error"])
+        self.assertEqual(self.factory.fake.aborts, [r.opencode_session])
+        call = self.payloads(r, "tool")[0]["id"]
+        self.assertTrue(_wait(lambda: self.payloads(r, "tool_result")))
+        cut = [p for p in self.payloads(r, "tool_result") if p["tool_use_id"] == call]
+        self.assertEqual(len(cut), 1)
+        self.assertTrue(cut[0]["is_error"])
+        self.assertIn("the turn ended while the call was running", cut[0]["text"])
+        log = r.home / "data" / "activity" / ("%s.log" % datetime.now().strftime("%Y-%m-%d"))
+        self.assertTrue(_wait(log.exists))
+        lines = log.read_text().splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("sleep 120", lines[0])
+        self.assertNotRegex(lines[0], r"Bash\s+ok")
+        time.sleep(0.3)         # the part opencode settles late is not recorded twice
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+
+    def test_a_stop_mid_call_records_the_call_once(self):
+        """A stop aborts the run: the call is recorded once, whether
+        opencode's own aborted part arrives in time or the runner closes
+        the call itself."""
+        seen = []
+        r = self.started(self.runner([[("WORK", "bash", {"command": "sleep 120"}, 30.0, "x")]],
+                                     recorder=seen.append))
+        r.enqueue(_op("sleep"))
+        self.assertTrue(_wait(lambda: self.payloads(r, "tool")))
+        r.stop(timeout=5)
+        posts = [p for p in seen if p["hook_event_name"] != "PreToolUse"]
+        self.assertEqual(len(posts), 1, seen)
+        self.assertEqual(posts[0]["tool_name"], "Bash")
+
     def test_stop_during_a_turn_is_bounded_and_stops_everything(self):
         r = self.started(self.runner([[("HANG",)]]))
         a = r.enqueue(_op("hang"))
@@ -1111,6 +1174,88 @@ class TestReplyGate(OpencodeCase):
         self.assertEqual(self.finished(r, b), "delivered")
         self.assertEqual(len(self.sent()), 2)
         self.assertEqual(self.payloads(r, "gate"), [])
+
+
+SAME_SEND = ("tool", "cousin_send", {"to": "testa", "text": "still waiting"}, '{"ok": true}')
+
+
+class TestRepeatBound(OpencodeCase):
+    """A run that keeps making the same call: one nudge at the limit, and
+    a repeat after the nudge ends the turn as an interruption."""
+
+    def nudges(self, r):
+        return [p for p in self.payloads(r, "gate") if p.get("gate") == "repeat"]
+
+    def sent(self):
+        return [q["body"]["parts"][0]["text"] for q in self.prompts()]
+
+    def test_the_same_call_three_times_gets_one_nudge_and_the_turn_ends_well(self):
+        r = self.started(self.runner([[SAME_SEND, SAME_SEND, SAME_SEND, ("SLOW", 0.3),
+                                        ("text", "sent")],
+                                       [("text", "stopping here")]]))
+        a = r.enqueue(Item("peer:testa", "chat", "status?", sender="Testa"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertTrue(self.factory.fake.settle())
+        self.assertEqual(self.nudges(r), [{"gate": "repeat", "tool": "cousin_send", "count": 3,
+                                           "action": "nudge"}])
+        self.assertEqual(self.sent()[1], opencode.repeat_nudge_text("cousin_send", 3))
+        results = self.payloads(r, "result")
+        self.assertEqual(len(results), 1, "the nudge is the same turn")
+        self.assertEqual((results[0]["inbox_ids"], results[0]["interrupted"],
+                          results[0]["is_error"]), ([a.inbox_id], False, False))
+        self.assertEqual(self.factory.fake.aborts, [])
+
+    def test_a_repeat_after_the_nudge_ends_the_turn_and_loses_no_row(self):
+        r = self.started(self.runner([[SAME_SEND, SAME_SEND, SAME_SEND, ("SLOW", 0.3),
+                                        ("text", "sent")],
+                                       [SAME_SEND, ("HANG",)],
+                                       [("text", "next turn")]]))
+        a = r.enqueue(Item("peer:testa", "chat", "status?", sender="Testa"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertEqual([p["action"] for p in self.nudges(r)], ["nudge", "end"])
+        self.assertEqual(self.nudges(r)[1]["count"], 4)
+        self.assertEqual(self.factory.fake.aborts, [r.opencode_session])
+        result = self.payloads(r, "result")[-1]
+        self.assertEqual((result["inbox_ids"], result["interrupted"], result["is_error"]),
+                         ([a.inbox_id], True, False))
+        self.assertEqual(self.outcome(r, a), "delivered")
+        self.assertTrue(_wait(lambda: r.state() == "idle"))
+        b = r.enqueue(_op("and now?"))                  # the next turn starts afresh
+        self.assertTrue(_wait(lambda: self.settled(r, b) is not None, 8))
+        self.assertEqual(len(self.nudges(r)), 2)
+
+    def test_handoff_counts_by_name_whatever_its_arguments(self):
+        calls = [("tool", "cousin_handoff", {"position": "p%d" % i, "next_action": "n",
+                                             "status": "s"}, "handoff written")
+                 for i in range(3)]
+        r = self.started(self.runner([calls + [("text", "done")], [("text", "ok")]]))
+        a = r.enqueue(_op("wrap up"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertEqual(self.nudges(r), [{"gate": "repeat", "tool": "cousin_handoff",
+                                           "count": 3, "action": "nudge"}])
+        self.assertEqual(self.sent()[1],
+                         opencode.repeat_nudge_text("cousin_handoff", 3, by_name=True))
+
+    def test_different_arguments_and_a_file_write_between_are_not_a_loop(self):
+        run_tests = ("tool", "bash", {"command": "python3 -m unittest"}, "FAILED")
+        edit = ("tool", "edit", {"filePath": "/srv/a.py", "oldString": "x", "newString": "y"},
+                "Edit applied successfully.")
+        r = self.started(self.runner([[run_tests, edit, run_tests, edit, run_tests, run_tests,
+                                       ("tool", "cousin_send", {"to": "testa", "text": "one"}, "ok"),
+                                       ("tool", "cousin_send", {"to": "testa", "text": "two"}, "ok"),
+                                       ("text", "done")]]))
+        a = r.enqueue(_op("fix it"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertEqual(self.nudges(r), [])
+        self.assertEqual(len(self.prompts()), 1)
+
+    def test_the_bound_off_never_nudges(self):
+        r = self.runner([[SAME_SEND] * 5 + [("text", "done")]])
+        r.repeat_limit = 0
+        self.started(r)
+        a = r.enqueue(_op("go"))
+        self.assertTrue(_wait(lambda: self.settled(r, a) is not None, 8))
+        self.assertEqual(self.nudges(r), [])
 
 
 class TestUsage(OpencodeCase):

@@ -367,6 +367,37 @@ def _claim_key(item):
     return (item["cousin"], item["rule"], re.sub(r"[\W_]+", " ", item["match"].lower()).strip())
 
 
+# A line that starts a new unit of text: a bullet, a numbered item or a heading.
+_NEW_ITEM = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#)")
+
+
+def _logical_lines(numbered):
+    """{line number: the text of the logical line it belongs to}. A line
+    that ends without sentence punctuation is continued by the next when
+    that one follows it directly, is indented, and starts no new item, as a
+    wrapped bullet is. The skip tests read the whole unit, so a wrapped
+    note about a command's usage is skipped on every line it spans."""
+    units, group, prev = {}, [], None
+
+    def flush():
+        text = " ".join(line.strip() for _n, line in group)
+        for n, _line in group:
+            units[n] = text
+        group.clear()
+
+    for n, line in numbered:
+        continues = (group and prev is not None and n == prev[0] + 1
+                     and not prev[1].rstrip().endswith((".", "!", "?", ":"))
+                     and line[:1].isspace() and not _NEW_ITEM.match(line))
+        if group and not continues:
+            flush()
+        group.append((n, line))
+        prev = (n, line)
+    if group:
+        flush()
+    return units
+
+
 def lane_findings(facts, path, numbered):
     if facts.lane not in MODEL_LANES or facts.registry is None:
         return []
@@ -374,8 +405,10 @@ def lane_findings(facts, path, numbered):
     pattern = re.compile(r"(?<![\w-])(%s)(?![\w-])"
                          % "|".join(re.escape(c) for c in sorted(clis, key=len, reverse=True)))
     out = []
+    units = _logical_lines(numbered)
     for lineno, line in numbered:
-        if _FALLBACK.search(line) or _USAGE.search(line):
+        unit = units.get(lineno, line)
+        if _FALLBACK.search(unit) or _USAGE.search(unit):
             continue
         mentions = {}                         # every command the line names, hedged or not
         for m in pattern.finditer(line):

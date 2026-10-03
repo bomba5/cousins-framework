@@ -131,6 +131,19 @@ class TestLane(_Case):
             "The usage line of cousin-chat send names the flags.\n"))
         self.assertEqual(self.items(), [])
 
+    def test_a_wrapped_note_about_a_commands_syntax_is_not_reported(self):
+        # the usage words are on the bullet's second physical line
+        self.cousin("wren", portrait=(
+            "- `cousin-chat send` takes the peer then the text, and `cousin-reply` takes\n"
+            "  --user first. Verify a CLI's shape from --help before piping.\n"))
+        self.assertEqual(self.items(), [])
+
+    def test_a_new_bullet_is_not_joined_to_the_one_before(self):
+        self.cousin("wren", portrait=(
+            "- Verify the shape of the backup before trusting it\n"
+            "- Answer the operator with cousin-reply.\n"))
+        self.assertEqual([i["rule"] for i in self.items()], ["lane"])
+
     def test_a_distinction_between_commands_is_kept_in_tool_terms(self):
         self.cousin("wren", claude=self.below(
             "`cousin-reply` is for the operator only, peers get `cousin-chat send`.",

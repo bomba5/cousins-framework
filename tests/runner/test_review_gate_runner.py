@@ -264,6 +264,41 @@ class TestTheDefaultReviewer(_Base):
             sessions = [row[0] for row in conn.execute("SELECT session_id FROM usage")]
         self.assertIn("review", sessions)
 
+    def test_a_drop_from_the_default_reviewer_carries_its_reason(self):
+        """The reply's new shape: each verdict with a short reason, which
+        lands in the drop's obsolete mark."""
+        made = []
+
+        def factory(options):
+            if not made:
+                made.append(ScriptedClient(options, [self._turn_script(4)]))
+            else:
+                verdict = {row["id"]: ({"verdict": "drop", "why": "repeats ledger fact 1"}
+                                       if row["topic"] == "ledger fact 0"
+                                       else {"verdict": "keep", "why": "a specific fact"})
+                           for row in review_gate.pending(self.home)}
+                made.append(ScriptedClient(options, [[
+                    assistant(text=json.dumps(verdict)),
+                    result(session="review", usage={"input_tokens": 50, "output_tokens": 7})]]))
+            return made[-1]
+        r = self._runner(None, client_factory=factory)
+        r.start()
+        self.assertTrue(self._done(r, self._send(r)))
+        self.assertTrue(_wait(lambda: self._gated(r)))
+        [ev] = self._gated(r)
+        self.assertEqual((ev["kept"], ev["dropped"], ev["error"]), (3, 1, None))
+        self.assertIn('"why"', str(made[1].queries))                # the brief asks for one
+        [row] = [x for x in memory.validity(self.home) if x["topic"] == "ledger fact 0"]
+        self.assertEqual(_mark_why(self.home, row["id"]),
+                         "the review gate's reviewer: repeats ledger fact 1")
+
+
+def _mark_why(home, entry_id):
+    lines = [json.loads(l) for p in memory.raw_dir(home).glob("*.jsonl")
+             for l in p.read_text().splitlines()]
+    [mark] = [l for l in lines if l.get("released") == entry_id and l.get("verdict") == "drop"]
+    return mark["why"]
+
 
 class TestParse(unittest.TestCase):
     def test_a_verdict_is_read_from_the_first_json_object_and_unknown_ids_ignored(self):
@@ -271,6 +306,40 @@ class TestParse(unittest.TestCase):
         self.assertEqual(review_gate.parse_verdicts(text, ["aaaaaaaaaaaa", "bbbbbbbbbbbb"]),
                          {"aaaaaaaaaaaa": "keep", "bbbbbbbbbbbb": "drop"})
         self.assertEqual(review_gate.parse_verdicts("no json here", ["aaaaaaaaaaaa"]), {})
+
+    def test_a_verdict_with_its_reason_is_read(self):
+        text = ('{"aaaaaaaaaaaa": {"verdict": "Drop", "why": "  a duplicate of\n the backups topic "},'
+                ' "bbbbbbbbbbbb": {"verdict": "keep", "why": "a durable rule"}}')
+        self.assertEqual(review_gate.parse_verdicts(text, ["aaaaaaaaaaaa", "bbbbbbbbbbbb"]), {
+            "aaaaaaaaaaaa": {"verdict": "drop", "why": "a duplicate of the backups topic"},
+            "bbbbbbbbbbbb": {"verdict": "keep", "why": "a durable rule"}})
+
+    def test_both_shapes_may_share_a_reply(self):
+        text = '{"aaaaaaaaaaaa": "keep", "bbbbbbbbbbbb": {"verdict": "drop", "why": "chatter"}}'
+        self.assertEqual(review_gate.parse_verdicts(text, ["aaaaaaaaaaaa", "bbbbbbbbbbbb"]),
+                         {"aaaaaaaaaaaa": "keep",
+                          "bbbbbbbbbbbb": {"verdict": "drop", "why": "chatter"}})
+
+    def test_a_missing_or_garbage_reason_leaves_the_bare_verdict(self):
+        text = json.dumps({"a": {"verdict": "drop"}, "b": {"verdict": "drop", "why": 42},
+                           "c": {"verdict": "keep", "why": "   "},
+                           "d": {"verdict": "drop", "why": ["x"]}})
+        self.assertEqual(review_gate.parse_verdicts(text, "abcd"),
+                         {"a": "drop", "b": "drop", "c": "keep", "d": "drop"})
+
+    def test_a_value_with_no_readable_verdict_is_no_verdict(self):
+        text = json.dumps({"a": {"why": "a duplicate"}, "b": {"verdict": "maybe", "why": "x"},
+                           "c": {"verdict": 1}, "d": ["drop"], "e": None, "f": 3})
+        self.assertEqual(review_gate.parse_verdicts(text, "abcdef"), {})
+
+    def test_a_long_reason_is_capped_and_kept_to_one_printable_line(self):
+        why = "word\x1b[31m " * 200
+        out = review_gate.parse_verdicts(json.dumps({"a": {"verdict": "drop", "why": why}}), "a")
+        said = out["a"]["why"]
+        self.assertLessEqual(len(said), review_gate.REASON_CHARS)
+        self.assertTrue(said.endswith("..."))
+        self.assertTrue(said.isprintable())
+        self.assertNotIn("\x1b", said)
 
 
 if __name__ == "__main__":

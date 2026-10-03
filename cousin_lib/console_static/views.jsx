@@ -1156,6 +1156,19 @@ function num(v) {
 const TRACKER_STATES = ["open", "active", "blocked", "done", "dropped"];
 const TRACKER_CLOSED = new Set(["done", "dropped"]);
 
+// One history row as text, the same wording as `cousin-tracker show --history`.
+function trackerChange(c) {
+  const head = `${(c.at || "").slice(0, 16).replace("T", " ")} UTC ${c.who || "?"}: `;
+  if (c.field === "created") return head + "created " + JSON.stringify(c.new);
+  if (c.field === "deleted") return head + "deleted";
+  if (c.field === "notes") {
+    const o = c.old || "", n = c.new || "";
+    if (n.startsWith(o)) return head + "notes += " + n.slice(o.length).replace(/^\n+/, "");
+    return head + (n ? "notes replaced; were:\n" : "notes cleared; were:\n") + o;
+  }
+  return head + `${c.field} ${JSON.stringify(c.old)} -> ${JSON.stringify(c.new)}`;
+}
+
 function TrackerView({ cousins }) {
   const [items, setItems] = React.useState([]);
   const [filters, setFilters] = React.useState({ owner: "", state: "", domain: "" });
@@ -1163,6 +1176,8 @@ function TrackerView({ cousins }) {
   const [adding, setAdding] = React.useState(false);
   const [form, setForm] = React.useState({ title: "", domain: "", state: "open", owner: "", tags: "", notes: "" });
   const [editing, setEditing] = React.useState(null); // item being edited
+  const [history, setHistory] = React.useState(null);  // { id, rows } of the item being edited
+  const [noteText, setNoteText] = React.useState("");
   const [status, setStatus] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -1210,6 +1225,22 @@ function TrackerView({ cousins }) {
     } finally { setBusy(false); }
   };
 
+  const loadHistory = React.useCallback(async (id) => {
+    const d = await apiGet(`/api/tracker/${id}`);
+    setHistory({ id, rows: (d && d.history) || [] });
+  }, []);
+
+  const toggleEdit = (it) => {
+    setHistory(null);
+    setNoteText("");
+    if (editing && editing.id === it.id) { setEditing(null); return; }
+    // `orig` is the row as it was when the editor opened: save sends only
+    // what was changed against it, so a note a cousin appended meanwhile
+    // is not overwritten by an untouched notes box.
+    setEditing({ ...it, orig: it, tagsText: itemTags(it).join(", "), notesText: itemNotes(it) });
+    loadHistory(it.id);
+  };
+
   const patch = async (id, fields) => {
     setBusy(true);
     try {
@@ -1217,6 +1248,7 @@ function TrackerView({ cousins }) {
       if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
       setStatus({ ok: true, msg: `updated #${id}` });
       await pull();
+      if (history && history.id === id) loadHistory(id);
       return true;
     } catch (e) {
       setStatus({ ok: false, msg: String(e.message || e) });
@@ -1334,7 +1366,7 @@ function TrackerView({ cousins }) {
                   <td className="muted" data-label="updated" title={itemUpdated(it)}>{itemUpdated(it).slice(0, 16).replace("T", " ") || "-"}</td>
                   <td data-label="actions" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                     <button className="btn ghost" style={{ fontSize: 10, padding: "2px 6px", marginRight: 4 }}
-                      onClick={() => setEditing(editing && editing.id === it.id ? null : { ...it, tagsText: itemTags(it).join(", "), notesText: itemNotes(it) })}>
+                      onClick={() => toggleEdit(it)}>
                       {editing && editing.id === it.id ? "close" : "edit"}
                     </button>
                     <button className="btn danger" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => remove(it.id)} disabled={busy}>×</button>
@@ -1349,16 +1381,34 @@ function TrackerView({ cousins }) {
                         <input className="txt" value={editing.owner || ""} onChange={e => setEditing({ ...editing, owner: e.target.value })} placeholder="owner" list="tracker-owners" />
                         <input className="txt" value={editing.tagsText} onChange={e => setEditing({ ...editing, tagsText: e.target.value })} placeholder="tags, comma separated" />
                       </div>
-                      <textarea className="txt" value={editing.notesText} onChange={e => setEditing({ ...editing, notesText: e.target.value })} placeholder="notes" style={{ width: "100%", minHeight: 60, boxSizing: "border-box" }} />
+                      <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                        <input className="txt" style={{ flex: 1 }} value={noteText} onChange={e => setNoteText(e.target.value)}
+                          placeholder="add a note (appended, dated and signed)"
+                          onKeyDown={async e => { if (e.key === "Enter" && noteText.trim() && !busy && await patch(it.id, { add_note: noteText.trim() })) setNoteText(""); }} />
+                        <button className="btn" disabled={busy || !noteText.trim()} onClick={async () => {
+                          if (await patch(it.id, { add_note: noteText.trim() })) setNoteText("");
+                        }}>add note</button>
+                      </div>
+                      <textarea className="txt" value={editing.notesText} onChange={e => setEditing({ ...editing, notesText: e.target.value })} placeholder="notes (saving a change here replaces them; the old text stays in the history)" title="saving a change here replaces the notes; the old text stays in the history" style={{ width: "100%", minHeight: 60, boxSizing: "border-box" }} />
                       <div style={{ display: "flex", gap: 6, marginTop: 6, justifyContent: "flex-end" }}>
-                        <button className="btn" onClick={() => setEditing(null)}>cancel</button>
+                        <button className="btn" onClick={() => { setEditing(null); setHistory(null); }}>cancel</button>
                         <button className="btn primary" disabled={busy || !editing.title.trim()} onClick={async () => {
-                          const ok = await patch(it.id, {
-                            title: editing.title.trim(), domain: editing.domain || "", owner: editing.owner || "",
-                            tags: parseTags(editing.tagsText), notes: editing.notesText,
-                          });
-                          if (ok) setEditing(null);
+                          const o = editing.orig, fields = {};
+                          const want = { title: editing.title.trim(), domain: editing.domain || "", owner: editing.owner || "" };
+                          for (const k of Object.keys(want)) if (want[k] !== (o[k] || "")) fields[k] = want[k];
+                          if (editing.notesText !== itemNotes(o)) fields.notes = editing.notesText;
+                          const tags = parseTags(editing.tagsText);
+                          if (JSON.stringify(tags) !== JSON.stringify(itemTags(o))) fields.tags = tags;
+                          if (Object.keys(fields).length === 0) { setEditing(null); setHistory(null); return; }
+                          const ok = await patch(it.id, fields);
+                          if (ok) { setEditing(null); setHistory(null); }
                         }}>{busy ? "saving..." : "save"}</button>
+                      </div>
+                      <div className="tracker-history" style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 10, color: "var(--fg-2)", maxHeight: 220, overflowY: "auto" }}>
+                        <div style={{ color: "var(--fg-3)", marginBottom: 2 }}>history, oldest first</div>
+                        {!history || history.id !== it.id ? <span className="muted">loading...</span>
+                          : history.rows.length === 0 ? <span className="muted">none recorded</span>
+                          : history.rows.map(c => <div key={c.id} style={{ whiteSpace: "pre-wrap" }}>{trackerChange(c)}</div>)}
                       </div>
                     </td>
                   </tr>

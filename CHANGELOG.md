@@ -3,6 +3,27 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.24.0 - 2026-10-03
+
+### Added
+
+- **The tracker keeps a history and appends notes.** `cousin-tracker
+  update ID --add-note TEXT` appends a dated, signed line
+  (`YYYY-MM-DD HH:MM UTC who: text`); `cousin-tracker show ID --history`
+  prints every change to the item, oldest first. The database gains a
+  history table on first open. The console returns the history from
+  `GET /api/tracker/<id>`, accepts `add_note`, and shows the history and an
+  add-note box in the edit panel; the tracker tool accepts `add_note` and
+  `history` (an install's tool registry lists them, see docs/mcp.md).
+
+### Fixed
+
+- **A tracker update no longer loses data.** `--notes` still replaces, but
+  the old text, like every field change, is kept in the history with who
+  changed it and when. The console's edit form sends only the fields you
+  changed, so it no longer overwrites a note added while it was open, and
+  `--add-tag` appends in the same transaction as the rest of the update.
+
 ## 3.23.2 - 2026-10-03
 
 ### Fixed

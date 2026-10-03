@@ -79,10 +79,22 @@ def normalize_level(value):
     return LEVEL_ALIASES.get(text.lower(), "other")
 
 
+# Law 10: L0, L1 and L2 need a cited source. An uncited framework or tool
+# level asked of `decide` or `remember` is written at the default (L3) and
+# the line says so (demotion). An uncited operator level stays refused,
+# stricter than the law: it is the strongest claim, and a cousin that
+# meant it can say where at once. The framework's own entries
+# (record_event: `framework:<kind>` state changes, job closes) never come
+# through here, so they keep their level.
+CITED_LEVELS = ("L1_FRAMEWORK", "L2_TOOL")
+
+
 def resolve_level(level, cite):
     """(canonical level, error). An operator-stated entry must cite where
     the operator said it (a chat message id, a quote, a date): the level
-    is the strongest claim a memory can make, so it carries its source."""
+    is the strongest claim a memory can make, so it carries its source.
+    An uncited framework or tool level resolves to the default, L3
+    (demotion says why)."""
     canonical = normalize_level(level)
     if canonical == "other":
         return None, "unknown truth level %r (use one of: %s)" % (
@@ -90,7 +102,19 @@ def resolve_level(level, cite):
     if canonical == OPERATOR_LEVEL and not (cite or "").strip():
         return None, ("an operator-stated entry needs --cite (where the"
                       " operator said it: chat message id, quote, date)")
+    if canonical in CITED_LEVELS and not (cite or "").strip():
+        return DEFAULT_TRUTH_LEVEL, None
     return canonical, None
+
+
+def demotion(level, cite):
+    """The one line a write prints when resolve_level demoted its level,
+    else None."""
+    canonical = normalize_level(level)
+    if canonical in CITED_LEVELS and not (cite or "").strip():
+        return ("demoted: %s needs --cite (a cited source, law 10); written as %s"
+                % (canonical, DEFAULT_TRUTH_LEVEL))
+    return None
 
 
 class _NoContext(Exception):
@@ -547,11 +571,13 @@ def _derived_args(p):
 def _level_args(p):
     p.add_argument("--level", default="conclusion",
                    help="truth level: %s (default conclusion); operator"
-                        " = the operator stated it, needs --cite"
-                        % ", ".join(LEVEL_CHOICES))
+                        " = the operator stated it, needs --cite;"
+                        " framework or tool without --cite is written as"
+                        " conclusion" % ", ".join(LEVEL_CHOICES))
     p.add_argument("--cite", default=None,
                    help="where it comes from (chat message id, quote,"
-                        " file, date); required for --level operator")
+                        " file, date); required for --level operator,"
+                        " keeps --level framework or tool")
 
 
 _DECIDE_USAGE = (
@@ -613,6 +639,9 @@ def decide(home, topic, decision, reasoning, *, level=None, cite=None, derived_f
         with open(decisions, "a") as fh:
             fh.write(json.dumps(entry) + "\n")
         lines = ["Decision logged: [%s] %s" % (topic, decision)]
+        note = demotion(level, cite)
+        if note:
+            lines.append(note)
         archive = _rotate_decisions_if_needed(decisions)
         if archive:
             lines.append("(decisions.jsonl rotated: older entries -> %s)" % archive.name)
@@ -657,13 +686,16 @@ def remember_entry(home, topic, fact, *, level=None, cite=None, derived_from=Non
 
 def remember(home, topic, fact, *, level=None, cite=None, derived_from=None,
              source="remember"):
-    """One durable fact into raw memory. Raises ValueError. Returns the line.
+    """One durable fact into raw memory. Raises ValueError. Returns the line,
+    and under it the demotion line when an uncited level was demoted.
     `derived_from`: the entry ids it was built from (check_derived), one hop;
     `why` walks it."""
     entry = remember_entry(home, topic, fact, level=level, cite=cite,
                            derived_from=derived_from, source=source)
-    return "Remembered [%s] (%s): %s" % (entry["topic"], entry["truth_level"],
+    line = "Remembered [%s] (%s): %s" % (entry["topic"], entry["truth_level"],
                                          entry["content"])
+    note = demotion(level, cite)
+    return line + "\n" + note if note else line
 
 
 RECALL_ALL = 50           # a keyword recall with last=0 ("all") still stops somewhere

@@ -3,6 +3,21 @@
 The version lives in `pyproject.toml`. `cousin-version` prints it and
 `cousin-version bump [major|minor|patch]` changes it. Newest first.
 
+## 3.21.1 - 2026-10-03
+
+### Fixed
+
+- **An uncited framework or tool level is demoted, as law rule 10 says.**
+  `decide` and `remember` (the CLI, the `memory` tool, the console) write
+  a `framework` or `tool` entry that has no `--cite` at `conclusion` (L3)
+  and print one `demoted:` line saying which level was asked and why. The
+  law's "auto-demote" now holds for framework and tool; an uncited
+  `operator` level stays refused, as before, which is stricter than the
+  law. The framework's own entries (`framework:<kind>` state changes, job
+  closes at `tool`) are written by `record_event`, which does not take
+  this path, and keep their level. Law rule 10 is now marked enforced in
+  the rules inventory.
+
 ## 3.21.0 - 2026-10-03
 
 ### Added

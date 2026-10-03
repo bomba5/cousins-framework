@@ -14,8 +14,9 @@ The version lives in `pyproject.toml`. `cousin-version` prints it and
   test that runs it as a subprocess, and a probe is checked before a defect
   is declared; elimination experiments are not evidence, and a degraded
   surface that still works is a defect to report; a killed wrapper leaves
-  its children running. The seven now take about 5000 of the shared
-  layer's 6000 characters. An existing install keeps its own copies:
+  its children running. The seven take about 5000 characters, and
+  the shared layer's limit rises from 6000 to 8000 (about 2000 tokens) so an
+  install keeps room for rules of its own. An existing install keeps its own copies:
   `cousin-shared templates --full` shows the difference.
 - **The README says isolation is policy, not permission.** Every cousin
   runs as one OS user; the sdk lane's tool gate on a subagent is what

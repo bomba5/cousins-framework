@@ -67,7 +67,7 @@ class TestTheShippedFiles(unittest.TestCase):
 
     def test_the_active_rules_fit_the_shared_layer_with_room(self):
         # The rules and the index, measured against the shared layer's
-        # budget: they must leave at least a sixth of it for the
+        # budget: they must leave at least a quarter of it for the
         # install's own rules and the index, and fit whole even with the
         # example on.
         budget = boot.LAYER_BUDGETS["shared"][1]
@@ -80,7 +80,7 @@ class TestTheShippedFiles(unittest.TestCase):
             active = size(tmp)
             (pathlib.Path(tmp) / "shared" / EXAMPLE.name).write_text(EXAMPLE.read_text())
             with_example = size(tmp)
-        self.assertLessEqual(active, budget * 5 // 6, "%d of %d" % (active, budget))
+        self.assertLessEqual(active, budget * 3 // 4, "%d of %d" % (active, budget))
         self.assertLess(with_example, budget, "%d of %d" % (with_example, budget))
 
 

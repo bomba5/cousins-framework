@@ -428,10 +428,23 @@ cousin-memory remember "backups" "the NAS snapshot runs at 02:00" \
 
 `cousin-shared` works the shared tier: list and read canonical files, propose
 a file (body on stdin), and promote or reject a proposal as a reviewer.
-Subcommands: `list`, `read`, `diff`, `propose`, `promote`, `reject`.
+Subcommands: `list`, `read`, `diff`, `propose`, `promote`, `reject`,
+`templates`.
 
 ```
 cousin-shared promote house-rules.md --proposer wren --by ana
+```
+
+`cousin-shared templates` compares the files the install seeded once
+(`config/law.md` and the [house rules](house-rules.md) in `shared/`) with the
+templates the installed version ships, one line per file: `same`, `differs`,
+`missing in install`, or `not shipped any more`. `-v`/`--full` prints a
+unified diff under each file that differs, from the install's text to the
+shipped one. It reads only: taking a change is yours to do by hand. Exit 0
+when every file matches, 1 otherwise.
+
+```
+cousin-shared templates --full
 ```
 
 `cousin-callback` is a cousin's library of moments worth calling back to.

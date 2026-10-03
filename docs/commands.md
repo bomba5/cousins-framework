@@ -314,7 +314,12 @@ a `failing` child is started again, nothing else healthy is touched. `--no-conso
 `--console-host` (`127.0.0.1`), `--console-port` (8600) and `--loops-interval`
 (30) shape what it runs; `--root R` picks the install, else `FRAMEWORK_ROOT`,
 else the checkout you are in. One supervisor per install: it holds
-`run/supervisor.lock`, and a second one exits 2.
+`run/supervisor.lock`, and a second one exits 2. It sets umask 077 before
+it writes or starts anything, and every child inherits it, so what the
+install creates from then on is readable by its own user only. That closes
+new files to other users on the host (and to a different uid, such as a
+container's user reading a bind mount); every cousin runs as this one user,
+so it does not separate cousins from each other.
 
 The running supervisor answers on `run/supervisor.sock` (the `run/` directory
 is private to its user). `status [--json]` lists every child with its state

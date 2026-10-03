@@ -2,6 +2,7 @@
 the ordered stop. Stub children are `python3 -c`
 scripts; every wait has a deadline and every process is killed in
 cleanup. Invented cast only."""
+import contextlib
 import ctypes
 import io
 import json
@@ -549,6 +550,54 @@ class TestProcess(_Case):
         self.assertIsNone(proc.poll())
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(60), 0)     # a loaded runner: the stop, not its speed
+
+
+class TestUmask(_Case):
+    """`run` sets umask 077 before it writes anything, every child inherits
+    it, and the caller's umask is back once `run` returns."""
+
+    _PRINT_UMASK = "import os; print(oct(os.umask(0)))"
+
+    def _run(self, serve):
+        before = os.umask(0o022)
+        self.addCleanup(os.umask, before)
+        with mock.patch.object(supervisor.Supervisor, "serve", serve), \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = supervisor.supervisor_main(["run", "--root", str(self.root),
+                                               "--no-console", "--no-loops"])
+        return code
+
+    def test_the_umask_is_077(self):
+        self.assertEqual(supervisor.UMASK, 0o077)
+
+    def test_apply_umask_sets_it_and_returns_the_previous_one(self):
+        before = os.umask(0o022)
+        self.addCleanup(os.umask, before)
+        self.assertEqual(supervisor.apply_umask(), 0o022)
+        self.assertEqual(os.umask(0o022), 0o077)
+
+    def test_run_serves_under_077_and_a_child_inherits_it(self):
+        seen = {}
+
+        def serve(sup):
+            current = os.umask(0)
+            os.umask(current)
+            seen["own"] = current
+            seen["child"] = subprocess.run([sys.executable, "-c", self._PRINT_UMASK],
+                                           capture_output=True, text=True,
+                                           timeout=60).stdout.strip()
+            return 0
+
+        self.assertEqual(self._run(serve), 0)
+        self.assertEqual(seen, {"own": 0o077, "child": "0o77"})
+        self.assertEqual(os.umask(0o022), 0o022)    # put back on return
+
+    def test_what_run_seeds_before_serving_is_written_under_it(self):
+        self.assertEqual(self._run(lambda sup: 0), 0)
+        seeded = sorted((self.root / "shared").glob("*.md"))
+        self.assertTrue(seeded)
+        for path in seeded:
+            self.assertEqual(path.stat().st_mode & 0o077, 0, path)
 
 
 if __name__ == "__main__":

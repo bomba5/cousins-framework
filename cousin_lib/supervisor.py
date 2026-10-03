@@ -48,6 +48,11 @@ STOP_TIMEOUT_S), then the plugin services, then the loops daemon, then the conso
 (10 s each); a child still alive at its timeout is SIGKILLed with its
 process group. Then the supervisor exits 0.
 
+Umask. `run` sets UMASK (077) first, before it seeds or starts
+anything, and every child inherits it (apply_umask); files they create
+are the owner's alone. It is put back when `run` returns, for a caller
+in the same process.
+
 Control. `<root>/run/supervisor.sock` (run/ is 0700) takes one JSON line
 per connection and answers one: `status`, `start`, `stop`, `reload`.
 `start` and `stop` name their child by `slug` (a runner cousin, only
@@ -174,6 +179,11 @@ _SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 NAMED = ("console", "loops")     # the children a request addresses by `name`
 HELD = "run/held"                # under a cousin's home: stopped by request, held down
 LOCK_TAKE_S = 1.0                # _take_lock retries this long (a snapshot() probe holds LOCK_SH for microseconds)
+# `run`'s umask, set before anything is written and inherited by every
+# child: what the supervisor, the console, the loops daemon and the
+# runners create is the owner's alone. Closes new files to other users on
+# the host; every cousin runs as this one user, so not to each other.
+UMASK = 0o077
 
 
 class SupervisorError(Exception):
@@ -1613,6 +1623,12 @@ def _seed_house_rules(root):
         print("supervisor: law not seeded: %s" % err, file=sys.stderr)
 
 
+def apply_umask():
+    """Set the process umask to UMASK, which every child started after
+    it inherits; return the previous one."""
+    return os.umask(UMASK)
+
+
 def supervisor_main(argv=None):
     """cousin-supervisor run|status|start|stop|reload. Exit codes: run 0
     after SIGTERM/SIGINT, 2 when another supervisor holds the root (or
@@ -1630,19 +1646,23 @@ def supervisor_main(argv=None):
         print("cousin-supervisor: %s" % err, file=sys.stderr)
         return 2
     if args.command == "run":
-        os.environ["FRAMEWORK_ROOT"] = str(root)     # the flag and the children agree
-        _seed_house_rules(root)
-        specs = []
-        if not args.no_console:
-            specs.append(console_spec(root, args.console_host, args.console_port))
-        if not args.no_loops:
-            specs.append(loops_spec(root, args.loops_interval))
-        specs += [runner_spec(c.home) for c in runner_cousins(root)]
+        previous = apply_umask()     # first: everything after is written under it
         try:
-            return Supervisor(root, specs).serve()
-        except SupervisorError as err:
-            print("cousin-supervisor: %s" % err, file=sys.stderr)
-            return 2
+            os.environ["FRAMEWORK_ROOT"] = str(root)     # the flag and the children agree
+            _seed_house_rules(root)
+            specs = []
+            if not args.no_console:
+                specs.append(console_spec(root, args.console_host, args.console_port))
+            if not args.no_loops:
+                specs.append(loops_spec(root, args.loops_interval))
+            specs += [runner_spec(c.home) for c in runner_cousins(root)]
+            try:
+                return Supervisor(root, specs).serve()
+            except SupervisorError as err:
+                print("cousin-supervisor: %s" % err, file=sys.stderr)
+                return 2
+        finally:
+            os.umask(previous)
     op_args = {}
     if args.command in ("start", "stop"):
         op_args = {"slug": args.slug} if args.slug is not None else {"name": args.name}

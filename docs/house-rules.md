@@ -23,8 +23,8 @@ Why they exist: an agent left to itself guesses before it reads, calls code
 "done" because it is written, and hands its successor a vague summary. These
 rules are the habits that, in practice, make cousins worth leaving
 unattended. They are short on purpose: all seven together take about 5000 of
-the 6000 characters the boot packet gives the shared tier, which leaves about
-1000 for rules of your own.
+the 8000 characters the boot packet gives the shared tier, which leaves about
+3000 for rules of your own.
 
 The source files are in the checkout under `templates/shared/`.
 

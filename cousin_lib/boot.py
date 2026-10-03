@@ -46,7 +46,7 @@ LAYER_BUDGETS = {
     "law": (500 * CHARS_PER_TOKEN, 800 * CHARS_PER_TOKEN),
     # Operator rules every cousin follows, in full, then a one-line
     # index of the rest of the shared tier.
-    "shared": (400 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
+    "shared": (400 * CHARS_PER_TOKEN, 2000 * CHARS_PER_TOKEN),
     "self_portrait": (800 * CHARS_PER_TOKEN, 1500 * CHARS_PER_TOKEN),
     # Whole entries, newest first (the runner's calibration packer): the
     # floor is the old ceiling, so an overflow pass keeps what it used to.

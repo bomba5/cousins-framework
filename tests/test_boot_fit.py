@@ -80,11 +80,6 @@ class TestExplicitRoot(RootCase):
         with mock.patch.dict(os.environ, NOWHERE):
             self.assertIn("cousin-memory", trace.summary_for_boot("wren", root=self.root))
 
-    def test_the_packet_text_is_unchanged(self):
-        with mock.patch.dict(os.environ, {"FRAMEWORK_ROOT": str(self.root)}):
-            self.assertIn("Operator rules every cousin follows:", boot._shared())
-            self.assertIn("- `ref_host.md`: the host map", boot._shared())
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,10 +13,11 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             stopped cousin would start it (the supervisor starts every
             runner cousin), so it is started first or left alone.
   apply     the steps, in order, stopping at the first that fails:
-              close    a clean stop of the tmux session (flip.close_session:
-                       the handoff, the transcript mined, the generation bumped);
-                       a handoff not written during the close is a warning
-                       with its age (handoff_freshness)
+              close    a clean stop of the tmux session (the caller's `close`
+                       action: the handoff, the transcript mined, the generation
+                       bumped; _live() wires none, the legacy lane's clean stop
+                       is gone); a handoff not written during the close is a
+                       warning with its age (handoff_freshness)
               handover the tmux lane's transcript path(s) recorded in
                        data/previous-transcript.json (handover.py): the
                        working conversation does not carry, and the runner's
@@ -32,8 +33,7 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
                        cousin's own key file
                        (an existing [agent] key wins); only once the tmux
                        session is still down
-              start    the migration-day boot packet archived (the runner
-                       boots on its own digest), the review gate's cursor
+              start    the review gate's cursor
                        opened afresh (what the cousin wrote on the tmux lane
                        is not the gate's), the supervisor asked to start
                        the runner, and the cousin's chat server started (the
@@ -55,8 +55,7 @@ migrates a cousin: only the operator's `cousin-migrate apply <slug>
             supervisor rescan. The handover record (and a consumed one) is
             removed. A key account the migration made is
             removed with its secret when no other cousin names it (else
-            kept, and why). Then a fresh boot packet (the cousin's state
-            now, not the migration day's) and the tmux session started,
+            kept, and why). Then the tmux session started,
             since the cousin was running when `apply` began, unless it
             already runs; last, the supervisor's hold on the runner
             (`run/held`, which its stop wrote) is released: a tmux cousin
@@ -115,7 +114,6 @@ VERIFY_S = 90.0           # how long verify waits for a stable runner
 TRUST_WAIT_S = 600.0      # how long a kind switch's verify waits for the operator at the pane's trust dialog
 STABLE_S = 10.0           # how long the runner must stay up to count as started
 DOWN_S = 60.0             # how long rollback waits for a stopped runner to let go of its lock
-PRE_RUNNER_BOOT = "data/pending-boot.pre-runner.json"
 
 
 class MigrateError(Exception):
@@ -190,7 +188,7 @@ def handoff_freshness(home, before_ns, stages=()):
     """(fresh, detail, warning or None) after the close: the runner starts
     from the handoff, so it must be one written during this close (its
     mtime moved past `before_ns`, the mtime before the close; None when
-    there was no file). flip.close_session waits for exactly that, else
+    there was no file). The clean stop waits for exactly that, else
     writes an emergency handoff; a cousin whose session was already gone
     gets neither, which this catches."""
     after = _handoff_mtime_ns(home)
@@ -229,8 +227,8 @@ def tmux_values(home, root):
     """{key: (value, source)} for model and effort: what the tmux lane
     runs the cousin on. [runtime] first; else config/harness.toml [agent]
     default_<key>, but only when config/agent-cmd renders the {<key>}
-    placeholder (spawn.render_agent_cmd's rule). None when neither: the
-    tmux lane ran the CLI's own default too."""
+    placeholder. None when neither: the tmux lane ran the CLI's own
+    default too."""
     from cousin_lib import flip
     from cousin_lib.config import MissingConfigError, agent_config
     runtime = _cousin_toml(home).get("runtime") or {}
@@ -812,9 +810,6 @@ def apply(home, *, root, account=None, close, import_auto, start, verify, tmux_a
                 "; " + "; ".join(kept) if kept else "")
         if step == "start":
             still_down()
-            boot_file = home / "data" / "pending-boot.json"
-            if boot_file.exists():
-                os.replace(boot_file, home / PRE_RUNNER_BOOT)
             from cousin_lib import review_gate
             review_gate.begin(home, reset=True)
             start(home, root)
@@ -884,22 +879,6 @@ def _inbox_rows(home):
         return None
 
 
-def fresh_packet(home):
-    """A boot packet of the cousin's state now, pending for the next tmux
-    start (flip.close_session's tail): the rollback's tmux session must
-    not boot on the migration day's packet."""
-    from cousin_lib import boot, spawn
-    home = Path(home)
-    generation = boot.bump_generation(home)
-    packet = boot.assemble(home.name, home, generation=generation)
-    path = home / "data" / ("boot-packet-gen-%04d.md" % generation)
-    path.write_text(packet["text"])
-    spawn.pending_boot_path(home).write_text(json.dumps({
-        "generation": generation, "packet": str(path), "written_at": _now()}))
-    return generation
-
-
-
 def _runner_session_files(home):
     """The runner lane's session state in a home: data/runner-session.json,
     each side session's data/runner-session-<kind>.json, and the restart
@@ -921,7 +900,7 @@ def _remove_all(paths):
     return gone
 
 def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, release,
-             new_packet=fresh_packet, force=False, sleep=time.sleep, clock=time.monotonic,
+             force=False, sleep=time.sleep, clock=time.monotonic,
              **_unused):
     """Back to the tmux lane, undoing only what `apply` did. Process
     actions follow what IS, not what was recorded: the runner is stopped
@@ -994,8 +973,6 @@ def rollback(home, *, root, stop, runner_alive, reload, start_tmux, tmux_alive, 
     if flipped:
         step("reload", lambda: reload(root))
     if "close" in ran or flipped:
-        if flipped:
-            step("packet", lambda: new_packet(home), lambda g: "generation %s" % g)
         if rec.get("was_running"):
             if tmux_alive(home):
                 steps.append({"step": "start_tmux", "detail": "its tmux session is already up",
@@ -1208,7 +1185,7 @@ def _live():
         return counts
 
     def start(home, root):
-        spawn.start_cousin(home, agent_cmd="", root=root)
+        spawn.start_cousin(home, root=root)
 
     def reload(root):
         try:
@@ -1226,7 +1203,6 @@ def _live():
         supervisor_up=lambda root: supervisor.snapshot(root) is not None,
         sdk_ok=lambda: importlib.util.find_spec("claude_agent_sdk") is not None,
         tmux_alive=tmux_alive,
-        close=lambda slug, root: flip.close_session(slug),
         import_auto=import_auto,
         start=start,
         verify=lambda home, root: verify_runner(home, root, snapshot=supervisor.snapshot,
@@ -1235,8 +1211,7 @@ def _live():
         runner_alive=delivery.is_alive,
         release=supervisor.release,
         reload=reload,
-        start_tmux=lambda home, root: spawn.start_cousin(
-            home, agent_cmd=flip._read_agent_cmd_template(Path(root)), root=root))
+        start_tmux=lambda home, root: spawn.start_cousin(home, root=root))
 
 
 # ------------------------------------------------------------ the kind switch

@@ -77,23 +77,6 @@ class TestLegacyFlipRefused(FlipCase):
         self.assertFalse((self.home / "data" / ".flip-in-progress.json").exists())
 
 
-class TestMintSessionId(unittest.TestCase):
-    def test_minted_ids_stay_inside_the_charset(self):
-        from cousin_lib.spawn import _mint_session_id
-        for _ in range(20):
-            self.assertRegex(_mint_session_id(), r"^[a-z0-9-]+$")
-
-    def test_a_drifted_mint_raises_instead_of_rendering(self):
-        # The constraint must travel with the mint and survive -O: if
-        # the generation line ever changes to something that can emit
-        # shell-relevant characters, the constructor itself refuses.
-        from cousin_lib import spawn as spawn_mod
-        with mock.patch.object(spawn_mod.uuid, "uuid4",
-                               return_value="Bad_ID!;rm"):
-            with self.assertRaises(ValueError):
-                spawn_mod._mint_session_id()
-
-
 class TestCli(FlipCase):
     def test_root_flag_is_accepted(self):
         import contextlib

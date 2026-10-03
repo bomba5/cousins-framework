@@ -24,7 +24,7 @@ here).
 | `cousin-supervisor.service` | `cousin-supervisor run --console-port 8600`: the console (on loopback), the loops daemon and one `cousin-runner` per runner cousin, restarted with backoff and stopped in order | always |
 | `cousin-loops.service` | `cousin-loops run --interval 30`: heartbeats, loops, one-shot schedules, timed flips, the daily `flip_at` | never beside the supervisor, which runs the same daemon: leave it disabled (see below) |
 | `cousin-console.service` | `cousin-console --port 8600`: the web console, on loopback | never beside the supervisor, which runs the same console: leave it disabled (see below) |
-| `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, which the boot packet quotes | daily at 06:00 |
+| `cousin-tool-surface.service` + `cousin-tool-surface.timer` | `cousin-tool-surface --bin {{USER_BIN}}`: rewrites `data/tool-surface.md`, the list of `cousin-*` commands a cousin can read | daily at 06:00 |
 | `cousin-sweep.service` + `cousin-sweep.timer` | `cousin-sweep compact --target both`: memory compaction for every cousin | Sundays at 05:30 |
 
 A `.timer` starts the `.service` with the same name. Enable the timer, not

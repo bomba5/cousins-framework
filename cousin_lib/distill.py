@@ -28,8 +28,8 @@ fully curated and gets the generated block appended under it - unless
 its head already carries the generated block's own header, which means
 an earlier run wrote it and keeping it would duplicate every line.
 
-Consumers: boot.assemble (runs distill before reading the floor) and
-`cousin-memory distill` / `consolidate`.
+Consumers: the runner's state digest (runner/prompt.py, runs distill
+before reading the floor) and `cousin-memory distill` / `consolidate`.
 """
 import re
 from collections import defaultdict

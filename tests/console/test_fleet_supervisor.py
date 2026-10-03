@@ -89,16 +89,13 @@ class TestRunnerLaneStartStop(_Case):
         # supervisor.state shows when the runner is down
         self.cousin("wren", extra=RUNNER)
         stub = self.stub()
-        server = self.serve()
-        closes = []
-        server.close_fn = lambda slug, **kw: closes.append(slug)
+        self.serve()
         status, body = self.post("/api/cousins/wren/stop")
         self.assertEqual(status, 202, body)
         self.assertEqual(body, {"ok": True, "slug": "wren", "status": "stopping",
                                 "runner": "stopping", "supervisor": "running"})
         self.assertEqual(stub.ops(), [("stop", "wren")])
         self.assertEqual((stub.requests[0]["wait"], stub.requests[0]["by"]), (False, "console"))
-        self.assertEqual(closes, [])
         self.assertEqual(self.tmux_calls(), "")
 
     def test_the_stop_route_never_waits_for_a_busy_runner(self):
